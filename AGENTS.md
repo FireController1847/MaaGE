@@ -102,6 +102,7 @@ intended design; inspect the repository before claiming functionality exists.
 - Keep `README.md` human-facing: overview, goals, status, build guidance, and
   disclosures. Preserve its opening AI-routing HTML comment, human–AI development
   disclosure, and legally relevant notices. Do not add visible agent instructions.
+  Use MLA title capitalization for README headings and concise, professional prose.
 - Source holds implementation and necessary local comments; useful API references
   describe public contracts and usage. Human technical specifications may exist.
   Build files configure builds. None is a substitute home for persistent AI context.
