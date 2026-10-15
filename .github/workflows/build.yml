@@ -90,7 +90,7 @@ jobs:
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
           sdk="$(xcrun --sdk macosx --show-sdk-path)"
-          for framework in AppKit Metal QuartzCore OpenGL; do
+          for framework in AppKit Metal QuartzCore CoreGraphics CoreText OpenGL; do
             test -d "$sdk/System/Library/Frameworks/$framework.framework" || {
               echo "::error::Required Apple framework missing: $framework ($sdk)"; exit 1;
             }

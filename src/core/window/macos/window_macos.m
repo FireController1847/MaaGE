@@ -67,6 +67,12 @@ static maage_window_result maage_cocoa_state(maage_window *);
     owner->state.close_requested = 1;
     return NO;
 }
+- (void)windowDidResignKey:(NSNotification *)notification
+{
+    (void)notification;
+    owner->input.cancelled = 1;
+    owner->input.down = 0;
+}
 - (void)windowDidResize:(NSNotification *)notification
 {
     (void)notification;
@@ -313,7 +319,12 @@ static maage_window_result maage_cocoa_poll(maage_window_system *system, int tim
 {
     NSAutoreleasePool *pool;
     NSEvent *event;
-    (void)system;
+    maage_window *window;
+    maage_cocoa_window *native;
+    maage_input_state *input;
+    NSPoint point;
+    const char *text;
+    int consumed;
     if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
     pool = [[NSAutoreleasePool alloc] init];
     event = [NSApp nextEventMatchingMask:NSEventMaskAny
@@ -321,9 +332,46 @@ static maage_window_result maage_cocoa_poll(maage_window_system *system, int tim
             [NSDate dateWithTimeIntervalSinceNow:(double)timeout_ms / 1000.0]
         inMode:NSDefaultRunLoopMode dequeue:YES];
     while (event) {
-        [NSApp sendEvent:event];
+        consumed = 0;
+        for (window = system->windows; window; window = window->next) {
+            native = window->platform;
+            if ([event window] != native->handle || !window->input_enabled) continue;
+            input = &window->input;
+            input->shift = ([event modifierFlags] & NSEventModifierFlagShift) != 0;
+            switch ([event type]) {
+            case NSEventTypeLeftMouseDown: input->pressed = 1; input->down = 1; break;
+            case NSEventTypeLeftMouseUp: input->released = 1; input->down = 0; break;
+            case NSEventTypeScrollWheel: input->scroll += (float)[event scrollingDeltaY]; break;
+            case NSEventTypeKeyDown:
+                if ([event modifierFlags] & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) break;
+                consumed = 1;
+                switch ([event keyCode]) {
+                case 48: input->key = MAAGE_KEY_TAB; break;
+                case 36: input->key = MAAGE_KEY_ENTER; break;
+                case 53: input->key = MAAGE_KEY_ESCAPE; break;
+                case 51: input->key = MAAGE_KEY_BACKSPACE; break;
+                case 123: input->key = MAAGE_KEY_LEFT; break;
+                case 124: input->key = MAAGE_KEY_RIGHT; break;
+                default:
+                    if (!([event modifierFlags] & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) {
+                        text = [[event characters] UTF8String];
+                        if (text) strncat(input->text, text, sizeof(input->text) - strlen(input->text) - 1);
+                    }
+                    break;
+                }
+                break;
+            default: break;
+            }
+        }
+        if (!consumed) [NSApp sendEvent:event];
         event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast]
             inMode:NSDefaultRunLoopMode dequeue:YES];
+    }
+    for (window = system->windows; window; window = window->next) {
+        native = window->platform;
+        point = [[native->handle contentView] convertPoint:[native->handle mouseLocationOutsideOfEventStream] fromView:nil];
+        window->input.x = (float)point.x;
+        window->input.y = (float)([[native->handle contentView] bounds].size.height - point.y);
     }
     [NSApp updateWindows];
     [pool drain];

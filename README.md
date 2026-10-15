@@ -28,15 +28,15 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The Launcher uses Core windowing and rendering for an RGB demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client is a graphical application startup stub; Server has shared startup code with a headless executable and an optional GUI stub. Client gameplay and Server administration UI are not implemented. Authentication and asset management are also unimplemented. Metal and AppKit have been compiled locally; runtime testing remains manual, and the Windows/Linux backends have not been compiled locally.
+**Early development.** The macOS Launcher has a native UI preview with Play, News, Profiles, Accounts, Settings, and About pages using local example data. UI presentation currently supports Metal and Software; Windows/Linux UI adapters and Vulkan/OpenGL UI presentation remain unimplemented. Client is a graphical startup stub; Server has shared startup code with headless and optional GUI executables. Gameplay, administration UI, authentication, and asset management remain unimplemented.
 
-Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
+The Launcher has been compiled locally with Apple Clang on macOS arm64 and cross-compiled with MinGW-w64 for Windows. Runtime and visual testing remain manual; Linux has not been compiled locally. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
 ## Build
 
 Use **CMake 3.21+** and a C compiler. The Linux and macOS presets also require **Ninja**. From the repository root:
 
-Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. Windows/Linux rendering requires Vulkan development headers and a loader discoverable by CMake. macOS uses Xcode's AppKit, Metal, and QuartzCore frameworks.
+Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. Windows/Linux rendering requires Vulkan development headers and a loader discoverable by CMake. macOS uses Apple's AppKit, Metal, QuartzCore, CoreGraphics, and CoreText frameworks.
 
 **Linux / macOS** — GCC or Clang on Linux; Apple Clang on macOS:
 

@@ -188,7 +188,8 @@ renderers borrow windows, which must outlive
 them. Native-content ownership is acquired exclusively through window interop;
 Wayland's empty backing must not overwrite external rendering. CPU presentation
 uses the shared RGBA8 pixel-buffer contract and native Window adapters, without a
-graphics SDK dependency. Preserve the same lifecycle and RGB demo across backends.
+graphics SDK dependency. Preserve consistent renderer lifecycle across backends;
+the Launcher UI replaces its initial RGB clear-color demo.
 Headless targets must not link rendering or acquire graphics dependencies; disable
 `MAAGE_BUILD_RENDER` for headless-only workspaces. Missing Vulkan development files
 are configuration errors when that backend is enabled. Isolate graphics SDK/C99
@@ -202,9 +203,8 @@ requirements in backend targets; portable headers and common implementation stay
 | Secondary | Software | CPU fallback and portability. |
 | Legacy | OpenGL 1.1 | Older hardware/OS compatibility. |
 
-Metal and Vulkan are the only actively prioritized GPU backends. Other renderers
-it a technically legacy API. Do not significantly expand, optimize, refactor, or
-chase feature parity in lower-priority backends unless explicitly requested, needed
+Metal and Vulkan are the only actively prioritized GPU backends. Do not
+significantly expand, optimize, refactor, or chase feature parity in lower-priority backends unless explicitly requested, needed
 for a small shared-interface adjustment, or required to fix compilation broken by
 the current task. Metal/Vulkan guide modern capabilities; optional capabilities
 let older backends support relevant subsets without unnecessary constraints or
@@ -250,6 +250,26 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   Chunk meshing, visibility, world simulation, and content must not depend directly
   on graphics APIs. Headless operation must not acquire graphics dependencies;
   changing the rendering backend must not require rewriting simulation.
+
+## Launcher UI
+
+- Launcher owns `MaaGE::LauncherUI` in `src/launcher/ui/`: reusable widgets,
+  theme, layouts, navigation, and presentation state. The Client will own a
+  separate high-level UI library; neither belongs in Core or depends on the other.
+- Core owns only reusable graphics/input primitives behind portable C90 APIs.
+  `MaaGE::Canvas` provides logical-coordinate drawing, text, images, blending,
+  clipping, and DPI scaling; native font/rasterization currently uses macOS
+  CoreGraphics/CoreText. Input snapshots currently have a Cocoa adapter. Other
+  platforms report unsupported until implemented; keep SDK details private.
+- Canvas presentation uses Core Render's capability-gated RGBA8 upload (currently
+  Metal and Software). Vulkan remains a primary backend; its UI upload and other
+  platform adapters are deferred. Explicit renderer selection never switches
+  families to obtain UI support. Headless targets acquire no UI dependencies.
+- ProtoLauncher supplies the initial flat charcoal/magenta visual direction, not
+  an immutable specification. Respect logical sizes, DPI, and native safe areas.
+  Sample pages use original procedural imagery and temporary local interactions;
+  authentication, downloads, installation, persistence, and launch services remain
+  deferred until explicitly requested. No web runtime or speculative Game UI.
 
 ## Planned engine systems
 

@@ -1,6 +1,7 @@
 #ifndef MAAGE_WINDOW_INTERNAL_H
 #define MAAGE_WINDOW_INTERNAL_H
 #include "maage/window.h"
+#include "maage/input.h"
 
 typedef struct maage_window_backend_api {
     maage_window_backend kind;
@@ -31,6 +32,8 @@ struct maage_window {
     maage_window_state state;
     int full_display_content;
     int surface_owned;
+    int input_enabled;
+    maage_input_state input;
 };
 
 extern const maage_window_backend_api maage_window_win32_api;

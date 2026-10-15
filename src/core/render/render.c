@@ -214,3 +214,18 @@ void maage_renderer_resize(maage_renderer *renderer)
 {
     if (renderer) renderer->refresh = 1;
 }
+maage_render_result maage_renderer_present_pixels(maage_renderer *renderer, const maage_pixel_buffer *pixels)
+{
+    maage_render_result result;
+    maage_window_state state;
+    if (!renderer || !pixels || !pixels->pixels || pixels->width <= 0 || pixels->height <= 0 ||
+        (size_t)pixels->width > (size_t)-1 / 4 || pixels->stride < (size_t)pixels->width * 4 ||
+        pixels->stride > (size_t)-1 / (size_t)pixels->height) return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_PIXEL_PRESENT)) return MAAGE_RENDER_UNSUPPORTED;
+    if (maage_window_get_state(renderer->window, &state) != MAAGE_WINDOW_OK) return MAAGE_RENDER_WINDOW_ERROR;
+    if (state.framebuffer_width != pixels->width || state.framebuffer_height != pixels->height) return MAAGE_RENDER_SKIPPED;
+    renderer->pixels = pixels;
+    result = maage_renderer_present(renderer);
+    renderer->pixels = NULL;
+    return result;
+}
