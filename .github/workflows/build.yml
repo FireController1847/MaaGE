@@ -1,0 +1,42 @@
+name: Build Validation
+
+# To enable automatic builds later, add push: and pull_request: under on:.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            configure_preset: windows-msvc
+            build_preset: windows-msvc-release
+          - os: ubuntu-latest
+            configure_preset: release
+            build_preset: release
+          - os: macos-latest
+            configure_preset: release
+            build_preset: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure Release
+        run: cmake --preset ${{ matrix.configure_preset }}
+
+      - name: Build all targets
+        run: cmake --build --preset ${{ matrix.build_preset }} --parallel
