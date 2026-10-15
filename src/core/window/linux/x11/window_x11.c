@@ -1,5 +1,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xutil.h>
 #include <poll.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -205,8 +206,54 @@ static void maage_x11_native(maage_window *window, maage_window_native *output)
     output->handles.x11.display = system->display;
     output->handles.x11.window = native->handle;
 }
+static unsigned long maage_x11_channel(unsigned char value, unsigned long mask)
+{
+    unsigned int shift = 0;
+    if (!mask) return 0;
+    while (!(mask & 1)) { mask >>= 1; ++shift; }
+    return (((unsigned long)value * mask + 127) / 255) << shift;
+}
+static maage_window_result maage_x11_pixels(maage_window *window, const maage_pixel_buffer *buffer)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    XWindowAttributes attributes;
+    XImage *image;
+    GC gc;
+    int x, y;
+    unsigned long pixel;
+    const unsigned char *source;
+    if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_WINDOW_PLATFORM_ERROR;
+    if (attributes.visual->class != TrueColor) return MAAGE_WINDOW_UNSUPPORTED;
+    image = XCreateImage(system->display, attributes.visual, (unsigned int)attributes.depth, ZPixmap,
+        0, NULL, (unsigned int)buffer->width, (unsigned int)buffer->height, 32, 0);
+    if (!image) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    if (image->bytes_per_line <= 0 || (size_t)image->bytes_per_line > (size_t)-1 / (size_t)buffer->height) {
+        XDestroyImage(image);
+        return MAAGE_WINDOW_UNSUPPORTED;
+    }
+    image->data = (char *)calloc((size_t)image->bytes_per_line, (size_t)buffer->height);
+    if (!image->data) { XDestroyImage(image); return MAAGE_WINDOW_OUT_OF_MEMORY; }
+    for (y = 0; y < buffer->height; ++y) {
+        source = buffer->pixels + (size_t)y * buffer->stride;
+        for (x = 0; x < buffer->width; ++x) {
+            pixel = maage_x11_channel(source[0], image->red_mask) |
+                maage_x11_channel(source[1], image->green_mask) | maage_x11_channel(source[2], image->blue_mask);
+            XPutPixel(image, x, y, pixel);
+            source += 4;
+        }
+    }
+    gc = XCreateGC(system->display, native->handle, 0, NULL);
+    if (!gc) { XDestroyImage(image); return MAAGE_WINDOW_PLATFORM_ERROR; }
+    XPutImage(system->display, native->handle, gc, image, 0, 0, 0, 0,
+        (unsigned int)buffer->width, (unsigned int)buffer->height);
+    XFreeGC(system->display, gc);
+    XDestroyImage(image);
+    XFlush(system->display);
+    return MAAGE_WINDOW_OK;
+}
 const maage_window_backend_api maage_window_x11_api = {
     MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,
     maage_x11_destroy, maage_x11_poll, maage_x11_state, maage_x11_title,
-    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL
+    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL, maage_x11_pixels
 };

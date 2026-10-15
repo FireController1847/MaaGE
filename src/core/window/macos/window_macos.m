@@ -15,6 +15,7 @@ typedef struct maage_cocoa_window {
     NSRect normal_frame;
     maage_window_mode desired_mode;
     int transitioning;
+    NSView *bitmap_view;
 } maage_cocoa_window;
 
 static maage_window_system *maage_cocoa_active;
@@ -25,6 +26,20 @@ static maage_window_result maage_cocoa_state(maage_window *);
 @end
 @implementation MaaGEPlatformWindow
 - (BOOL)canBecomeKeyWindow { return YES; }
+@end
+
+@interface MaaGEBitmapView : NSView {
+@public
+    NSBitmapImageRep *image;
+}
+@end
+@implementation MaaGEBitmapView
+- (void)drawRect:(NSRect)dirty
+{
+    (void)dirty;
+    [image drawInRect:[self bounds]];
+}
+- (void)dealloc { [image release]; [super dealloc]; }
 @end
 
 @interface MaaGEApplicationDelegate : NSObject <NSApplicationDelegate>
@@ -361,8 +376,54 @@ static void maage_cocoa_native(maage_window *window, maage_window_native *output
     output->handles.cocoa.window = native->handle;
     output->handles.cocoa.view = [native->handle contentView];
 }
+static maage_window_result maage_cocoa_surface(maage_window *window, int external)
+{
+    maage_cocoa_window *native = window->platform;
+    if (!external && native->bitmap_view) {
+        [native->bitmap_view removeFromSuperview];
+        [native->bitmap_view release];
+        native->bitmap_view = nil;
+    }
+    return MAAGE_WINDOW_OK;
+}
+static maage_window_result maage_cocoa_pixels(maage_window *window, const maage_pixel_buffer *buffer)
+{
+    maage_cocoa_window *native = window->platform;
+    NSView *parent = [native->handle contentView];
+    MaaGEBitmapView *view = (MaaGEBitmapView *)native->bitmap_view;
+    NSAutoreleasePool *pool;
+    NSBitmapImageRep *image;
+    int row;
+    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
+    if ([native->handle isMiniaturized]) return MAAGE_WINDOW_UNAVAILABLE;
+    if (!view) {
+        view = [[MaaGEBitmapView alloc] initWithFrame:[parent bounds]];
+        if (!view) return MAAGE_WINDOW_OUT_OF_MEMORY;
+        [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+        [parent addSubview:view];
+        native->bitmap_view = view;
+    }
+    pool = [[NSAutoreleasePool alloc] init];
+    if (!view->image || [view->image pixelsWide] != buffer->width || [view->image pixelsHigh] != buffer->height) {
+        image = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:buffer->width
+            pixelsHigh:buffer->height bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+            colorSpaceName:NSDeviceRGBColorSpace bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
+            bytesPerRow:0 bitsPerPixel:32];
+        if (!image) { [pool drain]; return MAAGE_WINDOW_OUT_OF_MEMORY; }
+        [view->image release];
+        view->image = image;
+    }
+    for (row = 0; row < buffer->height; ++row)
+        memcpy([view->image bitmapData] + row * [view->image bytesPerRow],
+            buffer->pixels + (size_t)row * buffer->stride, (size_t)buffer->width * 4);
+    [view setNeedsDisplay:YES];
+    [view displayIfNeeded];
+    [pool drain];
+    return MAAGE_WINDOW_OK;
+}
 const maage_window_backend_api maage_window_cocoa_api = {
     MAAGE_WINDOW_COCOA, maage_cocoa_init, maage_cocoa_shutdown, maage_cocoa_create,
     maage_cocoa_destroy, maage_cocoa_poll, maage_cocoa_state, maage_cocoa_title,
-    maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native, NULL
+    maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native,
+    maage_cocoa_surface, maage_cocoa_pixels
 };

@@ -166,6 +166,21 @@ maage_window_result maage_window_release_surface(maage_window *window)
     return MAAGE_WINDOW_OK;
 }
 
+maage_window_result maage_window_present_pixels(maage_window *window, const maage_pixel_buffer *buffer)
+{
+    size_t row;
+    if (!window || !window->surface_owned || !buffer || !buffer->pixels ||
+        buffer->width <= 0 || buffer->height <= 0 || (size_t)buffer->width > (size_t)-1 / 4)
+        return MAAGE_WINDOW_INVALID_ARGUMENT;
+    row = (size_t)buffer->width * 4;
+    if (buffer->stride < row || buffer->stride > (size_t)-1 / (size_t)buffer->height)
+        return MAAGE_WINDOW_INVALID_ARGUMENT;
+    if (!window->system->api->pixels) return MAAGE_WINDOW_UNSUPPORTED;
+    if (buffer->width != window->state.framebuffer_width || buffer->height != window->state.framebuffer_height)
+        return MAAGE_WINDOW_UNAVAILABLE;
+    return window->system->api->pixels(window, buffer);
+}
+
 maage_window_result maage_window_set_title(maage_window *window, const char *title)
 {
     if (!window || !title) return MAAGE_WINDOW_INVALID_ARGUMENT;

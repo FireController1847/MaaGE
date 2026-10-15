@@ -1,6 +1,7 @@
 /* Native graphics declarations and WSI headers are confined to this adapter. */
 #if defined(MAAGE_RENDER_WIN32)
 #define VK_USE_PLATFORM_WIN32_KHR
+#define VK_NO_PROTOTYPES
 #endif
 #if defined(MAAGE_RENDER_X11)
 #define VK_USE_PLATFORM_XLIB_KHR
@@ -12,8 +13,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../render_internal.h"
+#if defined(MAAGE_RENDER_WIN32)
+#include "loader_win32.h"
+#endif
 
 typedef struct maage_vulkan_renderer {
+#if defined(MAAGE_RENDER_WIN32)
+    HMODULE library;
+    maage_vulkan_dispatch dispatch;
+#endif
     VkInstance instance;
     VkSurfaceKHR surface;
     VkPhysicalDevice physical;
@@ -29,6 +37,7 @@ typedef struct maage_vulkan_renderer {
     VkSemaphore *finished;
     uint32_t image_count;
     int requested_width, requested_height;
+    int compute;
 } maage_vulkan_renderer;
 
 static maage_render_result maage_vulkan_result(VkResult result)
@@ -44,11 +53,12 @@ static maage_render_result maage_vulkan_result(VkResult result)
     default: return MAAGE_RENDER_PLATFORM_ERROR;
     }
 }
-static int maage_vulkan_instance_extension(const char *name)
+static int maage_vulkan_instance_extension(maage_vulkan_renderer *native, const char *name)
 {
     uint32_t count, index;
     VkExtensionProperties *properties;
     int found = 0;
+    (void)native;
     if (vkEnumerateInstanceExtensionProperties(NULL, &count, NULL) != VK_SUCCESS) return 0;
     properties = calloc(count, sizeof(*properties));
     if (!properties) return 0;
@@ -119,6 +129,7 @@ static int maage_vulkan_device_suitable(maage_vulkan_renderer *native, VkPhysica
         if (!queues[index].queueCount) continue;
         if (!has_graphics && (queues[index].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
             *graphics = index;
+            native->compute = (queues[index].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
             has_graphics = 1;
         }
         supported = VK_FALSE;
@@ -153,6 +164,8 @@ static maage_render_result maage_vulkan_create(maage_renderer *renderer)
     maage_render_result surface_result;
     uint32_t count, index, queue_count;
     float priority = 1.0f;
+    VkPhysicalDeviceProperties properties;
+    VkFormatProperties format_properties;
     switch (renderer->native.backend) {
 #if defined(MAAGE_RENDER_WIN32)
     case MAAGE_WINDOW_WIN32: extensions[1] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME; break;
@@ -165,11 +178,14 @@ static maage_render_result maage_vulkan_create(maage_renderer *renderer)
 #endif
     default: return MAAGE_RENDER_UNSUPPORTED;
     }
-    if (!maage_vulkan_instance_extension(extensions[0]) || !maage_vulkan_instance_extension(extensions[1]))
-        return MAAGE_RENDER_UNSUPPORTED;
     native = calloc(1, sizeof(*native));
     if (!native) return MAAGE_RENDER_OUT_OF_MEMORY;
     renderer->platform = native;
+#if defined(MAAGE_RENDER_WIN32)
+    if (!maage_vulkan_load_win32(&native->library, &native->dispatch)) return MAAGE_RENDER_UNAVAILABLE;
+#endif
+    if (!maage_vulkan_instance_extension(native, extensions[0]) || !maage_vulkan_instance_extension(native, extensions[1]))
+        return MAAGE_RENDER_UNSUPPORTED;
     memset(&application, 0, sizeof(application));
     application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application.pApplicationName = "MaaGE";
@@ -201,6 +217,25 @@ static maage_render_result maage_vulkan_create(maage_renderer *renderer)
     free(devices);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     if (!native->physical) return MAAGE_RENDER_UNAVAILABLE;
+    vkGetPhysicalDeviceProperties(native->physical, &properties);
+    renderer->capabilities.max_texture_dimension_2d = properties.limits.maxImageDimension2D;
+    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS |
+        MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_INSTANCING;
+    if (native->compute) renderer->capabilities.features |= MAAGE_RENDER_CAP_COMPUTE;
+    vkGetPhysicalDeviceFormatProperties(native->physical, VK_FORMAT_R8G8B8A8_UNORM, &format_properties);
+    if (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+        renderer->capabilities.texture_formats |= MAAGE_RENDER_FORMAT_RGBA8;
+    vkGetPhysicalDeviceFormatProperties(native->physical, VK_FORMAT_B8G8R8A8_UNORM, &format_properties);
+    if (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+        renderer->capabilities.texture_formats |= MAAGE_RENDER_FORMAT_BGRA8;
+    vkGetPhysicalDeviceFormatProperties(native->physical, VK_FORMAT_D32_SFLOAT, &format_properties);
+    if (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        renderer->capabilities.features |= MAAGE_RENDER_CAP_DEPTH;
+    vkGetPhysicalDeviceFormatProperties(native->physical, VK_FORMAT_D24_UNORM_S8_UINT, &format_properties);
+    if (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        renderer->capabilities.features |= MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_STENCIL;
+    renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT | MAAGE_RENDER_SYNC_FENCE |
+        MAAGE_RENDER_SYNC_BINARY_SEMAPHORE;
     memset(queues, 0, sizeof(queues));
     queues[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queues[0].queueFamilyIndex = native->graphics_family;
@@ -273,6 +308,9 @@ static void maage_vulkan_destroy(maage_renderer *renderer)
     }
     if (native->surface) vkDestroySurfaceKHR(native->instance, native->surface, NULL);
     if (native->instance) vkDestroyInstance(native->instance, NULL);
+#if defined(MAAGE_RENDER_WIN32)
+    if (native->library) FreeLibrary(native->library);
+#endif
     free(native);
 }
 static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, const maage_window_state *state)
@@ -450,5 +488,6 @@ static maage_render_result maage_vulkan_present(maage_renderer *renderer, const 
     return presented == VK_SUBOPTIMAL_KHR ? MAAGE_RENDER_OK : maage_vulkan_result(presented);
 }
 const maage_render_backend_api maage_render_vulkan_api = {
-    MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy, maage_vulkan_present
+    MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy, maage_vulkan_present,
+    MAAGE_RENDER_CAPABILITIES_VERSION
 };

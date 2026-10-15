@@ -127,8 +127,8 @@ portable foundations → platform abstractions → replaceable backend implement
 responsibilities, not permission for generic services to depend on concrete backends.
 
 Cross-layer interactions use explicit contracts: Window API → native windowing;
-Render API → Vulkan/Metal/Null; Input API → native event adapters; Storage API →
-filesystem implementations; Engine API → world/simulation services. Preserve
+Render API → capability-driven native/software backends; Input API → native event
+adapters; Storage API → filesystem implementations; Engine API → world/simulation services. Preserve
 interchangeable implementations without building a universal abstraction framework.
 
 Evaluate `lib-core-c` types, memory utilities, and other foundations before reuse;
@@ -175,11 +175,13 @@ cannot display pixels, and macOS retains control over Spaces/menu-bar/Dock polic
 
 Rendering is a reusable Core subsystem consumed through a C90, opaque,
 backend-independent API. Direct Vulkan on Windows/Linux and genuine native Apple
-Metal on macOS are fundamental requirements. Keep rendering separate from window
-lifecycle, applications, and gameplay; renderers borrow windows, which must outlive
+Metal on macOS are the primary backends; Metal is the current development focus.
+Keep rendering separate from window lifecycle, applications, and gameplay;
+renderers borrow windows, which must outlive
 them. Native-content ownership is acquired exclusively through window interop;
-Wayland's empty backing must not overwrite external rendering. Future OpenGL and
-software backends must fit the public lifecycle without application redesign.
+Wayland's empty backing must not overwrite external rendering. CPU presentation
+uses the shared RGBA8 pixel-buffer contract and native Window adapters, without a
+graphics SDK dependency. Preserve the same lifecycle and RGB demo across backends.
 Headless targets must not link rendering or acquire graphics dependencies; disable
 `MAAGE_BUILD_RENDER` for headless-only workspaces. Missing Vulkan development files
 are configuration errors when that backend is enabled. Isolate graphics SDK/C99
@@ -193,15 +195,44 @@ requirements in backend targets; portable headers and common implementation stay
   Objective-C/Objective-C++ translation units in macOS implementation directories;
   exclude Metal objects/types from portable C interfaces. Provide a suitable shader
   asset pipeline for Metal Shading Language when implementing this backend.
+- **OpenGL:** Modern (3.3+ Core; macOS requests 4.1) and Legacy (1.1 fixed-function
+  baseline, no shader/VBO/VAO requirement) share `render/opengl/`. Context creation
+  stays native: Cocoa, WGL, GLX/X11 (requires a compatible window visual).
+  Wayland OpenGL contexts are not implemented;
+  report unsupported. Legacy WGL does not require modern context extensions.
+- **Direct3D:** optional native D3D12 is isolated under `render/directx/d3d12/`.
+  D3D2 is a separate planned DirectDraw/IDirect3D2 boundary, disabled by default;
+  its reservation returns unsupported and advertises no capabilities. Require an
+  appropriate historical SDK/toolchain before implementation; never invent or
+  vendor proprietary SDK declarations. Renderer baselines do not guarantee Win95
+  compatibility of the surrounding OS/windowing/application code.
+- **Software:** retain the C90 CPU framebuffer as the universal fallback, with
+  native AppKit/GDI/X11/Wayland presentation. Do not add GPU API dependencies or
+  prematurely implement a full rasterizer.
+- **Selection/capabilities:** independent `MAAGE_ENABLE_*` backend options; optional
+  SDK absence is reported and must not break unrelated applications. Explicit
+  `--renderer=...` never falls back. AUTO tries Metal → Modern GL → Legacy GL →
+  Software on macOS, Vulkan → D3D12 → Modern GL → Legacy GL → Software on Windows,
+  and Vulkan → Modern GL → Legacy GL → Software on Linux; never AUTO-select D3D2.
+  Use actual initialization and required feature masks, log failures/selection,
+  and release failed backend resources before trying another.
+  Load optional Vulkan/D3D runtime DLLs dynamically on Windows so a missing
+  runtime cannot prevent reaching a fallback backend at process startup.
+- Version capability contracts; query native limits/formats conservatively and
+  report zero for unknown limits. Device capabilities do not imply unimplemented
+  public resource/draw commands exist. Keep interfaces backend-neutral and useful
+  to legacy fixed-function and CPU paths; unsupported operations return meaningful
+  errors, never successful no-ops or forced emulation of modern GPU features.
+  Only implemented, compiled backends may be called build-supported. Runtime
+  functionality requires programmer testing; compilation alone is not evidence.
 - **Rendering contracts:** expose backend-independent buffers, textures, shader and
   pipeline resources, resource binding, command submission, synchronization, render
   targets/presentation, capabilities, and optional features as needed. Backend
   replacement must be demonstrable, not merely theoretical.
 - Keep high-level voxel rendering separate from the low-level graphics device API.
   Chunk meshing, visibility, world simulation, and content must not depend directly
-  on Vulkan or Metal. Null supports headless operation and relevant tests without
-  graphics dependencies; future OpenGL/software/other backends must not require
-  rewriting simulation.
+  on graphics APIs. Headless operation must not acquire graphics dependencies;
+  changing the rendering backend must not require rewriting simulation.
 
 ## Planned engine systems
 
@@ -278,7 +309,7 @@ unless explicitly requested.
 - CI must provision and verify required build dependencies before configuring
   CMake. Keep them platform-specific and minimal, pin versions where practical,
   and fail clearly rather than disabling required applications or backends.
-  Graphics builds require Vulkan headers/loader on Windows/Linux and native
+  Default graphics builds require Vulkan headers/loader on Windows/Linux and native
   Metal/AppKit/QuartzCore from the Apple SDK on macOS; do not install MoltenVK.
 - Preserve the existing Git author and committer identity. Every commit created
   or amended on the user's behalf must include:

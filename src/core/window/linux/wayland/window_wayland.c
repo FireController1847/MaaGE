@@ -65,9 +65,9 @@ static void maage_wayland_buffer_release(void *data, struct wl_buffer *handle)
 static const struct wl_buffer_listener maage_wayland_buffer_listener = {
     .release = maage_wayland_buffer_release
 };
-/* wl_shm supplies only the empty native backing required to map a window;
- * no graphics API, device, or renderer is involved. */
-static maage_window_result maage_wayland_backing(maage_window *window)
+/* Shared CPU presentation transport for empty backing and software frames.
+ * Submitted storage lives until wl_buffer.release, independently of the caller. */
+static maage_window_result maage_wayland_backing(maage_window *window, const maage_pixel_buffer *pixels)
 {
     maage_wayland_system *system = window->system->platform;
     maage_wayland_window *native = window->platform;
@@ -76,7 +76,15 @@ static maage_window_result maage_wayland_backing(maage_window *window)
     char name[] = "/tmp/maage-window-XXXXXX";
     int fd, width = window->state.width, height = window->state.height;
     size_t size;
-    if (window->surface_owned || !native->visible || !native->configured) return MAAGE_WINDOW_OK;
+    int x, y, pending = 0;
+    const unsigned char *source;
+    uint32_t *target;
+    if ((window->surface_owned && !pixels) || !native->visible || !native->configured)
+        return pixels ? MAAGE_WINDOW_UNAVAILABLE : MAAGE_WINDOW_OK;
+    if (pixels) {
+        for (buffer = native->buffers; buffer; buffer = buffer->next) ++pending;
+        if (pending >= 3) return MAAGE_WINDOW_UNAVAILABLE;
+    }
     if (width > INT_MAX / 4 || height > INT_MAX / (width * 4)) return MAAGE_WINDOW_INVALID_ARGUMENT;
     size = (size_t)width * 4 * (size_t)height;
     fd = mkstemp(name);
@@ -88,6 +96,16 @@ static maage_window_result maage_wayland_backing(maage_window *window)
     buffer->memory = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (buffer->memory == MAP_FAILED) { close(fd); free(buffer); return MAAGE_WINDOW_PLATFORM_ERROR; }
     memset(buffer->memory, 0, size);
+    if (pixels) {
+        for (y = 0; y < height; ++y) {
+            source = pixels->pixels + (size_t)y * pixels->stride;
+            target = (uint32_t *)buffer->memory + (size_t)y * (size_t)width;
+            for (x = 0; x < width; ++x) {
+                target[x] = ((uint32_t)source[0] << 16) | ((uint32_t)source[1] << 8) | source[2];
+                source += 4;
+            }
+        }
+    }
     pool = wl_shm_create_pool(system->shm, fd, (int)size);
     close(fd);
     if (!pool) { munmap(buffer->memory, size); free(buffer); return MAAGE_WINDOW_OUT_OF_MEMORY; }
@@ -102,6 +120,7 @@ static maage_window_result maage_wayland_backing(maage_window *window)
     wl_surface_attach(native->surface, buffer->handle, 0, 0);
     wl_surface_damage(native->surface, 0, 0, width, height);
     wl_surface_commit(native->surface);
+    if (wl_display_flush(system->display) < 0 && errno != EAGAIN) return MAAGE_WINDOW_PLATFORM_ERROR;
     return MAAGE_WINDOW_OK;
 }
 static void maage_wayland_ping(void *data, struct xdg_wm_base *shell, uint32_t serial)
@@ -202,7 +221,7 @@ static void maage_wayland_configure(void *data, struct xdg_surface *surface, uin
         MAAGE_WINDOW_BORDERLESS_WINDOWED : MAAGE_WINDOW_WINDOWED);
     window->state.resized = 1;
     if (native->error == MAAGE_WINDOW_OK)
-        native->error = maage_wayland_backing(window);
+        native->error = maage_wayland_backing(window, NULL);
 }
 static const struct xdg_surface_listener maage_wayland_surface_listener = {
     .configure = maage_wayland_configure
@@ -379,12 +398,16 @@ static maage_window_result maage_wayland_surface(maage_window *window, int exter
 {
     maage_wayland_window *native = window->platform;
     if (external) return MAAGE_WINDOW_OK;
-    native->error = maage_wayland_backing(window);
+    native->error = maage_wayland_backing(window, NULL);
     return native->error;
+}
+static maage_window_result maage_wayland_pixels(maage_window *window, const maage_pixel_buffer *pixels)
+{
+    return maage_wayland_backing(window, pixels);
 }
 const maage_window_backend_api maage_window_wayland_api = {
     MAAGE_WINDOW_WAYLAND, maage_wayland_init, maage_wayland_shutdown, maage_wayland_create,
     maage_wayland_destroy, maage_wayland_poll, maage_wayland_state, maage_wayland_title,
     maage_wayland_visible, maage_wayland_resize, maage_wayland_mode, maage_wayland_native,
-    maage_wayland_surface
+    maage_wayland_surface, maage_wayland_pixels
 };

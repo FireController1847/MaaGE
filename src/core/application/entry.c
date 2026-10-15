@@ -86,7 +86,7 @@ static int maage_application_run(int argc, char *const argv[])
     if (path) { config.file = 1; config.file_path = path; }
     maage_log_init(&config, argc, argv);
     free(path);
-    result = maage_application_main();
+    result = maage_application_main(argc, argv);
     maage_log_shutdown();
     return result;
 }

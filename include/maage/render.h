@@ -6,7 +6,12 @@ typedef struct maage_renderer maage_renderer;
 typedef enum maage_render_backend {
     MAAGE_RENDER_AUTO = 0,
     MAAGE_RENDER_VULKAN,
-    MAAGE_RENDER_METAL
+    MAAGE_RENDER_METAL,
+    MAAGE_RENDER_OPENGL,
+    MAAGE_RENDER_OPENGL_LEGACY,
+    MAAGE_RENDER_D3D12,
+    MAAGE_RENDER_D3D2,
+    MAAGE_RENDER_SOFTWARE
 } maage_render_backend;
 typedef enum maage_render_result {
     MAAGE_RENDER_OK = 0,
@@ -23,7 +28,51 @@ typedef enum maage_render_result {
 typedef struct maage_render_desc {
     maage_window *window;
     maage_render_backend backend;
+    unsigned long required_features; /* AUTO skips backends missing these flags. */
 } maage_render_desc;
+
+#define MAAGE_RENDER_CAPABILITIES_VERSION 1
+#define MAAGE_RENDER_CAP_CLEAR             0x0001UL
+#define MAAGE_RENDER_CAP_PRESENT           0x0002UL
+#define MAAGE_RENDER_CAP_SHADERS           0x0004UL
+#define MAAGE_RENDER_CAP_FIXED_FUNCTION    0x0008UL
+#define MAAGE_RENDER_CAP_VERTEX_BUFFERS    0x0010UL
+#define MAAGE_RENDER_CAP_INDEX_BUFFERS     0x0020UL
+#define MAAGE_RENDER_CAP_RENDER_TARGETS    0x0040UL
+#define MAAGE_RENDER_CAP_DEPTH             0x0080UL
+#define MAAGE_RENDER_CAP_STENCIL           0x0100UL
+#define MAAGE_RENDER_CAP_INSTANCING        0x0200UL
+#define MAAGE_RENDER_CAP_COMPUTE           0x0400UL
+#define MAAGE_RENDER_CAP_CPU_FRAMEBUFFER   0x0800UL
+#define MAAGE_RENDER_FORMAT_RGBA8          0x01UL
+#define MAAGE_RENDER_FORMAT_BGRA8          0x02UL
+#define MAAGE_RENDER_SYNC_CPU_WAIT         0x01UL
+#define MAAGE_RENDER_SYNC_FENCE            0x02UL
+#define MAAGE_RENDER_SYNC_BINARY_SEMAPHORE 0x04UL
+
+/* Conservative device/backend capabilities, not a promise that resource/draw APIs already
+ * exist. Zero limits mean unknown or inapplicable; never assume a modern GPU.
+ * Texture formats describe sampled 2D textures; CPU_FRAMEBUFFER instead uses
+ * the neutral RGBA8 pixel-buffer representation in maage/pixels.h. */
+typedef struct maage_render_capabilities {
+    unsigned int version;
+    unsigned long features;
+    unsigned long texture_formats;
+    unsigned long synchronization;
+    unsigned int max_texture_dimension_2d;
+    unsigned int max_frames_in_flight;
+} maage_render_capabilities;
+
+const char *maage_render_backend_name(maage_render_backend backend);
+/* Compile-time availability only, not runtime device/display availability.
+ * Reserved/unimplemented backends (including D3D2) return zero. */
+int maage_render_backend_compiled(maage_render_backend backend);
+/* Parse only --renderer=...; leave unrelated arguments untouched. Last wins.
+ * Invalid names return INVALID_ARGUMENT, never an implicit AUTO selection. */
+maage_render_result maage_render_backend_from_args(int argc, char *const argv[],
+    maage_render_backend *backend);
+maage_render_result maage_renderer_get_capabilities(const maage_renderer *renderer,
+    maage_render_capabilities *capabilities);
 
 /* Use the window's initialization thread. The caller owns the window and must
  * keep it alive until renderer destruction. One renderer owns a window's native

@@ -78,6 +78,7 @@ static maage_window_result maage_win32_init(maage_window_system *system)
     if (awareness) awareness((HANDLE)(LONG_PTR)-4);
     memset(&cls, 0, sizeof(cls));
     cls.lpfnWndProc = maage_win32_proc;
+    cls.style = CS_OWNDC;
     cls.hInstance = native->instance;
     cls.hCursor = LoadCursorW(NULL, IDC_ARROW);
     cls.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
@@ -226,8 +227,40 @@ static void maage_win32_native(maage_window *window, maage_window_native *output
     output->handles.win32.instance = system->instance;
     output->handles.win32.window = native->handle;
 }
+static maage_window_result maage_win32_pixels(maage_window *window, const maage_pixel_buffer *buffer)
+{
+    maage_win32_window *native = window->platform;
+    BITMAPINFO info;
+    HDC dc;
+    unsigned char *bgra;
+    size_t index, size = (size_t)buffer->width * 4 * (size_t)buffer->height;
+    int row, result;
+    bgra = (unsigned char *)malloc(size);
+    if (!bgra) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    for (row = 0; row < buffer->height; ++row) {
+        const unsigned char *source = buffer->pixels + (size_t)row * buffer->stride;
+        unsigned char *target = bgra + (size_t)row * (size_t)buffer->width * 4;
+        for (index = 0; index < (size_t)buffer->width * 4; index += 4) {
+            target[index] = source[index + 2]; target[index + 1] = source[index + 1];
+            target[index + 2] = source[index]; target[index + 3] = 0;
+        }
+    }
+    memset(&info, 0, sizeof(info));
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = buffer->width;
+    info.bmiHeader.biHeight = -buffer->height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    dc = GetDC(native->handle);
+    result = dc ? StretchDIBits(dc, 0, 0, buffer->width, buffer->height, 0, 0,
+        buffer->width, buffer->height, bgra, &info, DIB_RGB_COLORS, SRCCOPY) : GDI_ERROR;
+    if (dc) ReleaseDC(native->handle, dc);
+    free(bgra);
+    return result == GDI_ERROR || result == 0 ? MAAGE_WINDOW_PLATFORM_ERROR : MAAGE_WINDOW_OK;
+}
 const maage_window_backend_api maage_window_win32_api = {
     MAAGE_WINDOW_WIN32, maage_win32_init, maage_win32_shutdown, maage_win32_create,
     maage_win32_destroy, maage_win32_poll, maage_win32_state, maage_win32_title,
-    maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL
+    maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL, maage_win32_pixels
 };

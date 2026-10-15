@@ -16,6 +16,7 @@ typedef struct maage_window_backend_api {
     maage_window_result (*mode)(maage_window *window, maage_window_mode mode);
     void (*native)(maage_window *window, maage_window_native *native);
     maage_window_result (*surface)(maage_window *window, int external);
+    maage_window_result (*pixels)(maage_window *window, const maage_pixel_buffer *buffer);
 } maage_window_backend_api;
 
 struct maage_window_system {

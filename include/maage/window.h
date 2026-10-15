@@ -1,5 +1,6 @@
 #ifndef MAAGE_WINDOW_H
 #define MAAGE_WINDOW_H
+#include "maage/pixels.h"
 
 /* All calls, including destruction, belong to the initialization thread (the
  * main thread on macOS). One system may own multiple windows. No thread safety.
@@ -118,5 +119,12 @@ maage_window_result maage_window_get_native(maage_window *window,
 maage_window_result maage_window_acquire_surface(maage_window *window,
     maage_window_native *native);
 maage_window_result maage_window_release_surface(maage_window *window);
+/* Native CPU-image presentation while the caller owns the surface. Copies or
+ * consumes the image before returning; never retains borrowed pixel storage.
+ * UNAVAILABLE means the native surface/buffer is not ready; process events and
+ * retry. Size must match the current framebuffer. Native surfaces may ignore
+ * alpha. No GPU SDK is required. */
+maage_window_result maage_window_present_pixels(maage_window *window,
+    const maage_pixel_buffer *buffer);
 
 #endif

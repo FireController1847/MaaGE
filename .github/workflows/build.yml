@@ -39,11 +39,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libwayland-dev libwayland-bin wayland-protocols pkg-config libvulkan-dev
+          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libwayland-dev libwayland-bin wayland-protocols pkg-config libvulkan-dev libgl-dev
           for tool in cc cmake ninja pkg-config wayland-scanner; do
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
-          pkg-config --print-errors --exists vulkan x11 wayland-client wayland-protocols
+          pkg-config --print-errors --exists vulkan gl x11 wayland-client wayland-protocols
           protocols="$(pkg-config --variable=pkgdatadir wayland-protocols)"
           for protocol in stable/xdg-shell/xdg-shell.xml unstable/xdg-decoration/xdg-decoration-unstable-v1.xml; do
             test -f "$protocols/$protocol" || { echo "::error::Required Wayland protocol missing: $protocol"; exit 1; }
@@ -90,7 +90,7 @@ jobs:
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
           sdk="$(xcrun --sdk macosx --show-sdk-path)"
-          for framework in AppKit Metal QuartzCore; do
+          for framework in AppKit Metal QuartzCore OpenGL; do
             test -d "$sdk/System/Library/Frameworks/$framework.framework" || {
               echo "::error::Required Apple framework missing: $framework ($sdk)"; exit 1;
             }

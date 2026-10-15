@@ -7,7 +7,7 @@
 #include "maage/launcher_version.h"
 #include "maage/application.h"
 
-int maage_application_main(void)
+int maage_application_main(int argc, char *const argv[])
 {
     maage_window_system *system;
     maage_window *window;
@@ -20,6 +20,12 @@ int maage_application_main(void)
     double start, now, after, remaining;
     int color, timeout_ms;
     maage_log_info("maage.launcher", "MaaGE Launcher %s", MAAGE_LAUNCHER_VERSION);
+    maage_render_desc_init(&render_desc);
+    rendered = maage_render_backend_from_args(argc, argv, &render_desc.backend);
+    if (rendered != MAAGE_RENDER_OK) {
+        maage_log_error("maage.render", "Invalid --renderer selection");
+        return 1;
+    }
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) {
         maage_log_error("maage.window", "%s", maage_window_result_string(result));
@@ -30,7 +36,6 @@ int maage_application_main(void)
     config.full_display_content = 1;
     result = maage_window_create(system, &config, &window);
     if (result == MAAGE_WINDOW_OK) {
-        maage_render_desc_init(&render_desc);
         render_desc.window = window;
         rendered = maage_renderer_create(&render_desc, &renderer);
         start = maage_time_monotonic_seconds();

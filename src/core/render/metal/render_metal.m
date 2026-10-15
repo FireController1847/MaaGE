@@ -43,6 +43,13 @@ static maage_render_result maage_metal_create(maage_renderer *renderer)
     [native->view setWantsLayer:YES];
     [native->view setLayer:native->layer];
     native->installed = 1;
+    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS |
+        MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH |
+        MAAGE_RENDER_CAP_STENCIL | MAAGE_RENDER_CAP_INSTANCING | MAAGE_RENDER_CAP_COMPUTE;
+    renderer->capabilities.texture_formats = MAAGE_RENDER_FORMAT_RGBA8 | MAAGE_RENDER_FORMAT_BGRA8;
+    renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT;
+    /* Texture limits vary by GPU family; leave unknown until resource creation
+     * needs family-specific queries rather than promising an unqueried limit. */
     return MAAGE_RENDER_OK;
 }
 static void maage_metal_destroy(maage_renderer *renderer)
@@ -105,5 +112,6 @@ static maage_render_result maage_metal_present(maage_renderer *renderer, const m
     return result;
 }
 const maage_render_backend_api maage_render_metal_api = {
-    MAAGE_RENDER_METAL, maage_metal_create, maage_metal_destroy, maage_metal_present
+    MAAGE_RENDER_METAL, maage_metal_create, maage_metal_destroy, maage_metal_present,
+    MAAGE_RENDER_CAPABILITIES_VERSION
 };
