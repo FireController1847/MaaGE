@@ -14,17 +14,6 @@
 
 > **MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.**
 
-<table>
-  <tr>
-    <td width="50%"><strong>Modular Architecture</strong><br>Independent applications and a shared core for different modpacks and gameplay.</td>
-    <td width="50%"><strong>Cross-Platform Support</strong><br>Targeting Windows, Linux, and macOS with native integration.</td>
-  </tr>
-  <tr>
-    <td width="50%"><strong>Native Rendering</strong><br>Planned Vulkan on Windows and Linux; native Metal on macOS.</td>
-    <td width="50%"><strong>C90-First Portability</strong><br>Portable C foundations with isolated platform-specific code.</td>
-  </tr>
-</table>
-
 ## About MaaGE
 
 MaaGE is an independent native voxel platform inspired by Minecraft, designed for custom modpacks and gameplay experiences.
