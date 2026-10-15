@@ -60,9 +60,11 @@ before claiming functionality or successful platform validation.
   executable. The launcher must not use client/server implementation internals.
   Client and server may share contracts and game definitions, not application
   implementations. Shared infrastructure must not depend on applications.
-- The server must remain headless and independent of client, windowing, and
-  graphics implementations. Never couple simulation to rendering, windowing, or
-  OS implementations; access necessary services through appropriate boundaries.
+- Server simulation/networking and its headless executable must remain independent
+  of client, windowing, and graphics implementations. An optional native GUI is a
+  frontend to the same server library, never a second server implementation. Never
+  couple simulation to rendering, windowing, or OS implementations; access necessary
+  services through appropriate boundaries.
 - Extend established module boundaries instead of adding speculative abstraction
   layers. Do not create artificial APIs for trivial, localized behavior.
 
@@ -109,7 +111,11 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
   gameplay, modpack definitions/registries, persistence, and multiplayer synchronization.
-  Run independently and headlessly without client, windowing, or graphics dependencies.
+  Share one server library between headless Server and optional Server GUI executables.
+  The headless executable must build/run without display servers, graphics devices,
+  Vulkan, Metal, X11, Wayland, Cocoa, or GUI dependencies. Optional administration
+  UI may use Core windowing/rendering only in its frontend; do not implement that
+  UI until explicitly requested.
 - **Core (`src/core/`):** reusable platform-independent foundations and shared
   contracts, without application implementation dependencies.
 
@@ -155,7 +161,8 @@ Wayland session with X11 fallback. Keep OS/protocol language exceptions backend-
 Wayland generated inline helpers require C99 only in its adapter target; the public
 API and common implementation remain C90. Linux builds require the selected native
 development libraries and protocol tools. Disable the optional windowing target for
-headless-only workspaces; never link it into the dedicated server. Native fullscreen
+headless-only workspaces; never link it into Server core or the headless executable.
+The optional Server GUI may consume it separately. Native fullscreen
 is currently AppKit-only; other adapters offer borderless fullscreen. Wayland
 client-requested resize and unnegotiable borderless decorations return unsupported.
 macOS calls belong on the main thread. Full-display content is configurable:
@@ -255,7 +262,7 @@ unless explicitly requested.
   options/configuration variables. Public headers/include paths use `maage`;
   project namespaces and aliases use `MaaGE`. Preserve external identifiers.
 - Keep the root clean: `README.md`, `AGENTS.md`, `LICENSE`, `.gitignore`,
-  `CMakeLists.txt`, `CMakePresets.json`, `CMakeVersions.cmake`, and the
+  `CMakeLists.txt`, `CMakePresets.json`, `CMakeVersions.cmake`, `CMakeApplications.cmake`, and the
   `CMakeConfig.h` template belong here.
   The three application directories and `src/core/` are the established source layout.
 - Keep authored top-level build configuration and active presets at the root;
@@ -272,11 +279,30 @@ unless explicitly requested.
   or amended on the user's behalf must include:
   `Co-authored-by: Codex <noreply@openai.com>`.
 
+## Native application builds
+
+- Launcher and Client are independently buildable native graphical applications:
+  Windows GUI subsystem/WinMain, macOS `.app` bundles with generated Info.plist,
+  and Linux ELF executables with installed `Terminal=false` desktop entries.
+  Keep startup logic in application callbacks; share only entry-point glue.
+- Server core is shared by CLI `maage_server` and optional `maage_server_gui`
+  (`MAAGE_BUILD_SERVER_GUI`, default OFF). The GUI uses the same platform packaging
+  rules and Server version; its startup stub is not an administration interface.
+  The headless executable remains a command-line program on every platform.
+- Keep GUI identity/installation configuration in root `CMakeApplications.cmake`.
+  Preserve `cmake/` intermediates and `build/` outputs, including complete bundles.
+  Apple bundle version fields are numeric; `MaaGESemanticVersion` stores full SemVer
+  and Git metadata from the shared build-time version generator. Desktop commands
+  must use actual installation paths, including install-prefix overrides.
+- GUI stdout/stderr diagnostics go to per-user application log files; they must
+  remain available without Terminal. Headless Server preserves console diagnostics.
+
 ## Independent application versions
 
 - Launcher, Client, and Server independently follow SemVer 2.0.0, initially
   `1.0.0-alpha.1`. Maintain release fields centrally in root `CMakeVersions.cmake`,
   independently of `PROJECT_VERSION`; never duplicate constants in source.
+  Both Server frontends represent the same product and share its release fields.
 - Each build appends the same abbreviated Git HEAD hash as build metadata
   (`unknown` without Git metadata), refreshing generated C90 headers under the
   active `cmake/` tree even without reconfiguration. Metadata uses SemVer-safe

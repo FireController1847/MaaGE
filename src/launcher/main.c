@@ -4,8 +4,9 @@
 #include "maage/render.h"
 #include "maage/time.h"
 #include "maage/launcher_version.h"
+#include "maage/application.h"
 
-int main(void)
+int maage_application_main(void)
 {
     maage_window_system *system;
     maage_window *window;

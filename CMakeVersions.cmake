@@ -2,19 +2,20 @@
 set(MAAGE_LAUNCHER_VERSION_MAJOR 1)
 set(MAAGE_LAUNCHER_VERSION_MINOR 0)
 set(MAAGE_LAUNCHER_VERSION_PATCH 0)
-set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.2")
+set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.3")
 
 set(MAAGE_CLIENT_VERSION_MAJOR 1)
 set(MAAGE_CLIENT_VERSION_MINOR 0)
 set(MAAGE_CLIENT_VERSION_PATCH 0)
-set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.1")
+set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.2")
 
 set(MAAGE_SERVER_VERSION_MAJOR 1)
 set(MAAGE_SERVER_VERSION_MINOR 0)
 set(MAAGE_SERVER_VERSION_PATCH 0)
-set(MAAGE_SERVER_VERSION_PRERELEASE "alpha.1")
+set(MAAGE_SERVER_VERSION_PRERELEASE "alpha.2")
 
 if(CMAKE_SCRIPT_MODE_FILE)
+    include("${CMAKE_CURRENT_LIST_DIR}/CMakeApplications.cmake")
     # Run once per build, including in already configured workspaces. Archives
     # without .git must not accidentally inherit an enclosing repository's HEAD.
     set(MAAGE_GIT_HASH "unknown")
@@ -70,6 +71,36 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
 #endif
 ]=] @ONLY)
+        if(application STREQUAL "server")
+            set(MAAGE_FRONTEND server_gui)
+        else()
+            set(MAAGE_FRONTEND "${application}")
+        endif()
+        string(TOUPPER "${MAAGE_FRONTEND}" MAAGE_FRONTEND_KEY)
+        set(MAAGE_BUNDLE_NAME "${MAAGE_${MAAGE_FRONTEND_KEY}_NAME}")
+        set(MAAGE_BUNDLE_IDENTIFIER "${MAAGE_${MAAGE_FRONTEND_KEY}_IDENTIFIER}")
+        # Apple version fields are numeric; preserve complete SemVer separately.
+        file(CONFIGURE OUTPUT "${MAAGE_VERSION_OUTPUT_DIR}/maage/${MAAGE_FRONTEND}_Info.plist" CONTENT [=[
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>@MAAGE_BUNDLE_NAME@</string>
+    <key>CFBundleName</key><string>@MAAGE_BUNDLE_NAME@</string>
+    <key>CFBundleDisplayName</key><string>@MAAGE_BUNDLE_NAME@</string>
+    <key>CFBundleIdentifier</key><string>@MAAGE_BUNDLE_IDENTIFIER@</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleShortVersionString</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
+    <key>CFBundleVersion</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
+    <key>CFBundleGetInfoString</key><string>@MAAGE_BUNDLE_NAME@ @MAAGE_VERSION@</string>
+    <key>MaaGESemanticVersion</key><string>@MAAGE_VERSION@</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
+</dict>
+</plist>
+]=] @ONLY)
     endforeach()
 else()
     # Explicit application dependencies also support building a single target.
@@ -82,6 +113,9 @@ else()
             "${PROJECT_BINARY_DIR}/generated/maage/launcher_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/client_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/server_version.h"
+            "${PROJECT_BINARY_DIR}/generated/maage/launcher_Info.plist"
+            "${PROJECT_BINARY_DIR}/generated/maage/client_Info.plist"
+            "${PROJECT_BINARY_DIR}/generated/maage/server_gui_Info.plist"
         COMMENT "Refreshing application versions from Git HEAD"
         VERBATIM)
 endif()

@@ -22,13 +22,13 @@ The architecture separates three applications:
 
 - **Launcher** — planned asset management, Microsoft authentication, and Minecraft ownership verification. Mojang's proprietary assets will not be distributed.
 - **Client** — planned native windowing, input, rendering, and player interaction.
-- **Dedicated server** — independent, headless operation, with shared core functionality and game definitions planned for client and server.
+- **Server** — independent headless operation, with an optional graphical administration frontend planned around the same server functionality.
 
 The portable core targets ISO C90, with platform-specific integrations kept separate.
 
 ## Development Status
 
-**Early development.** The Launcher uses Core windowing and rendering libraries for a repeating RGB clear-color demonstration: native Metal on macOS and Vulkan on Windows/Linux. The Client and Server remain console entry points. Gameplay, authentication, and asset management are not implemented. Metal and AppKit have been compiled locally; runtime testing remains manual, and the Windows/Linux backends have not been compiled locally.
+**Early development.** The Launcher uses Core windowing and rendering for an RGB demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client is a graphical application startup stub; Server has shared startup code with a headless executable and an optional GUI stub. Client gameplay and Server administration UI are not implemented. Authentication and asset management are also unimplemented. Metal and AppKit have been compiled locally; runtime testing remains manual, and the Windows/Linux backends have not been compiled locally.
 
 Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
@@ -54,7 +54,11 @@ cmake --build --preset windows-msvc-release
 
 Both build `maage_launcher`, `maage_client`, `maage_server`, `maage_core`, `maage_window`, and `maage_render`. Add `--target maage_server` to build only the server and its dependencies. For Debug builds, use `debug` on Linux/macOS or build with `windows-msvc-debug` on Windows. For a headless workspace, configure with `-DMAAGE_BUILD_LAUNCHER=OFF -DMAAGE_BUILD_RENDER=OFF -DMAAGE_BUILD_WINDOW=OFF`.
 
-Generated files go in `cmake/<preset>/`; compiled output goes in `build/<preset>/bin/` and `lib/`. Visual Studio adds `Release/` or `Debug/` subdirectories. Headless builds require no windowing or graphics SDK.
+Generated files go in `cmake/<preset>/`; compiled output goes in `build/<preset>/bin/` and `lib/`. macOS produces `MaaGE Launcher.app` and `MaaGE Client.app`; Server remains a command-line executable. Visual Studio adds `Release/` or `Debug/` subdirectories. `MAAGE_BUILD_SERVER_GUI=ON` adds the optional Server GUI startup target, using the Server's version. For Server-only builds, also disable Client with `-DMAAGE_BUILD_CLIENT=OFF`.
+
+Install with `cmake --install cmake/release --prefix <destination>` (add `--config Release` for multi-config builds). Linux desktop entries use the installed executable paths and do not require a terminal. Headless Server builds require no windowing or graphics SDK.
+
+GUI diagnostic logs are stored in `~/Library/Logs/MaaGE/` on macOS, `%LOCALAPPDATA%\MaaGE\` on Windows, and `$XDG_STATE_HOME/maage/` or `~/.local/state/maage/` on Linux.
 
 ## AI Collaborative Development
 
