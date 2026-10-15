@@ -1,0 +1,212 @@
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <poll.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../../window_internal.h"
+
+typedef struct maage_x11_system {
+    Display *display;
+    Atom close_atom;
+    Atom protocols;
+    Atom state_atom;
+    Atom fullscreen;
+    Atom motif;
+    int has_fullscreen;
+} maage_x11_system;
+typedef struct maage_x11_window {
+    Window handle;
+    int normal_width;
+    int normal_height;
+    maage_window_mode decoration;
+} maage_x11_window;
+
+static int maage_x11_contains(Display *display, Window window, Atom property, Atom atom)
+{
+    Atom actual;
+    int format;
+    unsigned long count, remaining, index;
+    unsigned char *data = NULL;
+    int found = 0;
+    if (XGetWindowProperty(display, window, property, 0, 1024, False, XA_ATOM,
+        &actual, &format, &count, &remaining, &data) == Success && format == 32) {
+        for (index = 0; index < count; ++index)
+            if (((Atom *)data)[index] == atom) found = 1;
+    }
+    if (data) XFree(data);
+    return found;
+}
+static maage_window_result maage_x11_init(maage_window_system *system)
+{
+    maage_x11_system *native = (maage_x11_system *)calloc(1, sizeof(*native));
+    if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    system->platform = native;
+    native->display = XOpenDisplay(NULL);
+    if (!native->display) return MAAGE_WINDOW_UNAVAILABLE;
+    native->close_atom = XInternAtom(native->display, "WM_DELETE_WINDOW", False);
+    native->protocols = XInternAtom(native->display, "WM_PROTOCOLS", False);
+    native->state_atom = XInternAtom(native->display, "_NET_WM_STATE", False);
+    native->fullscreen = XInternAtom(native->display, "_NET_WM_STATE_FULLSCREEN", False);
+    native->motif = XInternAtom(native->display, "_MOTIF_WM_HINTS", False);
+    native->has_fullscreen = maage_x11_contains(native->display, DefaultRootWindow(native->display),
+        XInternAtom(native->display, "_NET_SUPPORTED", False), native->fullscreen);
+    return MAAGE_WINDOW_OK;
+}
+static void maage_x11_shutdown(maage_window_system *system)
+{
+    maage_x11_system *native = system->platform;
+    if (!native) return;
+    if (native->display) XCloseDisplay(native->display);
+    free(native);
+}
+static maage_window_result maage_x11_title(maage_window *window, const char *title)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    XChangeProperty(system->display, native->handle,
+        XInternAtom(system->display, "_NET_WM_NAME", False),
+        XInternAtom(system->display, "UTF8_STRING", False), 8, PropModeReplace,
+        (const unsigned char *)title, (int)strlen(title));
+    XStoreName(system->display, native->handle, title);
+    XFlush(system->display);
+    return MAAGE_WINDOW_OK;
+}
+static maage_window_result maage_x11_visible(maage_window *window, int visible)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    if (visible) XMapWindow(system->display, native->handle);
+    else XUnmapWindow(system->display, native->handle);
+    XFlush(system->display);
+    window->state.visible = visible != 0;
+    return MAAGE_WINDOW_OK;
+}
+static maage_window_result maage_x11_resize(maage_window *window, int width, int height)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    XResizeWindow(system->display, native->handle, (unsigned int)width, (unsigned int)height);
+    native->normal_width = width;
+    native->normal_height = height;
+    XFlush(system->display);
+    return MAAGE_WINDOW_OK;
+}
+static maage_window_result maage_x11_mode(maage_window *window, maage_window_mode mode)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    XEvent event;
+    unsigned long hints[5];
+    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_WINDOW_UNSUPPORTED;
+    if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN && !system->has_fullscreen)
+        return MAAGE_WINDOW_UNSUPPORTED;
+    memset(hints, 0, sizeof(hints));
+    hints[0] = 2;
+    hints[2] = mode == MAAGE_WINDOW_WINDOWED ? 1 : 0;
+    XChangeProperty(system->display, native->handle, system->motif, system->motif,
+        32, PropModeReplace, (unsigned char *)hints, 5);
+    native->decoration = mode == MAAGE_WINDOW_WINDOWED ? MAAGE_WINDOW_WINDOWED : MAAGE_WINDOW_BORDERLESS_WINDOWED;
+    if (window->state.visible) {
+        memset(&event, 0, sizeof(event));
+        event.xclient.type = ClientMessage;
+        event.xclient.window = native->handle;
+        event.xclient.message_type = system->state_atom;
+        event.xclient.format = 32;
+        event.xclient.data.l[0] = mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN ? 1 : 0;
+        event.xclient.data.l[1] = (long)system->fullscreen;
+        event.xclient.data.l[3] = 1;
+        if (!XSendEvent(system->display, DefaultRootWindow(system->display), False,
+            SubstructureRedirectMask | SubstructureNotifyMask, &event)) return MAAGE_WINDOW_PLATFORM_ERROR;
+    } else {
+        if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
+            XChangeProperty(system->display, native->handle, system->state_atom, XA_ATOM,
+                32, PropModeReplace, (unsigned char *)&system->fullscreen, 1);
+        else XDeleteProperty(system->display, native->handle, system->state_atom);
+    }
+    XFlush(system->display);
+    return MAAGE_WINDOW_OK;
+}
+static maage_window_result maage_x11_create(maage_window *window, const maage_window_config *config)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = (maage_x11_window *)calloc(1, sizeof(*native));
+    maage_window_result result;
+    if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    window->platform = native;
+    native->normal_width = config->width;
+    native->normal_height = config->height;
+    native->handle = XCreateSimpleWindow(system->display, DefaultRootWindow(system->display),
+        0, 0, (unsigned int)config->width, (unsigned int)config->height, 0, 0, 0);
+    if (!native->handle) return MAAGE_WINDOW_PLATFORM_ERROR;
+    XSelectInput(system->display, native->handle, StructureNotifyMask | ExposureMask | PropertyChangeMask);
+    XSetWMProtocols(system->display, native->handle, &system->close_atom, 1);
+    result = maage_x11_title(window, config->title);
+    if (result != MAAGE_WINDOW_OK) return result;
+    result = maage_x11_mode(window, config->mode);
+    if (result != MAAGE_WINDOW_OK) return result;
+    return maage_x11_visible(window, config->visible);
+}
+static void maage_x11_destroy(maage_window *window)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    if (!native) return;
+    if (native->handle) XDestroyWindow(system->display, native->handle);
+    XFlush(system->display);
+    free(native);
+}
+static maage_window_result maage_x11_poll(maage_window_system *system, int wait)
+{
+    maage_x11_system *native = system->platform;
+    maage_x11_window *handle;
+    maage_window *window;
+    struct pollfd fd;
+    XEvent event;
+    int result;
+    if (wait && !XPending(native->display)) {
+        fd.fd = ConnectionNumber(native->display);
+        fd.events = POLLIN;
+        result = poll(&fd, 1, -1);
+        if (result < 0) return errno == EINTR ? MAAGE_WINDOW_OK : MAAGE_WINDOW_PLATFORM_ERROR;
+        if (fd.revents & (POLLERR | POLLHUP | POLLNVAL)) return MAAGE_WINDOW_PLATFORM_ERROR;
+    }
+    while (XPending(native->display)) {
+        XNextEvent(native->display, &event);
+        for (window = system->windows; window; window = window->next) {
+            handle = window->platform;
+            if (handle->handle != event.xany.window) continue;
+            if (event.type == ClientMessage && event.xclient.message_type == native->protocols &&
+                (Atom)event.xclient.data.l[0] == native->close_atom) window->state.close_requested = 1;
+            if (event.type == ConfigureNotify) window->state.resized = 1;
+            if (event.type == DestroyNotify) { handle->handle = 0; window->state.close_requested = 1; }
+        }
+    }
+    return MAAGE_WINDOW_OK;
+}
+static maage_window_result maage_x11_state(maage_window *window)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    XWindowAttributes attributes;
+    if (!native->handle) return MAAGE_WINDOW_OK;
+    if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_WINDOW_PLATFORM_ERROR;
+    window->state.width = window->state.framebuffer_width = attributes.width;
+    window->state.height = window->state.framebuffer_height = attributes.height;
+    window->state.visible = attributes.map_state != IsUnmapped;
+    window->state.mode = maage_x11_contains(system->display, native->handle, system->state_atom,
+        system->fullscreen) ? MAAGE_WINDOW_BORDERLESS_FULLSCREEN : native->decoration;
+    return MAAGE_WINDOW_OK;
+}
+static void maage_x11_native(maage_window *window, maage_window_native *output)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    output->handles.x11.display = system->display;
+    output->handles.x11.window = native->handle;
+}
+const maage_window_backend_api maage_window_x11_api = {
+    MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,
+    maage_x11_destroy, maage_x11_poll, maage_x11_state, maage_x11_title,
+    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native
+};

@@ -25,9 +25,9 @@ modpacks rather than one predefined game. Do not reproduce the Java engine,
 preserve Forge compatibility, or execute existing Java mods; develop independent
 native or data-driven systems and content instead.
 
-The current repository is a workspace foundation: three application entry points,
-a metadata-only static core, CMake configuration, manual build validation, and
-documentation. The architecture and roadmap below describe future responsibilities,
+The repository has a CMake workspace, a minimal shared core, and a reusable native
+windowing subsystem consumed by the Launcher. The architecture and roadmap describe
+future responsibilities,
 not implemented capabilities or authorization to build them. Inspect current code
 before claiming functionality or successful platform validation.
 
@@ -70,7 +70,7 @@ before claiming functionality or successful platform validation.
 
 - Make focused, minimal changes that solve the actual requirement. Avoid duplicated
   logic and unnecessary scaffolding, boilerplate, comments, directories, or dependencies.
-- Prefer concise implementations and targeted verification over unrelated
+- Prefer concise implementations and necessary compilation over unrelated
   refactoring. Develop incrementally rather than in enormous implementation passes.
   Keep responses concise: report meaningful results, failures, and remaining
   limitations without repeatedly explaining established information.
@@ -79,10 +79,21 @@ before claiming functionality or successful platform validation.
 - Follow the current task's scope. Do not implement engine subsystems or planned
   integrations merely because they appear in the architectural goals.
 
+### Build, but do not test
+
+- Configure, compile, and link affected targets; fix introduced configuration,
+  compiler, and linker failures without disabling targets or hiding relevant errors.
+- Unless the programmer explicitly requests otherwise, never execute applications,
+  unit/integration/smoke/UI tests, benchmarks, CTest, or runtime validation. Do not
+  add automated testing steps or run separate validation scripts/passes beyond
+  what successful compilation requires. Runtime testing belongs to the programmer.
+- Report builds, errors, and uncompiled platforms concisely. Compilation does not
+  establish correct runtime behavior. This policy applies to subsequent tasks.
+
 ## Application responsibilities
 
-All responsibilities here are planned. Shared functionality belongs in reusable
-modules, not duplicate application implementations.
+These are long-term responsibilities; consult source for implemented portions.
+Shared functionality belongs in reusable modules, not duplicate implementations.
 
 - **Launcher (`src/launcher/`):** engine installation/version management; modpack
   installation/configuration; authorized Minecraft asset acquisition; Microsoft
@@ -133,6 +144,25 @@ fullscreen/windowed modes, logical/framebuffer dimensions, DPI/scaling,
 focus/visibility, cursors, and native surface interoperability. Input is a separate
 subsystem consuming appropriate native events. Permit Objective-C AppKit bridges
 behind C90-compatible public interfaces. Do not require SDL or GLFW as foundations.
+
+Windowing is a reusable Core library, independent of applications and renderers;
+use native implementations without general-purpose third-party windowing frameworks.
+Its C90 public API uses opaque owned windows, explicit results, distinct windowed,
+borderless-windowed, borderless-fullscreen, and native-fullscreen modes, and typed
+native-handle interoperability. Report unsupported operations explicitly. Linux
+backends are independently selectable; automatic selection prefers an available
+Wayland session with X11 fallback. Keep OS/protocol language exceptions backend-local.
+Wayland generated inline helpers require C99 only in its adapter target; the public
+API and common implementation remain C90. Linux builds require the selected native
+development libraries and protocol tools. Disable the optional windowing target for
+headless-only workspaces; never link it into the dedicated server. Native fullscreen
+is currently AppKit-only; other adapters offer borderless fullscreen. Wayland
+client-requested resize and unnegotiable borderless decorations return unsupported.
+macOS calls belong on the main thread. Full-display content is configurable:
+borderless fullscreen uses the screen frame, and native fullscreen requests maximum
+permitted content via public AppKit APIs. Expose safe-area insets for UI; never
+unnecessarily crop drawable content to the safe area. The physical camera cutout
+cannot display pixels, and macOS retains control over Spaces/menu-bar/Dock policy.
 
 ## First-class rendering backends
 

@@ -28,13 +28,15 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The workspace builds three executables that print their names and exit, plus a static core library with project metadata. Gameplay, rendering, windowing, authentication, and asset management are not implemented.
+**Early development.** The Launcher now uses a native Core windowing library. The Client and Server remain console entry points, with a minimal shared core. Gameplay, rendering, authentication, and asset management are not implemented. Windowing has been compiled on macOS; runtime testing remains manual, and the Windows/Linux backends have not been compiled locally.
 
-Locally validated on macOS arm64 with Apple Clang. Other platforms and toolchains remain unverified locally. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
+Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
 ## Build
 
 Use **CMake 3.21+** and a C compiler. The Linux and macOS presets also require **Ninja**. From the repository root:
+
+Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. macOS uses the AppKit SDK supplied by Xcode.
 
 **Linux / macOS** — GCC or Clang on Linux; Apple Clang on macOS:
 
@@ -50,7 +52,7 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc-release
 ```
 
-Both build `maage_launcher`, `maage_client`, `maage_server`, and `maage_core`. Add `--target maage_server` to build only the server and its dependencies. For Debug builds, use `debug` on Linux/macOS or build with `windows-msvc-debug` on Windows.
+Both build `maage_launcher`, `maage_client`, `maage_server`, `maage_core`, and `maage_window`. Add `--target maage_server` to build only the server and its dependencies. For Debug builds, use `debug` on Linux/macOS or build with `windows-msvc-debug` on Windows. For a fresh headless workspace, configure with `-DMAAGE_BUILD_LAUNCHER=OFF -DMAAGE_BUILD_WINDOW=OFF` to avoid window-system dependencies.
 
 Generated files go in `cmake/<preset>/`; compiled output goes in `build/<preset>/bin/` and `lib/`. Visual Studio adds `Release/` or `Debug/` subdirectories. No graphics SDK is required yet.
 

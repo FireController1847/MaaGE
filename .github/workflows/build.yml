@@ -35,6 +35,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Linux window-system development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libx11-dev libwayland-dev wayland-protocols pkg-config
+
       - name: Configure Release
         run: cmake --preset ${{ matrix.configure_preset }}
 

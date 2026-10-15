@@ -1,7 +1,4 @@
 add_executable(maage_launcher main.c)
 maage_configure_portable_target(maage_launcher)
 set_target_properties(maage_launcher PROPERTIES OUTPUT_NAME launcher)
-if(MAAGE_BUILD_TESTS)
-    add_test(NAME maage_launcher_smoke COMMAND maage_launcher)
-    set_tests_properties(maage_launcher_smoke PROPERTIES PASS_REGULAR_EXPRESSION "MaaGE Launcher")
-endif()
+target_link_libraries(maage_launcher PRIVATE MaaGE::Window)

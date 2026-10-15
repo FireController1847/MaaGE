@@ -1,0 +1,113 @@
+#ifndef MAAGE_WINDOW_H
+#define MAAGE_WINDOW_H
+
+/* All calls, including destruction, belong to the initialization thread (the
+ * main thread on macOS). One system may own multiple windows. No thread safety.
+ * Destroy windows before their system; system destruction also cleans survivors.
+ * Strings are UTF-8 and copied by native creation/title operations. */
+typedef struct maage_window_system maage_window_system;
+typedef struct maage_window maage_window;
+
+typedef enum maage_window_result {
+    MAAGE_WINDOW_OK = 0,
+    MAAGE_WINDOW_INVALID_ARGUMENT,
+    MAAGE_WINDOW_OUT_OF_MEMORY,
+    MAAGE_WINDOW_UNAVAILABLE,
+    MAAGE_WINDOW_UNSUPPORTED,
+    MAAGE_WINDOW_PLATFORM_ERROR,
+    MAAGE_WINDOW_WRONG_THREAD
+} maage_window_result;
+
+typedef enum maage_window_backend {
+    MAAGE_WINDOW_AUTO = 0,
+    MAAGE_WINDOW_WIN32,
+    MAAGE_WINDOW_COCOA,
+    MAAGE_WINDOW_X11,
+    MAAGE_WINDOW_WAYLAND
+} maage_window_backend;
+
+typedef enum maage_window_mode {
+    MAAGE_WINDOW_WINDOWED = 0,
+    MAAGE_WINDOW_BORDERLESS_WINDOWED,
+    MAAGE_WINDOW_BORDERLESS_FULLSCREEN,
+    MAAGE_WINDOW_NATIVE_FULLSCREEN
+} maage_window_mode;
+
+typedef struct maage_window_config {
+    const char *title;
+    int width;
+    int height;
+    int visible;
+    int full_display_content;
+    maage_window_mode mode;
+} maage_window_config;
+
+typedef struct maage_window_insets {
+    double top;
+    double right;
+    double bottom;
+    double left;
+} maage_window_insets;
+
+/* Dimensions and safe-area insets use logical units, except framebuffer sizes
+ * which use backing pixels. Zero insets mean no known display obstruction.
+ * Renderers may cover the full backing area; UI can respect the safe rectangle.
+ * Wayland's initial empty backing uses scale 1 (compositor scaling still applies). */
+typedef struct maage_window_state {
+    int width;
+    int height;
+    int framebuffer_width;
+    int framebuffer_height;
+    int visible;
+    int close_requested;
+    int resized;
+    maage_window_mode mode;
+    maage_window_insets safe_area;
+} maage_window_state;
+
+/* Borrowed handles; never destroy them. Valid only while the window/system
+ * lives. Check backend before interpreting its matching union member. Display
+ * connections must remain under this library's event ownership. Cocoa pointers
+ * identify NSWindow/NSView; Wayland pointers identify wl_display/wl_surface. */
+typedef struct maage_window_native {
+    maage_window_backend backend;
+    union {
+        struct { void *instance; void *window; } win32;
+        struct { void *window; void *view; } cocoa;
+        struct { void *display; unsigned long window; } x11;
+        struct { void *display; void *surface; } wayland;
+    } handles;
+} maage_window_native;
+
+void maage_window_config_init(maage_window_config *config);
+const char *maage_window_result_string(maage_window_result result);
+/* AUTO: native backend; on Linux try Wayland when advertised, then X11.
+ * Explicit selection never falls back. Failure sets *system to null. */
+maage_window_result maage_window_system_create(maage_window_backend backend,
+    maage_window_system **system);
+void maage_window_system_destroy(maage_window_system *system);
+maage_window_result maage_window_create(maage_window_system *system,
+    const maage_window_config *config, maage_window **window);
+void maage_window_destroy(maage_window *window);
+/* wait != 0 may block until OS events arrive; otherwise dispatch available
+ * events only. Close requests remain set; resized is consumed by get_state.
+ * A failed poll means the application should destroy its windows and exit. */
+maage_window_result maage_window_poll_events(maage_window_system *system, int wait);
+maage_window_result maage_window_get_state(maage_window *window,
+    maage_window_state *state);
+maage_window_result maage_window_set_title(maage_window *window, const char *title);
+maage_window_result maage_window_set_visible(maage_window *window, int visible);
+/* Sizes are logical content dimensions, not outer frames. Fullscreen sizes are
+ * OS-controlled; resize returns UNSUPPORTED there. Mode changes may be async:
+ * OK acknowledges a request, not compositor acceptance. Query state after polls.
+ * Native fullscreen currently means AppKit fullscreen Spaces and requires a
+ * visible window; other backends use BORDERLESS_FULLSCREEN and reject NATIVE.
+ * Wayland client-requested resize and forced borderless mode without decoration
+ * negotiation return UNSUPPORTED. Normal Wayland decoration is compositor-owned.
+ * Unsupported native fullscreen/borderless semantics return UNSUPPORTED. */
+maage_window_result maage_window_resize(maage_window *window, int width, int height);
+maage_window_result maage_window_set_mode(maage_window *window, maage_window_mode mode);
+maage_window_result maage_window_get_native(maage_window *window,
+    maage_window_native *native);
+
+#endif

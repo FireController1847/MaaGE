@@ -1,3 +1,10 @@
 add_library(maage_core STATIC core.c)
 maage_configure_portable_target(maage_core)
 target_include_directories(maage_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
+
+option(MAAGE_BUILD_WINDOW "Build the native Core windowing library" ${MAAGE_BUILD_LAUNCHER})
+if(MAAGE_BUILD_WINDOW)
+    add_subdirectory(window)
+elseif(MAAGE_BUILD_LAUNCHER)
+    message(FATAL_ERROR "The Launcher requires MAAGE_BUILD_WINDOW=ON.")
+endif()
