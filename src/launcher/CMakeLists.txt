@@ -1,4 +1,5 @@
 add_executable(maage_launcher main.c)
+add_dependencies(maage_launcher maage_versions)
 maage_configure_portable_target(maage_launcher)
 set_target_properties(maage_launcher PROPERTIES OUTPUT_NAME launcher)
 target_link_libraries(maage_launcher PRIVATE MaaGE::Window)

@@ -1,4 +1,5 @@
 add_executable(maage_client main.c)
+add_dependencies(maage_client maage_versions)
 maage_configure_portable_target(maage_client)
 set_target_properties(maage_client PROPERTIES OUTPUT_NAME client)
 target_link_libraries(maage_client PRIVATE maage_core)

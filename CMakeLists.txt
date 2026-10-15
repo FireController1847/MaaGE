@@ -60,6 +60,7 @@ if(NOT MAAGE_HAVE_PUTS)
     message(FATAL_ERROR "The initial console applications require standard C stdio (puts).")
 endif()
 configure_file(CMakeConfig.h "${PROJECT_BINARY_DIR}/generated/cmakecfg.h" @ONLY)
+include(CMakeVersions.cmake)
 
 # Apply portable requirements only to portable targets. Future adapters may opt
 # into other languages/standards locally, with target_sources inside platform ifs.

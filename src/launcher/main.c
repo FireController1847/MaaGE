@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "maage/window.h"
+#include "maage/launcher_version.h"
 
 int main(void)
 {
@@ -8,6 +9,7 @@ int main(void)
     maage_window_config config;
     maage_window_state state;
     maage_window_result result;
+    printf("MaaGE Launcher %s\n", MAAGE_LAUNCHER_VERSION);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) {
         fprintf(stderr, "MaaGE Launcher: %s\n", maage_window_result_string(result));

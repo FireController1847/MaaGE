@@ -246,7 +246,8 @@ unless explicitly requested.
   options/configuration variables. Public headers/include paths use `maage`;
   project namespaces and aliases use `MaaGE`. Preserve external identifiers.
 - Keep the root clean: `README.md`, `AGENTS.md`, `LICENSE`, `.gitignore`,
-  `CMakeLists.txt`, `CMakePresets.json`, and the `CMakeConfig.h` template belong here.
+  `CMakeLists.txt`, `CMakePresets.json`, `CMakeVersions.cmake`, and the
+  `CMakeConfig.h` template belong here.
   The three application directories and `src/core/` are the established source layout.
 - Keep authored top-level build configuration and active presets at the root;
   root `CMakeLists.txt` orchestrates the workspace. Reserve `cmake/<name>/` for
@@ -261,6 +262,19 @@ unless explicitly requested.
 - Preserve the existing Git author and committer identity. Every commit created
   or amended on the user's behalf must include:
   `Co-authored-by: Codex <noreply@openai.com>`.
+
+## Independent application versions
+
+- Launcher, Client, and Server independently follow SemVer 2.0.0, initially
+  `1.0.0-alpha.1`. Maintain release fields centrally in root `CMakeVersions.cmake`,
+  independently of `PROJECT_VERSION`; never duplicate constants in source.
+- Each build appends the same abbreviated Git HEAD hash as build metadata
+  (`unknown` without Git metadata), refreshing generated C90 headers under the
+  active `cmake/` tree even without reconfiguration. Metadata uses SemVer-safe
+  ASCII characters and does not affect version precedence.
+- Increment the affected application's version when appropriate to the scope of
+  changes; increment prerelease identifiers during alpha development. Do not bump
+  release numbers merely for a new commit: the hash distinguishes individual builds.
 
 ## Conceptual development sequence
 
