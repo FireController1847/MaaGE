@@ -9,8 +9,6 @@ typedef enum maage_render_backend {
     MAAGE_RENDER_METAL,
     MAAGE_RENDER_OPENGL,
     MAAGE_RENDER_OPENGL_LEGACY,
-    MAAGE_RENDER_D3D12,
-    MAAGE_RENDER_D3D2,
     MAAGE_RENDER_SOFTWARE
 } maage_render_backend;
 /* Requested API family is separate from the concrete active backend above. */
@@ -19,7 +17,6 @@ typedef enum maage_render_family {
     MAAGE_RENDER_FAMILY_METAL,
     MAAGE_RENDER_FAMILY_VULKAN,
     MAAGE_RENDER_FAMILY_OPENGL,
-    MAAGE_RENDER_FAMILY_DIRECT3D,
     MAAGE_RENDER_FAMILY_SOFTWARE
 } maage_render_family;
 typedef enum maage_render_result {
@@ -37,8 +34,6 @@ typedef enum maage_render_result {
 typedef struct maage_render_desc {
     maage_window *window;
     maage_render_family family;
-    unsigned int version_major;
-    unsigned int version_minor;
     unsigned long required_features; /* AUTO skips backends missing these flags. */
 } maage_render_desc;
 
@@ -76,15 +71,11 @@ typedef struct maage_render_capabilities {
 
 const char *maage_render_backend_name(maage_render_backend backend);
 /* Compile-time availability only, not runtime device/display availability.
- * Reserved/unimplemented backends (including D3D2) return zero. */
+ * Unavailable backends return zero. */
 int maage_render_backend_compiled(maage_render_backend backend);
-/* Parse --renderer=auto|metal|vulkan|opengl|direct3d|software and optional
- * --renderer-version=... in either order; last occurrence of each wins. Only
- * selection fields change; unrelated arguments, window and features survive.
- * Versions select existing implementation baselines: OpenGL 1.1 (legacy) or
- * 3.3+ Core, Direct3D 2 or 12. Zero/zero means unconstrained. Other family/version
- * combinations return UNSUPPORTED; invalid names return INVALID_ARGUMENT.
- * Explicit families never fall back outside that family. D3D2 is unimplemented. */
+/* Parse --renderer=auto|metal|vulkan|opengl|software; last occurrence wins.
+ * OpenGL negotiates modern/legacy internally. Explicit selection stays within
+ * its family. Removed --renderer-version flags are rejected. */
 maage_render_result maage_render_desc_parse_args(int argc, char *const argv[],
     maage_render_desc *desc);
 maage_render_result maage_renderer_get_capabilities(const maage_renderer *renderer,

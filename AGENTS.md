@@ -201,11 +201,8 @@ requirements in backend targets; portable headers and common implementation stay
 | Secondary | Modern OpenGL | Compatibility fallback. |
 | Secondary | Software | CPU fallback and portability. |
 | Legacy | OpenGL 1.1 | Older hardware/OS compatibility. |
-| Legacy | Direct3D 12 | Optional modern Windows alternative; lower project priority. |
-| Experimental | Direct3D 2 | Historical Windows experimentation. |
 
 Metal and Vulkan are the only actively prioritized GPU backends. Other renderers
-serve compatibility, fallback, or experimentation; D3D12's priority does not make
 it a technically legacy API. Do not significantly expand, optimize, refactor, or
 chase feature parity in lower-priority backends unless explicitly requested, needed
 for a small shared-interface adjustment, or required to fix compilation broken by
@@ -227,28 +224,17 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   stays native: Cocoa, WGL, GLX/X11 (requires a compatible window visual).
   Wayland OpenGL contexts are not implemented;
   report unsupported. Legacy WGL does not require modern context extensions.
-- **Direct3D:** optional native D3D12 is isolated under `render/directx/d3d12/`.
-  D3D2 is a separate planned DirectDraw/IDirect3D2 boundary, disabled by default;
-  its reservation returns unsupported and advertises no capabilities. Require an
-  appropriate historical SDK/toolchain before implementation; never invent or
-  vendor proprietary SDK declarations. Renderer baselines do not guarantee Win95
-  compatibility of the surrounding OS/windowing/application code.
 - **Software:** retain the C90 CPU framebuffer as the universal fallback, with
   native AppKit/GDI/X11/Wayland presentation. Do not add GPU API dependencies or
   prematurely implement a full rasterizer.
-- **Selection/capabilities:** independent `MAAGE_ENABLE_*` backend options; optional
-  SDK absence is reported and must not break unrelated applications.
-  CLI families are `auto`, `metal`, `vulkan`, `opengl`, `direct3d`, and `software`.
-  Optional `--renderer-version=` selects existing baselines: OpenGL `1.1`/`3.3`,
-  Direct3D `2`/`12`; reject unsupported combinations. Without a version, try the
-  best available implementation within the requested family. Explicit families
-  never switch families. AUTO tries Metal → Modern GL → Legacy GL →
-  Software on macOS, Vulkan → D3D12 → Modern GL → Legacy GL → Software on Windows,
-  and Vulkan → Modern GL → Legacy GL → Software on Linux; never AUTO-select D3D2.
-  Use actual initialization and required feature masks, log failures/selection,
-  and release failed backend resources before trying another.
-  Load optional Vulkan/D3D runtime DLLs dynamically on Windows so a missing
-  runtime cannot prevent reaching a fallback backend at process startup.
+- **Selection/capabilities:** CLI families are `auto`, `metal`, `vulkan`,
+  `opengl`, and `software` only. There is no renderer-version option.
+  OpenGL selects modern or 1.1 legacy internally, not as a user-facing option.
+  Explicit renderer selection never falls back to a different family.
+  AUTO tries Metal → modern GL → legacy GL → Software on macOS, and Vulkan →
+  modern GL → legacy GL → Software on Windows/Linux. Advertise only actual
+  compiled capabilities; log selection/failures and clean up failed attempts.
+  Load optional Vulkan runtime DLLs dynamically on Windows to permit fallback.
 - Version capability contracts; query native limits/formats conservatively and
   report zero for unknown limits. Device capabilities do not imply unimplemented
   public resource/draw commands exist. Keep interfaces backend-neutral and useful

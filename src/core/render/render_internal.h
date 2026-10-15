@@ -23,7 +23,5 @@ extern const maage_render_backend_api maage_render_metal_api;
 extern const maage_render_backend_api maage_render_vulkan_api;
 extern const maage_render_backend_api maage_render_opengl_api;
 extern const maage_render_backend_api maage_render_opengl_legacy_api;
-extern const maage_render_backend_api maage_render_d3d12_api;
-extern const maage_render_backend_api maage_render_d3d2_api;
 extern const maage_render_backend_api maage_render_software_api;
 #endif
