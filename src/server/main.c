@@ -1,6 +1,12 @@
 #include "server.h"
+#include "maage/log.h"
+#include <stddef.h>
 
-int main(void)
+int main(int argc, char **argv)
 {
-    return maage_server_run();
+    int result;
+    maage_log_init(NULL, argc, argv);
+    result = maage_server_run();
+    maage_log_shutdown();
+    return result;
 }

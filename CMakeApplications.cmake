@@ -24,7 +24,9 @@ function(maage_configure_gui_application target application)
     set_target_properties(${target} PROPERTIES
         WIN32_EXECUTABLE "${MAAGE_PLATFORM_WINDOWS}"
         MACOSX_BUNDLE "${MAAGE_PLATFORM_MACOS}")
-    if(MAAGE_PLATFORM_MACOS)
+    if(MAAGE_PLATFORM_WINDOWS)
+        target_link_libraries(${target} PRIVATE shell32)
+    elseif(MAAGE_PLATFORM_MACOS)
         set(MAAGE_NUMERIC_VERSION "${MAAGE_${MAAGE_PRODUCT}_VERSION_MAJOR}.${MAAGE_${MAAGE_PRODUCT}_VERSION_MINOR}.${MAAGE_${MAAGE_PRODUCT}_VERSION_PATCH}")
         set_target_properties(${target} PROPERTIES
             OUTPUT_NAME "${MAAGE_GUI_NAME}"

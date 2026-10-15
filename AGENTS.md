@@ -294,8 +294,16 @@ unless explicitly requested.
   Apple bundle version fields are numeric; `MaaGESemanticVersion` stores full SemVer
   and Git metadata from the shared build-time version generator. Desktop commands
   must use actual installation paths, including install-prefix overrides.
-- GUI stdout/stderr diagnostics go to per-user application log files; they must
-  remain available without Terminal. Headless Server preserves console diagnostics.
+- Core `MaaGE::Log` (`maage/log.h`) is the standard diagnostic API; use named
+  `maage.*` loggers instead of ad hoc printf/file logging. Levels inherit through
+  dot-separated names. Defaults are INFO, console on, file off, local timestamps;
+  GUI startup supplies per-user file defaults, and Server keeps console output.
+  Configuration precedence is defaults → optional INI → explicit `--log-*` CLI
+  overrides. Initialize early and shut down cleanly; FATAL never exits by itself.
+  Keep logging synchronous, thread-safe, bounded, C90-compatible, and headless-safe.
+- Log severity labels are exactly `[TRACE]`, `[DEBUG]`, `[INFO]`, `[WARN]`,
+  `[ERROR]`, or `[FATAL]`. Align logger names with padding after the closing `]`,
+  never inside brackets (for example, `[INFO]  [maage.launcher]`).
 
 ## Independent application versions
 

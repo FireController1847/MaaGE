@@ -1,0 +1,8 @@
+add_library(maage_log STATIC log.c log_config.c log_platform.c)
+add_library(MaaGE::Log ALIAS maage_log)
+maage_configure_portable_target(maage_log)
+target_include_directories(maage_log PUBLIC "${PROJECT_SOURCE_DIR}/include")
+if(NOT MAAGE_PLATFORM_WINDOWS)
+    find_package(Threads REQUIRED)
+    target_link_libraries(maage_log PRIVATE Threads::Threads)
+endif()

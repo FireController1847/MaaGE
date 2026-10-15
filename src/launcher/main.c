@@ -1,4 +1,5 @@
-#include <stdio.h>
+#include "maage/log.h"
+#include <stddef.h>
 #include <math.h>
 #include "maage/window.h"
 #include "maage/render.h"
@@ -18,10 +19,10 @@ int maage_application_main(void)
     maage_render_result rendered = MAAGE_RENDER_OK;
     double start, now, after, remaining;
     int color, timeout_ms;
-    printf("MaaGE Launcher %s\n", MAAGE_LAUNCHER_VERSION);
+    maage_log_info("maage.launcher", "MaaGE Launcher %s", MAAGE_LAUNCHER_VERSION);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) {
-        fprintf(stderr, "MaaGE Launcher: %s\n", maage_window_result_string(result));
+        maage_log_error("maage.window", "%s", maage_window_result_string(result));
         return 1;
     }
     maage_window_config_init(&config);
@@ -34,7 +35,7 @@ int maage_application_main(void)
         rendered = maage_renderer_create(&render_desc, &renderer);
         start = maage_time_monotonic_seconds();
         if (start < 0.0) {
-            fprintf(stderr, "MaaGE Launcher: monotonic clock unavailable\n");
+            maage_log_error("maage.launcher", "Monotonic clock unavailable");
             rendered = MAAGE_RENDER_PLATFORM_ERROR;
         }
         while (rendered == MAAGE_RENDER_OK || rendered == MAAGE_RENDER_SKIPPED) {
@@ -63,11 +64,11 @@ int maage_application_main(void)
     }
     maage_window_system_destroy(system);
     if (result != MAAGE_WINDOW_OK) {
-        fprintf(stderr, "MaaGE Launcher: %s\n", maage_window_result_string(result));
+        maage_log_error("maage.window", "%s", maage_window_result_string(result));
         return 1;
     }
     if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED) {
-        fprintf(stderr, "MaaGE Launcher: %s\n", maage_render_result_string(rendered));
+        maage_log_error("maage.render", "%s", maage_render_result_string(rendered));
         return 1;
     }
     return 0;

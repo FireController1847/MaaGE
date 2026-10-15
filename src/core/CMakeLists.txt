@@ -1,6 +1,8 @@
 add_library(maage_core STATIC core.c time.c)
 maage_configure_portable_target(maage_core)
 target_include_directories(maage_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
+add_subdirectory(log)
+target_link_libraries(maage_core PUBLIC MaaGE::Log)
 
 option(MAAGE_BUILD_WINDOW "Build the native Core windowing library" ${MAAGE_BUILD_LAUNCHER})
 if(MAAGE_BUILD_WINDOW)
