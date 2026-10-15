@@ -21,11 +21,8 @@ int maage_application_main(int argc, char *const argv[])
     int color, timeout_ms;
     maage_log_info("maage.launcher", "MaaGE Launcher %s", MAAGE_LAUNCHER_VERSION);
     maage_render_desc_init(&render_desc);
-    rendered = maage_render_backend_from_args(argc, argv, &render_desc.backend);
-    if (rendered != MAAGE_RENDER_OK) {
-        maage_log_error("maage.render", "Invalid --renderer selection");
-        return 1;
-    }
+    rendered = maage_render_desc_parse_args(argc, argv, &render_desc);
+    if (rendered != MAAGE_RENDER_OK) return 1;
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) {
         maage_log_error("maage.window", "%s", maage_window_result_string(result));

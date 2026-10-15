@@ -8,7 +8,7 @@ void maage_render_desc_init(maage_render_desc *desc)
 {
     if (!desc) return;
     memset(desc, 0, sizeof(*desc));
-    desc->backend = MAAGE_RENDER_AUTO;
+    desc->family = MAAGE_RENDER_FAMILY_AUTO;
 }
 const char *maage_render_result_string(maage_render_result result)
 {
@@ -71,23 +71,59 @@ int maage_render_backend_compiled(maage_render_backend backend)
     const maage_render_backend_api *api = maage_render_api(backend);
     return api && api->version == MAAGE_RENDER_CAPABILITIES_VERSION;
 }
-maage_render_result maage_render_backend_from_args(int argc, char *const argv[], maage_render_backend *backend)
+static const char *const maage_render_family_names[] = {
+    "auto", "metal", "vulkan", "opengl", "direct3d", "software"
+};
+static const struct maage_render_version {
+    maage_render_family family;
+    const char *name;
+    unsigned int major, minor;
+    maage_render_backend backend;
+} maage_render_versions[] = {
+    { MAAGE_RENDER_FAMILY_OPENGL, "1.1", 1, 1, MAAGE_RENDER_OPENGL_LEGACY },
+    { MAAGE_RENDER_FAMILY_OPENGL, "3.3", 3, 3, MAAGE_RENDER_OPENGL },
+    { MAAGE_RENDER_FAMILY_DIRECT3D, "2", 2, 0, MAAGE_RENDER_D3D2 },
+    { MAAGE_RENDER_FAMILY_DIRECT3D, "12", 12, 0, MAAGE_RENDER_D3D12 }
+};
+
+maage_render_result maage_render_desc_parse_args(int argc, char *const argv[], maage_render_desc *desc)
 {
-    int index, kind, found;
-    if (!backend) return MAAGE_RENDER_INVALID_ARGUMENT;
-    *backend = MAAGE_RENDER_AUTO;
+    const char *family = "auto", *version = NULL;
+    int index, kind;
+    size_t choice;
+    unsigned int major = 0, minor = 0;
+    if (!desc) return MAAGE_RENDER_INVALID_ARGUMENT;
     for (index = 1; argv && index < argc; ++index) {
-        if (!argv[index] || strncmp(argv[index], "--renderer=", 11) != 0) continue;
-        found = 0;
-        for (kind = MAAGE_RENDER_AUTO; kind <= MAAGE_RENDER_SOFTWARE; ++kind) {
-            if (!strcmp(argv[index] + 11, maage_render_backend_name((maage_render_backend)kind))) {
-                *backend = (maage_render_backend)kind;
-                found = 1;
-                break;
-            }
+        if (!argv[index]) continue;
+        if (!strncmp(argv[index], "--renderer=", sizeof("--renderer=") - 1))
+            family = argv[index] + sizeof("--renderer=") - 1;
+        else if (!strncmp(argv[index], "--renderer-version=", sizeof("--renderer-version=") - 1))
+            version = argv[index] + sizeof("--renderer-version=") - 1;
+        else if (!strcmp(argv[index], "--renderer") || !strcmp(argv[index], "--renderer-version")) {
+            maage_log_error("maage.render", "%s requires an =value", argv[index]);
+            return MAAGE_RENDER_INVALID_ARGUMENT;
         }
-        if (!found) return MAAGE_RENDER_INVALID_ARGUMENT;
     }
+    for (kind = MAAGE_RENDER_FAMILY_AUTO; kind <= MAAGE_RENDER_FAMILY_SOFTWARE; ++kind)
+        if (!strcmp(family, maage_render_family_names[kind])) break;
+    if (kind > MAAGE_RENDER_FAMILY_SOFTWARE) {
+        maage_log_error("maage.render", "Unknown renderer family '%s'; use auto, metal, vulkan, opengl, direct3d, or software", family);
+        return MAAGE_RENDER_INVALID_ARGUMENT;
+    }
+    if (version) {
+        for (choice = 0; choice < sizeof(maage_render_versions) / sizeof(maage_render_versions[0]); ++choice)
+            if (maage_render_versions[choice].family == (maage_render_family)kind &&
+                !strcmp(version, maage_render_versions[choice].name)) break;
+        if (choice == sizeof(maage_render_versions) / sizeof(maage_render_versions[0])) {
+            maage_log_error("maage.render", "Unsupported version '%s' for renderer '%s'; supported constraints: opengl 1.1/3.3, direct3d 2/12", version, family);
+            return MAAGE_RENDER_UNSUPPORTED;
+        }
+        major = maage_render_versions[choice].major;
+        minor = maage_render_versions[choice].minor;
+    }
+    desc->family = (maage_render_family)kind;
+    desc->version_major = major;
+    desc->version_minor = minor;
     return MAAGE_RENDER_OK;
 }
 maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_renderer **output)
@@ -102,15 +138,41 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_r
 #endif
         MAAGE_RENDER_OPENGL, MAAGE_RENDER_OPENGL_LEGACY, MAAGE_RENDER_SOFTWARE
     };
+    static const maage_render_backend opengl[] = { MAAGE_RENDER_OPENGL, MAAGE_RENDER_OPENGL_LEGACY };
+    static const maage_render_backend direct3d[] = { MAAGE_RENDER_D3D12, MAAGE_RENDER_D3D2 };
     maage_renderer *renderer;
     maage_render_result result = MAAGE_RENDER_UNAVAILABLE;
     const maage_render_backend_api *api;
-    size_t index, count = desc && desc->backend == MAAGE_RENDER_AUTO ? sizeof(order) / sizeof(order[0]) : 1;
-    maage_render_backend backend;
+    size_t index, count = 1;
+    maage_render_backend backend, single = MAAGE_RENDER_AUTO;
+    const maage_render_backend *candidates = &single;
     if (!output) return MAAGE_RENDER_INVALID_ARGUMENT;
     *output = NULL;
-    if (!desc || !desc->window || desc->backend < MAAGE_RENDER_AUTO || desc->backend > MAAGE_RENDER_SOFTWARE)
+    if (!desc || !desc->window || desc->family < MAAGE_RENDER_FAMILY_AUTO || desc->family > MAAGE_RENDER_FAMILY_SOFTWARE)
         return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (desc->version_major || desc->version_minor) {
+        for (index = 0; index < sizeof(maage_render_versions) / sizeof(maage_render_versions[0]); ++index) {
+            if (maage_render_versions[index].family == desc->family &&
+                maage_render_versions[index].major == desc->version_major && maage_render_versions[index].minor == desc->version_minor) {
+                single = maage_render_versions[index].backend;
+                break;
+            }
+        }
+        if (single == MAAGE_RENDER_AUTO) {
+            maage_log_error("maage.render", "Unsupported version %u.%u for renderer '%s'",
+                desc->version_major, desc->version_minor, maage_render_family_names[desc->family]);
+            return MAAGE_RENDER_UNSUPPORTED;
+        }
+    } else {
+        switch (desc->family) {
+        case MAAGE_RENDER_FAMILY_AUTO: candidates = order; count = sizeof(order) / sizeof(order[0]); break;
+        case MAAGE_RENDER_FAMILY_METAL: single = MAAGE_RENDER_METAL; break;
+        case MAAGE_RENDER_FAMILY_VULKAN: single = MAAGE_RENDER_VULKAN; break;
+        case MAAGE_RENDER_FAMILY_OPENGL: candidates = opengl; count = sizeof(opengl) / sizeof(opengl[0]); break;
+        case MAAGE_RENDER_FAMILY_DIRECT3D: candidates = direct3d; count = sizeof(direct3d) / sizeof(direct3d[0]); break;
+        case MAAGE_RENDER_FAMILY_SOFTWARE: single = MAAGE_RENDER_SOFTWARE; break;
+        }
+    }
     renderer = (maage_renderer *)calloc(1, sizeof(*renderer));
     if (!renderer) return MAAGE_RENDER_OUT_OF_MEMORY;
     renderer->window = desc->window;
@@ -121,13 +183,11 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_r
         return MAAGE_RENDER_WINDOW_ERROR;
     }
     for (index = 0; index < count; ++index) {
-        backend = desc->backend == MAAGE_RENDER_AUTO ? order[index] : desc->backend;
+        backend = candidates[index];
         api = maage_render_api(backend);
         if (!api || api->version != MAAGE_RENDER_CAPABILITIES_VERSION) {
-            if (desc->backend == MAAGE_RENDER_AUTO) continue;
-            maage_log_error("maage.render", "Renderer %s is not implemented in this build", maage_render_backend_name(backend));
             result = MAAGE_RENDER_UNSUPPORTED;
-            break;
+            continue;
         }
         renderer->api = api;
         memset(&renderer->capabilities, 0, sizeof(renderer->capabilities));
@@ -150,6 +210,12 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_r
         renderer->api = NULL;
         renderer->refresh = 1;
     }
+    if (count == 1 && !maage_render_backend_compiled(single))
+        maage_log_error("maage.render", "Renderer implementation '%s' is not implemented in this build", maage_render_backend_name(single));
+    else if (desc->version_major || desc->version_minor)
+        maage_log_error("maage.render", "No usable implementation for renderer family '%s' version %u.%u",
+            maage_render_family_names[desc->family], desc->version_major, desc->version_minor);
+    else maage_log_error("maage.render", "No usable implementation for renderer family '%s'", maage_render_family_names[desc->family]);
     maage_window_release_surface(renderer->window);
     free(renderer);
     return result;

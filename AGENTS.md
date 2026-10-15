@@ -91,6 +91,13 @@ before claiming functionality or successful platform validation.
   what successful compilation requires. Runtime testing belongs to the programmer.
 - Report builds, errors, and uncompiled platforms concisely. Compilation does not
   establish correct runtime behavior. This policy applies to subsequent tasks.
+- Prefer focused builds of directly affected targets, shared components, and
+  relevant primary backends. Build fallback backends only when modified or
+  affected by shared API/build changes; do not repeatedly rebuild every platform
+  or renderer after unrelated edits. Do not fix unrelated legacy problems during
+  primary development or trigger GitHub Actions without explicit authorization.
+  Keep exploration focused and report unsupported/uncompiled backends honestly.
+  Runtime testing and visual validation belong to the programmer.
 
 ## Application responsibilities
 
@@ -187,6 +194,26 @@ Headless targets must not link rendering or acquire graphics dependencies; disab
 are configuration errors when that backend is enabled. Isolate graphics SDK/C99
 requirements in backend targets; portable headers and common implementation stay C90.
 
+| Project priority | Renderer | Role |
+| --- | --- | --- |
+| Primary | Native Metal | Main macOS development focus. |
+| Primary | Vulkan | Main Windows/Linux renderer. |
+| Secondary | Modern OpenGL | Compatibility fallback. |
+| Secondary | Software | CPU fallback and portability. |
+| Legacy | OpenGL 1.1 | Older hardware/OS compatibility. |
+| Legacy | Direct3D 12 | Optional modern Windows alternative; lower project priority. |
+| Experimental | Direct3D 2 | Historical Windows experimentation. |
+
+Metal and Vulkan are the only actively prioritized GPU backends. Other renderers
+serve compatibility, fallback, or experimentation; D3D12's priority does not make
+it a technically legacy API. Do not significantly expand, optimize, refactor, or
+chase feature parity in lower-priority backends unless explicitly requested, needed
+for a small shared-interface adjustment, or required to fix compilation broken by
+the current task. Metal/Vulkan guide modern capabilities; optional capabilities
+let older backends support relevant subsets without unnecessary constraints or
+emulation. **Modularity is mandatory; feature parity is not.** Keep backend logic
+isolated and avoid speculative interfaces for hypothetical legacy requirements.
+
 - **Vulkan:** isolate API types, device management, swapchains, pipelines, command
   recording, and synchronization inside the backend, away from generic engine and
   gameplay interfaces.
@@ -210,8 +237,12 @@ requirements in backend targets; portable headers and common implementation stay
   native AppKit/GDI/X11/Wayland presentation. Do not add GPU API dependencies or
   prematurely implement a full rasterizer.
 - **Selection/capabilities:** independent `MAAGE_ENABLE_*` backend options; optional
-  SDK absence is reported and must not break unrelated applications. Explicit
-  `--renderer=...` never falls back. AUTO tries Metal → Modern GL → Legacy GL →
+  SDK absence is reported and must not break unrelated applications.
+  CLI families are `auto`, `metal`, `vulkan`, `opengl`, `direct3d`, and `software`.
+  Optional `--renderer-version=` selects existing baselines: OpenGL `1.1`/`3.3`,
+  Direct3D `2`/`12`; reject unsupported combinations. Without a version, try the
+  best available implementation within the requested family. Explicit families
+  never switch families. AUTO tries Metal → Modern GL → Legacy GL →
   Software on macOS, Vulkan → D3D12 → Modern GL → Legacy GL → Software on Windows,
   and Vulkan → Modern GL → Legacy GL → Software on Linux; never AUTO-select D3D2.
   Use actual initialization and required feature masks, log failures/selection,
