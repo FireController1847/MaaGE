@@ -21,8 +21,8 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            configure_preset: windows-msvc
-            build_preset: windows-msvc-release
+            configure_preset: windows-ci
+            build_preset: windows-ci
           - os: ubuntu-latest
             configure_preset: release
             build_preset: release
@@ -40,6 +40,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libx11-dev libwayland-dev wayland-protocols pkg-config libvulkan-dev
+
+      - name: Initialize MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Configure Release
         run: cmake --preset ${{ matrix.configure_preset }}
