@@ -294,7 +294,7 @@ static void maage_cocoa_destroy(maage_window *window)
     free(native);
     maage_cocoa_presentation(window->system);
 }
-static maage_window_result maage_cocoa_poll(maage_window_system *system, int wait)
+static maage_window_result maage_cocoa_poll(maage_window_system *system, int timeout_ms)
 {
     NSAutoreleasePool *pool;
     NSEvent *event;
@@ -302,7 +302,8 @@ static maage_window_result maage_cocoa_poll(maage_window_system *system, int wai
     if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
     pool = [[NSAutoreleasePool alloc] init];
     event = [NSApp nextEventMatchingMask:NSEventMaskAny
-        untilDate:wait ? [NSDate distantFuture] : [NSDate distantPast]
+        untilDate:timeout_ms < 0 ? [NSDate distantFuture] :
+            [NSDate dateWithTimeIntervalSinceNow:(double)timeout_ms / 1000.0]
         inMode:NSDefaultRunLoopMode dequeue:YES];
     while (event) {
         [NSApp sendEvent:event];
@@ -363,5 +364,5 @@ static void maage_cocoa_native(maage_window *window, maage_window_native *output
 const maage_window_backend_api maage_window_cocoa_api = {
     MAAGE_WINDOW_COCOA, maage_cocoa_init, maage_cocoa_shutdown, maage_cocoa_create,
     maage_cocoa_destroy, maage_cocoa_poll, maage_cocoa_state, maage_cocoa_title,
-    maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native
+    maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native, NULL
 };

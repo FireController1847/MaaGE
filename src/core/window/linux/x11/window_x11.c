@@ -156,7 +156,7 @@ static void maage_x11_destroy(maage_window *window)
     XFlush(system->display);
     free(native);
 }
-static maage_window_result maage_x11_poll(maage_window_system *system, int wait)
+static maage_window_result maage_x11_poll(maage_window_system *system, int timeout_ms)
 {
     maage_x11_system *native = system->platform;
     maage_x11_window *handle;
@@ -164,10 +164,10 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int wait)
     struct pollfd fd;
     XEvent event;
     int result;
-    if (wait && !XPending(native->display)) {
+    if (timeout_ms && !XPending(native->display)) {
         fd.fd = ConnectionNumber(native->display);
         fd.events = POLLIN;
-        result = poll(&fd, 1, -1);
+        result = poll(&fd, 1, timeout_ms);
         if (result < 0) return errno == EINTR ? MAAGE_WINDOW_OK : MAAGE_WINDOW_PLATFORM_ERROR;
         if (fd.revents & (POLLERR | POLLHUP | POLLNVAL)) return MAAGE_WINDOW_PLATFORM_ERROR;
     }
@@ -208,5 +208,5 @@ static void maage_x11_native(maage_window *window, maage_window_native *output)
 const maage_window_backend_api maage_window_x11_api = {
     MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,
     maage_x11_destroy, maage_x11_poll, maage_x11_state, maage_x11_title,
-    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native
+    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL
 };

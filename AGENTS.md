@@ -26,7 +26,7 @@ preserve Forge compatibility, or execute existing Java mods; develop independent
 native or data-driven systems and content instead.
 
 The repository has a CMake workspace, a minimal shared core, and a reusable native
-windowing subsystem consumed by the Launcher. The architecture and roadmap describe
+windowing and rendering subsystems consumed by the Launcher. The architecture and roadmap describe
 future responsibilities,
 not implemented capabilities or authorization to build them. Inspect current code
 before claiming functionality or successful platform validation.
@@ -166,8 +166,17 @@ cannot display pixels, and macOS retains control over Spaces/menu-bar/Dock polic
 
 ## First-class rendering backends
 
-Both direct Vulkan on Windows/Linux and genuine native Apple Metal on macOS are
-fundamental requirements. **Do not implement rendering until explicitly requested.**
+Rendering is a reusable Core subsystem consumed through a C90, opaque,
+backend-independent API. Direct Vulkan on Windows/Linux and genuine native Apple
+Metal on macOS are fundamental requirements. Keep rendering separate from window
+lifecycle, applications, and gameplay; renderers borrow windows, which must outlive
+them. Native-content ownership is acquired exclusively through window interop;
+Wayland's empty backing must not overwrite external rendering. Future OpenGL and
+software backends must fit the public lifecycle without application redesign.
+Headless targets must not link rendering or acquire graphics dependencies; disable
+`MAAGE_BUILD_RENDER` for headless-only workspaces. Missing Vulkan development files
+are configuration errors when that backend is enabled. Isolate graphics SDK/C99
+requirements in backend targets; portable headers and common implementation stay C90.
 
 - **Vulkan:** isolate API types, device management, swapchains, pipelines, command
   recording, and synchronization inside the backend, away from generic engine and

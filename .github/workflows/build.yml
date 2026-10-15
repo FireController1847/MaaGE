@@ -35,11 +35,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Linux window-system development libraries
+      - name: Install Linux native build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libx11-dev libwayland-dev wayland-protocols pkg-config
+          sudo apt-get install --no-install-recommends -y libx11-dev libwayland-dev wayland-protocols pkg-config libvulkan-dev
 
       - name: Configure Release
         run: cmake --preset ${{ matrix.configure_preset }}

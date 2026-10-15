@@ -123,7 +123,13 @@ void maage_window_destroy(maage_window *window)
 maage_window_result maage_window_poll_events(maage_window_system *system, int wait)
 {
     if (!system) return MAAGE_WINDOW_INVALID_ARGUMENT;
-    return system->api->poll(system, wait);
+    return system->api->poll(system, wait ? -1 : 0);
+}
+
+maage_window_result maage_window_wait_events(maage_window_system *system, int timeout_ms)
+{
+    if (!system || timeout_ms < 0) return MAAGE_WINDOW_INVALID_ARGUMENT;
+    return system->api->poll(system, timeout_ms);
 }
 
 maage_window_result maage_window_get_state(maage_window *window, maage_window_state *state)
@@ -134,6 +140,29 @@ maage_window_result maage_window_get_state(maage_window *window, maage_window_st
     if (result != MAAGE_WINDOW_OK) return result;
     *state = window->state;
     window->state.resized = 0;
+    return MAAGE_WINDOW_OK;
+}
+
+maage_window_result maage_window_acquire_surface(maage_window *window, maage_window_native *native)
+{
+    maage_window_result result;
+    if (!window || !native) return MAAGE_WINDOW_INVALID_ARGUMENT;
+    if (window->surface_owned) return MAAGE_WINDOW_UNSUPPORTED;
+    result = maage_window_get_native(window, native);
+    if (result != MAAGE_WINDOW_OK) return result;
+    window->surface_owned = 1;
+    if (window->system->api->surface) {
+        result = window->system->api->surface(window, 1);
+        if (result != MAAGE_WINDOW_OK) window->surface_owned = 0;
+    }
+    return result;
+}
+
+maage_window_result maage_window_release_surface(maage_window *window)
+{
+    if (!window || !window->surface_owned) return MAAGE_WINDOW_INVALID_ARGUMENT;
+    window->surface_owned = 0;
+    if (window->system->api->surface) return window->system->api->surface(window, 0);
     return MAAGE_WINDOW_OK;
 }
 

@@ -184,13 +184,17 @@ static void maage_win32_destroy(maage_window *window)
     if (native->handle) DestroyWindow(native->handle);
     free(native);
 }
-static maage_window_result maage_win32_poll(maage_window_system *system, int wait)
+static maage_window_result maage_win32_poll(maage_window_system *system, int timeout_ms)
 {
     maage_win32_system *native = system->platform;
     maage_window *window;
     MSG message;
     if (GetCurrentThreadId() != native->thread) return MAAGE_WINDOW_WRONG_THREAD;
-    if (wait && !PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE)) WaitMessage();
+    if (timeout_ms && !PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE)) {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE,
+            timeout_ms < 0 ? INFINITE : (DWORD)timeout_ms, QS_ALLINPUT) == WAIT_FAILED)
+            return MAAGE_WINDOW_PLATFORM_ERROR;
+    }
     while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
         if (message.message == WM_QUIT) {
             for (window = system->windows; window; window = window->next)
@@ -225,5 +229,5 @@ static void maage_win32_native(maage_window *window, maage_window_native *output
 const maage_window_backend_api maage_window_win32_api = {
     MAAGE_WINDOW_WIN32, maage_win32_init, maage_win32_shutdown, maage_win32_create,
     maage_win32_destroy, maage_win32_poll, maage_win32_state, maage_win32_title,
-    maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native
+    maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL
 };

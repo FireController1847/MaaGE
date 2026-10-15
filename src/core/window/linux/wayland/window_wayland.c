@@ -76,7 +76,7 @@ static maage_window_result maage_wayland_backing(maage_window *window)
     char name[] = "/tmp/maage-window-XXXXXX";
     int fd, width = window->state.width, height = window->state.height;
     size_t size;
-    if (!native->visible || !native->configured) return MAAGE_WINDOW_OK;
+    if (window->surface_owned || !native->visible || !native->configured) return MAAGE_WINDOW_OK;
     if (width > INT_MAX / 4 || height > INT_MAX / (width * 4)) return MAAGE_WINDOW_INVALID_ARGUMENT;
     size = (size_t)width * 4 * (size_t)height;
     fd = mkstemp(name);
@@ -317,7 +317,7 @@ static void maage_wayland_destroy(maage_window *window)
     free(native->title);
     free(native);
 }
-static maage_window_result maage_wayland_poll(maage_window_system *system, int wait)
+static maage_window_result maage_wayland_poll(maage_window_system *system, int timeout_ms)
 {
     maage_wayland_system *native = system->platform;
     maage_window *window;
@@ -329,7 +329,7 @@ static maage_window_result maage_wayland_poll(maage_window_system *system, int w
     if (pending < 0) return MAAGE_WINDOW_PLATFORM_ERROR;
     /* Do not block after callbacks have already reported close/resize. */
     for (window = system->windows; window; window = window->next)
-        if (window->state.close_requested || window->state.resized) wait = 0;
+        if (window->state.close_requested || window->state.resized) timeout_ms = 0;
     while (wl_display_prepare_read(native->display) != 0)
         if (wl_display_dispatch_pending(native->display) < 0) return MAAGE_WINDOW_PLATFORM_ERROR;
     fd.fd = wl_display_get_fd(native->display);
@@ -339,7 +339,7 @@ static maage_window_result maage_wayland_poll(maage_window_system *system, int w
         if (errno != EAGAIN) { wl_display_cancel_read(native->display); return MAAGE_WINDOW_PLATFORM_ERROR; }
         fd.events |= POLLOUT;
     }
-    ready = poll(&fd, 1, wait ? -1 : 0);
+    ready = poll(&fd, 1, timeout_ms);
     if (ready < 0 || (fd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
         wl_display_cancel_read(native->display);
         return ready < 0 && errno == EINTR ? MAAGE_WINDOW_OK : MAAGE_WINDOW_PLATFORM_ERROR;
@@ -375,8 +375,16 @@ static void maage_wayland_native(maage_window *window, maage_window_native *outp
     output->handles.wayland.display = system->display;
     output->handles.wayland.surface = native->surface;
 }
+static maage_window_result maage_wayland_surface(maage_window *window, int external)
+{
+    maage_wayland_window *native = window->platform;
+    if (external) return MAAGE_WINDOW_OK;
+    native->error = maage_wayland_backing(window);
+    return native->error;
+}
 const maage_window_backend_api maage_window_wayland_api = {
     MAAGE_WINDOW_WAYLAND, maage_wayland_init, maage_wayland_shutdown, maage_wayland_create,
     maage_wayland_destroy, maage_wayland_poll, maage_wayland_state, maage_wayland_title,
-    maage_wayland_visible, maage_wayland_resize, maage_wayland_mode, maage_wayland_native
+    maage_wayland_visible, maage_wayland_resize, maage_wayland_mode, maage_wayland_native,
+    maage_wayland_surface
 };

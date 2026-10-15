@@ -93,6 +93,8 @@ void maage_window_destroy(maage_window *window);
  * events only. Close requests remain set; resized is consumed by get_state.
  * A failed poll means the application should destroy its windows and exit. */
 maage_window_result maage_window_poll_events(maage_window_system *system, int wait);
+/* Process events, waiting at most timeout_ms milliseconds (zero never blocks). */
+maage_window_result maage_window_wait_events(maage_window_system *system, int timeout_ms);
 maage_window_result maage_window_get_state(maage_window *window,
     maage_window_state *state);
 maage_window_result maage_window_set_title(maage_window *window, const char *title);
@@ -109,5 +111,12 @@ maage_window_result maage_window_resize(maage_window *window, int width, int hei
 maage_window_result maage_window_set_mode(maage_window *window, maage_window_mode mode);
 maage_window_result maage_window_get_native(maage_window *window,
     maage_window_native *native);
+/* Exclusive native-content ownership for a renderer or other surface producer.
+ * Acquire once before attaching graphics resources; release after destroying
+ * them, before window destruction. Borrowed native handles keep their lifetime.
+ * Wayland suspends its empty wl_shm backing while an external owner is active. */
+maage_window_result maage_window_acquire_surface(maage_window *window,
+    maage_window_native *native);
+maage_window_result maage_window_release_surface(maage_window *window);
 
 #endif
