@@ -1,6 +1,6 @@
-add_library(maage_launcher_ui STATIC widgets.c pages.c shell.c)
+add_library(maage_launcher_ui STATIC widgets.c pages.c settings_page.c account_menu.c shell.c)
 add_library(MaaGE::LauncherUI ALIAS maage_launcher_ui)
 add_dependencies(maage_launcher_ui maage_versions)
 maage_configure_portable_target(maage_launcher_ui)
 target_include_directories(maage_launcher_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(maage_launcher_ui PUBLIC MaaGE::Canvas MaaGE::Render)
+target_link_libraries(maage_launcher_ui PUBLIC MaaGE::LauncherState MaaGE::Canvas MaaGE::Render)

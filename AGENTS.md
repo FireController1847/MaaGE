@@ -267,9 +267,17 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   families to obtain UI support. Headless targets acquire no UI dependencies.
 - ProtoLauncher supplies the initial flat charcoal/magenta visual direction, not
   an immutable specification. Respect logical sizes, DPI, and native safe areas.
-  Sample pages use original procedural imagery and temporary local interactions;
-  authentication, downloads, installation, persistence, and launch services remain
-  deferred until explicitly requested. No web runtime or speculative Game UI.
+  Build a real application shell, not sample/demo pages. Primary navigation is
+  Play, News, Installations, Settings; accounts belong in the header menu, About
+  within Settings. Default to signed out and empty/unavailable content; never
+  fabricate installations, accounts, announcements, or successful service actions.
+- Application-owned Launcher state and explicit per-service request boundaries
+  supply views; widgets own presentation only. Providers publish borrowed display
+  snapshots between frames, never tokens/credentials. Typed settings centralize
+  definitions, defaults, validation, and change notifications; current preferences
+  are session-only and must say so. Keep persistence separate from state/UI.
+  Authentication, persistence, installation management, networking, and launching
+  remain deferred until explicitly requested. No web runtime or speculative Game UI.
 
 ## Planned engine systems
 

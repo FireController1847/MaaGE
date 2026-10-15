@@ -1,3 +1,7 @@
+add_library(maage_launcher_state STATIC state.c settings.c)
+add_library(MaaGE::LauncherState ALIAS maage_launcher_state)
+maage_configure_portable_target(maage_launcher_state)
+target_include_directories(maage_launcher_state PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include")
 add_subdirectory(ui)
 add_executable(maage_launcher main.c)
 add_dependencies(maage_launcher maage_versions)

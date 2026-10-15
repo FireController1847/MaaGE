@@ -7,6 +7,7 @@
 
 int maage_application_main(int argc, char *const argv[])
 {
+    maage_launcher_state application;
     maage_window_system *system;
     maage_window *window;
     maage_window_config config;
@@ -21,7 +22,8 @@ int maage_application_main(int argc, char *const argv[])
     maage_render_desc_init(&desc);
     rendered = maage_render_desc_parse_args(argc, argv, &desc);
     if (rendered != MAAGE_RENDER_OK) return 1;
-    rendered = maage_launcher_ui_create(&ui);
+    maage_launcher_state_init(&application);
+    rendered = maage_launcher_ui_create(&application, &ui);
     if (rendered != MAAGE_RENDER_OK) {
         maage_log_error("maage.launcher", "UI canvas unavailable: %s (native canvas/input currently require macOS)", maage_render_result_string(rendered));
         return 1;

@@ -46,7 +46,8 @@ static int maage_ui_hit(maage_launcher_ui *ui, int id, maage_rect rect, int enab
 {
     int hot, clicked = 0;
     if (!enabled || ui->blocked) return 0;
-    if (ui->focus_count < 128 && rect.y + rect.height > ui->clip.y && rect.y < ui->clip.y + ui->clip.height)
+    if (ui->focus_count < 128 && rect.width > 0 && rect.height > 0 && rect.x + rect.width > ui->clip.x && rect.x < ui->clip.x + ui->clip.width &&
+        rect.y + rect.height > ui->clip.y && rect.y < ui->clip.y + ui->clip.height)
         ui->focus_ids[ui->focus_count++] = id;
     hot = maage_ui_contains(rect, ui->input.x, ui->input.y) && maage_ui_contains(ui->clip, ui->input.x, ui->input.y);
     if (hot && ui->input.pressed) { ui->active = id; ui->focus = id; }
@@ -57,7 +58,7 @@ static int maage_ui_hit(maage_launcher_ui *ui, int id, maage_rect rect, int enab
 int maage_ui_button(maage_launcher_ui *ui, int id, maage_rect rect, const char *text, int style, int enabled)
 {
     maage_color color = ui->theme.navigation;
-    float width, size = style == MAAGE_UI_TAB ? 16.0f : 15.0f;
+    float width, size = 14.0f;
     int clicked = maage_ui_hit(ui, id, rect, enabled);
     int hot = maage_ui_contains(rect, ui->input.x, ui->input.y) && maage_ui_contains(ui->clip, ui->input.x, ui->input.y);
     if (style == MAAGE_UI_CARD) color = ui->theme.panel;
@@ -84,19 +85,19 @@ int maage_ui_button(maage_launcher_ui *ui, int id, maage_rect rect, const char *
         enabled ? ui->theme.text : ui->theme.muted, text);
     return clicked;
 }
-void maage_ui_slider(maage_launcher_ui *ui, int id, maage_rect rect, float *value, float minimum, float maximum)
+void maage_ui_slider(maage_launcher_ui *ui, int id, maage_rect rect, float *value, float minimum, float maximum, int enabled)
 {
     float position;
     int dragging = ui->active == id;
     if (rect.width <= 0 || maximum <= minimum) return;
-    maage_ui_hit(ui, id, rect, 1);
-    if (!ui->blocked && (ui->active == id || (dragging && ui->input.released))) {
+    maage_ui_hit(ui, id, rect, enabled);
+    if (enabled && !ui->blocked && (ui->active == id || (dragging && ui->input.released))) {
         position = (ui->input.x - rect.x) / rect.width;
         if (position < 0) position = 0;
         if (position > 1) position = 1;
         *value = minimum + position * (maximum - minimum);
     }
-    if (!ui->blocked && ui->focus == id) {
+    if (enabled && !ui->blocked && ui->focus == id) {
         if (ui->input.key == MAAGE_KEY_LEFT) *value -= (maximum - minimum) / 40;
         if (ui->input.key == MAAGE_KEY_RIGHT) *value += (maximum - minimum) / 40;
     }
@@ -104,16 +105,16 @@ void maage_ui_slider(maage_launcher_ui *ui, int id, maage_rect rect, float *valu
     if (*value > maximum) *value = maximum;
     position = (*value - minimum) / (maximum - minimum);
     maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 2, rect.width, 4), ui->theme.navigation);
-    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 2, rect.width * position, 4), ui->theme.accent);
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 2, rect.width * position, 4), enabled ? ui->theme.accent : ui->theme.hover);
     maage_ui_fill(ui, maage_ui_rect(rect.x + (rect.width - 14) * position, rect.y + 4, 14, rect.height - 8),
-        ui->focus == id ? ui->theme.text : ui->theme.accent);
+        enabled ? (ui->focus == id ? ui->theme.text : ui->theme.accent) : ui->theme.muted);
 }
-void maage_ui_text_input(maage_launcher_ui *ui, int id, maage_rect rect, char *text, size_t capacity)
+void maage_ui_text_input(maage_launcher_ui *ui, int id, maage_rect rect, char *text, size_t capacity, int enabled)
 {
     size_t length = strlen(text), index = 0, count, remaining = strlen(ui->input.text);
     const unsigned char *input = (const unsigned char *)ui->input.text;
-    maage_ui_hit(ui, id, rect, 1);
-    if (!ui->blocked && ui->focus == id) {
+    maage_ui_hit(ui, id, rect, enabled);
+    if (enabled && !ui->blocked && ui->focus == id) {
         if (ui->input.key == MAAGE_KEY_BACKSPACE && length) {
             --length;
             while (length && ((unsigned char)text[length] & 0xc0) == 0x80) --length;
@@ -128,8 +129,8 @@ void maage_ui_text_input(maage_launcher_ui *ui, int id, maage_rect rect, char *t
         text[length] = '\0';
     }
     maage_ui_fill(ui, rect, ui->theme.inset);
-    maage_ui_label(ui, maage_ui_rect(rect.x + 12, rect.y + 10, rect.width - 24, 24), 16, ui->theme.text, text);
-    if (ui->focus == id)
+    maage_ui_label(ui, maage_ui_rect(rect.x + 12, rect.y + 7, rect.width - 24, 24), 14, enabled ? ui->theme.text : ui->theme.muted, text);
+    if (ui->focus == id && enabled)
         maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height - 2, rect.width, 2), ui->theme.accent);
 }
 maage_rect maage_ui_take(maage_ui_layout *layout, float size)
@@ -143,72 +144,92 @@ maage_rect maage_ui_take(maage_ui_layout *layout, float size)
 maage_rect maage_ui_scroll(maage_launcher_ui *ui, maage_rect rect, float *offset, float content_height)
 {
     float maximum = content_height > rect.height ? content_height - rect.height : 0;
-    if (!ui->blocked && maage_ui_contains(rect, ui->input.x, ui->input.y)) *offset -= ui->input.scroll * 5;
+    float thumb = rect.height < 36 ? rect.height : 36;
+    if (!ui->blocked && maage_ui_contains(ui->clip, ui->input.x, ui->input.y) && maage_ui_contains(rect, ui->input.x, ui->input.y)) *offset -= ui->input.scroll * 5;
     if (*offset < 0) *offset = 0;
     if (*offset > maximum) *offset = maximum;
     if (maximum > 0) {
-        maage_ui_fill(ui, maage_ui_rect(rect.x + rect.width - 3, rect.y + (*offset / maximum) * (rect.height - 36), 3, 36), ui->theme.hover);
+        maage_ui_fill(ui, maage_ui_rect(rect.x + rect.width - 3, rect.y + (*offset / maximum) * (rect.height - thumb), 3, thumb), ui->theme.hover);
     }
     maage_ui_clip_push(ui, rect);
     rect.y -= *offset;
     rect.height = content_height;
     return rect;
 }
-void maage_ui_image(maage_launcher_ui *ui, maage_rect rect, int index)
+void maage_ui_image(maage_launcher_ui *ui, maage_rect rect, const maage_pixel_buffer *image)
 {
-    maage_pixel_buffer image;
-    image.pixels = ui->art[index % 4]; image.width = image.height = 32; image.stride = 128;
-    maage_canvas_image(ui->canvas, rect, &image);
+    if (image) maage_canvas_image(ui->canvas, rect, image);
+    else maage_ui_fill(ui, rect, ui->theme.navigation);
 }
-void maage_ui_hero(maage_launcher_ui *ui, maage_rect rect, int variant)
+void maage_ui_heading(maage_launcher_ui *ui, maage_rect rect, const char *title, const char *subtitle)
 {
-    int index;
-    float points[6], x;
-    maage_color color;
-    maage_ui_clip_push(ui, rect);
-    for (index = 0; index < 40; ++index) {
-        color.r = (unsigned char)(22 + index / 3); color.g = (unsigned char)(28 + index / 2);
-        color.b = (unsigned char)(45 + index); color.a = 255;
-        maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height * index / 40, rect.width, rect.height / 40 + 1), color);
-    }
-    color.r = 192; color.g = 65; color.b = 143;
-    maage_ui_fill(ui, maage_ui_rect(rect.x + rect.width * 0.72f, rect.y + rect.height * 0.18f, 44, 44), color);
-    for (index = 0; index < 7; ++index) {
-        x = rect.x + rect.width * index / 6;
-        points[0] = x - rect.width / 4; points[1] = rect.y + rect.height;
-        points[2] = x; points[3] = rect.y + rect.height * (0.3f + ((index + variant) % 3) * 0.14f);
-        points[4] = x + rect.width / 4; points[5] = rect.y + rect.height;
-        color.r = (unsigned char)(18 + index * 2); color.g = (unsigned char)(25 + index * 2); color.b = (unsigned char)(34 + index * 3);
-        maage_canvas_triangle(ui->canvas, points, color);
-    }
-    maage_ui_clip_pop(ui);
+    maage_ui_label(ui, maage_ui_rect(rect.x, rect.y, rect.width, 34), 26, ui->theme.text, title);
+    maage_ui_paragraph(ui, maage_ui_rect(rect.x, rect.y + 40, rect.width, 56), 14, subtitle);
 }
-void maage_ui_paragraph(maage_launcher_ui *ui, maage_rect rect, float size, const char *text)
+void maage_ui_empty(maage_launcher_ui *ui, maage_rect rect, const char *title, const char *message)
+{
+    maage_ui_fill(ui, rect, ui->theme.panel);
+    maage_ui_label(ui, maage_ui_rect(rect.x + 20, rect.y + 20, rect.width - 40, 32), 21, ui->theme.text, title);
+    maage_ui_paragraph(ui, maage_ui_rect(rect.x + 20, rect.y + 62, rect.width - 40, rect.height - 78), 15, message);
+}
+int maage_ui_summary(maage_launcher_ui *ui, int id, maage_rect rect, const char *title, const char *subtitle, const maage_pixel_buffer *image, int selected, int enabled)
+{
+    int clicked = maage_ui_button(ui, id, rect, "", MAAGE_UI_CARD, enabled);
+    float inset = image ? 68 : 16;
+    if (image) maage_ui_image(ui, maage_ui_rect(rect.x + 12, rect.y + 14, 44, 44), image);
+    if (selected) maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y, 3, rect.height), ui->theme.accent);
+    maage_ui_label(ui, maage_ui_rect(rect.x + inset, rect.y + 12, rect.width - inset - 16, 27), 17, ui->theme.text, title);
+    maage_ui_label(ui, maage_ui_rect(rect.x + inset, rect.y + 43, rect.width - inset - 16, 24), 13, ui->theme.muted, subtitle);
+    return clicked;
+}
+static float maage_ui_text_block(maage_launcher_ui *ui, maage_rect rect, float size, const char *text, int draw)
 {
     char line[256];
-    size_t length = 0, word;
-    float y = rect.y;
-    const char *cursor = text;
-    while (*cursor && y + size < rect.y + rect.height) {
-        word = 0;
-        while (cursor[word] && cursor[word] != ' ' && cursor[word] != '\n' && word < 120) ++word;
-        if (length && (length + word + 2 >= sizeof(line) || *cursor == '\n')) {
-            maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, size + 8), size, ui->theme.muted, line);
-            length = 0; y += size + 10;
+    size_t length = 0, word, bytes;
+    float y = rect.y, advance = size + 9;
+    const unsigned char *cursor = (const unsigned char *)text;
+    if (!text || rect.width <= 0) return 0;
+    while (*cursor) {
+        if (*cursor == '\n') {
+            if (length && draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+            length = 0; y += advance; ++cursor;
+            continue;
         }
-        if (*cursor == '\n') { ++cursor; continue; }
-        if (word == 0) { ++cursor; continue; }
+        if (*cursor == ' ') { ++cursor; continue; }
+        word = 0;
+        while (cursor[word] && cursor[word] != ' ' && cursor[word] != '\n') {
+            bytes = cursor[word] < 0x80 ? 1 : cursor[word] < 0xe0 ? 2 : cursor[word] < 0xf0 ? 3 : 4;
+            if (word + bytes > 120) break;
+            word += bytes;
+        }
+        if (length + word + 2 >= sizeof(line)) {
+            if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+            length = 0; y += advance;
+        }
         memcpy(line + length, cursor, word); line[length + word] = '\0';
         if (length && maage_canvas_text_width(ui->canvas, size, line) > rect.width) {
             line[length - 1] = '\0';
-            maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, size + 8), size, ui->theme.muted, line);
-            y += size + 10; length = 0;
+            if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+            y += advance; length = 0;
             memcpy(line, cursor, word);
         }
         length += word;
         line[length++] = ' '; line[length] = '\0';
         cursor += word;
-        if (*cursor == ' ') ++cursor;
     }
-    if (length) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, size + 8), size, ui->theme.muted, line);
+    if (length) {
+        if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+        y += advance;
+    }
+    return y - rect.y;
+}
+float maage_ui_paragraph_height(maage_launcher_ui *ui, float width, float size, const char *text)
+{
+    return maage_ui_text_block(ui, maage_ui_rect(0, 0, width, 0), size, text, 0);
+}
+void maage_ui_paragraph(maage_launcher_ui *ui, maage_rect rect, float size, const char *text)
+{
+    maage_ui_clip_push(ui, rect);
+    maage_ui_text_block(ui, rect, size, text, 1);
+    maage_ui_clip_pop(ui);
 }

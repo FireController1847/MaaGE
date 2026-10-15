@@ -28,7 +28,7 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The macOS Launcher has a native UI preview with Play, News, Profiles, Accounts, Settings, and About pages using local example data. UI presentation currently supports Metal and Software; Windows/Linux UI adapters and Vulkan/OpenGL UI presentation remain unimplemented. Client is a graphical startup stub; Server has shared startup code with headless and optional GUI executables. Gameplay, administration UI, authentication, and asset management remain unimplemented.
+**Early development.** The macOS Launcher has a native application shell with Play, News, Installations, and Settings, plus a header account menu. It starts signed out with no installations or news; interface scale can be changed for the current session. UI presentation currently supports Metal and Software; Windows/Linux UI adapters and Vulkan/OpenGL UI presentation remain unimplemented. Client is a graphical startup stub; Server has shared startup code with headless and optional GUI executables. Gameplay, administration UI, authentication, and asset management remain unimplemented.
 
 The Launcher has been compiled locally with Apple Clang on macOS arm64 and cross-compiled with MinGW-w64 for Windows. Runtime and visual testing remain manual; Linux has not been compiled locally. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
