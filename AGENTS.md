@@ -275,6 +275,11 @@ unless explicitly requested.
 - Keep build validation in `.github/workflows/build.yml` manually triggered only
   (`workflow_dispatch`) until explicitly authorized otherwise. Preserve read-only
   permissions and existing CMake layout.
+- CI must provision and verify required build dependencies before configuring
+  CMake. Keep them platform-specific and minimal, pin versions where practical,
+  and fail clearly rather than disabling required applications or backends.
+  Graphics builds require Vulkan headers/loader on Windows/Linux and native
+  Metal/AppKit/QuartzCore from the Apple SDK on macOS; do not install MoltenVK.
 - Preserve the existing Git author and committer identity. Every commit created
   or amended on the user's behalf must include:
   `Co-authored-by: Codex <noreply@openai.com>`.
