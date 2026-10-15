@@ -1,25 +1,71 @@
 <!-- AI AGENTS: README.md is intended for human readers only. Read AGENTS.md for all AI development instructions, architectural requirements, and repository conventions. -->
 
-# MaaGE
+<h1 align="center">MaaGE</h1>
+<p align="center"><strong>Minecraft as a Game Engine</strong></p>
+<p align="center">
+  A modular, cross-platform reimagining of Minecraft in C, built for performance, extensibility, and limitless modding.
+</p>
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/language-C-555555?style=flat-square&amp;logo=c&amp;logoColor=white" alt="Language: C">
+  <img src="https://img.shields.io/badge/targets-Windows%20%7C%20Linux%20%7C%20macOS-526b80?style=flat-square" alt="Target platforms: Windows, Linux, macOS">
+  <a href="https://github.com/FireController1847/MaaGE/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/FireController1847/MaaGE/build.yml?branch=main&amp;event=workflow_dispatch&amp;style=flat-square&amp;label=build" alt="Build Validation status"></a>
+</p>
 
-An independent, extensible, Minecraft-inspired native voxel game platform, designed to support different modpacks and gameplay experiences.
+> **MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.**
 
-MaaGE aims to provide a modular foundation for building and playing voxel worlds, with room for distinct rules, content, and ways to play.
+### Design goals
 
-## Current status
+<table>
+  <tr>
+    <td width="50%"><strong>Modular by design</strong><br>Independent applications and a shared core, built around different modpacks and ways to play.</td>
+    <td width="50%"><strong>Across desktop platforms</strong><br>Targeting Windows, Linux, and macOS with native platform integration.</td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Native rendering</strong><br>Planned Vulkan on Windows and Linux; native Metal on macOS.</td>
+    <td width="50%"><strong>C90 first</strong><br>Portable C foundations, with platform-specific code kept at the edges.</td>
+  </tr>
+</table>
 
-**Early planning and workspace initialization.** The repository provides a C90-first CMake workspace with launcher, client, and server executables that identify themselves and exit, plus a minimal shared core containing project identity metadata. Engine functionality and the capabilities below remain future plans.
+## About MaaGE
 
-## Planned architecture
+MaaGE is an independent native voxel game platform inspired by Minecraft. It aims to provide a modular foundation for distinct modpacks, content, and gameplay experiences.
 
-The platform will be written primarily in C, with **ISO C90 portability as a major design goal**. Platform-specific integrations will sit behind a modular core; C90 is a portability target, not a guarantee of support for every compiler or operating system.
+The platform is organized into three applications:
 
-- **Separate applications:** a launcher, a game client, and a dedicated server.
-- **Modular core:** shared foundations intended to support different modpacks and gameplay experiences.
-- **Native windowing:** integration with each desktop platform's native windowing APIs.
-- **Graphics:** Vulkan on Windows and Linux, with native Metal on macOS.
+- **Launcher** — planned asset management, Microsoft account authentication, and Minecraft ownership verification. Mojang's proprietary assets will not be distributed with the project.
+- **Client** — the future game experience, with native windowing, input, interaction, and rendering.
+- **Dedicated server** — a standalone, headless application, intended to share core functionality and game definitions with the client.
 
-The planned launcher will manage assets and provide Microsoft account authentication with Minecraft ownership verification. Mojang's proprietary assets will not be distributed with the project.
+ISO C90 portability is a major design goal, not a guarantee of support for every compiler or operating system.
+
+## Development status
+
+**Early development · build foundation only.** The current workspace builds three small executables that print their names and exit, plus a static core library containing project identity metadata. Gameplay, rendering, windowing, authentication, and asset management are not implemented.
+
+Local validation covers macOS arm64 with Apple Clang; other platforms and toolchains remain unverified locally. The [Build Validation workflow](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) provides manually triggered Release builds for Windows, Linux, and macOS.
+
+## Build
+
+Use **CMake 3.21+** and a C compiler. The Linux and macOS presets also require **Ninja**. From the repository root:
+
+**Linux / macOS** — GCC or Clang on Linux; Apple Clang on macOS:
+
+```sh
+cmake --preset release
+cmake --build --preset release
+```
+
+**Windows** — with the Visual Studio 2022 C toolchain installed:
+
+```powershell
+cmake --preset windows-msvc
+cmake --build --preset windows-msvc-release
+```
+
+Both build the `nv_launcher`, `nv_client`, `nv_server`, and `nv_core` targets. For a single application, append `--target nv_server` (or another target) to the build command. Use the `debug` preset on Linux/macOS, or `windows-msvc-debug` when building on Windows, for Debug output.
+
+Generated configuration stays in `cmake/<preset>/`; binaries and libraries go to `build/<preset>/bin/` and `lib/`. Visual Studio builds add `Release/` or `Debug/` beneath those output directories. No graphics SDK is required at this stage.
 
 ## Human and AI development
 
@@ -29,29 +75,7 @@ Contributors should disclose substantial AI involvement in their contributions. 
 
 We are transparent about this approach and stand by it. Anyone who objects to AI-assisted software development is free not to use or contribute to MaaGE.
 
-## Contributing
-
-Human and AI-assisted contributions are welcome, including design discussions, documentation improvements, and implementation proposals. At this stage, contributions should reflect the project's planning status and distinguish proposals from working functionality.
-
-See [AGENTS.md](AGENTS.md) for AI development instructions, architectural requirements, and repository conventions.
-
-## Build the workspace
-
-Use CMake 3.21 or newer, Ninja, and a C compiler. The minimum supports version 3 presets, including host conditions and configure/build presets, without requiring CMake 4.x. From the repository root:
-
-```sh
-cmake --preset debug
-cmake --build --preset debug
-./build/debug/bin/launcher
-```
-
-Use `release` for an optimized build. The `debug` and `release` presets use the environment's default C compiler; select GCC or Clang with `CC` on the first configure, or use a Windows developer shell for MSVC/Clang. The Windows-only `windows-msvc` preset requires Visual Studio 2022's C toolchain; build with `windows-msvc-debug` or `windows-msvc-release`. The `multi` Ninja Multi-Config preset similarly provides `multi-debug` and `multi-release` builds.
-
-Targets are `nv_launcher`, `nv_client`, `nv_server`, and static library `nv_core`. Disable applications independently with `-DNV_BUILD_LAUNCHER=OFF`, `-DNV_BUILD_CLIENT=OFF`, or `-DNV_BUILD_SERVER=OFF` when configuring. `-DNV_BUILD_TESTS=ON` registers smoke tests for enabled applications; run `ctest --test-dir cmake/debug --output-on-failure` after building.
-
-Generated headers and intermediates live in `cmake/<preset>/`; compiled output lives in `build/<preset>/bin/` and `lib/`. Multi-config builds append a configuration directory such as `bin/Debug/`. Manual builds must also configure beneath `cmake/<name>/`; cross-compilers should supply a toolchain file with target information. Target vendor defaults to `apple` for macOS and `unknown` otherwise, and can be supplied through `NV_TARGET_VENDOR`.
-
-Validated on macOS arm64 with Apple Clang. Windows, Linux, other architectures, and Open Watcom remain untested. Open Watcom experimentation requires a suitable local toolchain/generator configuration; no working preset is claimed. No windowing or rendering SDK is required or linked.
+Human and AI-assisted contributions, design discussions, and documentation improvements are welcome.
 
 ## License and independence
 
