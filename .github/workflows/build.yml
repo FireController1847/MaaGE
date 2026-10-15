@@ -39,11 +39,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libwayland-dev libwayland-bin wayland-protocols pkg-config libvulkan-dev libgl-dev
+          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libwayland-dev libwayland-bin wayland-protocols pkg-config libvulkan-dev libgl-dev libcurl4-openssl-dev libjson-c-dev libsecret-1-dev xdg-utils
           for tool in cc cmake ninja pkg-config wayland-scanner; do
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
-          pkg-config --print-errors --exists vulkan gl x11 wayland-client wayland-protocols
+          pkg-config --print-errors --exists vulkan gl x11 wayland-client wayland-protocols libcurl json-c libsecret-1
           protocols="$(pkg-config --variable=pkgdatadir wayland-protocols)"
           for protocol in stable/xdg-shell/xdg-shell.xml unstable/xdg-decoration/xdg-decoration-unstable-v1.xml; do
             test -f "$protocols/$protocol" || { echo "::error::Required Wayland protocol missing: $protocol"; exit 1; }
@@ -59,6 +59,22 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           Get-Command cl.exe, link.exe, cmake, ninja -ErrorAction Stop
+
+      - name: Provision Windows authentication dependencies
+        if: runner.os == 'Windows'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:VCPKG_INSTALLATION_ROOT) { throw 'Runner vcpkg installation missing.' }
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          # Pin the ports and tool source together; reuse the runner's package manager.
+          git -C $root fetch --depth 1 origin c52f7bd748185ef0e0daf033d9f2ddfc8a3449ea
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch pinned vcpkg revision.' }
+          git -C $root checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not select pinned vcpkg revision.' }
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'Could not bootstrap vcpkg.' }
+          & "$root/vcpkg.exe" install 'curl[core,schannel]:x64-windows' 'json-c:x64-windows' --recurse --disable-metrics
+          if ($LASTEXITCODE -ne 0) { throw 'Could not provision authentication libraries.' }
 
       - name: Provision Windows Vulkan headers and loader
         if: runner.os == 'Windows'
@@ -83,6 +99,10 @@ jobs:
           }
           Write-Host "Vulkan SDK: $env:VULKAN_SDK"
 
+      - name: Provision macOS authentication dependencies
+        if: runner.os == 'macOS'
+        run: brew list json-c >/dev/null 2>&1 || brew install json-c
+
       - name: Verify macOS native build dependencies
         if: runner.os == 'macOS'
         run: |
@@ -90,13 +110,18 @@ jobs:
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
           sdk="$(xcrun --sdk macosx --show-sdk-path)"
-          for framework in AppKit Metal QuartzCore CoreGraphics CoreText OpenGL; do
+          for framework in AppKit Metal QuartzCore CoreGraphics CoreText OpenGL Security CoreServices ImageIO; do
             test -d "$sdk/System/Library/Frameworks/$framework.framework" || {
               echo "::error::Required Apple framework missing: $framework ($sdk)"; exit 1;
             }
           done
 
-      - name: Configure Release
+      - name: Configure Release (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --preset windows-ci "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Configure Release (Linux / macOS)
+        if: runner.os != 'Windows'
         run: cmake --preset ${{ matrix.configure_preset }}
 
       - name: Build all targets

@@ -29,7 +29,9 @@ static const maage_launcher_service *maage_launcher_service_for(const maage_laun
     if (!state) return NULL;
     switch (action) {
     case MAAGE_ACTION_SIGN_IN: case MAAGE_ACTION_CANCEL_SIGN_IN:
-    case MAAGE_ACTION_SELECT_ACCOUNT: case MAAGE_ACTION_SIGN_OUT: return &state->accounts.service;
+    case MAAGE_ACTION_SELECT_ACCOUNT: case MAAGE_ACTION_SIGN_OUT:
+    case MAAGE_ACTION_REMOVE_ACCOUNT: case MAAGE_ACTION_REFRESH_SESSION:
+    case MAAGE_ACTION_REAUTH_ACCOUNT: case MAAGE_ACTION_SESSION_ONLY: return &state->accounts.service;
     case MAAGE_ACTION_CREATE_INSTALLATION: case MAAGE_ACTION_EDIT_INSTALLATION:
     case MAAGE_ACTION_REMOVE_INSTALLATION: case MAAGE_ACTION_SELECT_INSTALLATION:
     case MAAGE_ACTION_PLAY: return &state->installations.service;
@@ -41,12 +43,15 @@ int maage_launcher_can_request(const maage_launcher_state *state, maage_launcher
 {
     const maage_launcher_service *service = maage_launcher_service_for(state, action);
     const maage_launcher_installation *installation;
+    const maage_launcher_account *account;
     size_t index;
     if (!service || !service->request || !(service->actions & action)) return 0;
     switch (action) {
     case MAAGE_ACTION_SIGN_IN: return state->accounts.status != MAAGE_ACCOUNT_AUTHENTICATING;
-    case MAAGE_ACTION_CANCEL_SIGN_IN: return state->accounts.status == MAAGE_ACCOUNT_AUTHENTICATING;
+    case MAAGE_ACTION_CANCEL_SIGN_IN: return state->accounts.status == MAAGE_ACCOUNT_AUTHENTICATING || state->accounts.storage_decision_required;
+    case MAAGE_ACTION_SESSION_ONLY: return state->accounts.storage_decision_required;
     case MAAGE_ACTION_SIGN_OUT: case MAAGE_ACTION_SELECT_ACCOUNT:
+    case MAAGE_ACTION_REMOVE_ACCOUNT: case MAAGE_ACTION_REFRESH_SESSION: case MAAGE_ACTION_REAUTH_ACCOUNT:
         if (state->accounts.items) for (index = 0; index < state->accounts.count; ++index)
             if (maage_launcher_same_id(id, state->accounts.items[index].id)) return 1;
         return 0;
@@ -57,8 +62,11 @@ int maage_launcher_can_request(const maage_launcher_state *state, maage_launcher
         if (state->installations.status != MAAGE_CONTENT_READY || !state->installations.items) return 0;
         for (index = 0; index < state->installations.count; ++index) {
             installation = &state->installations.items[index];
-            if (maage_launcher_same_id(id, installation->id))
-                return action != MAAGE_ACTION_PLAY || (installation->launchable && maage_launcher_same_id(id, state->installations.selected_id));
+            if (maage_launcher_same_id(id, installation->id)) {
+                account = maage_launcher_selected_account(state);
+                return action != MAAGE_ACTION_PLAY || (installation->launchable && maage_launcher_same_id(id, state->installations.selected_id) &&
+                    account && account->minecraft_ready);
+            }
         }
         return 0;
     case MAAGE_ACTION_REFRESH_NEWS: return state->news.status != MAAGE_CONTENT_LOADING;

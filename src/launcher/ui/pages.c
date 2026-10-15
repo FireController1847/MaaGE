@@ -27,14 +27,14 @@ static void maage_ui_launch_readiness(maage_launcher_ui *ui, maage_rect card)
     const maage_launcher_account *account = maage_launcher_selected_account(ui->app);
     const char *account_label = "Signed out";
     maage_rect inside = maage_ui_panel(ui, card);
-    int signed_in = ui->app->accounts.status == MAAGE_ACCOUNT_SIGNED_IN && account && account->authenticated;
+    int signed_in = account && account->authenticated;
     int ready = maage_launcher_can_request(ui->app, MAAGE_ACTION_PLAY, installation ? installation->id : NULL);
     if (signed_in) account_label = account->display_name ? account->display_name : "Signed in";
     if (ui->app->accounts.status == MAAGE_ACCOUNT_AUTHENTICATING) account_label = "Sign-in in progress";
     if (ui->app->accounts.status == MAAGE_ACCOUNT_ERROR) account_label = "Sign-in needs attention";
     maage_ui_label(ui, maage_ui_rect(inside.x, inside.y, inside.width, 32), ui->theme.section_size, ui->theme.text, "Launch readiness");
     maage_ui_status(ui, maage_ui_rect(inside.x, inside.y + 52, inside.width, 52), "Installation", installation ? "Selected" : "Not selected", installation != NULL);
-    maage_ui_status(ui, maage_ui_rect(inside.x, inside.y + 124, inside.width, 52), "Microsoft account", account_label, signed_in);
+    maage_ui_status(ui, maage_ui_rect(inside.x, inside.y + 124, inside.width, 52), "Minecraft account", account && signed_in && account->status_message ? account->status_message : account_label, account && account->minecraft_ready);
     maage_ui_status(ui, maage_ui_rect(inside.x, inside.y + 196, inside.width, 52), "Game launching", ready ? "Available" : "Not available yet", ready);
     if (maage_ui_button(ui, 102, maage_ui_rect(inside.x, inside.y + inside.height - ui->theme.control_height, inside.width, ui->theme.control_height),
         signed_in ? "Manage account" : "Account options", MAAGE_UI_NORMAL, 1)) ui->account_menu = 1;

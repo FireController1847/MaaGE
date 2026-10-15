@@ -108,8 +108,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   installation/configuration; authorized Minecraft asset acquisition; Microsoft
   authentication and legitimate ownership verification through authorized mechanisms;
   profiles, client launch configuration, updates, and dependency management.
-  Remain independent of client/server internals. Do not implement authentication,
-  downloading, or ownership verification until explicitly requested.
+  Remain independent of client/server internals. Downloading, installation and
+  game launching remain deferred until explicitly requested.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
@@ -280,8 +280,29 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   snapshots between frames, never tokens/credentials. Typed settings centralize
   definitions, defaults, validation, and change notifications; current preferences
   are session-only and must say so. Keep persistence separate from state/UI.
-  Authentication, persistence, installation management, networking, and launching
-  remain deferred until explicitly requested. No web runtime or speculative Game UI.
+  Installation management, general settings persistence and game launching remain
+  deferred until explicitly requested. No web runtime or speculative Game UI.
+
+## Launcher authentication
+
+- Launcher owns `MaaGE::LauncherAuth` under `src/launcher/auth/`: C90 OAuth/PKCE,
+  Xbox/XSTS, Minecraft ownership/profile validation and account/session management.
+  libcurl/json-c, native threads/crypto/browser/loopback and credential adapters
+  privately use C99; do not add these dependencies to Core, Client or Server.
+- Use MaaGE's own explicitly configured Microsoft public-client registration,
+  system browser, random state and PKCE S256. Never borrow client IDs, embed client
+  secrets or copy incompatible reference code. Keep endpoints centralized and HTTPS;
+  verify certificates, bound requests/responses and support cancellation off the UI.
+- Persist only refresh tokens in Keychain/Credential Manager/Secret Service;
+  non-sensitive account metadata is separate. Secure-storage failure requires an
+  explicit session-only choice, never plaintext credentials. Honor refresh rotation;
+  invalid/revoked credentials require reauthentication. Never log credentials,
+  authorization codes, sensitive headers or full authentication responses.
+- Stable account IDs are independent of names; deduplicate identities. Microsoft
+  authentication, Java ownership and an unexpired verified game session are distinct.
+  Metadata alone never proves readiness. Widgets receive display snapshots only;
+  future launch code copies a valid session and clears its credential copy afterward.
+  See `docs/authentication.md` for registration, dependency setup and protocol limits.
 
 ## Planned engine systems
 

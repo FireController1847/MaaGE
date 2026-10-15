@@ -3,6 +3,7 @@
 #include "maage/launcher_version.h"
 #include "maage/application.h"
 #include "ui.h"
+#include "auth.h"
 #include <stddef.h>
 
 int maage_application_main(int argc, char *const argv[])
@@ -17,6 +18,7 @@ int maage_application_main(int argc, char *const argv[])
     maage_render_desc desc;
     maage_renderer *renderer = NULL;
     maage_launcher_ui *ui = NULL;
+    maage_auth *auth = NULL;
     maage_render_result rendered;
     maage_log_info("maage.launcher", "MaaGE Launcher %s", MAAGE_LAUNCHER_VERSION);
     maage_render_desc_init(&desc);
@@ -42,6 +44,10 @@ int maage_application_main(int argc, char *const argv[])
         desc.window = window;
         desc.required_features |= MAAGE_RENDER_CAP_PIXEL_PRESENT;
         rendered = maage_renderer_create(&desc, &renderer);
+        if (rendered == MAAGE_RENDER_OK && maage_auth_create(&application, &auth) != MAAGE_LAUNCHER_OK) {
+            maage_log_error("maage.launcher.auth", "Could not initialize the account worker or HTTPS library.");
+            rendered = MAAGE_RENDER_PLATFORM_ERROR;
+        }
         if (rendered == MAAGE_RENDER_OK) result = maage_input_poll(window, &input);
         while (result == MAAGE_WINDOW_OK && (rendered == MAAGE_RENDER_OK || rendered == MAAGE_RENDER_SKIPPED)) {
             result = maage_window_poll_events(system, 0);
@@ -50,10 +56,12 @@ int maage_application_main(int argc, char *const argv[])
             if (result != MAAGE_WINDOW_OK || state.close_requested) break;
             result = maage_input_poll(window, &input);
             if (result != MAAGE_WINDOW_OK) break;
+            maage_auth_poll(auth);
             rendered = maage_launcher_ui_frame(ui, renderer, &state, &input);
             if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED) break;
             result = maage_window_wait_events(system, rendered == MAAGE_RENDER_SKIPPED ? 100 : 16);
         }
+        maage_auth_destroy(auth);
         maage_renderer_destroy(renderer);
         maage_window_destroy(window);
     }

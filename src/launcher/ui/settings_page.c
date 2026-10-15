@@ -65,7 +65,7 @@ static void maage_ui_account_settings(maage_launcher_ui *ui, maage_rect body)
 {
     maage_rect area, inside;
     const maage_launcher_account *account = maage_launcher_selected_account(ui->app);
-    int signed_in = ui->app->accounts.status == MAAGE_ACCOUNT_SIGNED_IN && account && account->authenticated;
+    int signed_in = account && account->authenticated;
     area = maage_ui_scroll(ui, body, &ui->scroll[3], 260);
     inside = maage_ui_panel(ui, maage_ui_rect(area.x, area.y, area.width - 8, 260));
     maage_ui_label(ui, maage_ui_rect(inside.x, inside.y, inside.width, 32), ui->theme.section_size, ui->theme.text, "Microsoft Accounts");

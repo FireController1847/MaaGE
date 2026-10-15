@@ -33,7 +33,7 @@ static void maage_ui_navigation(maage_launcher_ui *ui, maage_rect safe, float *b
 {
     static const char *tabs[] = { "Play", "Installations", "News", "Settings" };
     static const maage_launcher_page pages[] = { MAAGE_PAGE_PLAY, MAAGE_PAGE_INSTALLATIONS, MAAGE_PAGE_NEWS, MAAGE_PAGE_SETTINGS };
-    const maage_launcher_account *account = ui->app->accounts.status == MAAGE_ACCOUNT_SIGNED_IN ? maage_launcher_selected_account(ui->app) : NULL;
+    const maage_launcher_account *account = maage_launcher_selected_account(ui->app);
     const char *label = "Sign in";
     maage_rect rect;
     maage_ui_layout row;
@@ -44,7 +44,7 @@ static void maage_ui_navigation(maage_launcher_ui *ui, maage_rect safe, float *b
     maage_ui_fill(ui, maage_ui_rect(safe.x, safe.y + header - 1, safe.width, 1), ui->theme.line);
     maage_ui_label(ui, maage_ui_rect(safe.x + 24, safe.y + 16, 112, 34), 26, ui->theme.text, "MaaGE");
     if (ui->app->accounts.status == MAAGE_ACCOUNT_AUTHENTICATING) label = "Signing in...";
-    if (ui->app->accounts.status == MAAGE_ACCOUNT_SIGNED_IN) label = account && account->display_name ? account->display_name : "Accounts";
+    if (account && account->authenticated) label = account->display_name ? account->display_name : "Accounts";
     ui->account_anchor = maage_ui_rect(safe.x + safe.width - 208, safe.y + 12, 184, ui->theme.control_height);
     ui->blocked = 0;
     if (maage_ui_tab(ui, 7, ui->account_anchor, "", ui->account_menu)) ui->account_menu = !ui->account_menu;

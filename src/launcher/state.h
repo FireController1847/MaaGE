@@ -19,7 +19,9 @@ typedef enum maage_launcher_action {
     MAAGE_ACTION_SELECT_ACCOUNT = 0x004, MAAGE_ACTION_SIGN_OUT = 0x008,
     MAAGE_ACTION_CREATE_INSTALLATION = 0x010, MAAGE_ACTION_EDIT_INSTALLATION = 0x020,
     MAAGE_ACTION_REMOVE_INSTALLATION = 0x040, MAAGE_ACTION_SELECT_INSTALLATION = 0x080,
-    MAAGE_ACTION_PLAY = 0x100, MAAGE_ACTION_REFRESH_NEWS = 0x200
+    MAAGE_ACTION_PLAY = 0x100, MAAGE_ACTION_REFRESH_NEWS = 0x200,
+    MAAGE_ACTION_REMOVE_ACCOUNT = 0x400, MAAGE_ACTION_REFRESH_SESSION = 0x800,
+    MAAGE_ACTION_REAUTH_ACCOUNT = 0x1000, MAAGE_ACTION_SESSION_ONLY = 0x2000
 } maage_launcher_action;
 typedef struct maage_launcher_service {
     void *context;
@@ -28,7 +30,8 @@ typedef struct maage_launcher_service {
 } maage_launcher_service;
 typedef struct maage_launcher_account {
     const char *id, *provider, *display_name;
-    int authenticated;
+    int authenticated, owns_minecraft, minecraft_ready;
+    const char *uuid, *status_message;
     const maage_pixel_buffer *avatar;
 } maage_launcher_account;
 typedef struct maage_launcher_installation {
@@ -45,7 +48,8 @@ typedef struct maage_launcher_state {
         maage_account_status status;
         const maage_launcher_account *items;
         size_t count;
-        const char *selected_id, *error;
+        const char *selected_id, *error, *progress;
+        int storage_decision_required;
         maage_launcher_service service;
     } accounts;
     struct {
