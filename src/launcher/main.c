@@ -36,7 +36,7 @@ int maage_application_main(int argc, char *const argv[])
     }
     maage_window_config_init(&config);
     config.title = "MaaGE Launcher";
-    config.width = 1100; config.height = 740;
+    config.width = 1040; config.height = 680;
     result = maage_window_create(system, &config, &window);
     if (result == MAAGE_WINDOW_OK) {
         desc.window = window;

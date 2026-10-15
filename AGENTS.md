@@ -268,9 +268,13 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
 - ProtoLauncher supplies the initial flat charcoal/magenta visual direction, not
   an immutable specification. Respect logical sizes, DPI, and native safe areas.
   Build a real application shell, not sample/demo pages. Primary navigation is
-  Play, News, Installations, Settings; accounts belong in the header menu, About
+  Play, Installations, News, Settings; accounts belong in the header menu, About
   within Settings. Default to signed out and empty/unavailable content; never
   fabricate installations, accounts, announcements, or successful service actions.
+  Use readable typography, comfortable controls, and one shared tab treatment for
+  hover/selection with a distinct keyboard-focus outline. Compose Play around
+  installation selection and launch readiness; group Settings into preference
+  panels. Reflow columns/navigation and scroll content in smaller windows.
 - Application-owned Launcher state and explicit per-service request boundaries
   supply views; widgets own presentation only. Providers publish borrowed display
   snapshots between frames, never tokens/credentials. Typed settings centralize

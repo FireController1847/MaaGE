@@ -15,6 +15,23 @@ void maage_ui_fill(maage_launcher_ui *ui, maage_rect rect, maage_color color)
 {
     maage_canvas_rect(ui->canvas, rect, color);
 }
+maage_rect maage_ui_inset(maage_rect rect, float padding)
+{
+    return maage_ui_rect(rect.x + padding, rect.y + padding, rect.width - padding * 2, rect.height - padding * 2);
+}
+void maage_ui_outline(maage_launcher_ui *ui, maage_rect rect, maage_color color)
+{
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y, rect.width, 1), color);
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height - 1, rect.width, 1), color);
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y, 1, rect.height), color);
+    maage_ui_fill(ui, maage_ui_rect(rect.x + rect.width - 1, rect.y, 1, rect.height), color);
+}
+maage_rect maage_ui_panel(maage_launcher_ui *ui, maage_rect rect)
+{
+    maage_ui_fill(ui, rect, ui->theme.panel);
+    maage_ui_outline(ui, rect, ui->theme.line);
+    return maage_ui_inset(rect, ui->theme.padding);
+}
 void maage_ui_label(maage_launcher_ui *ui, maage_rect rect, float size, maage_color color, const char *text)
 {
     maage_ui_clip_push(ui, rect);
@@ -57,11 +74,12 @@ static int maage_ui_hit(maage_launcher_ui *ui, int id, maage_rect rect, int enab
 }
 int maage_ui_button(maage_launcher_ui *ui, int id, maage_rect rect, const char *text, int style, int enabled)
 {
-    maage_color color = ui->theme.navigation;
-    float width, size = 14.0f;
+    maage_color color = ui->theme.hover;
+    float width, size = ui->theme.button_size;
     int clicked = maage_ui_hit(ui, id, rect, enabled);
     int hot = maage_ui_contains(rect, ui->input.x, ui->input.y) && maage_ui_contains(ui->clip, ui->input.x, ui->input.y);
     if (style == MAAGE_UI_CARD) color = ui->theme.panel;
+    if (style == MAAGE_UI_TAB) color = ui->theme.navigation;
     if (style == MAAGE_UI_PRIMARY) color = ui->theme.accent;
     if (style == MAAGE_UI_DANGER) color = ui->theme.danger;
     if (!enabled) {
@@ -77,13 +95,31 @@ int maage_ui_button(maage_launcher_ui *ui, int id, maage_rect rect, const char *
         color.b = (unsigned char)(color.b + (ui->active == id ? 8 : 16));
     }
     maage_ui_fill(ui, rect, color);
-    if (ui->focus == id && enabled)
-        maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height - 2, rect.width, 2), ui->theme.text);
+    if (ui->focus == id && ui->keyboard_focus && enabled && !ui->blocked)
+        maage_ui_outline(ui, maage_ui_inset(rect, 3), ui->theme.text);
     width = maage_canvas_text_width(ui->canvas, size, text);
     maage_ui_label(ui, maage_ui_rect(rect.x + (rect.width > width ? (rect.width - width) / 2 : 6),
         rect.y + (rect.height - size - 3) / 2, rect.width - 8, size + 8), size,
         enabled ? ui->theme.text : ui->theme.muted, text);
     return clicked;
+}
+int maage_ui_tab(maage_launcher_ui *ui, int id, maage_rect rect, const char *text, int selected)
+{
+    int clicked, hot;
+    maage_color previous = ui->theme.navigation;
+    if (selected) ui->theme.navigation = ui->theme.selection;
+    clicked = maage_ui_button(ui, id, rect, text, MAAGE_UI_TAB, 1);
+    ui->theme.navigation = previous;
+    hot = !ui->blocked && maage_ui_contains(rect, ui->input.x, ui->input.y) && maage_ui_contains(ui->clip, ui->input.x, ui->input.y);
+    if (selected || hot) maage_ui_fill(ui, maage_ui_rect(rect.x + 8, rect.y + rect.height - 3, rect.width - 16, 3),
+        selected ? ui->theme.accent : ui->theme.muted);
+    return clicked;
+}
+void maage_ui_status(maage_launcher_ui *ui, maage_rect rect, const char *title, const char *value, int ready)
+{
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + 3, 3, 43), ready ? ui->theme.accent : ui->theme.line);
+    maage_ui_label(ui, maage_ui_rect(rect.x + 16, rect.y, rect.width - 16, 24), ui->theme.small_size, ui->theme.muted, title);
+    maage_ui_label(ui, maage_ui_rect(rect.x + 16, rect.y + 25, rect.width - 16, 27), ui->theme.body_size, ui->theme.text, value);
 }
 void maage_ui_slider(maage_launcher_ui *ui, int id, maage_rect rect, float *value, float minimum, float maximum, int enabled)
 {
@@ -104,10 +140,11 @@ void maage_ui_slider(maage_launcher_ui *ui, int id, maage_rect rect, float *valu
     if (*value < minimum) *value = minimum;
     if (*value > maximum) *value = maximum;
     position = (*value - minimum) / (maximum - minimum);
-    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 2, rect.width, 4), ui->theme.navigation);
-    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 2, rect.width * position, 4), enabled ? ui->theme.accent : ui->theme.hover);
-    maage_ui_fill(ui, maage_ui_rect(rect.x + (rect.width - 14) * position, rect.y + 4, 14, rect.height - 8),
-        enabled ? (ui->focus == id ? ui->theme.text : ui->theme.accent) : ui->theme.muted);
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 3, rect.width, 6), ui->theme.navigation);
+    maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height / 2 - 3, rect.width * position, 6), enabled ? ui->theme.accent : ui->theme.hover);
+    maage_ui_fill(ui, maage_ui_rect(rect.x + (rect.width - 18) * position, rect.y + (rect.height - 24) / 2, 18, 24),
+        enabled ? ui->theme.accent : ui->theme.muted);
+    if (ui->focus == id && ui->keyboard_focus && enabled && !ui->blocked) maage_ui_outline(ui, maage_ui_inset(rect, 2), ui->theme.text);
 }
 void maage_ui_text_input(maage_launcher_ui *ui, int id, maage_rect rect, char *text, size_t capacity, int enabled)
 {
@@ -129,9 +166,9 @@ void maage_ui_text_input(maage_launcher_ui *ui, int id, maage_rect rect, char *t
         text[length] = '\0';
     }
     maage_ui_fill(ui, rect, ui->theme.inset);
-    maage_ui_label(ui, maage_ui_rect(rect.x + 12, rect.y + 7, rect.width - 24, 24), 14, enabled ? ui->theme.text : ui->theme.muted, text);
-    if (ui->focus == id && enabled)
-        maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y + rect.height - 2, rect.width, 2), ui->theme.accent);
+    maage_ui_outline(ui, rect, ui->theme.line);
+    maage_ui_label(ui, maage_ui_rect(rect.x + 12, rect.y + (rect.height - ui->theme.body_size - 3) / 2, rect.width - 24, 26), ui->theme.body_size, enabled ? ui->theme.text : ui->theme.muted, text);
+    if (ui->focus == id && ui->keyboard_focus && enabled && !ui->blocked) maage_ui_outline(ui, maage_ui_inset(rect, 2), ui->theme.text);
 }
 maage_rect maage_ui_take(maage_ui_layout *layout, float size)
 {
@@ -161,16 +198,20 @@ void maage_ui_image(maage_launcher_ui *ui, maage_rect rect, const maage_pixel_bu
     if (image) maage_canvas_image(ui->canvas, rect, image);
     else maage_ui_fill(ui, rect, ui->theme.navigation);
 }
-void maage_ui_heading(maage_launcher_ui *ui, maage_rect rect, const char *title, const char *subtitle)
+float maage_ui_heading(maage_launcher_ui *ui, maage_rect rect, const char *title, const char *subtitle)
 {
-    maage_ui_label(ui, maage_ui_rect(rect.x, rect.y, rect.width, 34), 26, ui->theme.text, title);
-    maage_ui_paragraph(ui, maage_ui_rect(rect.x, rect.y + 40, rect.width, 56), 14, subtitle);
+    float title_height = maage_ui_paragraph_height(ui, rect.width, ui->theme.title_size, title);
+    float subtitle_height = maage_ui_paragraph_height(ui, rect.width, ui->theme.body_size, subtitle);
+    maage_ui_paragraph_color(ui, maage_ui_rect(rect.x, rect.y, rect.width, title_height), ui->theme.title_size, ui->theme.text, title);
+    maage_ui_paragraph(ui, maage_ui_rect(rect.x, rect.y + title_height + 4, rect.width, subtitle_height), ui->theme.body_size, subtitle);
+    return title_height + 4 + subtitle_height;
 }
 void maage_ui_empty(maage_launcher_ui *ui, maage_rect rect, const char *title, const char *message)
 {
-    maage_ui_fill(ui, rect, ui->theme.panel);
-    maage_ui_label(ui, maage_ui_rect(rect.x + 20, rect.y + 20, rect.width - 40, 32), 21, ui->theme.text, title);
-    maage_ui_paragraph(ui, maage_ui_rect(rect.x + 20, rect.y + 62, rect.width - 40, rect.height - 78), 15, message);
+    maage_rect inside = maage_ui_panel(ui, rect);
+    float height = maage_ui_paragraph_height(ui, inside.width, ui->theme.section_size, title);
+    maage_ui_paragraph_color(ui, maage_ui_rect(inside.x, inside.y, inside.width, height), ui->theme.section_size, ui->theme.text, title);
+    maage_ui_paragraph(ui, maage_ui_rect(inside.x, inside.y + height + 12, inside.width, inside.height - height - 12), ui->theme.body_size, message);
 }
 int maage_ui_summary(maage_launcher_ui *ui, int id, maage_rect rect, const char *title, const char *subtitle, const maage_pixel_buffer *image, int selected, int enabled)
 {
@@ -178,11 +219,11 @@ int maage_ui_summary(maage_launcher_ui *ui, int id, maage_rect rect, const char 
     float inset = image ? 68 : 16;
     if (image) maage_ui_image(ui, maage_ui_rect(rect.x + 12, rect.y + 14, 44, 44), image);
     if (selected) maage_ui_fill(ui, maage_ui_rect(rect.x, rect.y, 3, rect.height), ui->theme.accent);
-    maage_ui_label(ui, maage_ui_rect(rect.x + inset, rect.y + 12, rect.width - inset - 16, 27), 17, ui->theme.text, title);
-    maage_ui_label(ui, maage_ui_rect(rect.x + inset, rect.y + 43, rect.width - inset - 16, 24), 13, ui->theme.muted, subtitle);
+    maage_ui_label(ui, maage_ui_rect(rect.x + inset, rect.y + 10, rect.width - inset - 16, 29), 18, ui->theme.text, title);
+    maage_ui_label(ui, maage_ui_rect(rect.x + inset, rect.y + 41, rect.width - inset - 16, 27), ui->theme.small_size, ui->theme.muted, subtitle);
     return clicked;
 }
-static float maage_ui_text_block(maage_launcher_ui *ui, maage_rect rect, float size, const char *text, int draw)
+static float maage_ui_text_block(maage_launcher_ui *ui, maage_rect rect, float size, const char *text, int draw, maage_color color)
 {
     char line[256];
     size_t length = 0, word, bytes;
@@ -191,7 +232,7 @@ static float maage_ui_text_block(maage_launcher_ui *ui, maage_rect rect, float s
     if (!text || rect.width <= 0) return 0;
     while (*cursor) {
         if (*cursor == '\n') {
-            if (length && draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+            if (length && draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, color, line);
             length = 0; y += advance; ++cursor;
             continue;
         }
@@ -203,13 +244,13 @@ static float maage_ui_text_block(maage_launcher_ui *ui, maage_rect rect, float s
             word += bytes;
         }
         if (length + word + 2 >= sizeof(line)) {
-            if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+            if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, color, line);
             length = 0; y += advance;
         }
         memcpy(line + length, cursor, word); line[length + word] = '\0';
         if (length && maage_canvas_text_width(ui->canvas, size, line) > rect.width) {
             line[length - 1] = '\0';
-            if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+            if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, color, line);
             y += advance; length = 0;
             memcpy(line, cursor, word);
         }
@@ -218,18 +259,24 @@ static float maage_ui_text_block(maage_launcher_ui *ui, maage_rect rect, float s
         cursor += word;
     }
     if (length) {
-        if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, ui->theme.muted, line);
+        if (draw) maage_ui_label(ui, maage_ui_rect(rect.x, y, rect.width, advance), size, color, line);
         y += advance;
     }
     return y - rect.y;
 }
 float maage_ui_paragraph_height(maage_launcher_ui *ui, float width, float size, const char *text)
 {
-    return maage_ui_text_block(ui, maage_ui_rect(0, 0, width, 0), size, text, 0);
+    return maage_ui_text_block(ui, maage_ui_rect(0, 0, width, 0), size, text, 0, ui->theme.muted);
 }
 void maage_ui_paragraph(maage_launcher_ui *ui, maage_rect rect, float size, const char *text)
 {
     maage_ui_clip_push(ui, rect);
-    maage_ui_text_block(ui, rect, size, text, 1);
+    maage_ui_text_block(ui, rect, size, text, 1, ui->theme.muted);
+    maage_ui_clip_pop(ui);
+}
+void maage_ui_paragraph_color(maage_launcher_ui *ui, maage_rect rect, float size, maage_color color, const char *text)
+{
+    maage_ui_clip_push(ui, rect);
+    maage_ui_text_block(ui, rect, size, text, 1, color);
     maage_ui_clip_pop(ui);
 }

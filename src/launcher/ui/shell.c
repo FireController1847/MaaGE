@@ -6,9 +6,10 @@ maage_render_result maage_launcher_ui_create(maage_launcher_state *state, maage_
     maage_launcher_ui *ui;
     maage_render_result result;
     maage_ui_theme theme = {
-        {35,35,37,255}, {46,46,49,255}, {29,29,31,255}, {25,25,27,255},
-        {239,239,241,255}, {163,163,170,255}, {184,25,124,255}, {174,35,56,255},
-        {83,83,89,255}, {58,58,63,255}, 12, 20, 32
+        {28,28,31,255}, {34,34,38,255}, {39,39,44,255}, {30,30,34,255},
+        {242,242,245,255}, {175,175,185,255}, {199,28,137,255}, {184,43,66,255},
+        {55,55,62,255}, {61,61,69,255}, {56,39,53,255},
+        16, 24, 40, 16, 14, 30, 22, 16
     };
     if (!output || !state) return MAAGE_RENDER_INVALID_ARGUMENT;
     *output = NULL;
@@ -30,34 +31,40 @@ void maage_launcher_ui_destroy(maage_launcher_ui *ui)
 }
 static void maage_ui_navigation(maage_launcher_ui *ui, maage_rect safe, float *bottom)
 {
-    static const char *tabs[] = { "Play", "News", "Installations", "Settings" };
+    static const char *tabs[] = { "Play", "Installations", "News", "Settings" };
+    static const maage_launcher_page pages[] = { MAAGE_PAGE_PLAY, MAAGE_PAGE_INSTALLATIONS, MAAGE_PAGE_NEWS, MAAGE_PAGE_SETTINGS };
     const maage_launcher_account *account = ui->app->accounts.status == MAAGE_ACCOUNT_SIGNED_IN ? maage_launcher_selected_account(ui->app) : NULL;
     const char *label = "Sign in";
     maage_rect rect;
     maage_ui_layout row;
-    float widths[4], total = 0, factor;
-    int index, blocked = ui->blocked, compact = safe.width < 740;
-    float header = compact ? 92 : 52;
+    float widths[4], total = 0, factor, points[6];
+    int index, blocked = ui->blocked, compact = safe.width < 840;
+    float header = compact ? 112 : 64;
     maage_ui_fill(ui, maage_ui_rect(safe.x, safe.y, safe.width, header), ui->theme.navigation);
-    maage_ui_label(ui, maage_ui_rect(safe.x + 18, safe.y + 12, 94, 30), 22, ui->theme.text, "MaaGE");
+    maage_ui_fill(ui, maage_ui_rect(safe.x, safe.y + header - 1, safe.width, 1), ui->theme.line);
+    maage_ui_label(ui, maage_ui_rect(safe.x + 24, safe.y + 16, 112, 34), 26, ui->theme.text, "MaaGE");
     if (ui->app->accounts.status == MAAGE_ACCOUNT_AUTHENTICATING) label = "Signing in...";
     if (ui->app->accounts.status == MAAGE_ACCOUNT_SIGNED_IN) label = account && account->display_name ? account->display_name : "Accounts";
-    ui->account_anchor = maage_ui_rect(safe.x + safe.width - 164, safe.y + 10, 148, ui->theme.control_height);
+    ui->account_anchor = maage_ui_rect(safe.x + safe.width - 208, safe.y + 12, 184, ui->theme.control_height);
     ui->blocked = 0;
-    if (maage_ui_button(ui, 7, ui->account_anchor, account && account->avatar ? "" : label, MAAGE_UI_NORMAL, 1)) ui->account_menu = !ui->account_menu;
-    if (account && account->avatar) {
-        maage_ui_image(ui, maage_ui_rect(ui->account_anchor.x + 6, ui->account_anchor.y + 4, 24, 24), account->avatar);
-        maage_ui_label(ui, maage_ui_rect(ui->account_anchor.x + 38, ui->account_anchor.y + 7, 102, 24), 14, ui->theme.text, label);
-    }
+    if (maage_ui_tab(ui, 7, ui->account_anchor, "", ui->account_menu)) ui->account_menu = !ui->account_menu;
+    maage_ui_outline(ui, ui->account_anchor, ui->theme.line);
+    if (account && account->avatar) maage_ui_image(ui, maage_ui_rect(ui->account_anchor.x + 8, ui->account_anchor.y + 6, 28, 28), account->avatar);
+    rect = maage_ui_rect(ui->account_anchor.x + (account && account->avatar ? 48 : 16), ui->account_anchor.y + 10,
+        account && account->avatar ? 108 : 140, 26);
+    maage_ui_label(ui, rect, ui->theme.button_size, ui->theme.text, label);
+    points[0] = ui->account_anchor.x + 162; points[1] = ui->account_anchor.y + 18;
+    points[2] = points[0] + 8; points[3] = points[1]; points[4] = points[0] + 4; points[5] = points[1] + 4;
+    maage_canvas_triangle(ui->canvas, points, ui->theme.muted);
     ui->blocked = blocked;
-    for (index = 0; index < 4; ++index) { widths[index] = maage_canvas_text_width(ui->canvas, 14, tabs[index]) + 28; total += widths[index]; }
-    factor = compact ? safe.width / total : 1;
-    row.rect = maage_ui_rect(compact ? safe.x : safe.x + 118, compact ? safe.y + 52 : safe.y, compact ? safe.width : total, compact ? 40 : 52);
+    for (index = 0; index < 4; ++index) { widths[index] = maage_canvas_text_width(ui->canvas, ui->theme.button_size, tabs[index]) + 36; total += widths[index]; }
+    factor = compact ? (safe.width - 48) / total : 1;
+    row.rect = maage_ui_rect(compact ? safe.x + 24 : safe.x + 144, compact ? safe.y + 64 : safe.y + 10,
+        compact ? safe.width - 48 : total, 44);
     row.cursor = 0; row.gap = 0; row.horizontal = 1;
     for (index = 0; index < 4; ++index) {
         rect = maage_ui_take(&row, widths[index] * factor);
-        if (maage_ui_button(ui, 1 + index, rect, tabs[index], MAAGE_UI_TAB, 1)) ui->app->navigation.page = (maage_launcher_page)index;
-        if ((int)ui->app->navigation.page == index) maage_ui_fill(ui, maage_ui_rect(rect.x + 12, rect.y + rect.height - 2, rect.width - 24, 2), ui->theme.accent);
+        if (maage_ui_tab(ui, 1 + index, rect, tabs[index], ui->app->navigation.page == pages[index])) ui->app->navigation.page = pages[index];
     }
     *bottom = safe.y + header;
 }
@@ -77,9 +84,11 @@ maage_render_result maage_launcher_ui_frame(maage_launcher_ui *ui, maage_rendere
     if (result != MAAGE_RENDER_OK) return result;
     ui->width = window->width / zoom; ui->height = window->height / zoom;
     ui->input = *input;
+    if (input->pressed) ui->keyboard_focus = 0;
+    if (input->key != MAAGE_KEY_NONE || input->text[0]) ui->keyboard_focus = 1;
     ui->input.x /= zoom; ui->input.y /= zoom;
     if (input->cancelled) {
-        ui->active = ui->focus = ui->account_menu = 0;
+        ui->active = ui->focus = ui->account_menu = ui->keyboard_focus = 0;
         ui->input.pressed = ui->input.released = 0;
         ui->input.key = MAAGE_KEY_NONE; ui->input.text[0] = '\0';
     }
@@ -104,16 +113,17 @@ maage_render_result maage_launcher_ui_frame(maage_launcher_ui *ui, maage_rendere
     ui->blocked = menu_was_open;
     maage_ui_navigation(ui, ui->safe, &bottom);
     if (ui->last_page != (int)ui->app->navigation.page) {
-        ui->last_page = (int)ui->app->navigation.page; ui->focus = ui->active = 0;
+        ui->last_page = (int)ui->app->navigation.page; ui->active = 0;
+        if (ui->focus < 1 || ui->focus > 7) ui->focus = 0;
     }
     ui->blocked = menu_was_open || ui->account_menu;
     padding = ui->theme.padding;
     width = ui->safe.width - padding * 2;
-    if (width > 960) width = 960;
-    body = maage_ui_rect(ui->safe.x + (ui->safe.width - width) / 2, bottom + 24, width,
-        ui->safe.y + ui->safe.height - bottom - (ui->app->notice ? 68 : 44));
+    if (width > 1120) width = 1120;
+    body = maage_ui_rect(ui->safe.x + (ui->safe.width - width) / 2, bottom + padding, width,
+        ui->safe.y + ui->safe.height - bottom - (ui->app->notice ? padding * 2 + 32 : padding * 2));
     maage_ui_pages(ui, body);
-    if (ui->app->notice) maage_ui_label(ui, maage_ui_rect(body.x, ui->safe.y + ui->safe.height - 30, body.width, 24), 13, ui->theme.text, ui->app->notice);
+    if (ui->app->notice) maage_ui_label(ui, maage_ui_rect(body.x, ui->safe.y + ui->safe.height - 30, body.width, 26), ui->theme.small_size, ui->theme.text, ui->app->notice);
     if (ui->account_menu) {
         if (!menu_was_open) {
             ui->focus_count = 1; ui->focus_ids[0] = 7; ui->focus = 7; ui->active = 0;
