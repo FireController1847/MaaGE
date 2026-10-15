@@ -13,10 +13,23 @@
 
 # MaaGE project contract
 
-MaaGE (Minecraft as a Game Engine) is an independent, modular, cross-platform,
-Minecraft-inspired native voxel game platform for different modpacks and gameplay
-experiences. The engine is primarily C. Architectural goals below describe the
-intended design; inspect the repository before claiming functionality exists.
+MaaGE (Minecraft as a Game Engine): **A modular, cross-platform reimagining of
+Minecraft in C, built for performance, extensibility, and limitless modding.**
+
+This independently developed native voxel platform takes **Minecraft: Java Edition
+1.7.10** as its canonical gameplay and compatibility reference, not later releases.
+Recreate its familiar mechanics and modpack experience while retaining freedom to
+redesign, optimize, extend, or replace systems. Version 1.7.10 is the starting
+point, not an architectural limitation. Support many independently configurable
+modpacks rather than one predefined game. Do not reproduce the Java engine,
+preserve Forge compatibility, or execute existing Java mods; develop independent
+native or data-driven systems and content instead.
+
+The current repository is a workspace foundation: three application entry points,
+a metadata-only static core, CMake configuration, manual build validation, and
+documentation. The architecture and roadmap below describe future responsibilities,
+not implemented capabilities or authorization to build them. Inspect current code
+before claiming functionality or successful platform validation.
 
 ## Non-negotiable engineering principles
 
@@ -27,7 +40,8 @@ intended design; inspect the repository before claiming functionality exists.
   never silently introduce newer syntax, comments, or language features.
 - Isolate necessary compiler, OS, and graphics extensions behind platform-specific
   boundaries. Keep language exceptions target-local; enable Objective-C only when
-  a macOS implementation target needs it. Avoid unnecessary C++.
+  a macOS implementation target needs it. Avoid unnecessary C99, C11, or C++;
+  do not sacrifice essential modern functionality to universal C90 compatibility.
 - Preserve alternative-toolchain experimentation, including Open Watcom where
   feasible; do not impose an unnecessary modern compiler baseline. Do not assume
   pointer size or integer widths.
@@ -40,7 +54,8 @@ intended design; inspect the repository before claiming functionality exists.
   and shared utilities when behavior crosses boundaries or is reasonably reusable.
   Inspect existing interfaces before adding new ones; implement shared logic once.
 - Keep implementation details private and public contracts minimal. Use opaque
-  handles, explicit ownership, and backend-independent interfaces where appropriate.
+  handles, explicit ownership, versioned interfaces, and backend-independent
+  contracts where appropriate. Avoid circular dependencies.
 - Keep launcher, client, and dedicated server independently buildable and
   executable. The launcher must not use client/server implementation internals.
   Client and server may share contracts and game definitions, not application
@@ -56,42 +71,186 @@ intended design; inspect the repository before claiming functionality exists.
 - Make focused, minimal changes that solve the actual requirement. Avoid duplicated
   logic and unnecessary scaffolding, boilerplate, comments, directories, or dependencies.
 - Prefer concise implementations and targeted verification over unrelated
-  refactoring. Keep responses concise: report meaningful results, failures, and
-  remaining limitations without repeatedly explaining established information.
+  refactoring. Develop incrementally rather than in enormous implementation passes.
+  Keep responses concise: report meaningful results, failures, and remaining
+  limitations without repeatedly explaining established information.
 - Treat token efficiency alongside portability and modularity, but never sacrifice
   correctness, readability, security, or maintainability to reduce tokens.
 - Follow the current task's scope. Do not implement engine subsystems or planned
   integrations merely because they appear in the architectural goals.
 
-## Platform and intellectual-property boundaries
+## Application responsibilities
 
-- Native windowing: Win32 on Windows, X11/Wayland on Linux, Cocoa/AppKit on macOS.
-- Initial rendering: Vulkan on Windows/Linux, native Metal on macOS without
-  requiring MoltenVK, and null/headless operation for servers and testing.
-  Rendering backends must be replaceable behind stable, implementation-independent
-  interfaces. Keep platform dependencies isolated and SDKs out of portable headers.
-- Planned launcher responsibilities include asset management, Microsoft account
-  authentication, and Minecraft ownership verification. Do not distribute Mojang's
-  proprietary assets or conflate Minecraft compatibility with original project code.
+All responsibilities here are planned. Shared functionality belongs in reusable
+modules, not duplicate application implementations.
+
+- **Launcher (`src/launcher/`):** engine installation/version management; modpack
+  installation/configuration; authorized Minecraft asset acquisition; Microsoft
+  authentication and legitimate ownership verification through authorized mechanisms;
+  profiles, client launch configuration, updates, and dependency management.
+  Remain independent of client/server internals. Do not implement authentication,
+  downloading, or ownership verification until explicitly requested.
+- **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
+  presentation, simulation interaction, and multiplayer connectivity. Consume shared
+  game definitions/protocols without depending on the server executable or private
+  server implementation. Integrated singleplayer may use an in-process or separate
+  server; that decision remains open.
+- **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
+  entities, ticks, scheduled updates, physics, interactions, generation, inventories,
+  gameplay, modpack definitions/registries, persistence, and multiplayer synchronization.
+  Run independently and headlessly without client, windowing, or graphics dependencies.
+- **Core (`src/core/`):** reusable platform-independent foundations and shared
+  contracts, without application implementation dependencies.
+
+## Layering and dependencies
+
+Use CatalystUI and `lib-core-c` as inspiration for these conceptual layers:
+portable foundations → platform abstractions → replaceable backend implementations
+→ engine services → gameplay/content → applications. This expresses separation of
+responsibilities, not permission for generic services to depend on concrete backends.
+
+Cross-layer interactions use explicit contracts: Window API → native windowing;
+Render API → Vulkan/Metal/Null; Input API → native event adapters; Storage API →
+filesystem implementations; Engine API → world/simulation services. Preserve
+interchangeable implementations without building a universal abstraction framework.
+
+Evaluate `lib-core-c` types, memory utilities, and other foundations before reuse;
+do not make it a mandatory external dependency without explicit user approval.
+Keep platform dependencies isolated and SDK types out of portable public headers.
+
+## Native platform and windowing
+
+| Target | Native windowing | Initial renderer |
+| --- | --- | --- |
+| Windows | Win32 | Vulkan |
+| Linux | X11 and Wayland | Vulkan |
+| macOS | Cocoa/AppKit | Native Metal |
+| Headless | Null | Null |
+
+Native windowing is mandatory and independent of rendering. Its eventual contract
+covers window creation/destruction, event processing, resize/display changes,
+fullscreen/windowed modes, logical/framebuffer dimensions, DPI/scaling,
+focus/visibility, cursors, and native surface interoperability. Input is a separate
+subsystem consuming appropriate native events. Permit Objective-C AppKit bridges
+behind C90-compatible public interfaces. Do not require SDL or GLFW as foundations.
+
+## First-class rendering backends
+
+Both direct Vulkan on Windows/Linux and genuine native Apple Metal on macOS are
+fundamental requirements. **Do not implement rendering until explicitly requested.**
+
+- **Vulkan:** isolate API types, device management, swapchains, pipelines, command
+  recording, and synchronization inside the backend, away from generic engine and
+  gameplay interfaces.
+- **Metal:** use Apple's Metal API, with Cocoa/AppKit and `CAMetalLayer` where
+  appropriate. MoltenVK must not be the required implementation. Isolate necessary
+  Objective-C/Objective-C++ translation units in macOS implementation directories;
+  exclude Metal objects/types from portable C interfaces. Provide a suitable shader
+  asset pipeline for Metal Shading Language when implementing this backend.
+- **Rendering contracts:** expose backend-independent buffers, textures, shader and
+  pipeline resources, resource binding, command submission, synchronization, render
+  targets/presentation, capabilities, and optional features as needed. Backend
+  replacement must be demonstrable, not merely theoretical.
+- Keep high-level voxel rendering separate from the low-level graphics device API.
+  Chunk meshing, visibility, world simulation, and content must not depend directly
+  on Vulkan or Metal. Null supports headless operation and relevant tests without
+  graphics dependencies; future OpenGL/software/other backends must not require
+  rewriting simulation.
+
+## Planned engine systems
+
+These are responsibility boundaries, not instructions to create empty directories
+or interfaces now. Establish contracts incrementally as systems become necessary.
+
+| System | Planned responsibilities |
+| --- | --- |
+| World | Worlds/dimensions, chunks, block-state storage, lighting, persistence, streaming. |
+| Simulation | Configurable fixed-step ticking, scheduled block updates, events, parallelizable workloads, deterministic ordering where gameplay requires it. |
+| Entities | Lifecycle, components/behaviors, AI, spawning, spatial indexing. |
+| Physics | Collision detection, raycasting, movement, spatial queries. |
+| Generation | Seeds, deterministic randomness, biomes, terrain, structures, configurable pipelines. |
+| Resources | Textures/models/audio/data, loading/caching, format decoders, resource-pack composition. |
+| Networking | Client/server communication, protocol versioning, serialization, entity/chunk synchronization, multiplayer sessions. |
+| Content | Block/item registries, recipes, machines, materials, game rules, modpack-defined behavior. |
+| Supporting services | Audio, input, UI, job scheduling, memory allocation, logging/diagnostics, optional scripting where appropriate. |
+
+## Minecraft 1.7.10 compatibility and intellectual property
+
+- Use Java Edition **1.7.10** for block/item behavior, chunk-based worlds,
+  entities/physics, survival/creative foundations, crafting/inventories, redstone,
+  scheduled updates, terrain generation, and traditional modded gameplay. Do not
+  silently adopt later Minecraft versions as the baseline.
+- Selected 1.7.10 world/resource formats or network protocols may eventually be
+  supported. Exact binary compatibility, Java execution, and Forge compatibility
+  are not requirements; existing Java mods will not be loaded or executed.
+  Optimizations and improvements may intentionally diverge from vanilla. Make
+  compatibility decisions explicit and document them here when durable.
+- Independently implement project code. Do not copy or translate proprietary
+  Minecraft or third-party mod source without appropriate authorization. Keep
+  Mojang/Microsoft and third-party mod assets separate from original MaaGE code
+  and content; never distribute Mojang's proprietary assets. A legitimate Minecraft
+  installation alone does not resolve all asset-use permissions.
 - Apache-2.0 covers original project code and documentation, not third-party
   materials or Minecraft/Mojang/Microsoft intellectual property. Preserve applicable
-  licenses and disclosures; MaaGE is not an official or endorsed Minecraft project.
+  licenses and disclosures. MaaGE is not official, affiliated with, or endorsed by
+  Mojang or Microsoft.
+
+## Modpack platform
+
+Support many independently configurable modpacks, conceptually composed of a
+versioned manifest, content definitions, resources, game rules, dependencies,
+optional executable modules, and optional scripts. Prefer data-driven content
+where appropriate; never hardcode individual modpacks into the core.
+
+Native extensions should use stable, versioned C-compatible interfaces with explicit
+ownership and lifecycle rules. Treat them as trusted executable code unless genuine
+security isolation exists. Do not implement third-party mod compatibility layers
+unless explicitly requested.
 
 ## Workspace and build conventions
 
 - Put implementations under `src/` and public interfaces under `include/`.
   Configure each application in its own directory; use the `nv_` target prefix.
+- Keep the root clean: `README.md`, `AGENTS.md`, `LICENSE`, `.gitignore`,
+  `CMakeLists.txt`, `CMakePresets.json`, and the `CMakeConfig.h` template belong here.
+  The three application directories and `src/core/` are the established source layout.
 - Keep authored top-level build configuration and active presets at the root;
   root `CMakeLists.txt` orchestrates the workspace. Reserve `cmake/<name>/` for
   generated configuration, headers, and intermediates; corresponding compiled
   output belongs in `build/<name>/`. Isolate presets/toolchains and multi-config
   outputs. Never generate into source directories or commit generated artifacts.
+  Select platform-specific sources conditionally and exclude graphics dependencies
+  from headless targets; portable targets retain strict C90 requirements.
 - Keep build validation in `.github/workflows/build.yml` manually triggered only
   (`workflow_dispatch`) until explicitly authorized otherwise. Preserve read-only
   permissions and existing CMake layout.
 - Preserve the existing Git author and committer identity. Every commit created
   or amended on the user's behalf must include:
   `Co-authored-by: Codex <noreply@openai.com>`.
+
+## Conceptual development sequence
+
+Phases may overlap; this is a roadmap, not a schedule or authorization for later work.
+The workspace foundation exists; phase labels do not certify completion or validation.
+
+0. **Workspace Foundation:** CMake, independent targets, C90, platform configuration,
+   manual GitHub Actions build validation, documentation.
+1. **Portable Core:** allocation/memory, logging, error handling, basic containers,
+   filesystem/timing abstractions, module lifecycle.
+2. **Native Platform Layer:** Win32, X11, Wayland, Cocoa/AppKit, window events, input.
+3. **Graphics Foundation:** backend-independent API, Vulkan, native Metal, Null,
+   shader pipeline, basic rendering validation.
+4. **Voxel Engine:** block registries, chunks, world storage, meshing, terrain
+   generation, persistence, streaming.
+5. **Gameplay:** simulation, entities, physics, player controls, inventory,
+   interactions, survival/creative foundations.
+6. **Client/Server Integration:** networking, dedicated-server simulation, client
+   synchronization, singleplayer integration, multiplayer compatibility.
+7. **Modpack Platform:** manifests, resource composition, native modules, game rules,
+   dependency management, optional scripting.
+8. **Launcher and Distribution:** profiles/installations, Microsoft authentication,
+   authorized asset acquisition, ownership verification, modpack management,
+   updates/distribution.
 
 ## Documentation and persistent context
 
