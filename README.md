@@ -50,7 +50,7 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc-release
 ```
 
-Both build `nv_launcher`, `nv_client`, `nv_server`, and `nv_core`. Add `--target nv_server` to build only the server and its dependencies. For Debug builds, use `debug` on Linux/macOS or build with `windows-msvc-debug` on Windows.
+Both build `maage_launcher`, `maage_client`, `maage_server`, and `maage_core`. Add `--target maage_server` to build only the server and its dependencies. For Debug builds, use `debug` on Linux/macOS or build with `windows-msvc-debug` on Windows.
 
 Generated files go in `cmake/<preset>/`; compiled output goes in `build/<preset>/bin/` and `lib/`. Visual Studio adds `Release/` or `Debug/` subdirectories. No graphics SDK is required yet.
 

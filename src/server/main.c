@@ -1,8 +1,8 @@
 #include <stdio.h>
-#include "nv_core.h"
+#include "maage_core.h"
 
 int main(void)
 {
-    printf("%s Server\n", nv_core_project_name);
+    printf("%s Server\n", maage_core_project_name);
     return 0;
 }

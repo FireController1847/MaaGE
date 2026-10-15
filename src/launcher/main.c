@@ -3,6 +3,6 @@
 
 int main(void)
 {
-    puts(NV_PROJECT_NAME " Launcher");
+    puts(MAAGE_PROJECT_NAME " Launcher");
     return 0;
 }

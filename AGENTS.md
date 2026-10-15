@@ -210,7 +210,11 @@ unless explicitly requested.
 ## Workspace and build conventions
 
 - Put implementations under `src/` and public interfaces under `include/`.
-  Configure each application in its own directory; use the `nv_` target prefix.
+  Configure each application in its own directory.
+- Permanent naming: `maage_` for functions, variables, typedefs, symbols, and
+  CMake targets/helpers; `MAAGE_` for constants, macros, include guards, and CMake
+  options/configuration variables. Public headers/include paths use `maage`;
+  project namespaces and aliases use `MaaGE`. Preserve external identifiers.
 - Keep the root clean: `README.md`, `AGENTS.md`, `LICENSE`, `.gitignore`,
   `CMakeLists.txt`, `CMakePresets.json`, and the `CMakeConfig.h` template belong here.
   The three application directories and `src/core/` are the established source layout.
