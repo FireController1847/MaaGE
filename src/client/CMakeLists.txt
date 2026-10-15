@@ -1,0 +1,8 @@
+add_executable(nv_client main.c)
+nv_configure_portable_target(nv_client)
+set_target_properties(nv_client PROPERTIES OUTPUT_NAME client)
+target_link_libraries(nv_client PRIVATE nv_core)
+if(NV_BUILD_TESTS)
+    add_test(NAME nv_client_smoke COMMAND nv_client)
+    set_tests_properties(nv_client_smoke PROPERTIES PASS_REGULAR_EXPRESSION "MaaGE Client")
+endif()

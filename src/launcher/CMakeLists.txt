@@ -1,0 +1,7 @@
+add_executable(nv_launcher main.c)
+nv_configure_portable_target(nv_launcher)
+set_target_properties(nv_launcher PROPERTIES OUTPUT_NAME launcher)
+if(NV_BUILD_TESTS)
+    add_test(NAME nv_launcher_smoke COMMAND nv_launcher)
+    set_tests_properties(nv_launcher_smoke PROPERTIES PASS_REGULAR_EXPRESSION "MaaGE Launcher")
+endif()
