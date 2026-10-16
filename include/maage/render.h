@@ -50,7 +50,6 @@ typedef struct maage_render_desc {
 #define MAAGE_RENDER_CAP_INSTANCING        0x0200UL
 #define MAAGE_RENDER_CAP_COMPUTE           0x0400UL
 #define MAAGE_RENDER_CAP_CPU_FRAMEBUFFER   0x0800UL
-#define MAAGE_RENDER_CAP_PIXEL_PRESENT     0x1000UL
 #define MAAGE_RENDER_FORMAT_RGBA8          0x01UL
 #define MAAGE_RENDER_FORMAT_BGRA8          0x02UL
 #define MAAGE_RENDER_SYNC_CPU_WAIT         0x01UL
@@ -99,10 +98,6 @@ maage_render_result maage_renderer_set_clear_color(maage_renderer *renderer,
  * swapchain rebuild). Keep processing events and use a bounded event wait.
  * Fatal errors require destruction; create a new renderer/window to recover. */
 maage_render_result maage_renderer_present(maage_renderer *renderer);
-/* Present a borrowed RGBA8 frame matching the native framebuffer size. Requires
- * PIXEL_PRESENT. Currently Metal and Software; other backends return UNSUPPORTED.
- * No ownership transfer or cross-family fallback occurs. */
-maage_render_result maage_renderer_present_pixels(maage_renderer *renderer, const maage_pixel_buffer *pixels);
 /* Force presentation resources to refresh on the next frame, if needed. */
 void maage_renderer_resize(maage_renderer *renderer);
 #endif

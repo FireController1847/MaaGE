@@ -18,7 +18,6 @@ struct maage_renderer {
     int refresh;
     maage_render_result failure;
     maage_render_capabilities capabilities;
-    const maage_pixel_buffer *pixels;
 };
 extern const maage_render_backend_api maage_render_metal_api;
 extern const maage_render_backend_api maage_render_vulkan_api;

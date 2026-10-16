@@ -20,7 +20,7 @@ MaaGE is an independent native voxel platform inspired by Minecraft, designed fo
 
 The architecture separates three applications:
 
-- **Launcher** — Microsoft sign-in and Minecraft ownership verification, with asset and installation management planned. Mojang's proprietary assets will not be distributed.
+- **Launcher** — planned asset management, Microsoft authentication, and Minecraft ownership verification. Mojang's proprietary assets will not be distributed.
 - **Client** — planned native windowing, input, rendering, and player interaction.
 - **Server** — independent headless operation, with an optional graphical administration frontend planned around the same server functionality.
 
@@ -28,17 +28,15 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The macOS Launcher has a native application shell with Play, News, Installations, and Settings, plus a header account menu. It restores saved accounts through native secure storage and has no installations or news; interface scale can be changed for the current session. UI presentation currently supports Metal and Software; Windows/Linux UI adapters and Vulkan/OpenGL UI presentation remain unimplemented. Client is a graphical startup stub; Server has shared startup code with headless and optional GUI executables. Microsoft authentication and account management are implemented but require MaaGE's own app registration and service authorization; end-to-end sign-in has not been tested. Gameplay, administration UI, and asset management remain unimplemented.
+**Early development.** The Launcher uses Core windowing and rendering for an RGB demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client is a graphical application startup stub; Server has shared startup code with a headless executable and an optional GUI stub. Client gameplay and Server administration UI are not implemented. Authentication and asset management are also unimplemented. Metal and AppKit have been compiled locally; runtime testing remains manual, and the Windows/Linux backends have not been compiled locally.
 
-The current Launcher has been compiled locally with Apple Clang on macOS arm64; Windows/Linux authentication adapters have not been compiled locally. Runtime and visual testing remain manual. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
+Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
 ## Build
 
 Use **CMake 3.21+** and a C compiler. The Linux and macOS presets also require **Ninja**. From the repository root:
 
-Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. Windows/Linux rendering requires Vulkan development headers and a loader discoverable by CMake. macOS uses Apple's AppKit, Metal, QuartzCore, CoreGraphics, and CoreText frameworks.
-
-Launcher authentication also requires libcurl 7.85+ and json-c 0.15+, plus libsecret on Linux. See [Authentication Setup](docs/authentication.md) for platform dependencies, Microsoft registration, and secure account storage.
+Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. Windows/Linux rendering requires Vulkan development headers and a loader discoverable by CMake. macOS uses Xcode's AppKit, Metal, and QuartzCore frameworks.
 
 **Linux / macOS** — GCC or Clang on Linux; Apple Clang on macOS:
 

@@ -10,7 +10,7 @@ static maage_render_result maage_software_create(maage_renderer *renderer)
 {
     renderer->platform = calloc(1, sizeof(maage_software_renderer));
     if (!renderer->platform) return MAAGE_RENDER_OUT_OF_MEMORY;
-    renderer->capabilities.features |= MAAGE_RENDER_CAP_CPU_FRAMEBUFFER | MAAGE_RENDER_CAP_PIXEL_PRESENT;
+    renderer->capabilities.features |= MAAGE_RENDER_CAP_CPU_FRAMEBUFFER;
     renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT;
     return MAAGE_RENDER_OK;
 }
@@ -29,12 +29,6 @@ static maage_render_result maage_software_present(maage_renderer *renderer, cons
     unsigned char color[4], *resized;
     size_t size, index;
     int channel;
-    if (renderer->pixels) {
-        result = maage_window_present_pixels(renderer->window, renderer->pixels);
-        if (result == MAAGE_WINDOW_OK) return MAAGE_RENDER_OK;
-        if (result == MAAGE_WINDOW_UNAVAILABLE) return MAAGE_RENDER_SKIPPED;
-        return result == MAAGE_WINDOW_OUT_OF_MEMORY ? MAAGE_RENDER_OUT_OF_MEMORY : MAAGE_RENDER_WINDOW_ERROR;
-    }
     if ((size_t)state->framebuffer_width > (size_t)-1 / 4) return MAAGE_RENDER_UNSUPPORTED;
     buffer.width = state->framebuffer_width;
     buffer.height = state->framebuffer_height;

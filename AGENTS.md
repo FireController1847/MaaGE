@@ -108,8 +108,9 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   installation/configuration; authorized Minecraft asset acquisition; Microsoft
   authentication and legitimate ownership verification through authorized mechanisms;
   profiles, client launch configuration, updates, and dependency management.
-  Remain independent of client/server internals. Downloading, installation and
-  game launching remain deferred until explicitly requested.
+  Remain independent of client/server internals. Authentication, ownership
+  verification, UI, downloading, installation, and game launching remain deferred
+  until explicitly requested.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
@@ -188,8 +189,8 @@ renderers borrow windows, which must outlive
 them. Native-content ownership is acquired exclusively through window interop;
 Wayland's empty backing must not overwrite external rendering. CPU presentation
 uses the shared RGBA8 pixel-buffer contract and native Window adapters, without a
-graphics SDK dependency. Preserve consistent renderer lifecycle across backends;
-the Launcher UI replaces its initial RGB clear-color demo.
+graphics SDK dependency. Preserve consistent renderer lifecycle and the Launcher
+RGB demonstration across backends.
 Headless targets must not link rendering or acquire graphics dependencies; disable
 `MAAGE_BUILD_RENDER` for headless-only workspaces. Missing Vulkan development files
 are configuration errors when that backend is enabled. Isolate graphics SDK/C99
@@ -251,67 +252,11 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   on graphics APIs. Headless operation must not acquire graphics dependencies;
   changing the rendering backend must not require rewriting simulation.
 
-## Launcher UI
+## Launcher UI and authentication
 
-- Launcher owns `MaaGE::LauncherUI` in `src/launcher/ui/`: reusable widgets,
-  theme, layouts, navigation, and presentation state. The Client will own a
-  separate high-level UI library; neither belongs in Core or depends on the other.
-- Core owns only reusable graphics/input primitives behind portable C90 APIs.
-  `MaaGE::Canvas` provides logical-coordinate drawing, text, images, blending,
-  clipping, and DPI scaling; native font/rasterization currently uses macOS
-  CoreGraphics/CoreText. Input snapshots currently have a Cocoa adapter. Other
-  platforms report unsupported until implemented; keep SDK details private.
-- Canvas presentation uses Core Render's capability-gated RGBA8 upload (currently
-  Metal and Software). Vulkan remains a primary backend; its UI upload and other
-  platform adapters are deferred. Explicit renderer selection never switches
-  families to obtain UI support. Headless targets acquire no UI dependencies.
-- ProtoLauncher supplies the initial flat charcoal/magenta visual direction, not
-  an immutable specification. Respect logical sizes, DPI, and native safe areas.
-  Build a real application shell, not sample/demo pages. Primary navigation is
-  Play, Installations, News, Settings; accounts belong in the header menu, About
-  within Settings. Default to signed out and empty/unavailable content; never
-  fabricate installations, accounts, announcements, or successful service actions.
-  Use readable typography, comfortable controls, and one shared tab treatment for
-  hover/selection with a distinct keyboard-focus outline. Compose Play around
-  installation selection and launch readiness; group Settings into preference
-  panels. Reflow columns/navigation and scroll content in smaller windows.
-- Application-owned Launcher state and explicit per-service request boundaries
-  supply views; widgets own presentation only. Providers publish borrowed display
-  snapshots between frames, never tokens/credentials. Typed settings centralize
-  definitions, defaults, validation, and change notifications; current preferences
-  are session-only and must say so. Keep persistence separate from state/UI.
-  Installation management, general settings persistence and game launching remain
-  deferred until explicitly requested. No web runtime or speculative Game UI.
-
-## Launcher authentication
-
-- Launcher owns `MaaGE::LauncherAuth` under `src/launcher/auth/`: C90 device
-  authorization, Xbox/XSTS, Minecraft ownership/profile validation and sessions.
-  libcurl/json-c, native threads/crypto/browser/clipboard and credential adapters
-  privately use C99; do not add these dependencies to Core, Client or Server.
-- Use MaaGE's own explicitly configured Microsoft public-client registration,
-  OAuth Device Code Flow and the system browser; no localhost listener or OAuth
-  redirect. The macOS Launcher accepts `maage://auth` only as a native return/focus
-  link; it never trusts URI payloads as authentication or handles them in Core.
-  Honor returned expiry/interval, pending/slow-down responses and network backoff.
-  Keep polling/browser launch off the UI thread and cancel/erase private device
-  codes promptly. The native modal receives only the public user code, verification
-  URI and progress, with Copy Code/Open Browser controls. Never borrow client IDs,
-  embed client secrets or copy incompatible reference code. Keep endpoints HTTPS;
-  verify certificates, bound requests/responses and support cancellation off the UI.
-- Persist only refresh tokens in Keychain/Credential Manager/Secret Service;
-  non-sensitive account metadata is separate. Secure-storage failure requires an
-  explicit session-only choice, never plaintext credentials. Honor refresh rotation;
-  invalid/revoked credentials require reauthentication. Never log credentials,
-  private device codes, sensitive headers or full authentication responses. Report
-  failures with the service stage, HTTP status and fixed schema-error descriptions;
-  preserve those diagnostics during startup restoration as well as interactive login.
-- Stable account IDs use authenticated Xbox XUIDs, never token-specific user hashes
-  (`uhs`); deduplicate identities independently of player names. Microsoft
-  authentication, Java ownership and an unexpired verified game session are distinct.
-  Metadata alone never proves readiness. Widgets receive display snapshots only;
-  future launch code copies a valid session and clears its credential copy afterward.
-  See `docs/authentication.md` for registration, dependency setup and protocol limits.
+Launcher UI and authentication implementations have been removed pending redesign.
+Do not reintroduce them or their dependencies until explicitly requested. Preserve
+Core windowing/rendering and the Launcher's renderer demonstration in the meantime.
 
 ## Planned engine systems
 

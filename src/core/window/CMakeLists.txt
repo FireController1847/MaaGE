@@ -1,4 +1,4 @@
-add_library(maage_window STATIC window.c ../input/input.c)
+add_library(maage_window STATIC window.c)
 add_library(MaaGE::Window ALIAS maage_window)
 maage_configure_portable_target(maage_window)
 target_include_directories(maage_window PUBLIC "${PROJECT_SOURCE_DIR}/include")

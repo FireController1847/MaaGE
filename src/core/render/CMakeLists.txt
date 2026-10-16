@@ -3,7 +3,6 @@ add_library(MaaGE::Render ALIAS maage_render)
 maage_configure_portable_target(maage_render)
 target_include_directories(maage_render PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(maage_render PUBLIC MaaGE::Window PRIVATE MaaGE::Log)
-add_subdirectory(canvas)
 
 set(MAAGE_DEFAULT_VULKAN OFF)
 if(MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX)
