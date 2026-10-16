@@ -93,6 +93,10 @@ maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer);
 /* Components must be finite values in [0, 1]. */
 maage_render_result maage_renderer_set_clear_color(maage_renderer *renderer,
     float red, float green, float blue, float alpha);
+/* Prime the initial clear frame before showing a hidden window. Currently Metal
+ * only; UNSUPPORTED leaves other backends unchanged. SKIPPED means no drawable
+ * yet. Does not change window visibility; normal present still skips hidden windows. */
+maage_render_result maage_renderer_prepare_frame(maage_renderer *renderer);
 /* Presents a cleared frame; automatically observes framebuffer size changes.
  * SKIPPED is nonfatal (hidden/minimized/unconfigured, no drawable, or a pending
  * swapchain rebuild). Keep processing events and use a bounded event wait.

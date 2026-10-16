@@ -7,5 +7,6 @@ int maage_application_main(int argc, char *const argv[])
 {
     (void)argc; (void)argv;
     maage_log_info("maage.client", "%s Client %s", maage_core_project_name, MAAGE_CLIENT_VERSION);
-    return 0;
+    maage_log_warn("maage.client", "Start the Client through MaaGE Launcher. Launcher-managed startup is not implemented yet.");
+    return 1;
 }

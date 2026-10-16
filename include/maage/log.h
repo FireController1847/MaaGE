@@ -25,6 +25,10 @@ typedef struct maage_log_config {
  * init copies strings; caller storage need only survive the call. Precedence:
  * supplied defaults, optional INI, then recognized --log-* arguments. Missing
  * INI files are optional; other errors return zero with usable settings retained.
+ * With file output enabled, init archives any previous file using a sortable
+ * local rotation timestamp (numeric suffix only on collision), then starts a new
+ * latest file.
+ * Archives are retained; rotation failure preserves the old file and returns zero.
  * Unknown application arguments are ignored and argv is never modified. */
 void maage_log_config_init(maage_log_config *config);
 int maage_log_init(const maage_log_config *config, int argc, char *const argv[]);

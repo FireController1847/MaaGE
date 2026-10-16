@@ -52,7 +52,7 @@ static int maage_log_path(const char *value)
     size_t length;
     if (!value) return 0;
     length = strlen(value);
-    if (!length || length >= sizeof(maage_log_current.path)) return 0;
+    if (!length || length >= MAAGE_LOG_PATH_SIZE) return 0;
     memcpy(maage_log_current.path, value, length + 1);
     return 1;
 }
@@ -154,7 +154,9 @@ int maage_log_configure(const maage_log_config *defaults, int argc, char *const 
     config->file_path = maage_log_current.path;
     config->config_path = NULL;
     if (config->file) {
-        maage_log_current.output = maage_log_open(config->file_path, "a");
+        if (maage_log_rotate(config->file_path))
+            maage_log_current.output = maage_log_open(config->file_path, "a");
+        else maage_log_problem(&status, "Cannot archive previous logging file: ", config->file_path);
         if (!maage_log_current.output) {
             config->file = 0;
             maage_log_problem(&status, "Cannot append to logging file: ", config->file_path);

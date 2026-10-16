@@ -196,6 +196,21 @@ maage_render_result maage_renderer_set_clear_color(maage_renderer *renderer,
     renderer->clear[3] = alpha;
     return MAAGE_RENDER_OK;
 }
+maage_render_result maage_renderer_prepare_frame(maage_renderer *renderer)
+{
+    maage_window_state state;
+    maage_render_result result;
+    if (!renderer) return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (renderer->failure != MAAGE_RENDER_OK) return renderer->failure;
+    if (!renderer->api->prepare_frame) return MAAGE_RENDER_UNSUPPORTED;
+    if (maage_window_get_state(renderer->window, &state) != MAAGE_WINDOW_OK)
+        return MAAGE_RENDER_WINDOW_ERROR;
+    if (state.visible) return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (state.framebuffer_width <= 0 || state.framebuffer_height <= 0) return MAAGE_RENDER_SKIPPED;
+    result = renderer->api->prepare_frame(renderer, &state);
+    if (result != MAAGE_RENDER_OK && result != MAAGE_RENDER_SKIPPED) renderer->failure = result;
+    return result;
+}
 maage_render_result maage_renderer_present(maage_renderer *renderer)
 {
     maage_window_state state;

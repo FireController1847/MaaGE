@@ -1,8 +1,11 @@
 #include "log_internal.h"
 #include <string.h>
 
+/* Keep empty tables in zero-fill storage instead of embedding them in the file. */
+static char maage_log_path_storage[MAAGE_LOG_PATH_SIZE];
+static maage_log_override maage_log_overrides[MAAGE_LOG_OVERRIDE_COUNT];
 maage_log_state maage_log_current = {
-    { MAAGE_LOG_INFO, 1, 0, 1, NULL, NULL }, { 0 }, { { { 0 }, MAAGE_LOG_TRACE } }, 0, NULL
+    { MAAGE_LOG_INFO, 1, 0, 1, NULL, NULL }, maage_log_path_storage, maage_log_overrides, 0, NULL
 };
 
 void maage_log_config_init(maage_log_config *config)

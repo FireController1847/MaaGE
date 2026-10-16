@@ -17,12 +17,3 @@ if(MAAGE_BUILD_SERVER)
     endif()
 endif()
 
-# Optional packaging/entry-point foundation only; no administration UI yet.
-# Future window/render dependencies belong to this frontend, never Server core.
-if(MAAGE_BUILD_SERVER_GUI)
-    add_executable(maage_server_gui gui_main.c)
-    maage_configure_portable_target(maage_server_gui)
-    set_target_properties(maage_server_gui PROPERTIES OUTPUT_NAME server-gui)
-    target_link_libraries(maage_server_gui PRIVATE MaaGE::Server)
-    maage_configure_gui_application(maage_server_gui server_gui)
-endif()

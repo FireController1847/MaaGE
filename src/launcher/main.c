@@ -31,16 +31,27 @@ int maage_application_main(int argc, char *const argv[])
     maage_window_config_init(&config);
     config.title = "MaaGE Launcher";
     config.full_display_content = 1;
+    config.visible = 0;
     result = maage_window_create(system, &config, &window);
     if (result == MAAGE_WINDOW_OK) {
         render_desc.window = window;
         rendered = maage_renderer_create(&render_desc, &renderer);
+        /* Keep native backing hidden during device/backend initialization. */
+        if (rendered == MAAGE_RENDER_OK)
+            rendered = maage_renderer_set_clear_color(renderer, 1.0f, 0.0f, 0.0f, 1.0f);
+        if (rendered == MAAGE_RENDER_OK) {
+            rendered = maage_renderer_prepare_frame(renderer);
+            if (rendered == MAAGE_RENDER_UNSUPPORTED) rendered = MAAGE_RENDER_OK;
+        }
+        if (rendered == MAAGE_RENDER_OK || rendered == MAAGE_RENDER_SKIPPED)
+            result = maage_window_set_visible(window, 1);
         start = maage_time_monotonic_seconds();
         if (start < 0.0) {
             maage_log_error("maage.launcher", "Monotonic clock unavailable");
             rendered = MAAGE_RENDER_PLATFORM_ERROR;
         }
-        while (rendered == MAAGE_RENDER_OK || rendered == MAAGE_RENDER_SKIPPED) {
+        while (result == MAAGE_WINDOW_OK &&
+            (rendered == MAAGE_RENDER_OK || rendered == MAAGE_RENDER_SKIPPED)) {
             result = maage_window_poll_events(system, 0);
             if (result != MAAGE_WINDOW_OK) break;
             result = maage_window_get_state(window, &state);

@@ -8,6 +8,7 @@ typedef struct maage_render_backend_api {
     void (*destroy)(maage_renderer *renderer);
     maage_render_result (*present)(maage_renderer *renderer, const maage_window_state *state);
     unsigned int version;
+    maage_render_result (*prepare_frame)(maage_renderer *renderer, const maage_window_state *state);
 } maage_render_backend_api;
 struct maage_renderer {
     maage_window *window;

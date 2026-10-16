@@ -7,12 +7,12 @@ set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.15")
 set(MAAGE_CLIENT_VERSION_MAJOR 1)
 set(MAAGE_CLIENT_VERSION_MINOR 0)
 set(MAAGE_CLIENT_VERSION_PATCH 0)
-set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.3")
+set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.4")
 
 set(MAAGE_SERVER_VERSION_MAJOR 1)
 set(MAAGE_SERVER_VERSION_MINOR 0)
 set(MAAGE_SERVER_VERSION_PATCH 0)
-set(MAAGE_SERVER_VERSION_PRERELEASE "alpha.3")
+set(MAAGE_SERVER_VERSION_PRERELEASE "alpha.4")
 
 if(CMAKE_SCRIPT_MODE_FILE)
     include("${CMAKE_CURRENT_LIST_DIR}/CMakeApplications.cmake")
@@ -71,11 +71,10 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
 #endif
 ]=] @ONLY)
-        if(application STREQUAL "server")
-            set(MAAGE_FRONTEND server_gui)
-        else()
-            set(MAAGE_FRONTEND "${application}")
+        if(NOT application STREQUAL "launcher")
+            continue()
         endif()
+        set(MAAGE_FRONTEND "${application}")
         string(TOUPPER "${MAAGE_FRONTEND}" MAAGE_FRONTEND_KEY)
         set(MAAGE_BUNDLE_NAME "${MAAGE_${MAAGE_FRONTEND_KEY}_NAME}")
         set(MAAGE_BUNDLE_IDENTIFIER "${MAAGE_${MAAGE_FRONTEND_KEY}_IDENTIFIER}")
@@ -114,8 +113,6 @@ else()
             "${PROJECT_BINARY_DIR}/generated/maage/client_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/server_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/launcher_Info.plist"
-            "${PROJECT_BINARY_DIR}/generated/maage/client_Info.plist"
-            "${PROJECT_BINARY_DIR}/generated/maage/server_gui_Info.plist"
         COMMENT "Refreshing application versions from Git HEAD"
         VERBATIM)
 endif()

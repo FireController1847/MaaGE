@@ -56,8 +56,9 @@ before claiming functionality or successful platform validation.
 - Keep implementation details private and public contracts minimal. Use opaque
   handles, explicit ownership, versioned interfaces, and backend-independent
   contracts where appropriate. Avoid circular dependencies.
-- Keep launcher, client, and dedicated server independently buildable and
-  executable. The launcher must not use client/server implementation internals.
+- Keep Launcher, Client, and Server independently buildable and versioned.
+  The Client is a separate executable with Launcher-managed startup and lifetime
+  independent of the Launcher; it is not an in-process Launcher library. The launcher must not use client/server implementation internals.
   Client and server may share contracts and game definitions, not application
   implementations. Shared infrastructure must not depend on applications.
 - Server simulation/networking and its headless executable must remain independent
@@ -115,15 +116,21 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
   server implementation. Integrated singleplayer may use an in-process or separate
-  server; that decision remains open.
+  server; that decision remains open. The Launcher distributes/selects independently
+  versioned Client installations and starts them detached, so closing the Launcher
+  never terminates the game. Client startup consumes an explicit versioned launch
+  contract when implemented; no standalone desktop entry or app bundle. Do not
+  invent launch flags as authentication or implement distribution/launching yet.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
   gameplay, modpack definitions/registries, persistence, and multiplayer synchronization.
-  Share one server library between headless Server and optional Server GUI executables.
-  The headless executable must build/run without display servers, graphics devices,
-  Vulkan, Metal, X11, Wayland, Cocoa, or GUI dependencies. Optional administration
-  UI may use Core windowing/rendering only in its frontend; do not implement that
-  UI until explicitly requested.
+  One CLI executable owns both headless operation and an optional future native
+  administration GUI frontend over the same server library. No separate Server GUI
+  executable, macOS app bundle, or desktop entry. Headless builds/runs require no
+  display server, graphics device, Vulkan, Metal, X11, Wayland, Cocoa, or GUI
+  dependencies. Future GUI dependencies must load only when requested, never at
+  headless startup; simulation/networking remain independent. Do not implement the
+  administration interface until explicitly requested.
 - **Core (`src/core/`):** reusable platform-independent foundations and shared
   contracts, without application implementation dependencies.
 
@@ -170,7 +177,7 @@ Wayland generated inline helpers require C99 only in its adapter target; the pub
 API and common implementation remain C90. Linux builds require the selected native
 development libraries and protocol tools. Disable the optional windowing target for
 headless-only workspaces; never link it into Server core or the headless executable.
-The optional Server GUI may consume it separately. Native fullscreen
+A future optional GUI frontend inside the Server process may consume it. Native fullscreen
 is currently AppKit-only; other adapters offer borderless fullscreen. Wayland
 client-requested resize and unnegotiable borderless decorations return unsupported.
 macOS calls belong on the main thread. Full-display content is configurable:
@@ -215,7 +222,10 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
 - **Vulkan:** isolate API types, device management, swapchains, pipelines, command
   recording, and synchronization inside the backend, away from generic engine and
   gameplay interfaces.
-- **Metal:** use Apple's Metal API, with Cocoa/AppKit and `CAMetalLayer` where
+- **Metal:** prepare the initial frame before revealing the Launcher window; match
+  native backing to the initial clear color and synchronize the first drawable
+  with Core Animation. Normal presentation continues to skip hidden windows.
+  Use Apple's Metal API, with Cocoa/AppKit and `CAMetalLayer` where
   appropriate. MoltenVK must not be the required implementation. Isolate necessary
   Objective-C/Objective-C++ translation units in macOS implementation directories;
   exclude Metal objects/types from portable C interfaces. Provide a suitable shader
@@ -320,6 +330,12 @@ unless explicitly requested.
   `CMakeLists.txt`, `CMakePresets.json`, `CMakeVersions.cmake`, `CMakeApplications.cmake`, and the
   `CMakeConfig.h` template belong here.
   The three application directories and `src/core/` are the established source layout.
+- Target compact Release executables (currently aiming below 60 KiB for the
+  Launcher). `MAAGE_OPTIMIZE_SIZE` enables size optimization, supported LTO,
+  dead-code removal and symbol stripping. Retain runtime metadata, protections,
+  required backends, and useful diagnostics; report actual uncompressed sizes
+  and distinguish executable bytes from bundle/disk allocation. Debug builds
+  retain debugging support. Do not remove functionality merely to meet a size target.
 - Keep authored top-level build configuration and active presets at the root;
   root `CMakeLists.txt` orchestrates the workspace. Reserve `cmake/<name>/` for
   generated configuration, headers, and intermediates; corresponding compiled
@@ -341,14 +357,14 @@ unless explicitly requested.
 
 ## Native application builds
 
-- Launcher and Client are independently buildable native graphical applications:
-  Windows GUI subsystem/WinMain, macOS `.app` bundles with generated Info.plist,
-  and Linux ELF executables with installed `Terminal=false` desktop entries.
+- Launcher is the standalone graphical application: Windows GUI subsystem/WinMain,
+  macOS `.app` bundle with generated Info.plist, and Linux `Terminal=false` desktop
+  entry. Client is a separately versioned Launcher-managed native executable:
+  Windows GUI subsystem, plain macOS/Linux binary, no bundle or desktop entry.
   Keep startup logic in application callbacks; share only entry-point glue.
-- Server core is shared by CLI `maage_server` and optional `maage_server_gui`
-  (`MAAGE_BUILD_SERVER_GUI`, default OFF). The GUI uses the same platform packaging
-  rules and Server version; its startup stub is not an administration interface.
-  The headless executable remains a command-line program on every platform.
+- `maage_server` is one CLI executable using `MaaGE::Server`; an optional future
+  native GUI runs inside that process. No `maage_server_gui` target or packaging.
+  Preserve independent headless builds and defer GUI implementation.
 - Keep GUI identity/installation configuration in root `CMakeApplications.cmake`.
   Preserve `cmake/` intermediates and `build/` outputs, including complete bundles.
   Apple bundle version fields are numeric; `MaaGESemanticVersion` stores full SemVer
@@ -357,10 +373,18 @@ unless explicitly requested.
 - Core `MaaGE::Log` (`maage/log.h`) is the standard diagnostic API; use named
   `maage.*` loggers instead of ad hoc printf/file logging. Levels inherit through
   dot-separated names. Defaults are INFO, console on, file off, local timestamps;
-  GUI startup supplies per-user file defaults, and Server keeps console output.
+  Launcher logs belong in the per-user `.maage/logs/`: `%APPDATA%` on Windows,
+  `~/Library/Application Support` on macOS, and `~` on Linux. Create directories
+  as needed; never fall back to working/install directories for Launcher logs.
+  Client logs currently remain beside its executable. Logging overrides remain
+  supported; Server keeps console output.
   Configuration precedence is defaults → optional INI → explicit `--log-*` CLI
   overrides. Initialize early and shut down cleanly; FATAL never exits by itself.
   Keep logging synchronous, thread-safe, bounded, C90-compatible, and headless-safe.
+- File logging rotates on initialization: the configured filename holds the latest
+  session; previous files receive a local `YYYY-MM-DD_HH-MM-SS` rotation timestamp
+  before the extension; add a numeric suffix only on filename collisions. Preserve archives without overwriting
+  or automatic deletion; report rotation failures rather than append across sessions.
 - Log severity labels are exactly `[TRACE]`, `[DEBUG]`, `[INFO]`, `[WARN]`,
   `[ERROR]`, or `[FATAL]`. Align logger names with padding after the closing `]`,
   never inside brackets (for example, `[INFO]  [maage.launcher]`).
@@ -370,7 +394,7 @@ unless explicitly requested.
 - Launcher, Client, and Server independently follow SemVer 2.0.0, initially
   `1.0.0-alpha.1`. Maintain release fields centrally in root `CMakeVersions.cmake`,
   independently of `PROJECT_VERSION`; never duplicate constants in source.
-  Both Server frontends represent the same product and share its release fields.
+  Headless and optional GUI modes of the Server share its release fields.
 - Each build appends the same abbreviated Git HEAD hash as build metadata
   (`unknown` without Git metadata), refreshing generated C90 headers under the
   active `cmake/` tree even without reconfiguration. Metadata uses SemVer-safe

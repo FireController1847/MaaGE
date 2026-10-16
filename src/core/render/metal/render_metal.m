@@ -10,6 +10,7 @@ typedef struct maage_metal_renderer {
     id<MTLCommandQueue> queue;
     CAMetalLayer *layer;
     CALayer *previous_layer;
+    NSColor *previous_background;
     NSView *view;
     BOOL previous_wants_layer;
     int installed;
@@ -38,6 +39,7 @@ static maage_render_result maage_metal_create(maage_renderer *renderer)
     native->layer.displaySyncEnabled = YES;
     native->layer.allowsNextDrawableTimeout = YES;
     native->layer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
+    native->previous_background = [[(NSWindow *)renderer->native.handles.cocoa.window backgroundColor] retain];
     native->previous_wants_layer = [native->view wantsLayer];
     native->previous_layer = [[native->view layer] retain];
     [native->view setWantsLayer:YES];
@@ -58,16 +60,18 @@ static void maage_metal_destroy(maage_renderer *renderer)
     if (!native) return;
     /* Present waits for completion, so no submitted frame outlives these objects. */
     if (native->installed) {
+        [(NSWindow *)renderer->native.handles.cocoa.window setBackgroundColor:native->previous_background];
         [native->view setLayer:native->previous_layer];
         [native->view setWantsLayer:native->previous_wants_layer];
     }
+    [native->previous_background release];
     [native->previous_layer release];
     [native->layer release];
     [native->queue release];
     [native->device release];
     free(native);
 }
-static maage_render_result maage_metal_present(maage_renderer *renderer, const maage_window_state *state)
+static maage_render_result maage_metal_frame(maage_renderer *renderer, const maage_window_state *state, int preparing)
 {
     maage_metal_renderer *native = renderer->platform;
     NSWindow *window = renderer->native.handles.cocoa.window;
@@ -78,18 +82,26 @@ static maage_render_result maage_metal_present(maage_renderer *renderer, const m
     MTLRenderPassDescriptor *pass;
     maage_render_result result;
     if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
-    if ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible))
+    if (!preparing && ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible)))
         return MAAGE_RENDER_SKIPPED;
     pool = [[NSAutoreleasePool alloc] init];
     /* Use the entire content view, including permitted notch-adjacent regions.
      * Safe-area insets are for UI placement, not drawable cropping. */
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    native->layer.presentsWithTransaction = preparing != 0;
+    if (preparing) {
+        NSColor *color = [NSColor colorWithSRGBRed:renderer->clear[0] green:renderer->clear[1]
+            blue:renderer->clear[2] alpha:renderer->clear[3]];
+        [window setBackgroundColor:color];
+        native->layer.backgroundColor = [color CGColor];
+    }
     native->layer.frame = NSRectToCGRect([native->view bounds]);
     native->layer.contentsScale = state->width > 0 ?
         (double)state->framebuffer_width / state->width : [window backingScaleFactor];
     native->layer.drawableSize = CGSizeMake(state->framebuffer_width, state->framebuffer_height);
     [CATransaction commit];
+    if (preparing) [CATransaction flush];
     renderer->refresh = 0;
     drawable = [native->layer nextDrawable];
     if (!drawable) { [pool drain]; return MAAGE_RENDER_SKIPPED; }
@@ -104,14 +116,30 @@ static maage_render_result maage_metal_present(maage_renderer *renderer, const m
     encoder = [command renderCommandEncoderWithDescriptor:pass];
     if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
     [encoder endEncoding];
-    [command presentDrawable:drawable];
+    if (!preparing) [command presentDrawable:drawable];
     [command commit];
     [command waitUntilCompleted];
     result = [command status] == MTLCommandBufferStatusError ? MAAGE_RENDER_PLATFORM_ERROR : MAAGE_RENDER_OK;
+    if (preparing && result == MAAGE_RENDER_OK) {
+        /* Present completed content with the layer transaction before reveal. */
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        [drawable present];
+        [CATransaction commit];
+        [CATransaction flush];
+    }
     [pool drain];
     return result;
 }
+static maage_render_result maage_metal_present(maage_renderer *renderer, const maage_window_state *state)
+{
+    return maage_metal_frame(renderer, state, 0);
+}
+static maage_render_result maage_metal_prepare_frame(maage_renderer *renderer, const maage_window_state *state)
+{
+    return maage_metal_frame(renderer, state, 1);
+}
 const maage_render_backend_api maage_render_metal_api = {
     MAAGE_RENDER_METAL, maage_metal_create, maage_metal_destroy, maage_metal_present,
-    MAAGE_RENDER_CAPABILITIES_VERSION
+    MAAGE_RENDER_CAPABILITIES_VERSION, maage_metal_prepare_frame
 };

@@ -1,34 +1,30 @@
 # GUI identity is shared by CMake target configuration and build-time metadata.
-set(MAAGE_LAUNCHER_NAME "MaaGE Launcher")
+set(MAAGE_LAUNCHER_NAME "MaaGE")
 set(MAAGE_LAUNCHER_IDENTIFIER "org.maage.launcher")
 set(MAAGE_CLIENT_NAME "MaaGE Client")
 set(MAAGE_CLIENT_IDENTIFIER "org.maage.client")
-set(MAAGE_SERVER_GUI_NAME "MaaGE Server GUI")
-set(MAAGE_SERVER_GUI_IDENTIFIER "org.maage.server-gui")
 if(CMAKE_SCRIPT_MODE_FILE)
     return()
 endif()
 
 include(GNUInstallDirs)
 function(maage_configure_gui_application target application)
+    cmake_parse_arguments(MAAGE_GUI "LAUNCHER_MANAGED" "" "" ${ARGN})
     string(TOUPPER "${application}" MAAGE_APPLICATION)
     set(MAAGE_GUI_NAME "${MAAGE_${MAAGE_APPLICATION}_NAME}")
     set(MAAGE_GUI_IDENTIFIER "${MAAGE_${MAAGE_APPLICATION}_IDENTIFIER}")
-    if(application STREQUAL "server_gui")
-        set(MAAGE_PRODUCT SERVER)
-    else()
-        set(MAAGE_PRODUCT "${MAAGE_APPLICATION}")
-    endif()
+    set(MAAGE_PRODUCT "${MAAGE_APPLICATION}")
     target_sources(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src/core/application/entry.c")
     target_compile_definitions(${target} PRIVATE "MAAGE_APPLICATION_KEY=\"${application}\"")
     set_target_properties(${target} PROPERTIES
         WIN32_EXECUTABLE "${MAAGE_PLATFORM_WINDOWS}"
-        MACOSX_BUNDLE "${MAAGE_PLATFORM_MACOS}")
+        MACOSX_BUNDLE OFF)
     if(MAAGE_PLATFORM_WINDOWS)
         target_link_libraries(${target} PRIVATE shell32)
-    elseif(MAAGE_PLATFORM_MACOS)
+    elseif(MAAGE_PLATFORM_MACOS AND NOT MAAGE_GUI_LAUNCHER_MANAGED)
         set(MAAGE_NUMERIC_VERSION "${MAAGE_${MAAGE_PRODUCT}_VERSION_MAJOR}.${MAAGE_${MAAGE_PRODUCT}_VERSION_MINOR}.${MAAGE_${MAAGE_PRODUCT}_VERSION_PATCH}")
         set_target_properties(${target} PROPERTIES
+            MACOSX_BUNDLE ON
             OUTPUT_NAME "${MAAGE_GUI_NAME}"
             MACOSX_BUNDLE_BUNDLE_NAME "${MAAGE_GUI_NAME}"
             MACOSX_BUNDLE_GUI_IDENTIFIER "${MAAGE_GUI_IDENTIFIER}"
@@ -43,7 +39,7 @@ function(maage_configure_gui_application target application)
                 "$<TARGET_BUNDLE_DIR:${target}>/Contents/Info.plist"
             DEPENDS maage_versions VERBATIM)
         add_dependencies(${target} ${target}_metadata)
-    elseif(MAAGE_PLATFORM_LINUX)
+    elseif(MAAGE_PLATFORM_LINUX AND NOT MAAGE_GUI_LAUNCHER_MANAGED)
         set(MAAGE_DESKTOP_DIR "${PROJECT_BINARY_DIR}/generated/applications")
         file(MAKE_DIRECTORY "${MAAGE_DESKTOP_DIR}")
         file(WRITE "${MAAGE_DESKTOP_DIR}/${application}.desktop.in"

@@ -16,8 +16,8 @@ typedef struct maage_log_override {
 
 typedef struct maage_log_state {
     maage_log_config config;
-    char path[MAAGE_LOG_PATH_SIZE];
-    maage_log_override overrides[MAAGE_LOG_OVERRIDE_COUNT];
+    char *path;
+    maage_log_override *overrides;
     size_t count;
     FILE *output;
 } maage_log_state;
@@ -35,6 +35,8 @@ int maage_log_format(char *buffer, size_t capacity, const char *format, va_list 
 void maage_log_timestamp(char *buffer, size_t capacity);
 int maage_log_console_available(int error);
 void maage_log_platform_diagnostic(const char *message);
+/* Archive the previous file without replacing an existing archive. */
+int maage_log_rotate(const char *path);
 FILE *maage_log_open(const char *path, const char *mode);
 
 #endif
