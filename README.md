@@ -20,7 +20,7 @@ MaaGE is an independent native voxel platform inspired by Minecraft, designed fo
 
 The architecture separates three applications:
 
-- **Launcher** — planned asset management, Microsoft authentication, and Minecraft ownership verification. Mojang's proprietary assets will not be distributed.
+- **Launcher** — native first-run asset setup; Microsoft authentication and Minecraft ownership verification remain planned. Mojang's proprietary assets will not be distributed.
 - **Client** — independently versioned game executable for Launcher-managed installations and startup. Native windowing, rendering, and gameplay are planned.
 - **Server** — independent headless operation, with an optional graphical administration interface planned within the same executable.
 
@@ -28,7 +28,7 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The Launcher uses Core windowing and rendering for an RGB demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client is a startup stub; its Launcher-managed launch contract is not implemented. Server is a CLI startup stub; its optional integrated GUI is not implemented. Client gameplay and Server administration UI are not implemented. Authentication and asset management are also unimplemented. Metal and AppKit have been compiled locally; runtime testing remains manual, and the Windows/Linux backends have not been compiled locally.
+**Early development.** The Launcher has a native initial setup interface (AppKit on macOS, Win32 on Windows, GTK 3 on Linux) and a resumable asset manager for Minecraft Java Edition 1.7.10's asset index. After setup, it retains the Core RGB rendering demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client and Server remain startup stubs; gameplay, authentication, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; Windows/Linux compilation and runtime/UI testing remain outstanding.
 
 Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
@@ -39,6 +39,8 @@ Release builds optimize for size and strip nonessential symbols; use Debug for s
 Use **CMake 3.21+** and a C compiler. The Linux and macOS presets also require **Ninja**. From the repository root:
 
 Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. Windows/Linux rendering requires Vulkan development headers and a loader discoverable by CMake. macOS uses Xcode's AppKit, Metal, and QuartzCore frameworks.
+
+Launcher setup also requires **libcurl 7.85+** with HTTPS/TLS support, **json-c 0.15+**, and **OpenSSL Crypto 1.1.0+**. Linux additionally needs **GTK 3.22+**. These dependencies are excluded from headless workspaces. On macOS, `brew install json-c openssl@3` supplies the additional libraries; the Apple SDK supplies libcurl. On Debian/Ubuntu, install `libgtk-3-dev libcurl4-openssl-dev libjson-c-dev libssl-dev ca-certificates`. On Windows, install `curl:x64-windows json-c:x64-windows openssl:x64-windows` with vcpkg and pass `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` when configuring. Keep dependency libraries available at runtime; standalone dependency bundling is not yet implemented.
 
 **Linux / macOS** — GCC or Clang on Linux; Apple Clang on macOS:
 
@@ -60,7 +62,13 @@ Generated files go in `cmake/<preset>/`; compiled output goes in `build/<preset>
 
 Install with `cmake --install cmake/release --prefix <destination>` (add `--config Release` for multi-config builds). The Linux Launcher desktop entry uses the installed executable path and does not require a terminal. Headless Server builds require no windowing or graphics SDK.
 
-Launcher logs are stored in `%APPDATA%\.maage\logs\` on Windows, `~/Library/Application Support/.maage/logs/` on macOS, and `~/.maage/logs/` on Linux. Client logs currently remain in `logs/` beside its executable. Each launch starts a fresh latest file; the previous log is archived as, for example, `launcher.2026-10-15_19-30-00.log` (local rotation time, with a numeric suffix only if the name already exists). Archives are retained. Logging configuration and command-line options can override the defaults.
+Launcher data lives in `%APPDATA%/MaaGE/` on Windows, `~/Library/Application Support/MaaGE/` on macOS, and `$XDG_DATA_HOME/maage/` or `~/.local/share/maage/` on Linux. Launcher logs use its `logs/` subdirectory; old `.maage` logs are retained in place. Client logs currently remain in `logs/` beside its executable. Each launch starts a fresh latest file; the previous log is archived as, for example, `launcher.2026-10-15_19-30-00.log` (local rotation time, with a numeric suffix only if the name already exists). Archives are retained. Logging configuration and command-line options can override the defaults.
+
+## Initial Setup
+
+Setup retrieves the official version manifest, Minecraft 1.7.10 metadata, its referenced asset index, and only that index's content-addressed objects. The original logical-name mapping is retained in `assets/indexes/1.7.10.json`; objects live in `assets/objects/<hash-prefix>/<hash>`. Version metadata is stored in `versions/1.7.10/metadata.json`. No Minecraft JAR, Java runtime, native library, authentication, or game installation is required or downloaded. The index does not include every resource historically embedded in the client JAR.
+
+Downloads use verified HTTPS, four concurrent requests, timeouts, and limited retries. Cancel preserves verified objects. Retry reuses valid files; interrupted individual files restart, and their temporary files are removed. Continue becomes available only after verification succeeds. Subsequent launches check cached metadata, object sizes, and file fingerprints without requiring network access for an unchanged installation. Changed files are hashed; incomplete installations receive full verification. Run the Launcher with `--repair-assets` to verify every asset hash and repair missing or corrupted resources. Completion state is an optimization rather than the sole installation check. The interface and download behavior await programmer runtime testing.
 
 ## AI Collaborative Development
 

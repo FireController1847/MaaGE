@@ -1,0 +1,6 @@
+find_package(CURL 7.85 REQUIRED)
+add_library(maage_download STATIC download.c)
+add_library(MaaGE::Download ALIAS maage_download)
+maage_configure_portable_target(maage_download)
+target_include_directories(maage_download PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(maage_download PRIVATE CURL::libcurl MaaGE::Storage maage_core)

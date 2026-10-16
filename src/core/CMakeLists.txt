@@ -20,3 +20,8 @@ if(MAAGE_BUILD_RENDER)
 elseif(MAAGE_BUILD_LAUNCHER)
     message(FATAL_ERROR "The Launcher requires MAAGE_BUILD_RENDER=ON.")
 endif()
+
+if(MAAGE_BUILD_LAUNCHER)
+    add_subdirectory(storage)
+    add_subdirectory(net)
+endif()

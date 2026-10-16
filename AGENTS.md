@@ -110,8 +110,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   authentication and legitimate ownership verification through authorized mechanisms;
   profiles, client launch configuration, updates, and dependency management.
   Remain independent of client/server internals. Authentication, ownership
-  verification, UI, downloading, installation, and game launching remain deferred
-  until explicitly requested.
+  verification, modpack installation, and game launching remain deferred. Native
+  first-run setup and asset-index acquisition are implemented separately from authentication.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
@@ -262,11 +262,38 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   on graphics APIs. Headless operation must not acquire graphics dependencies;
   changing the rendering backend must not require rewriting simulation.
 
-## Launcher UI and authentication
+## Launcher UI and asset setup
 
-Launcher UI and authentication implementations have been removed pending redesign.
-Do not reintroduce them or their dependencies until explicitly requested. Preserve
-Core windowing/rendering and the Launcher's renderer demonstration in the meantime.
+Prefer native operating-system infrastructure for the lightweight Launcher:
+AppKit on macOS, Win32 controls on Windows, and GTK 3 on Linux. Launcher-owned
+adapters remain separate from Game UI; do not create a shared widget framework.
+Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
+actual rendering needs; the existing RGB demonstration follows successful setup.
+Authentication and game launching remain deferred.
+
+First-run setup acquires **only Minecraft Java Edition 1.7.10 asset-index resources**
+through official HTTPS metadata. It needs no sign-in, client/server JAR, Java,
+libraries, or modpack. Preserve the original index's logical-name mapping; it does
+not contain all resources historically embedded in the client JAR.
+
+The Launcher asset manager is UI-independent, with worker-thread operations,
+locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).
+Core provides generic UTF-8 storage/path and HTTPS transfer APIs, without Minecraft
+knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, and OpenSSL Crypto >=1.1.0;
+GTK >=3.22 stays in the Linux UI adapter. Keep these dependencies out of
+Server/headless targets.
+
+Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
+`$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
+configuration, and Launcher logs. Previous `.maage` logs remain untouched.
+Downloads are content-addressed, SHA-1/size-verified, bounded to four concurrent
+requests with three attempts and backoff, and atomically promoted from temporary
+files. Resume preserves completed objects; interrupted individual files restart.
+An installation lock serializes writers. Never use logical asset names as paths.
+Completion receipts optimize startup but cannot replace checking metadata and
+all object sizes/fingerprints; changed files and incomplete installations require
+hash verification, and Repair always verifies every hash. Runtime/UI behavior and
+non-macOS builds still require programmer validation.
 
 ## Planned engine systems
 
@@ -373,8 +400,8 @@ unless explicitly requested.
 - Core `MaaGE::Log` (`maage/log.h`) is the standard diagnostic API; use named
   `maage.*` loggers instead of ad hoc printf/file logging. Levels inherit through
   dot-separated names. Defaults are INFO, console on, file off, local timestamps;
-  Launcher logs belong in the per-user `.maage/logs/`: `%APPDATA%` on Windows,
-  `~/Library/Application Support` on macOS, and `~` on Linux. Create directories
+  Launcher logs belong in `logs/` beneath the platform MaaGE application-data
+  directory described above. Create directories
   as needed; never fall back to working/install directories for Launcher logs.
   Client logs currently remain beside its executable. Logging overrides remain
   supported; Server keeps console output.

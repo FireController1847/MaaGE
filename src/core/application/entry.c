@@ -24,58 +24,18 @@
 #endif
 
 #ifdef MAAGE_APPLICATION_USER_DATA
+#include "maage/storage.h"
 static char *maage_application_log_path(void)
 {
+    char directory[MAAGE_PATH_CAPACITY];
     char *path;
-#if MAAGE_PLATFORM_WINDOWS
-    const wchar_t *base = _wgetenv(L"APPDATA");
-    wchar_t *directory;
-    int bytes;
-    if (!base || !*base) return NULL;
-    directory = (wchar_t *)malloc((wcslen(base) + sizeof("\\.maage\\logs\\" MAAGE_APPLICATION_KEY ".log")) * sizeof(*directory));
-    if (!directory) return NULL;
-    wcscpy(directory, base);
-    wcscat(directory, L"\\.maage");
-    if (_wmkdir(directory) != 0 && errno != EEXIST) { free(directory); return NULL; }
-    wcscat(directory, L"\\logs");
-    if (_wmkdir(directory) != 0 && errno != EEXIST) { free(directory); return NULL; }
-    wcscat(directory, L"\\");
-    {
-        const char *key = MAAGE_APPLICATION_KEY;
-        size_t index = wcslen(directory);
-        while (*key) directory[index++] = (wchar_t)(unsigned char)*key++;
-        directory[index] = L'\0';
+    if (!maage_storage_data_path(directory, sizeof(directory)) ||
+        !maage_storage_join(directory, sizeof(directory), directory, "logs") ||
+        !maage_storage_directories(directory)) return NULL;
+    path = (char *)malloc(MAAGE_PATH_CAPACITY);
+    if (path && !maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, MAAGE_APPLICATION_KEY ".log")) {
+        free(path); return NULL;
     }
-    wcscat(directory, L".log");
-    bytes = WideCharToMultiByte(CP_UTF8, 0, directory, -1, NULL, 0, NULL, NULL);
-    path = bytes ? (char *)malloc((size_t)bytes) : NULL;
-    if (path && !WideCharToMultiByte(CP_UTF8, 0, directory, -1, path, bytes, NULL, NULL)) {
-        free(path); path = NULL;
-    }
-    free(directory);
-#else
-    const char *base = getenv("HOME");
-    char *cursor;
-#if MAAGE_PLATFORM_MACOS
-    const char *suffix = "/Library/Application Support/.maage/logs";
-#else
-    const char *suffix = "/.maage/logs";
-#endif
-    if (!base || base[0] != '/') return NULL;
-    path = (char *)malloc(strlen(base) + strlen(suffix) + sizeof("/" MAAGE_APPLICATION_KEY ".log"));
-    if (!path) return NULL;
-    strcpy(path, base); strcat(path, suffix);
-    for (cursor = path + 1; ; ++cursor) {
-        if (*cursor == '/' || !*cursor) {
-            char saved = *cursor;
-            *cursor = '\0';
-            if (mkdir(path, 0700) != 0 && errno != EEXIST) { free(path); return NULL; }
-            *cursor = saved;
-            if (!saved) break;
-        }
-    }
-    strcat(path, "/" MAAGE_APPLICATION_KEY ".log");
-#endif
     return path;
 }
 #else
@@ -168,7 +128,7 @@ static int maage_application_run(int argc, char *const argv[])
 #endif
     maage_log_init(&config, argc, argv);
 #ifdef MAAGE_APPLICATION_USER_DATA
-    if (!path) maage_log_error("maage.core.application", "Cannot resolve or create the per-user .maage/logs directory.");
+    if (!path) maage_log_error("maage.core.application", "Cannot resolve or create the per-user MaaGE logs directory.");
 #endif
     free(path);
     result = maage_application_main(argc, argv);

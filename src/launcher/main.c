@@ -1,4 +1,8 @@
 #include "maage/log.h"
+#include "maage/download.h"
+#include "assets.h"
+#include "native/setup.h"
+#include <string.h>
 #include <stddef.h>
 #include <math.h>
 #include "maage/window.h"
@@ -7,7 +11,7 @@
 #include "maage/launcher_version.h"
 #include "maage/application.h"
 
-int maage_application_main(int argc, char *const argv[])
+static int maage_launcher_demonstration(int argc, char *const argv[])
 {
     maage_window_system *system;
     maage_window *window;
@@ -85,4 +89,23 @@ int maage_application_main(int argc, char *const argv[])
         return 1;
     }
     return 0;
+}
+
+int maage_application_main(int argc, char *const argv[])
+{
+    maage_assets *assets;
+    int result, repair = 0, i;
+    for (i = 1; i < argc; ++i) if (!strcmp(argv[i], "--repair-assets")) repair = 1;
+    if (!maage_download_initialize()) {
+        maage_log_error("maage.launcher.assets", "Cannot initialize HTTPS networking.");
+        return 1;
+    }
+    assets = maage_assets_create();
+    if (!assets) { maage_download_shutdown(); return 1; }
+    maage_assets_start(assets, repair);
+    result = maage_setup_native_run(assets);
+    maage_assets_destroy(assets);
+    maage_download_shutdown();
+    if (result <= 0) return result < 0 ? 1 : 0;
+    return maage_launcher_demonstration(argc, argv);
 }
