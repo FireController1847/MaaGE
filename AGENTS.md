@@ -325,9 +325,10 @@ or new Microsoft authentication path until requested.
 The Launcher asset manager is UI-independent, with worker-thread operations,
 locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).
 Core provides generic UTF-8 storage/path and HTTPS transfer APIs, without Minecraft
-knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, OpenSSL Crypto >=1.1.0, and libzip >=1.7;
-GTK >=3.22 stays in the Linux UI adapter. Keep these dependencies out of
-Server/headless targets.
+knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, OpenSSL Crypto >=1.1.0, and libzip >=1.7.
+Discover libzip through pkg-config on Linux to avoid distro CMake exports requiring
+uninstalled command-line tools. GTK >=3.22 stays in the Linux UI adapter. Keep these
+dependencies out of Server/headless targets.
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
