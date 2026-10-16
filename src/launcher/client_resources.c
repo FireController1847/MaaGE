@@ -12,7 +12,7 @@
 #define MAAGE_CLIENT_ENTRY_LIMIT 67108864.0
 #define MAAGE_CLIENT_TOTAL_LIMIT 1073741824.0
 typedef struct maage_client_entry {
-    const char *name; /* Borrowed from the open archive. */
+    const char *name, *archive_name; /* Borrowed logical/source names. */
     zip_uint64_t index;
     double size;
     char hash[41], fingerprint[128];
@@ -128,6 +128,9 @@ maage_client_resources *maage_client_resources_open(const char *archive_path,
             (double)st.size > MAAGE_CLIENT_ENTRY_LIMIT) goto failed;
         expanded += (double)st.size;
         if (expanded > MAAGE_CLIENT_TOTAL_LIMIT) goto failed;
+        resources->entries[resources->count].archive_name = name;
+        if (!strncmp(name, "assets/minecraft/", sizeof("assets/minecraft/") - 1)) name += sizeof("assets/minecraft/") - 1;
+        if (!maage_minecraft_asset_path(application_data, name, destination, sizeof(destination))) goto unsafe;
         resources->entries[resources->count].name = name;
         resources->entries[resources->count].index = (zip_uint64_t)index;
         resources->entries[resources->count++].size = (double)st.size;
@@ -153,7 +156,7 @@ maage_client_resources *maage_client_resources_open(const char *archive_path,
         maage_client_entry *entry = &resources->entries[i];
         if (!maage_client_stream(resources, entry, NULL, observer, entry->hash)) goto failed;
         if (!observer->collision(observer->context, entry->name, entry->hash, entry->size, error)) goto failed;
-        maage_log_debug("maage.launcher.assets", "Client resource '%s': SHA-1 %s, %.0f bytes", entry->name, entry->hash, entry->size);
+        maage_log_debug("maage.launcher.assets", "Client resource '%s' -> '%s': SHA-1 %s, %.0f bytes", entry->archive_name, entry->name, entry->hash, entry->size);
         observer->progress(observer->context, MAAGE_CLIENT_INSPECT, (unsigned long)i + 1, resources->count, entry->name, 0);
     }
     maage_log_info("maage.launcher.assets", "Verified client archive: %lu applicable resources, %.0f expanded bytes", resources->count, expanded);
@@ -191,14 +194,22 @@ int maage_client_resources_reconstruct(maage_client_resources *resources,
         if (changed) {
             if (!maage_storage_remove(staging)) goto failed;
             cloned = 0;
-            for (j = 0; j < i; ++j) if (resources->entries[j].size == entry->size && !strcmp(resources->entries[j].hash, entry->hash)) {
+            if (strcmp(entry->archive_name, entry->name) &&
+                maage_minecraft_asset_path(application_data, entry->archive_name, source_path, sizeof(source_path))) {
+                strcpy(parent, source_path); separator = strrchr(parent, '/'); if (!separator) goto failed; *separator = 0;
+                if (maage_storage_directory_exists(parent) && maage_client_file_valid(source_path, entry, observer, entry->fingerprint)) {
+                    cloned = maage_storage_clone(source_path, staging, observer->cancelled, observer->context);
+                    if (cloned) maage_log_info("maage.launcher.assets", "Migrating client resource: %s -> %s", source_path, path);
+                }
+            }
+            for (j = 0; !cloned && j < i; ++j) if (resources->entries[j].size == entry->size && !strcmp(resources->entries[j].hash, entry->hash)) {
                 if (maage_minecraft_asset_path(application_data, resources->entries[j].name, source_path, sizeof(source_path)) &&
                     maage_client_file_valid(source_path, entry, observer, entry->fingerprint))
                     cloned = maage_storage_clone(source_path, staging, observer->cancelled, observer->context);
                 break;
             }
             output = cloned ? NULL : maage_storage_open(staging, "wb"); if (!cloned && !output) goto failed;
-            maage_log_info("maage.launcher.assets", "Extracting client JAR resource '%s' -> %s (staging %s)", entry->name, path, staging);
+            maage_log_info("maage.launcher.assets", "Extracting client JAR resource '%s' -> %s (staging %s)", entry->archive_name, path, staging);
             if (cloned) { strcpy(hash, entry->hash); ok = 1; }
             else {
                 ok = maage_client_stream(resources, entry, output, observer, hash);
@@ -209,7 +220,7 @@ int maage_client_resources_reconstruct(maage_client_resources *resources,
                 !maage_client_file_valid(path, entry, observer, entry->fingerprint)) goto failed;
             maage_log_info("maage.launcher.assets", "Reconstructed client resource '%s' via %s: %s (SHA-1 %s, %.0f bytes)", entry->name, cloned == 1 ? "hard link" : cloned ? "copy" : "ZIP extraction", path, entry->hash, entry->size);
         } else maage_log_debug("maage.launcher.assets", "Using verified client resource '%s': %s", entry->name, path);
-        if (!observer->record(observer->context, entry->name, entry->hash, entry->size, entry->fingerprint)) goto failed;
+        if (!observer->record(observer->context, entry->name, entry->archive_name, entry->hash, entry->size, entry->fingerprint)) goto failed;
         observer->progress(observer->context, MAAGE_CLIENT_RECONSTRUCT, i + 1, resources->count, entry->name, changed);
     }
     return 1;
@@ -231,7 +242,7 @@ int maage_client_resources_check(maage_client_resources *resources,
             (strcmp(fingerprint, entry->fingerprint) && !maage_client_file_valid(path, entry, observer, fingerprint))) {
             strcpy(error, "A reconstructed client resource changed during setup. Retry to repair it from the cached JAR."); return 0;
         }
-        if (!observer->record(observer->context, entry->name, entry->hash, entry->size, fingerprint)) return 0;
+        if (!observer->record(observer->context, entry->name, entry->archive_name, entry->hash, entry->size, fingerprint)) return 0;
         observer->progress(observer->context, MAAGE_CLIENT_FINAL_CHECK, i + 1, resources->count, entry->name, 0);
     }
     return 1;

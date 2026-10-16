@@ -313,15 +313,54 @@ static void maage_assets_client_progress(void *context, maage_client_phase phase
     maage_assets_unlock(assets);
     maage_assets_count(assets, objects, logical);
 }
-static int maage_assets_client_record(void *context, const char *name, const char *hash, double size, const char *fingerprint)
+static int maage_assets_client_record(void *context, const char *name, const char *archive_name, const char *hash, double size, const char *fingerprint)
 {
     struct json_object *record = json_object_new_object();
     maage_assets_client_context *client = (maage_assets_client_context *)context;
     if (!record) return 0;
+    json_object_object_add(record, "archive_path", json_object_new_string(archive_name));
     json_object_object_add(record, "sha1", json_object_new_string(hash));
     json_object_object_add(record, "size", json_object_new_double(size));
     json_object_object_add(record, "fingerprint", json_object_new_string(fingerprint));
     return json_object_object_add(client->records, name, record) == 0;
+}
+static int maage_assets_client_path_owned(struct json_object *records, const char *name)
+{
+    struct json_object_iter iterator;
+    const char *a, *b;
+    json_object_object_foreachC(records, iterator) {
+        a = name; b = iterator.key;
+        while (*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b)) { ++a; ++b; }
+        if (!*a && !*b) return 1;
+    }
+    return 0;
+}
+/* Only remove old names whose verified replacement exists. Unknown contents and
+ * paths still owned by the index remain untouched; prune empty directories only. */
+static void maage_assets_client_cleanup(maage_assets_client_context *client)
+{
+    struct json_object_iter iterator;
+    char path[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], boundary[MAAGE_PATH_CAPACITY], *separator;
+    const char *archive_name, *hash;
+    if (!maage_minecraft_asset_path(client->assets->root, "assets", boundary, sizeof(boundary))) return;
+    json_object_object_foreachC(client->records, iterator) {
+        if (maage_assets_cancelled(client->assets)) return;
+        archive_name = maage_assets_string(iterator.val, "archive_path"); hash = maage_assets_string(iterator.val, "sha1");
+        if (!archive_name || strncmp(archive_name, "assets/minecraft/", sizeof("assets/minecraft/") - 1) ||
+            !strcmp(archive_name, iterator.key) || !maage_assets_hash(hash) ||
+            maage_assets_client_path_owned(client->index_objects, archive_name) ||
+            maage_assets_client_path_owned(client->records, archive_name) ||
+            !maage_minecraft_asset_path(client->assets->root, archive_name, path, sizeof(path))) continue;
+        strcpy(parent, path); separator = strrchr(parent, '/'); if (!separator) continue; *separator = 0;
+        if (!maage_storage_directory_exists(parent) || !maage_assets_file(client->assets, path, hash, -1)) continue;
+        if (!maage_storage_remove(path)) { maage_log_warn("maage.launcher.assets", "Cannot remove migrated client resource: %s", path); continue; }
+        maage_log_info("maage.launcher.assets", "Removed verified obsolete client resource: %s", path);
+        while (strlen(parent) >= strlen(boundary)) {
+            maage_storage_remove_directory(parent);
+            if (!strcmp(parent, boundary)) break;
+            separator = strrchr(parent, '/'); if (!separator) break; *separator = 0;
+        }
+    }
 }
 static int maage_assets_install(maage_assets *assets, char error[512])
 {
@@ -649,8 +688,9 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         }
         json_object_object_add(new_logical, logical[i].name, json_object_new_string(fingerprint));
     }
-    if (!maage_client_resources_check(client_resources, assets->root, &client_observer, error)) goto cleanup;
     if (!maage_assets_file(assets, client_path, client_hash, client_size)) goto changed_error;
+    maage_assets_client_cleanup(&client_context);
+    if (!maage_client_resources_check(client_resources, assets->root, &client_observer, error)) goto cleanup;
     maage_assets_lock(assets); assets->progress.reconstruction_ready = 1; maage_assets_unlock(assets);
     json_object_object_add(receipt, "complete", json_object_new_boolean(1));
     if (!maage_assets_write_json(state_path, receipt)) goto storage_error;
