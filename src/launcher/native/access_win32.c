@@ -8,11 +8,11 @@
 typedef struct maage_access_win32 {
     maage_access *access;
     maage_access_snapshot snapshot;
-    HWND window, profiles, identity, status, connect, disconnect, rescan, manual, next, cancel;
+    HWND window, profiles, identity, status, connect, stored, disconnect, rescan, manual, next, cancel;
     HFONT font, heading;
     HBRUSH background, panel;
     unsigned revision;
-    int result, closing;
+    int result, closing, manage_accounts;
 } maage_access_win32;
 static void maage_access_win32_text(HWND control, const char *text)
 {
@@ -39,6 +39,7 @@ static void maage_access_win32_tick(maage_access_win32 *ui)
     if (selected >= 0) strcpy(uuid, ui->snapshot.profiles[selected].uuid);
     maage_access_snapshot_get(ui->access, &ui->snapshot);
     if (ui->closing && !ui->snapshot.busy) { DestroyWindow(ui->window); return; }
+    if (!ui->manage_accounts && ui->snapshot.auto_continue && ui->snapshot.allowed && !ui->snapshot.busy) { ui->result = 1; DestroyWindow(ui->window); return; }
     if (ui->revision != ui->snapshot.revision) {
         SendMessageW(ui->profiles, CB_RESETCONTENT, 0, 0); selected = 0;
         for (i = 0; i < ui->snapshot.count; ++i) {
@@ -55,9 +56,11 @@ static void maage_access_win32_tick(maage_access_win32 *ui)
     maage_access_win32_text(ui->identity, text); maage_access_win32_text(ui->status, ui->snapshot.status);
     idle = !ui->snapshot.busy && !ui->closing;
     EnableWindow(ui->profiles, idle && ui->snapshot.count > 0); EnableWindow(ui->connect, idle && p && p->available);
-    SetWindowTextW(ui->connect, p && p->connected ? L"Verify Again" : L"Connect & Verify");
+    SetWindowTextW(ui->connect, p && p->imported ? L"Re-import" : L"Import Account");
+    EnableWindow(ui->stored, idle && p && p->imported);
     EnableWindow(ui->disconnect, idle && p && p->connected); EnableWindow(ui->rescan, idle); EnableWindow(ui->manual, idle);
     EnableWindow(ui->next, idle && ui->snapshot.allowed); EnableWindow(ui->cancel, !ui->closing);
+    if (!IsWindowVisible(ui->window)) { ShowWindow(ui->window,SW_SHOW); UpdateWindow(ui->window); SetFocus(ui->profiles); }
 }
 static void maage_access_win32_manual(maage_access_win32 *ui)
 {
@@ -96,13 +99,14 @@ static LRESULT CALLBACK maage_access_win32_proc(HWND window, UINT message, WPARA
             int selected = maage_access_win32_selected(ui);
             if (LOWORD(wparam) == 103) maage_access_scan(ui->access, NULL);
             else if (LOWORD(wparam) == 104) maage_access_win32_manual(ui);
+            else if (selected >= 0 && LOWORD(wparam) == 107) maage_access_verify_local(ui->access, ui->snapshot.profiles[selected].uuid);
             else if (selected >= 0 && LOWORD(wparam) == 102) maage_access_disconnect(ui->access, ui->snapshot.profiles[selected].uuid);
             else if (selected >= 0 && LOWORD(wparam) == 101) {
                 wchar_t consent[2048];
                 char text[2048], uuid[33];
                 maage_access_profile *p = &ui->snapshot.profiles[selected];
                 strcpy(uuid, p->uuid); sprintf(text, "%s (%s)\n%s\n\n%s", p->name, p->uuid, p->sources, MAAGE_ACCESS_CONSENT);
-                if (MultiByteToWideChar(CP_UTF8, 0, text, -1, consent, 2048) && MessageBoxW(window, consent, L"Connect and Verify Minecraft Access", MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) == IDOK) maage_access_connect(ui->access, uuid);
+                if (MultiByteToWideChar(CP_UTF8, 0, text, -1, consent, 2048) && MessageBoxW(window, consent, L"Import Minecraft Account", MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) == IDOK) maage_access_connect(ui->access, uuid);
             }
             maage_access_win32_tick(ui);
         }
@@ -126,7 +130,7 @@ static LRESULT CALLBACK maage_access_win32_proc(HWND window, UINT message, WPARA
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
-int maage_access_native_run(maage_access *access)
+int maage_access_native_run(maage_access *access, int manage_accounts)
 {
     maage_access_win32 ui;
     WNDCLASSW klass;
@@ -134,7 +138,7 @@ int maage_access_native_run(maage_access *access)
     MSG message;
     int received;
     HWND label;
-    memset(&ui, 0, sizeof(ui)); ui.access = access; ui.revision = (unsigned)-1;
+    memset(&ui, 0, sizeof(ui)); ui.access = access; ui.manage_accounts = manage_accounts; ui.revision = (unsigned)-1;
     ui.background = CreateSolidBrush(RGB(28,28,28)); ui.panel = CreateSolidBrush(RGB(41,41,41));
     ui.font = CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
     ui.heading = CreateFontW(-27,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
@@ -145,10 +149,11 @@ int maage_access_native_run(maage_access *access)
     maage_access_win32_control(&ui,L"STATIC",L"MaaGE Launcher",0,28,22,260,24,0);
     maage_access_win32_control(&ui,L"STATIC",L"Initial setup · 1 of 2",SS_RIGHT,402,22,220,24,0);
     label = maage_access_win32_control(&ui,L"STATIC",L"✓ Verify Minecraft Access",0,30,76,590,38,106); SendMessageW(label,WM_SETFONT,(WPARAM)ui.heading,TRUE);
-    maage_access_win32_control(&ui,L"STATIC",L"Connect an existing Minecraft account to continue setting up MaaGE.",0,32,121,584,38,0);
+    maage_access_win32_control(&ui,L"STATIC",L"Import an existing Minecraft account into MaaGE to continue.",0,32,121,584,38,0);
     ui.profiles = maage_access_win32_control(&ui,L"COMBOBOX",L"Minecraft profiles",WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,44,180,562,260,105);
     ui.identity = maage_access_win32_control(&ui,L"STATIC",L"",0,48,218,554,82,0);
-    ui.connect = maage_access_win32_control(&ui,L"BUTTON",L"Connect & Verify",WS_TABSTOP | BS_PUSHBUTTON,430,305,176,30,101);
+    ui.connect = maage_access_win32_control(&ui,L"BUTTON",L"Import Account",WS_TABSTOP | BS_PUSHBUTTON,430,305,176,30,101);
+    ui.stored = maage_access_win32_control(&ui,L"BUTTON",L"Verify Saved",WS_TABSTOP | BS_PUSHBUTTON,48,305,150,30,107);
     ui.disconnect = maage_access_win32_control(&ui,L"BUTTON",L"Disconnect",WS_TABSTOP | BS_PUSHBUTTON,294,305,126,30,102);
     maage_access_win32_control(&ui,L"STATIC",L"Scan for Minecraft Accounts",0,32,368,380,26,0);
     ui.rescan = maage_access_win32_control(&ui,L"BUTTON",L"Rescan",WS_TABSTOP | BS_PUSHBUTTON,516,362,106,32,103);
@@ -157,7 +162,7 @@ int maage_access_native_run(maage_access *access)
     ui.status = maage_access_win32_control(&ui,L"STATIC",L"",0,30,518,590,58,0);
     ui.cancel = maage_access_win32_control(&ui,L"BUTTON",L"Cancel",WS_TABSTOP | BS_PUSHBUTTON,402,586,100,30,IDCANCEL);
     ui.next = maage_access_win32_control(&ui,L"BUTTON",L"Continue",WS_TABSTOP | BS_DEFPUSHBUTTON,512,586,110,30,IDOK);
-    maage_access_win32_tick(&ui); ShowWindow(ui.window,SW_SHOW); UpdateWindow(ui.window); SetFocus(ui.profiles);
+    EnableWindow(ui.next,FALSE);
     if (!SetTimer(ui.window,1,100,NULL)) { DestroyWindow(ui.window); ui.result = -1; goto cleanup; }
     while ((received = GetMessageW(&message,NULL,0,0)) > 0) if (!IsDialogMessageW(ui.window,&message)) { TranslateMessage(&message); DispatchMessageW(&message); }
     if (received < 0) { DestroyWindow(ui.window); ui.result = -1; }

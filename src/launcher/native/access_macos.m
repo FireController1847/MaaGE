@@ -17,11 +17,11 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSPopUpButton *profiles;
 @property(nonatomic, strong) NSTextField *identity, *status;
-@property(nonatomic, strong) NSButton *connect, *disconnect, *rescan, *manual, *next, *cancel;
+@property(nonatomic, strong) NSButton *connect, *stored, *disconnect, *rescan, *manual, *next, *cancel;
 @property(nonatomic, strong) NSProgressIndicator *progress;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic) unsigned revision;
-@property(nonatomic) BOOL closing;
+@property(nonatomic) BOOL closing, manageAccounts;
 @property(nonatomic) int result;
 @end
 @implementation MaaGEAccessController
@@ -46,12 +46,14 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     (void)sender;
     NSString *uuid = self.profiles.selectedItem.representedObject;
     if (!uuid || _snapshot.busy) return;
-    NSAlert *alert = [[NSAlert alloc] init]; alert.messageText = @"Connect and Verify Minecraft Access";
+    NSAlert *alert = [[NSAlert alloc] init]; alert.messageText = @"Import Minecraft Account";
     alert.informativeText = [NSString stringWithFormat:@"%@\n\n%s", self.identity.stringValue, MAAGE_ACCESS_CONSENT];
-    [alert addButtonWithTitle:@"Connect & Verify"]; [alert addButtonWithTitle:@"Cancel"];
+    [alert addButtonWithTitle:@"Import Account"]; [alert addButtonWithTitle:@"Cancel"];
     if ([alert runModal] == NSAlertFirstButtonReturn) maage_access_connect(self.access, uuid.UTF8String);
     [self refresh:nil];
 }
+- (void)verifySaved:(id)sender
+{ (void)sender; NSString *uuid = self.profiles.selectedItem.representedObject; if (uuid) maage_access_verify_local(self.access, uuid.UTF8String); [self refresh:nil]; }
 - (void)disconnectProfile:(id)sender
 { (void)sender; NSString *uuid = self.profiles.selectedItem.representedObject; if (uuid) maage_access_disconnect(self.access, uuid.UTF8String); [self refresh:nil]; }
 - (void)scan:(id)sender
@@ -71,6 +73,7 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     NSString *selected = self.profiles.selectedItem.representedObject;
     maage_access_snapshot_get(self.access, &_snapshot);
     if (self.closing && !_snapshot.busy) { [self finish:0]; return; }
+    if (!self.manageAccounts && _snapshot.auto_continue && _snapshot.allowed && !_snapshot.busy) { [self finish:1]; return; }
     if (self.revision != _snapshot.revision) {
         [self.profiles removeAllItems];
         for (unsigned i = 0; i < _snapshot.count; ++i) {
@@ -91,11 +94,13 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     BOOL idle = !_snapshot.busy && !self.closing;
     self.profiles.enabled = idle && _snapshot.count > 0;
     self.connect.enabled = idle && p && p->available;
-    self.connect.title = p && p->connected ? @"Verify Again" : @"Connect & Verify";
+    self.connect.title = p && p->imported ? @"Re-import" : @"Import Account";
+    self.stored.enabled = idle && p && p->imported;
     self.disconnect.enabled = idle && p && p->connected;
     self.rescan.enabled = idle; self.manual.enabled = idle; self.cancel.enabled = !self.closing;
     self.next.enabled = idle && _snapshot.allowed;
     if (_snapshot.busy) [self.progress startAnimation:nil]; else [self.progress stopAnimation:nil];
+    if (!self.window.visible) [self.window makeKeyAndOrderFront:nil];
 }
 - (NSButton *)button:(NSString *)title action:(SEL)action frame:(NSRect)frame parent:(NSView *)parent
 {
@@ -112,12 +117,13 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     NSTextField *step = maage_access_label(content, @"Initial setup · 1 of 2", NSMakeRect(422, 565, 200, 23), 12, NO); step.alignment = NSTextAlignmentRight;
     NSTextField *icon = maage_access_label(content, @"✓", NSMakeRect(30, 494, 42, 38), 30, YES); icon.textColor = [NSColor colorWithSRGBRed:.91 green:.29 blue:.68 alpha:1];
     maage_access_label(content, @"Verify Minecraft Access", NSMakeRect(78, 500, 540, 35), 25, YES);
-    maage_access_label(content, @"Connect an existing Minecraft account to continue setting up MaaGE.", NSMakeRect(79, 450, 535, 42), 13, NO);
+    maage_access_label(content, @"Import an existing Minecraft account into MaaGE to continue.", NSMakeRect(79, 450, 535, 42), 13, NO);
     NSView *panel = [[NSView alloc] initWithFrame:NSMakeRect(28, 270, 594, 172)]; panel.wantsLayer = YES; panel.layer.backgroundColor = maage_access_color(.16).CGColor; panel.layer.cornerRadius = 8; [content addSubview:panel];
     self.profiles = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(16, 129, 562, 28) pullsDown:NO]; self.profiles.menu.autoenablesItems = NO; self.profiles.target = self; self.profiles.action = @selector(selectProfile:); [panel addSubview:self.profiles];
     self.identity = maage_access_label(panel, @"", NSMakeRect(20, 48, 554, 78), 12, NO);
+    self.stored = [self button:@"Verify Saved" action:@selector(verifySaved:) frame:NSMakeRect(16, 10, 150, 30) parent:panel];
     self.disconnect = [self button:@"Disconnect" action:@selector(disconnectProfile:) frame:NSMakeRect(274, 10, 126, 30) parent:panel];
-    self.connect = [self button:@"Connect & Verify" action:@selector(connectProfile:) frame:NSMakeRect(404, 10, 174, 30) parent:panel];
+    self.connect = [self button:@"Import Account" action:@selector(connectProfile:) frame:NSMakeRect(404, 10, 174, 30) parent:panel];
     maage_access_label(content, @"Scan for Minecraft Accounts", NSMakeRect(32, 227, 370, 24), 13, YES);
     self.rescan = [self button:@"Rescan" action:@selector(scan:) frame:NSMakeRect(516, 222, 106, 31) parent:content];
     NSButton *coming = [NSButton buttonWithTitle:@"Verify Through Minecraft — Coming Soon" target:nil action:nil]; coming.frame = NSMakeRect(28, 165, 594, 43); coming.enabled = NO; [content addSubview:coming];
@@ -126,15 +132,15 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     self.status = maage_access_label(content, @"", NSMakeRect(30, 57, 590, 53), 12, NO); self.status.textColor = maage_access_color(.70);
     self.cancel = [self button:@"Cancel" action:@selector(cancelAccess:) frame:NSMakeRect(402, 17, 100, 32) parent:content]; self.cancel.keyEquivalent = @"\e";
     self.next = [self button:@"Continue" action:@selector(continueAccess:) frame:NSMakeRect(512, 17, 110, 32) parent:content]; self.next.keyEquivalent = @"\r";
-    [self refresh:nil]; [self.window center]; [self.window makeKeyAndOrderFront:nil];
+    self.next.enabled = NO; [self.window center];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:.1 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
 }
 @end
-int maage_access_native_run(maage_access *access)
+int maage_access_native_run(maage_access *access, int manage_accounts)
 {
     @autoreleasepool {
         [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-        MaaGEAccessController *controller = [[MaaGEAccessController alloc] init]; controller.access = access;
+        MaaGEAccessController *controller = [[MaaGEAccessController alloc] init]; controller.access = access; controller.manageAccounts = manage_accounts != 0;
         id previous = NSApp.delegate; NSApp.delegate = controller;
         NSMenu *menu = [[NSMenu alloc] init]; NSMenuItem *item = [[NSMenuItem alloc] init]; [menu addItem:item];
         NSMenu *application = [[NSMenu alloc] initWithTitle:@"MaaGE"];

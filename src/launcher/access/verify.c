@@ -153,7 +153,7 @@ maage_access_state maage_access_verify(const char *token, const char *uuid,
      * entitlement objects are never consulted. Do not interpret unrelated SKUs. */
     if (game && !cancelled(context)) {
         state = MAAGE_ACCESS_VERIFIED;
-        strcpy(detail, "Minecraft Java access verified. Valid for up to one hour in this Launcher session.");
+        strcpy(detail, "Minecraft Java access verified. The account service can retain a bounded local verification lease.");
     }
 done:
     if (profile) json_object_put(profile);

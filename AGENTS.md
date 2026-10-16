@@ -282,27 +282,42 @@ no Java runtime, server JAR, modpack import, or version-management system.
 Verify Minecraft Access precedes Preparing MaaGE. Discovery, explicit connection,
 and authenticated verification are distinct states. Prioritize existing compatible
 PrismLauncher/MultiMC V3 MSA sessions; MaaGE needs no Microsoft OAuth Client ID and
-must not perform a new Microsoft sign-in. Obtain only the selected account's
-short-lived Minecraft Services `ygg.token`, after explicit consent. Stream external
-account files selectively; never import Microsoft tokens, refresh tokens, full
-credential databases, passwords, or other applications' protected/vault data.
-Read original launcher files without modifying them. Check authenticated
-`minecraft/profile` UUID/username and `entitlements/mcstore` Java game entitlement
-over verified HTTPS; failures, missing sessions, and application-bound tokens never
-grant access. Never log/persist credentials or raw authentication responses.
+must not perform a new Microsoft sign-in. After explicit Import Account consent,
+selectively read only the selected Minecraft Services `ygg.token`; never import
+Microsoft tokens, refresh tokens, passwords, full authentication databases, or
+other applications' protected/vault data. Source launcher files remain read-only.
+Check authenticated `minecraft/profile` UUID/username and `entitlements/mcstore`
+Java access over verified HTTPS; failures/app-bound tokens never grant access.
+Never log credentials or raw responses. Wipe transient token and JSON copies.
 
-The Launcher-owned access service provides asynchronous discovery/verification and
-locked nonsecret snapshots. UUID deduplication retains source associations; native
-screens support rescan/manual folders, connect/retry, disconnect, and cancellation.
-Official/embedded launcher account records are discovery-only; FTB/CurseForge opaque
-or protected account stores remain unsupported. Do not confuse installation
-profiles with players or advertise directory detection as verified support.
-Persist only linked public metadata in `config/minecraft-profiles.json` and manual
-configuration-folder references. Verified authority is process-local for at most
-one hour (shorter for known session expiry), never restored from disk; reverify
-after every restart. One currently verified profile is sufficient. Both controller
-and asset manager enforce this policy, including repair/retry and active work;
-expiry/disconnection/cancellation revoke access without deleting existing resources.
+Import creates a MaaGE-owned account with stable UUID/name and a versioned
+`minecraft-session-import` credential provider, allowing future Microsoft OAuth
+credentials to replace it without recreating identity. Store AES-256-GCM account
+records at `config/accounts/<uuid>.account` with a random local `key.bin`, bound to
+the UUID and restricted to the current user (0600/protected DACL). Atomic writes
+and a store lock protect updates. No system credential stores/DPAPI; local key and
+ciphertext are both accessible to the local user. Keep public metadata in
+`config/minecraft-profiles.json` separate from credentials. Disconnect removes the
+saved credential; source launchers/resources remain unchanged.
+
+The UI-independent access service restores authenticated local leases across
+restarts for at most one hour, capped by imported token expiry. Public registry
+flags cannot grant authority. Recheck saved tokens automatically when leases need
+renewal; valid local accounts skip the import screen without source-launcher I/O
+for credentials. Verify Saved reads only MaaGE's account; Re-import requires fresh
+consent. `--manage-accounts` keeps account controls accessible despite automatic
+startup continuation. Unknown token expiry is capped at one hour. Expired tokens require
+re-import until a separately requested Microsoft sign-in/refresh provider exists;
+do not impersonate another launcher or use its OAuth client/refresh tokens.
+Discovery/connection/import/verification remain distinct, with UUID deduplication,
+multiple local accounts, rescan/manual folders, and responsive native controls.
+Official/embedded formats remain discovery-only; opaque FTB/CurseForge stores are
+unsupported. Directory detection, installation profiles, and cached source flags
+never prove access. The controller and asset manager require one current account
+lease, including repair/retry/active work; expiry, disconnect, and cancellation
+revoke active access without deleting resources. Local credential storage and
+background verification stay out of game clients and generic Core APIs; Core
+provides only generic filesystem permissions/atomic I/O and other foundations.
 Expose **Verify Through Minecraft — Coming Soon** as disabled; future multiplayer
 verification belongs in a separate provider, with no protocol/server implementation
 or new Microsoft authentication path until requested.

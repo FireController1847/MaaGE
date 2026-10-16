@@ -5,9 +5,9 @@
 typedef struct maage_access_gtk {
     maage_access *access;
     maage_access_snapshot snapshot;
-    GtkWidget *window, *profiles, *identity, *status, *spinner, *connect, *disconnect, *rescan, *manual, *next, *cancel;
+    GtkWidget *window, *profiles, *identity, *status, *spinner, *connect, *stored, *disconnect, *rescan, *manual, *next, *cancel;
     unsigned revision;
-    int result, closing, updating;
+    int result, closing, updating, manage_accounts;
 } maage_access_gtk;
 static GtkWidget *maage_access_gtk_label(GtkWidget *box, const char *text, const char *style)
 {
@@ -28,6 +28,7 @@ static gboolean maage_access_gtk_tick(gpointer context)
     if (selected) g_strlcpy(uuid, selected, sizeof(uuid));
     maage_access_snapshot_get(ui->access, &ui->snapshot);
     if (ui->closing && !ui->snapshot.busy) { gtk_main_quit(); return G_SOURCE_CONTINUE; }
+    if (!ui->manage_accounts && ui->snapshot.auto_continue && ui->snapshot.allowed && !ui->snapshot.busy) { ui->result = 1; gtk_main_quit(); return G_SOURCE_CONTINUE; }
     if (ui->revision != ui->snapshot.revision) {
         ui->updating = 1; gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(ui->profiles));
         for (i = 0; i < ui->snapshot.count; ++i) {
@@ -45,11 +46,13 @@ static gboolean maage_access_gtk_tick(gpointer context)
     gtk_label_set_text(GTK_LABEL(ui->identity), text); gtk_label_set_text(GTK_LABEL(ui->status), ui->snapshot.status);
     idle = !ui->snapshot.busy && !ui->closing;
     gtk_widget_set_sensitive(ui->profiles, idle && ui->snapshot.count);
-    gtk_widget_set_sensitive(ui->connect, idle && p && p->available); gtk_button_set_label(GTK_BUTTON(ui->connect), p && p->connected ? "Verify Again" : "Connect & Verify");
+    gtk_widget_set_sensitive(ui->connect, idle && p && p->available); gtk_button_set_label(GTK_BUTTON(ui->connect), p && p->imported ? "Re-import" : "Import Account");
+    gtk_widget_set_sensitive(ui->stored, idle && p && p->imported);
     gtk_widget_set_sensitive(ui->disconnect, idle && p && p->connected);
     gtk_widget_set_sensitive(ui->rescan, idle); gtk_widget_set_sensitive(ui->manual, idle);
     gtk_widget_set_sensitive(ui->next, idle && ui->snapshot.allowed); gtk_widget_set_sensitive(ui->cancel, !ui->closing);
     if (ui->snapshot.busy) gtk_spinner_start(GTK_SPINNER(ui->spinner)); else gtk_spinner_stop(GTK_SPINNER(ui->spinner));
+    if (!gtk_widget_get_visible(ui->window)) gtk_widget_show(ui->window);
     return G_SOURCE_CONTINUE;
 }
 static void maage_access_gtk_select(GtkWidget *widget, gpointer context)
@@ -69,11 +72,17 @@ static void maage_access_gtk_connect(GtkWidget *widget, gpointer context)
     (void)widget;
     if (!selected || !*selected || ui->snapshot.busy) return;
     g_strlcpy(uuid, selected, sizeof(uuid));
-    dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE, "Connect and Verify Minecraft Access");
+    dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE, "Import Minecraft Account");
     gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s\n\n%s", gtk_label_get_text(GTK_LABEL(ui->identity)), MAAGE_ACCESS_CONSENT);
-    gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL, "Connect & Verify", GTK_RESPONSE_ACCEPT, NULL);
+    gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL, "Import Account", GTK_RESPONSE_ACCEPT, NULL);
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) maage_access_connect(ui->access, uuid);
     gtk_widget_destroy(dialog); maage_access_gtk_tick(ui);
+}
+static void maage_access_gtk_saved(GtkWidget *widget, gpointer context)
+{
+    maage_access_gtk *ui = context; const char *selected = gtk_combo_box_get_active_id(GTK_COMBO_BOX(ui->profiles)); (void)widget;
+    if (selected && *selected) maage_access_verify_local(ui->access, selected);
+    maage_access_gtk_tick(ui);
 }
 static void maage_access_gtk_disconnect(GtkWidget *widget, gpointer context)
 {
@@ -102,13 +111,13 @@ static GtkWidget *maage_access_gtk_button(GtkWidget *box, const char *text, GCal
     if (callback) g_signal_connect(button, "clicked", callback, ui);
     return button;
 }
-int maage_access_native_run(maage_access *access)
+int maage_access_native_run(maage_access *access, int manage_accounts)
 {
     maage_access_gtk ui;
     GtkWidget *outer, *header, *panel, *row, *label, *coming;
     GtkCssProvider *css;
     guint timer;
-    memset(&ui, 0, sizeof(ui)); ui.access = access; ui.revision = (unsigned)-1;
+    memset(&ui, 0, sizeof(ui)); ui.access = access; ui.manage_accounts = manage_accounts; ui.revision = (unsigned)-1;
     if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return -1; }
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
     css = gtk_css_provider_new(); gtk_css_provider_load_from_data(css,
@@ -121,12 +130,12 @@ int maage_access_native_run(maage_access *access)
     outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18); gtk_container_set_border_width(GTK_CONTAINER(outer), 28); gtk_container_add(GTK_CONTAINER(ui.window), outer);
     header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(outer), header, FALSE, FALSE, 0);
     maage_access_gtk_label(header, "MaaGE Launcher", NULL); label = gtk_label_new("Initial setup · 1 of 2"); gtk_box_pack_end(GTK_BOX(header), label, FALSE, FALSE, 0);
-    maage_access_gtk_label(outer, "✓ Verify Minecraft Access", "heading"); maage_access_gtk_label(outer, "Connect an existing Minecraft account to continue setting up MaaGE.", "muted");
+    maage_access_gtk_label(outer, "✓ Verify Minecraft Access", "heading"); maage_access_gtk_label(outer, "Import an existing Minecraft account into MaaGE to continue.", "muted");
     panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12); gtk_style_context_add_class(gtk_widget_get_style_context(panel), "panel"); gtk_box_pack_start(GTK_BOX(outer), panel, FALSE, FALSE, 0);
     ui.profiles = gtk_combo_box_text_new(); gtk_box_pack_start(GTK_BOX(panel), ui.profiles, FALSE, FALSE, 0);
     ui.identity = maage_access_gtk_label(panel, "", "muted"); gtk_widget_set_size_request(ui.identity, -1, 90);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10); gtk_box_pack_start(GTK_BOX(panel), row, FALSE, FALSE, 0);
-    ui.connect = maage_access_gtk_button(row, "Connect & Verify", G_CALLBACK(maage_access_gtk_connect), &ui); ui.disconnect = maage_access_gtk_button(row, "Disconnect", G_CALLBACK(maage_access_gtk_disconnect), &ui);
+    ui.connect = maage_access_gtk_button(row, "Import Account", G_CALLBACK(maage_access_gtk_connect), &ui); ui.disconnect = maage_access_gtk_button(row, "Disconnect", G_CALLBACK(maage_access_gtk_disconnect), &ui); ui.stored = maage_access_gtk_button(row, "Verify Saved", G_CALLBACK(maage_access_gtk_saved), &ui);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10); gtk_box_pack_start(GTK_BOX(outer), row, FALSE, FALSE, 0); maage_access_gtk_label(row, "Scan for Minecraft Accounts", NULL); ui.rescan = maage_access_gtk_button(row, "Rescan", G_CALLBACK(maage_access_gtk_scan), &ui);
     coming = gtk_button_new_with_label("Verify Through Minecraft — Coming Soon"); gtk_widget_set_sensitive(coming, FALSE); gtk_box_pack_start(GTK_BOX(outer), coming, FALSE, FALSE, 0);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10); gtk_box_pack_start(GTK_BOX(outer), row, FALSE, FALSE, 0);
@@ -135,6 +144,6 @@ int maage_access_native_run(maage_access *access)
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10); gtk_box_pack_end(GTK_BOX(outer), row, FALSE, FALSE, 0);
     ui.next = maage_access_gtk_button(row, "Continue", G_CALLBACK(maage_access_gtk_next), &ui); ui.cancel = maage_access_gtk_button(row, "Cancel", G_CALLBACK(maage_access_gtk_cancel), &ui); gtk_style_context_add_class(gtk_widget_get_style_context(ui.next), "accent");
     g_signal_connect(ui.profiles, "changed", G_CALLBACK(maage_access_gtk_select), &ui); g_signal_connect(ui.window, "delete-event", G_CALLBACK(maage_access_gtk_close), &ui);
-    maage_access_gtk_tick(&ui); timer = g_timeout_add(100, maage_access_gtk_tick, &ui); gtk_widget_show_all(ui.window); gtk_main();
+    gtk_widget_set_sensitive(ui.next, FALSE); timer = g_timeout_add(100, maage_access_gtk_tick, &ui); gtk_widget_show_all(outer); gtk_main();
     g_source_remove(timer); gtk_widget_destroy(ui.window); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css)); g_object_unref(css); return ui.result;
 }

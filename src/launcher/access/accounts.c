@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-/* These are data formats, not trusted account claims. Network verification is
- * always required. Unknown JSON subtrees are consumed without retaining values. */
+/* Source data never grants access. MaaGE verifies the session and owns its
+ * resulting lease. Unknown JSON subtrees are consumed without retaining values. */
 enum maage_json_role { MAAGE_JSON_SKIP, MAAGE_JSON_ROOT, MAAGE_JSON_ACCOUNTS,
     MAAGE_JSON_ACCOUNT, MAAGE_JSON_PROFILE, MAAGE_JSON_YGG };
 typedef struct maage_account_reader {

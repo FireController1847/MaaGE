@@ -11,6 +11,8 @@ int maage_storage_directories(const char *path);
 int maage_storage_directory_exists(const char *path);
 /* Binary read ("rb") or binary replacement ("wb"). */
 FILE *maage_storage_open(const char *path, const char *mode);
+/* Restricts an existing regular file to the current user (0600 / protected DACL). */
+int maage_storage_private_file(const char *path);
 int maage_storage_remove(const char *path);
 int maage_storage_replace(const char *temporary, const char *destination);
 /* Link a verified source to a new staging path, or copy if links are unavailable.

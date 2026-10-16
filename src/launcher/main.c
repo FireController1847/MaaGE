@@ -95,8 +95,11 @@ int maage_application_main(int argc, char *const argv[])
 {
     maage_assets *assets;
     maage_access *access;
-    int result, repair = 0, i;
-    for (i = 1; i < argc; ++i) if (!strcmp(argv[i], "--repair-assets")) repair = 1;
+    int result, repair = 0, manage_accounts = 0, i;
+    for (i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i], "--repair-assets")) repair = 1;
+        if (!strcmp(argv[i], "--manage-accounts")) manage_accounts = 1;
+    }
     if (!maage_download_initialize()) {
         maage_log_error("maage.launcher.assets", "Cannot initialize HTTPS networking.");
         return 1;
@@ -105,7 +108,7 @@ int maage_application_main(int argc, char *const argv[])
     if (!access) { maage_download_shutdown(); return 1; }
     maage_access_scan(access, NULL);
     for (;;) {
-        result = maage_access_native_run(access);
+        result = maage_access_native_run(access, manage_accounts);
         if (result <= 0) break;
         if (!maage_access_allowed(access)) { result = 0; break; }
         assets = maage_assets_create(access);
@@ -115,6 +118,7 @@ int maage_application_main(int argc, char *const argv[])
         if (result == 1 && !maage_access_allowed(access)) result = 2;
         maage_assets_destroy(assets);
         if (result != 2) break;
+        maage_access_scan(access, NULL);
     }
     maage_access_destroy(access);
     maage_download_shutdown();

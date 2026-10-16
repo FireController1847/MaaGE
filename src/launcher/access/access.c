@@ -1,6 +1,7 @@
 #include "access.h"
 #include "accounts.h"
 #include "verify.h"
+#include "profile_store.h"
 #include "maage/storage.h"
 #include "maage/time.h"
 #include "maage/log.h"
@@ -83,7 +84,7 @@ static int maage_access_policy(maage_access *a)
         if (p->state != MAAGE_ACCESS_VERIFIED) continue;
         if (a->cancelled || !p->connected || now < 0 || now < a->starts[i] || now >= a->deadlines[i] || wall < p->last_verified || wall >= p->last_verified + 3600.0) {
             p->state = MAAGE_ACCESS_EXPIRED; a->deadlines[i] = 0;
-            strcpy(p->detail, "Verification expired. Refresh the session in the original launcher and verify again."); ++a->view.revision;
+            strcpy(p->detail, "Verification expired. MaaGE can check its saved session again, or re-import an expired session."); ++a->view.revision;
         } else allowed = 1;
     }
     a->view.allowed = allowed;
@@ -153,7 +154,7 @@ static void maage_access_load(maage_access *a)
                 if (strlen(text) < sizeof(p->sources)) strcpy(p->sources, text);
                 if (json_object_object_get_ex(item, "lastVerified", &value) && (json_object_is_type(value, json_type_double) || json_object_is_type(value, json_type_int))) p->last_verified = json_object_get_double(value);
                 if (p->last_verified > 0) p->state = MAAGE_ACCESS_EXPIRED;
-                strcpy(p->detail, "Linked profile restored. A fresh authenticated verification is required for this session.");
+                strcpy(p->detail, "Local profile restored. Checking the saved session and verification lease.");
             }
         }
     }
@@ -193,7 +194,7 @@ static void maage_access_save(maage_access *a)
         if (directories) json_object_put(directories);
         free(snapshot); maage_storage_release(lock); goto failed;
     }
-    json_object_object_add(root, "version", json_object_new_int(1));
+    json_object_object_add(root, "version", json_object_new_int(2));
     json_object_object_add(root, "profiles", list); json_object_object_add(root, "launcherDirectories", directories);
     for (i = 0; i < snapshot->count; ++i) {
         maage_access_profile *p = &snapshot->profiles[i];
@@ -202,6 +203,7 @@ static void maage_access_save(maage_access *a)
         json_object_object_add(item, "name", json_object_new_string(p->name));
         json_object_object_add(item, "uuid", json_object_new_string(p->uuid));
         json_object_object_add(item, "sources", json_object_new_string(p->sources));
+        json_object_object_add(item, "credentialProvider", json_object_new_string(p->imported ? "minecraft-session-import" : "none"));
         json_object_object_add(item, "state", json_object_new_string(maage_access_state_name(p->state)));
         json_object_object_add(item, "lastVerified", json_object_new_double(p->last_verified));
         json_object_array_add(list, item);
@@ -247,13 +249,13 @@ static void maage_access_add_file(maage_access *a, const char *directory, const 
             ++a->view.count; memset(&a->view.profiles[pindex], 0, sizeof(a->view.profiles[pindex]));
             strcpy(a->view.profiles[pindex].uuid, uuid);
         }
-        p = &a->view.profiles[pindex]; strcpy(p->name, record->name); p->available = 1;
+        p = &a->view.profiles[pindex]; if (!p->imported) strcpy(p->name, record->name); p->available = 1;
         if (!strstr(p->sources, launcher) && strlen(p->sources) + strlen(launcher) + 3 < sizeof(p->sources)) {
             if (*p->sources) strcat(p->sources, ", ");
             strcat(p->sources, launcher);
         }
         if (!p->connected) p->state = MAAGE_ACCESS_DETECTED;
-        if (p->state != MAAGE_ACCESS_VERIFIED) strcpy(p->detail, compatible ? "Compatible account format detected. Connect and verify its current Minecraft session." : "Identity discovery only. This launcher/account format has no supported Minecraft session transfer.");
+        if (!p->imported && p->state != MAAGE_ACCESS_VERIFIED) strcpy(p->detail, compatible ? "Compatible account detected. Import its Minecraft session into MaaGE." : "Identity discovery only. This launcher/account format has no supported Minecraft session transfer.");
         ++a->view.revision; maage_access_unlock(a);
         ref = &a->references[a->reference_count++]; strcpy(ref->uuid, uuid); strcpy(ref->launcher, launcher); strcpy(ref->path, path); ref->record = i; ref->compatible = compatible;
     }
@@ -306,6 +308,7 @@ static void maage_access_manual_scan(maage_access *a, const char *directory)
     maage_access_candidate(a, directory, "Install", "CurseForge", 0);
     maage_access_candidate(a, directory, "minecraft/Install", "CurseForge", 0);
 }
+static void maage_access_restore_profiles(maage_access *a);
 static void maage_access_discover(maage_access *a)
 {
     char home[MAAGE_PATH_CAPACITY], base[MAAGE_PATH_CAPACITY];
@@ -314,8 +317,7 @@ static void maage_access_discover(maage_access *a)
     maage_access_lock(a);
     for (i = 0, j = 0; i < a->view.count; ++i) if (a->view.profiles[i].connected) {
         a->view.profiles[j] = a->view.profiles[i]; a->view.profiles[j].available = 0;
-        a->view.profiles[j].sources[0] = 0; a->deadlines[j] = 0;
-        a->view.profiles[j].state = a->view.profiles[j].last_verified > 0 ? MAAGE_ACCESS_EXPIRED : MAAGE_ACCESS_CONNECTED; ++j;
+        a->deadlines[j] = a->deadlines[i]; a->starts[j] = a->starts[i]; ++j;
     }
     a->view.count = j; a->view.detected_launchers[0] = 0; a->view.launchers_found = 0; a->view.unsupported_files = 0; ++a->view.revision;
     maage_access_unlock(a); a->reference_count = 0;
@@ -375,60 +377,148 @@ static void maage_access_discover(maage_access *a)
     if (!a->cancelled) {
         if (!a->view.launchers_found) strcpy(a->view.status, "No launcher found. Choose its configuration folder manually, or install/sign in through PrismLauncher or MultiMC.");
         else if (!a->view.count) sprintf(a->view.status, "Found: %s. No supported player account records. FTB/CurseForge private stores are unsupported; choose a PrismLauncher/MultiMC configuration folder.", a->view.detected_launchers);
-        else sprintf(a->view.status, "Found: %s. Select an account and Connect & Verify. Only compatible PrismLauncher/MultiMC sessions can verify. FTB/CurseForge private stores are unsupported.", a->view.detected_launchers);
+        else sprintf(a->view.status, "Found: %s. Select an account and Import Account. Only compatible PrismLauncher/MultiMC sessions can verify. FTB/CurseForge private stores are unsupported.", a->view.detected_launchers);
     }
-    for (i = 0; i < a->view.count; ++i) if (!a->view.profiles[i].available)
+    for (i = 0; i < a->view.count; ++i) if (!a->view.profiles[i].available && !a->view.profiles[i].imported)
         strcpy(a->view.profiles[i].detail, "The linked source account is unavailable. Choose its launcher folder or sign in there, then rescan.");
     ++a->view.revision; maage_access_unlock(a);
+    maage_access_restore_profiles(a);
     maage_access_save(a);
 }
-static void maage_access_verify_selected(maage_access *a)
+static void maage_access_verify_selected(maage_access *a, int importing)
 {
     unsigned index, i;
     maage_access_reference *ref = NULL;
     maage_account_file *accounts = NULL;
-    char *token = NULL, detail[256], name[17] = "", uuid[33];
-    maage_access_state state = MAAGE_ACCESS_UNSUPPORTED;
-    double expires = 0, wall, now;
+    maage_profile_session *session = (maage_profile_session *)calloc(1, sizeof(*session));
+    char detail[256], name[17] = "", uuid[33];
+    maage_access_state state = MAAGE_ACCESS_FAILED;
+    double wall, now, duration;
+    int stored = 0;
     maage_access_lock(a); index = maage_access_find(a, a->selected);
-    if (index == a->view.count) { maage_access_unlock(a); return; }
+    if (index == a->view.count) { maage_access_unlock(a); free(session); return; }
     a->view.profiles[index].connected = 1; a->view.profiles[index].state = MAAGE_ACCESS_VERIFYING;
     a->deadlines[index] = 0; ++a->view.revision; maage_access_unlock(a);
-    for (i = 0; i < a->reference_count; ++i) if (!strcmp(a->references[i].uuid, a->selected) && a->references[i].compatible) { ref = &a->references[i]; break; }
-    strcpy(detail, "Discovery only: no compatible Minecraft Services session transfer is available. Use an authenticated PrismLauncher/MultiMC MSA profile, then rescan.");
-    if (!ref) goto done;
-    accounts = (maage_account_file *)malloc(sizeof(*accounts)); token = (char *)calloc(MAAGE_ACCESS_TOKEN_CAPACITY, 1);
-    if (!accounts || !token) { state = MAAGE_ACCESS_FAILED; strcpy(detail, "Not enough memory to verify this account."); goto done; }
-    state = MAAGE_ACCESS_FAILED;
-    maage_log_info("maage.launcher.access", "Approved connection to %s profile %s; reading only its Minecraft Services session.", ref->launcher, a->selected);
-    if (!maage_accounts_read(ref->path, 1, (int)ref->record, accounts, token, a->selected) || accounts->version != 3 || ref->record >= accounts->count || strcmp(accounts->records[ref->record].type, "MSA") || !maage_access_uuid(accounts->records[ref->record].uuid, uuid) || strcmp(uuid, a->selected)) {
-        strcpy(detail, "The source account file changed or is unsupported. Rescan and select the account again."); goto done;
+    strcpy(detail, "Cannot allocate the account verification worker.");
+    if (!session) goto done;
+    if (!importing) {
+        strcpy(detail, "The local account session is unavailable or damaged. Re-import this account; access remains unverified.");
+        if (!maage_profile_store_load(a->root, a->selected, session)) goto done;
+        stored = 1;
+        /* Clear the sealed lease before a new request; failures must not restore
+         * an older verified flag on the next process start. Keep the token. */
+        session->verified_at = session->verified_until = 0;
+        if (!maage_profile_store_save(a->root, session)) { strcpy(detail, "Cannot update the local credential file. Check MaaGE data permissions and retry."); goto done; }
+    } else {
+        /* A rejected re-import must not leave an older sealed lease usable. */
+        if (maage_profile_store_load(a->root, a->selected, session)) {
+            stored = 1; session->verified_at = session->verified_until = 0;
+            if (!maage_profile_store_save(a->root, session)) { strcpy(detail, "Cannot update the saved account before re-import. Check MaaGE data permissions."); goto done; }
+            OPENSSL_cleanse(session, sizeof(*session));
+        }
+        for (i = 0; i < a->reference_count; ++i)
+            if (!strcmp(a->references[i].uuid, a->selected) && a->references[i].compatible) { ref = &a->references[i]; break; }
+        state = MAAGE_ACCESS_UNSUPPORTED;
+        strcpy(detail, "No compatible Minecraft session import is available. Sign in through PrismLauncher/MultiMC, then rescan.");
+        if (!ref) goto done;
+        accounts = (maage_account_file *)malloc(sizeof(*accounts));
+        state = MAAGE_ACCESS_FAILED;
+        if (!accounts) goto done;
+        maage_log_info("maage.launcher.access", "Approved session import from %s for profile %s.", ref->launcher, a->selected);
+        if (!maage_accounts_read(ref->path, 1, (int)ref->record, accounts, session->minecraft_token, a->selected) || ref->record >= accounts->count ||
+            !maage_access_uuid(accounts->records[ref->record].uuid, uuid) || strcmp(uuid, a->selected)) {
+            strcpy(detail, "The source account changed or is unsupported. Rescan and select it again."); goto done;
+        }
+        strcpy(session->uuid, a->selected);
+        session->expires_at = accounts->records[ref->record].expires;
+        if (!*session->minecraft_token) { strcpy(detail, "No transferable Minecraft session was found. Refresh it in the source launcher and re-import."); goto done; }
     }
-    expires = accounts->records[ref->record].expires;
-    if (!*token) { strcpy(detail, "Minecraft session token unavailable. Sign in and launch Minecraft from the original launcher, then retry. MaaGE cannot import protected sessions."); goto done; }
     wall = difftime(time(NULL), (time_t)0);
-    if (expires > 0 && expires <= wall) { state = MAAGE_ACCESS_EXPIRED; strcpy(detail, "The Minecraft session has expired. Refresh it in the original launcher and retry."); goto done; }
+    if (session->expires_at > 0 && session->expires_at <= wall) {
+        state = MAAGE_ACCESS_EXPIRED;
+        strcpy(detail, "The imported Minecraft session expired. Refresh the original launcher session and re-import it into MaaGE."); goto done;
+    }
     if (maage_access_cancelled(a)) goto done;
-    state = maage_access_verify(token, a->selected, name, detail, maage_access_cancelled, a);
+    state = maage_access_verify(session->minecraft_token, a->selected, name, detail, maage_access_cancelled, a);
+    wall = difftime(time(NULL), (time_t)0); now = maage_time_monotonic_seconds();
+    if (state == MAAGE_ACCESS_VERIFIED && !maage_access_cancelled(a)) {
+        if (session->expires_at <= 0) session->expires_at = wall + 3600.0;
+        if (session->expires_at <= wall || now < 0) { state = MAAGE_ACCESS_EXPIRED; strcpy(detail, "The session expired during verification. Re-import a current session."); goto done; }
+        strcpy(session->name, name); session->verified_at = wall;
+        session->verified_until = wall + 3600.0;
+        if (session->verified_until > session->expires_at) session->verified_until = session->expires_at;
+        if (!maage_profile_store_save(a->root, session)) {
+            state = MAAGE_ACCESS_FAILED; strcpy(detail, "Minecraft access passed, but MaaGE could not save the local account. Check data-folder permissions and retry."); goto done;
+        }
+        stored = 1;
+        strcpy(detail, importing ? "Account imported into MaaGE. Its saved session will be checked automatically when needed." : "Saved Minecraft session verified. No source launcher was accessed.");
+    }
 done:
-    if (token) { OPENSSL_cleanse(token, MAAGE_ACCESS_TOKEN_CAPACITY); free(token); }
     free(accounts);
     now = maage_time_monotonic_seconds(); wall = difftime(time(NULL), (time_t)0);
     maage_access_lock(a);
-    if (a->cancelled) { state = MAAGE_ACCESS_CONNECTED; strcpy(detail, "Verification cancelled. No access was granted."); }
-    if (state == MAAGE_ACCESS_VERIFIED && (now < 0 || (expires > 0 && expires <= wall))) {
-        state = MAAGE_ACCESS_EXPIRED; strcpy(detail, "Session expired during verification. Refresh the original launcher and retry.");
+    if (a->cancelled) { state = MAAGE_ACCESS_CONNECTED; strcpy(detail, "Account operation cancelled. No access was granted."); }
+    if (state == MAAGE_ACCESS_VERIFIED && (now < 0 || !session || session->verified_until <= wall)) {
+        state = MAAGE_ACCESS_EXPIRED; strcpy(detail, "The saved session expired. Re-import a current Minecraft session.");
     }
-    a->view.profiles[index].state = state; strcpy(a->view.profiles[index].detail, detail);
+    a->view.profiles[index].state = state;
+    if (stored) a->view.profiles[index].imported = 1;
+    strcpy(a->view.profiles[index].detail, detail);
     if (state == MAAGE_ACCESS_VERIFIED) {
-        double duration = 3600;
-        if (expires > 0 && expires - wall < duration) duration = expires - wall;
-        strcpy(a->view.profiles[index].name, name); a->view.profiles[index].last_verified = wall;
+        duration = session->verified_until - wall;
+        strcpy(a->view.profiles[index].name, session->name); a->view.profiles[index].last_verified = session->verified_at;
         a->starts[index] = now; a->deadlines[index] = now + duration;
     }
     strcpy(a->view.status, detail); ++a->view.revision; maage_access_unlock(a);
+    if (session && stored && maage_access_cancelled(a)) {
+        session->verified_at = session->verified_until = 0;
+        if (*session->name) maage_profile_store_save(a->root, session);
+    }
+    if (session) { OPENSSL_cleanse(session, sizeof(*session)); free(session); }
     maage_log_info("maage.launcher.access", "Profile %s: %s. %s", a->selected, maage_access_state_name(state), detail);
     maage_access_save(a);
+}
+static void maage_access_restore_profiles(maage_access *a)
+{
+    maage_profile_session *session = (maage_profile_session *)calloc(1, sizeof(*session));
+    unsigned i;
+    double wall, now;
+    char uuid[33];
+    int check;
+    if (!session) return;
+    maage_access_status(a, "Restoring MaaGE accounts and checking saved Minecraft sessions...");
+    /* Restore all still-valid leases before considering any network requests. */
+    for (i = 0; i < a->view.count && !maage_access_cancelled(a); ++i) {
+        maage_access_lock(a); strcpy(uuid, a->view.profiles[i].uuid); maage_access_unlock(a);
+        if (!maage_profile_store_load(a->root, uuid, session)) continue;
+        wall = difftime(time(NULL), (time_t)0); now = maage_time_monotonic_seconds();
+        maage_access_lock(a);
+        a->view.profiles[i].connected = 1; a->view.profiles[i].imported = 1; strcpy(a->view.profiles[i].name, session->name);
+        if (session->verified_at > 0 && wall >= session->verified_at && wall < session->verified_until && wall < session->expires_at && now >= 0) {
+            a->view.profiles[i].state = MAAGE_ACCESS_VERIFIED; a->view.profiles[i].last_verified = session->verified_at;
+            a->starts[i] = now; a->deadlines[i] = now + session->verified_until - wall;
+            strcpy(a->view.profiles[i].detail, "Restored a current, authenticated local verification lease.");
+        } else {
+            a->deadlines[i] = 0;
+            a->view.profiles[i].state = session->expires_at <= wall ? MAAGE_ACCESS_EXPIRED : MAAGE_ACCESS_CONNECTED;
+            strcpy(a->view.profiles[i].detail, session->expires_at <= wall ? "The saved session expired. Refresh it in the original launcher and re-import." : "MaaGE has a saved Minecraft session; an access check is due.");
+        }
+        ++a->view.revision; maage_access_unlock(a);
+        OPENSSL_cleanse(session, sizeof(*session));
+    }
+    OPENSSL_cleanse(session, sizeof(*session)); free(session);
+    for (i = 0; i < a->view.count && !maage_access_cancelled(a) && !maage_access_allowed(a); ++i) {
+        maage_access_lock(a);
+        check = a->view.profiles[i].imported && a->view.profiles[i].state == MAAGE_ACCESS_CONNECTED;
+        strcpy(uuid, a->view.profiles[i].uuid); maage_access_unlock(a);
+        if (check) { strcpy(a->selected, uuid); maage_access_verify_selected(a, 0); }
+    }
+    maage_access_lock(a);
+    a->view.auto_continue = maage_access_policy(a);
+    if (a->view.auto_continue) strcpy(a->view.status, "A local Minecraft account is ready. Continuing setup...");
+    else if (!a->view.count) strcpy(a->view.status, "No Minecraft accounts found. Choose a launcher folder or sign in through PrismLauncher/MultiMC.");
+    else strcpy(a->view.status, "Import a launcher account, verify a saved session, or re-import an expired session to continue.");
+    ++a->view.revision; maage_access_unlock(a);
 }
 #ifdef _WIN32
 static DWORD WINAPI maage_access_worker(LPVOID context)
@@ -439,16 +529,17 @@ static void *maage_access_worker(void *context)
     maage_access *a = (maage_access *)context;
     if (maage_access_cancelled(a)) { /* Cancellation never starts new account I/O. */ }
     else if (a->operation == 1) maage_access_discover(a);
-    else if (a->operation == 2) maage_access_verify_selected(a);
+    else if (a->operation == 2 || a->operation == 4) maage_access_verify_selected(a, a->operation == 2);
     else {
         unsigned i;
+        int removed = maage_profile_store_remove(a->root, a->selected);
         maage_access_lock(a); i = maage_access_find(a, a->selected);
         if (i < a->view.count) {
-            a->view.profiles[i].connected = 0; a->view.profiles[i].state = MAAGE_ACCESS_DETECTED;
-            strcpy(a->view.profiles[i].detail, "Disconnected. Connect and verify to use this profile again.");
+            a->view.profiles[i].connected = !removed; a->view.profiles[i].imported = !removed; a->view.profiles[i].state = removed ? MAAGE_ACCESS_DETECTED : MAAGE_ACCESS_FAILED;
+            strcpy(a->view.profiles[i].detail, removed ? "Local account disconnected. Import it again to reconnect." : "The saved credential could not be removed. Access is revoked for this session; retry Disconnect after fixing permissions.");
             a->deadlines[i] = 0; ++a->view.revision;
         }
-        strcpy(a->view.status, "Profile disconnected. Existing Minecraft resources are preserved."); maage_access_unlock(a);
+        strcpy(a->view.status, removed ? "Local account removed. Existing Minecraft resources are preserved." : "Access revoked for this session, but the saved credential could not be removed. Check MaaGE data permissions and retry Disconnect."); maage_access_unlock(a);
         maage_access_save(a);
     }
     maage_access_lock(a); a->view.busy = 0; ++a->view.revision; maage_access_unlock(a);
@@ -475,7 +566,7 @@ static int maage_access_begin(maage_access *a, int operation, const char *value)
     maage_access_lock(a);
     if (a->view.busy || a->cancelled) { maage_access_unlock(a); return 0; }
     if (operation != 1 && (!maage_access_uuid(value, normalized) || maage_access_find(a, normalized) == a->view.count)) { maage_access_unlock(a); return 0; }
-    a->view.busy = 1;
+    a->view.busy = 1; a->view.auto_continue = 0;
     maage_access_unlock(a); maage_access_join(a); maage_access_lock(a);
     if (operation == 1) {
         a->manual[0] = 0;
@@ -486,7 +577,7 @@ static int maage_access_begin(maage_access *a, int operation, const char *value)
     } else {
         strcpy(a->selected, normalized);
         a->deadlines[maage_access_find(a, normalized)] = 0;
-        strcpy(a->view.status, operation == 2 ? "Checking this account's current Minecraft session..." : "Disconnecting profile...");
+        strcpy(a->view.status, operation == 2 ? "Importing this Minecraft account..." : operation == 4 ? "Verifying the saved Minecraft session..." : "Removing local account...");
     }
     a->operation = operation;
 #ifdef _WIN32
@@ -500,6 +591,7 @@ static int maage_access_begin(maage_access *a, int operation, const char *value)
 }
 int maage_access_scan(maage_access *a, const char *directory) { return maage_access_begin(a, 1, directory); }
 int maage_access_connect(maage_access *a, const char *uuid) { return maage_access_begin(a, 2, uuid); }
+int maage_access_verify_local(maage_access *a, const char *uuid) { return maage_access_begin(a, 4, uuid); }
 int maage_access_disconnect(maage_access *a, const char *uuid) { return maage_access_begin(a, 3, uuid); }
 maage_access *maage_access_create(void)
 {

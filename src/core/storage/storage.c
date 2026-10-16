@@ -13,6 +13,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shlobj.h>
+#include <aclapi.h>
 #include <wchar.h>
 struct maage_storage_lock { HANDLE handle; };
 static wchar_t *maage_storage_wide(const char *path)
@@ -127,6 +128,45 @@ FILE *maage_storage_open(const char *path, const char *mode)
     file = fdopen(fd, mode);
     if (!file) close(fd);
     return file;
+#endif
+}
+int maage_storage_private_file(const char *path)
+{
+#ifdef _WIN32
+    wchar_t *wide = maage_storage_wide(path);
+    HANDLE process_token = NULL, file = INVALID_HANDLE_VALUE;
+    TOKEN_USER *user = NULL;
+    DWORD bytes = 0, attributes;
+    EXPLICIT_ACCESSW access;
+    PACL acl = NULL;
+    int ok = 0;
+    if (!wide) return 0;
+    attributes = GetFileAttributesW(wide);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) goto done;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token)) goto done;
+    GetTokenInformation(process_token, TokenUser, NULL, 0, &bytes);
+    if (!bytes || !(user = (TOKEN_USER *)malloc(bytes)) || !GetTokenInformation(process_token, TokenUser, user, bytes, &bytes)) goto done;
+    memset(&access, 0, sizeof(access)); access.grfAccessPermissions = FILE_ALL_ACCESS;
+    access.grfAccessMode = SET_ACCESS; access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID; access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName = (LPWSTR)user->User.Sid;
+    if (SetEntriesInAclW(1, &access, NULL, &acl) != ERROR_SUCCESS) goto done;
+    file = CreateFileW(wide, READ_CONTROL | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file == INVALID_HANDLE_VALUE) goto done;
+    ok = SetSecurityInfo(file, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, acl, NULL) == ERROR_SUCCESS;
+done:
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    if (process_token) CloseHandle(process_token);
+    if (acl) LocalFree(acl);
+    free(user); free(wide); return ok;
+#else
+    struct stat st;
+    int descriptor = open(path, O_RDONLY | O_NOFOLLOW);
+    int ok;
+    if (descriptor < 0) return 0;
+    ok = fstat(descriptor, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() && fchmod(descriptor, 0600) == 0;
+    close(descriptor); return ok;
 #endif
 }
 int maage_storage_remove(const char *path)
