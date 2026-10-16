@@ -4,6 +4,9 @@
 #include "maage/application.h"
 #include "ui.h"
 #include "auth.h"
+#ifdef MAAGE_LAUNCHER_NATIVE_LINKS
+#include "links.h"
+#endif
 #include <stddef.h>
 
 int maage_application_main(int argc, char *const argv[])
@@ -30,8 +33,14 @@ int maage_application_main(int argc, char *const argv[])
         maage_log_error("maage.launcher", "UI canvas unavailable: %s (native canvas/input currently require macOS)", maage_render_result_string(rendered));
         return 1;
     }
+#ifdef MAAGE_LAUNCHER_NATIVE_LINKS
+    if (!maage_launcher_links_init()) maage_log_warn("maage.launcher", "Native URL handling could not be initialized.");
+#endif
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) {
+#ifdef MAAGE_LAUNCHER_NATIVE_LINKS
+        maage_launcher_links_shutdown();
+#endif
         maage_launcher_ui_destroy(ui);
         maage_log_error("maage.window", "%s", maage_window_result_string(result));
         return 1;
@@ -57,6 +66,12 @@ int maage_application_main(int argc, char *const argv[])
             result = maage_input_poll(window, &input);
             if (result != MAAGE_WINDOW_OK) break;
             maage_auth_poll(auth);
+#ifdef MAAGE_LAUNCHER_NATIVE_LINKS
+            if (maage_launcher_links_poll(window) && !application.accounts.sign_in.active) {
+                application.navigation.page = MAAGE_PAGE_SETTINGS;
+                application.navigation.settings = MAAGE_SETTINGS_ACCOUNTS;
+            }
+#endif
             rendered = maage_launcher_ui_frame(ui, renderer, &state, &input);
             if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED) break;
             result = maage_window_wait_events(system, rendered == MAAGE_RENDER_SKIPPED ? 100 : 16);
@@ -65,6 +80,9 @@ int maage_application_main(int argc, char *const argv[])
         maage_renderer_destroy(renderer);
         maage_window_destroy(window);
     }
+#ifdef MAAGE_LAUNCHER_NATIVE_LINKS
+    maage_launcher_links_shutdown();
+#endif
     maage_window_system_destroy(system);
     maage_launcher_ui_destroy(ui);
     if (result != MAAGE_WINDOW_OK) {

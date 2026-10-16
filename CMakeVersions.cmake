@@ -2,7 +2,7 @@
 set(MAAGE_LAUNCHER_VERSION_MAJOR 1)
 set(MAAGE_LAUNCHER_VERSION_MINOR 0)
 set(MAAGE_LAUNCHER_VERSION_PATCH 0)
-set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.11")
+set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.12")
 
 set(MAAGE_CLIENT_VERSION_MAJOR 1)
 set(MAAGE_CLIENT_VERSION_MINOR 0)
@@ -79,6 +79,10 @@ if(CMAKE_SCRIPT_MODE_FILE)
         string(TOUPPER "${MAAGE_FRONTEND}" MAAGE_FRONTEND_KEY)
         set(MAAGE_BUNDLE_NAME "${MAAGE_${MAAGE_FRONTEND_KEY}_NAME}")
         set(MAAGE_BUNDLE_IDENTIFIER "${MAAGE_${MAAGE_FRONTEND_KEY}_IDENTIFIER}")
+        set(MAAGE_BUNDLE_URL_TYPES "")
+        if(application STREQUAL "launcher")
+            set(MAAGE_BUNDLE_URL_TYPES "<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>${MAAGE_BUNDLE_IDENTIFIER}.auth</string><key>CFBundleTypeRole</key><string>Viewer</string><key>CFBundleURLSchemes</key><array><string>${MAAGE_LAUNCHER_URL_SCHEME}</string></array></dict></array>")
+        endif()
         # Apple version fields are numeric; preserve complete SemVer separately.
         file(CONFIGURE OUTPUT "${MAAGE_VERSION_OUTPUT_DIR}/maage/${MAAGE_FRONTEND}_Info.plist" CONTENT [=[
 <?xml version="1.0" encoding="UTF-8"?>
@@ -95,6 +99,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
     <key>CFBundleVersion</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
     <key>CFBundleGetInfoString</key><string>@MAAGE_BUNDLE_NAME@ @MAAGE_VERSION@</string>
     <key>MaaGESemanticVersion</key><string>@MAAGE_VERSION@</string>
+    @MAAGE_BUNDLE_URL_TYPES@
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>

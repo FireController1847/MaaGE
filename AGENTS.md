@@ -290,7 +290,9 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   libcurl/json-c, native threads/crypto/browser/clipboard and credential adapters
   privately use C99; do not add these dependencies to Core, Client or Server.
 - Use MaaGE's own explicitly configured Microsoft public-client registration,
-  OAuth Device Code Flow and the system browser; no localhost listener or redirect.
+  OAuth Device Code Flow and the system browser; no localhost listener or OAuth
+  redirect. The macOS Launcher accepts `maage://auth` only as a native return/focus
+  link; it never trusts URI payloads as authentication or handles them in Core.
   Honor returned expiry/interval, pending/slow-down responses and network backoff.
   Keep polling/browser launch off the UI thread and cancel/erase private device
   codes promptly. The native modal receives only the public user code, verification

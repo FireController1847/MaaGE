@@ -2,7 +2,7 @@ find_package(CURL 7.85 REQUIRED)
 find_package(json-c CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
-set(MAAGE_MICROSOFT_CLIENT_ID "" CACHE STRING "MaaGE's own registered Microsoft public-client application ID")
+set(MAAGE_MICROSOFT_CLIENT_ID "caa309b4-eb1a-415b-9098-3db974c08a36" CACHE STRING "MaaGE's own registered Microsoft public-client application ID")
 set(MAAGE_AUTH_DEVICE_URL "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode" CACHE STRING "Microsoft device authorization endpoint")
 set(MAAGE_AUTH_TOKEN_URL "https://login.microsoftonline.com/consumers/oauth2/v2.0/token" CACHE STRING "Microsoft token endpoint")
 set(MAAGE_AUTH_XBOX_URL "https://user.auth.xboxlive.com/user/authenticate" CACHE STRING "Xbox user authentication endpoint")

@@ -4,12 +4,12 @@ MaaGE uses OAuth 2.0 Device Authorization Grant with the system browser, then ex
 
 ## Microsoft Application Registration
 
-Before real sign-in, provide **MaaGE's own application registration**. No client ID is supplied, and no other launcher's registration may be substituted.
+The default public client ID is MaaGE's supplied registration, `caa309b4-eb1a-415b-9098-3db974c08a36`. It remains overridable for authorized alternate registrations. No other launcher's registration may be substituted; the registration must enable device authorization and have the required service access.
 
 1. Register a native/public client that supports personal Microsoft accounts. Follow Microsoft's [device authorization documentation](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code). Do not create or supply a client secret.
 2. Set **Allow public client flows** to **Yes** under the registration's Authentication settings, as described in Microsoft's [desktop application registration guide](https://learn.microsoft.com/en-us/azure/active-directory/develop/scenario-desktop-app-registration). No redirect URI, localhost listener, or callback port is required.
 3. Ensure the registration is authorized for `XboxLive.SignIn` and `XboxLive.offline_access`, and obtain any required Xbox/Minecraft Services permission for this application. See Microsoft's [Xbox authentication documentation](https://learn.microsoft.com/en-us/gaming/gdk/docs/services/fundamentals/s2s-auth-calls/service-authentication/live-website-authentication) and [Minecraft application registration information](https://aka.ms/AppRegInfo). Creating an Entra registration alone does not establish Minecraft Services approval.
-4. Configure the application ID at build time:
+4. To override the default application ID at build time:
 
    ```sh
    cmake --preset release -DMAAGE_MICROSOFT_CLIENT_ID=<your-application-id>
@@ -19,6 +19,8 @@ Before real sign-in, provide **MaaGE's own application registration**. No client
    Alternatively, set `MAAGE_MICROSOFT_CLIENT_ID` in the Launcher's process environment. Finder-launched applications do not ordinarily inherit shell environment settings; a build-time ID is convenient for native application bundles. The application ID is public configuration, not a credential.
 
 Missing registration produces a configuration message and disables account operations. Clicking Sign in with Microsoft opens a native dialog with the returned verification website and public user code. Copy Code uses the native clipboard on macOS/Windows; Open Browser can reopen the website. The website opens automatically without blocking the UI. The dialog shows progress and code expiry, and remains open through Xbox/Minecraft validation. Completion closes it with feedback; Cancel or Escape stops the attempt. The private device code is never displayed, copied, logged, or saved. Signing in again to a saved account must resolve to that same Xbox identity; use Add Microsoft Account for a different identity.
+
+The macOS Launcher bundle declares the `maage` URL scheme and handles `maage://auth` (or a trailing `/`) by bringing the Launcher forward. It preserves an active sign-in dialog or opens account settings. This is an optional return link: Device Code Flow still obtains tokens by polling, does not send a `redirect_uri`, and does not automatically redirect from Microsoft's verification page. URI queries, fragments, credentials and other routes are ignored. Windows/Linux protocol registration is not implemented. macOS must discover the built or installed bundle through Launch Services; URL dispatch has not been runtime-tested.
 
 ## Build Dependencies
 

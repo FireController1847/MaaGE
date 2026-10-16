@@ -1,6 +1,8 @@
 # GUI identity is shared by CMake target configuration and build-time metadata.
 set(MAAGE_LAUNCHER_NAME "MaaGE Launcher")
 set(MAAGE_LAUNCHER_IDENTIFIER "org.maage.launcher")
+set(MAAGE_LAUNCHER_URL_SCHEME "maage")
+set(MAAGE_LAUNCHER_AUTH_URI "${MAAGE_LAUNCHER_URL_SCHEME}://auth")
 set(MAAGE_CLIENT_NAME "MaaGE Client")
 set(MAAGE_CLIENT_IDENTIFIER "org.maage.client")
 set(MAAGE_SERVER_GUI_NAME "MaaGE Server GUI")
