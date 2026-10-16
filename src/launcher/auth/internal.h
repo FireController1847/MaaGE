@@ -11,7 +11,7 @@ typedef struct json_object maage_auth_json;
 typedef enum maage_auth_error {
     MAAGE_AUTH_OK, MAAGE_AUTH_CANCELLED, MAAGE_AUTH_NETWORK, MAAGE_AUTH_PROTOCOL,
     MAAGE_AUTH_REAUTH, MAAGE_AUTH_RESTRICTED, MAAGE_AUTH_CONFIGURATION,
-    MAAGE_AUTH_STORAGE, MAAGE_AUTH_BROWSER, MAAGE_AUTH_PROFILE, MAAGE_AUTH_SESSION, MAAGE_AUTH_STATE, MAAGE_AUTH_LIMIT
+    MAAGE_AUTH_STORAGE, MAAGE_AUTH_BROWSER, MAAGE_AUTH_PROFILE, MAAGE_AUTH_SESSION, MAAGE_AUTH_EXPIRED, MAAGE_AUTH_LIMIT, MAAGE_AUTH_DENIED
 } maage_auth_error;
 typedef struct maage_auth_record {
     char id[40], name[64], uuid[33], client_id[37];
@@ -23,8 +23,8 @@ typedef struct maage_auth_record {
     maage_auth_error error;
 } maage_auth_record;
 typedef struct maage_auth_config {
-    char client_id[37], redirect[128];
-    const char *authorize, *token, *xbox, *xsts, *minecraft;
+    char client_id[37];
+    const char *device, *token, *xbox, *xsts, *minecraft;
 } maage_auth_config;
 struct maage_auth {
     maage_auth_runtime *runtime;
@@ -38,13 +38,16 @@ struct maage_auth {
     int busy, cancelled, stop, changed, decision, candidate_pending;
     char progress[256], browser_url[4096];
     maage_auth_error error;
-    double retry_at;
+    double retry_at, device_deadline;
+    int dialog_active, copy_requested;
+    char user_code[64], verification_uri[512], link_hint[128];
     /* These copies belong exclusively to the UI/application thread. */
     maage_launcher_account views[MAAGE_AUTH_MAX_ACCOUNTS];
     char ids[MAAGE_AUTH_MAX_ACCOUNTS][40], names[MAAGE_AUTH_MAX_ACCOUNTS][64], uuids[MAAGE_AUTH_MAX_ACCOUNTS][33];
     unsigned char avatars[MAAGE_AUTH_MAX_ACCOUNTS][8 * 8 * 4];
     maage_pixel_buffer avatar_views[MAAGE_AUTH_MAX_ACCOUNTS];
     char statuses[MAAGE_AUTH_MAX_ACCOUNTS][96], ui_selected[40], ui_message[256];
+    char ui_code[64], ui_uri[512], ui_hint[128], ui_feedback[256];
 };
 int maage_auth_config_init(maage_auth_config *config);
 void maage_auth_wipe(void *memory, size_t size);
@@ -66,7 +69,10 @@ void maage_auth_wake(maage_auth_runtime *runtime);
 void maage_auth_wait(maage_auth_runtime *runtime);
 void maage_auth_runtime_destroy(maage_auth_runtime *runtime);
 int maage_auth_random(unsigned char *bytes, size_t size);
-int maage_auth_sha256(const unsigned char *bytes, size_t size, unsigned char digest[32]);
+void maage_auth_sleep_tick(void);
+int maage_auth_copy_code(const char *code);
+int maage_auth_device_expired(maage_auth *auth);
+maage_auth_error maage_auth_device(maage_auth *auth, maage_auth_json **tokens);
 int maage_auth_open_browser(maage_auth_runtime *runtime, const char *url);
 void maage_auth_browser_poll(maage_auth_runtime *runtime);
 /* 1 success, 0 not found, -1 unavailable/error. Only refresh tokens enter vaults. */
@@ -75,7 +81,6 @@ int maage_auth_secret_set(const char *key, const char *value);
 int maage_auth_secret_delete(const char *key);
 int maage_auth_metadata_read(char **output);
 int maage_auth_metadata_write(const char *data);
-maage_auth_error maage_auth_loopback(maage_auth *auth, const char *state, const char *challenge, char *code, size_t capacity);
 
 /* Bounded HTTPS transport; never follows redirects or logs payloads/headers. */
 int maage_auth_http_init(void);
@@ -101,7 +106,6 @@ double maage_auth_json_double(maage_auth_json *json, const char *key);
 size_t maage_auth_json_count(maage_auth_json *json);
 int maage_auth_json_is_array(maage_auth_json *json);
 char *maage_auth_json_encode(maage_auth_json *json);
-void maage_auth_base64url(const unsigned char *bytes, size_t size, char *output);
 int maage_auth_store_load(maage_auth *auth);
 int maage_auth_store_save(maage_auth *auth);
 void maage_auth_store_key(const maage_auth_record *record, char key[128]);

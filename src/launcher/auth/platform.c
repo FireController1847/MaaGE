@@ -33,7 +33,7 @@ static DWORD WINAPI maage_auth_entry(void *context)
 #ifdef __APPLE__
 #include <Security/Security.h>
 #include <CoreServices/CoreServices.h>
-#include <CommonCrypto/CommonDigest.h>
+#include <ApplicationServices/ApplicationServices.h>
 #else
 #include <libsecret/secret.h>
 #endif
@@ -135,34 +135,46 @@ int maage_auth_random(unsigned char *bytes, size_t size)
     return offset == size;
 #endif
 }
-int maage_auth_sha256(const unsigned char *bytes, size_t size, unsigned char digest[32])
+void maage_auth_sleep_tick(void)
 {
-    if (size > INT_MAX) return 0;
 #ifdef _WIN32
-    BCRYPT_ALG_HANDLE algorithm = NULL;
-    BCRYPT_HASH_HANDLE hash = NULL;
-    PUCHAR object = NULL;
-    DWORD length = 0, received;
-    int result = 0;
-    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) return 0;
-    if (BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH, (PUCHAR)&length, sizeof(length), &received, 0) != 0 || !length || length > 1048576) goto cleanup;
-    object = malloc(length);
-    if (!object || BCryptCreateHash(algorithm, &hash, object, length, NULL, 0, 0) != 0) goto cleanup;
-    result = BCryptHashData(hash, (PUCHAR)bytes, (ULONG)size, 0) == 0 && BCryptFinishHash(hash, digest, 32, 0) == 0;
-cleanup:
-    if (hash) BCryptDestroyHash(hash);
-    if (object) { maage_auth_wipe(object, length); free(object); }
-    BCryptCloseAlgorithmProvider(algorithm, 0);
-    return result;
-#elif defined(__APPLE__)
-    return CC_SHA256(bytes, (CC_LONG)size, digest) != NULL;
+    Sleep(100);
 #else
-    GChecksum *checksum = g_checksum_new(G_CHECKSUM_SHA256);
-    gsize length = 32;
-    if (!checksum) return 0;
-    g_checksum_update(checksum, bytes, (gssize)size); g_checksum_get_digest(checksum, digest, &length);
-    g_checksum_free(checksum);
-    return length == 32;
+    struct timespec delay = {0, 100000000};
+    nanosleep(&delay, NULL);
+#endif
+}
+int maage_auth_copy_code(const char *code)
+{
+#ifdef _WIN32
+    wchar_t wide[64];
+    HGLOBAL memory;
+    HWND window = GetActiveWindow();
+    void *bytes;
+    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, code, -1, wide, 64), success = 0;
+    if (!length || !window || !OpenClipboard(window)) return 0;
+    memory = GlobalAlloc(GMEM_MOVEABLE, (size_t)length * sizeof(wchar_t));
+    bytes = memory ? GlobalLock(memory) : NULL;
+    if (bytes) {
+        memcpy(bytes, wide, (size_t)length * sizeof(wchar_t)); GlobalUnlock(memory);
+        success = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory) != NULL;
+    }
+    if (memory && !success) GlobalFree(memory);
+    CloseClipboard();
+    return success;
+#elif defined(__APPLE__)
+    PasteboardRef clipboard = NULL;
+    CFDataRef text = CFDataCreate(NULL, (const UInt8 *)code, strlen(code));
+    int success = text && PasteboardCreate(kPasteboardClipboard, &clipboard) == noErr;
+    if (success) success = PasteboardClear(clipboard) == noErr &&
+        PasteboardPutItemFlavor(clipboard, (PasteboardItemID)1, CFSTR("public.utf8-plain-text"), text, 0) == noErr;
+    if (clipboard) CFRelease(clipboard);
+    if (text) CFRelease(text);
+    return success;
+#else
+    /* The native Launcher UI/input adapter is not available on Linux yet. */
+    (void)code;
+    return 0;
 #endif
 }
 int maage_auth_open_browser(maage_auth_runtime *runtime, const char *url)

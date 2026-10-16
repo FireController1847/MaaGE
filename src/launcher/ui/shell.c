@@ -46,7 +46,7 @@ static void maage_ui_navigation(maage_launcher_ui *ui, maage_rect safe, float *b
     if (ui->app->accounts.status == MAAGE_ACCOUNT_AUTHENTICATING) label = "Signing in...";
     if (account && account->authenticated) label = account->display_name ? account->display_name : "Accounts";
     ui->account_anchor = maage_ui_rect(safe.x + safe.width - 208, safe.y + 12, 184, ui->theme.control_height);
-    ui->blocked = 0;
+    ui->blocked = ui->app->accounts.sign_in.active;
     if (maage_ui_tab(ui, 7, ui->account_anchor, "", ui->account_menu)) ui->account_menu = !ui->account_menu;
     maage_ui_outline(ui, ui->account_anchor, ui->theme.line);
     if (account && account->avatar) maage_ui_image(ui, maage_ui_rect(ui->account_anchor.x + 8, ui->account_anchor.y + 6, 28, 28), account->avatar);
@@ -74,10 +74,11 @@ maage_render_result maage_launcher_ui_frame(maage_launcher_ui *ui, maage_rendere
     maage_render_result result;
     maage_rect body;
     float bottom, padding, zoom, width;
-    int index, next = 0, menu_was_open;
+    int index, next = 0, menu_was_open, dialog;
     if (!ui || !renderer || !window || !input) return MAAGE_RENDER_INVALID_ARGUMENT;
     if (window->width <= 0 || window->height <= 0 || window->framebuffer_width <= 0 || window->framebuffer_height <= 0 || !window->visible)
         return MAAGE_RENDER_SKIPPED;
+    dialog = ui->app->accounts.sign_in.active;
     zoom = ui->app->settings.values[MAAGE_SETTING_UI_SCALE].data.number;
     ui->scale = (float)window->framebuffer_width / window->width * zoom;
     result = maage_canvas_resize(ui->canvas, window->framebuffer_width, window->framebuffer_height, ui->scale);
@@ -92,7 +93,11 @@ maage_render_result maage_launcher_ui_frame(maage_launcher_ui *ui, maage_rendere
         ui->input.pressed = ui->input.released = 0;
         ui->input.key = MAAGE_KEY_NONE; ui->input.text[0] = '\0';
     }
-    if (ui->input.key == MAAGE_KEY_ESCAPE) { ui->account_menu = 0; ui->focus = 7; ui->active = 0; }
+    if (ui->input.key == MAAGE_KEY_ESCAPE) {
+        if (dialog) maage_launcher_request(ui->app, MAAGE_ACTION_CANCEL_SIGN_IN, NULL);
+        else { ui->account_menu = 0; ui->focus = 7; }
+        ui->active = 0; ui->input.key = MAAGE_KEY_NONE;
+    }
     if (ui->input.key == MAAGE_KEY_TAB && ui->focus_count) {
         next = ui->input.shift ? ui->focus_count - 1 : 0;
         for (index = 0; index < ui->focus_count; ++index) if (ui->focus_ids[index] == ui->focus) {
@@ -110,13 +115,13 @@ maage_render_result maage_launcher_ui_frame(maage_launcher_ui *ui, maage_rendere
         ui->height - (float)(window->safe_area.top + window->safe_area.bottom) / zoom);
     maage_ui_clip_push(ui, ui->safe);
     menu_was_open = ui->account_menu;
-    ui->blocked = menu_was_open;
+    ui->blocked = dialog || menu_was_open;
     maage_ui_navigation(ui, ui->safe, &bottom);
     if (ui->last_page != (int)ui->app->navigation.page) {
         ui->last_page = (int)ui->app->navigation.page; ui->active = 0;
         if (ui->focus < 1 || ui->focus > 7) ui->focus = 0;
     }
-    ui->blocked = menu_was_open || ui->account_menu;
+    ui->blocked = dialog || menu_was_open || ui->account_menu;
     padding = ui->theme.padding;
     width = ui->safe.width - padding * 2;
     if (width > 1120) width = 1120;
@@ -124,13 +129,22 @@ maage_render_result maage_launcher_ui_frame(maage_launcher_ui *ui, maage_rendere
         ui->safe.y + ui->safe.height - bottom - (ui->app->notice ? padding * 2 + 32 : padding * 2));
     maage_ui_pages(ui, body);
     if (ui->app->notice) maage_ui_label(ui, maage_ui_rect(body.x, ui->safe.y + ui->safe.height - 30, body.width, 26), ui->theme.small_size, ui->theme.text, ui->app->notice);
-    if (ui->account_menu) {
+    if (ui->account_menu && !dialog) {
         if (!menu_was_open) {
             ui->focus_count = 1; ui->focus_ids[0] = 7; ui->focus = 7; ui->active = 0;
             ui->input.pressed = ui->input.released = 0; ui->input.key = MAAGE_KEY_NONE;
         }
         maage_ui_account_menu(ui);
     }
+    if (dialog) {
+        if (!ui->sign_in_dialog) {
+            ui->account_menu = 0; ui->active = 0; ui->focus = 9103; ui->scroll[7] = 0;
+            ui->input.pressed = ui->input.released = 0; ui->input.key = MAAGE_KEY_NONE;
+        }
+        ui->focus_count = 0;
+        maage_ui_sign_in_dialog(ui);
+    } else if (ui->sign_in_dialog) { ui->focus = 7; ui->active = 0; }
+    ui->sign_in_dialog = dialog;
     maage_ui_clip_pop(ui);
     if (ui->input.released) ui->active = 0;
     return maage_renderer_present_pixels(renderer, maage_canvas_pixels(ui->canvas));

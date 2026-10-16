@@ -285,19 +285,23 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
 
 ## Launcher authentication
 
-- Launcher owns `MaaGE::LauncherAuth` under `src/launcher/auth/`: C90 OAuth/PKCE,
-  Xbox/XSTS, Minecraft ownership/profile validation and account/session management.
-  libcurl/json-c, native threads/crypto/browser/loopback and credential adapters
+- Launcher owns `MaaGE::LauncherAuth` under `src/launcher/auth/`: C90 device
+  authorization, Xbox/XSTS, Minecraft ownership/profile validation and sessions.
+  libcurl/json-c, native threads/crypto/browser/clipboard and credential adapters
   privately use C99; do not add these dependencies to Core, Client or Server.
 - Use MaaGE's own explicitly configured Microsoft public-client registration,
-  system browser, random state and PKCE S256. Never borrow client IDs, embed client
-  secrets or copy incompatible reference code. Keep endpoints centralized and HTTPS;
+  OAuth Device Code Flow and the system browser; no localhost listener or redirect.
+  Honor returned expiry/interval, pending/slow-down responses and network backoff.
+  Keep polling/browser launch off the UI thread and cancel/erase private device
+  codes promptly. The native modal receives only the public user code, verification
+  URI and progress, with Copy Code/Open Browser controls. Never borrow client IDs,
+  embed client secrets or copy incompatible reference code. Keep endpoints HTTPS;
   verify certificates, bound requests/responses and support cancellation off the UI.
 - Persist only refresh tokens in Keychain/Credential Manager/Secret Service;
   non-sensitive account metadata is separate. Secure-storage failure requires an
   explicit session-only choice, never plaintext credentials. Honor refresh rotation;
   invalid/revoked credentials require reauthentication. Never log credentials,
-  authorization codes, sensitive headers or full authentication responses.
+  private device codes, sensitive headers or full authentication responses.
 - Stable account IDs are independent of names; deduplicate identities. Microsoft
   authentication, Java ownership and an unexpired verified game session are distinct.
   Metadata alone never proves readiness. Widgets receive display snapshots only;

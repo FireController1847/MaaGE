@@ -1,5 +1,6 @@
 #include "internal.h"
 #include "maage/log.h"
+#include "maage/time.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -179,7 +180,6 @@ void maage_auth_worker(void *context)
             if (!maage_auth_store_save(auth)) result = MAAGE_AUTH_STORAGE;
         }
         maage_auth_lock(auth->runtime);
-        if (auth->error == MAAGE_AUTH_BROWSER && result == MAAGE_AUTH_CANCELLED) result = MAAGE_AUTH_BROWSER;
         auth->busy = 0; auth->changed = 1; auth->error = result;
         auth->browser_url[0] = '\0'; auth->retry_at = (double)time(NULL) + 60;
         if (result != MAAGE_AUTH_RESTRICTED) strcpy(auth->progress, maage_auth_message(result));
@@ -187,6 +187,18 @@ void maage_auth_worker(void *context)
         if (result == MAAGE_AUTH_OK) maage_log_info("maage.launcher.auth", "Account operation completed.");
         else maage_log_warn("maage.launcher.auth", "%s", maage_auth_message(result));
     }
+}
+static maage_launcher_result maage_auth_link_request(void *context, maage_sign_in_action action)
+{
+    maage_auth *auth = context;
+    maage_launcher_result result = MAAGE_LAUNCHER_UNAVAILABLE;
+    maage_auth_lock(auth->runtime);
+    if (auth->busy && auth->user_code[0] && !auth->cancelled) {
+        if (action == MAAGE_SIGN_IN_COPY_CODE) { auth->copy_requested = 1; result = MAAGE_LAUNCHER_OK; }
+        else if (action == MAAGE_SIGN_IN_OPEN_BROWSER) { strcpy(auth->browser_url, auth->verification_uri); result = MAAGE_LAUNCHER_OK; }
+    }
+    maage_auth_unlock(auth->runtime);
+    return result;
 }
 static maage_launcher_result maage_auth_request(void *context, maage_launcher_action action, const char *id)
 {
@@ -198,6 +210,8 @@ static maage_launcher_result maage_auth_request(void *context, maage_launcher_ac
     else if (auth->busy || !auth->config.client_id[0] || !maage_auth_copy(auth->target, sizeof(auth->target), id ? id : "")) result = MAAGE_LAUNCHER_UNAVAILABLE;
     else {
         auth->cancelled = 0; auth->busy = 1; auth->command = action; auth->error = MAAGE_AUTH_OK;
+        auth->dialog_active = action == MAAGE_ACTION_SIGN_IN || action == MAAGE_ACTION_REAUTH_ACCOUNT;
+        auth->copy_requested = 0; auth->ui_hint[0] = auth->link_hint[0] = '\0';
         strcpy(auth->progress, "Preparing account operation..."); maage_auth_wake(auth->runtime);
     }
     maage_auth_unlock(auth->runtime);
@@ -216,8 +230,11 @@ maage_launcher_result maage_auth_create(maage_launcher_state *state, maage_auth 
     if (!auth->runtime || !maage_auth_http_init()) { maage_auth_runtime_destroy(auth->runtime); free(auth); return MAAGE_LAUNCHER_FAILED; }
     auth->busy = 1; strcpy(auth->progress, "Restoring saved accounts...");
     state->accounts.service.context = auth; state->accounts.service.request = maage_auth_request;
+    state->accounts.sign_in.context = auth; state->accounts.sign_in.request = maage_auth_link_request;
     if (!maage_auth_thread_start(auth->runtime, maage_auth_worker, auth)) {
-        state->accounts.service.request = NULL; maage_auth_runtime_destroy(auth->runtime); maage_auth_http_cleanup(); free(auth); return MAAGE_LAUNCHER_FAILED;
+        memset(&state->accounts.service, 0, sizeof(state->accounts.service));
+        memset(&state->accounts.sign_in, 0, sizeof(state->accounts.sign_in));
+        maage_auth_runtime_destroy(auth->runtime); maage_auth_http_cleanup(); free(auth); return MAAGE_LAUNCHER_FAILED;
     }
     *output = auth;
     return MAAGE_LAUNCHER_OK;
@@ -227,10 +244,16 @@ void maage_auth_poll(maage_auth *auth)
     maage_launcher_state *state = auth->app;
     maage_auth_record *record;
     size_t index;
-    char browser[4096];
+    char copy_code[64];
+    double now = maage_time_monotonic_seconds();
     int ready, refresh = 0;
     maage_auth_lock(auth->runtime);
     if (auth->changed && !auth->busy) {
+        if (auth->dialog_active) {
+            maage_auth_copy(auth->ui_feedback, sizeof(auth->ui_feedback), auth->progress);
+            if (auth->error == MAAGE_AUTH_OK) strcpy(auth->ui_feedback, "Microsoft account linked. Open Accounts for Minecraft ownership and session status.");
+            state->notice = auth->ui_feedback; auth->dialog_active = 0;
+        }
         for (index = 0; index < auth->count; ++index) {
             record = &auth->records[index]; ready = maage_auth_ready(record);
             strcpy(auth->ids[index], record->id); strcpy(auth->names[index], record->name); strcpy(auth->uuids[index], record->uuid);
@@ -273,12 +296,25 @@ void maage_auth_poll(maage_auth *auth)
         if (!strcmp(auth->ids[index], auth->ui_selected) && auth->views[index].authenticated) state->accounts.status = MAAGE_ACCOUNT_SIGNED_IN;
     state->accounts.service.actions = auth->busy ? (MAAGE_ACTION_CANCEL_SIGN_IN | (auth->candidate_pending ? MAAGE_ACTION_SESSION_ONLY : 0)) :
         auth->config.client_id[0] ? MAAGE_ACTION_SIGN_IN | MAAGE_ACTION_SELECT_ACCOUNT | MAAGE_ACTION_SIGN_OUT | MAAGE_ACTION_REMOVE_ACCOUNT | MAAGE_ACTION_REFRESH_SESSION | MAAGE_ACTION_REAUTH_ACCOUNT : 0;
-    browser[0] = '\0';
-    if (auth->browser_url[0] && !auth->cancelled && !auth->stop) { strcpy(browser, auth->browser_url); auth->browser_url[0] = '\0'; }
+    state->accounts.sign_in.active = auth->dialog_active;
+    state->accounts.sign_in.can_link = auth->user_code[0] && !auth->cancelled && now >= 0 && now < auth->device_deadline;
+    state->accounts.sign_in.seconds_remaining = state->accounts.sign_in.can_link ? auth->device_deadline - now : 0;
+    maage_auth_copy(auth->ui_code, sizeof(auth->ui_code), state->accounts.sign_in.can_link ? auth->user_code : "");
+    maage_auth_copy(auth->ui_uri, sizeof(auth->ui_uri), state->accounts.sign_in.can_link ? auth->verification_uri : "");
+    state->accounts.sign_in.user_code = auth->ui_code; state->accounts.sign_in.verification_uri = auth->ui_uri;
+    maage_auth_copy(auth->ui_hint, sizeof(auth->ui_hint), auth->link_hint);
+    state->accounts.sign_in.hint = auth->ui_hint;
+    if (auth->cancelled && auth->busy) strcpy(auth->ui_message, "Cancelling sign-in...");
+    copy_code[0] = '\0';
+    if (state->accounts.sign_in.can_link && auth->copy_requested) strcpy(copy_code, auth->user_code);
+    auth->copy_requested = 0;
     maage_auth_unlock(auth->runtime);
-    maage_auth_browser_poll(auth->runtime);
-    if (browser[0] && !maage_auth_open_browser(auth->runtime, browser)) {
-        maage_auth_lock(auth->runtime); auth->cancelled = 1; auth->error = MAAGE_AUTH_BROWSER; strcpy(auth->progress, maage_auth_message(MAAGE_AUTH_BROWSER)); maage_auth_unlock(auth->runtime);
+    if (copy_code[0]) {
+        ready = maage_auth_copy_code(copy_code);
+        maage_auth_lock(auth->runtime);
+        strcpy(auth->link_hint, ready ? "Code copied to clipboard." : "Clipboard unavailable. Enter the displayed code manually.");
+        strcpy(auth->ui_hint, auth->link_hint);
+        maage_auth_unlock(auth->runtime);
     }
     if (refresh) maage_auth_request(auth, MAAGE_ACTION_REFRESH_SESSION, auth->ui_selected);
 }
@@ -304,7 +340,10 @@ void maage_auth_destroy(maage_auth *auth)
     if (!auth) return;
     maage_auth_lock(auth->runtime); auth->stop = auth->cancelled = 1; maage_auth_wake(auth->runtime); maage_auth_unlock(auth->runtime);
     maage_auth_runtime_destroy(auth->runtime);
+    if (auth->app->notice == auth->ui_feedback) auth->app->notice = NULL;
+    auth->app->accounts.error = auth->app->accounts.progress = NULL;
     auth->app->accounts.items = NULL; auth->app->accounts.count = 0; auth->app->accounts.selected_id = NULL;
     memset(&auth->app->accounts.service, 0, sizeof(auth->app->accounts.service));
+    memset(&auth->app->accounts.sign_in, 0, sizeof(auth->app->accounts.sign_in));
     maage_auth_http_cleanup(); maage_auth_wipe(auth, sizeof(*auth)); free(auth);
 }

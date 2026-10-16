@@ -28,6 +28,15 @@ typedef struct maage_launcher_service {
     unsigned long actions;
     maage_launcher_result (*request)(void *context, maage_launcher_action action, const char *id);
 } maage_launcher_service;
+typedef enum maage_sign_in_action { MAAGE_SIGN_IN_COPY_CODE, MAAGE_SIGN_IN_OPEN_BROWSER } maage_sign_in_action;
+/* Only public linking information; private device codes never enter UI state. */
+typedef struct maage_launcher_sign_in {
+    int active, can_link;
+    const char *user_code, *verification_uri, *hint;
+    double seconds_remaining;
+    void *context;
+    maage_launcher_result (*request)(void *context, maage_sign_in_action action);
+} maage_launcher_sign_in;
 typedef struct maage_launcher_account {
     const char *id, *provider, *display_name;
     int authenticated, owns_minecraft, minecraft_ready;
@@ -50,6 +59,7 @@ typedef struct maage_launcher_state {
         size_t count;
         const char *selected_id, *error, *progress;
         int storage_decision_required;
+        maage_launcher_sign_in sign_in;
         maage_launcher_service service;
     } accounts;
     struct {

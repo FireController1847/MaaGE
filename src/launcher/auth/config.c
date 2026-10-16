@@ -24,10 +24,9 @@ void maage_auth_free_secret(char *text)
 int maage_auth_config_init(maage_auth_config *config)
 {
     const char *id = getenv("MAAGE_MICROSOFT_CLIENT_ID");
-    const char *redirect = getenv("MAAGE_MICROSOFT_REDIRECT_URI");
     size_t index;
     memset(config, 0, sizeof(*config));
-    config->authorize = MAAGE_AUTH_AUTHORIZE_URL;
+    config->device = MAAGE_AUTH_DEVICE_URL;
     config->token = MAAGE_AUTH_TOKEN_URL;
     config->xbox = MAAGE_AUTH_XBOX_URL;
     config->xsts = MAAGE_AUTH_XSTS_URL;
@@ -40,38 +39,24 @@ int maage_auth_config_init(maage_auth_config *config)
         else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return 0;
         if (c >= 'A' && c <= 'F') config->client_id[index] = (char)(c + ('a' - 'A'));
     }
-    return maage_auth_copy(config->redirect, sizeof(config->redirect), redirect && *redirect ? redirect : "http://127.0.0.1:53682/callback");
+    return 1;
 }
 const char *maage_auth_message(maage_auth_error error)
 {
     switch (error) {
     case MAAGE_AUTH_OK: return "Account validation complete.";
     case MAAGE_AUTH_CANCELLED: return "Sign-in cancelled.";
-    case MAAGE_AUTH_NETWORK: return "Could not reach authentication services. Check your connection, then refresh the session.";
+    case MAAGE_AUTH_NETWORK: return "Could not reach authentication services. Check your connection, then try again.";
     case MAAGE_AUTH_REAUTH: return "Your Microsoft sign-in has expired or was revoked. Sign in again.";
     case MAAGE_AUTH_RESTRICTED: return "Xbox authorization was refused. Check your Xbox profile, region, age and family permissions.";
-    case MAAGE_AUTH_CONFIGURATION: return "Configure MaaGE's own Microsoft client ID and registered loopback redirect. Minecraft Services access may require approval.";
+    case MAAGE_AUTH_CONFIGURATION: return "Configure MaaGE's own Microsoft public-client ID with device-code sign-in enabled. Minecraft Services access may require approval.";
     case MAAGE_AUTH_STORAGE: return "Account storage could not be accessed. Unlock your credential store and check MaaGE data directory permissions, then retry.";
     case MAAGE_AUTH_BROWSER: return "The system browser could not be opened. Check your default browser and try again.";
-    case MAAGE_AUTH_STATE: return "The browser response did not match this sign-in request. Close that tab and start sign-in again.";
+    case MAAGE_AUTH_EXPIRED: return "This sign-in code expired. Start sign-in again for a new code.";
+    case MAAGE_AUTH_DENIED: return "Microsoft sign-in was declined. You can start sign-in again when ready.";
     case MAAGE_AUTH_LIMIT: return "The account limit has been reached. Remove an account before adding another.";
     case MAAGE_AUTH_SESSION: return "Minecraft rejected the session. Refresh it; if the problem persists, sign in again.";
     case MAAGE_AUTH_PROFILE: return "Minecraft Java profile unavailable. Complete your Java profile at minecraft.net, then refresh.";
     default: return "Authentication returned an invalid or unexpected response. Try again or check application registration and service availability.";
     }
-}
-void maage_auth_base64url(const unsigned char *bytes, size_t size, char *output)
-{
-    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    size_t index, written = 0;
-    unsigned int group;
-    for (index = 0; index < size; index += 3) {
-        group = (unsigned int)bytes[index] << 8;
-        if (index + 1 < size) group |= bytes[index + 1];
-        output[written++] = alphabet[group >> 10];
-        output[written++] = alphabet[(group >> 4) & 63];
-        if (index + 1 < size) output[written++] = alphabet[((group & 15) << 2) | (index + 2 < size ? bytes[index + 2] >> 6 : 0)];
-        if (index + 2 < size) output[written++] = alphabet[bytes[index + 2] & 63];
-    }
-    output[written] = '\0';
 }

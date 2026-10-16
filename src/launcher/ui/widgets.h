@@ -15,7 +15,7 @@ struct maage_launcher_ui {
     maage_input_state input;
     maage_rect clip, clips[8];
     int clip_depth, active, focus, focus_ids[128], focus_count, blocked, keyboard_focus;
-    int account_menu, last_page, last_section;
+    int account_menu, sign_in_dialog, last_page, last_section;
     float width, height, scale, scroll[8];
     maage_rect safe, account_anchor;
 };
@@ -45,5 +45,6 @@ maage_rect maage_ui_scroll(maage_launcher_ui *ui, maage_rect rect, float *offset
 maage_rect maage_ui_take(maage_ui_layout *layout, float size);
 void maage_ui_pages(maage_launcher_ui *ui, maage_rect body);
 void maage_ui_account_menu(maage_launcher_ui *ui);
+void maage_ui_sign_in_dialog(maage_launcher_ui *ui);
 void maage_ui_settings_page(maage_launcher_ui *ui, maage_rect body);
 #endif

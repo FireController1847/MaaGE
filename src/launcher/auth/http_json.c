@@ -27,7 +27,7 @@ static size_t maage_auth_receive(char *bytes, size_t size, size_t count, void *c
 static int maage_auth_transfer(void *context, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d)
 {
     (void)a; (void)b; (void)c; (void)d;
-    return maage_auth_cancelled(context);
+    return maage_auth_cancelled(context) || maage_auth_device_expired(context);
 }
 int maage_auth_http_init(void)
 {
@@ -57,6 +57,7 @@ maage_auth_error maage_auth_http_bytes(maage_auth *auth, const char *url, const 
     size_t index, header_count = 0;
     maage_auth_error error = MAAGE_AUTH_PROTOCOL;
     *status = 0; *bytes = NULL; *length = 0;
+    if (maage_auth_cancelled(auth)) return MAAGE_AUTH_CANCELLED;
     if (!url || strncmp(url, "https://", 8) || !type || strlen(type) > 60 || (body && strlen(body) > MAAGE_AUTH_RESPONSE_LIMIT)) return error;
     if (bearer) for (index = 0; bearer[index]; ++index)
         if ((unsigned char)bearer[index] <= 32 || (unsigned char)bearer[index] >= 127) return error;
