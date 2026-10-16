@@ -15,6 +15,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 option(MAAGE_BUILD_LAUNCHER "Build the standalone launcher" ON)
 option(MAAGE_BUILD_CLIENT "Build the game client" ON)
 option(MAAGE_BUILD_SERVER "Build the dedicated server executable" ON)
+option(MAAGE_BUILD_MINECRAFT_ASSETS "Build the shared Minecraft logical resource path library" ${MAAGE_BUILD_LAUNCHER})
 option(MAAGE_BUILD_TESTS "Register application smoke tests" OFF)
 
 # Single-config builds use bin/ and lib/; multi-config builds append Debug/, etc.
@@ -117,6 +118,9 @@ if(MAAGE_BUILD_TESTS)
 endif()
 
 add_subdirectory(src/core)
+if(MAAGE_BUILD_MINECRAFT_ASSETS)
+    add_subdirectory(src/resources)
+endif()
 foreach(application launcher client server)
     string(TOUPPER "${application}" application_option)
     if(MAAGE_BUILD_${application_option})

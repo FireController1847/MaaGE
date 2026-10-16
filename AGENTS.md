@@ -273,8 +273,9 @@ Authentication and game launching remain deferred.
 
 First-run setup acquires **only Minecraft Java Edition 1.7.10 asset-index resources**
 through official HTTPS metadata. It needs no sign-in, client/server JAR, Java,
-libraries, or modpack. Preserve the original index's logical-name mapping; it does
-not contain all resources historically embedded in the client JAR.
+libraries, or modpack. Minecraft 1.7.10 is the fixed resource baseline, independent of MaaGE application
+versions; do not create a Minecraft version-management system. The index does not
+contain all resources historically embedded in the client JAR.
 
 The Launcher asset manager is UI-independent, with worker-thread operations,
 locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).
@@ -285,15 +286,40 @@ Server/headless targets.
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
-configuration, and Launcher logs. Previous `.maage` logs remain untouched.
+configuration, and Launcher logs. Minecraft-specific data belongs beneath
+`minecraft/`: `assets/indexes/1.7.10.json`, `assets/objects/<prefix>/<hash>`,
+`assets/reconstructed/<logical-name>`, and `metadata/1.7.10.json`. Receipts and the
+manifest also live in `minecraft/metadata/`; MaaGE configuration/logs remain outside.
+Reuse/migrate verified files from the previous `assets/` and `versions/1.7.10/`
+layout without redownloading them. Never create new Minecraft `versions/` trees.
+Previous `.maage` logs remain untouched.
 Downloads are content-addressed, SHA-1/size-verified, bounded to four concurrent
 requests with three attempts and backoff, and atomically promoted from temporary
 files. Resume preserves completed objects; interrupted individual files restart.
-An installation lock serializes writers. Never use logical asset names as paths.
-Completion receipts optimize startup but cannot replace checking metadata and
-all object sizes/fingerprints; changed files and incomplete installations require
-hash verification, and Repair always verifies every hash. Runtime/UI behavior and
-non-macOS builds still require programmer validation.
+An installation lock serializes writers. Initial setup and repair share one
+verification/download/reconstruction implementation: cover every indexed entry,
+deduplicate hashes, and reconstruct every logical path, without resource-type
+filters. Completion requires both the verified object cache and valid logical
+files. Track unique objects, logical files, cached/downloaded objects,
+reconstruction progress, and outstanding missing/corrupt files separately.
+
+Reconstruction prefers hard links from verified objects, with verified copies as
+fallback, staged outside the logical tree and atomically promoted. Logical names
+must remain relative, preserve spelling, and pass cross-platform path validation;
+reject traversal, symlink/reparse directories, and unsafe/unrepresentable names
+rather than silently omitting assets. Derived files can be rebuilt from the cache;
+repairing an object invalidates associated reconstruction shortcuts. Completion
+receipts optimize startup but cannot replace checking metadata and all object/file
+sizes/fingerprints; changed files and incomplete installations require hash
+verification. Full Repair hashes every unique object and independently copied
+logical file; identical hard links share their verified source's content.
+
+Game consumers resolve logical names with `maage_minecraft_asset_path` from
+`MaaGE::MinecraftAssets` (`maage/minecraft_assets.h`), which writes a caller-owned
+UTF-8 path and depends on storage rather than Launcher UI, HTTP, JSON, or rendering.
+`MAAGE_BUILD_MINECRAFT_ASSETS` enables this shared resource module independently.
+Keep Minecraft-specific reconstruction out of generic Core and graphics.
+Runtime/UI behavior and non-macOS builds still require programmer validation.
 
 ## Planned engine systems
 

@@ -62,7 +62,7 @@ int maage_storage_data_path(char *path, size_t capacity)
 #endif
 #endif
 }
-int maage_storage_directories(const char *path)
+static int maage_storage_check_directories(const char *path, int create)
 {
     char copy[MAAGE_PATH_CAPACITY];
     size_t i, start;
@@ -85,7 +85,7 @@ int maage_storage_directories(const char *path)
                 wchar_t *wide = maage_storage_wide(copy);
                 DWORD attributes;
                 if (!wide) return 0;
-                CreateDirectoryW(wide, NULL);
+                if (create) CreateDirectoryW(wide, NULL);
                 attributes = GetFileAttributesW(wide);
                 ok = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT);
                 free(wide);
@@ -93,7 +93,7 @@ int maage_storage_directories(const char *path)
 #else
             {
                 struct stat st;
-                mkdir(copy, 0700);
+                if (create) mkdir(copy, 0700);
                 ok = lstat(copy, &st) == 0 && S_ISDIR(st.st_mode);
             }
 #endif
@@ -104,6 +104,8 @@ int maage_storage_directories(const char *path)
     }
     return 1;
 }
+int maage_storage_directories(const char *path) { return maage_storage_check_directories(path, 1); }
+int maage_storage_directory_exists(const char *path) { return maage_storage_check_directories(path, 0); }
 FILE *maage_storage_open(const char *path, const char *mode)
 {
 #ifdef _WIN32
@@ -219,4 +221,68 @@ void maage_storage_release(maage_storage_lock *lock)
     close(lock->descriptor);
 #endif
     free(lock);
+}
+
+void maage_storage_remove_directory(const char *path)
+{
+#ifdef _WIN32
+    wchar_t *wide = maage_storage_wide(path);
+    if (wide) RemoveDirectoryW(wide);
+    free(wide);
+#else
+    rmdir(path);
+#endif
+}
+int maage_storage_same_file(const char *left, const char *right)
+{
+#ifdef _WIN32
+    wchar_t *a = maage_storage_wide(left), *b = maage_storage_wide(right);
+    HANDLE ah = INVALID_HANDLE_VALUE, bh = INVALID_HANDLE_VALUE;
+    BY_HANDLE_FILE_INFORMATION ai, bi;
+    int same = 0;
+    if (a) ah = CreateFileW(a, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (b) bh = CreateFileW(b, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (ah != INVALID_HANDLE_VALUE && bh != INVALID_HANDLE_VALUE && GetFileInformationByHandle(ah, &ai) && GetFileInformationByHandle(bh, &bi))
+        same = !(ai.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) &&
+            !(bi.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) && ai.dwVolumeSerialNumber == bi.dwVolumeSerialNumber &&
+            ai.nFileIndexHigh == bi.nFileIndexHigh && ai.nFileIndexLow == bi.nFileIndexLow;
+    if (ah != INVALID_HANDLE_VALUE) CloseHandle(ah);
+    if (bh != INVALID_HANDLE_VALUE) CloseHandle(bh);
+    free(a); free(b); return same;
+#else
+    struct stat a, b;
+    return !lstat(left, &a) && !lstat(right, &b) && S_ISREG(a.st_mode) && S_ISREG(b.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+#endif
+}
+int maage_storage_clone(const char *source, const char *staging, int (*cancel)(void *), void *context)
+{
+    FILE *input, *output;
+    unsigned char buffer[32768];
+    char fingerprint[128];
+    double size;
+    size_t count;
+    int ok = 1, linked;
+    if ((cancel && cancel(context)) || !maage_storage_stat(source, &size, fingerprint) || !maage_storage_remove(staging)) return 0;
+#ifdef _WIN32
+    {
+        wchar_t *a = maage_storage_wide(source), *b = maage_storage_wide(staging);
+        linked = a && b && CreateHardLinkW(b, a, NULL);
+        free(a); free(b);
+    }
+#else
+    linked = link(source, staging) == 0;
+#endif
+    if (linked) return 1;
+    input = maage_storage_open(source, "rb");
+    if (!input) return 0;
+    output = maage_storage_open(staging, "wb");
+    if (!output) { fclose(input); return 0; }
+    while ((count = fread(buffer, 1, sizeof(buffer), input)) != 0) {
+        if ((cancel && cancel(context)) || fwrite(buffer, 1, count, output) != count) { ok = 0; break; }
+    }
+    if (ferror(input)) ok = 0;
+    fclose(input);
+    if (fclose(output)) ok = 0;
+    if (!ok) maage_storage_remove(staging);
+    return ok ? 2 : 0;
 }

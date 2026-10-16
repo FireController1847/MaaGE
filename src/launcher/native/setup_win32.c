@@ -6,7 +6,7 @@
 #include <string.h>
 typedef struct maage_setup_win32 {
     maage_assets *assets;
-    HWND window, heading, subtitle, directories, metadata, resources, percent, progress, count, detail, next, cancel;
+    HWND window, heading, subtitle, directories, metadata, resources, reconstruction, completion, percent, progress, count, detail, next, cancel;
     HFONT font, heading_font;
     HBRUSH background, panel;
     int result, closing;
@@ -31,7 +31,9 @@ static void maage_setup_win32_tick(maage_setup_win32 *ui)
     if (t.complete && !p.needs_setup) { ui->result = 1; DestroyWindow(ui->window); return; }
     maage_setup_win32_text(ui->heading, t.heading); maage_setup_win32_text(ui->subtitle, t.subtitle);
     maage_setup_win32_text(ui->directories, t.directories); maage_setup_win32_text(ui->metadata, t.metadata);
-    maage_setup_win32_text(ui->resources, t.resources); maage_setup_win32_text(ui->count, t.count); maage_setup_win32_text(ui->detail, t.detail);
+    maage_setup_win32_text(ui->resources, t.resources);
+    maage_setup_win32_text(ui->reconstruction, t.reconstruction); maage_setup_win32_text(ui->completion, t.completion); maage_setup_win32_text(ui->count, t.count); maage_setup_win32_text(ui->detail, t.detail);
+    SetWindowPos(ui->percent, NULL, 512, p.objects_ready ? (t.complete ? 297 : 266) : 235, 60, 24, SWP_NOZORDER | SWP_NOACTIVATE);
     percent[0] = 0;
     if (p.percent >= 0) {
         wsprintfA(percent, "%d%%", p.percent);
@@ -72,7 +74,7 @@ static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM
             HWND control = (HWND)lparam;
             int inset;
             GetWindowRect(control, &rect); MapWindowPoints(NULL, window, (POINT *)&rect, 2);
-            inset = rect.top >= 156 && rect.top < 330;
+            inset = rect.top >= 156 && rect.top < 392;
             SetTextColor((HDC)wparam, RGB(225,225,225)); SetBkColor((HDC)wparam, inset ? RGB(41,41,41) : RGB(28,28,28));
             return (LRESULT)(inset ? ui->panel : ui->background);
         }
@@ -80,7 +82,7 @@ static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM
         {
             RECT rect;
             GetClientRect(window, &rect); FillRect((HDC)wparam, &rect, ui->background);
-            rect.left = 28; rect.top = 156; rect.right = 592; rect.bottom = 332;
+            rect.left = 28; rect.top = 156; rect.right = 592; rect.bottom = 392;
             FillRect((HDC)wparam, &rect, ui->panel); return 1;
         }
     case WM_DESTROY: KillTimer(window, 1); PostQuitMessage(0); return 0;
@@ -91,7 +93,7 @@ int maage_setup_native_run(maage_assets *assets)
 {
     maage_setup_win32 ui;
     WNDCLASSW klass;
-    RECT bounds = {0,0,620,470};
+    RECT bounds = {0,0,620,530};
     MSG message;
     INITCOMMONCONTROLSEX controls;
     int received;
@@ -114,14 +116,16 @@ int maage_setup_native_run(maage_assets *assets)
     ui.subtitle = maage_setup_win32_control(&ui,L"STATIC",L"",0,79,108,480,38,0);
     ui.directories = maage_setup_win32_control(&ui,L"STATIC",L"",0,48,173,520,24,0);
     ui.metadata = maage_setup_win32_control(&ui,L"STATIC",L"",0,48,204,520,24,0);
-    ui.resources = maage_setup_win32_control(&ui,L"STATIC",L"",0,48,245,462,24,0);
-    ui.percent = maage_setup_win32_control(&ui,L"STATIC",L"",SS_RIGHT,512,245,60,24,0);
-    ui.progress = maage_setup_win32_control(&ui,PROGRESS_CLASSW,L"Resource setup progress",PBS_SMOOTH,50,280,520,8,0);
+    ui.resources = maage_setup_win32_control(&ui,L"STATIC",L"",0,48,235,462,24,0);
+    ui.reconstruction = maage_setup_win32_control(&ui,L"STATIC",L"",0,48,266,462,24,0);
+    ui.completion = maage_setup_win32_control(&ui,L"STATIC",L"",0,48,297,462,24,0);
+    ui.percent = maage_setup_win32_control(&ui,L"STATIC",L"",SS_RIGHT,512,235,60,24,0);
+    ui.progress = maage_setup_win32_control(&ui,PROGRESS_CLASSW,L"Resource setup progress",PBS_SMOOTH,50,340,520,8,0);
     SetWindowTheme(ui.progress,L"",L""); SendMessageW(ui.progress,PBM_SETBARCOLOR,0,RGB(222,48,158)); SendMessageW(ui.progress,PBM_SETBKCOLOR,0,RGB(61,61,61));
-    ui.count = maage_setup_win32_control(&ui,L"STATIC",L"",0,50,300,520,24,0);
-    ui.detail = maage_setup_win32_control(&ui,L"STATIC",L"",0,30,343,560,66,0);
-    ui.cancel = maage_setup_win32_control(&ui,L"BUTTON",L"Cancel",WS_TABSTOP | BS_PUSHBUTTON,378,420,100,30,IDCANCEL);
-    ui.next = maage_setup_win32_control(&ui,L"BUTTON",L"Continue",WS_TABSTOP | BS_DEFPUSHBUTTON,488,420,104,30,IDOK);
+    ui.count = maage_setup_win32_control(&ui,L"STATIC",L"",0,50,360,520,24,0);
+    ui.detail = maage_setup_win32_control(&ui,L"STATIC",L"",0,30,403,560,66,0);
+    ui.cancel = maage_setup_win32_control(&ui,L"BUTTON",L"Cancel",WS_TABSTOP | BS_PUSHBUTTON,378,480,100,30,IDCANCEL);
+    ui.next = maage_setup_win32_control(&ui,L"BUTTON",L"Continue",WS_TABSTOP | BS_DEFPUSHBUTTON,488,480,104,30,IDOK);
     EnableWindow(ui.next,FALSE); SetFocus(ui.cancel);
     if (!SetTimer(ui.window,1,100,NULL)) { DestroyWindow(ui.window); ui.result = -1; goto cleanup; }
     while ((received = GetMessageW(&message,NULL,0,0)) > 0) {

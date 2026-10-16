@@ -1,0 +1,5 @@
+add_library(maage_minecraft_assets STATIC minecraft_assets.c)
+add_library(MaaGE::MinecraftAssets ALIAS maage_minecraft_assets)
+maage_configure_portable_target(maage_minecraft_assets)
+target_include_directories(maage_minecraft_assets PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(maage_minecraft_assets PRIVATE MaaGE::Storage)

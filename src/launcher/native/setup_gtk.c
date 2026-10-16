@@ -4,7 +4,7 @@
 #include <string.h>
 typedef struct maage_setup_gtk {
     maage_assets *assets;
-    GtkWidget *window, *heading, *subtitle, *directories, *metadata, *resources, *percent, *progress, *count, *detail, *next, *cancel;
+    GtkWidget *window, *heading, *subtitle, *directories, *metadata, *resources, *reconstruction, *completion, *percent, *progress, *count, *detail, *next, *cancel;
     int result, closing;
 } maage_setup_gtk;
 static GtkWidget *maage_setup_gtk_label(GtkWidget *box, const char *text, const char *style)
@@ -45,7 +45,8 @@ static gboolean maage_setup_gtk_tick(gpointer context)
     if (t.complete && !p.needs_setup) { ui->result = 1; gtk_main_quit(); return G_SOURCE_CONTINUE; }
     gtk_label_set_text(GTK_LABEL(ui->heading), t.heading); gtk_label_set_text(GTK_LABEL(ui->subtitle), t.subtitle);
     gtk_label_set_text(GTK_LABEL(ui->directories), t.directories); gtk_label_set_text(GTK_LABEL(ui->metadata), t.metadata);
-    gtk_label_set_text(GTK_LABEL(ui->resources), t.resources); gtk_label_set_text(GTK_LABEL(ui->count), t.count);
+    gtk_label_set_text(GTK_LABEL(ui->resources), t.resources);
+    gtk_label_set_text(GTK_LABEL(ui->reconstruction), t.reconstruction); gtk_label_set_text(GTK_LABEL(ui->completion), t.completion); gtk_label_set_text(GTK_LABEL(ui->count), t.count);
     gtk_label_set_text(GTK_LABEL(ui->detail), t.detail);
     if (p.percent < 0) { percent[0] = 0; gtk_progress_bar_pulse(GTK_PROGRESS_BAR(ui->progress)); }
     else { g_snprintf(percent, sizeof(percent), "%d%%", p.percent); gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), p.percent / 100.0); }
@@ -76,7 +77,7 @@ int maage_setup_native_run(maage_assets *assets)
     ui.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_style_context_add_class(gtk_widget_get_style_context(ui.window), "maage-setup");
     gtk_window_set_title(GTK_WINDOW(ui.window), "MaaGE Launcher — Initial setup");
-    gtk_window_set_default_size(GTK_WINDOW(ui.window), 620, 470); gtk_window_set_resizable(GTK_WINDOW(ui.window), FALSE);
+    gtk_window_set_default_size(GTK_WINDOW(ui.window), 620, 530); gtk_window_set_resizable(GTK_WINDOW(ui.window), FALSE);
     gtk_window_set_position(GTK_WINDOW(ui.window), GTK_WIN_POS_CENTER);
     outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 20); gtk_container_set_border_width(GTK_CONTAINER(outer), 28);
     gtk_container_add(GTK_CONTAINER(ui.window), outer);
@@ -92,8 +93,12 @@ int maage_setup_native_run(maage_assets *assets)
     gtk_box_pack_start(GTK_BOX(outer), panel, FALSE, FALSE, 0);
     ui.directories = maage_setup_gtk_label(panel, "", NULL); ui.metadata = maage_setup_gtk_label(panel, "", NULL);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_widget_set_margin_top(row, 10); gtk_box_pack_start(GTK_BOX(panel), row, FALSE, FALSE, 0);
-    ui.resources = maage_setup_gtk_label(row, "", NULL); ui.percent = gtk_label_new(""); gtk_box_pack_end(GTK_BOX(row), ui.percent, FALSE, FALSE, 0);
-    ui.progress = gtk_progress_bar_new(); gtk_box_pack_start(GTK_BOX(panel), ui.progress, FALSE, FALSE, 0);
+    ui.resources = maage_setup_gtk_label(row, "", NULL);
+    ui.reconstruction = maage_setup_gtk_label(panel, "", NULL);
+    ui.completion = maage_setup_gtk_label(panel, "", NULL);
+    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10); gtk_box_pack_start(GTK_BOX(panel), row, FALSE, FALSE, 0);
+    ui.progress = gtk_progress_bar_new(); gtk_box_pack_start(GTK_BOX(row), ui.progress, TRUE, TRUE, 0);
+    ui.percent = gtk_label_new(""); gtk_box_pack_end(GTK_BOX(row), ui.percent, FALSE, FALSE, 0);
     atk_object_set_name(gtk_widget_get_accessible(ui.progress), "Resource setup progress");
     ui.count = maage_setup_gtk_label(panel, "", "muted");
     ui.detail = maage_setup_gtk_label(outer, "", "muted"); gtk_label_set_max_width_chars(GTK_LABEL(ui.detail), 70);

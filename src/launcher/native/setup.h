@@ -2,7 +2,7 @@
 #define MAAGE_LAUNCHER_SETUP_H
 #include "../assets.h"
 typedef struct maage_setup_text {
-    char directories[96], metadata[96], resources[96], count[256], detail[768];
+    char directories[96], metadata[96], resources[96], reconstruction[96], completion[96], count[256], detail[768];
     const char *heading, *subtitle, *button;
     int actionable, complete, failed;
 } maage_setup_text;

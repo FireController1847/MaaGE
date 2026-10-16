@@ -21,7 +21,7 @@ static NSColor *maage_setup_color(CGFloat value)
 @interface MaaGESetupController : NSObject <NSWindowDelegate, NSApplicationDelegate>
 @property(nonatomic, assign) maage_assets *assets;
 @property(nonatomic, strong) NSWindow *window;
-@property(nonatomic, strong) NSTextField *heading, *subtitle, *directories, *metadata, *resources, *percent, *count, *detail;
+@property(nonatomic, strong) NSTextField *heading, *subtitle, *directories, *metadata, *resources, *reconstruction, *completion, *percent, *count, *detail;
 @property(nonatomic, strong) MaaGESetupProgress *progress;
 @property(nonatomic, strong) NSButton *cancel, *next;
 @property(nonatomic, strong) NSTimer *timer;
@@ -74,7 +74,9 @@ static NSTextField *maage_setup_label(NSView *parent, NSString *value, NSRect re
     if (p.stage == MAAGE_SETUP_COMPLETE && !p.needs_setup) { [self finish:1]; return; }
     self.heading.stringValue = @(t.heading); self.subtitle.stringValue = @(t.subtitle);
     self.directories.stringValue = @(t.directories); self.metadata.stringValue = @(t.metadata);
-    self.resources.stringValue = @(t.resources); self.count.stringValue = @(t.count); self.detail.stringValue = @(t.detail);
+    self.resources.stringValue = @(t.resources);
+    self.reconstruction.stringValue = @(t.reconstruction); self.completion.stringValue = @(t.completion); self.count.stringValue = @(t.count); self.detail.stringValue = @(t.detail);
+    self.percent.frame = NSMakeRect(484, p.objects_ready ? (t.complete ? 73 : 104) : 135, 60, 23);
     self.percent.stringValue = p.percent < 0 ? @"" : [NSString stringWithFormat:@"%d%%", p.percent];
     self.progress.indeterminate = p.percent < 0;
     if (p.percent < 0) [self.progress startAnimation:nil];
@@ -85,28 +87,30 @@ static NSTextField *maage_setup_label(NSView *parent, NSString *value, NSRect re
 }
 - (void)show
 {
-    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 470)
+    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 530)
         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher — Initial setup";
     self.window.releasedWhenClosed = NO; self.window.delegate = self;
     self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.window.backgroundColor = maage_setup_color(0.11);
     NSView *content = self.window.contentView;
-    maage_setup_label(content, @"MaaGE Launcher", NSMakeRect(28, 427, 360, 22), 14, YES);
-    NSTextField *initial = maage_setup_label(content, @"Initial setup", NSMakeRect(474, 427, 118, 22), 12, NO);
+    maage_setup_label(content, @"MaaGE Launcher", NSMakeRect(28, 487, 360, 22), 14, YES);
+    NSTextField *initial = maage_setup_label(content, @"Initial setup", NSMakeRect(474, 487, 118, 22), 12, NO);
     initial.alignment = NSTextAlignmentRight; initial.textColor = maage_setup_color(0.62);
-    NSTextField *icon = maage_setup_label(content, @"↓", NSMakeRect(30, 355, 38, 43), 32, NO);
+    NSTextField *icon = maage_setup_label(content, @"↓", NSMakeRect(30, 415, 38, 43), 32, NO);
     icon.textColor = [NSColor colorWithSRGBRed:0.91 green:0.29 blue:0.68 alpha:1];
-    self.heading = maage_setup_label(content, @"Preparing MaaGE", NSMakeRect(78, 370, 500, 32), 25, YES);
-    self.subtitle = maage_setup_label(content, @"", NSMakeRect(79, 327, 480, 38), 13, NO);
+    self.heading = maage_setup_label(content, @"Preparing MaaGE", NSMakeRect(78, 430, 500, 32), 25, YES);
+    self.subtitle = maage_setup_label(content, @"", NSMakeRect(79, 387, 480, 38), 13, NO);
     self.subtitle.textColor = maage_setup_color(0.69);
-    NSView *panel = [[NSView alloc] initWithFrame:NSMakeRect(28, 139, 564, 176)];
+    NSView *panel = [[NSView alloc] initWithFrame:NSMakeRect(28, 139, 564, 236)];
     panel.wantsLayer = YES; panel.layer.backgroundColor = maage_setup_color(0.16).CGColor; panel.layer.cornerRadius = 8;
     [content addSubview:panel];
-    self.directories = maage_setup_label(panel, @"", NSMakeRect(20, 137, 520, 22), 13, NO);
-    self.metadata = maage_setup_label(panel, @"", NSMakeRect(20, 106, 520, 22), 13, NO);
-    self.resources = maage_setup_label(panel, @"", NSMakeRect(20, 65, 465, 23), 13, YES);
-    self.percent = maage_setup_label(panel, @"", NSMakeRect(484, 65, 60, 23), 13, YES);
+    self.directories = maage_setup_label(panel, @"", NSMakeRect(20, 197, 520, 22), 13, NO);
+    self.metadata = maage_setup_label(panel, @"", NSMakeRect(20, 166, 520, 22), 13, NO);
+    self.resources = maage_setup_label(panel, @"", NSMakeRect(20, 135, 465, 23), 13, YES);
+    self.reconstruction = maage_setup_label(panel, @"", NSMakeRect(20, 104, 465, 23), 13, NO);
+    self.completion = maage_setup_label(panel, @"", NSMakeRect(20, 73, 465, 23), 13, NO);
+    self.percent = maage_setup_label(panel, @"", NSMakeRect(484, 135, 60, 23), 13, YES);
     self.percent.alignment = NSTextAlignmentRight;
     self.progress = [[MaaGESetupProgress alloc] initWithFrame:NSMakeRect(22, 48, 520, 8)];
     self.progress.style = NSProgressIndicatorStyleBar; self.progress.minValue = 0; self.progress.maxValue = 100;

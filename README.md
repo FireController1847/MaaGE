@@ -28,7 +28,7 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The Launcher has a native initial setup interface (AppKit on macOS, Win32 on Windows, GTK 3 on Linux) and a resumable asset manager for Minecraft Java Edition 1.7.10's asset index. After setup, it retains the Core RGB rendering demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client and Server remain startup stubs; gameplay, authentication, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; Windows/Linux compilation and runtime/UI testing remain outstanding.
+**Early development.** The Launcher has a native initial setup interface (AppKit on macOS, Win32 on Windows, GTK 3 on Linux) and a resumable asset manager that verifies and reconstructs Minecraft Java Edition 1.7.10's full asset index. After setup, it retains the Core RGB rendering demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client and Server remain startup stubs; gameplay, authentication, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; Windows/Linux compilation and runtime/UI testing remain outstanding.
 
 Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
@@ -66,9 +66,22 @@ Launcher data lives in `%APPDATA%/MaaGE/` on Windows, `~/Library/Application Sup
 
 ## Initial Setup
 
-Setup retrieves the official version manifest, Minecraft 1.7.10 metadata, its referenced asset index, and only that index's content-addressed objects. The original logical-name mapping is retained in `assets/indexes/1.7.10.json`; objects live in `assets/objects/<hash-prefix>/<hash>`. Version metadata is stored in `versions/1.7.10/metadata.json`. No Minecraft JAR, Java runtime, native library, authentication, or game installation is required or downloaded. The index does not include every resource historically embedded in the client JAR.
+Setup retrieves the official manifest, Minecraft 1.7.10 metadata, its referenced asset index, and every unique content-addressed object in that index. Minecraft 1.7.10 is the fixed resource baseline; MaaGE application versions remain independent. No Minecraft JAR, Java runtime, native library, authentication, or game installation is required or downloaded. The index does not include every resource historically embedded in the client JAR.
 
-Downloads use verified HTTPS, four concurrent requests, timeouts, and limited retries. Cancel preserves verified objects. Retry reuses valid files; interrupted individual files restart, and their temporary files are removed. Continue becomes available only after verification succeeds. Subsequent launches check cached metadata, object sizes, and file fingerprints without requiring network access for an unchanged installation. Changed files are hashed; incomplete installations receive full verification. Run the Launcher with `--repair-assets` to verify every asset hash and repair missing or corrupted resources. Completion state is an optimization rather than the sole installation check. The interface and download behavior await programmer runtime testing.
+Minecraft files live beneath the application's `minecraft/` directory:
+
+- `assets/indexes/1.7.10.json` preserves the complete logical-name-to-hash mapping.
+- `assets/objects/<prefix>/<hash>` holds the verified, deduplicated object cache.
+- `assets/reconstructed/<logical-name>` exposes every indexed resource under its original name and directory hierarchy.
+- `metadata/1.7.10.json` stores the version metadata; the manifest and integrity receipt also live in `metadata/`.
+
+Existing files from the previous `assets/` and `versions/1.7.10/metadata.json` layout are verified and migrated as needed, preserving valid downloads across interrupted migration. After successful setup, recognized legacy files and their temporary files are removed; unrecognized contents are retained, and only empty legacy directories are removed. MaaGE's `config/` and `logs/` remain outside `minecraft/`.
+
+Downloads use verified HTTPS, four concurrent requests, timeouts, and limited retries. Reconstruction stages hard links where available and verified copies otherwise, then installs them atomically. Unsafe logical paths and symlink/reparse directories are rejected. Cancellation preserves verified resources, and Retry resumes the same operation. Continue remains disabled until every unique object and every logical file passes verification. The setup interface reports unique-object/download counts, transferred bytes, and reconstructed logical-file counts separately.
+
+Subsequent launches check cached metadata and both resource forms using sizes and file fingerprints; unchanged installations need no network requests or full rehash. Changed files and incomplete installations receive hash checks. `--repair-assets` uses the same implementation to fully verify and repair the cache and reconstructed resources. Missing derived files are restored from valid cached objects without network downloads. Hard links share already verified content; independent copies receive their own integrity checks.
+
+Resource consumers can link `MaaGE::MinecraftAssets` and call `maage_minecraft_asset_path` with a logical name and caller-owned output buffer. Set `MAAGE_BUILD_MINECRAFT_ASSETS=ON` to build this C90 resource-path library independently of the Launcher UI, downloader, and renderer. It resolves paths without certifying installation integrity; use resources after setup/repair succeeds. Runtime migration, downloading, reconstruction, and UI behavior await programmer testing.
 
 ## AI Collaborative Development
 
