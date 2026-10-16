@@ -129,7 +129,7 @@ maage_client_resources *maage_client_resources_open(const char *archive_path,
         expanded += (double)st.size;
         if (expanded > MAAGE_CLIENT_TOTAL_LIMIT) goto failed;
         resources->entries[resources->count].archive_name = name;
-        if (!strncmp(name, "assets/minecraft/", sizeof("assets/minecraft/") - 1)) name += sizeof("assets/minecraft/") - 1;
+        if (!strncmp(name, "assets/", sizeof("assets/") - 1)) name += sizeof("assets/") - 1;
         if (!maage_minecraft_asset_path(application_data, name, destination, sizeof(destination))) goto unsafe;
         resources->entries[resources->count].name = name;
         resources->entries[resources->count].index = (zip_uint64_t)index;
@@ -194,12 +194,18 @@ int maage_client_resources_reconstruct(maage_client_resources *resources,
         if (changed) {
             if (!maage_storage_remove(staging)) goto failed;
             cloned = 0;
-            if (strcmp(entry->archive_name, entry->name) &&
-                maage_minecraft_asset_path(application_data, entry->archive_name, source_path, sizeof(source_path))) {
-                strcpy(parent, source_path); separator = strrchr(parent, '/'); if (!separator) goto failed; *separator = 0;
-                if (maage_storage_directory_exists(parent) && maage_client_file_valid(source_path, entry, observer, entry->fingerprint)) {
-                    cloned = maage_storage_clone(source_path, staging, observer->cancelled, observer->context);
-                    if (cloned) maage_log_info("maage.launcher.assets", "Migrating client resource: %s -> %s", source_path, path);
+            for (j = 0; !cloned && j < 2; ++j) {
+                const char *legacy = entry->archive_name;
+                if (j) {
+                    if (strncmp(legacy, "assets/minecraft/", sizeof("assets/minecraft/") - 1)) continue;
+                    legacy += sizeof("assets/minecraft/") - 1;
+                }
+                if (strcmp(legacy, entry->name) && maage_minecraft_asset_path(application_data, legacy, source_path, sizeof(source_path))) {
+                    strcpy(parent, source_path); separator = strrchr(parent, '/'); if (!separator) goto failed; *separator = 0;
+                    if (maage_storage_directory_exists(parent) && maage_client_file_valid(source_path, entry, observer, entry->fingerprint)) {
+                        cloned = maage_storage_clone(source_path, staging, observer->cancelled, observer->context);
+                        if (cloned) maage_log_info("maage.launcher.assets", "Migrating client resource: %s -> %s", source_path, path);
+                    }
                 }
             }
             for (j = 0; !cloned && j < i; ++j) if (resources->entries[j].size == entry->size && !strcmp(resources->entries[j].hash, entry->hash)) {

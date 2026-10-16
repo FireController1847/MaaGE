@@ -355,11 +355,12 @@ private archive adapter uses libzip without leaking ZIP APIs into game consumers
 Validate all archive entry paths and types; reject traversal, absolute/aliased paths,
 links, and selected resource file/directory conflicts. Select actual files beneath
 `assets/<namespace>/` and root pack resources; exclude Java/executable extensions
-and unrelated package/signature metadata. Strip `assets/minecraft/` from vanilla
-JAR resources so textures, shaders, lang, etc. merge directly into reconstructed/;
-retain other namespaces and root resource paths. Preserve bytes and record the
-original archive path alongside each logical mapping. Reuse verified old nested
-files, then remove only verified obsolete originals and empty directories after
+and unrelated package/signature metadata. Strip only the leading `assets/` from
+JAR resources: `assets/minecraft/textures/...` maps to
+`assets/reconstructed/minecraft/textures/...`. Preserve every namespace, root pack
+paths, and resource bytes; record original archive paths alongside logical names.
+Reuse verified files from either previous nested or flattened layouts, then remove
+only verified obsolete originals and empty directories after
 reconstruction succeeds; preserve indexed/unknown files. Never invent categories. Bound entry count/size/expansion and verify CRC,
 size, and derived SHA-1 before atomic promotion. Equal-content JAR entries can share
 hard links; indexed/JAR collisions share a path only for identical spelling and

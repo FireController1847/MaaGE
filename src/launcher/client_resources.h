@@ -1,7 +1,7 @@
 #ifndef MAAGE_LAUNCHER_CLIENT_RESOURCES_H
 #define MAAGE_LAUNCHER_CLIENT_RESOURCES_H
 /* Private archive adapter; the Launcher verifies the source JAR before opening.
- * assets/minecraft/ is stripped from logical output; archive names are retained.
+ * Only assets/ is stripped from logical output; namespace and archive names remain.
  * No Java execution or ZIP dependency is exposed to resource consumers. */
 typedef struct maage_client_resources maage_client_resources;
 typedef enum maage_client_phase {

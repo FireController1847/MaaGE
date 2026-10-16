@@ -341,24 +341,30 @@ static void maage_assets_client_cleanup(maage_assets_client_context *client)
 {
     struct json_object_iter iterator;
     char path[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], boundary[MAAGE_PATH_CAPACITY], *separator;
-    const char *archive_name, *hash;
-    if (!maage_minecraft_asset_path(client->assets->root, "assets", boundary, sizeof(boundary))) return;
+    const char *archive_name, *legacy, *hash;
+    unsigned candidate;
+    if (!maage_storage_join(boundary, sizeof(boundary), client->assets->root, "minecraft/assets/reconstructed")) return;
     json_object_object_foreachC(client->records, iterator) {
-        if (maage_assets_cancelled(client->assets)) return;
         archive_name = maage_assets_string(iterator.val, "archive_path"); hash = maage_assets_string(iterator.val, "sha1");
-        if (!archive_name || strncmp(archive_name, "assets/minecraft/", sizeof("assets/minecraft/") - 1) ||
-            !strcmp(archive_name, iterator.key) || !maage_assets_hash(hash) ||
-            maage_assets_client_path_owned(client->index_objects, archive_name) ||
-            maage_assets_client_path_owned(client->records, archive_name) ||
-            !maage_minecraft_asset_path(client->assets->root, archive_name, path, sizeof(path))) continue;
-        strcpy(parent, path); separator = strrchr(parent, '/'); if (!separator) continue; *separator = 0;
-        if (!maage_storage_directory_exists(parent) || !maage_assets_file(client->assets, path, hash, -1)) continue;
-        if (!maage_storage_remove(path)) { maage_log_warn("maage.launcher.assets", "Cannot remove migrated client resource: %s", path); continue; }
-        maage_log_info("maage.launcher.assets", "Removed verified obsolete client resource: %s", path);
-        while (strlen(parent) >= strlen(boundary)) {
-            maage_storage_remove_directory(parent);
-            if (!strcmp(parent, boundary)) break;
-            separator = strrchr(parent, '/'); if (!separator) break; *separator = 0;
+        if (!archive_name || strncmp(archive_name, "assets/", sizeof("assets/") - 1) || !maage_assets_hash(hash)) continue;
+        for (candidate = 0; candidate < 2; ++candidate) {
+            if (maage_assets_cancelled(client->assets)) return;
+            legacy = archive_name;
+            if (candidate) {
+                if (strncmp(legacy, "assets/minecraft/", sizeof("assets/minecraft/") - 1)) continue;
+                legacy += sizeof("assets/minecraft/") - 1;
+            }
+            if (!strcmp(legacy, iterator.key) || maage_assets_client_path_owned(client->index_objects, legacy) ||
+                maage_assets_client_path_owned(client->records, legacy) ||
+                !maage_minecraft_asset_path(client->assets->root, legacy, path, sizeof(path))) continue;
+            strcpy(parent, path); separator = strrchr(parent, '/'); if (!separator) continue; *separator = 0;
+            if (!maage_storage_directory_exists(parent) || !maage_assets_file(client->assets, path, hash, -1)) continue;
+            if (!maage_storage_remove(path)) { maage_log_warn("maage.launcher.assets", "Cannot remove migrated client resource: %s", path); continue; }
+            maage_log_info("maage.launcher.assets", "Removed verified obsolete client resource: %s", path);
+            while (strlen(parent) > strlen(boundary)) {
+                maage_storage_remove_directory(parent);
+                separator = strrchr(parent, '/'); if (!separator) break; *separator = 0;
+            }
         }
     }
 }
