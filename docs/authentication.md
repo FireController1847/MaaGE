@@ -34,7 +34,7 @@ The manual CI workflow provisions these libraries; Windows pins its vcpkg tool/p
 
 ## Accounts and Credentials
 
-The header menu supports adding, selecting, refreshing, signing out, and removing up to 32 accounts. Identity uses the authenticated Xbox user hash, independently of player names. Saved accounts are displayed from metadata, but the selected account is refreshed and revalidated before becoming ready. Other accounts refresh when selected. Selected sessions refresh shortly before expiry; temporary network failure preserves an existing verified session only until its original expiration.
+The header menu supports adding, selecting, refreshing, signing out, and removing up to 32 accounts. Identity uses the authenticated permanent Xbox XUID, independently of player names. The token-specific user hash is used only for authentication requests. Legacy user-hash records migrate through their saved refresh token; if that credential is unavailable, add the account again and remove the old entry. Saved accounts are displayed from metadata, but the selected account is refreshed and revalidated before becoming ready. Other accounts refresh when selected. Selected sessions refresh shortly before expiry; temporary network failure preserves an existing verified session only until its original expiration.
 
 Only refresh tokens are persisted, using Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. Access tokens remain in memory. Rotated refresh tokens replace the saved credential before downstream validation. If secure storage fails while saving, the menu requires **Continue for This Session** or **Cancel**; no plaintext fallback exists. Session-only accounts need interactive sign-in after restart.
 

@@ -10,7 +10,7 @@ void maage_auth_store_key(const maage_auth_record *record, char key[128])
 static int maage_auth_valid_id(const char *id)
 {
     size_t index;
-    if (!id || strncmp(id, "xbox:", 5) || !id[5] || strlen(id) > 37) return 0;
+    if (!id || (strncmp(id, "xbox:", 5) && strncmp(id, "xuid:", 5)) || !id[5] || strlen(id) > 37) return 0;
     for (index = 5; id[index]; ++index) if (id[index] < '0' || id[index] > '9') return 0;
     return 1;
 }

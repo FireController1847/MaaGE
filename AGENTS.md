@@ -306,7 +306,8 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   private device codes, sensitive headers or full authentication responses. Report
   failures with the service stage, HTTP status and fixed schema-error descriptions;
   preserve those diagnostics during startup restoration as well as interactive login.
-- Stable account IDs are independent of names; deduplicate identities. Microsoft
+- Stable account IDs use authenticated Xbox XUIDs, never token-specific user hashes
+  (`uhs`); deduplicate identities independently of player names. Microsoft
   authentication, Java ownership and an unexpired verified game session are distinct.
   Metadata alone never proves readiness. Widgets receive display snapshots only;
   future launch code copies a valid session and clears its credential copy afterward.

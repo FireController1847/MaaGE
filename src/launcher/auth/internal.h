@@ -60,7 +60,7 @@ int maage_auth_cancelled(maage_auth *auth);
 void maage_auth_progress(maage_auth *auth, const char *message);
 void maage_auth_worker(void *context);
 maage_auth_error maage_auth_oauth(maage_auth *auth, maage_auth_record *record, char *access);
-maage_auth_error maage_auth_xbox(maage_auth *auth, const char *access, char *token, char *hash);
+maage_auth_error maage_auth_xbox(maage_auth *auth, const char *access, char *token, char *hash, char *xuid);
 maage_auth_error maage_auth_minecraft(maage_auth *auth, maage_auth_record *record, const char *token, const char *hash);
 
 /* Platform-private synchronization, OS crypto, browser and credential adapters. */

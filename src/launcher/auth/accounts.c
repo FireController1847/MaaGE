@@ -49,13 +49,19 @@ static maage_auth_error maage_auth_persist_refresh(maage_auth *auth, maage_auth_
 static maage_auth_error maage_auth_validate_account(maage_auth *auth, const char *target, int interactive)
 {
     maage_auth_record *candidate = &auth->candidate;
-    char *access = NULL, *xsts = NULL, hash[33], key[128], expected[40];
+    char *access = NULL, *xsts = NULL, hash[33], xuid[33], key[128], old_key[128], expected[40];
     size_t existing = maage_auth_find(auth, target), slot;
     maage_auth_error result, stored;
-    int persist_early = 0, secret_result;
+    int persist_early = 0, secret_result, migrate = 0;
     memset(candidate, 0, sizeof(*candidate)); hash[0] = expected[0] = '\0';
     if (existing < auth->count) {
         *candidate = auth->records[existing]; strcpy(expected, candidate->id);
+        migrate = !strncmp(expected, "xbox:", 5);
+        if (interactive && migrate) {
+            strcpy(auth->response_reason, "This saved account uses an obsolete identity. Use Add Microsoft account, then remove the old entry.");
+            result = MAAGE_AUTH_PROTOCOL; goto cleanup;
+        }
+        maage_auth_store_key(candidate, old_key);
         if (interactive) { maage_auth_wipe(candidate->refresh, sizeof(candidate->refresh)); candidate->session_only = 0; }
         else if (!candidate->refresh[0]) {
             maage_auth_store_key(candidate, key);
@@ -85,18 +91,17 @@ static maage_auth_error maage_auth_validate_account(maage_auth *auth, const char
         if (candidate->session_only && !maage_auth_store_save(auth)) { result = MAAGE_AUTH_STORAGE; goto cleanup; }
         persist_early = 1;
     }
-    result = maage_auth_xbox(auth, access, xsts, hash);
-    if (hash[0]) {
-        sprintf(candidate->id, "xbox:%s", hash);
-        if (expected[0] && strcmp(expected, candidate->id)) {
-            strcpy(auth->response_reason, "A different Microsoft account was approved. Use Add Microsoft account, or choose the saved account in the browser.");
-            result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
-        if (!candidate->name[0]) sprintf(candidate->name, "Microsoft account %.8s", hash);
-        if (maage_auth_find(auth, candidate->id) == auth->count && auth->count == MAAGE_AUTH_MAX_ACCOUNTS) { result = MAAGE_AUTH_LIMIT; goto cleanup; }
-        if (!persist_early) {
-            stored = maage_auth_persist_refresh(auth, candidate);
-            if (stored != MAAGE_AUTH_OK) { result = stored; goto cleanup; }
-        }
+    result = maage_auth_xbox(auth, access, xsts, hash, xuid);
+    if (!xuid[0]) goto cleanup;
+    sprintf(candidate->id, "xuid:%s", xuid);
+    if (expected[0] && !migrate && strcmp(expected, candidate->id)) {
+        strcpy(auth->response_reason, "A different Microsoft account was approved. Use Add Microsoft account, or choose the saved account in the browser.");
+        result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
+    if (!candidate->name[0]) sprintf(candidate->name, "Microsoft account %.8s", xuid);
+    if (!migrate && maage_auth_find(auth, candidate->id) == auth->count && auth->count == MAAGE_AUTH_MAX_ACCOUNTS) { result = MAAGE_AUTH_LIMIT; goto cleanup; }
+    if (!persist_early || migrate) {
+        stored = maage_auth_persist_refresh(auth, candidate);
+        if (stored != MAAGE_AUTH_OK) { result = stored; goto cleanup; }
     }
     if (result == MAAGE_AUTH_OK) result = maage_auth_minecraft(auth, candidate, xsts, hash);
     if (maage_auth_cancelled(auth)) { result = MAAGE_AUTH_CANCELLED; goto cleanup; }
@@ -104,6 +109,7 @@ static maage_auth_error maage_auth_validate_account(maage_auth *auth, const char
      * Xbox/Minecraft validation fails. It is never a launch-ready credential. */
     if (candidate->id[0] && candidate->microsoft_valid) {
         slot = maage_auth_find(auth, candidate->id);
+        if (migrate && slot == auth->count) slot = existing;
         if (slot == auth->count && auth->count == MAAGE_AUTH_MAX_ACCOUNTS) { result = MAAGE_AUTH_LIMIT; goto cleanup; }
         maage_auth_lock(auth->runtime);
         if (result == MAAGE_AUTH_NETWORK && existing < auth->count && maage_auth_ready(&auth->records[existing])) {
@@ -114,11 +120,18 @@ static maage_auth_error maage_auth_validate_account(maage_auth *auth, const char
         candidate->error = result;
         maage_auth_wipe(&auth->records[slot], sizeof(auth->records[slot])); auth->records[slot] = *candidate;
         if (slot == auth->count) ++auth->count;
+        if (migrate && slot != existing) {
+            memmove(auth->records + existing, auth->records + existing + 1, (auth->count - existing - 1) * sizeof(auth->records[0]));
+            --auth->count; maage_auth_wipe(&auth->records[auth->count], sizeof(auth->records[0]));
+        }
         strcpy(auth->selected, candidate->id);
         maage_auth_unlock(auth->runtime);
         if (!maage_auth_store_save(auth)) {
             maage_auth_progress(auth, "Signed in for this session, but account metadata could not be saved. Check your MaaGE data directory permissions.");
             result = MAAGE_AUTH_STORAGE;
+        } else if (migrate) {
+            /* Migrate only credentials obtained through the saved refresh token. */
+            maage_auth_secret_delete(old_key);
         }
     }
 cleanup:
