@@ -39,11 +39,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libwayland-dev libwayland-bin wayland-protocols pkg-config libvulkan-dev libgl-dev libgtk-3-dev libcurl4-openssl-dev libjson-c-dev libssl-dev ca-certificates
+          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libwayland-dev libwayland-bin wayland-protocols pkg-config libvulkan-dev libgl-dev libgtk-3-dev libcurl4-openssl-dev libjson-c-dev libssl-dev libzip-dev ca-certificates
           for tool in cc cmake ninja pkg-config wayland-scanner; do
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
-          pkg-config --print-errors --exists vulkan gl x11 wayland-client wayland-protocols gtk+-3.0 libcurl json-c openssl
+          pkg-config --print-errors --exists vulkan gl x11 wayland-client wayland-protocols gtk+-3.0 libcurl json-c openssl libzip
           protocols="$(pkg-config --variable=pkgdatadir wayland-protocols)"
           for protocol in stable/xdg-shell/xdg-shell.xml unstable/xdg-decoration/xdg-decoration-unstable-v1.xml; do
             test -f "$protocols/$protocol" || { echo "::error::Required Wayland protocol missing: $protocol"; exit 1; }
@@ -64,9 +64,9 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           if (-not $env:VCPKG_INSTALLATION_ROOT) { throw 'The runner must provide vcpkg.' }
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install curl:x64-windows json-c:x64-windows openssl:x64-windows
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install curl:x64-windows json-c:x64-windows openssl:x64-windows libzip[core]:x64-windows
           if ($LASTEXITCODE -ne 0) { throw 'Launcher dependency provisioning failed.' }
-          foreach ($header in @('curl/curl.h', 'json-c/json.h', 'openssl/evp.h')) {
+          foreach ($header in @('curl/curl.h', 'json-c/json.h', 'openssl/evp.h', 'zip.h')) {
             if (-not (Test-Path "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/include/$header")) {
               throw "Missing Launcher dependency: $header"
             }
@@ -99,10 +99,11 @@ jobs:
       - name: Provision macOS Launcher dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install json-c openssl@3
+          brew install json-c openssl@3 libzip
           echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
           test -f "$(brew --prefix json-c)/include/json-c/json.h"
           test -f "$(brew --prefix openssl@3)/include/openssl/evp.h"
+          test -f "$(brew --prefix libzip)/include/zip.h"
           test -f "$(xcrun --sdk macosx --show-sdk-path)/usr/include/curl/curl.h"
 
       - name: Verify macOS native build dependencies

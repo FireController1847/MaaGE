@@ -1,7 +1,8 @@
 #ifndef MAAGE_MINECRAFT_ASSETS_H
 #define MAAGE_MINECRAFT_ASSETS_H
 #include <stddef.h>
-/* Resolve a Minecraft 1.7.10 logical resource name beneath reconstructed assets.
+/* Resolve an indexed or client-JAR Minecraft 1.7.10 logical resource name beneath
+ * reconstructed assets; JAR names retain their assets/<namespace>/ prefix.
  * application_data is an absolute MaaGE data directory, or NULL for the platform
  * default. Writes a UTF-8 path into caller-owned storage. Returns zero for unsafe
  * names, invalid roots, or insufficient capacity. Does not create files, check

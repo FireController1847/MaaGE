@@ -271,11 +271,13 @@ Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
 actual rendering needs; the existing RGB demonstration follows successful setup.
 New Microsoft sign-in and game launching remain deferred.
 
-First-run setup acquires **only Minecraft Java Edition 1.7.10 asset-index resources**
-through official HTTPS metadata, after verifying an existing Minecraft account.
-It needs no client/server JAR, Java, libraries, or modpack. Minecraft 1.7.10 is the fixed resource baseline, independent of MaaGE application
-versions; do not create a Minecraft version-management system. The index does not
-contain all resources historically embedded in the client JAR.
+First-run setup acquires Minecraft Java Edition 1.7.10 indexed assets and game
+resources from its official client JAR, after verifying an existing Minecraft
+account. Read the client URL, SHA-1, and size from official version metadata; cache
+the verified source archive at `minecraft/cache/client-1.7.10.jar`. Never execute
+it, extract Java bytecode/implementation code, or distribute acquired resources.
+Minecraft 1.7.10 remains the fixed resource baseline, independent of MaaGE versions;
+no Java runtime, server JAR, modpack import, or version-management system.
 
 Verify Minecraft Access precedes Preparing MaaGE. Discovery, explicit connection,
 and authenticated verification are distinct states. Prioritize existing compatible
@@ -308,7 +310,7 @@ or new Microsoft authentication path until requested.
 The Launcher asset manager is UI-independent, with worker-thread operations,
 locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).
 Core provides generic UTF-8 storage/path and HTTPS transfer APIs, without Minecraft
-knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, and OpenSSL Crypto >=1.1.0;
+knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, OpenSSL Crypto >=1.1.0, and libzip >=1.7;
 GTK >=3.22 stays in the Linux UI adapter. Keep these dependencies out of
 Server/headless targets.
 
@@ -347,6 +349,24 @@ receipts optimize startup but cannot replace checking metadata and all object/fi
 sizes/fingerprints; changed files and incomplete installations require hash
 verification. Full Repair hashes every unique object and independently copied
 logical file; identical hard links share their verified source's content.
+
+The same asset manager owns indexed assets and JAR-resource preparation; its
+private archive adapter uses libzip without leaking ZIP APIs into game consumers.
+Validate all archive entry paths and types; reject traversal, absolute/aliased paths,
+links, and selected resource file/directory conflicts. Select actual files beneath
+`assets/<namespace>/` and root pack resources; exclude Java/executable extensions
+and unrelated package/signature metadata. Preserve internal paths and bytes, never
+invent modern resource categories. Bound entry count/size/expansion and verify CRC,
+size, and derived SHA-1 before atomic promotion. Equal-content JAR entries can share
+hard links; indexed/JAR collisions share a path only for identical spelling and
+content, otherwise fail before reconstruction. Receipt sections `reconstructed`
+(index) and `client_resources` (JAR, per-file SHA-1/size/fingerprint), plus source
+hashes, identify provenance. Completion requires both sources and their logical
+files; always hash-check the cached JAR and selected extracted resources. Repair
+from verified local sources without resource downloads when available, retaining
+the existing account prerequisite. UI reports actual JAR bytes and applicable
+archive entry counts. The client consumes reconstructed data, never ZIPs or Java
+implementation code. Keep all acquired files outside source/releases/packages.
 
 Game consumers resolve logical names with `maage_minecraft_asset_path` from
 `MaaGE::MinecraftAssets` (`maage/minecraft_assets.h`), which writes a caller-owned
