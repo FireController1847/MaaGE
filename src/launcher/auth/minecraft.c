@@ -42,11 +42,12 @@ maage_auth_error maage_auth_minecraft(maage_auth *auth, maage_auth_record *recor
     if (!body) goto cleanup;
     sprintf(url, "%s/launcher/login", auth->config.minecraft);
     maage_auth_progress(auth, "Signing in to Minecraft Services...");
-    result = maage_auth_http(auth, url, "application/json", body, NULL, &status, &response);
+    result = maage_auth_http(auth, "Minecraft sign-in", url, "application/json", body, NULL, &status, &response);
     if (result != MAAGE_AUTH_OK) goto cleanup;
     if (status != 200) { result = status == 401 || status == 403 ? MAAGE_AUTH_CONFIGURATION : MAAGE_AUTH_PROTOCOL; goto cleanup; }
     expires = maage_auth_json_double(response, "expires_in");
     if (!(expires > 60 && expires <= 86400 * 31) || !maage_auth_copy(record->minecraft, sizeof(record->minecraft), maage_auth_json_text(response, "access_token")) || !*record->minecraft) {
+        strcpy(auth->response_reason, "Minecraft returned a missing or invalid access_token or expires_in field.");
         result = MAAGE_AUTH_PROTOCOL; goto cleanup;
     }
     record->expires_at = (double)time(NULL) + expires;
@@ -57,10 +58,12 @@ maage_auth_error maage_auth_minecraft(maage_auth *auth, maage_auth_record *recor
     sprintf(request_id, "%.8s-%.4s-%.4s-%.4s-%.12s", hex, hex + 8, hex + 12, hex + 16, hex + 20);
     sprintf(url, "%s/entitlements/license?requestId=%s", auth->config.minecraft, request_id);
     maage_auth_progress(auth, "Checking Minecraft Java ownership...");
-    result = maage_auth_http(auth, url, "application/json", NULL, record->minecraft, &status, &response);
+    result = maage_auth_http(auth, "Minecraft ownership check", url, "application/json", NULL, record->minecraft, &status, &response);
     if (result != MAAGE_AUTH_OK) goto cleanup;
     items = maage_auth_json_get(response, "items");
-    if (status != 200 || !maage_auth_json_is_array(items)) { result = status == 401 ? MAAGE_AUTH_SESSION : MAAGE_AUTH_PROTOCOL; goto cleanup; }
+    if (status != 200 || !maage_auth_json_is_array(items)) {
+        if (status == 200) strcpy(auth->response_reason, "Minecraft ownership response did not contain an items array.");
+        result = status == 401 ? MAAGE_AUTH_SESSION : MAAGE_AUTH_PROTOCOL; goto cleanup; }
     record->entitled = record->owns_java = 0;
     for (index = 0; index < maage_auth_json_count(items); ++index) {
         text = maage_auth_json_text(maage_auth_json_at(items, index), "name");
@@ -70,12 +73,14 @@ maage_auth_error maage_auth_minecraft(maage_auth *auth, maage_auth_record *recor
     maage_auth_json_put(response); response = NULL;
     sprintf(url, "%s/minecraft/profile", auth->config.minecraft);
     maage_auth_progress(auth, "Retrieving Minecraft player name and UUID...");
-    result = maage_auth_http(auth, url, "application/json", NULL, record->minecraft, &status, &response);
+    result = maage_auth_http(auth, "Minecraft profile retrieval", url, "application/json", NULL, record->minecraft, &status, &response);
     if (result != MAAGE_AUTH_OK) goto cleanup;
     if (status == 404 && (!record->entitled || !record->owns_java)) { result = MAAGE_AUTH_OK; goto cleanup; }
     if (status == 404) { result = MAAGE_AUTH_PROFILE; goto cleanup; }
     uuid = maage_auth_json_text(response, "id"); name = maage_auth_json_text(response, "name");
-    if (status != 200 || !maage_auth_uuid(uuid) || !maage_auth_player_name(name)) { result = status == 401 ? MAAGE_AUTH_SESSION : MAAGE_AUTH_PROTOCOL; goto cleanup; }
+    if (status != 200 || !maage_auth_uuid(uuid) || !maage_auth_player_name(name)) {
+        if (status == 200) strcpy(auth->response_reason, "Minecraft profile did not contain a valid UUID and player name.");
+        result = status == 401 ? MAAGE_AUTH_SESSION : MAAGE_AUTH_PROTOCOL; goto cleanup; }
     strcpy(record->uuid, uuid); strcpy(record->name, name); record->profile_valid = 1;
     maage_auth_avatar(auth, record, response);
 cleanup:

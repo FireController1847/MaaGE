@@ -77,7 +77,7 @@ maage_auth_error maage_auth_device(maage_auth *auth, maage_auth_json **tokens)
     if (started < 0) return result;
     sprintf(request, "client_id=%s&scope=XboxLive.SignIn%%20XboxLive.offline_access", auth->config.client_id);
     maage_auth_progress(auth, "Requesting a Microsoft sign-in code...");
-    result = maage_auth_http(auth, auth->config.device, "application/x-www-form-urlencoded", request, NULL, &status, &response);
+    result = maage_auth_http(auth, "Microsoft device authorization", auth->config.device, "application/x-www-form-urlencoded", request, NULL, &status, &response);
     if (result != MAAGE_AUTH_OK) goto cleanup;
     if (status != 200) { result = maage_auth_device_error(maage_auth_json_text(response, "error")); goto cleanup; }
     device = maage_auth_json_text(response, "device_code"); code = maage_auth_json_text(response, "user_code");
@@ -108,7 +108,7 @@ maage_auth_error maage_auth_device(maage_auth *auth, maage_auth_json **tokens)
     for (;;) {
         result = maage_auth_device_wait(auth, interval, deadline);
         if (result != MAAGE_AUTH_OK) break;
-        result = maage_auth_http(auth, auth->config.token, "application/x-www-form-urlencoded", form, NULL, &status, &response);
+        result = maage_auth_http(auth, "Microsoft device token exchange", auth->config.token, "application/x-www-form-urlencoded", form, NULL, &status, &response);
         if (maage_auth_cancelled(auth)) { result = MAAGE_AUTH_CANCELLED; break; }
         if (maage_auth_device_expired(auth)) { result = MAAGE_AUTH_EXPIRED; break; }
         if (result == MAAGE_AUTH_NETWORK) {

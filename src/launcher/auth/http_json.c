@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "maage/log.h"
 #include <curl/curl.h>
 #include <json-c/json.h>
 #if JSON_C_VERSION_NUM < (15 << 8)
@@ -110,15 +111,34 @@ cleanup:
     return error;
 #undef MAAGE_CURL_SET
 }
-maage_auth_error maage_auth_http(maage_auth *auth, const char *url, const char *type, const char *body, const char *bearer, long *status, maage_auth_json **json)
+maage_auth_error maage_auth_http(maage_auth *auth, const char *stage, const char *url, const char *type, const char *body, const char *bearer, long *status, maage_auth_json **json)
 {
+    static const char *const errors[] = {
+        "invalid_request", "invalid_client", "invalid_grant", "invalid_scope", "invalid_resource",
+        "unauthorized_client", "unsupported_grant_type", "interaction_required", "login_required",
+        "authorization_pending", "slow_down", "expired_token", "access_denied", "authorization_declined", "bad_verification_code"
+    };
     char *bytes = NULL;
-    size_t length = 0;
-    maage_auth_error result = maage_auth_http_bytes(auth, url, type, body, bearer, status, &bytes, &length);
+    const char *error;
+    size_t index, length = 0;
+    maage_auth_error result;
+    auth->response_stage = stage; auth->response_status = 0; auth->response_reason[0] = '\0';
+    result = maage_auth_http_bytes(auth, url, type, body, bearer, status, &bytes, &length);
+    auth->response_status = *status;
+    maage_log_debug("maage.launcher.auth", "%s: HTTP %ld", stage, *status);
     *json = NULL;
     if (result == MAAGE_AUTH_OK) {
         if (bytes && !memchr(bytes, 0, length)) *json = maage_auth_json_parse(bytes);
-        if (!*json && *status < 400) result = MAAGE_AUTH_PROTOCOL;
+        error = maage_auth_json_text(*json, "error");
+        /* Only known error identifiers may be reflected; never service prose. */
+        for (index = 0; error && index < sizeof(errors) / sizeof(errors[0]); ++index) if (!strcmp(error, errors[index])) {
+            strcpy(auth->response_reason, "Service error: "); strcat(auth->response_reason, errors[index]); strcat(auth->response_reason, ".");
+            break;
+        }
+        if (!*json && *status < 400) {
+            result = MAAGE_AUTH_PROTOCOL;
+            strcpy(auth->response_reason, "The service response was empty or was not valid JSON.");
+        }
     }
     if (bytes) { maage_auth_wipe(bytes, length); free(bytes); }
     return result;

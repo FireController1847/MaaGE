@@ -38,6 +38,9 @@ struct maage_auth {
     int busy, cancelled, stop, changed, decision, candidate_pending;
     char progress[256], browser_url[4096];
     maage_auth_error error;
+    const char *response_stage;
+    long response_status;
+    char response_reason[128];
     double retry_at, device_deadline;
     int dialog_active, copy_requested;
     char user_code[64], verification_uri[512], link_hint[128];
@@ -85,7 +88,7 @@ int maage_auth_metadata_write(const char *data);
 /* Bounded HTTPS transport; never follows redirects or logs payloads/headers. */
 int maage_auth_http_init(void);
 void maage_auth_http_cleanup(void);
-maage_auth_error maage_auth_http(maage_auth *auth, const char *url, const char *type, const char *body, const char *bearer, long *status, maage_auth_json **response);
+maage_auth_error maage_auth_http(maage_auth *auth, const char *stage, const char *url, const char *type, const char *body, const char *bearer, long *status, maage_auth_json **response);
 maage_auth_error maage_auth_http_bytes(maage_auth *auth, const char *url, const char *type, const char *body, const char *bearer, long *status, char **bytes, size_t *length);
 void maage_auth_avatar(maage_auth *auth, maage_auth_record *record, maage_auth_json *profile);
 char *maage_auth_escape(const char *text);

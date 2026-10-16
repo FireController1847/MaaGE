@@ -88,7 +88,9 @@ static maage_auth_error maage_auth_validate_account(maage_auth *auth, const char
     result = maage_auth_xbox(auth, access, xsts, hash);
     if (hash[0]) {
         sprintf(candidate->id, "xbox:%s", hash);
-        if (expected[0] && strcmp(expected, candidate->id)) { result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
+        if (expected[0] && strcmp(expected, candidate->id)) {
+            strcpy(auth->response_reason, "A different Microsoft account was approved. Use Add Microsoft account, or choose the saved account in the browser.");
+            result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
         if (!candidate->name[0]) sprintf(candidate->name, "Microsoft account %.8s", hash);
         if (maage_auth_find(auth, candidate->id) == auth->count && auth->count == MAAGE_AUTH_MAX_ACCOUNTS) { result = MAAGE_AUTH_LIMIT; goto cleanup; }
         if (!persist_early) {
@@ -130,12 +132,20 @@ cleanup:
     maage_auth_wipe(candidate, sizeof(*candidate));
     return result;
 }
+static void maage_auth_finish_message(maage_auth *auth, maage_auth_error result)
+{
+    const char *message = result == MAAGE_AUTH_PROTOCOL && auth->response_reason[0] ? auth->response_reason : maage_auth_message(result);
+    if (result == MAAGE_AUTH_RESTRICTED) return;
+    if (auth->response_stage && result != MAAGE_AUTH_OK && result != MAAGE_AUTH_CANCELLED && result != MAAGE_AUTH_STORAGE && result != MAAGE_AUTH_LIMIT)
+        sprintf(auth->progress, "%.40s (last HTTP %ld): %.155s", auth->response_stage, auth->response_status, message);
+    else maage_auth_copy(auth->progress, sizeof(auth->progress), message);
+}
 void maage_auth_worker(void *context)
 {
     maage_auth *auth = context;
     maage_launcher_action command;
     maage_auth_error result;
-    char target[40], key[128];
+    char target[40], key[128], outcome[256];
     size_t index;
     int loaded;
     loaded = maage_auth_store_load(auth);
@@ -143,8 +153,11 @@ void maage_auth_worker(void *context)
     if (auth->config.client_id[0] && auth->selected[0]) result = maage_auth_validate_account(auth, auth->selected, 0);
     maage_auth_lock(auth->runtime);
     auth->busy = 0; auth->changed = 1; auth->error = result;
-    if (result != MAAGE_AUTH_RESTRICTED) strcpy(auth->progress, loaded < 0 ? "Saved account metadata could not be read. Check the MaaGE data directory permissions." : maage_auth_message(result));
+    if (loaded < 0) strcpy(auth->progress, "Saved account metadata could not be read. Check the MaaGE data directory permissions.");
+    else maage_auth_finish_message(auth, result);
+    strcpy(outcome, auth->progress);
     maage_auth_unlock(auth->runtime);
+    if (result != MAAGE_AUTH_OK) maage_log_warn("maage.launcher.auth", "%s", outcome);
     for (;;) {
         maage_auth_lock(auth->runtime);
         while (!auth->command && !auth->stop) maage_auth_wait(auth->runtime);
@@ -182,10 +195,10 @@ void maage_auth_worker(void *context)
         maage_auth_lock(auth->runtime);
         auth->busy = 0; auth->changed = 1; auth->error = result;
         auth->browser_url[0] = '\0'; auth->retry_at = (double)time(NULL) + 60;
-        if (result != MAAGE_AUTH_RESTRICTED) strcpy(auth->progress, maage_auth_message(result));
+        maage_auth_finish_message(auth, result); strcpy(outcome, auth->progress);
         maage_auth_unlock(auth->runtime);
         if (result == MAAGE_AUTH_OK) maage_log_info("maage.launcher.auth", "Account operation completed.");
-        else maage_log_warn("maage.launcher.auth", "%s", maage_auth_message(result));
+        else maage_log_warn("maage.launcher.auth", "%s", outcome);
     }
 }
 static maage_launcher_result maage_auth_link_request(void *context, maage_sign_in_action action)
@@ -209,6 +222,7 @@ static maage_launcher_result maage_auth_request(void *context, maage_launcher_ac
     else if (action == MAAGE_ACTION_SESSION_ONLY && auth->candidate_pending) { auth->decision = 1; maage_auth_wake(auth->runtime); }
     else if (auth->busy || !auth->config.client_id[0] || !maage_auth_copy(auth->target, sizeof(auth->target), id ? id : "")) result = MAAGE_LAUNCHER_UNAVAILABLE;
     else {
+        auth->response_stage = NULL; auth->response_status = 0; auth->response_reason[0] = '\0';
         auth->cancelled = 0; auth->busy = 1; auth->command = action; auth->error = MAAGE_AUTH_OK;
         auth->dialog_active = action == MAAGE_ACTION_SIGN_IN || action == MAAGE_ACTION_REAUTH_ACCOUNT;
         auth->copy_requested = 0; auth->ui_hint[0] = auth->link_hint[0] = '\0';

@@ -37,10 +37,12 @@ maage_auth_error maage_auth_xbox(maage_auth *auth, const char *access, char *tok
     body = maage_auth_json_encode(request);
     if (!body) goto cleanup;
     maage_auth_progress(auth, "Signing in to Xbox Live...");
-    result = maage_auth_http(auth, auth->config.xbox, "application/json", body, NULL, &status, &response);
+    result = maage_auth_http(auth, "Xbox Live authentication", auth->config.xbox, "application/json", body, NULL, &status, &response);
     if (result != MAAGE_AUTH_OK) goto cleanup;
     if (status != 200) { result = status == 401 ? MAAGE_AUTH_RESTRICTED : MAAGE_AUTH_CONFIGURATION; goto cleanup; }
-    if (!maage_auth_xbox_claims(response, user_token, user_hash)) { result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
+    if (!maage_auth_xbox_claims(response, user_token, user_hash)) {
+        strcpy(auth->response_reason, "Xbox Live did not return a valid token and user-hash claim.");
+        result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
     /* The authenticated Xbox user hash is stable across username/profile changes. */
     strcpy(hash, user_hash);
     maage_auth_json_put(response); response = NULL;
@@ -54,7 +56,7 @@ maage_auth_error maage_auth_xbox(maage_auth *auth, const char *access, char *tok
     body = maage_auth_json_encode(request);
     if (!body) { result = MAAGE_AUTH_PROTOCOL; goto cleanup; }
     maage_auth_progress(auth, "Authorizing access to Minecraft Services...");
-    result = maage_auth_http(auth, auth->config.xsts, "application/json", body, NULL, &status, &response);
+    result = maage_auth_http(auth, "Xbox XSTS authorization", auth->config.xsts, "application/json", body, NULL, &status, &response);
     if (result != MAAGE_AUTH_OK) goto cleanup;
     if (status != 200) {
         double code = maage_auth_json_double(response, "XErr");
@@ -64,7 +66,10 @@ maage_auth_error maage_auth_xbox(maage_auth *auth, const char *access, char *tok
         else maage_auth_progress(auth, "Xbox authorization was refused. Check region restrictions, account status and Xbox terms.");
         result = MAAGE_AUTH_RESTRICTED; goto cleanup;
     }
-    if (!maage_auth_xbox_claims(response, token, xsts_hash) || strcmp(xsts_hash, user_hash)) result = MAAGE_AUTH_PROTOCOL;
+    if (!maage_auth_xbox_claims(response, token, xsts_hash) || strcmp(xsts_hash, user_hash)) {
+        strcpy(auth->response_reason, "XSTS token/user-hash claims are invalid or differ from the Xbox Live account.");
+        result = MAAGE_AUTH_PROTOCOL;
+    }
 cleanup:
     maage_auth_free_secret(body); maage_auth_free_secret(ticket); maage_auth_free_secret(user_token);
     maage_auth_json_put(request); maage_auth_json_put(response);

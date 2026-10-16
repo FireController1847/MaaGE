@@ -303,7 +303,9 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   non-sensitive account metadata is separate. Secure-storage failure requires an
   explicit session-only choice, never plaintext credentials. Honor refresh rotation;
   invalid/revoked credentials require reauthentication. Never log credentials,
-  private device codes, sensitive headers or full authentication responses.
+  private device codes, sensitive headers or full authentication responses. Report
+  failures with the service stage, HTTP status and fixed schema-error descriptions;
+  preserve those diagnostics during startup restoration as well as interactive login.
 - Stable account IDs are independent of names; deduplicate identities. Microsoft
   authentication, Java ownership and an unexpired verified game session are distinct.
   Metadata alone never proves readiness. Widgets receive display snapshots only;
