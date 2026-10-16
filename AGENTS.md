@@ -318,7 +318,9 @@ Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
 configuration, and Launcher logs. Minecraft-specific data belongs beneath
 `minecraft/`: `assets/indexes/1.7.10.json`, `assets/objects/<prefix>/<hash>`,
-`assets/reconstructed/<logical-name>`, and `metadata/1.7.10.json`. Receipts and the
+`assets/reconst/<logical-name>`, and `metadata/1.7.10.json`. Rename the previous
+`assets/reconstructed/` directory when `reconst/` is absent; if both exist, preserve
+the old directory and prepare the active `reconst/` from verified caches. Receipts and the
 manifest also live in `minecraft/metadata/`; MaaGE configuration/logs remain outside.
 Reuse/migrate verified files from the previous `assets/` and `versions/1.7.10/`
 layout without redownloading them. Never create new Minecraft `versions/` trees.
@@ -357,7 +359,7 @@ links, and selected resource file/directory conflicts. Select actual files benea
 `assets/<namespace>/` and root pack resources; exclude Java/executable extensions
 and unrelated package/signature metadata. Strip only the leading `assets/` from
 JAR resources: `assets/minecraft/textures/...` maps to
-`assets/reconstructed/minecraft/textures/...`. Preserve every namespace, root pack
+`assets/reconst/minecraft/textures/...`. Preserve every namespace, root pack
 paths, and resource bytes; record original archive paths alongside logical names.
 Reuse verified files from either previous nested or flattened layouts, then remove
 only verified obsolete originals and empty directories after

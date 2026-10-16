@@ -35,7 +35,7 @@ static int maage_minecraft_name_valid(const char *name)
 }
 int maage_minecraft_asset_path(const char *application_data, const char *name, char *path, size_t capacity)
 {
-    char root[MAAGE_PATH_CAPACITY], reconstructed[MAAGE_PATH_CAPACITY];
+    char root[MAAGE_PATH_CAPACITY], reconst[MAAGE_PATH_CAPACITY];
     if (!maage_minecraft_name_valid(name)) return 0;
     if (!application_data) {
         if (!maage_storage_data_path(root, sizeof(root))) return 0;
@@ -47,6 +47,6 @@ int maage_minecraft_asset_path(const char *application_data, const char *name, c
 #else
     if (application_data[0] != '/') return 0;
 #endif
-    return maage_storage_join(reconstructed, sizeof(reconstructed), application_data, "minecraft/assets/reconstructed") &&
-        maage_storage_join(path, capacity, reconstructed, name);
+    return maage_storage_join(reconst, sizeof(reconst), application_data, "minecraft/assets/reconst") &&
+        maage_storage_join(path, capacity, reconst, name);
 }

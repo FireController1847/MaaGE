@@ -343,7 +343,7 @@ static void maage_assets_client_cleanup(maage_assets_client_context *client)
     char path[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], boundary[MAAGE_PATH_CAPACITY], *separator;
     const char *archive_name, *legacy, *hash;
     unsigned candidate;
-    if (!maage_storage_join(boundary, sizeof(boundary), client->assets->root, "minecraft/assets/reconstructed")) return;
+    if (!maage_storage_join(boundary, sizeof(boundary), client->assets->root, "minecraft/assets/reconst")) return;
     json_object_object_foreachC(client->records, iterator) {
         archive_name = maage_assets_string(iterator.val, "archive_path"); hash = maage_assets_string(iterator.val, "sha1");
         if (!archive_name || strncmp(archive_name, "assets/", sizeof("assets/") - 1) || !maage_assets_hash(hash)) continue;
@@ -375,7 +375,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     char destinations[4][MAAGE_PATH_CAPACITY], urls[4][160], fingerprint[128];
     char legacy_state_path[MAAGE_PATH_CAPACITY], staging[MAAGE_PATH_CAPACITY] = "";
     char destination[MAAGE_PATH_CAPACITY], relative[128], client_path[MAAGE_PATH_CAPACITY], client_hash[41];
-    const char *directories[] = { "minecraft/assets/indexes", "minecraft/assets/objects", "minecraft/assets/reconstructed", "minecraft/assets/.staging", "minecraft/metadata", "minecraft/cache", "config", "logs" };
+    const char *directories[] = { "minecraft/assets/indexes", "minecraft/assets/objects", "minecraft/assets/reconst", "minecraft/assets/.staging", "minecraft/metadata", "minecraft/cache", "config", "logs" };
     const char *text, *url, *expected, *cached, *client_url;
     struct json_object *manifest = NULL, *metadata = NULL, *index = NULL, *state = NULL, *receipt = NULL;
     struct json_object *versions, *version, *reference, *objects, *value, *saved = NULL, *new_saved = NULL;
@@ -404,6 +404,17 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     maage_storage_join(path, sizeof(path), assets->root, "config/assets.lock");
     lock = maage_storage_acquire(path);
     if (!lock) { strcpy(error, "Another Launcher may be preparing assets. Close it and Retry; check data-directory permissions if it is already closed."); goto cleanup; }
+    maage_storage_join(path, sizeof(path), assets->root, "minecraft/assets/reconstructed");
+    maage_storage_join(destination, sizeof(destination), assets->root, "minecraft/assets/reconst");
+    if (maage_storage_directory_exists(path)) {
+        if (!maage_storage_directory_exists(destination)) {
+            if (!maage_storage_replace(path, destination)) {
+                strcpy(error, "Cannot rename reconstructed resources to reconst. Check data-directory permissions and retry."); goto cleanup;
+            }
+            maage_log_info("maage.launcher.assets", "Renamed resource directory: %s -> %s", path, destination);
+            maage_assets_lock(assets); assets->progress.needs_setup = 1; maage_assets_unlock(assets);
+        } else maage_log_info("maage.launcher.assets", "Using %s; the existing %s directory is retained because both layouts exist.", destination, path);
+    }
     for (i = 0; i < sizeof(directories) / sizeof(directories[0]); ++i) {
         maage_storage_join(path, sizeof(path), assets->root, directories[i]);
         if (!maage_storage_directories(path)) goto storage_error;
@@ -514,6 +525,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     }
     receipt = json_object_new_object(); new_saved = json_object_new_object();
     if (!receipt || !new_saved) goto memory_error;
+    json_object_object_add(receipt, "resource_directory", json_object_new_string("reconst"));
     json_object_object_add(receipt, "metadata_sha1", json_object_new_string(metadata_hash));
     json_object_object_add(receipt, "index_sha1", json_object_new_string(index_hash));
     json_object_object_add(receipt, "client_jar_sha1", json_object_new_string(client_hash));
