@@ -27,8 +27,13 @@ static void maage_setup_win32_tick(maage_setup_win32 *ui)
     maage_setup_text t;
     char percent[16];
     maage_assets_snapshot(ui->assets, &p); maage_setup_describe(&p, &t);
+    if (p.stage == MAAGE_SETUP_COMPLETE && !maage_assets_access_allowed(ui->assets)) {
+        p.stage = MAAGE_SETUP_FAILED; p.needs_setup = 1;
+        strcpy(p.error, "Minecraft access expired. Choose Verify Access and verify again. Existing resources are preserved.");
+        maage_setup_describe(&p, &t);
+    }
     if (ui->closing && (p.stage == MAAGE_SETUP_CANCELLED || p.stage == MAAGE_SETUP_FAILED || p.stage == MAAGE_SETUP_COMPLETE)) { DestroyWindow(ui->window); return; }
-    if (t.complete && !p.needs_setup) { ui->result = 1; DestroyWindow(ui->window); return; }
+    if (t.complete && !p.needs_setup && maage_assets_access_allowed(ui->assets)) { ui->result = 1; DestroyWindow(ui->window); return; }
     maage_setup_win32_text(ui->heading, t.heading); maage_setup_win32_text(ui->subtitle, t.subtitle);
     maage_setup_win32_text(ui->directories, t.directories); maage_setup_win32_text(ui->metadata, t.metadata);
     maage_setup_win32_text(ui->resources, t.resources);
@@ -43,7 +48,8 @@ static void maage_setup_win32_tick(maage_setup_win32 *ui)
         SetWindowLongPtrW(ui->progress, GWL_STYLE, GetWindowLongPtrW(ui->progress, GWL_STYLE) | PBS_MARQUEE);
         SendMessageW(ui->progress, PBM_SETMARQUEE, TRUE, 30);
     }
-    maage_setup_win32_text(ui->percent, percent); maage_setup_win32_text(ui->next, t.button); EnableWindow(ui->next, t.actionable && !ui->closing);
+    if (t.failed && !maage_assets_access_allowed(ui->assets)) t.button = "Verify Access";
+    maage_setup_win32_text(ui->percent, percent); maage_setup_win32_text(ui->next, t.button); EnableWindow(ui->next, t.actionable && !ui->closing && (!t.complete || maage_assets_access_allowed(ui->assets)));
     if (!IsWindowVisible(ui->window) && (p.needs_setup || t.failed)) { ShowWindow(ui->window, SW_SHOW); UpdateWindow(ui->window); }
 }
 static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
@@ -62,7 +68,8 @@ static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM
         else if (LOWORD(wparam) == IDOK) {
             maage_setup_progress p;
             maage_assets_snapshot(ui->assets, &p);
-            if (p.stage == MAAGE_SETUP_COMPLETE) { ui->result = 1; DestroyWindow(window); }
+            if (!maage_assets_access_allowed(ui->assets) && (p.stage == MAAGE_SETUP_FAILED || p.stage == MAAGE_SETUP_COMPLETE)) { ui->result = 2; DestroyWindow(window); }
+            else if (p.stage == MAAGE_SETUP_COMPLETE && maage_assets_access_allowed(ui->assets)) { ui->result = 1; DestroyWindow(window); }
             else if (p.stage == MAAGE_SETUP_FAILED) maage_assets_retry(ui->assets);
         }
         return 0;

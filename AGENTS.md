@@ -109,9 +109,9 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   installation/configuration; authorized Minecraft asset acquisition; Microsoft
   authentication and legitimate ownership verification through authorized mechanisms;
   profiles, client launch configuration, updates, and dependency management.
-  Remain independent of client/server internals. Authentication, ownership
-  verification, modpack installation, and game launching remain deferred. Native
-  first-run setup and asset-index acquisition are implemented separately from authentication.
+  Remain independent of client/server internals. Existing-launcher Minecraft session
+  verification gates native first-run asset setup. New Microsoft sign-in, modpack
+  installation, and game launching remain deferred.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
@@ -269,13 +269,41 @@ AppKit on macOS, Win32 controls on Windows, and GTK 3 on Linux. Launcher-owned
 adapters remain separate from Game UI; do not create a shared widget framework.
 Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
 actual rendering needs; the existing RGB demonstration follows successful setup.
-Authentication and game launching remain deferred.
+New Microsoft sign-in and game launching remain deferred.
 
 First-run setup acquires **only Minecraft Java Edition 1.7.10 asset-index resources**
-through official HTTPS metadata. It needs no sign-in, client/server JAR, Java,
-libraries, or modpack. Minecraft 1.7.10 is the fixed resource baseline, independent of MaaGE application
+through official HTTPS metadata, after verifying an existing Minecraft account.
+It needs no client/server JAR, Java, libraries, or modpack. Minecraft 1.7.10 is the fixed resource baseline, independent of MaaGE application
 versions; do not create a Minecraft version-management system. The index does not
 contain all resources historically embedded in the client JAR.
+
+Verify Minecraft Access precedes Preparing MaaGE. Discovery, explicit connection,
+and authenticated verification are distinct states. Prioritize existing compatible
+PrismLauncher/MultiMC V3 MSA sessions; MaaGE needs no Microsoft OAuth Client ID and
+must not perform a new Microsoft sign-in. Obtain only the selected account's
+short-lived Minecraft Services `ygg.token`, after explicit consent. Stream external
+account files selectively; never import Microsoft tokens, refresh tokens, full
+credential databases, passwords, or other applications' protected/vault data.
+Read original launcher files without modifying them. Check authenticated
+`minecraft/profile` UUID/username and `entitlements/mcstore` Java game entitlement
+over verified HTTPS; failures, missing sessions, and application-bound tokens never
+grant access. Never log/persist credentials or raw authentication responses.
+
+The Launcher-owned access service provides asynchronous discovery/verification and
+locked nonsecret snapshots. UUID deduplication retains source associations; native
+screens support rescan/manual folders, connect/retry, disconnect, and cancellation.
+Official/embedded launcher account records are discovery-only; FTB/CurseForge opaque
+or protected account stores remain unsupported. Do not confuse installation
+profiles with players or advertise directory detection as verified support.
+Persist only linked public metadata in `config/minecraft-profiles.json` and manual
+configuration-folder references. Verified authority is process-local for at most
+one hour (shorter for known session expiry), never restored from disk; reverify
+after every restart. One currently verified profile is sufficient. Both controller
+and asset manager enforce this policy, including repair/retry and active work;
+expiry/disconnection/cancellation revoke access without deleting existing resources.
+Expose **Verify Through Minecraft — Coming Soon** as disabled; future multiplayer
+verification belongs in a separate provider, with no protocol/server implementation
+or new Microsoft authentication path until requested.
 
 The Launcher asset manager is UI-independent, with worker-thread operations,
 locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).
@@ -302,6 +330,12 @@ deduplicate hashes, and reconstruct every logical path, without resource-type
 filters. Completion requires both the verified object cache and valid logical
 files. Track unique objects, logical files, cached/downloaded objects,
 reconstruction progress, and outstanding missing/corrupt files separately.
+Log actual file operations through Core logging: indexed names/hashes, download
+URLs/destinations/attempts/retries, verified installation, migration, reconstruction
+source/destination and hard-link/copy results, cancellation, failures, and summaries.
+Use INFO for performed work and DEBUG for per-file verification and unchanged cache
+reuse. Derive resource names and mappings from the downloaded index; keep static
+resources minimal rather than embedding asset lists or duplicate resource tables.
 
 Reconstruction prefers hard links from verified objects, with verified copies as
 fallback, staged outside the logical tree and atomically promoted. Logical names

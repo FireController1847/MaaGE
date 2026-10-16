@@ -21,7 +21,10 @@ typedef struct maage_setup_progress {
     char activity[256], error[512];
 } maage_setup_progress;
 typedef struct maage_assets maage_assets;
-maage_assets *maage_assets_create(void);
+#include "access/access.h"
+/* Borrows access, which must outlive this manager. NULL always denies work. */
+maage_assets *maage_assets_create(maage_access *access);
+int maage_assets_access_allowed(maage_assets *assets);
 /* Returns zero if a worker is active. Repair forces every object hash check. */
 int maage_assets_start(maage_assets *assets, int repair);
 /* Retry preserves whether the failed operation requested a full repair. */

@@ -31,7 +31,8 @@ static void maage_setup_gtk_next(GtkWidget *widget, gpointer context)
     maage_setup_progress p;
     (void)widget;
     maage_assets_snapshot(ui->assets, &p);
-    if (p.stage == MAAGE_SETUP_COMPLETE) { ui->result = 1; gtk_main_quit(); }
+    if (!maage_assets_access_allowed(ui->assets) && (p.stage == MAAGE_SETUP_FAILED || p.stage == MAAGE_SETUP_COMPLETE)) { ui->result = 2; gtk_main_quit(); }
+    else if (p.stage == MAAGE_SETUP_COMPLETE && maage_assets_access_allowed(ui->assets)) { ui->result = 1; gtk_main_quit(); }
     else if (p.stage == MAAGE_SETUP_FAILED) maage_assets_retry(ui->assets);
 }
 static gboolean maage_setup_gtk_tick(gpointer context)
@@ -41,8 +42,13 @@ static gboolean maage_setup_gtk_tick(gpointer context)
     maage_setup_text t;
     char percent[16];
     maage_assets_snapshot(ui->assets, &p); maage_setup_describe(&p, &t);
+    if (p.stage == MAAGE_SETUP_COMPLETE && !maage_assets_access_allowed(ui->assets)) {
+        p.stage = MAAGE_SETUP_FAILED; p.needs_setup = 1;
+        strcpy(p.error, "Minecraft access expired. Choose Verify Access and verify again. Existing resources are preserved.");
+        maage_setup_describe(&p, &t);
+    }
     if (ui->closing && (p.stage == MAAGE_SETUP_CANCELLED || p.stage == MAAGE_SETUP_FAILED || p.stage == MAAGE_SETUP_COMPLETE)) { gtk_main_quit(); return G_SOURCE_CONTINUE; }
-    if (t.complete && !p.needs_setup) { ui->result = 1; gtk_main_quit(); return G_SOURCE_CONTINUE; }
+    if (t.complete && !p.needs_setup && maage_assets_access_allowed(ui->assets)) { ui->result = 1; gtk_main_quit(); return G_SOURCE_CONTINUE; }
     gtk_label_set_text(GTK_LABEL(ui->heading), t.heading); gtk_label_set_text(GTK_LABEL(ui->subtitle), t.subtitle);
     gtk_label_set_text(GTK_LABEL(ui->directories), t.directories); gtk_label_set_text(GTK_LABEL(ui->metadata), t.metadata);
     gtk_label_set_text(GTK_LABEL(ui->resources), t.resources);
@@ -51,7 +57,8 @@ static gboolean maage_setup_gtk_tick(gpointer context)
     if (p.percent < 0) { percent[0] = 0; gtk_progress_bar_pulse(GTK_PROGRESS_BAR(ui->progress)); }
     else { g_snprintf(percent, sizeof(percent), "%d%%", p.percent); gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), p.percent / 100.0); }
     gtk_label_set_text(GTK_LABEL(ui->percent), percent);
-    gtk_button_set_label(GTK_BUTTON(ui->next), t.button); gtk_widget_set_sensitive(ui->next, t.actionable && !ui->closing);
+    if (t.failed && !maage_assets_access_allowed(ui->assets)) t.button = "Verify Access";
+    gtk_button_set_label(GTK_BUTTON(ui->next), t.button); gtk_widget_set_sensitive(ui->next, t.actionable && !ui->closing && (!t.complete || maage_assets_access_allowed(ui->assets)));
     if (!gtk_widget_get_visible(ui->window) && (p.needs_setup || t.failed)) gtk_widget_show(ui->window);
     return G_SOURCE_CONTINUE;
 }

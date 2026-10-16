@@ -20,7 +20,7 @@ MaaGE is an independent native voxel platform inspired by Minecraft, designed fo
 
 The architecture separates three applications:
 
-- **Launcher** — native first-run asset setup; Microsoft authentication and Minecraft ownership verification remain planned. Mojang's proprietary assets will not be distributed.
+- **Launcher** — native existing-account access verification followed by first-run asset setup; new Microsoft sign-in remains deferred. Mojang's proprietary assets will not be distributed.
 - **Client** — independently versioned game executable for Launcher-managed installations and startup. Native windowing, rendering, and gameplay are planned.
 - **Server** — independent headless operation, with an optional graphical administration interface planned within the same executable.
 
@@ -28,7 +28,7 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The Launcher has a native initial setup interface (AppKit on macOS, Win32 on Windows, GTK 3 on Linux) and a resumable asset manager that verifies and reconstructs Minecraft Java Edition 1.7.10's full asset index. After setup, it retains the Core RGB rendering demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client and Server remain startup stubs; gameplay, authentication, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; Windows/Linux compilation and runtime/UI testing remain outstanding.
+**Early development.** The Launcher has native Verify Minecraft Access and Preparing MaaGE interfaces (AppKit on macOS, Win32 on Windows, GTK 3 on Linux), an authenticated existing-session verification service, and a resumable asset manager that verifies and reconstructs Minecraft Java Edition 1.7.10's full asset index. After setup, it retains the Core RGB rendering demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client and Server remain startup stubs; gameplay, new Microsoft sign-in, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; Windows/Linux compilation and runtime/UI testing remain outstanding.
 
 Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
@@ -66,7 +66,24 @@ Launcher data lives in `%APPDATA%/MaaGE/` on Windows, `~/Library/Application Sup
 
 ## Initial Setup
 
-Setup retrieves the official manifest, Minecraft 1.7.10 metadata, its referenced asset index, and every unique content-addressed object in that index. Minecraft 1.7.10 is the fixed resource baseline; MaaGE application versions remain independent. No Minecraft JAR, Java runtime, native library, authentication, or game installation is required or downloaded. The index does not include every resource historically embedded in the client JAR.
+The workflow is **Verify Minecraft Access → Preparing MaaGE → download and reconstruct resources → Ready to Play**, followed by the existing RGB rendering demonstration. Game launching is still deferred. Native controls support selecting multiple real accounts, rescan, manual configuration-folder selection, explicit Connect & Verify consent, retry, disconnect, and cancel. The disabled **Verify Through Minecraft — Coming Soon** option has no multiplayer implementation. No renderer initializes for these setup screens.
+
+| Launcher / Format | Discovery | Authenticated Verification |
+| --- | --- | --- |
+| PrismLauncher / MultiMC `accounts.json` V3 | Public `profile.id` / `profile.name`; UUID deduplication preserves launcher sources | MSA accounts with an available, usable Minecraft Services `ygg.token` |
+| Official Launcher `launcher_accounts.json` | Public `accounts.*.minecraftProfile` identities | Discovery only |
+| CurseForge with an embedded official launcher | Official account records under the Minecraft `Install` directory | Discovery only |
+| FTB App / standalone CurseForge private stores | Known folders detected; official-format records read where present | Private, protected, and opaque account formats unsupported |
+
+Known Windows, macOS, Linux, and Prism/MultiMC Flatpak paths are scanned; portable/custom installations can be selected manually. Folder detection alone does not create a player account or prove access. Installation profiles, offline identities, and cached ownership flags cannot pass verification. Unsupported formats and missing sessions remain unverified. The supported token layout follows the upstream [PrismLauncher account format](https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/auth/AccountData.cpp) and [MultiMC account format](https://github.com/MultiMC/Launcher/blob/develop/launcher/minecraft/auth/AccountData.cpp); launcher changes may require an adapter update.
+
+After explicit consent, a worker selectively reads only the selected compatible account's temporary Minecraft Services token. It checks `GET https://api.minecraftservices.com/minecraft/profile`, validates the username and matching UUID, then checks `GET https://api.minecraftservices.com/entitlements/mcstore` for a valid Java `game_minecraft` entitlement record. HTTPS requests have bounded responses, timeouts, certificate verification, and no redirects. HTTP 200 alone does not grant access. Rejected/application-bound or expired sessions require refreshing the original launcher and retrying; MaaGE cannot refresh them. This workflow does not use a MaaGE Microsoft Client ID or perform Microsoft OAuth.
+
+Tokens are wiped after verification, never saved or logged. Microsoft passwords/tokens, OAuth refresh tokens, whole authentication databases, and other applications' credential vaults are not imported; source launcher files are read-only. Linked nonsecret names, UUIDs, source labels, state, and last-verification timestamps are saved in `<MaaGE Application Data>/config/minecraft-profiles.json`, along with manually selected configuration folders. Saved verification state grants no authority. Access lasts at most one hour in the current MaaGE process, shortened by known source-session expiry; every restart requires authenticated re-verification.
+
+At least one currently verified profile is required by both the controller and asset-manager service, including repair and retry. Cancellation, disconnect, and expiry revoke the grant; active work stops through its cancellation checks, preserving completed resources. If access expires during setup, **Verify Access** returns to the account screen. Authentication, discovery, and native UI behavior have not been runtime tested.
+
+Setup retrieves the official manifest, Minecraft 1.7.10 metadata, its referenced asset index, and every unique content-addressed object in that index. Minecraft 1.7.10 is the fixed resource baseline; MaaGE application versions remain independent. A verified Minecraft Java account is required first; no Minecraft JAR, Java runtime, native library, or game installation is required or downloaded. The index does not include every resource historically embedded in the client JAR.
 
 Minecraft files live beneath the application's `minecraft/` directory:
 
@@ -77,7 +94,7 @@ Minecraft files live beneath the application's `minecraft/` directory:
 
 Existing files from the previous `assets/` and `versions/1.7.10/metadata.json` layout are verified and migrated as needed, preserving valid downloads across interrupted migration. After successful setup, recognized legacy files and their temporary files are removed; unrecognized contents are retained, and only empty legacy directories are removed. MaaGE's `config/` and `logs/` remain outside `minecraft/`.
 
-Downloads use verified HTTPS, four concurrent requests, timeouts, and limited retries. Reconstruction stages hard links where available and verified copies otherwise, then installs them atomically. Unsafe logical paths and symlink/reparse directories are rejected. Cancellation preserves verified resources, and Retry resumes the same operation. Continue remains disabled until every unique object and every logical file passes verification. The setup interface reports unique-object/download counts, transferred bytes, and reconstructed logical-file counts separately.
+Downloads use verified HTTPS, four concurrent requests, timeouts, and limited retries. Reconstruction stages hard links where available and verified copies otherwise, then installs them atomically. Unsafe logical paths and symlink/reparse directories are rejected. Cancellation preserves verified resources, and Retry resumes the same operation. Continue remains disabled until every unique object and every logical file passes verification. The setup interface reports unique-object/download counts, transferred bytes, and reconstructed logical-file counts separately. INFO logs record individual downloads (logical name, URL, destination, attempts/retries), verified installation, migration, and reconstruction source/destination paths with hard-link/copy results. Use `--log-level=debug` to also log indexed mappings, per-file verification, and reuse of unchanged cached resources. These diagnostics use the downloaded index rather than an embedded asset list.
 
 Subsequent launches check cached metadata and both resource forms using sizes and file fingerprints; unchanged installations need no network requests or full rehash. Changed files and incomplete installations receive hash checks. `--repair-assets` uses the same implementation to fully verify and repair the cache and reconstructed resources. Missing derived files are restored from valid cached objects without network downloads. Hard links share already verified content; independent copies receive their own integrity checks.
 
