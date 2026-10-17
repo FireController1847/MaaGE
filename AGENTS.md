@@ -268,8 +268,21 @@ Prefer native operating-system infrastructure for the lightweight Launcher:
 AppKit on macOS, Win32 controls on Windows, and GTK 3 on Linux. Launcher-owned
 adapters remain separate from Game UI; do not create a shared widget framework.
 Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
-actual rendering needs; the existing RGB demonstration follows successful setup.
+actual rendering needs; `--renderer-demo` explicitly opens the existing RGB
+demonstration after setup instead of the main Launcher.
 New Microsoft sign-in and game launching remain deferred.
+
+Preserve the native initial setup experience. The main Launcher uses a compact
+native sidebar with Play as the default page/principal action; News, Installations,
+and Settings (including About) remain separate. Account selection belongs in the
+Play header and controls service authorization. Keep Launcher state/configurations
+in Launcher-owned modules, independent of game UI/rendering; use `config/launcher.json`
+for nonsecret preferences and minimal MaaGE configurations, never Minecraft instances
+or versions. Persist installation/account selections and supported appearance
+preferences; default appearance follows the system. Reuse existing account/setup
+services for management and repair. Disable Play honestly until Client startup is
+implemented; show an empty News state until a real source exists. Do not introduce
+webviews, heavyweight GUI frameworks, or a shared Launcher/Client widget framework.
 
 First-run setup acquires Minecraft Java Edition 1.7.10 indexed assets and game
 resources from its official client JAR, after verifying an existing Minecraft

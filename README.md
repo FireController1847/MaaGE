@@ -28,7 +28,7 @@ The portable core targets ISO C90, with platform-specific integrations kept sepa
 
 ## Development Status
 
-**Early development.** The Launcher has native Verify Minecraft Access and Preparing MaaGE interfaces (AppKit on macOS, Win32 on Windows, GTK 3 on Linux), an authenticated existing-session verification service, and a resumable asset manager that verifies and reconstructs Minecraft Java Edition 1.7.10's full asset index and client-JAR game resources. After setup, it retains the Core RGB rendering demonstration: native Metal on macOS and Vulkan on Windows/Linux. Client and Server remain startup stubs; gameplay, new Microsoft sign-in, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; Windows/Linux compilation and runtime/UI testing remain outstanding.
+**Early development.** The Launcher has native Verify Minecraft Access and Preparing MaaGE interfaces (AppKit on macOS, Win32 on Windows, GTK 3 on Linux), an authenticated existing-session verification service, and a resumable asset manager that verifies and reconstructs Minecraft Java Edition 1.7.10's full asset index and client-JAR game resources. After setup, a native sidebar opens Play, News, Installations, and Settings. Play remains disabled because Client startup is not implemented; News has an honest empty state. Client and Server remain startup stubs; gameplay, new Microsoft sign-in, game launching, and Server administration UI are not implemented. macOS builds have been compiled locally; full Windows/Linux builds and runtime/UI testing remain outstanding.
 
 Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
 
@@ -66,7 +66,9 @@ Launcher data lives in `%APPDATA%/MaaGE/` on Windows, `~/Library/Application Sup
 
 ## Initial Setup
 
-The workflow is **Verify Minecraft Access → Preparing MaaGE → download and reconstruct resources → Ready to Play**, followed by the existing RGB rendering demonstration. Game launching is still deferred. Native controls support selecting multiple real accounts, rescan, manual configuration-folder selection, explicit Import Account consent and Verify Saved, retry, disconnect, and cancel. The disabled **Verify Through Minecraft — Coming Soon** option has no multiplayer implementation. No renderer initializes for these setup screens.
+The workflow is **Verify Minecraft Access → Preparing MaaGE → download and reconstruct resources → main Launcher**. Native controls support selecting multiple real accounts, rescan, manual configuration-folder selection, explicit Import Account consent and Verify Saved, retry, disconnect, and cancel. The disabled **Verify Through Minecraft — Coming Soon** option has no multiplayer implementation. No renderer initializes for setup or ordinary Launcher UI. Use `--renderer-demo` to open the existing RGB demonstration after setup; its renderer command-line options remain supported.
+
+The main Launcher defaults to Play, with a compact account selector and synchronized MaaGE configuration selector. Installations supports naming, duplication, removal, and choosing a default; these are configurations, not Minecraft instances or versions. Preferences and selections live in `config/launcher.json`, separately from account credentials. Settings shows the resource location and readiness, opens the established account and repair workflows, and includes About information. Appearance follows the system by default, with Light/Dark overrides in AppKit and GTK; Win32 uses native system colors. News links to the project while no feed is configured. Play explains the unavailable Client startup rather than simulating a launch.
 
 | Launcher / Format | Discovery | Authenticated Verification |
 | --- | --- | --- |

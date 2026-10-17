@@ -32,6 +32,9 @@ int maage_access_verify_local(maage_access *access, const char *uuid);
 int maage_access_disconnect(maage_access *access, const char *uuid);
 void maage_access_snapshot_get(maage_access *access, maage_access_snapshot *snapshot);
 int maage_access_allowed(maage_access *access);
+/* Restrict subsequent authorization to a connected account; NULL restores the
+ * initial-setup policy accepting any current account. Does not grant a lease. */
+int maage_access_select(maage_access *access, const char *uuid);
 void maage_access_cancel(maage_access *access);
 void maage_access_destroy(maage_access *access);
 const char *maage_access_state_name(maage_access_state state);

@@ -31,7 +31,7 @@ struct maage_access {
     pthread_t thread;
 #endif
     int has_thread, cancelled, operation, loaded;
-    char selected[33], manual[MAAGE_PATH_CAPACITY], root[MAAGE_PATH_CAPACITY];
+    char selected[33], active[33], manual[MAAGE_PATH_CAPACITY], root[MAAGE_PATH_CAPACITY];
     char directories[MAAGE_ACCESS_MANUAL][MAAGE_PATH_CAPACITY];
     unsigned directory_count, reference_count;
     maage_access_reference references[MAAGE_ACCESS_REFERENCES];
@@ -85,7 +85,7 @@ static int maage_access_policy(maage_access *a)
         if (a->cancelled || !p->connected || now < 0 || now < a->starts[i] || now >= a->deadlines[i] || wall < p->last_verified || wall >= p->last_verified + 3600.0) {
             p->state = MAAGE_ACCESS_EXPIRED; a->deadlines[i] = 0;
             strcpy(p->detail, "Verification expired. MaaGE can check its saved session again, or re-import an expired session."); ++a->view.revision;
-        } else allowed = 1;
+        } else if (!*a->active || !strcmp(a->active, p->uuid)) allowed = 1;
     }
     a->view.allowed = allowed;
     return allowed;
@@ -96,6 +96,20 @@ int maage_access_allowed(maage_access *a)
     if (!a) return 0;
     maage_access_lock(a); allowed = maage_access_policy(a); maage_access_unlock(a);
     return allowed;
+}
+int maage_access_select(maage_access *a, const char *uuid)
+{
+    unsigned index;
+    int ok = 1;
+    maage_access_lock(a);
+    if (!uuid) a->active[0] = 0;
+    else {
+        index = maage_access_find(a, uuid);
+        if (index == a->view.count || !a->view.profiles[index].connected) ok = 0;
+        else strcpy(a->active, uuid);
+    }
+    maage_access_policy(a); ++a->view.revision; maage_access_unlock(a);
+    return ok;
 }
 void maage_access_snapshot_get(maage_access *a, maage_access_snapshot *snapshot)
 { maage_access_lock(a); maage_access_policy(a); *snapshot = a->view; maage_access_unlock(a); }
