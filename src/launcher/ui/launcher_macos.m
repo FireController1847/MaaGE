@@ -25,6 +25,26 @@ static void maage_ui_fill(NSView *child, NSView *parent, CGFloat margin)
         [child.topAnchor constraintEqualToAnchor:parent.topAnchor constant:margin],
         [child.bottomAnchor constraintEqualToAnchor:parent.bottomAnchor constant:-margin]]];
 }
+static NSTextField *maage_ui_row_label(NSString *text, CGFloat size, BOOL bold)
+{
+    NSTextField *label = [NSTextField labelWithString:text];
+    label.font = [NSFont systemFontOfSize:size weight:bold ? NSFontWeightSemibold : NSFontWeightRegular];
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    [label setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationVertical];
+    return label;
+}
+static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
+{
+    NSTableCellView *cell = [[NSTableCellView alloc] init];
+    content.translatesAutoresizingMaskIntoConstraints = NO; [cell addSubview:content];
+    [NSLayoutConstraint activateConstraints:@[
+        [content.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:inset],
+        [content.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-inset],
+        [content.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+        [content.topAnchor constraintGreaterThanOrEqualToAnchor:cell.topAnchor constant:4],
+        [content.bottomAnchor constraintLessThanOrEqualToAnchor:cell.bottomAnchor constant:-4]]];
+    return cell;
+}
 @interface MaaGELauncherController : NSObject <NSWindowDelegate, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
@@ -87,21 +107,20 @@ static void maage_ui_fill(NSView *child, NSView *parent, CGFloat margin)
     if (table == self.sidebar) {
         NSArray *names = @[@"Play", @"News", @"Installations", @"Settings"];
         NSArray *symbols = @[@"play", @"newspaper", @"square.stack", @"gearshape"];
-        NSTableCellView *cell = [[NSTableCellView alloc] init];
         NSStackView *line = maage_ui_stack(YES, 10);
         if (@available(macOS 11.0, *)) {
             NSImageView *icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbols[row] accessibilityDescription:names[row]]];
             [icon.widthAnchor constraintEqualToConstant:18].active = YES; [line addArrangedSubview:icon];
         }
-        [line addArrangedSubview:maage_ui_label(names[row], 13, NO)]; maage_ui_fill(line, cell, 5); return cell;
+        [line addArrangedSubview:maage_ui_row_label(names[row], 13, NO)]; return maage_ui_row(line, 5);
     }
     maage_installation *item = &self.state->installations[row];
     NSString *suffix = item->id == self.state->default_id ? @" · Default" : @"";
     NSString *selected = item->id == self.state->selected ? @" · Selected" : @"";
     NSStackView *line = maage_ui_stack(NO, 4);
-    [line addArrangedSubview:maage_ui_label([NSString stringWithFormat:@"%s%@%@", item->name, suffix, selected], 14, YES)];
-    NSTextField *summary = maage_ui_label(@"Minecraft 1.7.10 resources · Native MaaGE Client", 12, NO);
-    summary.textColor = NSColor.secondaryLabelColor; [line addArrangedSubview:summary]; return line;
+    [line addArrangedSubview:maage_ui_row_label([NSString stringWithFormat:@"%s%@%@", item->name, suffix, selected], 14, YES)];
+    NSTextField *summary = maage_ui_row_label(@"Minecraft 1.7.10 resources · Native MaaGE Client", 12, NO);
+    summary.textColor = NSColor.secondaryLabelColor; [line addArrangedSubview:summary]; return maage_ui_row(line, 6);
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
 {
@@ -296,7 +315,10 @@ static void maage_ui_fill(NSView *child, NSView *parent, CGFloat margin)
     self.sidebar.backgroundColor = NSColor.clearColor; self.sidebar.dataSource = self; self.sidebar.delegate = self;
     if (@available(macOS 11.0, *)) self.sidebar.style = NSTableViewStyleSourceList;
     self.sidebar.accessibilityLabel = @"Launcher navigation";
-    [self.sidebar addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"page"]];
+    NSTableColumn *navigationColumn = [[NSTableColumn alloc] initWithIdentifier:@"page"];
+    navigationColumn.width = 140;
+    self.sidebar.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
+    [self.sidebar addTableColumn:navigationColumn];
     NSTextField *brand = maage_ui_label(@"MAAGE", 12, YES); brand.textColor = NSColor.secondaryLabelColor;
     NSStackView *nav = maage_ui_stack(NO, 16); [nav addArrangedSubview:brand];
     NSScrollView *navigation = [[NSScrollView alloc] init]; navigation.drawsBackground = NO; navigation.documentView = self.sidebar;
