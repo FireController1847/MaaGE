@@ -45,10 +45,20 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
         [content.bottomAnchor constraintLessThanOrEqualToAnchor:cell.bottomAnchor constant:-4]]];
     return cell;
 }
+static NSTableView *maage_ui_navigation_table(void)
+{
+    NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 140, 120)];
+    table.headerView = nil; table.rowHeight = 35; table.autoresizingMask = NSViewWidthSizable;
+    table.backgroundColor = NSColor.clearColor;
+    if (@available(macOS 11.0, *)) table.style = NSTableViewStyleSourceList;
+    NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"page"];
+    column.width = 140; table.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
+    [table addTableColumn:column]; return table;
+}
 @interface MaaGELauncherController : NSObject <NSWindowDelegate, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
-@property(nonatomic, strong) NSTableView *sidebar, *installations;
+@property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations;
 @property(nonatomic, strong) NSView *body;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
@@ -85,6 +95,7 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
 - (void)showSettings:(id)sender
 {
     (void)sender; self.state->page = MAAGE_PAGE_SETTINGS; [self.sidebar deselectAll:nil];
+    if (self.settingsSidebar.selectedRow != 0) [self.settingsSidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
     for (NSInteger i = 0; i < 4; ++i) self.pages[i].hidden = i != 3;
 }
 - (void)selectAccount:(id)sender
@@ -100,11 +111,12 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
 - (void)selectInstallation:(id)sender
 { (void)sender; maage_launcher_installation_select(self.state, (unsigned)self.installation.indexOfSelectedItem); [self reloadInstallations]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table
-{ return table == self.sidebar ? 3 : self.state->count; }
+{ return table == self.sidebar ? 3 : table == self.settingsSidebar ? 1 : self.state->count; }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row
 {
     (void)column;
-    if (table == self.sidebar) {
+    if (table == self.sidebar || table == self.settingsSidebar) {
+        if (table == self.settingsSidebar) row = 3;
         NSArray *names = @[@"Play", @"News", @"Installations", @"Settings"];
         NSArray *symbols = @[@"play", @"newspaper", @"square.stack", @"gearshape"];
         NSStackView *line = maage_ui_stack(YES, 10);
@@ -124,10 +136,15 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
 {
+    if (notification.object == self.settingsSidebar) {
+        if (self.settingsSidebar.selectedRow == 0) [self showSettings:nil];
+        return;
+    }
     if (notification.object == self.sidebar) {
         NSInteger index = self.sidebar.selectedRow;
         if (index < 0 || index > 3) return;
         self.state->page = (maage_launcher_page)index;
+        [self.settingsSidebar deselectAll:nil];
         for (NSInteger i = 0; i < 4; ++i) self.pages[i].hidden = i != index;
     }
     [self refresh:nil];
@@ -310,22 +327,19 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
     maage_ui_fill(split, self.window.contentView, 0);
     NSView *sidebar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 165, 670)];
     NSVisualEffectView *material = [[NSVisualEffectView alloc] init]; material.material = NSVisualEffectMaterialSidebar; material.blendingMode = NSVisualEffectBlendingModeWithinWindow; maage_ui_fill(material, sidebar, 0);
-    self.sidebar = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 140, 120)]; self.sidebar.headerView = nil; self.sidebar.rowHeight = 35;
-    self.sidebar.autoresizingMask = NSViewWidthSizable;
-    self.sidebar.backgroundColor = NSColor.clearColor; self.sidebar.dataSource = self; self.sidebar.delegate = self;
-    if (@available(macOS 11.0, *)) self.sidebar.style = NSTableViewStyleSourceList;
+    self.sidebar = maage_ui_navigation_table(); self.sidebar.dataSource = self; self.sidebar.delegate = self;
     self.sidebar.accessibilityLabel = @"Launcher navigation";
-    NSTableColumn *navigationColumn = [[NSTableColumn alloc] initWithIdentifier:@"page"];
-    navigationColumn.width = 140;
-    self.sidebar.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
-    [self.sidebar addTableColumn:navigationColumn];
     NSTextField *brand = maage_ui_label(@"MAAGE", 12, YES); brand.textColor = NSColor.secondaryLabelColor;
     NSStackView *nav = maage_ui_stack(NO, 16); [nav addArrangedSubview:brand];
     NSScrollView *navigation = [[NSScrollView alloc] init]; navigation.drawsBackground = NO; navigation.documentView = self.sidebar;
     [nav addArrangedSubview:navigation]; [navigation.widthAnchor constraintEqualToAnchor:nav.widthAnchor].active = YES;
-    NSButton *settings = [self button:@"Settings" action:@selector(showSettings:)]; settings.bordered = NO;
-    if (@available(macOS 11.0, *)) settings.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Settings"];
-    settings.imagePosition = NSImageLeft; [nav addArrangedSubview:settings];
+    self.settingsSidebar = maage_ui_navigation_table();
+    self.settingsSidebar.dataSource = self; self.settingsSidebar.delegate = self;
+    self.settingsSidebar.accessibilityLabel = @"Settings navigation";
+    NSScrollView *settings = [[NSScrollView alloc] init]; settings.drawsBackground = NO; settings.documentView = self.settingsSidebar;
+    [nav addArrangedSubview:settings];
+    [settings.widthAnchor constraintEqualToAnchor:nav.widthAnchor].active = YES;
+    [settings.heightAnchor constraintEqualToConstant:43].active = YES;
     maage_ui_fill(nav, sidebar, 12);
     NSView *right = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 835, 670)]; [split addSubview:sidebar]; [split addSubview:right];
     [sidebar.widthAnchor constraintGreaterThanOrEqualToConstant:155].active = YES;
@@ -341,7 +355,7 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
     [footer addArrangedSubview:version]; [footer addArrangedSubview:[[NSView alloc] init]];
     self.status = [self button:@"" action:@selector(showSettings:)]; self.status.bordered = NO; self.status.font = [NSFont systemFontOfSize:11]; [footer addArrangedSubview:self.status];
     [content addArrangedSubview:footer]; [footer.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
-    [self.sidebar reloadData];
+    [self.sidebar reloadData]; [self.settingsSidebar reloadData];
     if (self.state->page == MAAGE_PAGE_SETTINGS) [self showSettings:nil];
     else [self.sidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:self.state->page] byExtendingSelection:NO];
     [self reloadInstallations]; [self refresh:nil];
