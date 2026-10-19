@@ -293,7 +293,7 @@ no Java runtime, server JAR, modpack import, or version-management system.
 
 Verify Minecraft Access precedes Preparing MaaGE. MaaGE uses its own officially
 approved Microsoft Entra public-client application
-`5e2b53b6-d00b-4de9-8f4d-a1897aaeca43`, with the consumer authority, system-browser
+`ff5d912a-45ca-409e-a364-9d1bf9512f61`, with the consumer authority, system-browser
 OAuth authorization code + S256 PKCE, and device-code fallback. The registered
 Mobile and desktop redirect is `http://localhost`. A temporary worker-owned HTTP
 listener binds only `127.0.0.1` on an OS-selected ephemeral port; authorization and

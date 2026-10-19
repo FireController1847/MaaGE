@@ -2,7 +2,7 @@
 #define MAAGE_LAUNCHER_OAUTH_H
 #include "profile_store.h"
 struct json_object;
-#define MAAGE_MICROSOFT_CLIENT_ID "5e2b53b6-d00b-4de9-8f4d-a1897aaeca43"
+#define MAAGE_MICROSOFT_CLIENT_ID "ff5d912a-45ca-409e-a364-9d1bf9512f61"
 #define MAAGE_MICROSOFT_REDIRECT "http://localhost"
 #define MAAGE_MICROSOFT_AUTHORITY "https://login.microsoftonline.com/consumers/oauth2/v2.0/"
 #define MAAGE_MICROSOFT_SCOPE "XboxLive.signin offline_access"
