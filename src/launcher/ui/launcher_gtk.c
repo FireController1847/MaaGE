@@ -80,6 +80,9 @@ static void maage_ui_account_changed(GtkComboBox *box, gpointer context)
     if (ui->updating) return; uuid = gtk_combo_box_get_active_id(box);
     if (uuid && !strcmp(uuid, "manage")) maage_ui_manage(NULL, ui);
     else if (uuid && !strcmp(uuid, "verify")) maage_ui_verify(NULL, ui);
+    else if (uuid && !strcmp(uuid, "add")) { if (maage_access_sign_in(ui->state->access, 0)) { ui->result = 1; gtk_main_quit(); } }
+    else if (uuid && !strcmp(uuid, "signout")) maage_access_sign_out(ui->state->access, ui->state->account);
+    else if (uuid && !strcmp(uuid, "remove")) maage_access_disconnect(ui->state->access, ui->state->account);
     else if (uuid) maage_launcher_account_select(ui->state, uuid);
     ui->revision = 0;
 }
@@ -134,8 +137,13 @@ static gboolean maage_ui_tick(gpointer context)
             ++connected;
         }
         if (!connected) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "none", "No connected Minecraft account");
-        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "manage", "Manage Connected Accounts…");
-        if (state->account[0]) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "verify", "Verify Saved Account");
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "add", "Add Microsoft Account…");
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "manage", "Manage Microsoft Accounts…");
+        if (state->account[0]) {
+            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "verify", "Refresh / Reverify Account");
+            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "signout", "Sign Out");
+            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "remove", "Remove Account");
+        }
         gtk_combo_box_set_active_id(GTK_COMBO_BOX(ui->account), state->account); ui->updating = 0; ui->revision = state->accounts.revision;
         if (!connected) { ui->updating = 1; gtk_combo_box_set_active(GTK_COMBO_BOX(ui->account), 0); ui->updating = 0; }
     }
@@ -195,7 +203,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     scroll = gtk_scrolled_window_new(NULL, NULL); gtk_stack_add_named(GTK_STACK(ui.stack), scroll, "settings"); page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12); gtk_container_add(GTK_CONTAINER(scroll), page);
     maage_ui_label(page, "Settings", "heading"); maage_ui_label(page, "Launcher", NULL); maage_ui_label(page, "Startup opens Play after account and resource preparation.", "muted");
     ui.account_status = maage_ui_label(page, "", "muted"); gtk_label_set_max_width_chars(GTK_LABEL(ui.account_status), 70);
-    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0); maage_ui_button(actions, "Manage Minecraft Accounts…", G_CALLBACK(maage_ui_manage), &ui); ui.verify = maage_ui_button(actions, "Verify Saved Account", G_CALLBACK(maage_ui_verify), &ui);
+    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0); maage_ui_button(actions, "Manage Minecraft Accounts…", G_CALLBACK(maage_ui_manage), &ui); ui.verify = maage_ui_button(actions, "Refresh / Reverify Account", G_CALLBACK(maage_ui_verify), &ui);
     maage_ui_label(page, "Resources", NULL); button = maage_ui_label(page, state->resources, "muted"); gtk_label_set_selectable(GTK_LABEL(button), TRUE); gtk_label_set_max_width_chars(GTK_LABEL(button), 70);
     ui.resource = maage_ui_label(page, "", NULL); gtk_label_set_max_width_chars(GTK_LABEL(ui.resource), 70); ui.repair = maage_ui_button(page, "Repair Assets…", G_CALLBACK(maage_ui_repair), &ui);
     maage_ui_label(page, "Appearance", NULL); appearance = gtk_combo_box_text_new(); gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(appearance), "System"); gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(appearance), "Light"); gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(appearance), "Dark"); gtk_combo_box_set_active(GTK_COMBO_BOX(appearance), state->appearance); gtk_box_pack_start(GTK_BOX(page), appearance, FALSE, FALSE, 0); g_signal_connect(appearance, "changed", G_CALLBACK(maage_ui_appearance), &ui);

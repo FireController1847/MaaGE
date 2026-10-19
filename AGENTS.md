@@ -109,9 +109,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   installation/configuration; authorized Minecraft asset acquisition; Microsoft
   authentication and legitimate ownership verification through authorized mechanisms;
   profiles, client launch configuration, updates, and dependency management.
-  Remain independent of client/server internals. Existing-launcher Minecraft session
-  verification gates native first-run asset setup. New Microsoft sign-in, modpack
-  installation, and game launching remain deferred.
+  Remain independent of client/server internals. Official Microsoft authentication
+  and Java Edition access verification gate native first-run asset setup. Modpack installation and game launching remain deferred.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
@@ -270,7 +269,7 @@ adapters remain separate from Game UI; do not create a shared widget framework.
 Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
 actual rendering needs; `--renderer-demo` explicitly opens the existing RGB
 demonstration after setup instead of the main Launcher.
-New Microsoft sign-in and game launching remain deferred.
+Game launching remains deferred.
 
 Preserve the native initial setup experience. The main Launcher uses a compact
 native sidebar with Play as the default page/principal action; News, Installations,
@@ -292,48 +291,50 @@ it, extract Java bytecode/implementation code, or distribute acquired resources.
 Minecraft 1.7.10 remains the fixed resource baseline, independent of MaaGE versions;
 no Java runtime, server JAR, modpack import, or version-management system.
 
-Verify Minecraft Access precedes Preparing MaaGE. Discovery, explicit connection,
-and authenticated verification are distinct states. Prioritize existing compatible
-PrismLauncher/MultiMC V3 MSA sessions; MaaGE needs no Microsoft OAuth Client ID and
-must not perform a new Microsoft sign-in. After explicit Import Account consent,
-selectively read only the selected Minecraft Services `ygg.token`; never import
-Microsoft tokens, refresh tokens, passwords, full authentication databases, or
-other applications' protected/vault data. Source launcher files remain read-only.
-Check authenticated `minecraft/profile` UUID/username and `entitlements/mcstore`
-Java access over verified HTTPS; failures/app-bound tokens never grant access.
-Never log credentials or raw responses. Wipe transient token and JSON copies.
+Verify Minecraft Access precedes Preparing MaaGE. MaaGE uses its own officially
+approved Microsoft Entra public-client application
+`5e2b53b6-d00b-4de9-8f4d-a1897aaeca43`, with the consumer authority, system-browser
+OAuth authorization code + S256 PKCE, and device-code fallback. Browser callbacks
+use the exact registered `maage://auth` URI, unpredictable validated state, bounded
+pending attempts, and one-time code exchange. Never silently substitute redirects,
+application IDs, client secrets, or third-party launcher credentials. App-specific
+redirect acceptance requires programmer runtime confirmation; offer device code
+and document the additional `http://localhost` Entra registration for a future
+explicit loopback alternative if custom-scheme sign-in is rejected.
 
-Import creates a MaaGE-owned account with stable UUID/name and a versioned
-`minecraft-session-import` credential provider, allowing future Microsoft OAuth
-credentials to replace it without recreating identity. Store AES-256-GCM account
-records at `config/accounts/<uuid>.account` with a random local `key.bin`, bound to
-the UUID and restricted to the current user (0600/protected DACL). Atomic writes
-and a store lock protect updates. No system credential stores/DPAPI; local key and
-ciphertext are both accessible to the local user. Keep public metadata in
-`config/minecraft-profiles.json` separate from credentials. Disconnect removes the
-saved credential; source launchers/resources remain unchanged.
+Xbox Live, XSTS, and Minecraft Services establish the Minecraft session. Verify a
+valid Java UUID/username plus an explicit Java entitlement from authenticated
+store/license responses; empty lists, Bedrock-only access, registry flags, and
+Xbox sign-in alone never grant access. Confirm current access without inventing a
+permanent-purchase guarantee. All network work runs on the existing access worker.
+Never log credentials, callback URLs, payloads, or raw responses; wipe transient
+secrets. Keep native AppKit/Win32/GTK authentication UI lightweight and consistent
+with setup, with actionable progress, cancellation/retry, and Continue disabled
+until verification succeeds. No embedded browser or new widget framework.
 
-The UI-independent access service restores authenticated local leases across
-restarts for at most one hour, capped by imported token expiry. Public registry
-flags cannot grant authority. Recheck saved tokens automatically when leases need
-renewal; valid local accounts skip the import screen without source-launcher I/O
-for credentials. Verify Saved reads only MaaGE's account; Re-import requires fresh
-consent. `--manage-accounts` keeps account controls accessible despite automatic
-startup continuation. Unknown token expiry is capped at one hour. Expired tokens require
-re-import until a separately requested Microsoft sign-in/refresh provider exists;
-do not impersonate another launcher or use its OAuth client/refresh tokens.
-Discovery/connection/import/verification remain distinct, with UUID deduplication,
-multiple local accounts, rescan/manual folders, and responsive native controls.
-Official/embedded formats remain discovery-only; opaque FTB/CurseForge stores are
-unsupported. Directory detection, installation profiles, and cached source flags
-never prove access. The controller and asset manager require one current account
-lease, including repair/retry/active work; expiry, disconnect, and cancellation
-revoke active access without deleting resources. Local credential storage and
-background verification stay out of game clients and generic Core APIs; Core
-provides only generic filesystem permissions/atomic I/O and other foundations.
-Expose **Verify Through Minecraft — Coming Soon** as disabled; future multiplayer
-verification belongs in a separate provider, with no protocol/server implementation
-or new Microsoft authentication path until requested.
+Authentication and profile management share `config/minecraft-profiles.json` and
+stable Minecraft UUIDs. Support account addition/selection, refresh/reverification,
+sign-out and removal; imported profiles must sign in through MaaGE without reading
+other launchers' credentials. Microsoft refresh rotation securely replaces the
+saved credential before downstream exchanges. Keep Xbox/Microsoft access tokens
+transient; persist only required refresh/Minecraft credentials and verified leases.
+**Do not use native credential storage** (Keychain, Credential Manager, DPAPI,
+Secret Service/libsecret). The programmer explicitly requires MaaGE-owned
+AES-256-GCM records at `config/accounts/<uuid>.account`, authenticated to the UUID,
+with a random local `key.bin`, owner-only permissions (0600/protected DACL), atomic
+writes and a store lock. The local user can read both key and ciphertext.
+Use OS cryptographic randomness for OAuth state, PKCE and local encryption.
+
+The access service restores encrypted authenticated leases for at most one hour,
+bounded by Minecraft token expiry, and refreshes saved Microsoft authorization
+without interactive login when possible. Public registry metadata cannot grant
+access. `--manage-accounts` keeps account controls accessible when startup could
+automatically continue. Account selection restricts Launcher service authorization;
+the controller and asset manager require a current verified lease for acquisition,
+repair, retry and active work. Expiry, sign-out and closing revoke active access
+without deleting resources. Authentication/storage remain Launcher-owned, outside
+Client and generic Core. New Microsoft login must never access other launchers'
+authentication files, OAuth clients, refresh tokens, or protected data.
 
 The Launcher asset manager is UI-independent, with worker-thread operations,
 locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).

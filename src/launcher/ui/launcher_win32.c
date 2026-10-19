@@ -101,11 +101,15 @@ static void maage_ui_refresh(maage_launcher_win32 *ui)
         }
         if (!added) SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"No connected Minecraft account");
         {
-            LRESULT row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Manage Connected Accounts...");
+            LRESULT row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Manage Microsoft Accounts...");
             SendMessageW(ui->account,CB_SETITEMDATA,row,(LPARAM)-2);
+            row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Add Microsoft Account...");
+            SendMessageW(ui->account,CB_SETITEMDATA,row,(LPARAM)-4);
             if (state->account[0]) {
-                row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Verify Saved Account");
+                row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Refresh / Reverify Account");
                 SendMessageW(ui->account,CB_SETITEMDATA,row,(LPARAM)-3);
+                row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Sign Out"); SendMessageW(ui->account,CB_SETITEMDATA,row,(LPARAM)-5);
+                row=SendMessageW(ui->account,CB_ADDSTRING,0,(LPARAM)L"Remove Account"); SendMessageW(ui->account,CB_SETITEMDATA,row,(LPARAM)-6);
             }
         }
         SendMessageW(ui->account,CB_SETCURSEL,selected<0 ? 0 : selected,0); ui->revision=state->accounts.revision; ui->updating=0;
@@ -151,6 +155,9 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
                 if (index>=0 && (unsigned)index<ui->state->accounts.count) maage_launcher_account_select(ui->state,ui->state->accounts.profiles[index].uuid);
                 else if (index==-2 && !ui->state->accounts.busy) { ui->result=1; DestroyWindow(window); return 0; }
                 else if (index==-3 && ui->state->account[0]) maage_access_verify_local(ui->state->access,ui->state->account);
+                else if (index==-4 && maage_access_sign_in(ui->state->access,0)) { ui->result=1; DestroyWindow(window); return 0; }
+                else if (index==-5 && ui->state->account[0]) maage_access_sign_out(ui->state->access,ui->state->account);
+                else if (index==-6 && ui->state->account[0]) maage_access_disconnect(ui->state->access,ui->state->account);
                 ui->revision=0;
             }
             if (id==MAAGE_UI_INSTALLATION && event==CBN_SELCHANGE && !ui->updating) { maage_launcher_installation_select(ui->state,(unsigned)SendMessageW(ui->installation,CB_GETCURSEL,0,0)); maage_ui_installations_reload(ui); }
@@ -227,7 +234,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     maage_ui_label(&ui,3,L"Launcher",198,80,250,26);
     maage_ui_label(&ui,3,L"Startup opens Play after account and resource preparation.",198,110,-230,26);
     maage_ui_button(&ui,3,L"Manage Minecraft Accounts...",198,146,245,MAAGE_UI_MANAGE);
-    ui.verify=maage_ui_button(&ui,3,L"Verify Saved Account",455,146,200,MAAGE_UI_VERIFY);
+    ui.verify=maage_ui_button(&ui,3,L"Refresh / Reverify Account",455,146,200,MAAGE_UI_VERIFY);
     ui.account_status=maage_ui_label(&ui,3,L"",198,188,-230,55);
     maage_ui_label(&ui,3,L"Resources",198,256,250,26);
     control=maage_ui_control(&ui,3,L"EDIT",L"Minecraft resource location",ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP,198,288,-230,30,0); maage_ui_text(control,state->resources);

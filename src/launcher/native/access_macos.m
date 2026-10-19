@@ -1,6 +1,8 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 #include "../access/access.h"
+#include "../access/oauth.h"
+#include "maage/time.h"
 #include <string.h>
 static NSColor *maage_access_color(CGFloat gray)
 { return [NSColor colorWithSRGBRed:gray green:gray blue:gray alpha:1]; }
@@ -15,9 +17,10 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
 }
 @property(nonatomic, assign) maage_access *access;
 @property(nonatomic, strong) NSWindow *window;
+@property(nonatomic, strong) NSView *panel;
 @property(nonatomic, strong) NSPopUpButton *profiles;
-@property(nonatomic, strong) NSTextField *identity, *status;
-@property(nonatomic, strong) NSButton *connect, *stored, *disconnect, *rescan, *manual, *next, *cancel;
+@property(nonatomic, strong) NSTextField *identity, *status, *device;
+@property(nonatomic, strong) NSButton *signIn, *fallback, *stored, *signOut, *remove, *codeCopyButton, *open, *stop, *next, *cancel;
 @property(nonatomic, strong) NSProgressIndicator *progress;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic) unsigned revision;
@@ -39,34 +42,20 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
 { (void)application; [self cancelAccess:nil]; return NSTerminateCancel; }
 - (void)continueAccess:(id)sender
 { (void)sender; if (!_snapshot.busy && maage_access_allowed(self.access)) [self finish:1]; }
-- (void)selectProfile:(id)sender
-{ (void)sender; [self refresh:nil]; }
-- (void)connectProfile:(id)sender
-{
-    (void)sender;
-    NSString *uuid = self.profiles.selectedItem.representedObject;
-    if (!uuid || _snapshot.busy) return;
-    NSAlert *alert = [[NSAlert alloc] init]; alert.messageText = @"Import Minecraft Account";
-    alert.informativeText = [NSString stringWithFormat:@"%@\n\n%s", self.identity.stringValue, MAAGE_ACCESS_CONSENT];
-    [alert addButtonWithTitle:@"Import Account"]; [alert addButtonWithTitle:@"Cancel"];
-    if ([alert runModal] == NSAlertFirstButtonReturn) maage_access_connect(self.access, uuid.UTF8String);
-    [self refresh:nil];
-}
+- (void)selectProfile:(id)sender { (void)sender; [self refresh:nil]; }
+- (void)signIn:(id)sender { (void)sender; maage_access_sign_in(self.access, 0); [self refresh:nil]; }
+- (void)deviceSignIn:(id)sender { (void)sender; maage_access_sign_in(self.access, 1); [self refresh:nil]; }
 - (void)verifySaved:(id)sender
 { (void)sender; NSString *uuid = self.profiles.selectedItem.representedObject; if (uuid) maage_access_verify_local(self.access, uuid.UTF8String); [self refresh:nil]; }
-- (void)disconnectProfile:(id)sender
+- (void)signOut:(id)sender
+{ (void)sender; NSString *uuid = self.profiles.selectedItem.representedObject; if (uuid) maage_access_sign_out(self.access, uuid.UTF8String); [self refresh:nil]; }
+- (void)removeAccount:(id)sender
 { (void)sender; NSString *uuid = self.profiles.selectedItem.representedObject; if (uuid) maage_access_disconnect(self.access, uuid.UTF8String); [self refresh:nil]; }
-- (void)scan:(id)sender
-{ (void)sender; maage_access_scan(self.access, NULL); [self refresh:nil]; }
-- (void)chooseDirectory:(id)sender
-{
-    (void)sender;
-    NSOpenPanel *picker = [NSOpenPanel openPanel]; picker.canChooseDirectories = YES; picker.canChooseFiles = NO;
-    picker.allowsMultipleSelection = NO; picker.title = @"Choose Launcher Configuration Folder";
-    picker.message = @"Choose the folder containing accounts.json (PrismLauncher/MultiMC) or launcher_accounts.json.";
-    if ([picker runModal] == NSModalResponseOK) maage_access_scan(self.access, picker.URL.path.UTF8String);
-    [self refresh:nil];
-}
+- (void)copyCode:(id)sender
+{ (void)sender; if (*_snapshot.device_code) { [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setString:@(_snapshot.device_code) forType:NSPasteboardTypeString]; } }
+- (void)openBrowser:(id)sender
+{ (void)sender; if (*_snapshot.device_url) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@(_snapshot.device_url)]]; }
+- (void)stopSignIn:(id)sender { (void)sender; maage_access_cancel_operation(self.access); }
 - (void)refresh:(NSTimer *)timer
 {
     (void)timer;
@@ -79,26 +68,28 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
         for (unsigned i = 0; i < _snapshot.count; ++i) {
             maage_access_profile *p = &_snapshot.profiles[i];
             NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"%s — %s", p->name, maage_access_state_name(p->state)] action:NULL keyEquivalent:@""];
-            [self.profiles.menu addItem:item];
-            self.profiles.lastItem.representedObject = @(p->uuid);
+            [self.profiles.menu addItem:item]; self.profiles.lastItem.representedObject = @(p->uuid);
             if ([selected isEqualToString:@(p->uuid)]) [self.profiles selectItem:self.profiles.lastItem];
         }
-        if (!_snapshot.count) [self.profiles addItemWithTitle:@"No Minecraft accounts discovered"];
-        if (self.profiles.indexOfSelectedItem < 0) [self.profiles selectItemAtIndex:0];
+        if (self.profiles.indexOfSelectedItem < 0 && _snapshot.count) [self.profiles selectItemAtIndex:0];
         self.revision = _snapshot.revision;
     }
     NSInteger index = self.profiles.indexOfSelectedItem;
     maage_access_profile *p = index >= 0 && (unsigned)index < _snapshot.count ? &_snapshot.profiles[index] : NULL;
-    self.identity.stringValue = p ? [NSString stringWithFormat:@"%s\n%s · %s\n%s", p->uuid, p->sources[0] ? p->sources : "Source unavailable", maage_access_state_name(p->state), p->detail] : @"Sign in through an existing launcher, then rescan. No account names are generated by MaaGE.";
+    self.panel.hidden = p == NULL;
+    self.identity.stringValue = p ? [NSString stringWithFormat:@"%s\nMinecraft: Java Edition · %s\n%s", p->uuid, maage_access_state_name(p->state), p->detail] : @"";
     self.status.stringValue = @(_snapshot.status);
     BOOL idle = !_snapshot.busy && !self.closing;
-    self.profiles.enabled = idle && _snapshot.count > 0;
-    self.connect.enabled = idle && p && p->available;
-    self.connect.title = p && p->imported ? @"Re-import" : @"Import Account";
-    self.stored.enabled = idle && p && p->imported;
-    self.disconnect.enabled = idle && p && p->connected;
-    self.rescan.enabled = idle; self.manual.enabled = idle; self.cancel.enabled = !self.closing;
+    self.profiles.enabled = idle; self.signIn.enabled = idle; self.fallback.enabled = idle;
+    self.stored.enabled = idle && p && p->session_saved; self.signOut.enabled = idle && p && p->session_saved;
+    self.remove.enabled = idle && p; self.cancel.enabled = !self.closing; self.stop.enabled = _snapshot.busy && !self.closing;
     self.next.enabled = idle && _snapshot.allowed;
+    BOOL device = *_snapshot.device_code != 0;
+    self.codeCopyButton.hidden = self.open.hidden = !device;
+    if (device) {
+        double seconds = _snapshot.device_deadline - maage_time_monotonic_seconds();
+        self.device.stringValue = [NSString stringWithFormat:@"%s\nCode: %s · %.0f seconds remaining", _snapshot.device_url, _snapshot.device_code, seconds > 0 ? seconds : 0];
+    } else self.device.stringValue = @"Your browser will open to complete sign-in.";
     if (_snapshot.busy) [self.progress startAnimation:nil]; else [self.progress stopAnimation:nil];
     if (!self.window.visible) [self.window makeKeyAndOrderFront:nil];
 }
@@ -109,29 +100,31 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
 - (void)show
 {
     self.revision = (unsigned)-1;
-    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 650, 610) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"MaaGE Launcher — Initial setup"; self.window.releasedWhenClosed = NO;
+    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 650, 630) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
+    self.window.title = self.manageAccounts ? @"MaaGE Launcher — Microsoft Accounts" : @"MaaGE Launcher — Initial setup"; self.window.releasedWhenClosed = NO;
     self.window.delegate = self; self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]; self.window.backgroundColor = maage_access_color(.11);
     NSView *content = self.window.contentView;
-    maage_access_label(content, @"MaaGE Launcher", NSMakeRect(28, 565, 240, 23), 14, YES);
-    NSTextField *step = maage_access_label(content, @"Initial setup · 1 of 2", NSMakeRect(422, 565, 200, 23), 12, NO); step.alignment = NSTextAlignmentRight;
-    NSTextField *icon = maage_access_label(content, @"✓", NSMakeRect(30, 494, 42, 38), 30, YES); icon.textColor = [NSColor colorWithSRGBRed:.91 green:.29 blue:.68 alpha:1];
-    maage_access_label(content, @"Verify Minecraft Access", NSMakeRect(78, 500, 540, 35), 25, YES);
-    maage_access_label(content, @"Import an existing Minecraft account into MaaGE to continue.", NSMakeRect(79, 450, 535, 42), 13, NO);
-    NSView *panel = [[NSView alloc] initWithFrame:NSMakeRect(28, 270, 594, 172)]; panel.wantsLayer = YES; panel.layer.backgroundColor = maage_access_color(.16).CGColor; panel.layer.cornerRadius = 8; [content addSubview:panel];
-    self.profiles = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(16, 129, 562, 28) pullsDown:NO]; self.profiles.menu.autoenablesItems = NO; self.profiles.target = self; self.profiles.action = @selector(selectProfile:); [panel addSubview:self.profiles];
-    self.identity = maage_access_label(panel, @"", NSMakeRect(20, 48, 554, 78), 12, NO);
-    self.stored = [self button:@"Verify Saved" action:@selector(verifySaved:) frame:NSMakeRect(16, 10, 150, 30) parent:panel];
-    self.disconnect = [self button:@"Disconnect" action:@selector(disconnectProfile:) frame:NSMakeRect(274, 10, 126, 30) parent:panel];
-    self.connect = [self button:@"Import Account" action:@selector(connectProfile:) frame:NSMakeRect(404, 10, 174, 30) parent:panel];
-    maage_access_label(content, @"Scan for Minecraft Accounts", NSMakeRect(32, 227, 370, 24), 13, YES);
-    self.rescan = [self button:@"Rescan" action:@selector(scan:) frame:NSMakeRect(516, 222, 106, 31) parent:content];
-    NSButton *coming = [NSButton buttonWithTitle:@"Verify Through Minecraft — Coming Soon" target:nil action:nil]; coming.frame = NSMakeRect(28, 165, 594, 43); coming.enabled = NO; [content addSubview:coming];
-    self.manual = [self button:@"Choose Launcher Manually" action:@selector(chooseDirectory:) frame:NSMakeRect(28, 116, 244, 32) parent:content];
-    self.progress = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(596, 122, 20, 20)]; self.progress.style = NSProgressIndicatorStyleSpinning; self.progress.displayedWhenStopped = NO; self.progress.accessibilityLabel = @"Account operation in progress"; [content addSubview:self.progress];
-    self.status = maage_access_label(content, @"", NSMakeRect(30, 57, 590, 53), 12, NO); self.status.textColor = maage_access_color(.70);
-    self.cancel = [self button:@"Cancel" action:@selector(cancelAccess:) frame:NSMakeRect(402, 17, 100, 32) parent:content]; self.cancel.keyEquivalent = @"\e";
-    self.next = [self button:@"Continue" action:@selector(continueAccess:) frame:NSMakeRect(512, 17, 110, 32) parent:content]; self.next.keyEquivalent = @"\r";
+    maage_access_label(content, @"MaaGE Launcher", NSMakeRect(28, 585, 240, 23), 14, YES);
+    NSTextField *step = maage_access_label(content, self.manageAccounts ? @"Connected accounts" : @"Initial setup · 1 of 2", NSMakeRect(422, 585, 200, 23), 12, NO); step.alignment = NSTextAlignmentRight;
+    maage_access_label(content, @"Verify Minecraft Access", NSMakeRect(30, 526, 590, 35), 25, YES);
+    maage_access_label(content, @"Sign in with your Microsoft account to verify access to Minecraft: Java Edition.", NSMakeRect(32, 478, 586, 42), 13, NO);
+    self.panel = [[NSView alloc] initWithFrame:NSMakeRect(28, 302, 594, 170)]; self.panel.wantsLayer = YES; self.panel.layer.backgroundColor = maage_access_color(.16).CGColor; self.panel.layer.cornerRadius = 8; [content addSubview:self.panel]; self.panel.hidden = YES;
+    self.profiles = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(16, 129, 562, 28) pullsDown:NO]; self.profiles.menu.autoenablesItems = NO; self.profiles.target = self; self.profiles.action = @selector(selectProfile:); [self.panel addSubview:self.profiles];
+    self.identity = maage_access_label(self.panel, @"", NSMakeRect(20, 46, 554, 78), 12, NO);
+    self.stored = [self button:@"Refresh / Reverify" action:@selector(verifySaved:) frame:NSMakeRect(16, 8, 190, 30) parent:self.panel];
+    self.signOut = [self button:@"Sign Out" action:@selector(signOut:) frame:NSMakeRect(310, 8, 120, 30) parent:self.panel];
+    self.remove = [self button:@"Remove" action:@selector(removeAccount:) frame:NSMakeRect(440, 8, 138, 30) parent:self.panel];
+    self.signIn = [self button:@"Sign in with Microsoft" action:@selector(signIn:) frame:NSMakeRect(28, 248, 594, 42) parent:content];
+    self.signIn.contentTintColor = [NSColor colorWithSRGBRed:.91 green:.29 blue:.68 alpha:1];
+    self.fallback = [self button:@"Use Device Code" action:@selector(deviceSignIn:) frame:NSMakeRect(28, 208, 200, 30) parent:content];
+    self.stop = [self button:@"Cancel Sign-in" action:@selector(stopSignIn:) frame:NSMakeRect(436, 208, 186, 30) parent:content];
+    self.device = maage_access_label(content, @"", NSMakeRect(32, 147, 584, 50), 12, NO);
+    self.codeCopyButton = [self button:@"Copy Code" action:@selector(copyCode:) frame:NSMakeRect(28, 109, 125, 30) parent:content];
+    self.open = [self button:@"Open Browser" action:@selector(openBrowser:) frame:NSMakeRect(164, 109, 150, 30) parent:content];
+    self.progress = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(596, 116, 20, 20)]; self.progress.style = NSProgressIndicatorStyleSpinning; self.progress.displayedWhenStopped = NO; [content addSubview:self.progress];
+    self.status = maage_access_label(content, @"", NSMakeRect(30, 54, 590, 52), 12, NO); self.status.textColor = maage_access_color(.70);
+    self.cancel = [self button:@"Cancel" action:@selector(cancelAccess:) frame:NSMakeRect(402, 14, 100, 32) parent:content]; self.cancel.keyEquivalent = @"\e";
+    self.next = [self button:@"Continue" action:@selector(continueAccess:) frame:NSMakeRect(512, 14, 110, 32) parent:content]; self.next.keyEquivalent = @"\r";
     self.next.enabled = NO; [self.window center];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:.1 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
 }

@@ -2,7 +2,7 @@
 set(MAAGE_LAUNCHER_VERSION_MAJOR 1)
 set(MAAGE_LAUNCHER_VERSION_MINOR 0)
 set(MAAGE_LAUNCHER_VERSION_PATCH 0)
-set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.21")
+set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.22")
 
 set(MAAGE_CLIENT_VERSION_MAJOR 1)
 set(MAAGE_CLIENT_VERSION_MINOR 0)
@@ -94,6 +94,11 @@ if(CMAKE_SCRIPT_MODE_FILE)
     <key>CFBundleVersion</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
     <key>CFBundleGetInfoString</key><string>@MAAGE_BUNDLE_NAME@ @MAAGE_VERSION@</string>
     <key>MaaGESemanticVersion</key><string>@MAAGE_VERSION@</string>
+    <key>CFBundleURLTypes</key><array><dict>
+        <key>CFBundleURLName</key><string>org.maage.launcher.authentication</string>
+        <key>CFBundleURLSchemes</key><array><string>maage</string></array>
+        <key>CFBundleTypeRole</key><string>Viewer</string>
+    </dict></array>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>

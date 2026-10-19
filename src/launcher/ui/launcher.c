@@ -136,7 +136,11 @@ void maage_launcher_ui_refresh(maage_launcher_ui *ui)
     unsigned i;
     maage_access_snapshot_get(ui->access, &ui->accounts);
     maage_assets_snapshot(ui->assets, &ui->progress);
-    strcpy(ui->account_status, "No connected Minecraft account. Open Manage Minecraft Accounts to import one.");
+    for (i = 0; i < ui->accounts.count; ++i) if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) break;
+    if (*ui->account && i == ui->accounts.count) {
+        ui->account[0] = 0; maage_launcher_account_restore(ui);
+    }
+    strcpy(ui->account_status, "No connected Minecraft account. Open Manage Minecraft Accounts to add a Microsoft account.");
     for (i = 0; i < ui->accounts.count; ++i) if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) {
         maage_access_profile *profile = &ui->accounts.profiles[i];
         sprintf(ui->account_status, "%s · %s\n%s", profile->name, maage_access_state_name(profile->state), profile->detail);

@@ -31,133 +31,75 @@ const char *maage_access_json_string(struct json_object *object, const char *key
     text = json_object_get_string(value);
     return strlen(text) == (size_t)json_object_get_string_len(value) ? text : "";
 }
-typedef struct maage_access_http {
-    char data[65537];
-    size_t used;
-    int (*cancelled)(void *);
-    void *context;
-} maage_access_http;
-static size_t maage_access_http_write(char *data, size_t size, size_t count, void *context)
+/* TLS-authenticated store and license responses describe current access, not a
+ * permanent-purchase guarantee. Accept only explicit Java game entitlements. */
+#include "oauth.h"
+static int maage_access_java_items(struct json_object *response, int license)
 {
-    maage_access_http *http = (maage_access_http *)context;
-    size_t bytes;
-    if (size && count > (sizeof(http->data) - 1 - http->used) / size) return 0;
-    bytes = size * count;
-    memcpy(http->data + http->used, data, bytes); http->used += bytes; http->data[http->used] = 0;
-    return bytes;
-}
-static int maage_access_http_progress(void *context, curl_off_t total, curl_off_t now, curl_off_t up_total, curl_off_t up_now)
-{
-    maage_access_http *http = (maage_access_http *)context;
-    (void)total; (void)now; (void)up_total; (void)up_now;
-    return http->cancelled(http->context);
-}
-static struct json_object *maage_access_get(const char *endpoint, const char *token,
-    maage_access_http *http, maage_access_state *state, char detail[256])
-{
-    CURL *curl;
-    CURLcode result = CURLE_FAILED_INIT;
-    struct curl_slist *headers = NULL, *entry;
-    struct json_object *json = NULL;
-    long status = 0;
-    size_t length = strlen(token);
-    char *authorization;
-    curl = curl_easy_init();
-    authorization = (char *)malloc(length + 32);
-    if (!curl || !authorization) { if (curl) curl_easy_cleanup(curl); free(authorization); strcpy(detail, "Not enough memory to verify this account."); return NULL; }
-    strcpy(authorization, "Authorization: Bearer "); strcat(authorization, token);
-    headers = curl_slist_append(NULL, authorization);
-    OPENSSL_cleanse(authorization, length + 32); free(authorization);
-    http->used = 0;
-    if (!headers) goto done;
-#define MAAGE_ACCESS_CURL(option, value) if (curl_easy_setopt(curl, option, value) != CURLE_OK) goto done
-    MAAGE_ACCESS_CURL(CURLOPT_URL, endpoint);
-    MAAGE_ACCESS_CURL(CURLOPT_HTTPHEADER, headers);
-    MAAGE_ACCESS_CURL(CURLOPT_PROTOCOLS_STR, "https");
-    MAAGE_ACCESS_CURL(CURLOPT_REDIR_PROTOCOLS_STR, "https");
-    MAAGE_ACCESS_CURL(CURLOPT_FOLLOWLOCATION, 0L);
-    MAAGE_ACCESS_CURL(CURLOPT_SSL_VERIFYPEER, 1L);
-    MAAGE_ACCESS_CURL(CURLOPT_SSL_VERIFYHOST, 2L);
-    MAAGE_ACCESS_CURL(CURLOPT_CONNECTTIMEOUT, 10L);
-    MAAGE_ACCESS_CURL(CURLOPT_TIMEOUT, 30L);
-    MAAGE_ACCESS_CURL(CURLOPT_NOSIGNAL, 1L);
-    MAAGE_ACCESS_CURL(CURLOPT_USERAGENT, "MaaGE-Launcher");
-    MAAGE_ACCESS_CURL(CURLOPT_WRITEFUNCTION, maage_access_http_write);
-    MAAGE_ACCESS_CURL(CURLOPT_WRITEDATA, http);
-    MAAGE_ACCESS_CURL(CURLOPT_XFERINFOFUNCTION, maage_access_http_progress);
-    MAAGE_ACCESS_CURL(CURLOPT_XFERINFODATA, http);
-    MAAGE_ACCESS_CURL(CURLOPT_NOPROGRESS, 0L);
-#undef MAAGE_ACCESS_CURL
-    if (http->cancelled(http->context)) goto done;
-    result = curl_easy_perform(curl);
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-done:
-    /* Cleanup curl's header references before wiping our explicit header copy. */
-    curl_easy_cleanup(curl);
-    for (entry = headers; entry; entry = entry->next) OPENSSL_cleanse(entry->data, strlen(entry->data));
-    curl_slist_free_all(headers);
-    if (http->cancelled(http->context)) strcpy(detail, "Verification cancelled. No access was granted.");
-    else if (result != CURLE_OK) strcpy(detail, "Cannot reach Minecraft Services securely. Check your connection and retry.");
-    else if (status == 401) { *state = MAAGE_ACCESS_EXPIRED; strcpy(detail, "The Minecraft session expired or was rejected. Sign in again in the original launcher, then retry."); }
-    else if (status == 403) strcpy(detail, "Minecraft Services rejected this session. It may be application-bound. Refresh it in the original launcher; access remains unverified.");
-    else if (status != 200) strcpy(detail, "Minecraft Services could not confirm access. Refresh your original launcher session and retry later.");
-    else {
-        json = maage_access_json(http->data, http->used);
-        if (!json) strcpy(detail, "Minecraft Services returned an unsupported response. Access remains unverified.");
-    }
-    OPENSSL_cleanse(http->data, sizeof(http->data));
-    return json;
-}
-maage_access_state maage_access_verify(const char *token, const char *uuid,
-    char name[17], char detail[256], int (*cancelled)(void *), void *context)
-{
-    maage_access_http *http;
-    struct json_object *profile = NULL, *entitlements = NULL, *items, *item;
-    maage_access_state state = MAAGE_ACCESS_FAILED;
-    char normalized[33];
-    const char *text;
-    size_t i, length = strlen(token), count;
+    struct json_object *items, *item, *errors;
+    size_t i, count;
     int game = 0;
-    strcpy(detail, "The original launcher has no compatible Minecraft Services token. Refresh its session and retry.");
-    if (length < 16 || length >= MAAGE_ACCESS_TOKEN_CAPACITY) return state;
-    for (i = 0; i < length; ++i) {
-        int c = (unsigned char)token[i];
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '~' || c == '=' || c == '+' || c == '/')) return state;
-    }
-    http = (maage_access_http *)calloc(1, sizeof(*http));
-    if (!http) { strcpy(detail, "Not enough memory to verify access."); return state; }
-    http->cancelled = cancelled; http->context = context;
-    maage_log_info("maage.launcher.access", "Checking authenticated Minecraft profile with Minecraft Services.");
-    profile = maage_access_get("https://api.minecraftservices.com/minecraft/profile", token, http, &state, detail);
-    if (!profile) goto done;
-    text = maage_access_json_string(profile, "name");
-    if (!maage_access_username(text) || !maage_access_uuid(maage_access_json_string(profile, "id"), normalized) || strcmp(normalized, uuid)) {
-        strcpy(detail, "The authenticated Minecraft profile does not match the selected account. Rescan and select it again."); goto done;
-    }
-    strcpy(name, text);
-    maage_log_info("maage.launcher.access", "Authenticated profile matched; checking Minecraft Java entitlements.");
-    entitlements = maage_access_get("https://api.minecraftservices.com/entitlements/mcstore", token, http, &state, detail);
-    if (!entitlements) goto done;
-    strcpy(detail, "Minecraft Java access was not confirmed by the entitlement response. Check access in the original launcher and retry.");
-    if (!json_object_object_get_ex(entitlements, "items", &items) || !json_object_is_type(items, json_type_array)) goto done;
-    count = json_object_array_length(items);
-    if (count > 256) goto done;
+    const char *name;
+    if (!*maage_access_json_string(response, "signature") || !*maage_access_json_string(response, "keyId") ||
+        !json_object_object_get_ex(response, "items", &items) || !json_object_is_type(items, json_type_array)) return 0;
+    if (json_object_object_get_ex(response, "errors", &errors) &&
+        (!json_object_is_type(errors, json_type_array) || json_object_array_length(errors))) return 0;
+    count = json_object_array_length(items); if (count > 256) return 0;
     for (i = 0; i < count; ++i) {
         item = json_object_array_get_idx(items, i);
-        if (!json_object_is_type(item, json_type_object)) goto done;
-        text = maage_access_json_string(item, "name");
-        if (!*text || !*maage_access_json_string(item, "signature")) goto done;
-        if (!strcmp(text, "game_minecraft")) game = 1;
+        if (!json_object_is_type(item, json_type_object)) return 0;
+        name = maage_access_json_string(item, "name");
+        if (!*name || !*maage_access_json_string(item, license ? "source" : "signature")) return 0;
+        if (!strcmp(name, "game_minecraft")) game = 1;
     }
-    /* The authenticated TLS endpoint is the authority; cached flags and local
-     * entitlement objects are never consulted. Do not interpret unrelated SKUs. */
-    if (game && !cancelled(context)) {
-        state = MAAGE_ACCESS_VERIFIED;
-        strcpy(detail, "Minecraft Java access verified. The account service can retain a bounded local verification lease.");
+    return game;
+}
+maage_access_state maage_access_verify(const char *token, char uuid[33],
+    char name[17], char detail[256], int (*cancelled)(void *), void *context)
+{
+    maage_auth_observer observer;
+    struct json_object *profile = NULL, *entitlements = NULL, *license = NULL;
+    maage_access_state state = MAAGE_ACCESS_FAILED;
+    char normalized[33], endpoint[160], request[37], store_error[256];
+    unsigned char random[16];
+    const char *text;
+    long status;
+    int game = 0, licensed = 0;
+    memset(&observer, 0, sizeof(observer)); observer.cancelled = cancelled; observer.context = context;
+    profile = maage_auth_request("https://api.minecraftservices.com/minecraft/profile", token, NULL, 0, &observer, &status, detail);
+    if (status == 401) state = MAAGE_ACCESS_EXPIRED;
+    if (!profile || status != 200) goto done;
+    text = maage_access_json_string(profile, "name");
+    if (!maage_access_username(text) || !maage_access_uuid(maage_access_json_string(profile, "id"), normalized) || (*uuid && strcmp(normalized, uuid))) {
+        strcpy(detail, "Minecraft Java profile missing or different from the selected account. Sign in with the correct Microsoft account."); goto done;
+    }
+    strcpy(name, text);
+    entitlements = maage_auth_request("https://api.minecraftservices.com/entitlements/mcstore", token, NULL, 0, &observer, &status, detail);
+    if (status == 401) state = MAAGE_ACCESS_EXPIRED;
+    if (status == 401 || status == 403 || cancelled(context)) goto done;
+    if (status == 200 && entitlements) game = maage_access_java_items(entitlements, 0);
+    strcpy(store_error, detail);
+    /* The license endpoint includes non-store access (e.g. subscriptions).
+     * Its signed aggregate has item name/source, not per-item signatures.
+     * Treat source as opaque; it is not a permanent-ownership warranty. */
+    if (!maage_auth_random(random, sizeof(random))) { strcpy(detail, "Cannot generate a secure entitlement request identifier."); goto done; }
+    random[6] = (unsigned char)((random[6] & 15) | 64); random[8] = (unsigned char)((random[8] & 63) | 128);
+    sprintf(request, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        random[0], random[1], random[2], random[3], random[4], random[5], random[6], random[7], random[8], random[9], random[10], random[11], random[12], random[13], random[14], random[15]);
+    sprintf(endpoint, "https://api.minecraftservices.com/entitlements/license?requestId=%s", request);
+    license = maage_auth_request(endpoint, token, NULL, 0, &observer, &status, detail);
+    if (status == 401) state = MAAGE_ACCESS_EXPIRED;
+    if (status == 401 || status == 403 || cancelled(context)) goto done;
+    if (status == 200 && license) licensed = maage_access_java_items(license, 1);
+    if (game || licensed) {
+        strcpy(uuid, normalized); state = MAAGE_ACCESS_VERIFIED;
+        strcpy(detail, "Minecraft Java Edition access verified. These services do not conclusively establish permanent purchase versus subscription access.");
+    } else if (status == 200 && license) strcpy(detail, "Minecraft Java Edition access could not be confirmed. A valid Java profile and explicit Java entitlement are required; empty lists and Bedrock-only access do not qualify.");
+    else {
+        char failure[256];
+        strcpy(failure, !entitlements ? store_error : detail);
+        sprintf(detail, "Minecraft Java Edition access could not be confirmed. %.195s", failure);
     }
 done:
-    if (profile) json_object_put(profile);
-    if (entitlements) json_object_put(entitlements);
-    OPENSSL_cleanse(http, sizeof(*http)); free(http);
-    return state;
+    maage_auth_json_free(profile); maage_auth_json_free(entitlements); maage_auth_json_free(license); return state;
 }

@@ -10,36 +10,35 @@ typedef enum maage_access_state {
 typedef struct maage_access_profile {
     char name[17], uuid[33], sources[160], detail[256];
     maage_access_state state;
-    int connected, available, imported;
+    int connected, session_saved, refreshing;
     double last_verified;
 } maage_access_profile;
 typedef struct maage_access_snapshot {
     maage_access_profile profiles[MAAGE_ACCESS_PROFILES];
-    unsigned count, revision, launchers_found, unsupported_files;
+    unsigned count, revision;
     int busy, allowed, auto_continue;
-    char detected_launchers[160], status[512];
+    char status[512], device_url[256], device_code[33];
+    double device_deadline;
 } maage_access_snapshot;
 typedef struct maage_access maage_access;
-/* All entry points are UI-independent. Operations serialize on one worker.
- * Creation performs no account-file I/O. Snapshots contain no credentials.
- * Authenticated local verification leases expire within one hour; plain registry
- * flags never grant access. Stored sessions revalidate without source-launcher I/O. */
+/* UI-independent single-worker service; snapshots never contain credentials.
+ * Registry metadata cannot authorize assets. Only authenticated, bounded leases
+ * from the encrypted MaaGE-owned OAuth account store can grant access. */
 maage_access *maage_access_create(void);
-int maage_access_scan(maage_access *access, const char *manual_directory);
-/* Call only after explicit consent to read the selected launcher's MC session. */
-int maage_access_connect(maage_access *access, const char *uuid);
+int maage_access_restore(maage_access *access);
+int maage_access_sign_in(maage_access *access, int device_code);
 int maage_access_verify_local(maage_access *access, const char *uuid);
+int maage_access_sign_out(maage_access *access, const char *uuid);
 int maage_access_disconnect(maage_access *access, const char *uuid);
 void maage_access_snapshot_get(maage_access *access, maage_access_snapshot *snapshot);
 int maage_access_allowed(maage_access *access);
-/* Restrict subsequent authorization to a connected account; NULL restores the
- * initial-setup policy accepting any current account. Does not grant a lease. */
+/* NULL accepts any verified account for setup; selection restricts services. */
 int maage_access_select(maage_access *access, const char *uuid);
+/* Operation cancellation permits retry; closing revokes all in-memory leases. */
+void maage_access_cancel_operation(maage_access *access);
 void maage_access_cancel(maage_access *access);
 void maage_access_destroy(maage_access *access);
 const char *maage_access_state_name(maage_access_state state);
-/* Native UI, main thread: 1 continue, 0 cancel, -1 unavailable. */
-/* manage_accounts keeps the account controls visible even with a valid lease. */
+/* Main thread: 1 continue, 0 cancel, -1 unavailable. */
 int maage_access_native_run(maage_access *access, int manage_accounts);
-#define MAAGE_ACCESS_CONSENT "Import this account into MaaGE? MaaGE will copy only its Minecraft Services session token from the selected compatible launcher, verify Java access, and save it encrypted in MaaGE's local accounts folder with a local key. No system credential storage is used. The original launcher is unchanged. This session expires; re-import will be needed until Microsoft sign-in is implemented."
 #endif

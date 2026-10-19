@@ -6,9 +6,9 @@
  * external authentication databases. */
 struct json_object *maage_access_json(const char *data, size_t size);
 const char *maage_access_json_string(struct json_object *object, const char *key);
-/* Returns VERIFIED only after both authenticated endpoint responses validate.
+/* Returns VERIFIED only after a valid profile plus explicit Java entitlement.
  * This routine never logs/persists raw responses, tokens, or curl error text.
- * The account service delegates authorized token persistence to profile_store. */
-maage_access_state maage_access_verify(const char *token, const char *uuid,
+ * Empty uuid accepts and returns a newly authenticated identity; nonempty must match. */
+maage_access_state maage_access_verify(const char *token, char uuid[33],
     char name[17], char detail[256], int (*cancelled)(void *), void *context);
 #endif

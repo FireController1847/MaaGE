@@ -1,13 +1,13 @@
 #include "profile_store.h"
 #include "verify.h"
+#include "oauth.h"
 #include "maage/storage.h"
 #include <openssl/evp.h>
-#include <openssl/rand.h>
 #include <openssl/crypto.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define MAAGE_PROFILE_LIMIT 24576
+#define MAAGE_PROFILE_LIMIT 100000
 #define MAAGE_PROFILE_HEADER 36
 static int maage_profile_path(const char *root, const char *name, char path[MAAGE_PATH_CAPACITY])
 {
@@ -43,7 +43,7 @@ static int maage_profile_key(const char *root, unsigned char key[32], int create
         ok = fread(key, 1, 32, file) == 32 && fgetc(file) == EOF && !ferror(file);
         fclose(file); return ok;
     }
-    return create && RAND_bytes(key, 32) == 1 && maage_profile_write(path, key, 32);
+    return create && maage_auth_random(key, 32) && maage_profile_write(path, key, 32);
 }
 static int maage_profile_crypt(int encrypt, unsigned char *plain, int size,
     unsigned char *sealed, const unsigned char key[32], const char *uuid)
@@ -52,8 +52,8 @@ static int maage_profile_crypt(int encrypt, unsigned char *plain, int size,
     int count = 0, final_count = 0, ok = 0;
     if (!cipher) return 0;
     if (encrypt) {
-        memcpy(sealed, "MAAGEAC1", 8);
-        if (RAND_bytes(sealed + 8, 12) != 1 ||
+        memcpy(sealed, "MAAGEAC2", 8);
+        if (!maage_auth_random(sealed + 8, 12) ||
             EVP_EncryptInit_ex(cipher, EVP_aes_256_gcm(), NULL, key, sealed + 8) != 1 ||
             EVP_EncryptUpdate(cipher, NULL, &count, sealed, 8) != 1 ||
             EVP_EncryptUpdate(cipher, NULL, &count, (const unsigned char *)uuid, 32) != 1 ||
@@ -61,7 +61,7 @@ static int maage_profile_crypt(int encrypt, unsigned char *plain, int size,
             EVP_EncryptFinal_ex(cipher, sealed + MAAGE_PROFILE_HEADER + count, &final_count) != 1 || final_count != 0 ||
             EVP_CIPHER_CTX_ctrl(cipher, EVP_CTRL_GCM_GET_TAG, 16, sealed + 20) != 1) goto done;
     } else {
-        if (memcmp(sealed, "MAAGEAC1", 8) ||
+        if (memcmp(sealed, "MAAGEAC2", 8) ||
             EVP_DecryptInit_ex(cipher, EVP_aes_256_gcm(), NULL, key, sealed + 8) != 1 ||
             EVP_DecryptUpdate(cipher, NULL, &count, sealed, 8) != 1 ||
             EVP_DecryptUpdate(cipher, NULL, &count, (const unsigned char *)uuid, 32) != 1 ||
@@ -79,12 +79,6 @@ static double maage_profile_number(struct json_object *object, const char *key)
     double number;
     if (!json_object_object_get_ex(object, key, &value) || (!json_object_is_type(value, json_type_double) && !json_object_is_type(value, json_type_int))) return -1;
     number = json_object_get_double(value); return number >= 0 && number < 1.0e12 ? number : -1;
-}
-static void maage_profile_wipe_json(struct json_object *object)
-{
-    struct json_object *token;
-    if (object && json_object_object_get_ex(object, "minecraft_access_token", &token) && json_object_is_type(token, json_type_string))
-        OPENSSL_cleanse((char *)json_object_get_string(token), (size_t)json_object_get_string_len(token));
 }
 /* One directory lock serializes key creation, replacement and account removal. */
 static maage_storage_lock *maage_profile_lock(const char *root)
@@ -119,8 +113,8 @@ int maage_profile_store_load(const char *root, const char *uuid, maage_profile_s
     ok = 0;
     if (!maage_profile_crypt(0, plain, (int)size, sealed, key, uuid)) goto done;
     object = maage_access_json((const char *)plain, size); if (!object) goto done;
-    if (!json_object_object_get_ex(object, "version", &version) || !json_object_is_type(version, json_type_int) || json_object_get_int(version) != 1 ||
-        strcmp(maage_access_json_string(object, "provider"), "minecraft-session-import") || strcmp(maage_access_json_string(object, "uuid"), uuid)) goto done;
+    if (!json_object_object_get_ex(object, "version", &version) || !json_object_is_type(version, json_type_int) || json_object_get_int(version) != 2 ||
+        strcmp(maage_access_json_string(object, "provider"), "microsoft-oauth") || strcmp(maage_access_json_string(object, "uuid"), uuid)) goto done;
     token = maage_access_json_string(object, "minecraft_access_token"); player = maage_access_json_string(object, "name");
     if (!*token || strlen(token) >= sizeof(session->minecraft_token) || !maage_access_username(player)) goto done;
     session->expires_at = maage_profile_number(object, "expires_at");
@@ -128,9 +122,11 @@ int maage_profile_store_load(const char *root, const char *uuid, maage_profile_s
     session->verified_until = maage_profile_number(object, "verified_until");
     if (session->expires_at <= 0 || session->verified_at < 0 || session->verified_until < 0 ||
         session->verified_until > session->expires_at || session->verified_until > session->verified_at + 3600.0) goto done;
+    if (strcmp(maage_access_json_string(object, "client_id"), MAAGE_MICROSOFT_CLIENT_ID) ||
+        !maage_auth_token(session->microsoft_refresh, sizeof(session->microsoft_refresh), object, "microsoft_refresh_token")) goto done;
     strcpy(session->uuid, uuid); strcpy(session->name, player); strcpy(session->minecraft_token, token); ok = 1;
 done:
-    maage_profile_wipe_json(object); if (object) json_object_put(object);
+    maage_auth_json_free(object);
     if (plain) { OPENSSL_cleanse(plain, MAAGE_PROFILE_LIMIT + 1); free(plain); }
     if (sealed) { OPENSSL_cleanse(sealed, MAAGE_PROFILE_LIMIT + MAAGE_PROFILE_HEADER + 1); free(sealed); }
     OPENSSL_cleanse(key, sizeof(key)); maage_storage_release(lock);
@@ -147,23 +143,27 @@ int maage_profile_store_save(const char *root, const maage_profile_session *sess
     size_t size = 0;
     int ok = 0;
     if (!maage_access_uuid(session->uuid, normalized) || strcmp(session->uuid, normalized) ||
-        !maage_access_username(session->name) || !*session->minecraft_token || strlen(session->minecraft_token) >= MAAGE_ACCESS_TOKEN_CAPACITY ||
+        !maage_access_username(session->name) || !*session->microsoft_refresh || !*session->minecraft_token || strlen(session->minecraft_token) >= MAAGE_ACCESS_TOKEN_CAPACITY ||
         !(session->expires_at > 0 && session->expires_at < 1.0e12) || !(session->verified_at >= 0 && session->verified_at < 1.0e12) ||
         !(session->verified_until >= 0 && session->verified_until <= session->expires_at && session->verified_until <= session->verified_at + 3600.0)) return 0;
     lock = maage_profile_lock(root);
     if (!lock || !maage_profile_key(root, key, 1)) goto done;
     object = json_object_new_object(); if (!object) goto done;
-    json_object_object_add(object, "version", json_object_new_int(1));
-    json_object_object_add(object, "provider", json_object_new_string("minecraft-session-import"));
+    json_object_object_add(object, "version", json_object_new_int(2));
+    json_object_object_add(object, "provider", json_object_new_string("microsoft-oauth"));
     json_object_object_add(object, "uuid", json_object_new_string(session->uuid));
     json_object_object_add(object, "name", json_object_new_string(session->name));
+    json_object_object_add(object, "client_id", json_object_new_string(MAAGE_MICROSOFT_CLIENT_ID));
+    json_object_object_add(object, "microsoft_refresh_token", json_object_new_string(session->microsoft_refresh));
     json_object_object_add(object, "minecraft_access_token", json_object_new_string(session->minecraft_token));
     json_object_object_add(object, "expires_at", json_object_new_double(session->expires_at));
     json_object_object_add(object, "verified_at", json_object_new_double(session->verified_at));
     json_object_object_add(object, "verified_until", json_object_new_double(session->verified_until));
-    if (maage_profile_number(object, "version") != 1 ||
-        strcmp(maage_access_json_string(object, "provider"), "minecraft-session-import") ||
+    if (maage_profile_number(object, "version") != 2 ||
+        strcmp(maage_access_json_string(object, "provider"), "microsoft-oauth") ||
         strcmp(maage_access_json_string(object, "name"), session->name) ||
+        strcmp(maage_access_json_string(object, "microsoft_refresh_token"), session->microsoft_refresh) ||
+        strcmp(maage_access_json_string(object, "client_id"), MAAGE_MICROSOFT_CLIENT_ID) ||
         strcmp(maage_access_json_string(object, "minecraft_access_token"), session->minecraft_token) ||
         strcmp(maage_access_json_string(object, "uuid"), session->uuid) ||
         maage_profile_number(object, "expires_at") != session->expires_at ||
@@ -176,8 +176,7 @@ int maage_profile_store_save(const char *root, const maage_profile_session *sess
     ok = maage_profile_crypt(1, (unsigned char *)plain, (int)size, sealed, key, session->uuid) &&
         maage_profile_path(root, name, path) && maage_profile_write(path, sealed, size + MAAGE_PROFILE_HEADER);
 done:
-    if (plain) OPENSSL_cleanse((char *)plain, size);
-    maage_profile_wipe_json(object); if (object) json_object_put(object);
+    maage_auth_json_free(object);
     if (sealed) { OPENSSL_cleanse(sealed, size + MAAGE_PROFILE_HEADER + EVP_MAX_BLOCK_LENGTH); free(sealed); }
     OPENSSL_cleanse(key, sizeof(key)); maage_storage_release(lock); return ok;
 }

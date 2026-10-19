@@ -83,6 +83,12 @@ static NSTableView *maage_ui_navigation_table(void)
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)application
 { (void)application; [self finish:0]; return NSTerminateCancel; }
 - (void)manage:(id)sender { (void)sender; if (!self.state->accounts.busy) [self finish:1]; }
+- (void)addAccount:(id)sender
+{ (void)sender; if (maage_access_sign_in(self.state->access, 0)) [self finish:1]; }
+- (void)signOutAccount:(id)sender
+{ (void)sender; if (*self.state->account) maage_access_sign_out(self.state->access, self.state->account); [self refresh:nil]; }
+- (void)removeAccount:(id)sender
+{ (void)sender; if (*self.state->account) maage_access_disconnect(self.state->access, self.state->account); [self refresh:nil]; }
 - (void)repairAssets:(id)sender
 { (void)sender; if (maage_access_allowed(self.state->access)) [self finish:2]; else [self manage:nil]; }
 - (void)verifyAccount:(id)sender
@@ -105,6 +111,9 @@ static NSTableView *maage_ui_navigation_table(void)
     if (uuid) maage_launcher_account_select(self.state, uuid.UTF8String);
     else if (self.account.selectedItem.tag == 1) { [self manage:nil]; return; }
     else if (self.account.selectedItem.tag == 2) [self verifyAccount:nil];
+    else if (self.account.selectedItem.tag == 3) { [self addAccount:nil]; return; }
+    else if (self.account.selectedItem.tag == 4) [self signOutAccount:nil];
+    else if (self.account.selectedItem.tag == 5) [self removeAccount:nil];
     self.accountRevision = 0;
     [self refresh:nil];
 }
@@ -213,8 +222,13 @@ static NSTableView *maage_ui_navigation_table(void)
         if (!self.account.numberOfItems) [self.account addItemWithTitle:@"No connected Minecraft account"];
         NSMenuItem *chosen = self.account.selectedItem;
         [self.account.menu addItem:NSMenuItem.separatorItem];
-        [self.account addItemWithTitle:@"Manage Connected Accounts…"]; self.account.lastItem.tag = 1;
-        [self.account addItemWithTitle:@"Verify Saved Account"]; self.account.lastItem.tag = 2;
+        [self.account addItemWithTitle:@"Add Microsoft Account…"]; self.account.lastItem.tag = 3;
+        [self.account addItemWithTitle:@"Manage Microsoft Accounts…"]; self.account.lastItem.tag = 1;
+        [self.account addItemWithTitle:@"Refresh / Reverify Account"]; self.account.lastItem.tag = 2;
+        self.account.lastItem.enabled = !state->accounts.busy && state->account[0];
+        [self.account addItemWithTitle:@"Sign Out"]; self.account.lastItem.tag = 4;
+        self.account.lastItem.enabled = !state->accounts.busy && state->account[0];
+        [self.account addItemWithTitle:@"Remove Account"]; self.account.lastItem.tag = 5;
         self.account.lastItem.enabled = !state->accounts.busy && state->account[0];
         [self.account selectItem:chosen];
         self.account.autoenablesItems = NO;
@@ -300,7 +314,7 @@ static NSTableView *maage_ui_navigation_table(void)
     self.accountStatus = maage_ui_label(@"", 12, NO); [groups addArrangedSubview:self.accountStatus];
     NSStackView *accounts = maage_ui_stack(YES, 8);
     [accounts addArrangedSubview:[self button:@"Manage Minecraft Accounts…" action:@selector(manage:)]];
-    self.verify = [self button:@"Verify Saved Account" action:@selector(verifyAccount:)]; [accounts addArrangedSubview:self.verify]; [groups addArrangedSubview:accounts];
+    self.verify = [self button:@"Refresh / Reverify Account" action:@selector(verifyAccount:)]; [accounts addArrangedSubview:self.verify]; [groups addArrangedSubview:accounts];
     [groups addArrangedSubview:maage_ui_label(@"Resources", 15, YES)];
     NSTextField *path = maage_ui_label(@(self.state->resources), 12, NO); path.selectable = YES; [path.widthAnchor constraintLessThanOrEqualToConstant:560].active = YES; [groups addArrangedSubview:path];
     self.resourceStatus = maage_ui_label(@"", 13, NO); [groups addArrangedSubview:self.resourceStatus];

@@ -43,7 +43,7 @@ function(maage_configure_gui_application target application)
         set(MAAGE_DESKTOP_DIR "${PROJECT_BINARY_DIR}/generated/applications")
         file(MAKE_DIRECTORY "${MAAGE_DESKTOP_DIR}")
         file(WRITE "${MAAGE_DESKTOP_DIR}/${application}.desktop.in"
-            "[Desktop Entry]\nType=Application\nName=${MAAGE_GUI_NAME}\nExec=\"@MAAGE_DESKTOP_EXECUTABLE@\"\nTerminal=false\nCategories=Game;\n")
+            "[Desktop Entry]\nType=Application\nName=${MAAGE_GUI_NAME}\nExec=\"@MAAGE_DESKTOP_EXECUTABLE@\" %u\nTerminal=false\nCategories=Game;\nMimeType=x-scheme-handler/maage;\n")
         if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
             set(MAAGE_EXEC_DIR "${CMAKE_INSTALL_BINDIR}")
         else()
