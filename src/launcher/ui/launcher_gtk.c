@@ -5,10 +5,10 @@
 #include <string.h>
 typedef struct maage_launcher_gtk {
     maage_launcher_ui *state;
-    GtkWidget *window, *stack, *account, *installation, *list, *status, *resource, *account_status, *verify, *repair, *error;
+    GtkWidget *window, *stack, *account, *installation, *list, *status, *resource, *account_status, *verify, *repair, *error, *clients, *client_status;
     GtkWidget *actions[5];
     GtkCssProvider *css;
-    unsigned revision;
+    unsigned revision, client_revision;
     int result, updating;
 } maage_launcher_gtk;
 static GtkWidget *maage_ui_label(GtkWidget *box, const char *text, const char *style)
@@ -63,7 +63,7 @@ static void maage_ui_installations_reload(maage_launcher_gtk *ui)
         GtkWidget *line = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5); char title[160];
         g_snprintf(title, sizeof(title), "%s%s%s", item->name, item->id == ui->state->default_id ? " · Default" : "", item->id == ui->state->selected ? " · Selected" : "");
         gtk_container_set_border_width(GTK_CONTAINER(line), 12); maage_ui_label(line, title, NULL);
-        maage_ui_label(line, "Minecraft 1.7.10 resources · Native MaaGE Client", "muted"); gtk_list_box_insert(GTK_LIST_BOX(ui->list), line, -1);
+        maage_ui_label(line, maage_launcher_installation_client(ui->state, i), "muted"); gtk_list_box_insert(GTK_LIST_BOX(ui->list), line, -1);
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ui->installation), item->name);
         if (item->id == ui->state->selected) gtk_combo_box_set_active(GTK_COMBO_BOX(ui->installation), (int)i);
     }
@@ -89,7 +89,7 @@ static void maage_ui_account_changed(GtkComboBox *box, gpointer context)
 static void maage_ui_installation_action(GtkButton *button, gpointer context)
 {
     maage_launcher_gtk *ui = context; int action = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "action"));
-    int row = maage_ui_row(ui); GtkWidget *dialog, *entry, *area; char name[128];
+    int row = maage_ui_row(ui); GtkWidget *dialog, *entry, *area, *client; char name[128];
     if (action && row < 0) return;
     if (action == 4) { maage_launcher_installation_default(ui->state, (unsigned)row); maage_ui_installations_reload(ui); return; }
     if (action == 3) {
@@ -105,8 +105,20 @@ static void maage_ui_installation_action(GtkButton *button, gpointer context)
         g_snprintf(name, sizeof(name), "%s%s", action ? ui->state->installations[row].name : "New Installation", action == 2 ? " Copy" : "");
         gtk_entry_set_text(GTK_ENTRY(entry), name); gtk_box_pack_start(GTK_BOX(area), entry, FALSE, FALSE, 0);
         atk_object_set_name(gtk_widget_get_accessible(entry), "Installation name");
+        client = gtk_combo_box_text_new(); gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(client), "", "Client selection required");
+        gtk_combo_box_set_active(GTK_COMBO_BOX(client), 0);
+        for (unsigned i = 0; i < ui->state->clients->count; ++i) {
+            char label[384]; maage_client_build *build = &ui->state->clients->builds[i]; maage_client_build_label(build, label);
+            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(client), build->id, label);
+        }
+        if (action && *ui->state->installations[row].client) {
+            const char *id = ui->state->installations[row].client;
+            if (maage_clients_find(ui->state->clients, id) < 0) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(client), id, "Referenced Client missing (keep reference)");
+            gtk_combo_box_set_active_id(GTK_COMBO_BOX(client), id);
+        }
+        atk_object_set_name(gtk_widget_get_accessible(client), "Client build"); gtk_box_pack_start(GTK_BOX(area), client, FALSE, FALSE, 0);
         gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE); gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK); gtk_widget_show_all(area);
-        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_installation_write(ui->state, action == 1 ? row : -1, gtk_entry_get_text(GTK_ENTRY(entry)));
+        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_installation_write(ui->state, action == 1 ? row : -1, gtk_entry_get_text(GTK_ENTRY(entry)), gtk_combo_box_get_active_id(GTK_COMBO_BOX(client)));
     }
     gtk_widget_destroy(dialog); maage_ui_installations_reload(ui);
 }
@@ -147,6 +159,26 @@ static gboolean maage_ui_tick(gpointer context)
         gtk_combo_box_set_active_id(GTK_COMBO_BOX(ui->account), state->account); ui->updating = 0; ui->revision = state->accounts.revision;
         if (!connected) { ui->updating = 1; gtk_combo_box_set_active(GTK_COMBO_BOX(ui->account), 0); ui->updating = 0; }
     }
+    if (ui->client_revision != state->client_revision) {
+        gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(ui->clients));
+        for (i = 0; i < state->clients->count; ++i) {
+            char label[384]; maage_client_build_label(&state->clients->builds[i], label);
+            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->clients), state->clients->builds[i].id, label);
+        }
+        gtk_combo_box_set_active(GTK_COMBO_BOX(ui->clients), 0);
+        ui->client_revision = state->client_revision; maage_ui_installations_reload(ui);
+    }
+#if MAAGE_LAUNCHER_DEVELOPMENT
+    if (state->client_confirmation) {
+        GtkWidget *dialog; maage_client_build *build = &state->client_candidate.build;
+        state->client_confirmation = 0;
+        dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "Import Local Client?");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s + %s\n%s · %s · %s\n%s\n\nOnly import code you trust. The whole package is copied and the original is preserved.", build->version, build->build, build->build_type, build->platform, build->architecture, state->client_candidate.source);
+        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_client_import(state);
+        gtk_widget_destroy(dialog);
+    }
+#endif
+    gtk_label_set_text(GTK_LABEL(ui->client_status), state->client_status);
     gtk_widget_set_sensitive(ui->account, !state->accounts.busy); gtk_widget_set_sensitive(ui->verify, !state->accounts.busy && state->account[0]);
     gtk_widget_set_sensitive(ui->repair, !state->accounts.busy);
     gtk_button_set_label(GTK_BUTTON(ui->status), state->readiness);
@@ -157,7 +189,31 @@ static gboolean maage_ui_tick(gpointer context)
     return G_SOURCE_CONTINUE;
 }
 static gboolean maage_ui_close(GtkWidget *widget, GdkEvent *event, gpointer context)
-{ (void)widget; (void)event; (void)context; gtk_main_quit(); return TRUE; }
+{ maage_launcher_gtk *ui = context; (void)widget; (void)event; if (!ui->state->client_job) gtk_main_quit(); return TRUE; }
+#if MAAGE_LAUNCHER_DEVELOPMENT
+static void maage_ui_client_import(GtkWidget *widget, gpointer context)
+{
+    maage_launcher_gtk *ui = context; GtkWidget *dialog; (void)widget;
+    if (ui->state->client_job) return;
+    dialog = gtk_file_chooser_dialog_new("Import Local Client Package", GTK_WINDOW(ui->window), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "Cancel", GTK_RESPONSE_CANCEL, "Inspect", GTK_RESPONSE_ACCEPT, NULL);
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        if (path) { maage_launcher_client_probe(ui->state, path); g_free(path); }
+    }
+    gtk_widget_destroy(dialog);
+}
+#endif
+static void maage_ui_client_remove(GtkWidget *widget, gpointer context)
+{
+    maage_launcher_gtk *ui = context; const char *id; int index; GtkWidget *dialog; (void)widget;
+    if (ui->state->client_job) return;
+    id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(ui->clients));
+    if (!id || (index = maage_clients_find(ui->state->clients, id)) < 0) return;
+    dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "Remove managed Client?");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "Only unused local Client packages are removed. Shared Minecraft resources and developer originals are preserved.");
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_client_remove(ui->state, (unsigned)index);
+    gtk_widget_destroy(dialog);
+}
 int maage_launcher_native_run(maage_launcher_ui *state)
 {
     maage_launcher_gtk ui; GtkWidget *split, *sidebar, *navigation, *right, *header, *page, *center, *button, *scroll, *footer, *appearance, *actions;
@@ -194,9 +250,17 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     maage_ui_label(center, "MaaGE", "brand"); maage_ui_label(center, "Minecraft as a Game Engine", "muted");
     ui.installation = gtk_combo_box_text_new(); gtk_widget_set_size_request(ui.installation, 260, -1); gtk_box_pack_start(GTK_BOX(center), ui.installation, FALSE, FALSE, 0); atk_object_set_name(gtk_widget_get_accessible(ui.installation), "MaaGE installation");
     button = maage_ui_button(center, "▶  Play", NULL, &ui); gtk_style_context_add_class(gtk_widget_get_style_context(button), "primary"); gtk_widget_set_sensitive(button, FALSE); gtk_widget_set_tooltip_text(button, "Client startup is not implemented in this build.");
-    maage_ui_label(center, "Client launching is not available in this build.", "muted");
+    ui.client_status = maage_ui_label(center, "", "muted"); gtk_label_set_max_width_chars(GTK_LABEL(ui.client_status), 70);
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14); gtk_stack_add_named(GTK_STACK(ui.stack), page, "news"); maage_ui_label(page, "News", "heading"); maage_ui_label(page, "No news source is configured yet.", NULL); maage_ui_label(page, "Project updates are available in the MaaGE repository.", "muted"); maage_ui_button(page, "Open MaaGE Project ↗", G_CALLBACK(maage_ui_project), &ui);
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14); gtk_stack_add_named(GTK_STACK(ui.stack), page, "installations"); maage_ui_label(page, "Installations", "heading"); maage_ui_label(page, "MaaGE configurations · Minecraft 1.7.10 resource baseline", "muted");
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14); gtk_stack_add_named(GTK_STACK(ui.stack), page, "installations"); maage_ui_label(page, "Installations", "heading"); maage_ui_label(page, "Installed Clients", NULL);
+    ui.clients = gtk_combo_box_text_new(); gtk_box_pack_start(GTK_BOX(page), ui.clients, FALSE, FALSE, 0);
+    atk_object_set_name(gtk_widget_get_accessible(ui.clients), "Installed Client builds");
+    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
+#if MAAGE_LAUNCHER_DEVELOPMENT
+    maage_ui_button(actions, "Import Local Client…", G_CALLBACK(maage_ui_client_import), &ui);
+#endif
+    maage_ui_button(actions, "Remove Client…", G_CALLBACK(maage_ui_client_remove), &ui);
+    maage_ui_label(page, "MaaGE Installations · shared Minecraft 1.7.10 resources", "muted");
     scroll = gtk_scrolled_window_new(NULL, NULL); gtk_box_pack_start(GTK_BOX(page), scroll, TRUE, TRUE, 0); ui.list = gtk_list_box_new(); gtk_container_add(GTK_CONTAINER(scroll), ui.list);
     actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
     { const char *titles[] = {"New…", "Edit…", "Duplicate…", "Remove…", "Set as Default"}; for (i = 0; i < 5; ++i) { ui.actions[i] = maage_ui_button(actions, titles[i], G_CALLBACK(maage_ui_installation_action), &ui); g_object_set_data(G_OBJECT(ui.actions[i]), "action", GINT_TO_POINTER(i)); } }

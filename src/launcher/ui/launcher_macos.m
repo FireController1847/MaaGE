@@ -58,15 +58,15 @@ static NSTableView *maage_ui_navigation_table(void)
 @interface MaaGELauncherController : NSObject <NSWindowDelegate, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
-@property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations;
+@property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients;
 @property(nonatomic, strong) NSView *body;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
 @property(nonatomic, strong) NSButton *status, *repair, *verify;
-@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error;
+@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSArray<NSButton *> *installationActions;
-@property(nonatomic) unsigned accountRevision;
+@property(nonatomic) unsigned accountRevision, clientRevision;
 @property(nonatomic) int result;
 @end
 @implementation MaaGELauncherController
@@ -74,6 +74,7 @@ static NSTableView *maage_ui_navigation_table(void)
 { return [NSButton buttonWithTitle:title target:self action:action]; }
 - (void)finish:(int)result
 {
+    if (self.state->client_job) { NSBeep(); return; }
     self.result = result; [self.timer invalidate]; self.timer = nil;
     [self.window orderOut:nil]; [NSApp stop:nil];
     [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0] atStart:NO];
@@ -84,7 +85,7 @@ static NSTableView *maage_ui_navigation_table(void)
 { (void)application; [self finish:0]; return NSTerminateCancel; }
 - (void)manage:(id)sender { (void)sender; if (!self.state->accounts.busy) [self finish:1]; }
 - (void)addAccount:(id)sender
-{ (void)sender; if (maage_access_sign_in(self.state->access, 0)) [self finish:1]; }
+{ (void)sender; if (!self.state->client_job && maage_access_sign_in(self.state->access, 0)) [self finish:1]; }
 - (void)signOutAccount:(id)sender
 { (void)sender; if (*self.state->account) maage_access_sign_out(self.state->access, self.state->account); [self refresh:nil]; }
 - (void)removeAccount:(id)sender
@@ -120,7 +121,7 @@ static NSTableView *maage_ui_navigation_table(void)
 - (void)selectInstallation:(id)sender
 { (void)sender; maage_launcher_installation_select(self.state, (unsigned)self.installation.indexOfSelectedItem); [self reloadInstallations]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table
-{ return table == self.sidebar ? 3 : table == self.settingsSidebar ? 1 : self.state->count; }
+{ return table == self.sidebar ? 3 : table == self.settingsSidebar ? 1 : table == self.clients ? self.state->clients->count : self.state->count; }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row
 {
     (void)column;
@@ -135,12 +136,20 @@ static NSTableView *maage_ui_navigation_table(void)
         }
         [line addArrangedSubview:maage_ui_row_label(names[row], 13, NO)]; return maage_ui_row(line, 5);
     }
+    if (table == self.clients) {
+        maage_client_build *build = &self.state->clients->builds[row]; char title[384];
+        maage_client_build_label(build, title);
+        NSStackView *line = maage_ui_stack(NO, 3);
+        [line addArrangedSubview:maage_ui_row_label(@(title), 12, YES)];
+        [line addArrangedSubview:maage_ui_row_label([NSString stringWithFormat:@"%s · %s · %.12s", build->platform, build->architecture, build->id], 11, NO)];
+        return maage_ui_row(line, 6);
+    }
     maage_installation *item = &self.state->installations[row];
     NSString *suffix = item->id == self.state->default_id ? @" · Default" : @"";
     NSString *selected = item->id == self.state->selected ? @" · Selected" : @"";
     NSStackView *line = maage_ui_stack(NO, 4);
     [line addArrangedSubview:maage_ui_row_label([NSString stringWithFormat:@"%s%@%@", item->name, suffix, selected], 14, YES)];
-    NSTextField *summary = maage_ui_row_label(@"Minecraft 1.7.10 resources · Native MaaGE Client", 12, NO);
+    NSTextField *summary = maage_ui_row_label(@(maage_launcher_installation_client(self.state, (unsigned)row)), 12, NO);
     summary.textColor = NSColor.secondaryLabelColor; [line addArrangedSubview:summary]; return maage_ui_row(line, 6);
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
@@ -174,15 +183,28 @@ static NSTableView *maage_ui_navigation_table(void)
     if (!creating && row < 0) return;
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = sender.tag == 1 ? @"Edit Installation" : sender.tag == 2 ? @"Duplicate Installation" : @"New Installation";
-    alert.informativeText = @"Name this MaaGE configuration. The resource baseline is Minecraft 1.7.10. Client startup settings will be available when launching is implemented.";
+    alert.informativeText = @"Choose a managed Client build for this configuration. Minecraft 1.7.10 resources are shared.";
     NSTextField *name = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 360, 24)];
     name.stringValue = row >= 0 && sender.tag ? @(self.state->installations[row].name) : @"New Installation";
     if (sender.tag == 2 && row >= 0) name.stringValue = [name.stringValue stringByAppendingString:@" Copy"];
-    name.accessibilityLabel = @"Installation name"; alert.accessoryView = name;
+    name.accessibilityLabel = @"Installation name";
+    NSStackView *editor = maage_ui_stack(NO, 10); [editor addArrangedSubview:name];
+    NSPopUpButton *client = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 420, 26)];
+    [client addItemWithTitle:@"Client selection required"]; client.lastItem.representedObject = @"";
+    const char *selectedClient = row >= 0 && sender.tag ? self.state->installations[row].client : "";
+    for (unsigned i = 0; i < self.state->clients->count; ++i) {
+        maage_client_build *build = &self.state->clients->builds[i]; char label[384]; maage_client_build_label(build, label);
+        [client addItemWithTitle:@(label)]; client.lastItem.representedObject = @(build->id);
+        if (!strcmp(build->id, selectedClient)) [client selectItem:client.lastItem];
+    }
+    if (*selectedClient && maage_clients_find(self.state->clients, selectedClient) < 0) {
+        [client addItemWithTitle:@"Referenced Client missing (keep reference)"]; client.lastItem.representedObject = @(selectedClient); [client selectItem:client.lastItem];
+    }
+    client.accessibilityLabel = @"Client build"; [editor addArrangedSubview:client]; alert.accessoryView = editor;
     [alert addButtonWithTitle:@"Save"]; [alert addButtonWithTitle:@"Cancel"];
     [alert.window setInitialFirstResponder:name];
     if ([alert runModal] == NSAlertFirstButtonReturn) {
-        maage_launcher_installation_write(self.state, creating ? -1 : (int)row, name.stringValue.UTF8String);
+        maage_launcher_installation_write(self.state, creating ? -1 : (int)row, name.stringValue.UTF8String, [client.selectedItem.representedObject UTF8String]);
         [self reloadInstallations];
     }
 }
@@ -234,6 +256,20 @@ static NSTableView *maage_ui_navigation_table(void)
         self.account.autoenablesItems = NO;
         self.accountRevision = state->accounts.revision;
     }
+    if (self.clientRevision != state->client_revision) {
+        self.clientRevision = state->client_revision; [self.clients reloadData]; [self.installations reloadData];
+    }
+#if MAAGE_LAUNCHER_DEVELOPMENT
+    if (state->client_confirmation) {
+        state->client_confirmation = 0;
+        maage_client_build *build = &state->client_candidate.build;
+        NSAlert *confirmation = [[NSAlert alloc] init]; confirmation.messageText = @"Import Local Client?";
+        confirmation.informativeText = [NSString stringWithFormat:@"Client %s + %s\n%s · %s · %s\n\n%@\n\nImport copies the entire package. Only import code you trust. The original remains unchanged.", build->version, build->build, build->build_type, build->platform, build->architecture, @(state->client_candidate.source)];
+        [confirmation addButtonWithTitle:@"Import"]; [confirmation addButtonWithTitle:@"Cancel"];
+        if ([confirmation runModal] == NSAlertFirstButtonReturn) maage_launcher_client_import(state);
+    }
+#endif
+    self.clientStatus.stringValue = @(state->client_status);
     self.account.enabled = !state->accounts.busy;
     self.accountStatus.stringValue = @(state->account_status);
     self.verify.enabled = !state->accounts.busy && state->account[0];
@@ -270,7 +306,7 @@ static NSTableView *maage_ui_navigation_table(void)
     play.toolTip = @"Client startup is not implemented in this build.";
     [play.widthAnchor constraintEqualToConstant:260].active = YES; [play.heightAnchor constraintEqualToConstant:44].active = YES;
     [center addArrangedSubview:play];
-    NSTextField *reason = maage_ui_label(@"Client launching is not available in this build.", 12, NO); reason.textColor = NSColor.secondaryLabelColor; [center addArrangedSubview:reason];
+    self.clientStatus = maage_ui_label(@"", 12, NO); self.clientStatus.textColor = NSColor.secondaryLabelColor; [self.clientStatus.widthAnchor constraintLessThanOrEqualToConstant:560].active = YES; [center addArrangedSubview:self.clientStatus];
     center.translatesAutoresizingMaskIntoConstraints = NO; [page addSubview:center];
     [NSLayoutConstraint activateConstraints:@[[center.centerXAnchor constraintEqualToAnchor:page.centerXAnchor], [center.centerYAnchor constraintEqualToAnchor:page.centerYAnchor constant:15], [center.topAnchor constraintGreaterThanOrEqualToAnchor:header.bottomAnchor constant:24], [center.bottomAnchor constraintLessThanOrEqualToAnchor:page.bottomAnchor constant:-12]]];
     return page;
@@ -288,7 +324,21 @@ static NSTableView *maage_ui_navigation_table(void)
 {
     NSStackView *page = maage_ui_stack(NO, 14);
     [page addArrangedSubview:maage_ui_label(@"Installations", 24, YES)];
-    [page addArrangedSubview:maage_ui_label(@"MaaGE configurations · Minecraft 1.7.10 resource baseline", 13, NO)];
+    [page addArrangedSubview:maage_ui_label(@"Installed Clients", 15, YES)];
+    self.clients = [[NSTableView alloc] init]; self.clients.headerView = nil;
+    NSTableColumn *clientColumn = [[NSTableColumn alloc] initWithIdentifier:@"client"]; clientColumn.width = 640; [self.clients addTableColumn:clientColumn];
+    self.clients.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
+    self.clients.delegate = self; self.clients.dataSource = self; self.clients.rowHeight = 45;
+    self.clients.accessibilityLabel = @"Installed Client builds";
+    NSScrollView *clientScroll = [[NSScrollView alloc] init]; clientScroll.hasVerticalScroller = YES; clientScroll.borderType = NSBezelBorder; clientScroll.documentView = self.clients;
+    [page addArrangedSubview:clientScroll]; [clientScroll.widthAnchor constraintEqualToAnchor:page.widthAnchor].active = YES; [clientScroll.heightAnchor constraintEqualToConstant:110].active = YES;
+    NSStackView *clientActions = maage_ui_stack(YES, 8);
+#if MAAGE_LAUNCHER_DEVELOPMENT
+    [clientActions addArrangedSubview:[self button:@"Import Local Client…" action:@selector(importClient:)]];
+#endif
+    [clientActions addArrangedSubview:[self button:@"Remove Client…" action:@selector(removeClient:)]];
+    [page addArrangedSubview:clientActions];
+    [page addArrangedSubview:maage_ui_label(@"MaaGE Installations · shared Minecraft 1.7.10 resources", 15, YES)];
     self.installations = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 640, 300)]; self.installations.headerView = nil;
     self.installations.autoresizingMask = NSViewWidthSizable;
     self.installations.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
@@ -304,6 +354,25 @@ static NSTableView *maage_ui_navigation_table(void)
         NSButton *button = [self button:titles[i] action:action]; button.tag = i; [actions addArrangedSubview:button]; [buttons addObject:button];
     }
     self.installationActions = buttons; [page addArrangedSubview:actions]; return page;
+}
+#if MAAGE_LAUNCHER_DEVELOPMENT
+- (void)importClient:(id)sender
+{
+    (void)sender; if (self.state->client_job) return;
+    NSOpenPanel *panel = [NSOpenPanel openPanel]; panel.title = @"Import Local Client";
+    panel.message = @"Choose a compiled MaaGE Client .app bundle with its generated manifest. No executable will be run during import.";
+    panel.canChooseFiles = YES; panel.canChooseDirectories = YES; panel.treatsFilePackagesAsDirectories = NO; panel.allowsMultipleSelection = NO;
+    if ([panel runModal] == NSModalResponseOK) maage_launcher_client_probe(self.state, panel.URL.path.UTF8String);
+}
+#endif
+- (void)removeClient:(id)sender
+{
+    (void)sender; NSInteger row = self.clients.selectedRow;
+    if (row < 0 || self.state->client_job) return;
+    NSAlert *alert = [[NSAlert alloc] init]; alert.messageText = @"Remove Managed Client?";
+    alert.informativeText = @"Unused local Client files will be deleted. Developer originals and shared Minecraft resources are preserved. Builds referenced by installations cannot be removed.";
+    [alert addButtonWithTitle:@"Remove"]; [alert addButtonWithTitle:@"Cancel"];
+    if ([alert runModal] == NSAlertFirstButtonReturn) maage_launcher_client_remove(self.state, (unsigned)row);
 }
 - (NSView *)settingsPage
 {

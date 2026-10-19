@@ -117,7 +117,12 @@ static int maage_application_run(int argc, char *const argv[])
 {
     maage_log_config config;
     int result;
-    char *path = maage_application_log_path();
+    char *path;
+#ifdef MAAGE_APPLICATION_METADATA_QUERY
+    extern int maage_application_query(int argc, char *const argv[], int *result);
+    if (maage_application_query(argc, argv, &result)) return result;
+#endif
+    path = maage_application_log_path();
     maage_log_config_init(&config);
 #ifdef MAAGE_APPLICATION_USER_DATA
     config.file = path != NULL;

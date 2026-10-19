@@ -42,7 +42,7 @@ int maage_launcher_ui_save(maage_launcher_ui *ui)
     lock = maage_storage_acquire(lock_path);
     if (!lock) goto failed;
     root = json_object_new_object(); list = json_object_new_array();
-    json_object_object_add(root, "schema", json_object_new_int(1));
+    json_object_object_add(root, "schema", json_object_new_int(2));
     json_object_object_add(root, "selected", json_object_new_int((int)ui->selected));
     json_object_object_add(root, "default", json_object_new_int((int)ui->default_id));
     json_object_object_add(root, "nextId", json_object_new_int((int)ui->next_id));
@@ -52,6 +52,7 @@ int maage_launcher_ui_save(maage_launcher_ui *ui)
         item = json_object_new_object();
         json_object_object_add(item, "id", json_object_new_int((int)ui->installations[i].id));
         json_object_object_add(item, "name", json_object_new_string(ui->installations[i].name));
+        json_object_object_add(item, "client", json_object_new_string(ui->installations[i].client));
         json_object_array_add(list, item);
     }
     json_object_object_add(root, "installations", list);
@@ -75,16 +76,20 @@ static int maage_launcher_commit(maage_launcher_ui *ui, const maage_launcher_ui 
     if (maage_launcher_ui_save(ui)) return 1;
     strcpy(error, ui->error); *ui = *previous; strcpy(ui->error, error); return 0;
 }
-int maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name)
+int maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client)
 {
     maage_launcher_ui previous = *ui;
     if (!maage_launcher_name(name)) { strcpy(ui->error, "Enter a name of 1–95 UTF-8 bytes without control characters."); return 0; }
+    if (ui->client_job) { strcpy(ui->error, "Wait for the Client operation to finish."); return 0; }
+    if (*client && maage_clients_find(ui->clients, client) < 0 &&
+        (index < 0 || (unsigned)index >= ui->count || strcmp(ui->installations[index].client, client))) { strcpy(ui->error, "Choose a registered Client build."); return 0; }
     if (index < 0) {
         if (ui->count == MAAGE_INSTALLATIONS || ui->next_id >= 2147483647U) { strcpy(ui->error, "Installation limit reached."); return 0; }
         index = (int)ui->count++; ui->installations[index].id = ui->next_id++;
     }
     if ((unsigned)index >= ui->count) return 0;
     strcpy(ui->installations[index].name, name);
+    strcpy(ui->installations[index].client, client);
     return maage_launcher_commit(ui, &previous);
 }
 int maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned index)
@@ -134,6 +139,23 @@ void maage_launcher_account_restore(maage_launcher_ui *ui)
 void maage_launcher_ui_refresh(maage_launcher_ui *ui)
 {
     unsigned i;
+    int job_result;
+    if (ui->client_job) {
+        job_result = maage_client_job_take(&ui->client_job, &ui->client_candidate, ui->clients, ui->error);
+        if (job_result) {
+            if (job_result > 0 && ui->client_operation == 1) ui->client_confirmation = 1;
+            else { ++ui->client_revision; }
+            ui->client_operation = 0;
+        }
+    }
+    strcpy(ui->client_status, "Select a Client build in Installations.");
+    for (i = 0; i < ui->count; ++i) if (ui->installations[i].id == ui->selected) {
+        const char *client = maage_launcher_installation_client(ui, i);
+        sprintf(ui->client_status, "%.380s\nClient launching is not implemented in this build.", client);
+        break;
+    }
+    if (ui->client_job) strcpy(ui->client_status, "Processing Client package locally…");
+    if (!ui->clients_valid) strcpy(ui->client_status, "Client registry unavailable; restore config/client-builds.json.");
     maage_access_snapshot_get(ui->access, &ui->accounts);
     maage_assets_snapshot(ui->assets, &ui->progress);
     for (i = 0; i < ui->accounts.count; ++i) if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) break;
@@ -159,15 +181,21 @@ int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_as
     size_t size;
     struct json_object *root = NULL, *list, *item;
     unsigned i, j, id, max_id = 0;
-    const char *name, *account;
+    const char *name, *account, *client;
+    int legacy = 1;
     memset(ui, 0, sizeof(*ui)); ui->access = access; ui->assets = assets;
     if (!maage_storage_data_path(ui->root, sizeof(ui->root)) ||
         !maage_storage_join(ui->resources, sizeof(ui->resources), ui->root, "minecraft/assets/reconst")) return 0;
+    ui->clients = (maage_client_registry *)calloc(1, sizeof(*ui->clients));
+    if (!ui->clients) return 0;
+    ui->clients_valid = maage_clients_load(ui->clients, ui->root, ui->error);
+    ui->client_revision = 1;
     if (maage_launcher_path(ui, path, "launcher.json") && (file = maage_storage_open(path, "rb")) != NULL) {
         size = fread(data, 1, sizeof(data), file); fclose(file);
         if (size < sizeof(data)) { data[size] = 0; root = maage_access_json(data, size); }
     }
-    if (root && maage_launcher_number(root, "schema") == 1) {
+    if (root && (maage_launcher_number(root, "schema") == 1 || maage_launcher_number(root, "schema") == 2)) {
+        legacy = maage_launcher_number(root, "schema") == 1;
         ui->selected = maage_launcher_number(root, "selected"); ui->default_id = maage_launcher_number(root, "default");
         ui->next_id = maage_launcher_number(root, "nextId"); ui->appearance = (int)maage_launcher_number(root, "appearance");
         if (ui->appearance > 2) ui->appearance = 0;
@@ -179,6 +207,8 @@ int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_as
                 if (!id || id >= 2147483647U || !maage_launcher_name(name)) continue;
                 for (j = 0; j < ui->count; ++j) if (ui->installations[j].id == id) break;
                 if (j < ui->count) continue;
+                client = maage_access_json_string(item, "client");
+                if (strlen(client) == 64 && strspn(client, "0123456789abcdef") == 64) strcpy(ui->installations[ui->count].client, client);
                 ui->installations[ui->count].id = id; strcpy(ui->installations[ui->count++].name, name);
                 if (id > max_id) max_id = id;
             }
@@ -193,5 +223,57 @@ int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_as
     for (i = 0; i < ui->count; ++i) if (ui->installations[i].id == ui->selected) break;
     if (i == ui->count) ui->selected = ui->default_id;
     if (ui->next_id <= max_id) ui->next_id = max_id + 1;
+    if (legacy && ui->clients_valid) {
+        unsigned available = 0, chosen = 0;
+        for (i = 0; i < ui->clients->count; ++i) if (ui->clients->builds[i].available) { ++available; chosen = i; }
+        if (available == 1) for (i = 0; i < ui->count; ++i) if (!*ui->installations[i].client)
+            strcpy(ui->installations[i].client, ui->clients->builds[chosen].id);
+        maage_launcher_ui_save(ui);
+    }
     maage_launcher_account_restore(ui); maage_launcher_ui_refresh(ui); return 1;
 }
+
+void maage_launcher_ui_destroy(maage_launcher_ui *ui)
+{ maage_client_job_finish(&ui->client_job); free(ui->clients); ui->clients = NULL; }
+const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned index)
+{
+    int build;
+    static char label[384];
+    if (index >= ui->count || !*ui->installations[index].client)
+        return ui->clients->count ? "Select a Client build in the installation editor" : "No Client installed. A managed Client installation is required";
+    build = maage_clients_find(ui->clients, ui->installations[index].client);
+    if (build < 0) return "Referenced Client missing; select another build";
+    if (ui->clients->builds[build].available) {
+        char path[MAAGE_PATH_CAPACITY];
+        if (!maage_clients_path(ui->clients, ui->installations[index].client, path)) {
+            ui->clients->builds[build].available = 0;
+            strcpy(ui->clients->builds[build].status, "Missing; reimport required"); ++ui->client_revision;
+        }
+    }
+    maage_client_build_label(&ui->clients->builds[build], label); return label;
+}
+static int maage_launcher_client_start(maage_launcher_ui *ui, int mode, const char *source)
+{
+    if (ui->client_job || !ui->clients_valid) { strcpy(ui->error, "Client registry is busy or unavailable."); return 0; }
+    ui->error[0] = 0;
+    ui->client_job = maage_client_job_start(ui->root, mode, source, &ui->client_candidate);
+    if (!ui->client_job) { strcpy(ui->error, "Cannot start Client package worker."); return 0; }
+    ui->client_operation = mode;
+    strcpy(ui->error, mode == 1 ? "Inspecting Client package…" : mode == 2 ? "Copying Client package into MaaGE…" : "Removing managed Client package…");
+    return 1;
+}
+int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index)
+{
+    unsigned i;
+    if (index >= ui->clients->count) return 0;
+    for (i = 0; i < ui->count; ++i) if (!strcmp(ui->installations[i].client, ui->clients->builds[index].id)) {
+        strcpy(ui->error, "This Client is used by an installation. Change its Client selection before removing the build."); return 0;
+    }
+    return maage_launcher_client_start(ui, 3, ui->clients->builds[index].id);
+}
+#if MAAGE_LAUNCHER_DEVELOPMENT
+int maage_launcher_client_probe(maage_launcher_ui *ui, const char *path)
+{ ui->client_confirmation = 0; return maage_launcher_client_start(ui, 1, path); }
+int maage_launcher_client_import(maage_launcher_ui *ui)
+{ ui->client_confirmation = 0; return maage_launcher_client_start(ui, 2, NULL); }
+#endif

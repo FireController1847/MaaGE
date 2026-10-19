@@ -2,12 +2,12 @@
 set(MAAGE_LAUNCHER_VERSION_MAJOR 1)
 set(MAAGE_LAUNCHER_VERSION_MINOR 0)
 set(MAAGE_LAUNCHER_VERSION_PATCH 0)
-set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.23")
+set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.24")
 
-set(MAAGE_CLIENT_VERSION_MAJOR 1)
-set(MAAGE_CLIENT_VERSION_MINOR 0)
+set(MAAGE_CLIENT_VERSION_MAJOR 0)
+set(MAAGE_CLIENT_VERSION_MINOR 1)
 set(MAAGE_CLIENT_VERSION_PATCH 0)
-set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.4")
+set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.1")
 
 set(MAAGE_SERVER_VERSION_MAJOR 1)
 set(MAAGE_SERVER_VERSION_MINOR 0)
@@ -55,6 +55,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
             endforeach()
             string(APPEND MAAGE_VERSION "-${MAAGE_VERSION_PRERELEASE}")
         endif()
+        set(MAAGE_SEMANTIC_VERSION "${MAAGE_VERSION}")
         string(APPEND MAAGE_VERSION "+${MAAGE_GIT_HASH}")
         # file(CONFIGURE) preserves timestamps when content is unchanged.
         file(CONFIGURE OUTPUT "${MAAGE_VERSION_OUTPUT_DIR}/maage/${application}_version.h" CONTENT [=[
@@ -68,16 +69,20 @@ if(CMAKE_SCRIPT_MODE_FILE)
 #define MAAGE_@MAAGE_APPLICATION@_VERSION_PRERELEASE "@MAAGE_VERSION_PRERELEASE@"
 #define MAAGE_@MAAGE_APPLICATION@_GIT_HASH "@MAAGE_GIT_HASH@"
 #define MAAGE_@MAAGE_APPLICATION@_VERSION "@MAAGE_VERSION@"
+#define MAAGE_@MAAGE_APPLICATION@_SEMANTIC_VERSION "@MAAGE_SEMANTIC_VERSION@"
 
 #endif
 ]=] @ONLY)
-        if(NOT application STREQUAL "launcher")
+        if(application STREQUAL "server")
             continue()
         endif()
         set(MAAGE_FRONTEND "${application}")
         string(TOUPPER "${MAAGE_FRONTEND}" MAAGE_FRONTEND_KEY)
         set(MAAGE_BUNDLE_NAME "${MAAGE_${MAAGE_FRONTEND_KEY}_NAME}")
         set(MAAGE_BUNDLE_IDENTIFIER "${MAAGE_${MAAGE_FRONTEND_KEY}_IDENTIFIER}")
+        if(application STREQUAL "client")
+            set(MAAGE_BUNDLE_NAME "MaaGE-Client-${MAAGE_SEMANTIC_VERSION}")
+        endif()
         # Apple version fields are numeric; preserve complete SemVer separately.
         file(CONFIGURE OUTPUT "${MAAGE_VERSION_OUTPUT_DIR}/maage/${MAAGE_FRONTEND}_Info.plist" CONTENT [=[
 <?xml version="1.0" encoding="UTF-8"?>
@@ -113,6 +118,7 @@ else()
             "${PROJECT_BINARY_DIR}/generated/maage/client_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/server_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/launcher_Info.plist"
+            "${PROJECT_BINARY_DIR}/generated/maage/client_Info.plist"
         COMMENT "Refreshing application versions from Git HEAD"
         VERBATIM)
 endif()

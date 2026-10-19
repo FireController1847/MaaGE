@@ -39,23 +39,26 @@ int maage_application_main(int argc, char *const argv[])
     }
     if (result == 1 && !demonstration) {
         if (!maage_launcher_ui_init(&ui, access, assets)) result = -1;
-        else for (;;) {
-            result = maage_launcher_native_run(&ui);
-            if (result <= 0) break;
-            if (result == 1) {
-                /* The established account workflow accepts any verified account.
-                 * Restore the explicit main-window selection when it returns. */
-                maage_access_select(access, NULL);
-                result = maage_access_native_run(access, 1);
+        else {
+            for (;;) {
+                result = maage_launcher_native_run(&ui);
                 if (result <= 0) break;
-                maage_launcher_account_restore(&ui);
-            } else if (maage_access_allowed(access)) {
-                maage_assets_start(assets, 1);
-                result = maage_setup_native_run(assets);
-                if (result == 0 || result < 0) break;
-                /* Expiry returns to account controls, never a fake ready state. */
-                if (result == 2) ui.page = MAAGE_PAGE_SETTINGS;
+                if (result == 1) {
+                    /* The established account workflow accepts any verified account.
+                     * Restore the explicit main-window selection when it returns. */
+                    maage_access_select(access, NULL);
+                    result = maage_access_native_run(access, 1);
+                    if (result <= 0) break;
+                    maage_launcher_account_restore(&ui);
+                } else if (maage_access_allowed(access)) {
+                    maage_assets_start(assets, 1);
+                    result = maage_setup_native_run(assets);
+                    if (result == 0 || result < 0) break;
+                    /* Expiry returns to account controls, never a fake ready state. */
+                    if (result == 2) ui.page = MAAGE_PAGE_SETTINGS;
+                }
             }
+            maage_launcher_ui_destroy(&ui);
         }
     }
     maage_assets_destroy(assets); maage_access_destroy(access); maage_download_shutdown();

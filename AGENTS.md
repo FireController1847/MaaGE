@@ -118,7 +118,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   server; that decision remains open. The Launcher distributes/selects independently
   versioned Client installations and starts them detached, so closing the Launcher
   never terminates the game. Client startup consumes an explicit versioned launch
-  contract when implemented; no standalone desktop entry or app bundle. Do not
+  contract when implemented; no standalone desktop entry. macOS Clients use versioned
+  app bundles for local import. Do not
   invent launch flags as authentication or implement distribution/launching yet.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
@@ -511,7 +512,8 @@ unless explicitly requested.
 - Launcher is the standalone graphical application: Windows GUI subsystem/WinMain,
   macOS `.app` bundle with generated Info.plist, and Linux `Terminal=false` desktop
   entry. Client is a separately versioned Launcher-managed native executable:
-  Windows GUI subsystem, plain macOS/Linux binary, no bundle or desktop entry.
+  Windows GUI subsystem, versioned macOS app bundle, Linux package binary; no
+  separate desktop entry.
   Keep startup logic in application callbacks; share only entry-point glue.
 - `maage_server` is one CLI executable using `MaaGE::Server`; an optional future
   native GUI runs inside that process. No `maage_server_gui` target or packaging.
@@ -542,8 +544,10 @@ unless explicitly requested.
 
 ## Independent application versions
 
-- Launcher, Client, and Server independently follow SemVer 2.0.0, initially
-  `1.0.0-alpha.1`. Maintain release fields centrally in root `CMakeVersions.cmake`,
+- Launcher, Client, and Server independently follow SemVer 2.0.0. The Client
+  starts at `0.1.0-alpha.1`; its explicit release version is independent of Git,
+  Minecraft 1.7.10, and the future network protocol. Maintain release fields centrally
+  in root `CMakeVersions.cmake`,
   independently of `PROJECT_VERSION`; never duplicate constants in source.
   Headless and optional GUI modes of the Server share its release fields.
 - Each build appends the same abbreviated Git HEAD hash as build metadata
@@ -553,6 +557,34 @@ unless explicitly requested.
 - Increment the affected application's version when appropriate to the scope of
   changes; increment prerelease identifiers during alpha development. Do not bump
   release numbers merely for a new commit: the hash distinguishes individual builds.
+
+Client builds embed immutable version/build/platform metadata through a C90 API;
+`--version` and schema-1 `--version-json` bypass logging and game initialization.
+CMake produces versioned Client artifacts and a SHA-256-bound `maage-client.json`
+development descriptor; importing never executes selected code. The descriptor
+is not a remote-distribution signature. Explicit releases control Client SemVer;
+do not bump it automatically for builds or commits.
+
+The Launcher owns `config/client-builds.json` and side-by-side `clients/<build-id>/`
+packages, separate from installation configurations and shared `minecraft/` resources.
+Installations in `config/launcher.json` reference stable build IDs; never silently
+substitute another Client. Migrate old configurations only when one available build
+is unambiguous. Strict SemVer ordering ignores build metadata; identity also includes
+build/platform/type and executable SHA-256. Exact duplicate imports are rejected;
+changed builds coexist, and referenced builds must be unassigned before removal.
+Native Installations distinguishes Installed Clients from MaaGE Installations.
+Debug Launchers (or explicit `MAAGE_LAUNCHER_DEVELOPER_IMPORT`) can inspect, confirm
+and copy trusted local app/package trees with the existing native UI. Release omits
+import APIs and controls by default; a Release Client remains importable by a Debug
+Launcher. Package I/O runs on a worker; copy complete bundles/runtime directories,
+never move originals or link to developer source trees. Preserve only relative
+POSIX package links whose resolved targets stay inside the package; reject escaping
+links, Windows reparse points, special files, unsafe paths and bounded-tree
+violations. Future verified remote distribution uses
+the same registry origin distinction; no download service is implemented. Client
+startup/gameplay remain deferred, so Play reports actual selection/availability and
+stays disabled. Dedicated Server builds/registry/process management are a separate
+future Launcher milestone; software versions do not define protocol compatibility.
 
 ## Conceptual development sequence
 
