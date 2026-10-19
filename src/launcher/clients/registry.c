@@ -8,14 +8,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
-#ifdef __APPLE__
-#define MAAGE_CLIENT_PAYLOAD "Client.app"
-#define MAAGE_CLIENT_DESCRIPTOR "Contents/Resources/maage-client.json"
-#define MAAGE_CLIENT_EXECUTABLE_DIR "Contents/MacOS"
-#else
 #define MAAGE_CLIENT_PAYLOAD "package"
 #define MAAGE_CLIENT_DESCRIPTOR "maage-client.json"
-#define MAAGE_CLIENT_EXECUTABLE_DIR ""
+#ifdef _WIN32
+#define MAAGE_CLIENT_FILENAME "maage-client.exe"
+#else
+#define MAAGE_CLIENT_FILENAME "maage-client"
 #endif
 static int maage_client_text(struct json_object *o, const char *key, char *out, size_t capacity, int optional)
 {
@@ -52,11 +50,7 @@ static int maage_client_fields(struct json_object *o, maage_client_build *b)
 }
 static int maage_client_executable(const char *package, const maage_client_build *b, char path[MAAGE_PATH_CAPACITY])
 {
-    char dir[MAAGE_PATH_CAPACITY];
-    if (*MAAGE_CLIENT_EXECUTABLE_DIR) {
-        if (!maage_storage_join(dir,sizeof(dir),package,MAAGE_CLIENT_EXECUTABLE_DIR)) return 0;
-    } else strcpy(dir,package);
-    return maage_storage_directory_exists(dir) && maage_storage_join(path,MAAGE_PATH_CAPACITY,dir,b->executable);
+    return maage_storage_directory_exists(package) && maage_storage_join(path,MAAGE_PATH_CAPACITY,package,b->executable);
 }
 static int maage_client_identity(maage_client_build *b)
 {
@@ -92,7 +86,7 @@ static int maage_client_inspect(const char *package, maage_client_build *b, char
     if (!maage_storage_directory_exists(package) || !maage_storage_join(path,sizeof(path),package,MAAGE_CLIENT_DESCRIPTOR)) goto failed;
     o = maage_client_json(path);
     ok = o && json_object_object_get_ex(o,"schema",&v) && json_object_get_int(v)==1 &&
-        !strcmp(maage_access_json_string(o,"application"),"maage-client") && maage_client_fields(o,b);
+        !strcmp(maage_access_json_string(o,"application"),"maage-client") && maage_client_fields(o,b) && !strcmp(b->executable,MAAGE_CLIENT_FILENAME);
     /* No network protocol has been implemented; do not claim compatibility. */
     if (ok && json_object_object_get_ex(o,"protocol",&v) && v) ok = json_object_is_type(v,json_type_null);
     if (o) json_object_put(o);
@@ -107,10 +101,6 @@ static int maage_client_inspect(const char *package, maage_client_build *b, char
     ok = ok && !memcmp(magic,"\177ELF",4);
 #endif
     if (!ok || !maage_client_sha256(path,actual) || strcmp(actual,b->sha256) || !maage_client_identity(b)) goto failed;
-#ifdef __APPLE__
-    if (!maage_storage_join(path,sizeof(path),package,"Contents/Info.plist") || maage_client_file_kind(path)!=1 ||
-        !maage_client_bundle_identity(package,b->executable,b->version,b->build)) goto failed;
-#endif
     b->available = 1; strcpy(b->status,"Available"); return 1;
 failed:
     strcpy(error,"Client package is missing, unsafe, incomplete, or its executable does not match the build manifest. Rebuild and import the whole package."); return 0;
@@ -188,7 +178,7 @@ int maage_clients_load(maage_client_registry *r, const char *root, char error[25
         memset(&candidate,0,sizeof(candidate));
         if(maage_client_package(r,item->id,path) && maage_client_inspect(path,&candidate,why) && !strcmp(item->id,candidate.id)) {
             item->available=1; strcpy(item->status,"Available");
-        } else strcpy(item->status,maage_client_compatible(item) ? "Missing or modified; reimport required" : "Incompatible platform or architecture");
+        } else strcpy(item->status,maage_client_compatible(item) ? "Missing/legacy package; import standalone Client" : "Incompatible platform or architecture");
         ++r->count;
     }
     /* Highest SemVer first; build metadata never changes SemVer precedence. */
@@ -240,15 +230,10 @@ int maage_clients_probe(const char *source, maage_client_candidate *c, char erro
     char *slash;
     memset(c,0,sizeof(*c));
     if(!maage_client_absolute(source,c->source)) { strcpy(error,"Cannot resolve the selected Client package."); return 0; }
-    if(maage_client_file_kind(c->source)==1) {
-        slash=strrchr(c->source,'/'); if(!slash) return 0; *slash=0;
-#ifdef __APPLE__
-        /* Selecting the executable inside an app is equivalent to selecting it. */
-        slash=strstr(c->source,".app/Contents/MacOS");
-        if(!slash || slash[strlen(".app/Contents/MacOS")]) { strcpy(error,"Select the entire MaaGE Client .app bundle."); return 0; }
-        slash[4]=0;
-#endif
+    if(maage_client_file_kind(c->source)!=1 || !(slash=strrchr(c->source,'/')) || strcmp(slash+1,MAAGE_CLIENT_FILENAME)) {
+        strcpy(error,"Select the standalone " MAAGE_CLIENT_FILENAME " executable with its adjacent maage-client.json manifest."); return 0;
     }
+    *slash=0;
     return maage_client_inspect(c->source,&c->build,error);
 }
 int maage_clients_import(maage_client_registry *r, const maage_client_candidate *c, char error[256])

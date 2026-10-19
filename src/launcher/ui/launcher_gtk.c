@@ -5,7 +5,7 @@
 #include <string.h>
 typedef struct maage_launcher_gtk {
     maage_launcher_ui *state;
-    GtkWidget *window, *stack, *account, *installation, *list, *status, *resource, *account_status, *verify, *repair, *error, *clients, *client_status;
+    GtkWidget *window, *stack, *account, *installation, *list, *status, *resource, *account_status, *verify, *repair, *error, *clients, *client_status, *play;
     GtkWidget *actions[5];
     GtkCssProvider *css;
     unsigned revision, client_revision;
@@ -30,6 +30,8 @@ static void maage_ui_repair(GtkWidget *widget, gpointer context)
 { maage_launcher_gtk *ui = context; (void)widget; if (!ui->state->accounts.busy) { ui->result = maage_access_allowed(ui->state->access) ? 2 : 1; gtk_main_quit(); } }
 static void maage_ui_verify(GtkWidget *widget, gpointer context)
 { maage_launcher_gtk *ui = context; (void)widget; if (ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account); }
+static void maage_ui_play(GtkWidget *widget, gpointer context)
+{ maage_launcher_gtk *ui = context; (void)widget; maage_launcher_client_play(ui->state); }
 static void maage_ui_project(GtkWidget *widget, gpointer context)
 {
     maage_launcher_gtk *ui = context; GError *error = NULL; (void)widget;
@@ -179,6 +181,8 @@ static gboolean maage_ui_tick(gpointer context)
     }
 #endif
     gtk_label_set_text(GTK_LABEL(ui->client_status), state->client_status);
+    gtk_widget_set_sensitive(ui->play, state->can_play);
+    gtk_button_set_label(GTK_BUTTON(ui->play), state->client_process ? "Client Running" : "▶  Play");
     gtk_widget_set_sensitive(ui->account, !state->accounts.busy); gtk_widget_set_sensitive(ui->verify, !state->accounts.busy && state->account[0]);
     gtk_widget_set_sensitive(ui->repair, !state->accounts.busy);
     gtk_button_set_label(GTK_BUTTON(ui->status), state->readiness);
@@ -195,7 +199,9 @@ static void maage_ui_client_import(GtkWidget *widget, gpointer context)
 {
     maage_launcher_gtk *ui = context; GtkWidget *dialog; (void)widget;
     if (ui->state->client_job) return;
-    dialog = gtk_file_chooser_dialog_new("Import Local Client Package", GTK_WINDOW(ui->window), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "Cancel", GTK_RESPONSE_CANCEL, "Inspect", GTK_RESPONSE_ACCEPT, NULL);
+    dialog = gtk_file_chooser_dialog_new("Import Local Client Executable", GTK_WINDOW(ui->window), GTK_FILE_CHOOSER_ACTION_OPEN, "Cancel", GTK_RESPONSE_CANCEL, "Inspect", GTK_RESPONSE_ACCEPT, NULL);
+    { GtkFileFilter *filter = gtk_file_filter_new(); gtk_file_filter_set_name(filter, "MaaGE Client (maage-client)");
+      gtk_file_filter_add_pattern(filter, "maage-client"); gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter); }
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
         char *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
         if (path) { maage_launcher_client_probe(ui->state, path); g_free(path); }
@@ -249,7 +255,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     center = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14); gtk_widget_set_valign(center, GTK_ALIGN_CENTER); gtk_widget_set_halign(center, GTK_ALIGN_CENTER); gtk_box_pack_start(GTK_BOX(page), center, TRUE, TRUE, 0);
     maage_ui_label(center, "MaaGE", "brand"); maage_ui_label(center, "Minecraft as a Game Engine", "muted");
     ui.installation = gtk_combo_box_text_new(); gtk_widget_set_size_request(ui.installation, 260, -1); gtk_box_pack_start(GTK_BOX(center), ui.installation, FALSE, FALSE, 0); atk_object_set_name(gtk_widget_get_accessible(ui.installation), "MaaGE installation");
-    button = maage_ui_button(center, "▶  Play", NULL, &ui); gtk_style_context_add_class(gtk_widget_get_style_context(button), "primary"); gtk_widget_set_sensitive(button, FALSE); gtk_widget_set_tooltip_text(button, "Client startup is not implemented in this build.");
+    ui.play = button = maage_ui_button(center, "▶  Play", G_CALLBACK(maage_ui_play), &ui); gtk_style_context_add_class(gtk_widget_get_style_context(button), "primary"); gtk_widget_set_sensitive(button, FALSE); gtk_widget_set_tooltip_text(button, "Start this installation’s selected Client directly.");
     ui.client_status = maage_ui_label(center, "", "muted"); gtk_label_set_max_width_chars(GTK_LABEL(ui.client_status), 70);
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14); gtk_stack_add_named(GTK_STACK(ui.stack), page, "news"); maage_ui_label(page, "News", "heading"); maage_ui_label(page, "No news source is configured yet.", NULL); maage_ui_label(page, "Project updates are available in the MaaGE repository.", "muted"); maage_ui_button(page, "Open MaaGE Project ↗", G_CALLBACK(maage_ui_project), &ui);
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14); gtk_stack_add_named(GTK_STACK(ui.stack), page, "installations"); maage_ui_label(page, "Installations", "heading"); maage_ui_label(page, "Installed Clients", NULL);

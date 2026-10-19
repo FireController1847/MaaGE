@@ -1,0 +1,6 @@
+find_package(Threads REQUIRED)
+add_library(maage_process STATIC process.c)
+add_library(MaaGE::Process ALIAS maage_process)
+maage_configure_portable_target(maage_process)
+target_include_directories(maage_process PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(maage_process PRIVATE MaaGE::Storage Threads::Threads)

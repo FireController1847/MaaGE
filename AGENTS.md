@@ -110,7 +110,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   authentication and legitimate ownership verification through authorized mechanisms;
   profiles, client launch configuration, updates, and dependency management.
   Remain independent of client/server internals. Official Microsoft authentication
-  and Java Edition access verification gate native first-run asset setup. Modpack installation and game launching remain deferred.
+  and Java Edition access verification gate native first-run asset setup. Modpack installation and gameplay remain deferred; the selected native Client can
+  now be started as an independent subprocess.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
   game definitions/protocols without depending on the server executable or private
@@ -118,9 +119,9 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   server; that decision remains open. The Launcher distributes/selects independently
   versioned Client installations and starts them detached, so closing the Launcher
   never terminates the game. Client startup consumes an explicit versioned launch
-  contract when implemented; no standalone desktop entry. macOS Clients use versioned
-  app bundles for local import. Do not
-  invent launch flags as authentication or implement distribution/launching yet.
+  contract as gameplay develops; no standalone desktop entry or macOS app bundle.
+  The Client initializes its own window/renderer. Never invent launch flags as
+  authentication or implement remote distribution until requested.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
   gameplay, modpack definitions/registries, persistence, and multiplayer synchronization.
@@ -270,7 +271,7 @@ adapters remain separate from Game UI; do not create a shared widget framework.
 Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
 actual rendering needs; `--renderer-demo` explicitly opens the existing RGB
 demonstration after setup instead of the main Launcher.
-Game launching remains deferred.
+Client processes own their graphics; the native Launcher never hosts their renderer.
 
 Preserve the native initial setup experience. The main Launcher uses a compact
 native sidebar with Play as the default page/principal action; News, Installations,
@@ -512,8 +513,8 @@ unless explicitly requested.
 - Launcher is the standalone graphical application: Windows GUI subsystem/WinMain,
   macOS `.app` bundle with generated Info.plist, and Linux `Terminal=false` desktop
   entry. Client is a separately versioned Launcher-managed native executable:
-  Windows GUI subsystem, versioned macOS app bundle, Linux package binary; no
-  separate desktop entry.
+  `maage-client` on macOS/Linux and `maage-client.exe` on Windows. These stable,
+  unversioned filenames are never macOS app bundles or separate desktop entries.
   Keep startup logic in application callbacks; share only entry-point glue.
 - `maage_server` is one CLI executable using `MaaGE::Server`; an optional future
   native GUI runs inside that process. No `maage_server_gui` target or packaging.
@@ -560,7 +561,8 @@ unless explicitly requested.
 
 Client builds embed immutable version/build/platform metadata through a C90 API;
 `--version` and schema-1 `--version-json` bypass logging and game initialization.
-CMake produces versioned Client artifacts and a SHA-256-bound `maage-client.json`
+CMake produces standalone Client executables in versioned package directories
+and an adjacent SHA-256-bound `maage-client.json`
 development descriptor; importing never executes selected code. The descriptor
 is not a remote-distribution signature. Explicit releases control Client SemVer;
 do not bump it automatically for builds or commits.
@@ -574,16 +576,25 @@ build/platform/type and executable SHA-256. Exact duplicate imports are rejected
 changed builds coexist, and referenced builds must be unassigned before removal.
 Native Installations distinguishes Installed Clients from MaaGE Installations.
 Debug Launchers (or explicit `MAAGE_LAUNCHER_DEVELOPER_IMPORT`) can inspect, confirm
-and copy trusted local app/package trees with the existing native UI. Release omits
+and copy trusted local executable packages with the existing native UI. Pick the
+standalone executable; reject app bundles and never execute code for inspection. Release omits
 import APIs and controls by default; a Release Client remains importable by a Debug
-Launcher. Package I/O runs on a worker; copy complete bundles/runtime directories,
+Launcher. Package I/O runs on a worker; copy the executable and adjacent runtimes,
 never move originals or link to developer source trees. Preserve only relative
 POSIX package links whose resolved targets stay inside the package; reject escaping
 links, Windows reparse points, special files, unsafe paths and bounded-tree
 violations. Future verified remote distribution uses
-the same registry origin distinction; no download service is implemented. Client
-startup/gameplay remain deferred, so Play reports actual selection/availability and
-stays disabled. Dedicated Server builds/registry/process management are a separate
+the same registry origin distinction; no download service is implemented. Legacy
+bundle registry records retain their IDs/references but require standalone reimport.
+Play starts only the exact selected verified build, with current Minecraft access
+and prepared resources. The reusable Core Process API invokes executables directly
+with structured arguments, an explicit working directory, inherited environment,
+nonblocking monitoring and file capture beneath Launcher `logs/clients/`. POSIX
+fork/exec and Windows CreateProcess never use shells or Launch Services. Launch
+validation/spawning runs on the Client worker; prevent duplicate launches and
+removal of the active build. Closing the Launcher releases monitoring without
+terminating the Client. The Client owns its native viewport and existing renderer
+selection; metadata queries bypass both. Gameplay remains unimplemented. Dedicated Server builds/registry/process management are a separate
 future Launcher milestone; software versions do not define protocol compatibility.
 
 ## Conceptual development sequence

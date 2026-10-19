@@ -38,10 +38,7 @@ function(maage_configure_gui_application target application)
         MACOSX_BUNDLE OFF)
     if(MAAGE_PLATFORM_WINDOWS)
         target_link_libraries(${target} PRIVATE shell32)
-    elseif(MAAGE_PLATFORM_MACOS AND (NOT MAAGE_GUI_LAUNCHER_MANAGED OR application STREQUAL "client"))
-        if(application STREQUAL "client")
-            set(MAAGE_GUI_NAME "${MAAGE_CLIENT_ARTIFACT}")
-        endif()
+    elseif(MAAGE_PLATFORM_MACOS AND NOT MAAGE_GUI_LAUNCHER_MANAGED)
         set(MAAGE_NUMERIC_VERSION "${MAAGE_${MAAGE_PRODUCT}_VERSION_MAJOR}.${MAAGE_${MAAGE_PRODUCT}_VERSION_MINOR}.${MAAGE_${MAAGE_PRODUCT}_VERSION_PATCH}")
         set_target_properties(${target} PROPERTIES
             MACOSX_BUNDLE ON

@@ -139,23 +139,38 @@ void maage_launcher_account_restore(maage_launcher_ui *ui)
 void maage_launcher_ui_refresh(maage_launcher_ui *ui)
 {
     unsigned i;
-    int job_result;
+    int job_result, exit_code, selected_build=-1;
+    maage_process_state process_state;
     if (ui->client_job) {
-        job_result = maage_client_job_take(&ui->client_job, &ui->client_candidate, ui->clients, ui->error);
+        job_result = maage_client_job_take(&ui->client_job, &ui->client_candidate, ui->clients, &ui->client_process, ui->error);
         if (job_result) {
             if (job_result > 0 && ui->client_operation == 1) ui->client_confirmation = 1;
-            else { ++ui->client_revision; }
+            else if (ui->client_operation != 4) { ++ui->client_revision; }
+            if (job_result < 0 && ui->client_operation == 4) ui->running_client[0] = 0;
             ui->client_operation = 0;
         }
     }
+    if (ui->client_process) {
+        process_state = maage_process_poll(ui->client_process, &exit_code, ui->error);
+        if (process_state == MAAGE_PROCESS_EXITED || process_state == MAAGE_PROCESS_FAILED) {
+            if (process_state == MAAGE_PROCESS_EXITED) {
+                maage_log_info("maage.launcher.clients", "Client process exited (code=%d).", exit_code);
+                if (exit_code) sprintf(ui->error, "Client exited with code %d. Check logs/clients for captured output.", exit_code);
+            } else maage_log_error("maage.launcher.clients", "%s", ui->error);
+            maage_process_close(ui->client_process); ui->client_process = NULL; ui->running_client[0] = 0;
+        }
+    }
+    ui->can_play = 0;
     strcpy(ui->client_status, "Select a Client build in Installations.");
     for (i = 0; i < ui->count; ++i) if (ui->installations[i].id == ui->selected) {
         const char *client = maage_launcher_installation_client(ui, i);
-        sprintf(ui->client_status, "%.380s\nClient launching is not implemented in this build.", client);
+        sprintf(ui->client_status, "%.380s", client);
+        selected_build = maage_clients_find(ui->clients, ui->installations[i].client);
         break;
     }
     if (ui->client_job) strcpy(ui->client_status, "Processing Client package locally…");
     if (!ui->clients_valid) strcpy(ui->client_status, "Client registry unavailable; restore config/client-builds.json.");
+    if (ui->client_process) strcpy(ui->client_status, "Client process active. Output is captured in logs/clients.");
     maage_access_snapshot_get(ui->access, &ui->accounts);
     maage_assets_snapshot(ui->assets, &ui->progress);
     for (i = 0; i < ui->accounts.count; ++i) if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) break;
@@ -173,6 +188,8 @@ void maage_launcher_ui_refresh(maage_launcher_ui *ui)
     else if (ui->progress.stage == MAAGE_SETUP_FAILED) ui->readiness = "Repair required";
     else if (ui->progress.stage == MAAGE_SETUP_CANCELLED || ui->progress.stage == MAAGE_SETUP_NOT_STARTED) ui->readiness = "Resources missing";
     else ui->readiness = "Preparing resources";
+    ui->can_play = ui->clients_valid && selected_build >= 0 && ui->clients->builds[selected_build].available &&
+        !ui->client_job && !ui->client_process && ui->account[0] && ui->accounts.allowed && ui->progress.stage == MAAGE_SETUP_COMPLETE;
 }
 int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_assets *assets)
 {
@@ -234,7 +251,7 @@ int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_as
 }
 
 void maage_launcher_ui_destroy(maage_launcher_ui *ui)
-{ maage_client_job_finish(&ui->client_job); free(ui->clients); ui->clients = NULL; }
+{ maage_client_job_finish(&ui->client_job); maage_process_close(ui->client_process); free(ui->clients); ui->clients = NULL; }
 const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned index)
 {
     int build;
@@ -256,16 +273,19 @@ static int maage_launcher_client_start(maage_launcher_ui *ui, int mode, const ch
 {
     if (ui->client_job || !ui->clients_valid) { strcpy(ui->error, "Client registry is busy or unavailable."); return 0; }
     ui->error[0] = 0;
-    ui->client_job = maage_client_job_start(ui->root, mode, source, &ui->client_candidate);
+    ui->client_job = maage_client_job_start(ui->root, mode, source, &ui->client_candidate, ui->access);
     if (!ui->client_job) { strcpy(ui->error, "Cannot start Client package worker."); return 0; }
     ui->client_operation = mode;
-    strcpy(ui->error, mode == 1 ? "Inspecting Client package…" : mode == 2 ? "Copying Client package into MaaGE…" : "Removing managed Client package…");
+    strcpy(ui->error, mode == 1 ? "Inspecting Client package…" : mode == 2 ? "Copying Client package into MaaGE…" : mode == 4 ? "Starting selected Client…" : "Removing managed Client package…");
     return 1;
 }
 int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index)
 {
     unsigned i;
     if (index >= ui->clients->count) return 0;
+    if (!strcmp(ui->running_client, ui->clients->builds[index].id)) {
+        strcpy(ui->error, "Close the running Client before removing its files."); return 0;
+    }
     for (i = 0; i < ui->count; ++i) if (!strcmp(ui->installations[i].client, ui->clients->builds[index].id)) {
         strcpy(ui->error, "This Client is used by an installation. Change its Client selection before removing the build."); return 0;
     }
@@ -277,3 +297,15 @@ int maage_launcher_client_probe(maage_launcher_ui *ui, const char *path)
 int maage_launcher_client_import(maage_launcher_ui *ui)
 { ui->client_confirmation = 0; return maage_launcher_client_start(ui, 2, NULL); }
 #endif
+
+int maage_launcher_client_play(maage_launcher_ui *ui)
+{
+    unsigned i;
+    maage_launcher_ui_refresh(ui);
+    if (!ui->can_play || !maage_access_allowed(ui->access)) { strcpy(ui->error, "A verified account, prepared resources and an available selected Client are required. Close any running Client before starting another."); return 0; }
+    for (i=0;i<ui->count;++i) if (ui->installations[i].id==ui->selected) {
+        if (!maage_launcher_client_start(ui,4,ui->installations[i].client)) return 0;
+        strcpy(ui->running_client,ui->installations[i].client); ui->can_play=0; return 1;
+    }
+    return 0;
+}

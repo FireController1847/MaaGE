@@ -62,7 +62,7 @@ static NSTableView *maage_ui_navigation_table(void)
 @property(nonatomic, strong) NSView *body;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
-@property(nonatomic, strong) NSButton *status, *repair, *verify;
+@property(nonatomic, strong) NSButton *status, *repair, *verify, *play;
 @property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSArray<NSButton *> *installationActions;
@@ -98,6 +98,8 @@ static NSTableView *maage_ui_navigation_table(void)
     if (self.state->account[0]) maage_access_verify_local(self.state->access, self.state->account);
     [self refresh:nil];
 }
+- (void)playClient:(id)sender
+{ (void)sender; maage_launcher_client_play(self.state); [self refresh:nil]; }
 - (void)openProject:(id)sender { (void)sender; [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@MAAGE_PROJECT_URL]]; }
 - (void)showSettings:(id)sender
 {
@@ -270,6 +272,8 @@ static NSTableView *maage_ui_navigation_table(void)
     }
 #endif
     self.clientStatus.stringValue = @(state->client_status);
+    self.play.enabled = state->can_play;
+    self.play.title = state->client_process ? @"Client Running" : @"▶  Play";
     self.account.enabled = !state->accounts.busy;
     self.accountStatus.stringValue = @(state->account_status);
     self.verify.enabled = !state->accounts.busy && state->account[0];
@@ -301,9 +305,9 @@ static NSTableView *maage_ui_navigation_table(void)
     self.installation = [[NSPopUpButton alloc] init]; self.installation.target = self; self.installation.action = @selector(selectInstallation:);
     self.installation.accessibilityLabel = @"MaaGE installation"; [self.installation.widthAnchor constraintEqualToConstant:260].active = YES;
     [center addArrangedSubview:self.installation];
-    NSButton *play = [self button:@"▶  Play" action:NULL]; play.bezelStyle = NSBezelStyleRounded; play.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
+    NSButton *play = [self button:@"▶  Play" action:@selector(playClient:)]; self.play = play; play.bezelStyle = NSBezelStyleRounded; play.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
     play.bezelColor = [NSColor colorWithSRGBRed:.87 green:.19 blue:.62 alpha:1]; play.enabled = NO;
-    play.toolTip = @"Client startup is not implemented in this build.";
+    play.toolTip = @"Start the Client selected by this installation as an independent process.";
     [play.widthAnchor constraintEqualToConstant:260].active = YES; [play.heightAnchor constraintEqualToConstant:44].active = YES;
     [center addArrangedSubview:play];
     self.clientStatus = maage_ui_label(@"", 12, NO); self.clientStatus.textColor = NSColor.secondaryLabelColor; [self.clientStatus.widthAnchor constraintLessThanOrEqualToConstant:560].active = YES; [center addArrangedSubview:self.clientStatus];
@@ -360,8 +364,8 @@ static NSTableView *maage_ui_navigation_table(void)
 {
     (void)sender; if (self.state->client_job) return;
     NSOpenPanel *panel = [NSOpenPanel openPanel]; panel.title = @"Import Local Client";
-    panel.message = @"Choose a compiled MaaGE Client .app bundle with its generated manifest. No executable will be run during import.";
-    panel.canChooseFiles = YES; panel.canChooseDirectories = YES; panel.treatsFilePackagesAsDirectories = NO; panel.allowsMultipleSelection = NO;
+    panel.message = @"Choose maage-client with its adjacent maage-client.json manifest. Import copies its package and runtime dependencies without running it.";
+    panel.canChooseFiles = YES; panel.canChooseDirectories = NO; panel.treatsFilePackagesAsDirectories = NO; panel.allowsMultipleSelection = NO;
     if ([panel runModal] == NSModalResponseOK) maage_launcher_client_probe(self.state, panel.URL.path.UTF8String);
 }
 #endif

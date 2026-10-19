@@ -2,7 +2,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
-#include <shlobj.h>
+#include <commdlg.h>
 #include "launcher.h"
 #include "maage/launcher_version.h"
 #include <string.h>
@@ -30,7 +30,7 @@ typedef struct maage_launcher_control {
 } maage_launcher_control;
 typedef struct maage_launcher_win32 {
     maage_launcher_ui *state;
-    HWND window, navigation[4], account, installation, list, name, status, resource, account_status, verify, repair, error, clients, client_choice, client_status;
+    HWND window, navigation[4], account, installation, list, name, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
     HFONT font, heading, brand;
     HBRUSH background, sidebar, magenta;
     maage_launcher_control controls[72];
@@ -152,6 +152,7 @@ static void maage_ui_refresh(maage_launcher_win32 *ui)
     }
 #endif
     maage_ui_text(ui->client_status, state->client_status);
+    EnableWindow(ui->play, state->can_play);
     EnableWindow(ui->account,!state->accounts.busy); EnableWindow(ui->verify,!state->accounts.busy && state->account[0]); EnableWindow(ui->repair,!state->accounts.busy);
     maage_ui_text(ui->status,state->readiness); maage_ui_text(ui->resource,state->progress.stage==MAAGE_SETUP_FAILED ? state->progress.error : state->readiness);
     maage_ui_text(ui->account_status,state->account_status); maage_ui_text(ui->error,state->error);
@@ -180,21 +181,15 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id)
 #if MAAGE_LAUNCHER_DEVELOPMENT
 static void maage_ui_client_import(maage_launcher_win32 *ui)
 {
-    BROWSEINFOW info; LPITEMIDLIST item; wchar_t wide[MAX_PATH]; char path[MAAGE_PATH_CAPACITY];
-    HRESULT com;
+    OPENFILENAMEW picker; wchar_t wide[MAAGE_PATH_CAPACITY]; char path[MAAGE_PATH_CAPACITY];
     if (ui->state->client_job) return;
-    com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(com)) { strcpy(ui->state->error, "Cannot initialize native Client package picker."); return; }
-    memset(&info, 0, sizeof(info)); info.hwndOwner = ui->window;
-    info.lpszTitle = L"Select the MaaGE Client package folder (executable, manifest and runtime files)";
-    info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-    item = SHBrowseForFolderW(&info);
-    if (item) {
-        if (SHGetPathFromIDListW(item, wide) && WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, sizeof(path), NULL, NULL))
-            maage_launcher_client_probe(ui->state, path);
-        CoTaskMemFree(item);
-    }
-    CoUninitialize();
+    memset(&picker, 0, sizeof(picker)); wide[0]=0; picker.lStructSize=sizeof(picker); picker.hwndOwner=ui->window;
+    picker.lpstrTitle=L"Import Local Client"; picker.lpstrFilter=L"MaaGE Client executable\0maage-client.exe\0\0";
+    picker.lpstrFile=wide; picker.nMaxFile=MAAGE_PATH_CAPACITY;
+    picker.Flags=OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&picker)) {
+        if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, sizeof(path), NULL, NULL)) maage_launcher_client_probe(ui->state, path);
+    } else if (CommDlgExtendedError()) strcpy(ui->state->error,"Windows could not open the Client executable picker.");
 }
 #endif
 static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
@@ -217,6 +212,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
                 if (selected >= 0 && MessageBoxW(window, L"Remove unused managed Client files? Shared Minecraft resources and developer originals are preserved.", L"Remove Client", MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
                     maage_launcher_client_remove(ui->state, (unsigned)selected);
             }
+            if (id==150) maage_launcher_client_play(ui->state);
             if (id>=100 && id<104) { ui->state->page=(maage_launcher_page)(id-100); maage_ui_layout(ui); return 0; }
             if (id==MAAGE_UI_STATUS) { ui->state->page=MAAGE_PAGE_SETTINGS; maage_ui_layout(ui); return 0; }
             if (id==MAAGE_UI_ACCOUNT && event==CBN_SELCHANGE && !ui->updating) {
@@ -252,7 +248,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             DRAWITEMSTRUCT *draw=(DRAWITEMSTRUCT *)lparam;
             if (draw->CtlID==150) {
                 FillRect(draw->hDC,&draw->rcItem,ui->magenta); SetTextColor(draw->hDC,RGB(235,220,230)); SetBkMode(draw->hDC,TRANSPARENT);
-                DrawTextW(draw->hDC,L"Play",-1,&draw->rcItem,DT_CENTER | DT_VCENTER | DT_SINGLELINE); return TRUE;
+                DrawTextW(draw->hDC,ui->state->client_process ? L"Client Running" : L"Play",-1,&draw->rcItem,DT_CENTER | DT_VCENTER | DT_SINGLELINE); return TRUE;
             }
         }
         break;
@@ -287,7 +283,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     control=maage_ui_label(&ui,0,L"MaaGE",0,176,300,42); SendMessageW(control,WM_SETFONT,(WPARAM)ui.brand,TRUE); SetWindowLongPtrW(control,GWL_STYLE,GetWindowLongPtrW(control,GWL_STYLE)|SS_CENTER);
     control=maage_ui_label(&ui,0,L"Minecraft as a Game Engine",0,229,320,26); SetWindowLongPtrW(control,GWL_STYLE,GetWindowLongPtrW(control,GWL_STYLE)|SS_CENTER);
     ui.installation=maage_ui_control(&ui,0,L"COMBOBOX",L"MaaGE installation",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,0,279,280,230,MAAGE_UI_INSTALLATION);
-    control=maage_ui_control(&ui,0,L"BUTTON",L"Play",BS_OWNERDRAW,0,327,280,48,150); EnableWindow(control,FALSE);
+    ui.play=control=maage_ui_control(&ui,0,L"BUTTON",L"Play",BS_OWNERDRAW,0,327,280,48,150); EnableWindow(control,FALSE);
     ui.client_status=control=maage_ui_label(&ui,0,L"",0,390,540,64); SetWindowLongPtrW(control,GWL_STYLE,GetWindowLongPtrW(control,GWL_STYLE)|SS_CENTER);
     maage_ui_label(&ui,1,L"No news source is configured yet.\nProject updates are available in the MaaGE repository.",198,100,-230,72);
     maage_ui_button(&ui,1,L"Open MaaGE Project",198,188,200,MAAGE_UI_PROJECT);

@@ -27,6 +27,9 @@ typedef struct maage_launcher_ui {
     const char *readiness;
     maage_client_registry *clients;
     maage_client_job *client_job;
+    maage_process *client_process;
+    int can_play;
+    char running_client[65];
     maage_client_candidate client_candidate;
     unsigned client_revision;
     int client_operation, client_confirmation, clients_valid;
@@ -41,6 +44,7 @@ int maage_launcher_installation_select(maage_launcher_ui *ui, unsigned index);
 int maage_launcher_installation_default(maage_launcher_ui *ui, unsigned index);
 void maage_launcher_ui_destroy(maage_launcher_ui *ui);
 const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned index);
+int maage_launcher_client_play(maage_launcher_ui *ui);
 int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index);
 #if MAAGE_LAUNCHER_DEVELOPMENT
 int maage_launcher_client_probe(maage_launcher_ui *ui, const char *path);
