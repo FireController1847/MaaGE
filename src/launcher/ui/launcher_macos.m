@@ -190,7 +190,14 @@ static NSTableView *maage_ui_navigation_table(void)
     name.stringValue = row >= 0 && sender.tag ? @(self.state->installations[row].name) : @"New Installation";
     if (sender.tag == 2 && row >= 0) name.stringValue = [name.stringValue stringByAppendingString:@" Copy"];
     name.accessibilityLabel = @"Installation name";
-    NSStackView *editor = maage_ui_stack(NO, 10); [editor addArrangedSubview:name];
+    /* NSAlert sizes its accessory from its frame. An unframed stack collapses
+     * here even when its arranged controls were constructed with frames. */
+    NSView *editor = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 110)];
+    NSTextField *nameLabel = [NSTextField labelWithString:@"Installation name"];
+    nameLabel.frame = NSMakeRect(0, 90, 420, 16); [editor addSubview:nameLabel];
+    name.frame = NSMakeRect(0, 60, 420, 24); [editor addSubview:name];
+    NSTextField *clientLabel = [NSTextField labelWithString:@"Client build"];
+    clientLabel.frame = NSMakeRect(0, 32, 420, 18); [editor addSubview:clientLabel];
     NSPopUpButton *client = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 420, 26)];
     [client addItemWithTitle:@"Client selection required"]; client.lastItem.representedObject = @"";
     const char *selectedClient = row >= 0 && sender.tag ? self.state->installations[row].client : "";
@@ -202,7 +209,7 @@ static NSTableView *maage_ui_navigation_table(void)
     if (*selectedClient && maage_clients_find(self.state->clients, selectedClient) < 0) {
         [client addItemWithTitle:@"Referenced Client missing (keep reference)"]; client.lastItem.representedObject = @(selectedClient); [client selectItem:client.lastItem];
     }
-    client.accessibilityLabel = @"Client build"; [editor addArrangedSubview:client]; alert.accessoryView = editor;
+    client.accessibilityLabel = @"Client build"; [editor addSubview:client]; alert.accessoryView = editor;
     [alert addButtonWithTitle:@"Save"]; [alert addButtonWithTitle:@"Cancel"];
     [alert.window setInitialFirstResponder:name];
     if ([alert runModal] == NSAlertFirstButtonReturn) {
