@@ -3,7 +3,7 @@
 #include "profile_store.h"
 struct json_object;
 #define MAAGE_MICROSOFT_CLIENT_ID "5e2b53b6-d00b-4de9-8f4d-a1897aaeca43"
-#define MAAGE_MICROSOFT_REDIRECT "maage://auth"
+#define MAAGE_MICROSOFT_REDIRECT "http://localhost"
 #define MAAGE_MICROSOFT_AUTHORITY "https://login.microsoftonline.com/consumers/oauth2/v2.0/"
 #define MAAGE_MICROSOFT_SCOPE "XboxLive.signin offline_access"
 typedef struct maage_auth_observer {
@@ -21,6 +21,8 @@ int maage_oauth_refresh(const char *root, maage_profile_session *session,
 struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
     const char *body, int form, const maage_auth_observer *observer,
     long *status, char detail[256]);
+/* Returns a static allowlisted error name; never echoes untrusted input. */
+const char *maage_auth_error_name(const char *error);
 void maage_auth_json_free(struct json_object *object);
 double maage_auth_number(struct json_object *object, const char *key);
 int maage_auth_token(char *out, size_t capacity, struct json_object *object, const char *key);
@@ -29,15 +31,14 @@ int maage_auth_wait(double seconds, const maage_auth_observer *observer);
 int maage_auth_random(unsigned char *bytes, size_t count);
 int maage_auth_browser(const char *url);
 void maage_auth_sleep(unsigned milliseconds);
-/* Local callback transport is NOT the OAuth redirect. It forwards OS scheme
- * activations to the pending worker, authenticated by its random state + PKCE. */
+/* Temporary IPv4 HTTP loopback callback. All calls belong to the access worker.
+ * receive: 1 valid HTTP envelope (OAuth state not yet checked), 0 pending/rejected,
+ * -1 transport failure. Only a state-validated result may complete the attempt.
+ * reply: 1 authorization received, -1 validated OAuth error, 0 reject/keep waiting. */
 typedef struct maage_auth_listener maage_auth_listener;
 maage_auth_listener *maage_auth_listen(unsigned *port);
-int maage_auth_receive(maage_auth_listener *listener, char *uri, size_t capacity);
+int maage_auth_receive(maage_auth_listener *listener, char *query, size_t capacity,
+    const maage_auth_observer *observer);
+void maage_auth_reply(maage_auth_listener *listener, int accepted);
 void maage_auth_close(maage_auth_listener *listener);
-int maage_oauth_forward_url(const char *uri);
-/* Install/remove lifecycle callbacks on the main thread (macOS); other platforms
- * receive protocol activations as argv. Does not start authentication. */
-void maage_auth_platform_start(void);
-void maage_auth_platform_stop(void);
 #endif

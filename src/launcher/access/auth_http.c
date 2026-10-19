@@ -1,5 +1,6 @@
 #include "oauth.h"
 #include "verify.h"
+#include "maage/log.h"
 #include <curl/curl.h>
 #include <openssl/crypto.h>
 #include <stdlib.h>
@@ -9,13 +10,14 @@
 typedef struct maage_auth_http {
     char data[131073];
     size_t used;
+    int oversized;
     const maage_auth_observer *observer;
 } maage_auth_http;
 static size_t maage_auth_write(char *data, size_t size, size_t count, void *context)
 {
     maage_auth_http *http = (maage_auth_http *)context;
     size_t bytes;
-    if (size && count > (sizeof(http->data) - 1 - http->used) / size) return 0;
+    if (size && count > (sizeof(http->data) - 1 - http->used) / size) { http->oversized = 1; return 0; }
     bytes = size * count; memcpy(http->data + http->used, data, bytes); http->used += bytes; http->data[http->used] = 0;
     return bytes;
 }
@@ -63,6 +65,31 @@ int maage_auth_token(char *out, size_t capacity, struct json_object *object, con
     for (i = 0; i < count; ++i) if ((unsigned char)value[i] <= 32 || (unsigned char)value[i] >= 127) return 0;
     memcpy(out, value, count + 1); return 1;
 }
+const char *maage_auth_error_name(const char *error)
+{
+    static const char *names[] = {"authorization_pending", "slow_down", "invalid_grant",
+        "invalid_client", "unauthorized_client", "invalid_request", "invalid_scope",
+        "access_denied", "authorization_declined", "expired_token", "bad_verification_code",
+        "server_error", "temporarily_unavailable", "ForbiddenOperationException", "NOT_FOUND"};
+    size_t i;
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) if (!strcmp(error, names[i])) return names[i];
+    return "unrecognized_error";
+}
+/* Log only known routes. Never log a supplied URL, including query strings or
+ * request IDs. All other diagnostic strings below are local/library constants. */
+static const char *maage_auth_log_endpoint(const char *endpoint)
+{
+    static const char *routes[] = {MAAGE_MICROSOFT_AUTHORITY "token", MAAGE_MICROSOFT_AUTHORITY "devicecode",
+        "https://user.auth.xboxlive.com/user/authenticate", "https://xsts.auth.xboxlive.com/xsts/authorize",
+        "https://api.minecraftservices.com/authentication/login_with_xbox", "https://api.minecraftservices.com/minecraft/profile",
+        "https://api.minecraftservices.com/entitlements/mcstore", "https://api.minecraftservices.com/entitlements/license"};
+    size_t i, length;
+    for (i = 0; i < sizeof(routes) / sizeof(routes[0]); ++i) {
+        length = strlen(routes[i]);
+        if (!strncmp(endpoint, routes[i], length) && (endpoint[length] == 0 || endpoint[length] == '?')) return routes[i];
+    }
+    return "unrecognized authentication endpoint";
+}
 static const char *maage_auth_error(struct json_object *object)
 {
     const char *error = maage_access_json_string(object, "error");
@@ -92,9 +119,13 @@ struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
     struct curl_slist *headers = NULL, *entry;
     struct json_object *json = NULL;
     char *authorization = NULL;
+    const char *route = maage_auth_log_endpoint(endpoint), *setup = "initialize HTTP client", *error;
+    double elapsed = 0, xerr;
+    int performed = 0;
     *status = 0; strcpy(detail, "Cannot initialize a secure authentication request.");
-    if (!http) return NULL;
+    if (!http) { maage_log_error("maage.launcher.access.http", "Cannot allocate HTTP response buffer for %s.", route); return NULL; }
     http->observer = observer; curl = curl_easy_init(); if (!curl) goto done;
+    setup = "allocate request headers";
     headers = curl_slist_append(NULL, body ? (form ? "Content-Type: application/x-www-form-urlencoded" : "Content-Type: application/json") : "Accept: application/json");
     if (!headers) goto done;
     if (bearer) {
@@ -103,7 +134,7 @@ struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
         entry = curl_slist_append(headers, authorization); if (!entry) goto done; headers = entry;
     }
     entry = curl_slist_append(headers, "x-xbl-contract-version: 1"); if (!entry) goto done; headers = entry;
-#define MAAGE_AUTH_CURL(option, value) if (curl_easy_setopt(curl, option, value) != CURLE_OK) goto done
+#define MAAGE_AUTH_CURL(option, value) if ((result = curl_easy_setopt(curl, option, value)) != CURLE_OK) { setup = #option; goto done; }
     MAAGE_AUTH_CURL(CURLOPT_URL, endpoint);
     MAAGE_AUTH_CURL(CURLOPT_HTTPHEADER, headers);
     MAAGE_AUTH_CURL(CURLOPT_PROTOCOLS_STR, "https");
@@ -122,7 +153,9 @@ struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
     if (body) { MAAGE_AUTH_CURL(CURLOPT_POSTFIELDS, body); }
 #undef MAAGE_AUTH_CURL
     if (observer->cancelled(observer->context)) goto done;
-    result = curl_easy_perform(curl); curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status);
+    maage_log_debug("maage.launcher.access.http", "%s %s started.", body ? "POST" : "GET", route);
+    performed = 1; result = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status); curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &elapsed);
     if (result == CURLE_OK) json = maage_access_json(http->data, http->used);
     if (observer->cancelled(observer->context)) strcpy(detail, "Authentication cancelled. No access was granted.");
     else if (result != CURLE_OK) strcpy(detail, "Cannot reach authentication services securely. Check your connection and retry.");
@@ -133,6 +166,21 @@ struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
     } else if (!json) strcpy(detail, "Authentication service returned a malformed or oversized response.");
     else strcpy(detail, "Authentication response received.");
 done:
+    if (observer->cancelled(observer->context)) maage_log_info("maage.launcher.access.http", "Request cancelled: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    else if (!performed) maage_log_error("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int)result);
+    else if (http->oversized) maage_log_warn("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    else if (result != CURLE_OK) maage_log_warn("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int)result, curl_easy_strerror(result), *status, elapsed);
+    else if (*status != 200) {
+        error = maage_auth_error_name(maage_access_json_string(json, "error"));
+        if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down"))
+            maage_log_debug("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
+        else {
+            maage_log_warn("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed);
+            xerr = maage_auth_number(json, "XErr");
+            if (xerr >= 0) maage_log_warn("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr);
+        }
+    } else if (!json) maage_log_warn("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    else maage_log_debug("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
     if (curl) curl_easy_cleanup(curl);
     if (authorization) { OPENSSL_cleanse(authorization, strlen(authorization)); free(authorization); }
     for (entry = headers; entry; entry = entry->next) OPENSSL_cleanse(entry->data, strlen(entry->data));

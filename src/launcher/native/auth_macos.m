@@ -1,16 +1,22 @@
-#import <AppKit/AppKit.h>
+#import <CoreServices/CoreServices.h>
 #import <Security/Security.h>
 #include "../access/oauth.h"
+#include "maage/log.h"
 #include <string.h>
 #include <time.h>
 int maage_auth_random(unsigned char *bytes, size_t count)
-{ return SecRandomCopyBytes(kSecRandomDefault, count, bytes) == errSecSuccess; }
+{
+    OSStatus status = SecRandomCopyBytes(kSecRandomDefault, count, bytes);
+    if (status != errSecSuccess) maage_log_error("maage.launcher.access.platform", "macOS cryptographic random generation failed (OSStatus=%ld).", (long)status);
+    return status == errSecSuccess;
+}
 int maage_auth_browser(const char *url)
 {
     @autoreleasepool {
         /* LaunchServices supports worker-thread calls; AppKit remains on main. */
         CFURLRef target = CFURLCreateWithBytes(NULL, (const UInt8 *)url, (CFIndex)strlen(url), kCFStringEncodingUTF8, NULL);
         OSStatus result = target ? LSOpenCFURLRef(target, NULL) : paramErr;
+        if (result != noErr) maage_log_warn("maage.launcher.access.platform", "System browser launch failed (LaunchServices OSStatus=%ld).", (long)result);
         if (target) CFRelease(target); return result == noErr;
     }
 }
@@ -18,28 +24,4 @@ void maage_auth_sleep(unsigned milliseconds)
 {
     struct timespec delay; delay.tv_sec = milliseconds / 1000; delay.tv_nsec = (long)(milliseconds % 1000) * 1000000;
     nanosleep(&delay, NULL);
-}
-@interface MaaGEOAuthActivation : NSObject
-- (void)openURL:(NSAppleEventDescriptor *)event reply:(NSAppleEventDescriptor *)reply;
-@end
-@implementation MaaGEOAuthActivation
-- (void)openURL:(NSAppleEventDescriptor *)event reply:(NSAppleEventDescriptor *)reply
-{
-    (void)reply;
-    NSString *uri = [event paramDescriptorForKeyword:keyDirectObject].stringValue;
-    if (uri) maage_oauth_forward_url(uri.UTF8String);
-    [NSApp activateIgnoringOtherApps:YES];
-}
-@end
-static MaaGEOAuthActivation *maage_auth_activation;
-void maage_auth_platform_start(void)
-{
-    [NSApplication sharedApplication];
-    maage_auth_activation = [[MaaGEOAuthActivation alloc] init];
-    [[NSAppleEventManager sharedAppleEventManager] setEventHandler:maage_auth_activation andSelector:@selector(openURL:reply:) forEventClass:kInternetEventClass andEventID:kAEGetURL];
-}
-void maage_auth_platform_stop(void)
-{
-    [[NSAppleEventManager sharedAppleEventManager] removeEventHandlerForEventClass:kInternetEventClass andEventID:kAEGetURL];
-    maage_auth_activation = nil;
 }

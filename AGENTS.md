@@ -294,13 +294,13 @@ no Java runtime, server JAR, modpack import, or version-management system.
 Verify Minecraft Access precedes Preparing MaaGE. MaaGE uses its own officially
 approved Microsoft Entra public-client application
 `5e2b53b6-d00b-4de9-8f4d-a1897aaeca43`, with the consumer authority, system-browser
-OAuth authorization code + S256 PKCE, and device-code fallback. Browser callbacks
-use the exact registered `maage://auth` URI, unpredictable validated state, bounded
-pending attempts, and one-time code exchange. Never silently substitute redirects,
-application IDs, client secrets, or third-party launcher credentials. App-specific
-redirect acceptance requires programmer runtime confirmation; offer device code
-and document the additional `http://localhost` Entra registration for a future
-explicit loopback alternative if custom-scheme sign-in is rejected.
+OAuth authorization code + S256 PKCE, and device-code fallback. The registered
+Mobile and desktop redirect is `http://localhost`. A temporary worker-owned HTTP
+listener binds only `127.0.0.1` on an OS-selected ephemeral port; authorization and
+token exchange use the same `http://localhost:<port>/` URI. Accept only the expected
+GET path/Host and validated unpredictable OAuth state; bound reads, timeout and
+cancellation release the listener. No custom URI protocol handler is required.
+Never substitute application IDs, client secrets, or third-party credentials.
 
 Xbox Live, XSTS, and Minecraft Services establish the Minecraft session. Verify a
 valid Java UUID/username plus an explicit Java entitlement from authenticated
@@ -308,7 +308,12 @@ store/license responses; empty lists, Bedrock-only access, registry flags, and
 Xbox sign-in alone never grant access. Confirm current access without inventing a
 permanent-purchase guarantee. All network work runs on the existing access worker.
 Never log credentials, callback URLs, payloads, or raw responses; wipe transient
-secrets. Keep native AppKit/Win32/GTK authentication UI lightweight and consistent
+secrets. Authorization diagnostics use `maage.launcher.access` and child loggers:
+INFO for milestones, WARN/ERROR for failures, DEBUG for request timing and routine
+polling. Log only static/allowlisted routes, bound loopback ports, error names and numeric
+service/OS codes; exclude query strings, OAuth state/PKCE/device codes, account identities,
+credential paths, untrusted error descriptions and response bodies at every level.
+Keep native AppKit/Win32/GTK authentication UI lightweight and consistent
 with setup, with actionable progress, cancellation/retry, and Continue disabled
 until verification succeeds. No embedded browser or new widget framework.
 

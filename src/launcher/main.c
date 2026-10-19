@@ -4,7 +4,6 @@
 #include "maage/launcher_version.h"
 #include "native/setup.h"
 #include "ui/launcher.h"
-#include "access/oauth.h"
 #include <string.h>
 
 int maage_launcher_demonstration(int argc, char *const argv[]);
@@ -14,12 +13,6 @@ int maage_application_main(int argc, char *const argv[])
     maage_access *access;
     maage_launcher_ui ui;
     int result, repair = 0, manage_accounts = 0, demonstration = 0, i;
-    for (i = 1; i < argc; ++i) if (!strncmp(argv[i], "maage:", 6)) {
-        /* Protocol activation forwards to the existing pending login and exits.
-         * A cold/stale callback cannot create a new authenticated session. */
-        maage_oauth_forward_url(argv[i]); return 0;
-    }
-    maage_auth_platform_start();
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--repair-assets")) repair = 1;
         if (!strcmp(argv[i], "--manage-accounts")) manage_accounts = 1;
@@ -65,7 +58,7 @@ int maage_application_main(int argc, char *const argv[])
             }
         }
     }
-    maage_assets_destroy(assets); maage_access_destroy(access); maage_download_shutdown(); maage_auth_platform_stop();
+    maage_assets_destroy(assets); maage_access_destroy(access); maage_download_shutdown();
     if (result <= 0) return result < 0 ? 1 : 0;
     return demonstration ? maage_launcher_demonstration(argc, argv) : 0;
 }

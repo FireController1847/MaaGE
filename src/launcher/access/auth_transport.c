@@ -3,6 +3,8 @@
 #endif
 #include "oauth.h"
 #include "maage/time.h"
+#include "maage/log.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <openssl/crypto.h>
@@ -20,16 +22,40 @@ typedef SOCKET maage_auth_socket;
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 typedef int maage_auth_socket;
 #define MAAGE_AUTH_INVALID (-1)
 #define maage_auth_socket_close close
 #endif
-struct maage_auth_listener { maage_auth_socket socket; };
+#define MAAGE_AUTH_HTTP_LIMIT 40960
+struct maage_auth_listener {
+    maage_auth_socket socket, client;
+    unsigned port;
+};
+static int maage_auth_socket_error(void)
+{
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+static int maage_auth_socket_retry(void)
+{
+    int error = maage_auth_socket_error();
+#ifdef _WIN32
+    return error == WSAEINTR || error == WSAEWOULDBLOCK;
+#else
+    return error == EINTR || error == EAGAIN || error == EWOULDBLOCK;
+#endif
+}
 static int maage_auth_network(void)
 {
 #ifdef _WIN32
     WSADATA data;
-    return WSAStartup(MAKEWORD(2,2), &data) == 0;
+    int result = WSAStartup(MAKEWORD(2,2), &data);
+    if (result) maage_log_error("maage.launcher.access.callback", "Cannot initialize loopback transport (OS error=%d).", result);
+    return result == 0;
 #else
     return 1;
 #endif
@@ -40,127 +66,216 @@ static void maage_auth_network_done(void)
     WSACleanup();
 #endif
 }
-static maage_auth_socket maage_auth_socket_create(void)
+/* All sockets are nonblocking; each read/write is additionally bounded below.
+ * Descriptor inheritance is disabled before launching the system browser. */
+static int maage_auth_socket_prepare(maage_auth_socket socket)
 {
-    maage_auth_socket s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
-    if (s != MAAGE_AUTH_INVALID) SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+    u_long nonblocking = 1;
+    if (!SetHandleInformation((HANDLE)socket, HANDLE_FLAG_INHERIT, 0) || ioctlsocket(socket, FIONBIO, &nonblocking)) return 0;
 #else
-    if (s >= FD_SETSIZE) { close(s); return MAAGE_AUTH_INVALID; }
-    if (s != MAAGE_AUTH_INVALID) fcntl(s, F_SETFD, FD_CLOEXEC);
+    int flags;
+    if (socket >= FD_SETSIZE) return 0;
+    flags = fcntl(socket, F_GETFL, 0);
+    if (flags < 0 || fcntl(socket, F_SETFD, FD_CLOEXEC) || fcntl(socket, F_SETFL, flags | O_NONBLOCK)) return 0;
 #ifdef SO_NOSIGPIPE
-    if (s != MAAGE_AUTH_INVALID) { int enabled = 1; setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)); }
+    {
+        int enabled = 1;
+        if (setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled))) return 0;
+    }
 #endif
 #endif
-    return s;
+    return 1;
 }
-static int maage_auth_ready(maage_auth_socket s, int write_ready, unsigned ms)
+static int maage_auth_ready(maage_auth_socket socket, int write_ready, unsigned ms)
 {
     fd_set set;
     struct timeval timeout;
-    FD_ZERO(&set); FD_SET(s, &set); timeout.tv_sec = ms / 1000; timeout.tv_usec = (ms % 1000) * 1000;
-    return select((int)s + 1, write_ready ? NULL : &set, write_ready ? &set : NULL, NULL, &timeout) > 0;
-}
-static int maage_auth_connect_local(maage_auth_socket s, struct sockaddr_in *address)
-{
-    int result, error = 0;
+    FD_ZERO(&set); FD_SET(socket, &set); timeout.tv_sec = ms / 1000; timeout.tv_usec = (ms % 1000) * 1000;
 #ifdef _WIN32
-    u_long nonblocking = 1;
-    int size = sizeof(error);
-    if (ioctlsocket(s, FIONBIO, &nonblocking)) return 0;
+    return select(0, write_ready ? NULL : &set, write_ready ? &set : NULL, NULL, &timeout);
 #else
-    socklen_t size = sizeof(error);
-    int flags = fcntl(s, F_GETFL, 0);
-    if (flags < 0 || fcntl(s, F_SETFL, flags | O_NONBLOCK)) return 0;
+    return select(socket + 1, write_ready ? NULL : &set, write_ready ? &set : NULL, NULL, &timeout);
 #endif
-    result = connect(s, (struct sockaddr *)address, sizeof(*address));
-    if (result && !maage_auth_ready(s, 1, 200)) return 0;
-    if (getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&error, &size) || error) return 0;
-    return 1;
 }
 maage_auth_listener *maage_auth_listen(unsigned *port)
 {
     struct sockaddr_in address;
 #ifdef _WIN32
-    int length = sizeof(address);
+    int length = sizeof(address), exclusive = 1;
 #else
     socklen_t length = sizeof(address);
 #endif
     maage_auth_listener *listener;
+    *port = 0;
     if (!maage_auth_network()) return NULL;
     listener = (maage_auth_listener *)malloc(sizeof(*listener));
-    if (!listener) { maage_auth_network_done(); return NULL; }
-    listener->socket = maage_auth_socket_create();
-    memset(&address, 0, sizeof(address)); address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(0x7f000001UL);
-    if (listener->socket == MAAGE_AUTH_INVALID || bind(listener->socket, (struct sockaddr *)&address, sizeof(address)) ||
-        listen(listener->socket, 4) || getsockname(listener->socket, (struct sockaddr *)&address, &length)) {
-        maage_auth_close(listener); return NULL;
-    }
-    *port = ntohs(address.sin_port); return listener;
+    if (!listener) { maage_log_error("maage.launcher.access.callback", "Cannot allocate loopback listener."); maage_auth_network_done(); return NULL; }
+    listener->socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); listener->client = MAAGE_AUTH_INVALID; listener->port = 0;
+    if (listener->socket == MAAGE_AUTH_INVALID || !maage_auth_socket_prepare(listener->socket)) goto failed;
+#ifdef _WIN32
+    if (setsockopt(listener->socket, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive, sizeof(exclusive))) goto failed;
+#endif
+    memset(&address, 0, sizeof(address)); address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(0x7f000001UL); /* 127.0.0.1, never ANY or a resolved hostname. */
+    address.sin_port = 0; /* The OS chooses an available ephemeral port. */
+    if (bind(listener->socket, (struct sockaddr *)&address, sizeof(address)) || listen(listener->socket, 4) ||
+        getsockname(listener->socket, (struct sockaddr *)&address, &length)) goto failed;
+    listener->port = ntohs(address.sin_port); *port = listener->port;
+    maage_log_info("maage.launcher.access.callback", "OAuth HTTP listener ready on 127.0.0.1:%u (expected path=/; method=GET).", *port);
+    return listener;
+failed:
+    maage_log_error("maage.launcher.access.callback", "Cannot create or bind IPv4 loopback callback listener (OS error=%d); system-browser sign-in unavailable.", maage_auth_socket_error());
+    maage_auth_close(listener); return NULL;
+}
+static void maage_auth_client_close(maage_auth_listener *listener)
+{
+    if (listener->client != MAAGE_AUTH_INVALID) { maage_auth_socket_close(listener->client); listener->client = MAAGE_AUTH_INVALID; }
 }
 void maage_auth_close(maage_auth_listener *listener)
 {
     if (!listener) return;
-    if (listener->socket != MAAGE_AUTH_INVALID) maage_auth_socket_close(listener->socket);
+    maage_auth_client_close(listener);
+    if (listener->socket != MAAGE_AUTH_INVALID) {
+        maage_auth_socket_close(listener->socket);
+        maage_log_info("maage.launcher.access.callback", "OAuth loopback listener closed (port=%u).", listener->port);
+    }
     free(listener); maage_auth_network_done();
 }
-int maage_auth_receive(maage_auth_listener *listener, char *uri, size_t capacity)
+static void maage_auth_http_reply(maage_auth_listener *listener, int status)
 {
-    maage_auth_socket client;
-    size_t used = 0;
-    int count, complete = 0;
-    double deadline;
-    if (!maage_auth_ready(listener->socket, 0, 100)) return 0;
-    client = accept(listener->socket, NULL, NULL); if (client == MAAGE_AUTH_INVALID) return 0;
-#ifndef _WIN32
-    if (client >= FD_SETSIZE) { close(client); return 0; }
-#endif
-    deadline = maage_time_monotonic_seconds() + 1;
-    while (used + 1 < capacity && maage_time_monotonic_seconds() < deadline && maage_auth_ready(client, 0, 100)) {
-        count = recv(client, uri + used, (int)(capacity - 1 - used), 0);
-        if (count <= 0) { complete = count == 0; break; }
-        if (memchr(uri + used, 0, (size_t)count)) break;
-        used += (size_t)count;
-    }
-    maage_auth_socket_close(client); uri[used] = 0;
-    if (!complete) { OPENSSL_cleanse(uri, capacity); return 0; }
-    return used != 0;
-}
-/* Strict callback parsing lives in oauth.c. This helper only routes activation;
- * possession of a port never grants authorization. No URI or code is logged. */
-int maage_oauth_forward_url(const char *uri)
-{
-    const char *state, *end;
-    char *parsed;
-    unsigned long port;
-    struct sockaddr_in address;
-    maage_auth_socket s;
+    const char *title = status == 200 ? "Microsoft authorization received" : "Authorization callback not accepted";
+    const char *message = status == 200 ? "Return to MaaGE to finish verifying Minecraft access. You can close this tab." : "Return to MaaGE to retry or cancel sign-in. You can close this tab.";
+    const char *label = status == 200 ? "OK" : status == 404 ? "Not Found" : status == 405 ? "Method Not Allowed" : "Bad Request";
+    char body[512], response[1024];
     size_t size, sent = 0;
-    int count, ok = 0;
-    if (strncmp(uri, MAAGE_MICROSOFT_REDIRECT "?", sizeof(MAAGE_MICROSOFT_REDIRECT))) return 0;
-    size = strlen(uri); if (size > 32768 || strchr(uri, '#')) return 0;
-    state = strstr(uri, "?state="); if (!state) state = strstr(uri, "&state=");
-    if (!state) return 0;
-    state += 7; port = strtoul(state, &parsed, 10); end = parsed;
-    if (!port || port > 65535 || *end != '.' || end - state > 5 || strlen(end + 1) < 64) return 0;
-    if (!maage_auth_network()) return 0;
-    s = maage_auth_socket_create();
-    if (s == MAAGE_AUTH_INVALID) { maage_auth_network_done(); return 0; }
-    memset(&address, 0, sizeof(address)); address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(0x7f000001UL); address.sin_port = htons((unsigned short)port);
-    /* A loopback-only connect fails promptly when no login is pending. */
-    if (maage_auth_connect_local(s, &address)) {
-        while (sent < size && maage_auth_ready(s, 1, 100)) {
+    double deadline = maage_time_monotonic_seconds() + .5;
+    int ready, count;
+    if (listener->client == MAAGE_AUTH_INVALID) return;
+    sprintf(body, "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>MaaGE sign-in</title><h1>%s</h1><p>%s</p></html>", title, message);
+    sprintf(response, "HTTP/1.1 %d %s\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %lu\r\nCache-Control: no-store\r\nPragma: no-cache\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n%s\r\n%s", status, label, (unsigned long)strlen(body), status == 405 ? "Allow: GET\r\n" : "", body);
+    size = strlen(response);
+    while (sent < size && maage_time_monotonic_seconds() >= 0 && maage_time_monotonic_seconds() < deadline) {
+        ready = maage_auth_ready(listener->client, 1, 50);
+        if (ready < 0) { if (maage_auth_socket_retry()) continue; break; }
+        if (!ready) continue;
 #ifdef MSG_NOSIGNAL
-            count = send(s, uri + sent, (int)(size - sent), MSG_NOSIGNAL);
+        count = send(listener->client, response + sent, (int)(size - sent), MSG_NOSIGNAL);
 #else
-            count = send(s, uri + sent, (int)(size - sent), 0);
+        count = send(listener->client, response + sent, (int)(size - sent), 0);
 #endif
-            if (count <= 0) break;
-            sent += (size_t)count;
-        }
-        ok = sent == size;
+        if (count < 0 && maage_auth_socket_retry()) continue;
+        if (count <= 0) break;
+        sent += (size_t)count;
     }
-    maage_auth_socket_close(s); maage_auth_network_done(); return ok;
+    if (sent != size) maage_log_debug("maage.launcher.access.callback", "Browser callback page could not be fully delivered; authorization result unchanged.");
+    maage_auth_client_close(listener);
+}
+void maage_auth_reply(maage_auth_listener *listener, int accepted)
+{
+    /* Stop accepting connections as soon as the state-validated result completes
+     * an attempt. Keep only the already accepted socket to return its static page. */
+    if (accepted && listener->socket != MAAGE_AUTH_INVALID) {
+        maage_auth_socket_close(listener->socket); listener->socket = MAAGE_AUTH_INVALID;
+        maage_log_info("maage.launcher.access.callback", "OAuth loopback listener closed after validated callback (port=%u).", listener->port);
+    }
+    maage_auth_http_reply(listener, accepted > 0 ? 200 : 400);
+}
+static int maage_auth_ascii_equal(const char *left, const char *right)
+{
+    int a, b;
+    do {
+        a = (unsigned char)*left++; b = (unsigned char)*right++;
+        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+        if (a != b) return 0;
+    } while (a);
+    return 1;
+}
+/* This is a bounded, single-request HTTP adapter, not a general web server.
+ * Only origin-form GET /, an exact localhost Host header, and an empty body are
+ * accepted. Header/query values never enter logs or browser response pages. */
+static int maage_auth_http_query(char *request, unsigned port, char *query, size_t capacity, int *status, const char **reason)
+{
+    char *line, *end, *method_end, *target, *target_end, *version, *colon, *value, *tail;
+    const unsigned char *ch;
+    char host[64];
+    int host_seen = 0;
+    size_t size;
+    *status = 400; *reason = "malformed HTTP request";
+    end = strstr(request, "\r\n"); if (!end) return 0; *end = 0;
+    method_end = strchr(request, ' '); if (!method_end) return 0; *method_end = 0;
+    target = method_end + 1; target_end = strchr(target, ' '); if (!target_end) return 0; *target_end = 0; version = target_end + 1;
+    if (strcmp(version, "HTTP/1.1") && strcmp(version, "HTTP/1.0")) return 0;
+    if (strcmp(request, "GET")) { *status = 405; *reason = "unexpected HTTP method"; return 0; }
+    if (target[0] != '/' || (target[1] != '?' && target[1] != 0)) { *status = 404; *reason = "unexpected callback path"; return 0; }
+    for (ch = (const unsigned char *)target; *ch; ++ch) if (*ch <= 32 || *ch >= 127 || *ch == '#' || *ch == '\\') return 0;
+    sprintf(host, "localhost:%u", port); line = end + 2;
+    while (*line) {
+        end = strstr(line, "\r\n"); if (!end) return 0;
+        if (end == line) break;
+        *end = 0; colon = strchr(line, ':'); if (!colon || colon == line) return 0;
+        for (ch = (const unsigned char *)line; ch < (const unsigned char *)colon; ++ch)
+            if (!((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z') || (*ch >= '0' && *ch <= '9') || strchr("!#$%&'*+-.^_`|~", *ch))) return 0;
+        *colon = 0; value = colon + 1;
+        while (*value == ' ' || *value == '\t') ++value;
+        for (ch = (const unsigned char *)value; *ch; ++ch) if ((*ch < 32 && *ch != '\t') || *ch == 127) return 0;
+        tail = value + strlen(value); while (tail > value && (tail[-1] == ' ' || tail[-1] == '\t')) *--tail = 0;
+        if (maage_auth_ascii_equal(line, "Host")) {
+            if (host_seen++ || !maage_auth_ascii_equal(value, host)) { *reason = "unexpected or duplicate HTTP Host"; return 0; }
+        } else if (maage_auth_ascii_equal(line, "Transfer-Encoding") ||
+            (maage_auth_ascii_equal(line, "Content-Length") && strcmp(value, "0"))) { *reason = "unexpected callback request body"; return 0; }
+        line = end + 2;
+    }
+    if (host_seen != 1) { *reason = "missing localhost Host"; return 0; }
+    if (*target == '/' && target[1] == '?') target += 2; else target += 1;
+    size = strlen(target);
+    if (size >= capacity) { *reason = "callback query exceeds size limit"; return 0; }
+    memcpy(query, target, size + 1); return 1;
+}
+int maage_auth_receive(maage_auth_listener *listener, char *query, size_t capacity, const maage_auth_observer *observer)
+{
+    char *request, *complete;
+    const char *reason = "incomplete, oversized, or malformed HTTP request";
+    size_t used = 0;
+    int ready, count, status = 400, accepted = 0;
+    double deadline;
+    query[0] = 0;
+    ready = maage_auth_ready(listener->socket, 0, 100);
+    if (!ready || (ready < 0 && maage_auth_socket_retry())) return 0;
+    if (ready < 0) { maage_log_error("maage.launcher.access.callback", "Loopback listener wait failed (OS error=%d).", maage_auth_socket_error()); return -1; }
+    listener->client = accept(listener->socket, NULL, NULL);
+    if (listener->client == MAAGE_AUTH_INVALID) {
+        if (maage_auth_socket_retry()) return 0;
+        maage_log_error("maage.launcher.access.callback", "Loopback accept failed (OS error=%d).", maage_auth_socket_error()); return -1;
+    }
+    if (!maage_auth_socket_prepare(listener->client)) { maage_auth_client_close(listener); maage_log_warn("maage.launcher.access.callback", "Cannot configure accepted loopback connection."); return 0; }
+    request = (char *)calloc(1, MAAGE_AUTH_HTTP_LIMIT + 1);
+    if (!request) { maage_auth_client_close(listener); maage_log_error("maage.launcher.access.callback", "Cannot allocate loopback HTTP request buffer."); return -1; }
+    deadline = maage_time_monotonic_seconds() + 2;
+    while (used < MAAGE_AUTH_HTTP_LIMIT && !observer->cancelled(observer->context) && maage_time_monotonic_seconds() >= 0 && maage_time_monotonic_seconds() < deadline) {
+        ready = maage_auth_ready(listener->client, 0, 100);
+        if (ready < 0) { if (maage_auth_socket_retry()) continue; break; }
+        if (!ready) continue;
+        count = recv(listener->client, request + used, (int)(MAAGE_AUTH_HTTP_LIMIT - used), 0);
+        if (count < 0 && maage_auth_socket_retry()) continue;
+        if (count <= 0 || memchr(request + used, 0, (size_t)count)) break;
+        used += (size_t)count; request[used] = 0;
+        complete = strstr(request, "\r\n\r\n");
+        if (complete) {
+            if (complete + 4 == request + used) accepted = maage_auth_http_query(request, listener->port, query, capacity, &status, &reason);
+            else reason = "unexpected callback request body";
+            break;
+        }
+    }
+    OPENSSL_cleanse(request, MAAGE_AUTH_HTTP_LIMIT + 1); free(request);
+    if (observer->cancelled(observer->context)) { maage_auth_client_close(listener); return 0; }
+    if (!accepted) {
+        maage_log_warn("maage.launcher.access.callback", "Rejected loopback request: %s (HTTP %d); authorization remains pending.", reason, status);
+        maage_auth_http_reply(listener, status); return 0;
+    }
+    maage_log_info("maage.launcher.access.callback", "Received expected HTTP callback; validating OAuth state.");
+    return 1;
 }
 int maage_auth_wait(double seconds, const maage_auth_observer *observer)
 {

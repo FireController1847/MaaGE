@@ -74,6 +74,7 @@ static int maage_access_policy(maage_access *a)
         maage_access_profile *p = &a->view.profiles[i];
         if (p->state != MAAGE_ACCESS_VERIFIED) continue;
         if (a->revoked || !p->connected || now < a->starts[i] || now >= a->deadlines[i] || wall < p->last_verified || wall >= p->last_verified + 3600) {
+            maage_log_debug("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected ? "account disconnected" : now < a->starts[i] || wall < p->last_verified ? "clock changed or unavailable" : "lease expired");
             p->state = MAAGE_ACCESS_EXPIRED; a->deadlines[i] = 0;
             strcpy(p->detail, "Verification lease expired. MaaGE will refresh this session securely."); ++a->view.revision;
         } else if (!*a->active || !strcmp(a->active, p->uuid)) allowed = 1;
@@ -132,7 +133,7 @@ static int maage_access_cancelled(void *context)
     maage_access_lock(a); result = a->cancelled; maage_access_unlock(a); return result;
 }
 void maage_access_cancel_operation(maage_access *a)
-{ maage_access_lock(a); a->cancelled = 1; maage_access_unlock(a); }
+{ maage_log_info("maage.launcher.access", "Account operation cancellation requested."); maage_access_lock(a); a->cancelled = 1; maage_access_unlock(a); }
 void maage_access_cancel(maage_access *a)
 { maage_access_lock(a); a->cancelled = a->revoked = 1; maage_access_policy(a); maage_access_unlock(a); }
 static void maage_access_status(void *context, const char *text)
@@ -164,7 +165,7 @@ static void maage_access_load(maage_access *a)
     data = (char *)malloc(131073); if (!data) { fclose(file); return; }
     size = fread(data, 1, 131073, file); fclose(file);
     root = size <= 131072 ? maage_access_json(data, size) : NULL; free(data);
-    if (!root) return;
+    if (!root) { maage_log_warn("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return; }
     maage_access_lock(a);
     if (json_object_object_get_ex(root, "profiles", &list) && json_object_is_type(list, json_type_array)) {
         count = json_object_array_length(list); if (count > MAAGE_ACCESS_PROFILES) count = MAAGE_ACCESS_PROFILES;
@@ -241,32 +242,37 @@ static void maage_access_authenticate(maage_access *a, int operation)
     maage_auth_observer observer;
     unsigned i;
     int ok = 0, saved = 0;
+    const char *operation_name = operation == 4 ? "refresh" : operation == 6 ? "device-code sign-in" : "browser sign-in";
     maage_storage_lock *refresh_lock = NULL;
     char detail[256] = "Cannot allocate Microsoft sign-in session.";
     observer.cancelled = maage_access_cancelled; observer.status = maage_access_status; observer.device = maage_access_device; observer.context = a;
-    if (!s) goto done;
+    maage_log_info("maage.launcher.access", "Starting account %s.", operation_name);
+    if (!s) { maage_log_error("maage.launcher.access", "Cannot allocate account authentication session."); goto done; }
     if (operation == 4) {
         if (!(refresh_lock = maage_access_credential_lock(a, a->selected))) {
+            maage_log_warn("maage.launcher.access", "Cannot acquire account update lock; refresh not started.");
             strcpy(detail, "This account is being updated by another MaaGE process. Wait and retry Refresh."); goto done;
         }
-        if (!maage_profile_store_load(a->root, a->selected, s)) { strcpy(detail, "No saved Microsoft session. Sign in with Microsoft to reconnect this account."); goto done; }
+        if (!maage_profile_store_load(a->root, a->selected, s)) { maage_log_warn("maage.launcher.access", "Saved OAuth account unavailable, invalid, or not decryptable; interactive sign-in required."); strcpy(detail, "No saved Microsoft session. Sign in with Microsoft to reconnect this account."); goto done; }
         ok = maage_oauth_refresh(a->root, s, &observer, detail);
     } else ok = maage_oauth_login(s, operation == 6, &observer, detail);
     if (ok && !maage_access_cancelled(a)) {
         maage_access_lock(a);
         i = maage_access_find(a, s->uuid);
         if (i == a->view.count && i == MAAGE_ACCESS_PROFILES) {
+            maage_log_warn("maage.launcher.access", "Cannot add authenticated profile: registry capacity reached.");
             ok = 0; strcpy(detail, "Account limit reached. Remove an account before adding another.");
         }
         maage_access_unlock(a);
     }
     if (ok && !maage_access_cancelled(a) && !refresh_lock) {
         refresh_lock = maage_access_credential_lock(a, s->uuid);
-        if (!refresh_lock) { ok = 0; strcpy(detail, "This account is being updated by another MaaGE process. Retry sign-in when it finishes."); }
+        if (!refresh_lock) { maage_log_warn("maage.launcher.access", "Cannot acquire account update lock; sign-in credentials not saved."); ok = 0; strcpy(detail, "This account is being updated by another MaaGE process. Retry sign-in when it finishes."); }
     }
     if (ok && !maage_access_cancelled(a)) {
         saved = maage_profile_store_save(a->root, s); ok = saved;
-        if (!saved) strcpy(detail, "Java access verified, but MaaGE could not encrypt/save the account. Check data-folder permissions and retry.");
+        if (!saved) { maage_log_error("maage.launcher.access", "Account encryption/atomic persistence failed after Java verification; access denied."); strcpy(detail, "Java access verified, but MaaGE could not encrypt/save the account. Check data-folder permissions and retry."); }
+        else maage_log_info("maage.launcher.access", "Verified OAuth account encrypted and saved.");
     } else ok = 0;
 done:
     maage_access_lock(a);
@@ -283,33 +289,42 @@ done:
     }
     strcpy(a->view.status, ok ? "Minecraft Java Edition access successfully verified. Continue to Preparing MaaGE." : detail);
     a->view.auto_continue = 0; ++a->view.revision; maage_access_unlock(a);
-    if (saved && !ok && s) { s->verified_at = s->verified_until = 0; maage_profile_store_save(a->root, s); }
+    if (saved && !ok && s) {
+        s->verified_at = s->verified_until = 0;
+        if (!maage_profile_store_save(a->root, s)) maage_log_error("maage.launcher.access", "Cannot persist verification lease invalidation after cancellation.");
+    }
     if (!maage_access_save(a)) {
+        maage_log_error("maage.launcher.access", "Profile registry persistence failed; new access lease revoked.");
         maage_access_lock(a); i = s && *s->uuid ? maage_access_find(a, s->uuid) : maage_access_find(a, a->selected);
         if (i < a->view.count) { a->deadlines[i] = 0; a->view.profiles[i].state = MAAGE_ACCESS_FAILED; }
         maage_access_unlock(a); ok = 0;
-        if (saved && s) { s->verified_at = s->verified_until = 0; maage_profile_store_save(a->root, s); }
+        if (saved && s) { s->verified_at = s->verified_until = 0; if (!maage_profile_store_save(a->root, s)) maage_log_error("maage.launcher.access", "Cannot persist revoked lease after registry failure."); }
         maage_access_status(a, "Cannot save profile registry. Check MaaGE data-folder permissions before continuing.");
     }
     maage_storage_release(refresh_lock);
     if (s) { OPENSSL_cleanse(s, sizeof(*s)); free(s); }
-    maage_log_info("maage.launcher.access", "Microsoft account operation %s.", ok ? "verified Java access" : "did not grant access");
+    if (ok) maage_log_info("maage.launcher.access", "Account %s completed: Java access verified and saved.", operation_name);
+    else if (maage_access_cancelled(a)) maage_log_info("maage.launcher.access", "Account %s cancelled; no new access granted.", operation_name);
+    else maage_log_warn("maage.launcher.access", "Account %s failed; no new access granted. See preceding authorization diagnostics.", operation_name);
 }
 static void maage_access_restore_worker(maage_access *a)
 {
     maage_profile_session *s;
-    unsigned i;
+    unsigned i, restored = 0, leases = 0;
     char uuid[33];
     if (!a->loaded) maage_access_load(a);
-    s = (maage_profile_session *)calloc(1, sizeof(*s)); if (!s) return;
+    s = (maage_profile_session *)calloc(1, sizeof(*s)); if (!s) { maage_log_error("maage.launcher.access", "Cannot allocate saved-session restoration buffer."); return; }
     for (i = 0; i < a->view.count && !maage_access_cancelled(a); ++i) {
         maage_access_lock(a); strcpy(uuid, a->view.profiles[i].uuid); maage_access_unlock(a);
         if (maage_profile_store_load(a->root, uuid, s)) {
-            maage_access_lock(a); maage_access_apply(a, i, s); maage_access_unlock(a);
+            maage_access_lock(a); maage_access_apply(a, i, s); ++restored;
+            if (a->view.profiles[i].state == MAAGE_ACCESS_VERIFIED) ++leases;
+            maage_access_unlock(a);
         }
         OPENSSL_cleanse(s, sizeof(*s));
     }
     free(s);
+    maage_log_info("maage.launcher.access", "Saved account restoration: %u encrypted sessions restored; %u current leases reused; remaining accounts require refresh/sign-in.", restored, leases);
     for (i = 0; i < a->view.count && !maage_access_cancelled(a); ++i) {
         int refresh;
         maage_access_lock(a); refresh = a->view.profiles[i].session_saved && a->view.profiles[i].state != MAAGE_ACCESS_VERIFIED;
@@ -335,6 +350,8 @@ static void *maage_access_worker(void *context)
         unsigned i;
         maage_storage_lock *lock = maage_access_credential_lock(a, a->selected);
         int removed = lock && maage_profile_store_remove(a->root, a->selected);
+        if (removed) maage_log_info("maage.launcher.access", "%s completed: MaaGE credentials removed.", a->operation == 3 ? "Account removal" : "Sign-out");
+        else maage_log_error("maage.launcher.access", "%s failed: %s; current access revoked.", a->operation == 3 ? "Account removal" : "Sign-out", lock ? "credential deletion failed" : "account update lock unavailable");
         maage_access_lock(a); i = maage_access_find(a, a->selected);
         if (i < a->view.count) {
             a->deadlines[i] = 0; a->view.profiles[i].session_saved = 0;
@@ -352,7 +369,7 @@ static void *maage_access_worker(void *context)
         }
         strcpy(a->view.status, removed ? "MaaGE credentials removed. Downloaded Minecraft resources are preserved." : "Credential removal failed. Fix permissions and retry Sign Out / Remove.");
         maage_access_unlock(a);
-        if (!maage_access_save(a)) maage_access_status(a, "Could not save account registry changes. Check data-folder permissions.");
+        if (!maage_access_save(a)) { maage_log_error("maage.launcher.access", "Cannot persist account registry after credential removal."); maage_access_status(a, "Could not save account registry changes. Check data-folder permissions."); }
         maage_storage_release(lock);
     }
     maage_access_lock(a); a->view.device_code[0] = a->view.device_url[0] = 0; a->view.device_deadline = 0;
@@ -397,7 +414,7 @@ static int maage_access_begin(maage_access *a, int operation, const char *uuid)
 #else
     a->has_thread = pthread_create(&a->thread, NULL, maage_access_worker, a) == 0;
 #endif
-    if (!a->has_thread) { a->view.busy = 0; strcpy(a->view.status, "Cannot start account worker. Retry."); }
+    if (!a->has_thread) { maage_log_error("maage.launcher.access", "Cannot start account worker (operation=%d).", operation); a->view.busy = 0; strcpy(a->view.status, "Cannot start account worker. Retry."); }
     maage_access_unlock(a); return a->has_thread;
 }
 int maage_access_restore(maage_access *a) { return maage_access_begin(a, 1, NULL); }

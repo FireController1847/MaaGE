@@ -64,25 +64,30 @@ maage_access_state maage_access_verify(const char *token, char uuid[33],
     unsigned char random[16];
     const char *text;
     long status;
-    int game = 0, licensed = 0;
+    int game = 0, licensed = 0, profile_valid = 0;
     memset(&observer, 0, sizeof(observer)); observer.cancelled = cancelled; observer.context = context;
+    maage_log_info("maage.launcher.access.verify", "Checking authenticated Minecraft Java profile.");
     profile = maage_auth_request("https://api.minecraftservices.com/minecraft/profile", token, NULL, 0, &observer, &status, detail);
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (!profile || status != 200) goto done;
     text = maage_access_json_string(profile, "name");
     if (!maage_access_username(text) || !maage_access_uuid(maage_access_json_string(profile, "id"), normalized) || (*uuid && strcmp(normalized, uuid))) {
+        maage_log_warn("maage.launcher.access.verify", "Profile response rejected: invalid Java identity or mismatch with selected account.");
         strcpy(detail, "Minecraft Java profile missing or different from the selected account. Sign in with the correct Microsoft account."); goto done;
     }
+    profile_valid = 1;
+    maage_log_info("maage.launcher.access.verify", "Java profile validated; checking explicit Java entitlements.");
     strcpy(name, text);
     entitlements = maage_auth_request("https://api.minecraftservices.com/entitlements/mcstore", token, NULL, 0, &observer, &status, detail);
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && entitlements) game = maage_access_java_items(entitlements, 0);
+    maage_log_debug("maage.launcher.access.verify", "Store entitlement check: explicit Java entitlement %s.", game ? "present" : "not confirmed");
     strcpy(store_error, detail);
     /* The license endpoint includes non-store access (e.g. subscriptions).
      * Its signed aggregate has item name/source, not per-item signatures.
      * Treat source as opaque; it is not a permanent-ownership warranty. */
-    if (!maage_auth_random(random, sizeof(random))) { strcpy(detail, "Cannot generate a secure entitlement request identifier."); goto done; }
+    if (!maage_auth_random(random, sizeof(random))) { maage_log_error("maage.launcher.access.verify", "Cannot generate entitlement request identifier; verification stopped."); strcpy(detail, "Cannot generate a secure entitlement request identifier."); goto done; }
     random[6] = (unsigned char)((random[6] & 15) | 64); random[8] = (unsigned char)((random[8] & 63) | 128);
     sprintf(request, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
         random[0], random[1], random[2], random[3], random[4], random[5], random[6], random[7], random[8], random[9], random[10], random[11], random[12], random[13], random[14], random[15]);
@@ -91,6 +96,7 @@ maage_access_state maage_access_verify(const char *token, char uuid[33],
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && license) licensed = maage_access_java_items(license, 1);
+    maage_log_debug("maage.launcher.access.verify", "License entitlement check: explicit Java entitlement %s.", licensed ? "present" : "not confirmed");
     if (game || licensed) {
         strcpy(uuid, normalized); state = MAAGE_ACCESS_VERIFIED;
         strcpy(detail, "Minecraft Java Edition access verified. These services do not conclusively establish permanent purchase versus subscription access.");
@@ -101,5 +107,7 @@ maage_access_state maage_access_verify(const char *token, char uuid[33],
         sprintf(detail, "Minecraft Java Edition access could not be confirmed. %.195s", failure);
     }
 done:
+    if (state == MAAGE_ACCESS_VERIFIED) maage_log_info("maage.launcher.access.verify", "Java access verified (store entitlement=%s; license entitlement=%s).", game ? "confirmed" : "not confirmed", licensed ? "confirmed" : "not confirmed");
+    else if (!cancelled(context)) maage_log_warn("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed");
     maage_auth_json_free(profile); maage_auth_json_free(entitlements); maage_auth_json_free(license); return state;
 }
