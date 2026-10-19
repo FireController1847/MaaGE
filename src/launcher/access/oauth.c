@@ -72,6 +72,8 @@ static int maage_oauth_exchange(const char *grant, const char *credential, const
     int ok;
     if (!body) { maage_log_error("maage.launcher.access.oauth", "Cannot allocate OAuth exchange request."); strcpy(detail, "Cannot allocate the OAuth request."); return 0; }
     maage_log_info("maage.launcher.access.oauth", "Exchanging %s with Microsoft.", verifier ? "authorization code with PKCE" : "refresh credential");
+    if (verifier) maage_log_info("maage.launcher.access.oauth", "Authorization-code exchange configuration: endpoint=%s; client_id=%s; redirect_uri=%s.",
+        MAAGE_MICROSOFT_AUTHORITY "token", MAAGE_MICROSOFT_CLIENT_ID, redirect);
     json = maage_auth_request(MAAGE_MICROSOFT_AUTHORITY "token", NULL, body, 1, o, &status, detail);
     OPENSSL_cleanse(body, strlen(body)); free(body);
     ok = status == 200 && json && maage_oauth_tokens(json, ms, s);
@@ -162,13 +164,18 @@ static int maage_oauth_browser_login(maage_microsoft_session *ms, maage_profile_
     setup = "generate cryptographic randomness";
     if (!maage_auth_random(random, sizeof(random))) goto done;
     for (i = 0; i < sizeof(random); ++i) sprintf(state + i * 2, "%02x", random[i]);
-    /* Keep one exact redirect for both the authorize request and code exchange. */
-    sprintf(redirect, MAAGE_MICROSOFT_REDIRECT ":%u/", port);
+    /* Match the registered pathless URI, adding only the native-client port.
+     * Microsoft/browser normalization supplies GET / for the HTTP callback;
+     * keep this original, unnormalized value for the code exchange as well. */
+    sprintf(redirect, MAAGE_MICROSOFT_REDIRECT ":%u", port);
     setup = "encode loopback redirect URI"; encoder = curl_easy_init();
     if (!encoder || !(encoded_redirect = curl_easy_escape(encoder, redirect, 0))) goto done;
     sprintf(url, MAAGE_MICROSOFT_AUTHORITY "authorize?client_id=%s&response_type=code&response_mode=query&redirect_uri=%s&scope=XboxLive.signin%%20offline_access&code_challenge_method=S256&code_challenge=%s&state=%s&prompt=select_account", MAAGE_MICROSOFT_CLIENT_ID, encoded_redirect, challenge, state);
     setup = NULL;
-    maage_log_info("maage.launcher.access.oauth", "Opening system-browser authorization (PKCE S256; redirect=%s).", redirect);
+    /* Configuration only: the full authorization URL contains state/PKCE data. */
+    maage_log_info("maage.launcher.access.oauth", "Browser authorization configuration: endpoint=%s; client_id=%s; registered_redirect_uri=%s; redirect_uri=%s.",
+        MAAGE_MICROSOFT_AUTHORITY "authorize", MAAGE_MICROSOFT_CLIENT_ID, MAAGE_MICROSOFT_REDIRECT, redirect);
+    maage_log_info("maage.launcher.access.oauth", "Opening system-browser authorization (response_type=code; response_mode=query; scope=%s; PKCE=S256).", MAAGE_MICROSOFT_SCOPE);
     o->status(o->context, "Opening Microsoft sign-in in your system browser...");
     deadline = maage_time_monotonic_seconds() + 300;
     if (!maage_auth_browser(url)) { maage_log_warn("maage.launcher.access.oauth", "System browser launch failed; offering device-code fallback."); result = -1; goto done; }
@@ -207,6 +214,7 @@ done:
     if (encoder) curl_easy_cleanup(encoder);
     if (query) { OPENSSL_cleanse(query, 32769); free(query); }
     if (code) { OPENSSL_cleanse(code, 16385); free(code); }
+    OPENSSL_cleanse(url, sizeof(url));
     OPENSSL_cleanse(random, sizeof(random)); OPENSSL_cleanse(verifier, sizeof(verifier)); OPENSSL_cleanse(state, sizeof(state)); OPENSSL_cleanse(digest, sizeof(digest));
     return result;
 }

@@ -297,8 +297,10 @@ approved Microsoft Entra public-client application
 OAuth authorization code + S256 PKCE, and device-code fallback. The registered
 Mobile and desktop redirect is `http://localhost`. A temporary worker-owned HTTP
 listener binds only `127.0.0.1` on an OS-selected ephemeral port; authorization and
-token exchange use the same `http://localhost:<port>/` URI. Accept only the expected
-GET path/Host and validated unpredictable OAuth state; bound reads, timeout and
+token exchange use the same pathless `http://localhost:<port>` URI, percent-encoded
+once per request; the HTTP callback normalizes to `/`. Log only public endpoint,
+client ID and redirect configuration, never the full authorization URL. Accept only
+the expected GET path/Host and validated unpredictable OAuth state; bound reads, timeout and
 cancellation release the listener. No custom URI protocol handler is required.
 Never substitute application IDs, client secrets, or third-party credentials.
 
