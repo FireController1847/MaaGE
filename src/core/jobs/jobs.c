@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAAGE_JOBS_MAX_WORKERS 32
-#define MAAGE_JOBS_MAX_CAPACITY 4096
 #define MAAGE_JOB_FREE 0
 #define MAAGE_JOB_QUEUED 1
 #define MAAGE_JOB_RUNNING 2
@@ -29,10 +27,10 @@ struct maage_job_token {
 struct maage_jobs {
     maage_mutex *mutex;
     maage_condition *work, *completion;
-    maage_thread *threads[MAAGE_JOBS_MAX_WORKERS];
+    maage_thread **threads;
     maage_job_record *records;
     unsigned *heap, *free_slots, *ready_slots;
-    unsigned capacity, workers, free_count, queued, running, ready, ready_head;
+    unsigned logical_processors, capacity, workers, free_count, queued, running, ready, ready_head;
     int stopped, ids_wrapped;
     maage_job_id next_id;
     unsigned long order_high, order_low, completed, cancelled, started;
@@ -76,7 +74,7 @@ static void maage_jobs_heap_remove(maage_jobs *jobs, unsigned index)
     if (index && maage_jobs_before(jobs, slot, jobs->heap[(index - 1) / 2])) {
         maage_jobs_heap_up(jobs, index, slot); return;
     }
-    while (index * 2 + 1 < jobs->queued) {
+    while (index < jobs->queued / 2) {
         child = index * 2 + 1;
         if (child + 1 < jobs->queued && maage_jobs_before(jobs, jobs->heap[child + 1], jobs->heap[child])) ++child;
         if (!maage_jobs_before(jobs, jobs->heap[child], slot)) break;
@@ -88,8 +86,11 @@ static void maage_jobs_heap_remove(maage_jobs *jobs, unsigned index)
 static void maage_jobs_complete(maage_jobs *jobs, unsigned slot)
 {
     maage_job_record *record;
+    unsigned tail;
     record = &jobs->records[slot]; record->state = MAAGE_JOB_READY;
-    jobs->ready_slots[(jobs->ready_head + jobs->ready) % jobs->capacity] = slot;
+    tail = jobs->ready >= jobs->capacity - jobs->ready_head ?
+        jobs->ready - (jobs->capacity - jobs->ready_head) : jobs->ready_head + jobs->ready;
+    jobs->ready_slots[tail] = slot;
     ++jobs->ready; ++jobs->completed;
     if (record->cancelled) ++jobs->cancelled;
     maage_condition_signal(jobs->completion);
@@ -127,26 +128,36 @@ static void maage_jobs_worker(void *context)
     maage_mutex_unlock(jobs->mutex);
 }
 
+unsigned maage_jobs_resolve_workers(unsigned requested)
+{
+    unsigned processors;
+    if (requested) return requested;
+    processors = maage_thread_processor_count();
+    return processors > 1 ? processors - 1 : 1;
+}
+
 maage_jobs *maage_jobs_create(unsigned workers, unsigned capacity)
 {
     maage_jobs *jobs;
     unsigned index;
-    if (!workers) {
-        workers = maage_thread_processor_count();
-        if (workers > 1) --workers;
-        if (workers > 8) workers = 8;
-    }
-    if (!workers || workers > MAAGE_JOBS_MAX_WORKERS || !capacity || capacity > MAAGE_JOBS_MAX_CAPACITY) return NULL;
+    size_t worker_slots, task_slots;
+    workers = maage_jobs_resolve_workers(workers);
+    worker_slots = (size_t)workers; task_slots = (size_t)capacity;
+    if (!capacity || (unsigned)worker_slots != workers || (unsigned)task_slots != capacity ||
+        worker_slots > (size_t)-1 / sizeof(maage_thread *) ||
+        task_slots > (size_t)-1 / sizeof(maage_job_record) ||
+        task_slots > (size_t)-1 / sizeof(unsigned)) return NULL;
     jobs = (maage_jobs *)calloc(1, sizeof(*jobs));
     if (!jobs) return NULL;
-    jobs->capacity = capacity;
+    jobs->logical_processors = maage_thread_processor_count(); jobs->capacity = capacity;
+    jobs->threads = (maage_thread **)calloc(workers, sizeof(*jobs->threads));
     jobs->records = (maage_job_record *)calloc(capacity, sizeof(*jobs->records));
     jobs->heap = (unsigned *)malloc(capacity * sizeof(*jobs->heap));
     jobs->free_slots = (unsigned *)malloc(capacity * sizeof(*jobs->free_slots));
     jobs->ready_slots = (unsigned *)malloc(capacity * sizeof(*jobs->ready_slots));
     jobs->mutex = maage_mutex_create();
     jobs->work = maage_condition_create(); jobs->completion = maage_condition_create();
-    if (!jobs->records || !jobs->heap || !jobs->free_slots || !jobs->ready_slots || !jobs->mutex || !jobs->work || !jobs->completion) {
+    if (!jobs->threads || !jobs->records || !jobs->heap || !jobs->free_slots || !jobs->ready_slots || !jobs->mutex || !jobs->work || !jobs->completion) {
         maage_jobs_destroy(jobs, NULL); return NULL;
     }
     for (index = 0; index < capacity; ++index) jobs->free_slots[index] = index;
@@ -250,7 +261,7 @@ void maage_jobs_snapshot(maage_jobs *jobs, maage_jobs_stats *stats)
     memset(stats, 0, sizeof(*stats));
     if (!jobs) return;
     maage_mutex_lock(jobs->mutex);
-    stats->workers = jobs->workers; stats->capacity = jobs->capacity;
+    stats->logical_processors = jobs->logical_processors; stats->workers = jobs->workers; stats->capacity = jobs->capacity;
     stats->queued = jobs->queued; stats->running = jobs->running; stats->ready = jobs->ready;
     stats->completed = jobs->completed; stats->cancelled = jobs->cancelled;
     stats->mean_queue_seconds = jobs->mean_latency; stats->maximum_queue_seconds = jobs->maximum_latency;
@@ -288,5 +299,5 @@ void maage_jobs_destroy(maage_jobs *jobs, void (*dispose)(void *context))
         while (maage_jobs_poll(jobs, &completion)) if (dispose) dispose(completion.context);
     maage_condition_destroy(jobs->completion); maage_condition_destroy(jobs->work);
     maage_mutex_destroy(jobs->mutex);
-    free(jobs->ready_slots); free(jobs->free_slots); free(jobs->heap); free(jobs->records); free(jobs);
+    free(jobs->threads); free(jobs->ready_slots); free(jobs->free_slots); free(jobs->heap); free(jobs->records); free(jobs);
 }

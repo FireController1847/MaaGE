@@ -1,3 +1,6 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
 #include "maage/thread.h"
 #include <stdlib.h>
 #ifdef _WIN32
@@ -18,6 +21,9 @@ static DWORD WINAPI maage_thread_entry(LPVOID context)
 #include <pthread.h>
 #include <unistd.h>
 #include <limits.h>
+#ifdef __linux__
+#include <sched.h>
+#endif
 struct maage_mutex { pthread_mutex_t handle; };
 struct maage_condition { pthread_cond_t handle; };
 struct maage_thread { pthread_t handle; void (*function)(void *); void *context; };
@@ -137,14 +143,41 @@ void maage_thread_join(maage_thread *thread)
 unsigned maage_thread_processor_count(void)
 {
 #ifdef _WIN32
+    typedef DWORD (WINAPI *maage_processor_count_function)(WORD);
+    maage_processor_count_function active_processors;
+    HMODULE kernel;
+    DWORD processors;
     SYSTEM_INFO information;
+    /* Optional Windows 7+ query includes every processor group without making
+     * its symbol a load-time requirement on the threading adapter. */
+    kernel = GetModuleHandleW(L"kernel32.dll");
+    active_processors = kernel ? (maage_processor_count_function)GetProcAddress(kernel, "GetActiveProcessorCount") : NULL;
+    if (active_processors) {
+        processors = active_processors((WORD)0xffff);
+        if (processors) return (unsigned)processors;
+    }
     GetSystemInfo(&information);
     return information.dwNumberOfProcessors ? (unsigned)information.dwNumberOfProcessors : 1;
-#elif defined(_SC_NPROCESSORS_ONLN)
+#else
+#if defined(_SC_NPROCESSORS_ONLN)
     long processors;
+#endif
+#ifdef __linux__
+    cpu_set_t affinity;
+    unsigned count, index;
+    /* Respect a process restricted to a smaller CPU set. If the platform set
+     * cannot represent the machine, fall back to its online-processor query. */
+    if (!sched_getaffinity(0, sizeof(affinity), &affinity)) {
+        count = 0;
+        for (index = 0; index < CPU_SETSIZE; ++index) if (CPU_ISSET(index, &affinity)) ++count;
+        if (count) return count;
+    }
+#endif
+#if defined(_SC_NPROCESSORS_ONLN)
     processors = sysconf(_SC_NPROCESSORS_ONLN);
     return processors > 0 && (unsigned long)processors <= UINT_MAX ? (unsigned)processors : 1;
 #else
     return 1;
+#endif
 #endif
 }

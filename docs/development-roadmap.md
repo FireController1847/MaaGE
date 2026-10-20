@@ -166,9 +166,12 @@ Implemented as an extension of the existing World and Client:
 - **Portable scheduler:** `MaaGE::Jobs` uses a bounded native worker pool with
   prioritized FIFO work queues, completion polling/notification and cooperative
   cancellation. Capacity includes queued, running and unconsumed completed jobs.
-  Zero workers selects logical processors minus one, clamped to **1–8**; explicit
-  counts support **1–32**. Threads and scheduler arrays are created once, not per
-  chunk or frame. A brief scheduler mutex protects queue ownership and cancellation;
+  Zero workers detects logical processors and selects one fewer, with a minimum
+  of **one**; positive explicit counts have no arbitrary ceiling. Allocation
+  and operating-system resources determine availability. Queue/snapshot bounds
+  are independent of worker count: World task capacity scales with the pool
+  within its finite column-cache bound. Threads and scheduler arrays are created
+  once, not per chunk or frame. A brief scheduler mutex protects queue ownership and cancellation;
   it is never held while a task performs generation, meshing, lighting or I/O.
 - **World ownership:** the caller thread owns membership, published immutable
   column data, request/revision tracking and result application. Workers borrow
@@ -202,7 +205,7 @@ Implemented as an extension of the existing World and Client:
   GPU uploads remain capped at one changed column per frame and retain unchanged
   resources. Resource/world metadata opens during hidden startup; blocking flush,
   join and final player metadata happen after the render loop stops.
-- **Diagnostics:** `--world-workers=0..32` configures the pool. Startup reports its
+- **Diagnostics:** `--world-workers=<count>` configures the pool (0 is automatic). Startup reports its
   actual count. Five-second DEBUG logs report queued/running jobs, active
   generation, lighting, meshing and I/O work, lifetime completed/cancelled/stale
   counts, and approximate mean scheduling latency. No per-task production logging

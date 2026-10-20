@@ -18,14 +18,19 @@ typedef struct maage_job_completion {
 } maage_job_completion;
 
 typedef struct maage_jobs_stats {
-    unsigned workers, capacity, queued, running, ready;
+    unsigned logical_processors, workers, capacity, queued, running, ready;
     unsigned long completed, cancelled;
     double mean_queue_seconds, maximum_queue_seconds;
 } maage_jobs_stats;
 
-/* Zero workers chooses logical processors minus one, clamped to 1..8.
- * Explicit workers are 1..32; capacity is 1..4096 and bounds ALL contexts, including
- * completed jobs not yet polled. Arrays and threads are allocated only here. */
+/* Nonzero requests pass through unchanged. Zero chooses available logical
+ * processors minus one, with a minimum of one and no fixed worker limit. */
+unsigned maage_jobs_resolve_workers(unsigned requested);
+
+/* Capacity must be nonzero and bounds ALL accepted contexts, including
+ * completed jobs not yet polled. Counts are limited only by representable
+ * allocation sizes and available OS/memory resources; creation fails cleanly
+ * if any worker cannot start. Arrays and threads are allocated only here. */
 maage_jobs *maage_jobs_create(unsigned workers, unsigned capacity);
 
 /* Thread-safe and nonblocking apart from brief queue synchronization. Lower

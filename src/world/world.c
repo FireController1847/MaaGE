@@ -6,7 +6,6 @@
 #include <string.h>
 
 #define MAAGE_CHUNK_BUCKETS 2048
-#define MAAGE_WORLD_TASKS 64
 #define MAAGE_JOB_LOAD 1
 #define MAAGE_JOB_GENERATE 2
 #define MAAGE_JOB_LIGHT 3
@@ -50,7 +49,7 @@ struct maage_world {
     maage_jobs *jobs;
     maage_chunk_bucket buckets[MAAGE_CHUNK_BUCKETS];
     maage_world_slot *chunks;
-    maage_world_task tasks[MAAGE_WORLD_TASKS];
+    maage_world_task *tasks;
     unsigned count, active, task_limit;
     unsigned long clock;
     int center_x, center_z, stopped, failed;
@@ -313,7 +312,7 @@ static int maage_world_submit(maage_world *world, maage_world_slot *slot, int ki
     unsigned index;
     int side;
     if (world->active >= world->task_limit) return 0;
-    for (index = 0; index < MAAGE_WORLD_TASKS; ++index) if (!world->tasks[index].used) { task = &world->tasks[index]; break; }
+    for (index = 0; index < world->task_limit; ++index) if (!world->tasks[index].used) { task = &world->tasks[index]; break; }
     if (!task) return 0;
     memset(task, 0, sizeof(*task)); task->used = 1; task->kind = kind; task->x = slot->x; task->z = slot->z;
     task->incarnation = slot->incarnation; task->revision = slot->revision; task->light_epoch = slot->light_epoch;
@@ -397,6 +396,7 @@ maage_world *maage_world_create(const maage_world_config *config)
 {
     maage_world *world;
     maage_jobs_stats stats;
+    unsigned workers;
     int axis;
     if (!config || !maage_block_registry_is_finalized(config->registry) || !config->biomes ||
         !config->biomes->finalized || config->render_distance < 1 || config->render_distance > MAAGE_WORLD_MAX_RADIUS) return NULL;
@@ -410,10 +410,19 @@ maage_world *maage_world_create(const maage_world_config *config)
     if (!(world->spawn[1] >= 0 && world->spawn[1] <= MAAGE_WORLD_HEIGHT + 16)) { free(world); return NULL; }
     world->center_x = maage_world_chunk_coordinate((int)floor(world->spawn[0]));
     world->center_z = maage_world_chunk_coordinate((int)floor(world->spawn[2]));
-    world->jobs = maage_jobs_create(config->worker_count, MAAGE_WORLD_TASKS);
-    if (!world->jobs) { free(world); return NULL; }
-    maage_jobs_snapshot(world->jobs, &stats); world->task_limit = stats.workers * 2;
-    maage_log_info("maage.world.jobs", "World workers=%u; in-flight limit=%u; immutable snapshots, owner-thread commits.", stats.workers, world->task_limit);
+    workers = maage_jobs_resolve_workers(config->worker_count);
+    /* Each resident column can own one CPU/load job and one snapshot save.
+     * Bound contexts by that actual workload, independently of pool size. */
+    world->task_limit = workers >= MAAGE_WORLD_MAX_CHUNKS ?
+        MAAGE_WORLD_MAX_CHUNKS * 2U : workers * 2U;
+    if ((size_t)world->task_limit > (size_t)-1 / sizeof(*world->tasks)) { free(world); return NULL; }
+    world->tasks = (maage_world_task *)calloc(world->task_limit, sizeof(*world->tasks));
+    if (!world->tasks) { free(world); return NULL; }
+    world->jobs = maage_jobs_create(workers, world->task_limit);
+    if (!world->jobs) { free(world->tasks); free(world); return NULL; }
+    maage_jobs_snapshot(world->jobs, &stats);
+    maage_log_info("maage.world.jobs", "Available logical CPUs=%u; World workers=%u; in-flight limit=%u; immutable snapshots, owner-thread commits.",
+        stats.logical_processors, stats.workers, world->task_limit);
     maage_world_schedule(world);
     return world;
 }
@@ -453,7 +462,7 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats)
             abs(world->center_z + z) > MAAGE_WORLD_LIMIT / 16 - 1) continue;
         if (!maage_world_complete(maage_world_find(world, world->center_x + x, world->center_z + z))) ++stats->pending;
     }
-    for (index = 0; index < MAAGE_WORLD_TASKS; ++index) if (world->tasks[index].used) {
+    for (index = 0; index < world->task_limit; ++index) if (world->tasks[index].used) {
         if (world->tasks[index].kind == MAAGE_JOB_GENERATE) ++stats->generation_jobs;
         else if (world->tasks[index].kind == MAAGE_JOB_MESH) ++stats->meshing_jobs;
         else if (world->tasks[index].kind == MAAGE_JOB_LIGHT) ++stats->lighting_jobs;
@@ -518,7 +527,7 @@ int maage_world_flush(maage_world *world)
     if (!world || world->stopped) return !world || !world->failed;
     /* Lifecycle boundary, outside the render loop: finish saves, discard CPU
      * work and drain its pinned snapshots before closing the store/registries. */
-    for (index = 0; index < MAAGE_WORLD_TASKS; ++index)
+    for (index = 0; index < world->task_limit; ++index)
         if (world->tasks[index].used && world->tasks[index].kind != MAAGE_JOB_SAVE) maage_world_cancel(world, &world->tasks[index]);
     while (world->active) { maage_jobs_wait(world->jobs); maage_world_collect(world); }
     for (slot = world->chunks; slot; slot = slot->next) slot->stage = 0;
@@ -544,5 +553,5 @@ void maage_world_destroy(maage_world *world)
     for (slot = world->chunks; slot; slot = next) {
         next = slot->next; maage_world_release(slot->data); maage_world_mesh_destroy(slot->pending_mesh); free(slot);
     }
-    free(world);
+    free(world->tasks); free(world);
 }

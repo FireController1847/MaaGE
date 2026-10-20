@@ -104,8 +104,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Parallelize independent CPU-intensive world work by default through reusable
   `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
-  one, clamped to 1..8; explicit counts are 1..32. Bound accepted contexts and
-  retained snapshots as well as queued/running work.
+  one, with a minimum of one; detect the processor count through Core's platform
+  abstraction. Positive explicit counts have no arbitrary ceiling; allocation
+  and OS resource failures remain explicit. Bound accepted contexts, retained
+  snapshots and queued/running work separately from the worker count. World
+  task capacity scales with the pool within its finite column-cache bound.
 - One owner thread controls World membership, published immutable columns,
   simulation and deferred result commits. Workers own their output buffers and
   borrow immutable inputs/registries until completion. Independent column load,
@@ -444,7 +447,7 @@ one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
 creates a unique world; default startup resumes `config/last-world` or creates a
 unique world if none exists. Never overwrite an existing ID during creation or
 change its generator/seed implicitly. `--render-distance=1..8` defaults to 3;
-`--world-workers=0..32` selects the pool size (0 uses the automatic policy).
+`--world-workers=<count>` selects a positive pool size (0 uses the automatic policy).
 World metadata opens while the viewport is hidden; final player metadata and
 blocking flush/join occur after rendering stops, never inside the frame loop.
 Generic `MaaGE::Storage`, `MaaGE::Thread` and `MaaGE::Jobs` have no Launcher acquisition

@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <limits.h>
 
 /* Phase 1 camera tuning, pending 1.7.10 feel/fidelity verification. */
 #define MAAGE_CLIENT_MOUSE_RADIANS 0.0025
@@ -38,6 +39,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     const char *argument;
     char *end;
     long value;
+    unsigned long workers;
     memset(options, 0, sizeof(*options)); options->radius = 3;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
@@ -59,9 +61,10 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             if (errno || !argument[18] || *end || value < 1 || value > MAAGE_WORLD_MAX_RADIUS) return 0;
             options->radius = (int)value;
         } else if (!strncmp(argument, "--world-workers=", 16)) {
-            errno = 0; value = strtol(argument + 16, &end, 10);
-            if (errno || !argument[16] || *end || value < 0 || value > 32) return 0;
-            options->workers = (unsigned int)value;
+            if (argument[16] < '0' || argument[16] > '9') return 0;
+            errno = 0; workers = strtoul(argument + 16, &end, 10);
+            if (errno || *end || workers > UINT_MAX) return 0;
+            options->workers = (unsigned int)workers;
         } else if (!strcmp(argument, "--world") || !strcmp(argument, "--create-world") ||
             !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance") ||
             !strcmp(argument, "--world-workers")) return 0;
@@ -190,7 +193,7 @@ int maage_client_run(int argc, char *const argv[])
     rendered = maage_render_desc_parse_args(argc, argv, &render_config);
     if (rendered != MAAGE_RENDER_OK) goto done;
     if (!maage_client_world_options_parse(argc, argv, &options)) {
-        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=1..8, and --world-workers=0..32 (0 automatic)."); goto done;
+        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=1..8, and --world-workers=<nonnegative count> (0 automatic)."); goto done;
     }
     if (!maage_client_data_directory(argc, argv, directory)) {
         maage_log_error("maage.client.resources", "Cannot resolve MaaGE data directory; --data-directory requires an absolute path."); goto done;
