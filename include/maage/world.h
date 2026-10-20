@@ -34,7 +34,8 @@ typedef struct maage_world_config {
     const maage_biome_registry *biomes;
     maage_world_seed seed;
     maage_world_store *store; /* borrowed; close after world destruction */
-    unsigned int worker_count; /* 0 detects logical processors: count minus one, minimum one */
+    /* 0: logical processors minus one (minimum one), or eight if detection fails. */
+    unsigned int worker_count;
     int render_distance;
     int new_world;
     double position[3];

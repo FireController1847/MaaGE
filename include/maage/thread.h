@@ -18,6 +18,6 @@ void maage_condition_broadcast(maage_condition *condition);
 maage_thread *maage_thread_start(void (*function)(void *), void *context);
 void maage_thread_join(maage_thread *thread);
 /* Available logical processors, respecting Linux process affinity and including
- * all Windows processor groups when supported; one if platform queries fail. */
+ * all Windows processor groups when supported; zero if platform queries fail. */
 unsigned maage_thread_processor_count(void);
 #endif

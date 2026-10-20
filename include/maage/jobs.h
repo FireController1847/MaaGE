@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 /* Bounded CPU worker pool. No graphics, application, or native OS dependencies. */
+#define MAAGE_JOBS_FALLBACK_WORKERS 8U
 typedef struct maage_jobs maage_jobs;
 typedef struct maage_job_token maage_job_token;
 typedef unsigned long maage_job_id;
@@ -18,13 +19,14 @@ typedef struct maage_job_completion {
 } maage_job_completion;
 
 typedef struct maage_jobs_stats {
-    unsigned logical_processors, workers, capacity, queued, running, ready;
+    unsigned logical_processors, workers, capacity, queued, running, ready; /* CPUs: 0 unknown */
     unsigned long completed, cancelled;
     double mean_queue_seconds, maximum_queue_seconds;
 } maage_jobs_stats;
 
-/* Nonzero requests pass through unchanged. Zero chooses available logical
- * processors minus one, with a minimum of one and no fixed worker limit. */
+/* Nonzero requests pass through unchanged. Zero chooses detected logical
+ * processors minus one (minimum one), or eight workers if detection fails.
+ * There is no fixed worker limit. */
 unsigned maage_jobs_resolve_workers(unsigned requested);
 
 /* Capacity must be nonzero and bounds ALL accepted contexts, including

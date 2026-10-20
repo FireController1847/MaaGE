@@ -133,6 +133,7 @@ unsigned maage_jobs_resolve_workers(unsigned requested)
     unsigned processors;
     if (requested) return requested;
     processors = maage_thread_processor_count();
+    if (!processors) return MAAGE_JOBS_FALLBACK_WORKERS;
     return processors > 1 ? processors - 1 : 1;
 }
 

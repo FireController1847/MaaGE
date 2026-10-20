@@ -421,8 +421,8 @@ maage_world *maage_world_create(const maage_world_config *config)
     world->jobs = maage_jobs_create(workers, world->task_limit);
     if (!world->jobs) { free(world->tasks); free(world); return NULL; }
     maage_jobs_snapshot(world->jobs, &stats);
-    maage_log_info("maage.world.jobs", "Available logical CPUs=%u; World workers=%u; in-flight limit=%u; immutable snapshots, owner-thread commits.",
-        stats.logical_processors, stats.workers, world->task_limit);
+    maage_log_info("maage.world.jobs", "Detected logical CPUs=%u%s; World workers=%u; in-flight limit=%u; immutable snapshots, owner-thread commits.",
+        stats.logical_processors, stats.logical_processors ? "" : " (unknown)", stats.workers, world->task_limit);
     maage_world_schedule(world);
     return world;
 }

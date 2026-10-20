@@ -167,7 +167,8 @@ Implemented as an extension of the existing World and Client:
   prioritized FIFO work queues, completion polling/notification and cooperative
   cancellation. Capacity includes queued, running and unconsumed completed jobs.
   Zero workers detects logical processors and selects one fewer, with a minimum
-  of **one**; positive explicit counts have no arbitrary ceiling. Allocation
+  of **one**. Failed detection selects **eight workers** directly. Positive
+  explicit counts have no arbitrary ceiling. Allocation
   and operating-system resources determine availability. Queue/snapshot bounds
   are independent of worker count: World task capacity scales with the pool
   within its finite column-cache bound. Threads and scheduler arrays are created

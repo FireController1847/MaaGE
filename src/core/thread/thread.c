@@ -157,7 +157,7 @@ unsigned maage_thread_processor_count(void)
         if (processors) return (unsigned)processors;
     }
     GetSystemInfo(&information);
-    return information.dwNumberOfProcessors ? (unsigned)information.dwNumberOfProcessors : 1;
+    return (unsigned)information.dwNumberOfProcessors;
 #else
 #if defined(_SC_NPROCESSORS_ONLN)
     long processors;
@@ -175,9 +175,9 @@ unsigned maage_thread_processor_count(void)
 #endif
 #if defined(_SC_NPROCESSORS_ONLN)
     processors = sysconf(_SC_NPROCESSORS_ONLN);
-    return processors > 0 && (unsigned long)processors <= UINT_MAX ? (unsigned)processors : 1;
+    return processors > 0 && (unsigned long)processors <= UINT_MAX ? (unsigned)processors : 0;
 #else
-    return 1;
+    return 0;
 #endif
 #endif
 }

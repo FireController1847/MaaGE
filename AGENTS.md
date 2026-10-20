@@ -105,7 +105,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
   one, with a minimum of one; detect the processor count through Core's platform
-  abstraction. Positive explicit counts have no arbitrary ceiling; allocation
+  abstraction. If detection fails, use eight workers directly. Positive explicit
+  counts have no arbitrary ceiling; allocation
   and OS resource failures remain explicit. Bound accepted contexts, retained
   snapshots and queued/running work separately from the worker count. World
   task capacity scales with the pool within its finite column-cache bound.
