@@ -1,6 +1,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
+#include <X11/XKBlib.h>
 #include <poll.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -15,13 +16,21 @@ typedef struct maage_x11_system {
     Atom fullscreen;
     Atom motif;
     int has_fullscreen;
+    int keycodes[MAAGE_INPUT_KEY_COUNT];
 } maage_x11_system;
 typedef struct maage_x11_window {
     Window handle;
     int normal_width;
     int normal_height;
     maage_window_mode decoration;
+    Cursor hidden_cursor;
+    int pointer_x;
+    int pointer_y;
+    int warp_pending;
+    int warp_x;
+    int warp_y;
 } maage_x11_window;
+static maage_window_result maage_x11_capture(maage_window *, int);
 
 static int maage_x11_contains(Display *display, Window window, Atom property, Atom atom)
 {
@@ -41,10 +50,25 @@ static int maage_x11_contains(Display *display, Window window, Atom property, At
 static maage_window_result maage_x11_init(maage_window_system *system)
 {
     maage_x11_system *native = (maage_x11_system *)calloc(1, sizeof(*native));
+    XkbDescPtr keyboard;
+    int code, key;
+    Bool detectable;
+    static const char names[MAAGE_INPUT_KEY_COUNT][5] = {
+        "AD02", "AC01", "AC02", "AC03", "SPCE", "ESC "
+    };
     if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
     system->platform = native;
     native->display = XOpenDisplay(NULL);
     if (!native->display) return MAAGE_WINDOW_UNAVAILABLE;
+    keyboard = XkbGetKeyboard(native->display, XkbAllComponentsMask, XkbUseCoreKbd);
+    if (keyboard && keyboard->names && keyboard->names->keys) {
+        for (code = keyboard->min_key_code; code <= keyboard->max_key_code; ++code)
+            for (key = 0; key < MAAGE_INPUT_KEY_COUNT; ++key)
+                if (!memcmp(keyboard->names->keys[code].name, names[key], 4))
+                    native->keycodes[key] = code;
+    }
+    if (keyboard) XkbFreeKeyboard(keyboard, XkbAllComponentsMask, True);
+    XkbSetDetectableAutoRepeat(native->display, True, &detectable);
     native->close_atom = XInternAtom(native->display, "WM_DELETE_WINDOW", False);
     native->protocols = XInternAtom(native->display, "WM_PROTOCOLS", False);
     native->state_atom = XInternAtom(native->display, "_NET_WM_STATE", False);
@@ -140,7 +164,8 @@ static maage_window_result maage_x11_create(maage_window *window, const maage_wi
     native->handle = XCreateSimpleWindow(system->display, DefaultRootWindow(system->display),
         0, 0, (unsigned int)config->width, (unsigned int)config->height, 0, 0, 0);
     if (!native->handle) return MAAGE_WINDOW_PLATFORM_ERROR;
-    XSelectInput(system->display, native->handle, StructureNotifyMask | ExposureMask | PropertyChangeMask);
+    XSelectInput(system->display, native->handle, StructureNotifyMask | ExposureMask | PropertyChangeMask |
+        KeyPressMask | KeyReleaseMask | FocusChangeMask | PointerMotionMask | ButtonPressMask);
     XSetWMProtocols(system->display, native->handle, &system->close_atom, 1);
     result = maage_x11_title(window, config->title);
     if (result != MAAGE_WINDOW_OK) return result;
@@ -153,9 +178,52 @@ static void maage_x11_destroy(maage_window *window)
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
     if (!native) return;
+    maage_window_input_focus(window, 0);
+    if (native->hidden_cursor) XFreeCursor(system->display, native->hidden_cursor);
     if (native->handle) XDestroyWindow(system->display, native->handle);
     XFlush(system->display);
     free(native);
+}
+static maage_window_result maage_x11_capture(maage_window *window, int capture)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    maage_window *other;
+    XWindowAttributes attributes;
+    Pixmap bitmap;
+    XColor color;
+    int key;
+    static const char empty[1] = {0};
+    if (capture == window->input.captured) return MAAGE_WINDOW_OK;
+    if (capture) {
+        for (key = 0; key < MAAGE_INPUT_KEY_COUNT; ++key)
+            if (!system->keycodes[key]) return MAAGE_WINDOW_UNSUPPORTED;
+        if (!XGetWindowAttributes(system->display, native->handle, &attributes))
+            return MAAGE_WINDOW_PLATFORM_ERROR;
+        for (other = window->system->windows; other; other = other->next)
+            if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
+        if (!native->hidden_cursor) {
+            bitmap = XCreateBitmapFromData(system->display, native->handle, empty, 1, 1);
+            if (!bitmap) return MAAGE_WINDOW_PLATFORM_ERROR;
+            memset(&color, 0, sizeof(color));
+            native->hidden_cursor = XCreatePixmapCursor(system->display, bitmap, bitmap, &color, &color, 0, 0);
+            XFreePixmap(system->display, bitmap);
+            if (!native->hidden_cursor) return MAAGE_WINDOW_PLATFORM_ERROR;
+        }
+        if (XGrabPointer(system->display, native->handle, False,
+            PointerMotionMask | ButtonPressMask, GrabModeAsync, GrabModeAsync,
+            native->handle, native->hidden_cursor, CurrentTime) != GrabSuccess)
+            return MAAGE_WINDOW_UNAVAILABLE;
+        native->pointer_x = native->warp_x = attributes.width / 2;
+        native->pointer_y = native->warp_y = attributes.height / 2;
+        native->warp_pending = 1;
+        XWarpPointer(system->display, None, native->handle, 0, 0, 0, 0, native->pointer_x, native->pointer_y);
+    } else {
+        XUngrabPointer(system->display, CurrentTime);
+        native->warp_pending = 0;
+    }
+    XFlush(system->display);
+    return MAAGE_WINDOW_OK;
 }
 static maage_window_result maage_x11_poll(maage_window_system *system, int timeout_ms)
 {
@@ -163,8 +231,9 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int timeo
     maage_x11_window *handle;
     maage_window *window;
     struct pollfd fd;
-    XEvent event;
-    int result;
+    XEvent event, next;
+    XWindowAttributes attributes;
+    int result, key;
     if (timeout_ms && !XPending(native->display)) {
         fd.fd = ConnectionNumber(native->display);
         fd.events = POLLIN;
@@ -177,12 +246,55 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int timeo
         for (window = system->windows; window; window = window->next) {
             handle = window->platform;
             if (handle->handle != event.xany.window) continue;
+            if (event.type == FocusIn && event.xfocus.mode != NotifyGrab && event.xfocus.mode != NotifyUngrab)
+                maage_window_input_focus(window, 1);
+            if (event.type == FocusOut && event.xfocus.mode != NotifyGrab && event.xfocus.mode != NotifyUngrab)
+                maage_window_input_focus(window, 0);
+            if (event.type == UnmapNotify) maage_window_input_focus(window, 0);
+            if (event.type == KeyPress || event.type == KeyRelease) {
+                /* Servers without detectable repeat emit release/press pairs. */
+                if (event.type == KeyRelease && XPending(native->display)) {
+                    XPeekEvent(native->display, &next);
+                    if (next.type == KeyPress && next.xkey.keycode == event.xkey.keycode &&
+                        next.xkey.time == event.xkey.time && next.xkey.window == event.xkey.window) continue;
+                }
+                for (key = 0; key < MAAGE_INPUT_KEY_COUNT; ++key)
+                    if (native->keycodes[key] && native->keycodes[key] == (int)event.xkey.keycode)
+                        maage_window_input_key(window, (maage_input_key)key, event.type == KeyPress);
+            }
+            if (event.type == ButtonPress && event.xbutton.button == Button1) window->input.primary_pressed = 1;
+            if (event.type == MotionNotify && window->input.captured) {
+                if (handle->warp_pending && event.xmotion.x == handle->warp_x && event.xmotion.y == handle->warp_y)
+                    handle->warp_pending = 0;
+                else {
+                    window->input.mouse_delta_x += event.xmotion.x - handle->pointer_x;
+                    window->input.mouse_delta_y += event.xmotion.y - handle->pointer_y;
+                }
+                handle->pointer_x = event.xmotion.x;
+                handle->pointer_y = event.xmotion.y;
+            }
             if (event.type == ClientMessage && event.xclient.message_type == native->protocols &&
                 (Atom)event.xclient.data.l[0] == native->close_atom) window->state.close_requested = 1;
             if (event.type == ConfigureNotify) window->state.resized = 1;
-            if (event.type == DestroyNotify) { handle->handle = 0; window->state.close_requested = 1; }
+            if (event.type == DestroyNotify) {
+                maage_window_input_focus(window, 0);
+                handle->handle = 0;
+                window->state.close_requested = 1;
+            }
         }
     }
+    for (window = system->windows; window; window = window->next) {
+        handle = window->platform;
+        if (window->input.captured && !handle->warp_pending &&
+            XGetWindowAttributes(native->display, handle->handle, &attributes) &&
+            (handle->pointer_x != attributes.width / 2 || handle->pointer_y != attributes.height / 2)) {
+            handle->warp_x = attributes.width / 2;
+            handle->warp_y = attributes.height / 2;
+            handle->warp_pending = 1;
+            XWarpPointer(native->display, None, handle->handle, 0, 0, 0, 0, handle->warp_x, handle->warp_y);
+        }
+    }
+    XFlush(native->display);
     return MAAGE_WINDOW_OK;
 }
 static maage_window_result maage_x11_state(maage_window *window)
@@ -255,5 +367,6 @@ static maage_window_result maage_x11_pixels(maage_window *window, const maage_pi
 const maage_window_backend_api maage_window_x11_api = {
     MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,
     maage_x11_destroy, maage_x11_poll, maage_x11_state, maage_x11_title,
-    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL, maage_x11_pixels
+    maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL, maage_x11_pixels,
+    maage_x11_capture
 };

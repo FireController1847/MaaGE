@@ -1,8 +1,10 @@
 #ifndef MAAGE_RENDER_H
 #define MAAGE_RENDER_H
 #include "maage/window.h"
+#include "maage/geometry.h"
 
 typedef struct maage_renderer maage_renderer;
+typedef struct maage_render_mesh maage_render_mesh;
 typedef enum maage_render_backend {
     MAAGE_RENDER_AUTO = 0,
     MAAGE_RENDER_VULKAN,
@@ -50,6 +52,8 @@ typedef struct maage_render_desc {
 #define MAAGE_RENDER_CAP_INSTANCING        0x0200UL
 #define MAAGE_RENDER_CAP_COMPUTE           0x0400UL
 #define MAAGE_RENDER_CAP_CPU_FRAMEBUFFER   0x0800UL
+/* Implemented upload/draw commands, unlike the device capability flags above. */
+#define MAAGE_RENDER_CAP_TEXTURED_MESH     0x1000UL
 #define MAAGE_RENDER_FORMAT_RGBA8          0x01UL
 #define MAAGE_RENDER_FORMAT_BGRA8          0x02UL
 #define MAAGE_RENDER_SYNC_CPU_WAIT         0x01UL
@@ -102,6 +106,21 @@ maage_render_result maage_renderer_prepare_frame(maage_renderer *renderer);
  * swapchain rebuild). Keep processing events and use a bounded event wait.
  * Fatal errors require destruction; create a new renderer/window to recover. */
 maage_render_result maage_renderer_present(maage_renderer *renderer);
+/* Copies indexed triangles and a top-left-origin RGBA8 atlas into an immutable
+ * resource owned by this renderer. CPU data may be released after upload.
+ * Destroy meshes before their renderer; renderer destruction also releases any
+ * remaining meshes and invalidates their handles. Unsupported backends return
+ * UNSUPPORTED rather than drawing a placeholder. */
+maage_render_result maage_renderer_upload_mesh(maage_renderer *renderer,
+    const maage_mesh_data *data, const maage_pixel_buffer *atlas,
+    maage_render_mesh **mesh);
+void maage_render_mesh_destroy(maage_render_mesh *mesh);
+/* Clears, draws, and presents one mesh. Uses the same visibility/error behavior
+ * as present, nearest texture sampling, depth testing and CCW front faces.
+ * view_projection is a column-major matrix for a right-handed world with clip
+ * depth 0..W (normalized depth 0..1). No graphics API types enter the mesh. */
+maage_render_result maage_renderer_draw_mesh(maage_renderer *renderer,
+    const maage_render_mesh *mesh, const float view_projection[16]);
 /* Force presentation resources to refresh on the next frame, if needed. */
 void maage_renderer_resize(maage_renderer *renderer);
 #endif

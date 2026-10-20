@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import <CoreGraphics/CoreGraphics.h>
 #include "../window_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -16,11 +17,13 @@ typedef struct maage_cocoa_window {
     maage_window_mode desired_mode;
     int transitioning;
     NSView *bitmap_view;
+    double capture_time;
 } maage_cocoa_window;
 
 static maage_window_system *maage_cocoa_active;
 static maage_window_result maage_cocoa_mode(maage_window *, maage_window_mode);
 static maage_window_result maage_cocoa_state(maage_window *);
+static maage_window_result maage_cocoa_capture(maage_window *, int);
 
 @interface MaaGEPlatformWindow : NSWindow
 @end
@@ -45,6 +48,14 @@ static maage_window_result maage_cocoa_state(maage_window *);
 @interface MaaGEApplicationDelegate : NSObject <NSApplicationDelegate>
 @end
 @implementation MaaGEApplicationDelegate
+- (void)applicationDidResignActive:(NSNotification *)notification
+{
+    maage_window *window;
+    (void)notification;
+    if (!maage_cocoa_active) return;
+    for (window = maage_cocoa_active->windows; window; window = window->next)
+        maage_window_input_focus(window, 0);
+}
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)application
 {
     maage_window *window;
@@ -71,6 +82,21 @@ static maage_window_result maage_cocoa_state(maage_window *);
 {
     (void)notification;
     owner->state.resized = 1;
+}
+- (void)windowDidBecomeKey:(NSNotification *)notification
+{
+    (void)notification;
+    maage_window_input_focus(owner, 1);
+}
+- (void)windowDidResignKey:(NSNotification *)notification
+{
+    (void)notification;
+    maage_window_input_focus(owner, 0);
+}
+- (void)windowDidMiniaturize:(NSNotification *)notification
+{
+    (void)notification;
+    maage_window_input_focus(owner, 0);
 }
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification
 {
@@ -301,6 +327,7 @@ static void maage_cocoa_destroy(maage_window *window)
 {
     maage_cocoa_window *native = window->platform;
     if (!native) return;
+    maage_window_input_focus(window, 0);
     [native->handle setDelegate:nil];
     [native->handle orderOut:nil];
     [native->handle close];
@@ -309,11 +336,82 @@ static void maage_cocoa_destroy(maage_window *window)
     free(native);
     maage_cocoa_presentation(window->system);
 }
+static maage_window_result maage_cocoa_capture(maage_window *window, int capture)
+{
+    maage_cocoa_window *native = window->platform;
+    maage_window *other;
+    NSView *view;
+    NSRect content;
+    CGPoint point;
+    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
+    if (capture == window->input.captured) return MAAGE_WINDOW_OK;
+    if (capture) {
+        if (![native->handle isKeyWindow] || ![NSApp isActive]) return MAAGE_WINDOW_UNAVAILABLE;
+        for (other = window->system->windows; other; other = other->next)
+            if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
+        if (CGAssociateMouseAndMouseCursorPosition(0) != kCGErrorSuccess)
+            return MAAGE_WINDOW_PLATFORM_ERROR;
+        /* Freeze the native cursor inside this viewport even when activation
+         * happened through the Dock or keyboard with the pointer elsewhere. */
+        view = [native->handle contentView];
+        content = [native->handle convertRectToScreen:[view convertRect:[view bounds] toView:nil]];
+        point.x = NSMidX(content);
+        point.y = CGDisplayBounds(CGMainDisplayID()).size.height - NSMidY(content);
+        if (CGWarpMouseCursorPosition(point) != kCGErrorSuccess) {
+            CGAssociateMouseAndMouseCursorPosition(1);
+            return MAAGE_WINDOW_PLATFORM_ERROR;
+        }
+        native->capture_time = [[NSProcessInfo processInfo] systemUptime];
+        [native->handle setAcceptsMouseMovedEvents:YES];
+        [NSCursor hide];
+    } else {
+        CGAssociateMouseAndMouseCursorPosition(1);
+        [NSCursor unhide];
+    }
+    return MAAGE_WINDOW_OK;
+}
+static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
+{
+    maage_window *window;
+    maage_cocoa_window *native;
+    maage_input_key key;
+    NSEventType type = [event type];
+    for (window = system->windows; window; window = window->next) {
+        native = window->platform;
+        if (!native || native->handle != [event window]) continue;
+        if (type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
+            if (type == NSEventTypeKeyDown && ([event modifierFlags] & NSEventModifierFlagCommand)) return 0;
+            switch ([event keyCode]) {
+            case 13: key = MAAGE_INPUT_KEY_W; break;
+            case 0: key = MAAGE_INPUT_KEY_A; break;
+            case 1: key = MAAGE_INPUT_KEY_S; break;
+            case 2: key = MAAGE_INPUT_KEY_D; break;
+            case 49: key = MAAGE_INPUT_KEY_SPACE; break;
+            case 53: key = MAAGE_INPUT_KEY_ESCAPE; break;
+            default: return 0;
+            }
+            maage_window_input_key(window, key, type == NSEventTypeKeyDown);
+            return 1;
+        }
+        if (type == NSEventTypeLeftMouseDown) {
+            NSPoint point = [[native->handle contentView] convertPoint:[event locationInWindow] fromView:nil];
+            if (NSPointInRect(point, [[native->handle contentView] bounds]))
+                window->input.primary_pressed = 1;
+        }
+        if (window->input.captured && [event timestamp] >= native->capture_time && (type == NSEventTypeMouseMoved ||
+            type == NSEventTypeLeftMouseDragged || type == NSEventTypeRightMouseDragged ||
+            type == NSEventTypeOtherMouseDragged)) {
+            window->input.mouse_delta_x += [event deltaX];
+            window->input.mouse_delta_y += [event deltaY];
+        }
+        break;
+    }
+    return 0;
+}
 static maage_window_result maage_cocoa_poll(maage_window_system *system, int timeout_ms)
 {
     NSAutoreleasePool *pool;
     NSEvent *event;
-    (void)system;
     if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
     pool = [[NSAutoreleasePool alloc] init];
     event = [NSApp nextEventMatchingMask:NSEventMaskAny
@@ -321,7 +419,7 @@ static maage_window_result maage_cocoa_poll(maage_window_system *system, int tim
             [NSDate dateWithTimeIntervalSinceNow:(double)timeout_ms / 1000.0]
         inMode:NSDefaultRunLoopMode dequeue:YES];
     while (event) {
-        [NSApp sendEvent:event];
+        if (!maage_cocoa_input_event(system, event)) [NSApp sendEvent:event];
         event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast]
             inMode:NSDefaultRunLoopMode dequeue:YES];
     }
@@ -332,13 +430,19 @@ static maage_window_result maage_cocoa_poll(maage_window_system *system, int tim
 static maage_window_result maage_cocoa_state(maage_window *window)
 {
     maage_cocoa_window *native = window->platform;
-    NSView *view = [native->handle contentView];
-    NSScreen *screen = [native->handle screen];
-    NSRect logical = [view bounds];
-    NSRect backing = [view convertRectToBacking:logical];
+    NSView *view;
+    NSScreen *screen;
+    NSRect logical;
+    NSRect backing;
     NSRect content;
     NSRect safe;
     NSEdgeInsets inset;
+    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
+    view = [native->handle contentView];
+    screen = [native->handle screen];
+    logical = [view bounds];
+    backing = [view convertRectToBacking:logical];
+    maage_window_input_focus(window, [native->handle isKeyWindow] && [NSApp isActive]);
     memset(&window->state.safe_area, 0, sizeof(window->state.safe_area));
     window->state.width = (int)logical.size.width;
     window->state.height = (int)logical.size.height;
@@ -425,5 +529,5 @@ const maage_window_backend_api maage_window_cocoa_api = {
     MAAGE_WINDOW_COCOA, maage_cocoa_init, maage_cocoa_shutdown, maage_cocoa_create,
     maage_cocoa_destroy, maage_cocoa_poll, maage_cocoa_state, maage_cocoa_title,
     maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native,
-    maage_cocoa_surface, maage_cocoa_pixels
+    maage_cocoa_surface, maage_cocoa_pixels, maage_cocoa_capture
 };

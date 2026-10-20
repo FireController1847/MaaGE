@@ -19,7 +19,15 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
     find_library(MAAGE_METAL_FRAMEWORK Metal REQUIRED)
     find_library(MAAGE_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
     find_library(MAAGE_RENDER_APPKIT_FRAMEWORK AppKit REQUIRED)
-    target_sources(maage_render PRIVATE metal/render_metal.m)
+    set(MAAGE_METAL_GENERATED "${PROJECT_BINARY_DIR}/generated/maage_mesh")
+    # Embed one authoritative MSL asset for the native runtime shader compiler;
+    # command-line-tools installations need no optional offline Metal toolchain.
+    add_custom_command(OUTPUT "${MAAGE_METAL_GENERATED}.h"
+        COMMAND "${CMAKE_COMMAND}" "-DMAAGE_METAL_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/metal/mesh.metal"
+            "-DMAAGE_METAL_HEADER=${MAAGE_METAL_GENERATED}.h"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/metal/embed_shader.cmake"
+        DEPENDS metal/mesh.metal metal/embed_shader.cmake VERBATIM)
+    target_sources(maage_render PRIVATE metal/render_metal.m "${MAAGE_METAL_GENERATED}.h")
     target_compile_definitions(maage_render PRIVATE MAAGE_RENDER_HAS_METAL)
     target_compile_options(maage_render PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>")
     target_link_libraries(maage_render PRIVATE "${MAAGE_METAL_FRAMEWORK}"

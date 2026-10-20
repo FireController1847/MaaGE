@@ -9,8 +9,8 @@ int maage_client_launch(const char *root, const char *id, maage_access *access,
 {
     maage_client_registry *registry=(maage_client_registry *)malloc(sizeof(*registry));
     char executable[MAAGE_PATH_CAPACITY], directory[MAAGE_PATH_CAPACITY], logs[MAAGE_PATH_CAPACITY];
-    char output[MAAGE_PATH_CAPACITY], errors[MAAGE_PATH_CAPACITY], log[MAAGE_PATH_CAPACITY], argument[MAAGE_PATH_CAPACITY+12], name[128];
-    const char *argv[4];
+    char output[MAAGE_PATH_CAPACITY], errors[MAAGE_PATH_CAPACITY], log[MAAGE_PATH_CAPACITY], argument[MAAGE_PATH_CAPACITY+12], data_argument[MAAGE_PATH_CAPACITY+18], name[128];
+    const char *argv[5];
     char *slash;
     maage_storage_lock *lock=NULL;
     unsigned attempt;
@@ -35,7 +35,8 @@ int maage_client_launch(const char *root, const char *id, maage_access *access,
     }
     if(attempt==1000 || !maage_access_allowed(access)) goto done;
     sprintf(argument,"--log-file=%s",log);
-    argv[0]=executable; argv[1]=argument; argv[2]="--log-console=on"; argv[3]=NULL;
+    sprintf(data_argument,"--data-directory=%s",root);
+    argv[0]=executable; argv[1]=argument; argv[2]="--log-console=on"; argv[3]=data_argument; argv[4]=NULL;
     ok=maage_process_start(executable,argv,directory,output,errors,process,error);
     if(ok) maage_log_info("maage.launcher.clients","Starting selected Client %.12s directly; stdout=%s; stderr=%s.",id,output,errors);
 done:

@@ -1,0 +1,41 @@
+#ifndef MAAGE_INPUT_H
+#define MAAGE_INPUT_H
+#include "maage/window.h"
+
+#define MAAGE_INPUT_API_VERSION 1
+
+/* Physical movement-key positions, independent of the current text layout. */
+typedef enum maage_input_key {
+    MAAGE_INPUT_KEY_W = 0,
+    MAAGE_INPUT_KEY_A,
+    MAAGE_INPUT_KEY_S,
+    MAAGE_INPUT_KEY_D,
+    MAAGE_INPUT_KEY_SPACE,
+    MAAGE_INPUT_KEY_ESCAPE,
+    MAAGE_INPUT_KEY_COUNT
+} maage_input_key;
+
+typedef struct maage_input_snapshot {
+    int keys[MAAGE_INPUT_KEY_COUNT];
+    int pressed[MAAGE_INPUT_KEY_COUNT];
+    int primary_pressed;
+    double mouse_delta_x;
+    double mouse_delta_y;
+    int focused;
+    int captured;
+} maage_input_snapshot;
+
+/* Call on the window thread after event polling. Consumes press edges and mouse
+ * deltas; held keys persist. Mouse deltas are native relative units, positive
+ * right/down, and accumulate only while captured. Focus loss releases capture
+ * and clears held keys. This is raw input; gameplay maps it to actions.
+ * UNSUPPORTED means this adapter cannot supply gameplay input. */
+maage_window_result maage_window_get_input(maage_window *window,
+    maage_input_snapshot *input);
+/* Capture requires focus, hides the cursor and permits unbounded relative motion.
+ * Release also clears pending motion. Escape is an input edge; the application
+ * chooses when to release or reacquire capture. Native adapters never recapture
+ * automatically. A compositor/backend without capture returns UNSUPPORTED. */
+maage_window_result maage_window_capture_mouse(maage_window *window, int capture);
+
+#endif

@@ -3,6 +3,8 @@
 #include "maage/log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
+#include <limits.h>
 
 void maage_render_desc_init(maage_render_desc *desc)
 {
@@ -170,6 +172,7 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_r
 void maage_renderer_destroy(maage_renderer *renderer)
 {
     if (!renderer) return;
+    while (renderer->meshes) maage_render_mesh_destroy(renderer->meshes);
     renderer->api->destroy(renderer);
     maage_window_release_surface(renderer->window);
     free(renderer);
@@ -222,6 +225,74 @@ maage_render_result maage_renderer_present(maage_renderer *renderer)
     if (!state.visible || state.framebuffer_width <= 0 || state.framebuffer_height <= 0)
         return MAAGE_RENDER_SKIPPED;
     result = renderer->api->present(renderer, &state);
+    if (result != MAAGE_RENDER_OK && result != MAAGE_RENDER_SKIPPED) renderer->failure = result;
+    return result;
+}
+maage_render_result maage_renderer_upload_mesh(maage_renderer *renderer,
+    const maage_mesh_data *data, const maage_pixel_buffer *atlas,
+    maage_render_mesh **output)
+{
+    maage_render_mesh *mesh;
+    maage_render_result result;
+    size_t index;
+    if (!output) return MAAGE_RENDER_INVALID_ARGUMENT;
+    *output = NULL;
+    if (!renderer || !data || !atlas || !data->vertices || !data->indices ||
+        !data->vertex_count || !data->index_count || data->index_count % 3 ||
+        data->vertex_count > UINT_MAX ||
+        data->vertex_count > (size_t)-1 / sizeof(*data->vertices) ||
+        data->index_count > (size_t)-1 / sizeof(*data->indices) ||
+        !atlas->pixels || atlas->width <= 0 || atlas->height <= 0 ||
+        (size_t)atlas->width > (size_t)-1 / 4 ||
+        atlas->stride < (size_t)atlas->width * 4 ||
+        atlas->stride > (size_t)-1 / (size_t)atlas->height)
+        return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (renderer->failure != MAAGE_RENDER_OK) return renderer->failure;
+    if (!renderer->api->upload_mesh) return MAAGE_RENDER_UNSUPPORTED;
+    for (index = 0; index < data->index_count; ++index)
+        if (data->indices[index] >= data->vertex_count) return MAAGE_RENDER_INVALID_ARGUMENT;
+    mesh = (maage_render_mesh *)calloc(1, sizeof(*mesh));
+    if (!mesh) return MAAGE_RENDER_OUT_OF_MEMORY;
+    mesh->renderer = renderer;
+    result = renderer->api->upload_mesh(renderer, mesh, data, atlas);
+    if (result != MAAGE_RENDER_OK) {
+        renderer->api->destroy_mesh(mesh);
+        free(mesh);
+        return result;
+    }
+    mesh->next = renderer->meshes;
+    if (mesh->next) mesh->next->previous = mesh;
+    renderer->meshes = mesh;
+    *output = mesh;
+    return MAAGE_RENDER_OK;
+}
+void maage_render_mesh_destroy(maage_render_mesh *mesh)
+{
+    if (!mesh) return;
+    mesh->renderer->api->destroy_mesh(mesh);
+    if (mesh->previous) mesh->previous->next = mesh->next;
+    else mesh->renderer->meshes = mesh->next;
+    if (mesh->next) mesh->next->previous = mesh->previous;
+    free(mesh);
+}
+maage_render_result maage_renderer_draw_mesh(maage_renderer *renderer,
+    const maage_render_mesh *mesh, const float view_projection[16])
+{
+    maage_window_state state;
+    maage_render_result result;
+    int index;
+    if (!renderer || !mesh || mesh->renderer != renderer || !view_projection)
+        return MAAGE_RENDER_INVALID_ARGUMENT;
+    for (index = 0; index < 16; ++index)
+        if (!(view_projection[index] >= -FLT_MAX && view_projection[index] <= FLT_MAX))
+            return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (renderer->failure != MAAGE_RENDER_OK) return renderer->failure;
+    if (!renderer->api->draw_mesh) return MAAGE_RENDER_UNSUPPORTED;
+    if (maage_window_get_state(renderer->window, &state) != MAAGE_WINDOW_OK)
+        return MAAGE_RENDER_WINDOW_ERROR;
+    if (!state.visible || state.framebuffer_width <= 0 || state.framebuffer_height <= 0)
+        return MAAGE_RENDER_SKIPPED;
+    result = renderer->api->draw_mesh(renderer, mesh, &state, view_projection);
     if (result != MAAGE_RENDER_OK && result != MAAGE_RENDER_SKIPPED) renderer->failure = result;
     return result;
 }

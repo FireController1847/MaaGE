@@ -57,5 +57,5 @@ static maage_render_result maage_software_present(maage_renderer *renderer, cons
 }
 const maage_render_backend_api maage_render_software_api = {
     MAAGE_RENDER_SOFTWARE, maage_software_create, maage_software_destroy, maage_software_present,
-    MAAGE_RENDER_CAPABILITIES_VERSION, NULL
+    MAAGE_RENDER_CAPABILITIES_VERSION, NULL, NULL, NULL, NULL
 };

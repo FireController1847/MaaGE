@@ -19,17 +19,52 @@ typedef struct maage_win32_window {
 } maage_win32_window;
 static unsigned int maage_win32_users;
 static const WCHAR maage_win32_class[] = L"MaaGEWindow";
+static maage_window_result maage_win32_capture(maage_window *, int);
+
+static int maage_win32_key(LPARAM code)
+{
+    switch (((unsigned long)code >> 16) & 255) {
+    case 0x11: return MAAGE_INPUT_KEY_W;
+    case 0x1e: return MAAGE_INPUT_KEY_A;
+    case 0x1f: return MAAGE_INPUT_KEY_S;
+    case 0x20: return MAAGE_INPUT_KEY_D;
+    case 0x39: return MAAGE_INPUT_KEY_SPACE;
+    case 0x01: return MAAGE_INPUT_KEY_ESCAPE;
+    default: return -1;
+    }
+}
 
 static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, LPARAM lp)
 {
     maage_window *window;
     RECT *suggested;
+    RAWINPUT raw;
+    UINT raw_size;
     if (message == WM_NCCREATE) {
         window = (maage_window *)((CREATESTRUCTW *)lp)->lpCreateParams;
         SetWindowLongPtrW(handle, GWLP_USERDATA, (LONG_PTR)window);
     } else window = (maage_window *)GetWindowLongPtrW(handle, GWLP_USERDATA);
     if (window) {
         switch (message) {
+        case WM_SETFOCUS: maage_window_input_focus(window, 1); break;
+        case WM_KILLFOCUS: maage_window_input_focus(window, 0); break;
+        case WM_KEYDOWN: case WM_KEYUP:
+            maage_window_input_key(window, (maage_input_key)maage_win32_key(lp), message == WM_KEYDOWN);
+            break;
+        case WM_LBUTTONDOWN: window->input.primary_pressed = 1; break;
+        case WM_INPUT:
+            raw_size = sizeof(raw);
+            if (window->input.captured && GetRawInputData((HRAWINPUT)lp, RID_INPUT,
+                &raw, &raw_size, sizeof(RAWINPUTHEADER)) != (UINT)-1 &&
+                raw.header.dwType == RIM_TYPEMOUSE && !(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
+                window->input.mouse_delta_x += raw.data.mouse.lLastX;
+                window->input.mouse_delta_y += raw.data.mouse.lLastY;
+            }
+            break;
+        case WM_CAPTURECHANGED:
+            if (window->input.captured && (HWND)lp != handle)
+                maage_window_capture_mouse(window, 0);
+            break;
         case WM_CLOSE: window->state.close_requested = 1; return 0;
         case WM_SIZE: window->state.resized = 1; break;
         case WM_DPICHANGED:
@@ -40,7 +75,10 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
                     SWP_NOZORDER | SWP_NOACTIVATE);
             window->state.resized = 1;
             return 0;
-        case WM_DESTROY: window->state.close_requested = 1; break;
+        case WM_DESTROY:
+            maage_window_input_focus(window, 0);
+            window->state.close_requested = 1;
+            break;
         }
     }
     return DefWindowProcW(handle, message, wp, lp);
@@ -182,8 +220,52 @@ static void maage_win32_destroy(maage_window *window)
 {
     maage_win32_window *native = window->platform;
     if (!native) return;
+    maage_window_input_focus(window, 0);
     if (native->handle) DestroyWindow(native->handle);
     free(native);
+}
+static maage_window_result maage_win32_capture(maage_window *window, int capture)
+{
+    maage_win32_system *system = window->system->platform;
+    maage_win32_window *native = window->platform;
+    RAWINPUTDEVICE device;
+    RECT rect;
+    POINT corners[2];
+    maage_window *other;
+    if (GetCurrentThreadId() != system->thread) return MAAGE_WINDOW_WRONG_THREAD;
+    if (capture == window->input.captured) return MAAGE_WINDOW_OK;
+    if (capture) {
+        if (GetFocus() != native->handle || !GetClientRect(native->handle, &rect))
+            return MAAGE_WINDOW_UNAVAILABLE;
+        for (other = window->system->windows; other; other = other->next)
+            if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
+        corners[0].x = rect.left; corners[0].y = rect.top;
+        corners[1].x = rect.right; corners[1].y = rect.bottom;
+        if (!ClientToScreen(native->handle, &corners[0]) ||
+            !ClientToScreen(native->handle, &corners[1])) return MAAGE_WINDOW_PLATFORM_ERROR;
+        device.usUsagePage = 1; device.usUsage = 2; device.dwFlags = 0;
+        device.hwndTarget = native->handle;
+        if (!RegisterRawInputDevices(&device, 1, sizeof(device))) return MAAGE_WINDOW_UNSUPPORTED;
+        rect.left = corners[0].x; rect.top = corners[0].y;
+        rect.right = corners[1].x; rect.bottom = corners[1].y;
+        if (!ClipCursor(&rect)) {
+            device.dwFlags = RIDEV_REMOVE; device.hwndTarget = NULL;
+            RegisterRawInputDevices(&device, 1, sizeof(device));
+            return MAAGE_WINDOW_PLATFORM_ERROR;
+        }
+        SetCapture(native->handle);
+        ShowCursor(FALSE);
+    } else {
+        /* Clear first: ReleaseCapture synchronously emits WM_CAPTURECHANGED. */
+        window->input.captured = 0;
+        device.usUsagePage = 1; device.usUsage = 2;
+        device.dwFlags = RIDEV_REMOVE; device.hwndTarget = NULL;
+        RegisterRawInputDevices(&device, 1, sizeof(device));
+        if (GetCapture() == native->handle) ReleaseCapture();
+        ClipCursor(NULL);
+        ShowCursor(TRUE);
+    }
+    return MAAGE_WINDOW_OK;
 }
 static maage_window_result maage_win32_poll(maage_window_system *system, int timeout_ms)
 {
@@ -209,9 +291,11 @@ static maage_window_result maage_win32_poll(maage_window_system *system, int tim
 }
 static maage_window_result maage_win32_state(maage_window *window)
 {
+    maage_win32_system *system = window->system->platform;
     maage_win32_window *native = window->platform;
     RECT rect;
     UINT dpi = maage_win32_dpi(window);
+    if (GetCurrentThreadId() != system->thread) return MAAGE_WINDOW_WRONG_THREAD;
     if (!GetClientRect(native->handle, &rect)) return MAAGE_WINDOW_PLATFORM_ERROR;
     window->state.framebuffer_width = rect.right - rect.left;
     window->state.framebuffer_height = rect.bottom - rect.top;
@@ -262,5 +346,6 @@ static maage_window_result maage_win32_pixels(maage_window *window, const maage_
 const maage_window_backend_api maage_window_win32_api = {
     MAAGE_WINDOW_WIN32, maage_win32_init, maage_win32_shutdown, maage_win32_create,
     maage_win32_destroy, maage_win32_poll, maage_win32_state, maage_win32_title,
-    maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL, maage_win32_pixels
+    maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL, maage_win32_pixels,
+    maage_win32_capture
 };

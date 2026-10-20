@@ -69,6 +69,28 @@ before claiming functionality or successful platform validation.
 - Extend established module boundaries instead of adding speculative abstraction
   layers. Do not create artificial APIs for trivial, localized behavior.
 
+### Numeric runtime identity
+
+MaaGE uses numeric IDs internally. External namespaced identifiers are resolved
+during registration, initialization, or explicit data-import boundaries. Gameplay,
+simulation, block access, collision, meshing, physics, and rendering must not
+perform string-based identifier comparisons or name-to-ID lookups. Numeric
+ID-to-definition lookups must be direct, deterministic O(1) operations.
+
+- Block types and states have distinct numeric domains; states reference types
+  and resolved numeric metadata/properties. Preserve 1.7.10 IDs/metadata where
+  practical without permanently limiting ID capacity to the legacy format.
+- Finalize registries before gameplay. Definitions then remain immutable;
+  unknown/unregistered numeric IDs return explicit failure, never unrelated blocks.
+  Name hashing is collision-checked at registration/import only and has expected,
+  not guaranteed worst-case, O(1) lookup. Runtime blocks carry no identifier strings.
+- Resolve texture handles/atlas rectangles before meshing; no resource paths,
+  decoding, name resolution, or per-block/per-face allocations in gameplay loops.
+- `MaaGE::World` owns portable registry, numeric chunk storage, CPU meshing and
+  movement/collision contracts independently of Client, graphics and native UI.
+  Client coordinates input/camera/presentation; a future Server can consume the
+  same portable simulation without graphical dependencies.
+
 ### Mandatory token-efficient development
 
 - Make focused, minimal changes that solve the actual requirement. Avoid duplicated
@@ -122,6 +144,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   contract as gameplay develops; no standalone desktop entry or macOS app bundle.
   The Client initializes its own window/renderer. Never invent launch flags as
   authentication or implement remote distribution until requested.
+  Phase 1 implements a finite static voxel world and first-person exploration;
+  see `docs/development-roadmap.md` for implemented versus provisional behavior.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
   gameplay, modpack definitions/registries, persistence, and multiplayer synchronization.
@@ -258,6 +282,12 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   pipeline resources, resource binding, command submission, synchronization, render
   targets/presentation, capabilities, and optional features as needed. Backend
   replacement must be demonstrable, not merely theoretical.
+- The indexed textured-mesh command uses neutral CPU geometry, a copied RGBA8
+  atlas, opaque renderer-owned resources and column-major transforms (clip depth
+  0..1). Advertise `TEXTURED_MESH` only for implemented commands: currently Metal.
+  Other families retain their existing clear/presentation functionality and return
+  unsupported for gameplay mesh commands. MSL lives in an original `.metal` asset,
+  embedded at build time and compiled by native Metal at initialization.
 - Keep high-level voxel rendering separate from the low-level graphics device API.
   Chunk meshing, visibility, world simulation, and content must not depend directly
   on graphics APIs. Headless operation must not acquire graphics dependencies;
@@ -281,8 +311,8 @@ in Launcher-owned modules, independent of game UI/rendering; use `config/launche
 for nonsecret preferences and minimal MaaGE configurations, never Minecraft instances
 or versions. Persist installation/account selections and supported appearance
 preferences; default appearance follows the system. Reuse existing account/setup
-services for management and repair. Disable Play honestly until Client startup is
-implemented; show an empty News state until a real source exists. Do not introduce
+services for management and repair. Play starts the exact selected available Client
+after access/resource prerequisites; show an empty News state until a real source exists. Do not introduce
 webviews, heavyweight GUI frameworks, or a shared Launcher/Client widget framework.
 
 First-run setup acquires Minecraft Java Edition 1.7.10 indexed assets and game
@@ -352,6 +382,16 @@ knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, OpenSSL Crypto >=1.1.
 Discover libzip through pkg-config on Linux to avoid distro CMake exports requiring
 uninstalled command-line tools. GTK >=3.22 stays in the Linux UI adapter. Keep these
 dependencies out of Server/headless targets.
+
+Client resource loading uses `MaaGE::Image` (libpng >=1.6) for bounded PNG decoding
+and `MaaGE::MinecraftAssets` for existing reconstructed paths. It never downloads,
+authenticates or reads JARs. `--data-directory=<absolute MaaGE root>` is a resource
+location argument passed explicitly by Launcher; direct startup defaults to the
+platform MaaGE data directory. Missing/invalid required textures fail clearly.
+Native input snapshots/capture are separate from gameplay state; focus loss clears
+keys and releases capture. The Client uses bounded fixed 20 TPS updates with
+interpolated presentation, pausing when capture/focus is lost. Physics and camera
+tuning remain provisional until programmer fidelity verification.
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
@@ -594,7 +634,8 @@ fork/exec and Windows CreateProcess never use shells or Launch Services. Launch
 validation/spawning runs on the Client worker; prevent duplicate launches and
 removal of the active build. Closing the Launcher releases monitoring without
 terminating the Client. The Client owns its native viewport and existing renderer
-selection; metadata queries bypass both. Gameplay remains unimplemented. Dedicated Server builds/registry/process management are a separate
+selection; metadata queries bypass both. Phase 1 gameplay uses the portable world
+and Metal mesh renderer. Dedicated Server builds/registry/process management are a separate
 future Launcher milestone; software versions do not define protocol compatibility.
 
 ## Conceptual development sequence

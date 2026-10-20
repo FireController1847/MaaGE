@@ -489,5 +489,5 @@ static maage_render_result maage_vulkan_present(maage_renderer *renderer, const 
 }
 const maage_render_backend_api maage_render_vulkan_api = {
     MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy, maage_vulkan_present,
-    MAAGE_RENDER_CAPABILITIES_VERSION, NULL
+    MAAGE_RENDER_CAPABILITIES_VERSION, NULL, NULL, NULL, NULL
 };

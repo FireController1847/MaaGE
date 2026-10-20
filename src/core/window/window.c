@@ -143,6 +143,52 @@ maage_window_result maage_window_get_state(maage_window *window, maage_window_st
     return MAAGE_WINDOW_OK;
 }
 
+void maage_window_input_key(maage_window *window, maage_input_key key, int down)
+{
+    if (key < 0 || key >= MAAGE_INPUT_KEY_COUNT) return;
+    if (down && !window->input.keys[key]) window->input.pressed[key] = 1;
+    window->input.keys[key] = down != 0;
+}
+
+void maage_window_input_focus(maage_window *window, int focused)
+{
+    if (!focused) {
+        if (window->input.captured) maage_window_capture_mouse(window, 0);
+        memset(&window->input, 0, sizeof(window->input));
+    }
+    window->input.focused = focused != 0;
+}
+
+maage_window_result maage_window_get_input(maage_window *window, maage_input_snapshot *input)
+{
+    maage_window_result result;
+    if (!window || !input) return MAAGE_WINDOW_INVALID_ARGUMENT;
+    memset(input, 0, sizeof(*input));
+    if (!window->system->api->capture) return MAAGE_WINDOW_UNSUPPORTED;
+    result = window->system->api->state(window);
+    if (result != MAAGE_WINDOW_OK) return result;
+    *input = window->input;
+    memset(window->input.pressed, 0, sizeof(window->input.pressed));
+    window->input.primary_pressed = 0;
+    window->input.mouse_delta_x = window->input.mouse_delta_y = 0.0;
+    return MAAGE_WINDOW_OK;
+}
+
+maage_window_result maage_window_capture_mouse(maage_window *window, int capture)
+{
+    maage_window_result result;
+    if (!window) return MAAGE_WINDOW_INVALID_ARGUMENT;
+    if (!window->system->api->capture) return MAAGE_WINDOW_UNSUPPORTED;
+    capture = capture != 0;
+    if (capture && !window->input.focused) return MAAGE_WINDOW_UNAVAILABLE;
+    result = window->system->api->capture(window, capture);
+    if (result == MAAGE_WINDOW_OK) {
+        window->input.captured = capture;
+        window->input.mouse_delta_x = window->input.mouse_delta_y = 0.0;
+    }
+    return result;
+}
+
 maage_window_result maage_window_acquire_surface(maage_window *window, maage_window_native *native)
 {
     maage_window_result result;
@@ -188,8 +234,11 @@ maage_window_result maage_window_set_title(maage_window *window, const char *tit
 }
 maage_window_result maage_window_set_visible(maage_window *window, int visible)
 {
+    maage_window_result result;
     if (!window) return MAAGE_WINDOW_INVALID_ARGUMENT;
-    return window->system->api->visible(window, visible);
+    result = window->system->api->visible(window, visible);
+    if (result == MAAGE_WINDOW_OK && !visible) maage_window_input_focus(window, 0);
+    return result;
 }
 maage_window_result maage_window_resize(maage_window *window, int width, int height)
 {

@@ -1,6 +1,7 @@
 #ifndef MAAGE_WINDOW_INTERNAL_H
 #define MAAGE_WINDOW_INTERNAL_H
 #include "maage/window.h"
+#include "maage/input.h"
 
 typedef struct maage_window_backend_api {
     maage_window_backend kind;
@@ -17,6 +18,7 @@ typedef struct maage_window_backend_api {
     void (*native)(maage_window *window, maage_window_native *native);
     maage_window_result (*surface)(maage_window *window, int external);
     maage_window_result (*pixels)(maage_window *window, const maage_pixel_buffer *buffer);
+    maage_window_result (*capture)(maage_window *window, int capture);
 } maage_window_backend_api;
 
 struct maage_window_system {
@@ -29,6 +31,7 @@ struct maage_window {
     maage_window *next;
     void *platform;
     maage_window_state state;
+    maage_input_snapshot input;
     int full_display_content;
     int surface_owned;
 };
@@ -37,4 +40,6 @@ extern const maage_window_backend_api maage_window_win32_api;
 extern const maage_window_backend_api maage_window_cocoa_api;
 extern const maage_window_backend_api maage_window_x11_api;
 extern const maage_window_backend_api maage_window_wayland_api;
+void maage_window_input_key(maage_window *window, maage_input_key key, int down);
+void maage_window_input_focus(maage_window *window, int focused);
 #endif
