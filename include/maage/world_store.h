@@ -1,12 +1,15 @@
 #ifndef MAAGE_WORLD_STORE_H
 #define MAAGE_WORLD_STORE_H
 #include "maage/world.h"
+#include "maage/gameplay.h"
 #define MAAGE_WORLD_FORMAT_VERSION 1UL
+#define MAAGE_PLAYER_FORMAT_VERSION 2UL
 typedef struct maage_world_record {
     char id[65], name[128], created_utc[32];
     maage_world_seed seed;
     double position[3], yaw, pitch;
     int new_world; /* pending initial spawn; persists until first player save */
+    maage_gameplay_save gameplay;
 } maage_world_record;
 /* Metadata/import boundary only. IDs contain lowercase ASCII letters, digits,
  * '-' or '_'. NULL id resumes the last selection, creating a unique world if
@@ -20,6 +23,13 @@ int maage_world_store_open(const char *data_root, const char *id, int create,
  * Serialize metadata saves with each other; chunk files are independent. */
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256]);
+/* Atomic schema-2 metadata snapshot, used after rendering stops. Schema-1 worlds
+ * migrate to Creative with empty inventory and full vitals; chunk format stays 1.
+ * Numeric item mapping 1 fixes 1,2,3,7,12,13,24, metadata/damage zero. Unknown
+ * mappings fail without overwriting originals. Cursor and overflow pickups persist. */
+int maage_world_store_save_gameplay(maage_world_store *store,
+    const double position[3], double yaw, double pitch,
+    const maage_gameplay *game, const maage_item_registry *items, char error[256]);
 /* All jobs borrowing this store must finish before close releases its lock. */
 void maage_world_store_close(maage_world_store *store);
 /* Distinct coordinates may load/save concurrently: each job owns its buffers,

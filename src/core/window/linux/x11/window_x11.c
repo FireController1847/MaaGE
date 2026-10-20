@@ -55,7 +55,8 @@ static maage_window_result maage_x11_init(maage_window_system *system)
     Bool detectable;
     static const char names[MAAGE_INPUT_KEY_COUNT][5] = {
         "AD02", "AC01", "AC02", "AC03", "SPCE", "ESC",
-        "FK03", "RTRN", "TAB", "UP", "DOWN"
+        "FK03", "RTRN", "TAB", "UP", "DOWN", "AD03",
+        "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "LFSH"
     };
     if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
     system->platform = native;
@@ -270,6 +271,12 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int timeo
                     window->input.primary_down = event.type == ButtonPress;
                     if (event.type == ButtonPress) window->input.primary_pressed = 1;
                 }
+                if (event.xbutton.button == Button3) {
+                    window->input.secondary_down = event.type == ButtonPress;
+                    if (event.type == ButtonPress) window->input.secondary_pressed = 1;
+                }
+                if (event.type == ButtonPress && event.xbutton.button == Button4) window->input.scroll_y += 1;
+                if (event.type == ButtonPress && event.xbutton.button == Button5) window->input.scroll_y -= 1;
             }
             if (event.type == MotionNotify) {
                 window->input.mouse_x = event.xmotion.x; window->input.mouse_y = event.xmotion.y;

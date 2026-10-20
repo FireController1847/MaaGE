@@ -1,18 +1,21 @@
 #ifndef MAAGE_CLIENT_UI_H
 #define MAAGE_CLIENT_UI_H
 #include "maage/render.h"
+#include "maage/gameplay.h"
 
 typedef struct maage_client_ui maage_client_ui;
 typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_GAMEPLAY 0U
 #define MAAGE_CLIENT_UI_PAUSE 1U
 #define MAAGE_CLIENT_UI_OPTIONS 2U
+#define MAAGE_CLIENT_UI_INVENTORY 3U
 #define MAAGE_CLIENT_UI_EXIT 1U
+#define MAAGE_CLIENT_UI_RESPAWN 2U
 #define MAAGE_CLIENT_UI_DEBUG_LINES 32
 #define MAAGE_CLIENT_UI_DEBUG_CHARACTERS 192
 
 typedef struct maage_client_ui_input {
-    int escape, f3, accept, previous, next, primary_pressed;
+    int escape, f3, accept, previous, next, primary_pressed, secondary_pressed, inventory;
     float mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
 } maage_client_ui_input;
 typedef struct maage_client_ui_debug {
@@ -30,8 +33,12 @@ typedef unsigned int (*maage_client_ui_screen_input)(maage_client_ui *ui,
 
 /* Owns one GUI atlas and reusable CPU batch; destroy before the renderer.
  * Resources resolve only here, from the existing reconstructed installation. */
-maage_client_ui *maage_client_ui_create(maage_renderer *renderer, const char *application_data);
+maage_client_ui *maage_client_ui_create(maage_renderer *renderer, const char *application_data,
+    const maage_pixel_buffer *block_atlas);
 void maage_client_ui_destroy(maage_client_ui *ui);
+/* Borrow finalized registries and owner-thread gameplay for HUD and inventory. */
+void maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,
+    maage_gameplay *game, const maage_block_registry *blocks);
 /* Registration grows direct numeric indexing before finalization. ID zero is
  * gameplay (no modal). Unknown IDs and navigation cycles fail explicitly. */
 int maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,

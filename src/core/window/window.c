@@ -170,6 +170,8 @@ maage_window_result maage_window_get_input(maage_window *window, maage_input_sna
     *input = window->input;
     memset(window->input.pressed, 0, sizeof(window->input.pressed));
     window->input.primary_pressed = 0;
+    window->input.secondary_pressed = 0;
+    window->input.scroll_y = 0;
     window->input.mouse_delta_x = window->input.mouse_delta_y = 0.0;
     return MAAGE_WINDOW_OK;
 }

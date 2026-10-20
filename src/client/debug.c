@@ -79,7 +79,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     double now, const maage_world *world, const maage_world_record *record,
     const maage_world_stats *stats, const maage_player *player, double yaw,
     double pitch, int radius, int paused, maage_renderer *renderer,
-    const maage_client_mesh_stats *meshes)
+    const maage_client_mesh_stats *meshes, const maage_gameplay *game)
 {
     maage_client_ui_debug *text = &debug->text;
     const maage_client_metadata *identity = maage_client_identity();
@@ -124,7 +124,21 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->left[left++], "Sections: %u resident", stats->loaded_sections);
     sprintf(text->left[left++], "Vertices: %lu  triangles: %lu", (unsigned long)meshes->vertices, (unsigned long)(meshes->indices / 3));
     sprintf(text->left[left++], "Pending columns: %u", stats->pending);
-    strcpy(text->left[left++], "Target: N/A (no targeting yet)");
+    if (game) {
+        if (game->has_target) {
+            sprintf(text->left[left++], "Target: %d %d %d  face: %u", game->target.x,
+                game->target.y, game->target.z, (unsigned int)game->target.face);
+            sprintf(text->left[left++], "Target ID: %lu  state: %lu", game->target.block_id, game->target.state_id);
+        } else strcpy(text->left[left++], "Target: N/A (none / unavailable)");
+        sprintf(text->left[left++], "Selected item: %lu  slot: %u",
+            game->inventory.slots[game->inventory.selected].item_id, game->inventory.selected + 1);
+        sprintf(text->left[left++], "Mode: %s%s", game->mode == MAAGE_GAME_MODE_CREATIVE ?
+            "Creative" : "Survival", game->flying ? " (flying)" : "");
+        sprintf(text->left[left++], "Health: %u / 20  hunger: %u / 20", game->health, game->hunger);
+        sprintf(text->left[left++], "Break: %.1f%%  reach: %.1f", game->break_progress * 100.0,
+            game->reach > 0 ? game->reach : (game->mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5));
+        sprintf(text->left[left++], "Mutations: %lu broken / %lu placed", game->blocks_broken, game->blocks_placed);
+    }
     sprintf(text->right[right++], "OS: %.48s / %.48s", identity->platform, identity->architecture);
     sprintf(text->right[right++], "Renderer: %s", maage_render_backend_name(maage_renderer_get_backend(renderer)));
     sprintf(text->right[right++], "GPU: %.144s", gpu ? gpu : "N/A");
@@ -147,6 +161,8 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->right[right++], "Completed: %lu", stats->completed_jobs);
     sprintf(text->right[right++], "Cancelled: %lu  stale: %lu", stats->cancelled_jobs, stats->stale_jobs);
     sprintf(text->right[right++], "Queue latency: %.2f ms", stats->scheduling_latency_ms);
+    sprintf(text->right[right++], "Mutations: %lu  rejected: %lu", stats->mutations, stats->rejected_mutations);
+    sprintf(text->right[right++], "Dirty columns: %u", stats->dirty_columns);
     text->left_count = left; text->right_count = right;
     return text;
 }

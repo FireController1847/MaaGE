@@ -1,4 +1,4 @@
-add_library(maage_world STATIC blocks.c chunk.c world.c mesh.c player.c
+add_library(maage_world STATIC blocks.c chunk.c world.c raycast.c mesh.c player.c items.c gameplay.c
     seed.c biomes.c generation.c lighting.c store.c)
 add_library(MaaGE::World ALIAS maage_world)
 maage_configure_portable_target(maage_world)

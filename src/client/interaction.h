@@ -1,0 +1,19 @@
+#ifndef MAAGE_CLIENT_INTERACTION_H
+#define MAAGE_CLIENT_INTERACTION_H
+#include "maage/gameplay.h"
+#include "maage/render.h"
+#include "resources.h"
+typedef struct maage_client_interaction_visual {
+    maage_render_mesh *mesh;
+    maage_world_target target;
+    int visible, stage;
+    float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CLIENT_TEXTURE_COUNT][4];
+} maage_client_interaction_visual;
+/* Copies pre-resolved crack UVs. The frame path uses bounded stack geometry and
+ * uploads only when the target or damage stage changes. */
+void maage_client_interaction_init(maage_client_interaction_visual *visual,
+    const maage_client_resources *resources);
+maage_render_result maage_client_interaction_update(maage_client_interaction_visual *visual,
+    maage_renderer *renderer, maage_render_texture *atlas,
+    const maage_world *world, const maage_gameplay *game);
+#endif

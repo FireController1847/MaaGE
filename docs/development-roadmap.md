@@ -2,9 +2,9 @@
 
 Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.4**
 implements the Phase 1 foundation, Phase 2 world milestone and Phase 2.5
-multithreaded architecture, extended by the Phase 2.75 UI foundation below.
+multithreaded architecture, Phase 2.75 UI and Phase 3 gameplay foundations below.
 Compilation does not establish runtime correctness or vanilla fidelity. Phases
-3–6 remain future work.
+4–6 remain future work; Phase 3 limitations are explicit below.
 
 ## Phase 1 — Rendering and Movement
 
@@ -277,13 +277,80 @@ AppKit/Win32/GTK controls:
 
 The ASCII font, compact layout, scaling, capture/navigation, pause behavior and
 Metal presentation require programmer runtime/visual verification. Non-macOS
-source paths remain uncompiled locally. Inventory, crafting, targeting, a full
-settings system and multiplayer menus remain future phases.
+source paths remain uncompiled locally. Phase 3 extends this UI with inventory,
+targeting and basic game-mode controls. Crafting, a full settings system and
+multiplayer menus remain future phases.
 
-## Phase 3 — Player Interaction
+## Phase 3 — Player Interaction, Inventory and Core Gameplay
 
-Planned: block raycasting, breaking/placement, hotbar/inventory, item stacks,
-creative/survival player state, health/hunger and basic world interactions.
+Implemented foundations extend the existing World, scheduler, input and Client UI:
+
+- **Targeting:** allocation-free numeric 3D DDA returns block/state IDs, face,
+  position, distance and selection AABB, including negative coordinates. Missing
+  columns stop targeting. Default reach is 5 blocks in Creative and 4.5 in Survival;
+  `--interaction-range=<positive blocks>` optionally overrides it, up to 64.
+  Twelve depth-tested black edges outline the target. Selection and collision use
+  separate registered shapes; current content remains full cubes.
+- **Mutations:** owner-thread expected-state edits copy a column and publish an
+  immutable replacement. Center/neighbor lighting and mesh revisions are
+  invalidated; stale jobs/results cannot replace newer edits. Resident dirty columns
+  save asynchronously, one writer per file; eviction retains unsaved data. GPU
+  uploads remain deferred, with unchanged meshes retained while replacements run.
+- **Breaking and placement:** Creative breaks instantly and places without
+  consumption or drops. Survival accumulates hardness/tool-based progress at
+  20 TPS, consumes placed stacks, applies tool durability where defined and
+  harvests basic numeric drops. Placement validates replaceability, loaded
+  destination, height and player AABB; numeric placement callbacks permit future
+  state orientation. Ten reconstructed damage textures are precomposited into
+  the atlas at initialization and drawn through the existing mesh pipeline.
+- **Items and inventory:** a finalized direct-index item registry supplies seven
+  usable block items (stone, grass, dirt, bedrock, sand, gravel and sandstone),
+  stack limits, block/icon states, display names and extensible tool properties.
+  Thirty-six fixed stack slots include the nine-slot hotbar, plus a cursor stack.
+  Left click moves/merges/swaps; right click splits or places one. Numeric screen
+  3 provides the classic storage layout and a paged Creative catalogue, reusing
+  reconstructed GUI textures and the prepared block atlas.
+- **Controls and HUD:** mouse buttons break/place; 1–9 and wheel select hotbar
+  slots; E opens/closes inventory; Escape pops the screen stack. Existing GUI
+  scaling, capture/focus behavior, crosshair and F3 remain. The hotbar shows actual
+  selection/icons/counts; Survival displays hearts and hunger. A shaded three-face
+  held-block presentation with a basic swing uses the existing UI batch.
+- **Game modes and vitals:** new worlds start Creative with registered block
+  stacks. Options or `--gamemode=creative|survival` selects mode; new Survival
+  worlds begin empty. Double-tap Space toggles collision-aware Creative flight;
+  Space/Shift ascends/descends. Survival tracks health, hunger, saturation,
+  exhaustion, fall damage, slow regeneration and starvation. Death opens Pause
+  with Respawn, retaining inventory at the session-start position.
+- **Drops:** ordinary successful harvests enter inventory immediately. Overflow
+  uses at most 64 numeric position/stack records and is collected within two
+  blocks; a full pickup pool prevents another overflowing break. These records
+  persist but have no rendered item entities, movement or despawn yet.
+- **Persistence:** CRC-protected atomic player metadata schema 2 stores inventory,
+  cursor, selected slot, mode, vitals, flight, fall distance, pickup records and
+  position/rotation. Schema-1 worlds load with empty Creative inventory and full
+  vitals, retaining seed/chunks. Numeric item mapping 1 fixes the seven current
+  IDs with metadata/damage zero; unknown mappings fail explicitly. Chunk format
+  and block/biome mappings remain 1. Final player metadata writes after rendering
+  stops and World flush succeeds; no player-file I/O runs in the frame loop.
+- **F3:** target IDs/face/position, selected item/slot, mode/flight, health/hunger,
+  reach/break progress, mutation totals and dirty columns join existing scheduler
+  diagnostics through bounded owner snapshots.
+
+This is an independent 1.7.10-style foundation, not gameplay or visual parity.
+Tools are defined by the API but none are registered yet, so bare-hand mining
+cannot harvest stone/sandstone. Drops are simplified (no cobblestone item, gravel
+flint chance or item-entity simulation). Hunger uses provisional walking/jump/
+mining costs, 80-tick regeneration/starvation and a one-health starvation floor;
+food, difficulty selection, armor, combat and crafting remain deferred. Respawn
+has no persistent bed/spawn point or death drops. Held blocks are perspective UI
+quads with fixed idle positioning, without an arm, equip animation or models.
+Cracks use opaque precompositing rather than vanilla's dedicated blend pass.
+Full-cube placement is the only current content behavior; fluids do not simulate.
+
+macOS ARM64 Debug/Release Client (native Metal) and portable headless Release
+World/Server compilation passed. No application, test, benchmark, UI/runtime
+validation or GitHub Actions run was performed. Windows/Linux input source
+changes remain uncompiled locally; Wayland gameplay input remains unsupported.
 
 ## Phase 4 — World Systems
 

@@ -2,10 +2,11 @@
 #include "maage/minecraft_assets.h"
 #include "maage/storage.h"
 #include "maage/log.h"
+#include "maage/items.h"
 #include <stdlib.h>
 #include <string.h>
 
-#define MAAGE_CLIENT_SOURCE_COUNT 14
+#define MAAGE_CLIENT_SOURCE_COUNT 24
 static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] = {
     "minecraft/textures/blocks/stone.png",
     "minecraft/textures/blocks/dirt.png",
@@ -20,7 +21,17 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/blocks/sandstone_normal.png",
     "minecraft/textures/colormap/foliage.png",
     "minecraft/textures/blocks/sandstone_top.png",
-    "minecraft/textures/blocks/sandstone_bottom.png"
+    "minecraft/textures/blocks/sandstone_bottom.png",
+    "minecraft/textures/blocks/destroy_stage_0.png",
+    "minecraft/textures/blocks/destroy_stage_1.png",
+    "minecraft/textures/blocks/destroy_stage_2.png",
+    "minecraft/textures/blocks/destroy_stage_3.png",
+    "minecraft/textures/blocks/destroy_stage_4.png",
+    "minecraft/textures/blocks/destroy_stage_5.png",
+    "minecraft/textures/blocks/destroy_stage_6.png",
+    "minecraft/textures/blocks/destroy_stage_7.png",
+    "minecraft/textures/blocks/destroy_stage_8.png",
+    "minecraft/textures/blocks/destroy_stage_9.png"
 };
 
 static void maage_client_colormap(const maage_image *map,
@@ -50,7 +61,7 @@ int maage_client_resources_load(const char *application_data,
     const float *tint;
     unsigned char *pixel, *source, *overlay;
     unsigned int channel, alpha, value;
-    int i, j, x, y, sx, sy, edge, tile, source_index, biome_id, ok = 0;
+    int i, j, x, y, sx, sy, edge, tile, source_index, biome_id, stage, ok = 0;
     if (!resources || !biomes || biomes->finalized) return 0;
     memset(sources, 0, sizeof(sources));
     memset(resources, 0, sizeof(*resources));
@@ -81,9 +92,9 @@ int maage_client_resources_load(const char *application_data,
     }
     tile = edge + 2;
     resources->image.width = tile * MAAGE_CLIENT_TEXTURE_COUNT;
-    resources->image.height = tile;
+    resources->image.height = tile * (1 + MAAGE_CLIENT_BREAK_STAGES);
     resources->image.stride = (size_t)resources->image.width * 4;
-    resources->image.pixels = (unsigned char *)malloc(resources->image.stride * (size_t)tile);
+    resources->image.pixels = (unsigned char *)malloc(resources->image.stride * (size_t)resources->image.height);
     if (!resources->image.pixels) goto done;
     for (i = 0; i < MAAGE_CLIENT_TEXTURE_COUNT; ++i) {
         biome_id = i >= 11 ? (i - 11) / 2 : MAAGE_BIOME_PLAINS;
@@ -121,9 +132,29 @@ int maage_client_resources_load(const char *application_data,
             }
         }
         resources->uv[i][0] = (float)(i * tile + 1) / resources->image.width;
-        resources->uv[i][1] = 1.0f / tile;
+        resources->uv[i][1] = 1.0f / resources->image.height;
         resources->uv[i][2] = (float)(i * tile + 1 + edge) / resources->image.width;
-        resources->uv[i][3] = (float)(1 + edge) / tile;
+        resources->uv[i][3] = (float)(1 + edge) / resources->image.height;
+        /* Composite cracks at initialization so the existing opaque mesh path
+         * can draw damage without acquiring resources during interaction. */
+        for (stage = 0; stage < MAAGE_CLIENT_BREAK_STAGES; ++stage) {
+            for (y = 0; y < tile; ++y) {
+                sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
+                for (x = 0; x < tile; ++x) {
+                    sx = x == 0 ? 0 : (x > edge ? edge - 1 : x - 1);
+                    source = resources->image.pixels + (size_t)y * resources->image.stride + (size_t)(i * tile + x) * 4;
+                    pixel = source + (size_t)(stage + 1) * tile * resources->image.stride;
+                    overlay = sources[14 + stage].pixels + (size_t)sy * sources[14 + stage].stride + (size_t)sx * 4;
+                    for (channel = 0; channel < 3; ++channel)
+                        pixel[channel] = (unsigned char)((unsigned int)source[channel] *
+                            (255U - overlay[3] + (unsigned int)overlay[channel] * overlay[3] / 255U) / 255U);
+                    pixel[3] = source[3];
+                }
+            }
+            memcpy(resources->breaking_uv[stage][i], resources->uv[i], sizeof(resources->uv[i]));
+            resources->breaking_uv[stage][i][1] += (float)(stage + 1) / (1 + MAAGE_CLIENT_BREAK_STAGES);
+            resources->breaking_uv[stage][i][3] += (float)(stage + 1) / (1 + MAAGE_CLIENT_BREAK_STAGES);
+        }
     }
     resources->atlas.pixels = resources->image.pixels;
     resources->atlas.width = resources->image.width;
@@ -169,6 +200,8 @@ maage_block_registry *maage_client_register_blocks(
     static const char *const names[] = {"minecraft:air", "minecraft:stone", "minecraft:grass", "minecraft:dirt", "minecraft:bedrock", "minecraft:water", "minecraft:sand", "minecraft:gravel", "minecraft:sandstone"};
     static const maage_block_id ids[] = {0, 1, 2, 3, 7, 9, 12, 13, 24};
     static const int textures[] = {0, 0, 2, 1, 4, 5, 6, 7, 8};
+    static const double hardness[] = {0, 1.5, 0.6, 0.5, -1, 100, 0.5, 0.6, 0.8};
+    static const unsigned long drops[] = {0, 1, 3, 3, 0, 0, 12, 13, 24};
     maage_block_registry *registry;
     maage_block_definition block;
     int i;
@@ -176,9 +209,23 @@ maage_block_registry *maage_client_register_blocks(
     registry = maage_block_registry_create(32, 512);
     if (!registry) return NULL;
     for (i = 0; i < 9; ++i) {
+        memset(&block, 0, sizeof(block));
         block.id = ids[i];
         block.solid = block.opaque = ids[i] != MAAGE_BLOCK_AIR && ids[i] != MAAGE_BLOCK_WATER;
         block.emitted_light = 0;
+        block.selectable = block.solid;
+        block.replaceable = !block.solid;
+        block.hardness = hardness[i];
+        block.drop_item_id = drops[i]; block.drop_count = drops[i] ? 1U : 0U;
+        if (ids[i] == MAAGE_BLOCK_STONE || ids[i] == MAAGE_BLOCK_SANDSTONE) {
+            block.required_tool = MAAGE_TOOL_PICKAXE; block.required_tool_level = 1;
+        } else if (ids[i] == MAAGE_BLOCK_GRASS || ids[i] == MAAGE_BLOCK_DIRT ||
+            ids[i] == MAAGE_BLOCK_SAND || ids[i] == MAAGE_BLOCK_GRAVEL)
+            block.required_tool = MAAGE_TOOL_SHOVEL;
+        if (block.solid) {
+            block.collision_shape.maximum[0] = block.collision_shape.maximum[1] = block.collision_shape.maximum[2] = 1;
+            block.selection_shape = block.collision_shape;
+        }
         if (maage_block_registry_register_block(registry, names[i], &block) != MAAGE_REGISTRY_OK ||
             !maage_client_register_state(registry, resources, ids[i], ids[i], 0, textures[i], -1)) goto failed;
     }

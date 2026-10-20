@@ -18,10 +18,12 @@
 #define MAAGE_CLIENT_TEXTURE_BIOME_TOP(id) (11 + 2 * (id))
 #define MAAGE_CLIENT_TEXTURE_BIOME_SIDE(id) (12 + 2 * (id))
 #define MAAGE_CLIENT_TEXTURE_COUNT (11 + 2 * MAAGE_BIOME_COUNT)
+#define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
     maage_image image;
     maage_pixel_buffer atlas;
     float uv[MAAGE_CLIENT_TEXTURE_COUNT][4];
+    float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CLIENT_TEXTURE_COUNT][4];
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
 int maage_client_resources_load(const char *application_data,

@@ -1,0 +1,57 @@
+#ifndef MAAGE_GAMEPLAY_H
+#define MAAGE_GAMEPLAY_H
+#include "maage/items.h"
+#include "maage/player.h"
+
+enum { MAAGE_GAME_MODE_SURVIVAL = 0, MAAGE_GAME_MODE_CREATIVE = 1 };
+#define MAAGE_GAMEPLAY_PICKUPS 64U
+typedef struct maage_gameplay_pickup {
+    maage_item_stack stack;
+    double position[3];
+} maage_gameplay_pickup;
+/* Versioned persistence payload: numeric item mapping version 1 preserves the
+ * seven currently usable legacy block item IDs, metadata zero. */
+typedef struct maage_gameplay_save {
+    maage_inventory inventory;
+    unsigned int mode, health, hunger;
+    double saturation, exhaustion, fall_distance;
+    int flying;
+    maage_gameplay_pickup pickups[MAAGE_GAMEPLAY_PICKUPS];
+} maage_gameplay_save;
+typedef struct maage_gameplay {
+    maage_inventory inventory;
+    unsigned int mode, health, hunger;
+    double saturation, exhaustion, fall_distance;
+    int flying;
+    maage_gameplay_pickup pickups[MAAGE_GAMEPLAY_PICKUPS];
+    maage_world_target target, breaking;
+    int has_target, breaking_active;
+    double break_progress, swing, reach;
+    unsigned int use_delay, break_delay, jump_window, hunger_ticks;
+    unsigned long ticks, blocks_broken, blocks_placed;
+} maage_gameplay;
+typedef struct maage_gameplay_intent {
+    maage_player_input movement;
+    double pitch;
+    int attack, use, jump_pressed, descend;
+} maage_gameplay_intent;
+
+void maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
+int maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
+/* Foundation respawn returns to the session's start and retains inventory;
+ * persistent spawn points and full death-drop rules are deferred. */
+void maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
+    const maage_world *world);
+void maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
+int maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
+    const maage_gameplay_save *save);
+/* Owner-thread targeting may run every frame. Reach zero uses classic 5/4.5
+ * Creative/Survival blocks; positive configured reach is bounded to 64. */
+void maage_gameplay_target(maage_gameplay *game, const maage_player *player,
+    const maage_world *world, double yaw, double pitch);
+/* One 20 TPS owner-thread simulation phase: movement, damage, interactions.
+ * No graphics, filesystem I/O, worker waits, or string identity operations. */
+void maage_gameplay_tick(maage_gameplay *game, maage_player *player,
+    maage_world *world, const maage_item_registry *items,
+    const maage_gameplay_intent *intent);
+#endif

@@ -53,11 +53,23 @@ typedef struct maage_block_face_definition {
     float tint[4];
 } maage_block_face_definition;
 
+/* Local voxel coordinates; selection and collision may differ. Empty shapes
+ * are permitted only when the corresponding behavior is disabled. */
+typedef struct maage_block_shape {
+    double minimum[3], maximum[3];
+} maage_block_shape;
+
 typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
     int opaque;
     unsigned int emitted_light; /* 0..15; resolved during registration. */
+    int selectable, replaceable;
+    double hardness; /* Negative: unbreakable in Survival. */
+    unsigned int required_tool, required_tool_level;
+    unsigned long drop_item_id; /* Item domain, resolved at registration. */
+    unsigned int drop_count;
+    maage_block_shape collision_shape, selection_shape;
 } maage_block_definition;
 
 typedef struct maage_block_state_definition {

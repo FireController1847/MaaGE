@@ -46,7 +46,7 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
 void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float red, float green, float blue, float alpha)
 {
-    const float white = 511.5f / MAAGE_CLIENT_UI_ATLAS_EDGE;
+    const float white = (MAAGE_CLIENT_UI_ATLAS_EDGE - 0.5f) / MAAGE_CLIENT_UI_ATLAS_EDGE;
     maage_client_ui_rectangle(ui, rectangle, white, white, white, white, red, green, blue, alpha);
 }
 
@@ -79,4 +79,29 @@ void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle,
         MAAGE_CLIENT_UI_CENTER, 0.22f, 0.22f, 0.22f);
     maage_client_ui_text(ui, label, center, rectangle.y + 6,
         MAAGE_CLIENT_UI_CENTER, highlighted ? 1 : 0.88f, highlighted ? 1 : 0.88f, highlighted ? 0.63f : 0.88f);
+}
+
+/* The GPU clips held-item faces; no world or texture work. */
+void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
+    const float uv[4], float shade)
+{
+    static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
+    maage_render_ui_vertex *vertex;
+    size_t first, i;
+    if (!ui || ui->batch.vertex_count + 4 > MAAGE_CLIENT_UI_QUADS * 4) {
+        if (ui) ui->overflow = 1;
+        return;
+    }
+    first = ui->batch.vertex_count;
+    for (i = 0; i < 4; ++i) {
+        vertex = &ui->vertices[first + i];
+        vertex->position[0] = positions[i][0]; vertex->position[1] = positions[i][1];
+        vertex->uv[0] = i == 0 || i == 3 ? uv[0] : uv[2];
+        vertex->uv[1] = i < 2 ? uv[1] : uv[3];
+        vertex->color[0] = vertex->color[1] = vertex->color[2] = shade;
+        vertex->color[3] = 1;
+    }
+    for (i = 0; i < 6; ++i)
+        ui->indices[ui->batch.index_count + i] = (unsigned int)first + order[i];
+    ui->batch.vertex_count += 4; ui->batch.index_count += 6;
 }

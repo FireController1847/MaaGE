@@ -5,11 +5,13 @@
 #include "maage/minecraft_assets.h"
 #include "maage/time.h"
 #include "maage/player.h"
+#include "maage/gameplay.h"
 #include "maage/world_store.h"
 #include "maage/log.h"
 #include "resources.h"
 #include "ui/ui.h"
 #include "debug.h"
+#include "interaction.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -26,7 +28,8 @@ typedef struct maage_client_world_options {
     const char *id, *name;
     maage_world_seed seed;
     unsigned int workers;
-    int create, seeded, radius;
+    int create, seeded, radius, mode;
+    double reach;
 } maage_client_world_options;
 typedef struct maage_client_chunk_mesh {
     int x, z, used;
@@ -43,7 +46,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     char *end;
     long value;
     unsigned long workers;
-    memset(options, 0, sizeof(*options)); options->radius = 3;
+    memset(options, 0, sizeof(*options)); options->radius = 3; options->mode = -1;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
         if (!strncmp(argument, "--world=", 8)) {
@@ -68,9 +71,17 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             errno = 0; workers = strtoul(argument + 16, &end, 10);
             if (errno || *end || workers > UINT_MAX) return 0;
             options->workers = (unsigned int)workers;
+        } else if (!strncmp(argument, "--gamemode=", 11)) {
+            if (!strcmp(argument + 11, "creative")) options->mode = MAAGE_GAME_MODE_CREATIVE;
+            else if (!strcmp(argument + 11, "survival")) options->mode = MAAGE_GAME_MODE_SURVIVAL;
+            else return 0;
+        } else if (!strncmp(argument, "--interaction-range=", 20)) {
+            errno = 0; options->reach = strtod(argument + 20, &end);
+            if (errno || !argument[20] || *end || !(options->reach > 0 && options->reach <= 64)) return 0;
         } else if (!strcmp(argument, "--world") || !strcmp(argument, "--create-world") ||
             !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance") ||
-            !strcmp(argument, "--world-workers")) return 0;
+            !strcmp(argument, "--world-workers") || !strcmp(argument, "--gamemode") ||
+            !strcmp(argument, "--interaction-range")) return 0;
     }
     if (options->seeded && options->id && !options->create) return 0;
     if (options->name && !options->create && !options->seeded) return 0;
@@ -173,10 +184,14 @@ int maage_client_run(int argc, char *const argv[])
     maage_client_debug debug;
     maage_client_mesh_stats mesh_stats;
     maage_block_registry *registry = NULL;
+    maage_item_registry *items = NULL;
+    maage_gameplay game;
+    maage_gameplay_intent intent;
+    maage_client_interaction_visual interaction;
     maage_world *world = NULL;
     maage_world_store *store = NULL;
     maage_client_chunk_mesh cache[MAAGE_WORLD_MAX_CHUNKS];
-    const maage_render_mesh *draws[MAAGE_WORLD_MAX_CHUNKS];
+    const maage_render_mesh *draws[MAAGE_WORLD_MAX_CHUNKS + 1];
     maage_client_world_options options;
     maage_client_resources resources;
     maage_biome_registry biomes;
@@ -187,20 +202,22 @@ int maage_client_run(int argc, char *const argv[])
     maage_window_state state;
     maage_input_snapshot input;
     maage_player player, previous;
-    maage_player_input movement;
     maage_render_desc render_config;
     maage_window_result result = MAAGE_WINDOW_OK;
     maage_render_result rendered = MAAGE_RENDER_OK;
     char directory[MAAGE_PATH_CAPACITY], error[256], seed_text[32];
     double last, now, elapsed, raw_elapsed, accumulator = 0, alpha, eye[3], yaw = 0, pitch = 0, diagnostic_time;
     double tick_start = 0, tick_seconds, frame_end;
+    double wheel = 0;
     float matrix[16];
     size_t draw_count;
     unsigned long frames = 0, tick_count;
     unsigned ui_actions;
     int ok = 0, initial_capture = 1, active, was_active = 0, jump_pending = 0, axis;
     int player_ready = 0, cx, cz, i, was_modal, was_focused = 0;
+    int attack_pending = 0, use_pending = 0;
     memset(&resources, 0, sizeof(resources)); memset(cache, 0, sizeof(cache)); memset(&debug, 0, sizeof(debug));
+    memset(&interaction, 0, sizeof(interaction)); memset(&intent, 0, sizeof(intent));
     maage_render_desc_init(&render_config);
     rendered = maage_render_desc_parse_args(argc, argv, &render_config);
     if (rendered != MAAGE_RENDER_OK) goto done;
@@ -215,6 +232,9 @@ int maage_client_run(int argc, char *const argv[])
     if (!maage_client_resources_load(directory, &resources, &biomes) || !maage_biome_registry_finalize(&biomes)) goto done;
     registry = maage_client_register_blocks(&resources, &biomes);
     if (!registry) { maage_log_error("maage.client.world", "Block registration failed."); goto done; }
+    items = maage_item_registry_create_builtin(registry);
+    if (!items) { maage_log_error("maage.client.gameplay", "Item registration failed."); goto done; }
+    maage_gameplay_init(&game, items);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) goto window_failed;
     maage_window_config_init(&window_config); window_config.title = "MaaGE Client"; window_config.visible = 0;
@@ -225,8 +245,9 @@ int maage_client_run(int argc, char *const argv[])
     if (rendered != MAAGE_RENDER_OK) goto done;
     rendered = maage_renderer_create_texture(renderer, &resources.atlas, &atlas);
     if (rendered != MAAGE_RENDER_OK) goto done;
+    maage_client_interaction_init(&interaction, &resources);
+    ui = maage_client_ui_create(renderer, directory, &resources.atlas);
     maage_client_resources_destroy(&resources);
-    ui = maage_client_ui_create(renderer, directory);
     if (!ui || !maage_client_ui_finalize(ui)) { maage_log_error("maage.client.ui", "Cannot initialize Client GUI resources or screen registry."); goto done; }
     maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
     if (!maage_world_store_open(directory, options.id, options.create, options.name,
@@ -242,6 +263,17 @@ int maage_client_run(int argc, char *const argv[])
     if (!world) { maage_log_error("maage.client.world", "World worker pool initialization failed."); goto done; }
     maage_world_get_stats(world, &stats);
     maage_player_spawn(&player, world); previous = player; player_ready = 1;
+    if (!maage_gameplay_restore(&game, items, &record.gameplay)) {
+        maage_log_error("maage.client.gameplay", "Saved player gameplay data does not match registered items."); player_ready = 0; goto done;
+    }
+    if (record.new_world) maage_gameplay_init(&game, items);
+    if (options.mode >= 0) {
+        maage_gameplay_set_mode(&game, (unsigned int)options.mode);
+        if (record.new_world && options.mode == MAAGE_GAME_MODE_SURVIVAL)
+            memset(&game.inventory, 0, sizeof(game.inventory));
+    }
+    game.reach = options.reach;
+    maage_client_ui_set_gameplay(ui, items, &game, registry);
     yaw = record.yaw; pitch = record.pitch;
     maage_world_seed_format(record.seed, seed_text, sizeof(seed_text));
     maage_log_info("maage.client.world", "%s world %s; seed=%s; generator=1; render distance=%d; workers=%u. Loading nearby columns asynchronously.",
@@ -253,7 +285,7 @@ int maage_client_run(int argc, char *const argv[])
     if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED) goto done;
     result = maage_window_set_visible(window, 1);
     if (result != MAAGE_WINDOW_OK) goto window_failed;
-    maage_log_info("maage.client", "WASD to walk, Space to jump, Escape for Pause/Back, F3 for diagnostics. Unavailable columns block movement until loaded.");
+    maage_log_info("maage.client", "WASD walks; Space jumps (double tap for Creative flight), Shift descends; mouse buttons break/place; 1-9 or wheel selects; E opens inventory; Escape returns; F3 shows diagnostics. Options selects game mode. Unavailable columns block interaction and movement.");
     last = maage_time_monotonic_seconds(); diagnostic_time = last;
     if (last < 0) goto clock_failed;
     for (;;) {
@@ -273,6 +305,8 @@ int maage_client_run(int argc, char *const argv[])
             ui_input.previous = input.pressed[MAAGE_INPUT_KEY_UP];
             ui_input.next = input.pressed[MAAGE_INPUT_KEY_TAB] || input.pressed[MAAGE_INPUT_KEY_DOWN];
             ui_input.primary_pressed = input.primary_pressed;
+            ui_input.secondary_pressed = input.secondary_pressed;
+            ui_input.inventory = input.pressed[MAAGE_INPUT_KEY_E];
         }
         ui_input.mouse_x = (float)input.mouse_x; ui_input.mouse_y = (float)input.mouse_y;
         maage_client_ui_set_safe_area(ui, &state.safe_area);
@@ -282,6 +316,10 @@ int maage_client_run(int argc, char *const argv[])
         }
         was_focused = input.focused;
         if (ui_actions & MAAGE_CLIENT_UI_EXIT) { ok = 1; break; }
+        if (ui_actions & MAAGE_CLIENT_UI_RESPAWN) {
+            maage_gameplay_respawn(&game, &player, world); previous = player;
+            maage_client_ui_back(ui);
+        }
         if (maage_client_ui_modal(ui)) {
             initial_capture = 0;
             if (input.captured) result = maage_window_capture_mouse(window, 0);
@@ -317,23 +355,54 @@ int maage_client_run(int argc, char *const argv[])
             pitch += input.mouse_delta_y * MAAGE_CLIENT_MOUSE_RADIANS;
             if (pitch > MAAGE_CLIENT_PITCH_LIMIT) pitch = MAAGE_CLIENT_PITCH_LIMIT;
             if (pitch < -MAAGE_CLIENT_PITCH_LIMIT) pitch = -MAAGE_CLIENT_PITCH_LIMIT;
-            movement.forward = (double)(input.keys[MAAGE_INPUT_KEY_W] - input.keys[MAAGE_INPUT_KEY_S]);
-            movement.strafe = (double)(input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
+            intent.movement.forward = (double)(input.keys[MAAGE_INPUT_KEY_W] - input.keys[MAAGE_INPUT_KEY_S]);
+            intent.movement.strafe = (double)(input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
             if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_pending = 1;
-            movement.yaw = yaw; movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE] || jump_pending;
+            if (!was_modal) {
+                if (input.primary_pressed) attack_pending = 1;
+                if (input.secondary_pressed) use_pending = 1;
+            }
+            for (i = 0; i < (int)MAAGE_HOTBAR_SLOTS; ++i)
+                if (input.pressed[MAAGE_INPUT_KEY_1 + i]) game.inventory.selected = (unsigned int)i;
+            wheel += input.scroll_y;
+            if (wheel >= 1 || wheel <= -1) {
+                wheel = fmod(wheel, (double)MAAGE_HOTBAR_SLOTS);
+                i = (int)wheel;
+                game.inventory.selected = (unsigned int)(((int)game.inventory.selected - i + 9) % 9);
+                wheel -= i;
+            }
+            intent.movement.yaw = yaw; intent.pitch = pitch;
+            intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
             if (maage_world_chunk_loaded(world, cx, cz)) accumulator += elapsed;
             else { accumulator = 0; previous = player; }
             if (accumulator >= MAAGE_PLAYER_TICK_SECONDS) tick_start = maage_time_monotonic_seconds();
             while (accumulator >= MAAGE_PLAYER_TICK_SECONDS) {
-                previous = player; maage_player_tick(&player, world, &movement); accumulator -= MAAGE_PLAYER_TICK_SECONDS; ++tick_count;
-                jump_pending = 0; movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE];
+                intent.movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE] || jump_pending;
+                intent.jump_pressed = jump_pending;
+                intent.attack = !was_modal && (input.primary_down || attack_pending);
+                intent.use = !was_modal && (input.secondary_down || use_pending);
+                previous = player; maage_gameplay_tick(&game, &player, world, items, &intent);
+                accumulator -= MAAGE_PLAYER_TICK_SECONDS; ++tick_count;
+                jump_pending = attack_pending = use_pending = 0;
+                if (!game.health && game.mode == MAAGE_GAME_MODE_SURVIVAL) {
+                    maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
+                    accumulator = 0; break;
+                }
             }
             if (tick_count) {
                 tick_seconds = maage_time_monotonic_seconds() - tick_start;
                 if (tick_start < 0 || tick_seconds < 0) goto clock_failed;
             }
             alpha = accumulator / MAAGE_PLAYER_TICK_SECONDS;
-        } else { accumulator = 0; previous = player; alpha = 1; jump_pending = 0; }
+        } else {
+            accumulator = 0; previous = player; alpha = 1; jump_pending = attack_pending = use_pending = 0;
+            game.breaking_active = 0; game.break_progress = 0; wheel = 0;
+        }
+        if (!game.health && game.mode == MAAGE_GAME_MODE_SURVIVAL && !maage_client_ui_modal(ui))
+            maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
+        maage_gameplay_target(&game, &player, world, yaw, pitch);
+        rendered = maage_client_interaction_update(&interaction, renderer, atlas, world, &game);
+        if (rendered != MAAGE_RENDER_OK) goto done;
         for (axis = 0; axis < 3; ++axis) eye[axis] = previous.position[axis] + (player.position[axis] - previous.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
         if (state.resized) maage_renderer_resize(renderer);
@@ -342,8 +411,9 @@ int maage_client_run(int argc, char *const argv[])
             draws[draw_count++] = cache[i].mesh; ++mesh_stats.meshes;
             mesh_stats.vertices += cache[i].vertices; mesh_stats.indices += cache[i].indices;
         }
+        if (interaction.mesh) draws[draw_count++] = interaction.mesh;
         debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, world, &record,
-            &stats, &player, yaw, pitch, options.radius, !active, renderer, &mesh_stats) : NULL;
+            &stats, &player, yaw, pitch, options.radius, !active, renderer, &mesh_stats, &game) : NULL;
         ui_draw = maage_client_ui_draw(ui, debug_text);
         if (!ui_draw) { maage_log_error("maage.client.ui", "Client UI batch could not be constructed."); goto done; }
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
@@ -381,15 +451,20 @@ done:
         maage_log_error("maage.client", "Renderer failed: %s. Gameplay requires textured mesh support in the selected family.", maage_render_result_string(rendered));
     if (window) maage_window_capture_mouse(window, 0);
     /* Waiting and final player metadata I/O occur only after rendering stops. */
-    if (world && !maage_world_flush(world)) { maage_log_error("maage.client.world", "World shutdown reported a generation, loading or save failure."); ok = 0; }
-    if (store && player_ready && !maage_world_store_save_player(store, player.position, yaw, pitch, error)) {
+    if (world && !maage_world_flush(world)) {
+        maage_log_error("maage.client.world", "World shutdown reported a generation, loading or save failure; existing player metadata is preserved.");
+        ok = 0; player_ready = 0;
+    }
+    if (store && player_ready && !maage_world_store_save_gameplay(store, player.position, yaw, pitch, &game, items, error)) {
         maage_log_error("maage.client.world", "%s", error); ok = 0;
     }
     for (i = 0; i < MAAGE_WORLD_MAX_CHUNKS; ++i) maage_render_mesh_destroy(cache[i].mesh);
+    maage_render_mesh_destroy(interaction.mesh);
     maage_client_ui_destroy(ui); maage_render_texture_destroy(atlas); maage_renderer_destroy(renderer);
     if (window) maage_window_destroy(window);
     if (system) maage_window_system_destroy(system);
     maage_world_destroy(world); maage_world_store_close(store); maage_block_registry_destroy(registry);
+    maage_item_registry_destroy(items);
     maage_client_resources_destroy(&resources);
     return ok ? 0 : 1;
 }

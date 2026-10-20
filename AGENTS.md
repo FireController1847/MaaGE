@@ -82,6 +82,9 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   numeric indexing; generation, streaming and lighting never compare names.
   Preserve 1.7.10 IDs/metadata where
   practical without permanently limiting ID capacity to the legacy format.
+- Item types have their own immutable numeric registry, independent of block/state
+  IDs. Portable fixed-size stacks carry count, metadata and damage; inventory and
+  simulation never resolve names. Display names remain presentation data.
 - Finalize registries before gameplay. Definitions then remain immutable;
   unknown/unregistered numeric IDs return explicit failure, never unrelated blocks.
   Name hashing is collision-checked at registration/import only and has expected,
@@ -145,7 +148,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 - Client-owned `src/client/ui/` remains separate from native Launcher widgets.
   Register screens before finalization through numeric IDs and direct O(1)
-  indexing; gameplay/HUD is ID 0, Pause 1 and Options 2. Navigation uses a numeric
+  indexing; gameplay/HUD is ID 0, Pause 1, Options 2 and Inventory 3. Navigation uses a numeric
   stack: submenus push, Back/Escape pops, and the root returns to gameplay.
   Unknown IDs and navigation cycles fail explicitly. No runtime name lookup.
 - Keep registration/navigation, input routing, immediate drawing primitives,
@@ -163,6 +166,25 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   may copy bounded numeric job states; never read worker-owned output fields.
   Diagnostic text/names are presentation only, never gameplay identifier lookup.
   Omit unavailable data or report N/A; resident sections are not visibility counts.
+
+### Player interaction and inventory
+
+- `MaaGE::World` owns portable item/inventory and Creative/Survival rules alongside
+  movement. Owner-thread 20 TPS intents control breaking, placement, vitals and
+  bounded pickups; Client owns native input, camera, GUI and visual feedback.
+- Shape-aware numeric DDA stops at unavailable terrain. Definitions resolve
+  hardness, tool requirements, drops and separate selection/collision AABBs before
+  gameplay. Placement-state callbacks consume numeric metadata and face inputs.
+- All block changes use owner-thread expected-state mutations that publish copied
+  immutable columns, invalidate lighting/neighbor mesh revisions and reject stale
+  jobs/uploads. Retain asynchronous saves and dirty-eviction protection; never
+  mutate worker-borrowed storage or introduce a global World lock.
+- Player metadata schema 2 preserves numeric inventory/cursor, selected slot, mode,
+  vitals, flight, pickups and position/rotation; schema 1 migrates without changing
+  chunk mapping 1. Mapping changes require explicit migration. Save final player
+  metadata only after rendering and successful World flush. Respawn currently
+  retains inventory at session-start position; full death/entity/food rules remain
+  provisional against Java Edition 1.7.10.
 
 ### Mandatory token-efficient development
 
@@ -219,7 +241,7 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   authentication or implement remote distribution until requested.
   The Client extends Phase 1 movement/rendering with persistent seeded chunk
   streaming, numeric biomes, basic lighting, Phase 2.5 asynchronous World jobs,
-  and Phase 2.75 HUD/F3/Pause UI;
+  Phase 2.75 HUD/F3/Pause UI and Phase 3 interaction/inventory/gameplay foundations;
   see `docs/development-roadmap.md` for implemented versus provisional behavior.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,

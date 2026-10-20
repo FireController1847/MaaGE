@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 
 typedef struct maage_block_slot {
     maage_block_definition definition;
@@ -128,10 +129,23 @@ maage_registry_result maage_block_registry_register_block(
     size_t length;
     int found;
     char *copy;
+    int axis;
     if (registry == NULL || definition == NULL) return MAAGE_REGISTRY_INVALID;
     if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
     if (definition->id >= registry->block_capacity || definition->emitted_light > 15 ||
         !maage_block_name_valid(external_name)) return MAAGE_REGISTRY_INVALID;
+    if (!(definition->hardness >= -DBL_MAX && definition->hardness <= DBL_MAX))
+        return MAAGE_REGISTRY_INVALID;
+    for (axis = 0; axis < 3; ++axis) {
+        if (definition->solid && !(definition->collision_shape.minimum[axis] >= 0.0 &&
+            definition->collision_shape.maximum[axis] <= 1.0 &&
+            definition->collision_shape.minimum[axis] < definition->collision_shape.maximum[axis]))
+            return MAAGE_REGISTRY_INVALID;
+        if (definition->selectable && !(definition->selection_shape.minimum[axis] >= 0.0 &&
+            definition->selection_shape.maximum[axis] <= 1.0 &&
+            definition->selection_shape.minimum[axis] < definition->selection_shape.maximum[axis]))
+            return MAAGE_REGISTRY_INVALID;
+    }
     if (registry->blocks[definition->id].name != NULL)
         return MAAGE_REGISTRY_DUPLICATE;
     bucket = maage_block_name_bucket(registry, external_name, &found);

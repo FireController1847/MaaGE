@@ -51,6 +51,8 @@ typedef struct maage_world_stats {
     unsigned int io_queued, io_running;
     unsigned long generated, loaded_from_disk, meshes;
     unsigned long completed_jobs, cancelled_jobs, stale_jobs;
+    unsigned long mutations, rejected_mutations;
+    unsigned int dirty_columns;
     double scheduling_latency_ms;
     int failed;
 } maage_world_stats;
@@ -65,6 +67,21 @@ typedef struct maage_world_mesh_update {
     unsigned long revision;
     maage_world_mesh *mesh; /* ownership transfers to caller */
 } maage_world_mesh_update;
+typedef struct maage_world_target {
+    int x, y, z;
+    maage_block_state_id state_id;
+    maage_block_id block_id;
+    maage_block_face face;
+    double distance;
+    maage_block_shape bounds; /* Local selection shape. */
+} maage_world_target;
+typedef enum maage_world_mutation_result {
+    MAAGE_WORLD_MUTATION_OK = 0,
+    MAAGE_WORLD_MUTATION_UNAVAILABLE,
+    MAAGE_WORLD_MUTATION_STALE,
+    MAAGE_WORLD_MUTATION_INVALID,
+    MAAGE_WORLD_MUTATION_OUT_OF_MEMORY
+} maage_world_mutation_result;
 /* Floor division/positive modulo, including negative world coordinates. */
 int maage_world_chunk_coordinate(int coordinate);
 int maage_world_local_coordinate(int coordinate);
@@ -89,7 +106,7 @@ int maage_world_observe(const maage_world *world, int x, int y, int z,
 int maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update);
 /* Validate a detached CPU mesh immediately before owner-thread GPU upload. */
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision);
-int maage_world_chunk_loaded(maage_world *world, int x, int z);
+int maage_world_chunk_loaded(const maage_world *world, int x, int z);
 /* Blocking lifecycle boundary only: cancel obsolete work, finish saves and join
  * the pool. Never call inside the render loop. Zero means a failed world/save. */
 int maage_world_flush(maage_world *world);
@@ -100,6 +117,20 @@ void maage_world_spawn(const maage_world *world, double feet[3]);
  * for collision, preventing falls/teleports. Only complete columns are visible. */
 maage_block_state_id maage_world_get(const maage_world *world, int x, int y, int z);
 int maage_world_solid(const maage_world *world, int x, int y, int z);
+/* Allocation-free DDA through selection shapes. Direction is normalized here;
+ * range and returned distance are blocks. Missing columns stop traversal with
+ * -1, never permit targeting through unavailable terrain. 0 miss, 1 hit. */
+int maage_world_raycast(const maage_world *world, const double origin[3],
+    const double direction[3], double range, maage_world_target *target);
+/* Owner simulation phase only. Compare expected numeric state, then publish a
+ * private copy; workers retain their old immutable snapshots. Invalidates
+ * lighting/meshes and obsolete jobs without waiting. No filesystem work. */
+maage_world_mutation_result maage_world_set(maage_world *world,
+    int x, int y, int z, maage_block_state_id expected,
+    maage_block_state_id replacement);
+/* Local AABB; unavailable cells are full-cube collision barriers. */
+int maage_world_collision_shape(const maage_world *world, int x, int y, int z,
+    maage_block_shape *shape);
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh);
 void maage_world_mesh_destroy(maage_world_mesh *mesh);
 #ifdef __cplusplus

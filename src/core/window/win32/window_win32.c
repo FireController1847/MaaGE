@@ -36,6 +36,17 @@ static int maage_win32_key(LPARAM code)
     case 0x0f: return MAAGE_INPUT_KEY_TAB;
     case 0x48: return MAAGE_INPUT_KEY_UP;
     case 0x50: return MAAGE_INPUT_KEY_DOWN;
+    case 0x12: return MAAGE_INPUT_KEY_E;
+    case 0x02: return MAAGE_INPUT_KEY_1;
+    case 0x03: return MAAGE_INPUT_KEY_2;
+    case 0x04: return MAAGE_INPUT_KEY_3;
+    case 0x05: return MAAGE_INPUT_KEY_4;
+    case 0x06: return MAAGE_INPUT_KEY_5;
+    case 0x07: return MAAGE_INPUT_KEY_6;
+    case 0x08: return MAAGE_INPUT_KEY_7;
+    case 0x09: return MAAGE_INPUT_KEY_8;
+    case 0x0a: return MAAGE_INPUT_KEY_9;
+    case 0x2a: case 0x36: return MAAGE_INPUT_KEY_SHIFT;
     default: return -1;
     }
 }
@@ -58,10 +69,16 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
             maage_window_input_key(window, (maage_input_key)maage_win32_key(lp), message == WM_KEYDOWN);
             break;
         case WM_MOUSEMOVE: case WM_LBUTTONDOWN: case WM_LBUTTONUP:
+        case WM_RBUTTONDOWN: case WM_RBUTTONUP:
             window->input.mouse_x = (double)(short)LOWORD(lp) * 96.0 / maage_win32_dpi(window);
             window->input.mouse_y = (double)(short)HIWORD(lp) * 96.0 / maage_win32_dpi(window);
             if (message == WM_LBUTTONDOWN) window->input.primary_pressed = window->input.primary_down = 1;
             if (message == WM_LBUTTONUP) window->input.primary_down = 0;
+            if (message == WM_RBUTTONDOWN) window->input.secondary_pressed = window->input.secondary_down = 1;
+            if (message == WM_RBUTTONUP) window->input.secondary_down = 0;
+            break;
+        case WM_MOUSEWHEEL:
+            window->input.scroll_y += (double)(short)HIWORD(wp) / WHEEL_DELTA;
             break;
         case WM_INPUT:
             raw_size = sizeof(raw);

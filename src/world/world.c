@@ -189,8 +189,9 @@ static unsigned maage_world_light_boundaries(const maage_chunk *before, const ma
     }
     return changed;
 }
-/* All expensive copying, generation, propagation, meshing, serialization and
- * filesystem operations happen here, without any world/scheduler lock held. */
+/* Generation, lighting snapshot copying, propagation, meshing, serialization
+ * and filesystem work run without a world/scheduler lock. Owner mutations
+ * separately copy a published column before its atomic owner-thread replacement. */
 static void maage_world_run(void *context, const maage_job_token *token)
 {
     maage_world_task *task = (maage_world_task *)context;
@@ -387,8 +388,10 @@ static void maage_world_schedule(maage_world *world)
             } else if (!slot->data) kind = slot->stage;
             else if (slot->light_dirty) kind = MAAGE_JOB_LIGHT;
             else if (slot->mesh_dirty && abs(dx) <= world->config.render_distance && abs(dz) <= world->config.render_distance) kind = MAAGE_JOB_MESH;
+            else if (slot->dirty && !slot->save) kind = MAAGE_JOB_SAVE;
             if (kind == MAAGE_JOB_LOAD || kind == MAAGE_JOB_GENERATE) score += 4;
             else if (kind == MAAGE_JOB_MESH) ++score;
+            else if (kind == MAAGE_JOB_SAVE) score += 16;
             if (kind && score < best) { best = score; chosen = slot; chosen_kind = kind; x = world->center_x + dx; z = world->center_z + dz; }
         }
         if (!chosen_kind) break;
@@ -411,7 +414,7 @@ maage_world *maage_world_create(const maage_world_config *config)
     if (config->new_world) maage_generator_spawn(config->seed, config->biomes, world->spawn);
     for (axis = 0; axis < 3; ++axis)
         if (!(world->spawn[axis] > -MAAGE_WORLD_LIMIT && world->spawn[axis] < MAAGE_WORLD_LIMIT)) { free(world); return NULL; }
-    if (!(world->spawn[1] >= 0 && world->spawn[1] <= MAAGE_WORLD_HEIGHT + 16)) { free(world); return NULL; }
+    if (!(world->spawn[1] >= 0 && world->spawn[1] < MAAGE_WORLD_LIMIT)) { free(world); return NULL; }
     world->center_x = maage_world_chunk_coordinate((int)floor(world->spawn[0]));
     world->center_z = maage_world_chunk_coordinate((int)floor(world->spawn[2]));
     workers = maage_jobs_resolve_workers(config->worker_count);
@@ -461,6 +464,7 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats)
     if (!world || !stats) return;
     *stats = world->stats; stats->failed = world->failed;
     for (slot = world->chunks; slot; slot = slot->next) {
+        if (slot->dirty) ++stats->dirty_columns;
         if (maage_world_complete(slot)) {
             ++stats->loaded;
             for (section = 0; section < 16; ++section)
@@ -541,7 +545,7 @@ int maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update)
     }
     return chosen != NULL;
 }
-int maage_world_chunk_loaded(maage_world *world, int x, int z)
+int maage_world_chunk_loaded(const maage_world *world, int x, int z)
 { return world && maage_world_complete(maage_world_find(world, x, z)); }
 maage_block_state_id maage_world_get(const maage_world *world, int x, int y, int z)
 {
@@ -561,6 +565,79 @@ int maage_world_solid(const maage_world *world, int x, int y, int z)
     state = maage_block_registry_state(world->config.registry, maage_chunk_get(slot->data->chunk, maage_world_local_coordinate(x), y, maage_world_local_coordinate(z)));
     block = state ? maage_block_registry_block(world->config.registry, state->block_id) : NULL;
     return !block || block->solid;
+}
+int maage_world_collision_shape(const maage_world *world, int x, int y, int z,
+    maage_block_shape *shape)
+{
+    const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    int axis;
+    if (!shape) return 0;
+    for (axis = 0; axis < 3; ++axis) {
+        shape->minimum[axis] = 0.0; shape->maximum[axis] = 1.0;
+    }
+    if (!world || y < 0 || x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT ||
+        z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return 1;
+    if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x),
+        maage_world_chunk_coordinate(z))) return 1;
+    if (y >= MAAGE_WORLD_HEIGHT) return 0;
+    state = maage_block_registry_state(world->config.registry, maage_world_get(world, x, y, z));
+    block = state ? maage_block_registry_block(world->config.registry, state->block_id) : NULL;
+    if (!block) return 1;
+    if (!block->solid) return 0;
+    *shape = block->collision_shape;
+    return 1;
+}
+maage_world_mutation_result maage_world_set(maage_world *world,
+    int x, int y, int z, maage_block_state_id expected,
+    maage_block_state_id replacement)
+{
+    maage_world_slot *slot;
+    maage_chunk *copy;
+    maage_chunk_snapshot *snapshot;
+    int local_x, local_z, top;
+    if (!world) return MAAGE_WORLD_MUTATION_INVALID;
+    if (world->stopped || world->failed || y < 0 || y >= MAAGE_WORLD_HEIGHT ||
+        x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT ||
+        z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT ||
+        !maage_block_registry_state(world->config.registry, replacement) ||
+        !maage_block_registry_state(world->config.registry, expected)) {
+        ++world->stats.rejected_mutations; return MAAGE_WORLD_MUTATION_INVALID;
+    }
+    slot = maage_world_find(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
+    if (!maage_world_complete(slot)) {
+        ++world->stats.rejected_mutations; return MAAGE_WORLD_MUTATION_UNAVAILABLE;
+    }
+    if (world->clock > ~0UL - 5UL) {
+        world->failed = 1; ++world->stats.rejected_mutations;
+        return MAAGE_WORLD_MUTATION_INVALID;
+    }
+    local_x = maage_world_local_coordinate(x); local_z = maage_world_local_coordinate(z);
+    if (maage_chunk_get(slot->data->chunk, local_x, y, local_z) != expected) {
+        ++world->stats.rejected_mutations; return MAAGE_WORLD_MUTATION_STALE;
+    }
+    if (expected == replacement) return MAAGE_WORLD_MUTATION_OK;
+    copy = maage_world_copy_chunk(slot->data->chunk);
+    if (!copy || !maage_chunk_set(copy, local_x, y, local_z, replacement)) {
+        maage_chunk_destroy(copy); ++world->stats.rejected_mutations;
+        return MAAGE_WORLD_MUTATION_OUT_OF_MEMORY;
+    }
+    snapshot = maage_world_snapshot(copy);
+    if (!snapshot) {
+        maage_chunk_destroy(copy); ++world->stats.rejected_mutations;
+        return MAAGE_WORLD_MUTATION_OUT_OF_MEMORY;
+    }
+    top = MAAGE_WORLD_HEIGHT;
+    while (top > 0 && maage_chunk_get(copy, local_x, top - 1, local_z) == MAAGE_STATE_AIR) --top;
+    copy->heightmap[local_z * MAAGE_CHUNK_EDGE + local_x] = (unsigned short)top;
+    maage_world_release(slot->data); slot->data = snapshot; slot->dirty = 1;
+    maage_world_invalidate(world, slot, 1);
+    /* A light change can eventually reach any horizontal column boundary;
+     * immutable neighbor pointers also reject already submitted old meshes. */
+    maage_world_invalidate_neighbors(world, slot->x, slot->z, 15U);
+    maage_world_cancel(world, slot->work);
+    ++world->stats.mutations;
+    return MAAGE_WORLD_MUTATION_OK;
 }
 const maage_block_registry *maage_world_registry(const maage_world *world) { return world ? world->config.registry : NULL; }
 void maage_world_spawn(const maage_world *world, double feet[3])

@@ -25,5 +25,5 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     double now, const maage_world *world, const maage_world_record *record,
     const maage_world_stats *stats, const maage_player *player, double yaw,
     double pitch, int radius, int paused, maage_renderer *renderer,
-    const maage_client_mesh_stats *meshes);
+    const maage_client_mesh_stats *meshes, const maage_gameplay *game);
 #endif

@@ -37,6 +37,7 @@ typedef struct maage_player_input {
     /* yaw=0 faces -Z; forward=(sin(yaw),0,-cos(yaw)). */
     double yaw;
     int jump;
+    int flying, descend;
 } maage_player_input;
 
 void maage_player_spawn(maage_player *player, const maage_world *world);

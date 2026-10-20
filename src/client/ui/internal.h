@@ -5,7 +5,8 @@
 
 /* A frame is bounded by the supplied diagnostic text plus menu/HUD geometry. */
 #define MAAGE_CLIENT_UI_QUADS (2 * MAAGE_CLIENT_UI_DEBUG_LINES * MAAGE_CLIENT_UI_DEBUG_CHARACTERS + 512)
-#define MAAGE_CLIENT_UI_ATLAS_EDGE 512
+#define MAAGE_CLIENT_UI_ATLAS_EDGE 1024
+#define MAAGE_CLIENT_UI_BLOCK_ATLAS_Y 512
 typedef struct maage_client_ui_screen {
     maage_client_ui_screen_draw draw;
     maage_client_ui_screen_input input;
@@ -20,9 +21,14 @@ typedef struct maage_client_ui_navigation {
 typedef struct maage_client_ui_resources {
     maage_render_texture *texture;
     unsigned char glyph_width[256];
+    int block_atlas_width, block_atlas_height;
 } maage_client_ui_resources;
 struct maage_client_ui {
     maage_client_ui_navigation navigation;
+    const maage_item_registry *items;
+    const maage_block_registry *blocks;
+    maage_gameplay *game;
+    unsigned int creative_page;
     maage_client_ui_resources resources;
     maage_render_ui_vertex vertices[MAAGE_CLIENT_UI_QUADS * 4];
     unsigned int indices[MAAGE_CLIENT_UI_QUADS * 6];
@@ -34,12 +40,16 @@ struct maage_client_ui {
     int debug, overflow, overflow_reported;
 };
 int maage_client_ui_resources_load(maage_client_ui_resources *resources,
-    maage_renderer *renderer, const char *application_data);
+    maage_renderer *renderer, const char *application_data, const maage_pixel_buffer *block_atlas);
 void maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
     float x, float y, float red, float green, float blue);
+int maage_client_ui_inventory_register(maage_client_ui *ui);
+void maage_client_ui_gameplay_draw(maage_client_ui *ui);
+void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
+    const float uv[4], float shade);
 maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui);
 #endif
