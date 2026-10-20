@@ -1,7 +1,8 @@
 # MaaGE Gameplay Roadmap
 
-Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.2**
-implements the Phase 1 foundation and the scoped Phase 2 world milestone below.
+Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.3**
+implements the Phase 1 foundation, Phase 2 world milestone and Phase 2.5
+multithreaded architecture below.
 Compilation does not establish runtime correctness or vanilla fidelity. Phases
 3–6 remain future work.
 
@@ -53,17 +54,19 @@ Implemented in the existing portable `MaaGE::World` library:
   and initial lighting precede meshing. A bounded deterministic surface search
   selects the initial spawn. Generation has no mutable global PRNG and does not
   depend on request order, worker scheduling or render radius.
-- **Streaming:** one native worker handles loading/generation, lighting, CPU
-  meshing, save and eviction. The bounded desired grid prioritizes nearby and
+- **Streaming:** bounded asynchronous jobs handle loading/generation, lighting,
+  CPU meshing and saving; the owner commits results and evicts columns. The
+  bounded desired grid prioritizes nearby and
   view-facing columns. Render radius defaults to **3**, configurable from 1–8;
   one extra column provides a lighting/meshing halo. The cache is capped at 512
-  columns. Fully constructed columns are published under a mutex. Missing/loading
+  columns. Fully constructed immutable columns are published by the owner. Missing/loading
   columns block collision, and simulation waits for the player's column. Dirty
-  columns are saved before eviction; shutdown joins the worker and flushes saves.
+  columns are saved before eviction; shutdown joins the pool and flushes saves.
 - **Lifecycle and meshes:** requested → loading/generating → generated → lighting
   → mesh pending → ready, with saving/unloading and explicit failure states.
-  The worker alone owns column membership and borrowed neighbors. CPU mesh updates
-  transfer ownership under the mutex; the Client owns copied GPU resources.
+  The owner alone controls membership; jobs borrow stable column/neighbor snapshots.
+  CPU mesh updates transfer through the completion queue and owner revision checks;
+  the Client owns copied GPU resources.
   Neighbor arrival/removal invalidates affected boundaries and lighting. Existing
   meshes survive unrelated movement. Missing neighbors expose exterior faces
   until an updated culled mesh arrives. Water interiors are culled numerically.
@@ -74,12 +77,12 @@ Implemented in the existing portable `MaaGE::World` library:
   Real grass/foliage colormaps populate biome definitions; grass atlas variants
   and sandstone top/bottom/side references are resolved before gameplay.
 - **Lighting:** packed sky-high/block-low 0–15 levels. Direct sky, opaque occlusion,
-  water attenuation and bounded six-neighbor propagation run on the worker.
+  water attenuation and bounded six-neighbor propagation run on private worker snapshots.
   Both channels import neighboring column light and converge after arrivals,
   removals or changed boundary light. Numeric block emission properties seed the
   emitted channel; current terrain blocks emit zero. Meshing combines neighboring
   light levels with temporary directional face shading. Lighting-only sections
-  are published under the World mutex without copying block arrays.
+  are published through controlled owner commits with stale-neighbor rejection.
 - **Diagnostics:** startup logs world ID, signed seed, generator and radius.
   Periodic DEBUG diagnostics report loaded/pending/ready columns, generated versus
   disk-loaded counts, mesh rebuilds and approximate frame time.
@@ -109,7 +112,7 @@ selection and lifetime world locks prevent concurrent writers.
 Data lives beneath `worlds/<id>/`: `world.bin` metadata and
 `chunks/<signed-x>_<signed-z>.chunk`. Metadata records ID/name, signed seed,
 creation UTC, format/generator/blockset versions and player position/orientation.
-Player state saves after the worker's clean-shutdown flush. An interrupted first
+Player state saves after the pool's clean-shutdown flush. An interrupted first
 launch retains a pending-spawn flag; later interrupted launches resume the last
 successfully saved player state.
 
@@ -155,6 +158,63 @@ Local build coverage is macOS arm64. Windows/Linux source paths and all runtime
 world generation, streaming, lighting, save/reload and movement behavior require
 programmer validation. No applications, tests, benchmarks, world-generation tools,
 asset downloads or GitHub Actions runs form part of this implementation's checks.
+
+## Phase 2.5 — Multithreaded Architecture
+
+Implemented as an extension of the existing World and Client:
+
+- **Portable scheduler:** `MaaGE::Jobs` uses a bounded native worker pool with
+  prioritized FIFO work queues, completion polling/notification and cooperative
+  cancellation. Capacity includes queued, running and unconsumed completed jobs.
+  Zero workers selects logical processors minus one, clamped to **1–8**; explicit
+  counts support **1–32**. Threads and scheduler arrays are created once, not per
+  chunk or frame. A brief scheduler mutex protects queue ownership and cancellation;
+  it is never held while a task performs generation, meshing, lighting or I/O.
+- **World ownership:** the caller thread owns membership, published immutable
+  column data, request/revision tracking and result application. Workers borrow
+  immutable numeric registries and input snapshots; each owns its outputs.
+  `maage_world_stream` polls completions and schedules work without waiting.
+  Collision reads stable owner-published data without a global World lock.
+  There is no frame-wide barrier or arbitrary worker mutation of gameplay state.
+- **Concurrent work:** independent columns can load, generate, light, mesh and
+  save simultaneously. Near-player work takes priority over distant requests;
+  duplicate work is coalesced, accepted jobs and retained memory are bounded, and
+  obsolete CPU requests are cancelled as the desired grid changes. Lighting
+  imports staged immutable neighbor boundaries rather than mutating adjacent
+  columns. Generation retains generator 1's seed/coordinate/stage-derived random
+  state and terrain algorithms, so scheduling never selects different terrain.
+- **Revisions and lifetime:** task results include column incarnation/revision
+  identity and required neighbor revisions. Changed/unloaded inputs reject stale
+  lighting and meshes; completion processing releases borrowed snapshots only
+  after workers finish. GPU uploads validate the accepted mesh token again.
+  Cancelled or failed work cannot replace newer published data.
+- **Persistence:** workers serialize coherent immutable snapshots and perform
+  atomic file replacement. Only one save may target a column file at once.
+  Save completion clears dirty state only if the saved revision still matches;
+  dirty columns remain resident until a successful save. Clean shutdown cancels
+  obsolete CPU work, drains/joins the pool and flushes dirty revisions while the
+  registry and store remain alive. Existing save versions and corruption recovery
+  rules remain unchanged.
+- **Client phases:** input/native events, completion commits, ordered fixed
+  20 TPS player movement, rendering orchestration and GPU operations stay on the
+  owning thread. No other meaningful independent gameplay system exists yet;
+  entity frameworks or mechanics have not been added to demonstrate parallelism.
+  GPU uploads remain capped at one changed column per frame and retain unchanged
+  resources. Resource/world metadata opens during hidden startup; blocking flush,
+  join and final player metadata happen after the render loop stops.
+- **Diagnostics:** `--world-workers=0..32` configures the pool. Startup reports its
+  actual count. Five-second DEBUG logs report queued/running jobs, active
+  generation, lighting, meshing and I/O work, lifetime completed/cancelled/stale
+  counts, and approximate mean scheduling latency. No per-task production logging
+  or runtime benchmark is required.
+
+Synchronization remains at scheduler ownership handoffs and filesystem writer
+locks, where shared queue state and exclusive save ownership require it. Worker
+tasks have no graphics or native UI dependencies, allowing future Server reuse.
+Main-thread startup/shutdown metadata I/O is a lifecycle boundary; no chunk
+generation, serialization, mesh construction or disk I/O runs inside the render
+loop. Runtime concurrency, cancellation, determinism and recovery require programmer
+testing; compilation alone does not establish their behavior.
 
 ## Phase 3 — Player Interaction
 

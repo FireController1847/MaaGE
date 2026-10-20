@@ -18,7 +18,8 @@ endif()
 if(NOT MAAGE_BUILD_MINECRAFT_ASSETS OR NOT MAAGE_BUILD_IMAGE OR NOT MAAGE_BUILD_WORLD)
     message(FATAL_ERROR "Client requires MAAGE_BUILD_MINECRAFT_ASSETS, MAAGE_BUILD_IMAGE and MAAGE_BUILD_WORLD.")
 endif()
-target_link_libraries(maage_client PRIVATE maage_core MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::World)
+# World supplies the Jobs/Core dependency after the libraries that use it.
+target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::World)
 # A dedicated executable package on every OS; no desktop bundle or entry.
 set_target_properties(maage_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${MAAGE_OUTPUT_DIRECTORY}/bin/$<CONFIG>/${MAAGE_CLIENT_ARTIFACT}-${MAAGE_TARGET_SYSTEM}-${MAAGE_CLIENT_ARCH}")

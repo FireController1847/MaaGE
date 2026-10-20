@@ -101,11 +101,33 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Seeded generation is versioned and independent of load order/scheduling.
   Signed 64-bit seeds use C90-compatible word pairs. Generator 1 approximates
   classic terrain; never claim Java Random/GenLayer or seed-for-seed parity.
-- One bounded World worker owns column loading, generation, numeric sky/emitted
-  light propagation, CPU meshing, saving and eviction. Publish complete columns
-  and new section pointers under a mutex; graphics owns copied meshes and a
-  shared atlas on its rendering thread. Invalidate affected neighbor boundaries,
-  preserve unchanged GPU resources, and save dirty columns before eviction.
+- Parallelize independent CPU-intensive world work by default through reusable
+  `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
+  never threads per object. Automatic worker count is logical processors minus
+  one, clamped to 1..8; explicit counts are 1..32. Bound accepted contexts and
+  retained snapshots as well as queued/running work.
+- One owner thread controls World membership, published immutable columns,
+  simulation and deferred result commits. Workers own their output buffers and
+  borrow immutable inputs/registries until completion. Independent column load,
+  generation, lighting, CPU mesh and save tasks may overlap. No worker mutates
+  published columns or Client gameplay state. Keep fixed-step player updates
+  ordered; parallelize existing gameplay only when workloads are independent.
+- Localize and justify synchronization: brief scheduler queue/token handoffs and
+  completion notifications are necessary; global World locks, frame barriers,
+  render-loop waits, and locks around generation, filesystem I/O or GPU work are
+  prohibited. `maage_world_stream` polls commits and schedules bounded near-player
+  work on the owner. Snapshot/column/neighbor revisions reject obsolete results;
+  unloading invalidates requests, and cancellation remains cooperative.
+- Lighting writes private snapshots and propagates through staged neighbor
+  boundaries. Commit only when required revisions still match. Graphics owns
+  copied meshes and the shared atlas on its rendering thread; validate result
+  tokens before uploads, invalidate affected neighbor boundaries and preserve
+  unchanged GPU resources. No graphical types belong in portable World tasks.
+- Save coherent immutable snapshots asynchronously, with at most one writer per
+  column file. Clear dirty state only if the saved revision is still current;
+  never evict unsaved dirty data. Shutdown cancels obsolete CPU work, drains and
+  joins jobs, and flushes dirty columns outside the rendering loop. Borrowed
+  registries, stores and snapshots must outlive all jobs that access them.
 - Missing/loading columns block collision; never turn unavailable terrain into
   collision-free air or teleport the player. Preserve fixed-step movement.
 - Store worlds beneath `worlds/<safe-id>/`, separate from Minecraft resources.
@@ -169,7 +191,7 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   The Client initializes its own window/renderer. Never invent launch flags as
   authentication or implement remote distribution until requested.
   The Client extends Phase 1 movement/rendering with persistent seeded chunk
-  streaming, numeric biomes and basic lighting;
+  streaming, numeric biomes, basic lighting and Phase 2.5 asynchronous World jobs;
   see `docs/development-roadmap.md` for implemented versus provisional behavior.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
@@ -421,8 +443,11 @@ tuning remain provisional until programmer fidelity verification.
 one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
 creates a unique world; default startup resumes `config/last-world` or creates a
 unique world if none exists. Never overwrite an existing ID during creation or
-change its generator/seed implicitly. `--render-distance=1..8` defaults to 3.
-Generic `MaaGE::Storage` and `MaaGE::Thread` have no Launcher acquisition
+change its generator/seed implicitly. `--render-distance=1..8` defaults to 3;
+`--world-workers=0..32` selects the pool size (0 uses the automatic policy).
+World metadata opens while the viewport is hidden; final player metadata and
+blocking flush/join occur after rendering stops, never inside the frame loop.
+Generic `MaaGE::Storage`, `MaaGE::Thread` and `MaaGE::Jobs` have no Launcher acquisition
 dependencies; optional `MaaGE::StorageHash` owns OpenSSL SHA-1 for asset acquisition.
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or

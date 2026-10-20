@@ -1,4 +1,5 @@
 #include "world_internal.h"
+#include "maage/jobs.h"
 
 #include <math.h>
 
@@ -25,6 +26,8 @@ static unsigned long maage_generation_hash(maage_world_seed seed,
     int x, int z, unsigned long stage)
 {
     unsigned long value;
+    /* Version 1 freezes the original stage namespace and terrain bytes. */
+    stage ^= (MAAGE_WORLD_GENERATOR_VERSION - 1UL) * 2654435761UL;
     value = maage_generation_mix(seed.low ^ stage);
     value = maage_generation_mix(value ^ seed.high);
     value = maage_generation_mix(value ^
@@ -167,8 +170,9 @@ static int maage_generation_column_at(maage_world_seed seed,
     return 1;
 }
 
-int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes)
+int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    const maage_job_token *token)
 {
     const maage_biome_definition *biome;
     maage_generation_column column;
@@ -182,6 +186,7 @@ int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
         chunk->z < -MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE ||
         chunk->z >= MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE) return 0;
     for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
+        if (token && maage_job_cancelled(token)) return 0;
         for (x = 0; x < MAAGE_CHUNK_EDGE; ++x) {
             wx = chunk->x * MAAGE_CHUNK_EDGE + x;
             wz = chunk->z * MAAGE_CHUNK_EDGE + z;
@@ -212,6 +217,12 @@ int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
         }
     }
     return 1;
+}
+
+int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes)
+{
+    return maage_generate_chunk_job(chunk, seed, blocks, biomes, NULL);
 }
 
 void maage_generator_spawn(maage_world_seed seed,

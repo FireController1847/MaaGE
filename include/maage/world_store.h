@@ -16,11 +16,18 @@ typedef struct maage_world_record {
 int maage_world_store_open(const char *data_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **store,
     maage_world_record *record, char error[256]);
+/* Saves a caller-owned player snapshot without changing shared store data.
+ * Serialize metadata saves with each other; chunk files are independent. */
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256]);
+/* All jobs borrowing this store must finish before close releases its lock. */
 void maage_world_store_close(maage_world_store *store);
-/* A single World worker owns chunk I/O. Detached loaded columns transfer to
- * caller. 1 loaded, 0 absent, -1 invalid/I/O error; corruption never means air.
+/* Distinct coordinates may load/save concurrently: each job owns its buffers,
+ * error storage and an immutable chunk snapshot, borrowing finalized registries.
+ * The task owner serializes/coalesces writes to the same coordinate and keeps
+ * store/registries alive until completion; no store-wide I/O mutex is needed.
+ * Detached loaded columns transfer to caller. 1 loaded, 0 absent, -1 invalid/I/O
+ * error; corruption never means air.
  * Format 1 fixes legacy numeric states 0,1,2,3,7,9,12,13,24 and grass states
  * 256..261 (type 2, metadata biome+1), plus biome IDs 0..5. Reordering or adding
  * saved identities requires a versioned migration, never reinterpretation. */

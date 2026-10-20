@@ -163,7 +163,8 @@ static int maage_store_write(const char *path, const unsigned char *data, size_t
     if (strlen(path) + 5 > sizeof(temporary)) return maage_store_error(error, "World file path is too long.");
     strcpy(temporary, path); strcat(temporary, ".tmp");
     /* A stale temporary file must not retain an accidental hard link to a live
-     * save. The world/selection lock makes this caller the only writer. */
+     * save. The lifetime lock excludes other processes; the task owner permits
+     * only one write to this particular file at a time. Other files are disjoint. */
     if (!maage_storage_remove(temporary)) return maage_store_error(error, "Could not remove an abandoned temporary world file.");
     file = maage_storage_open(temporary, "wb");
     if (!file) return maage_store_error(error, "Could not create a temporary world file.");
@@ -187,11 +188,11 @@ static void maage_store_checksum_put(maage_store_bytes *bytes)
     unsigned long crc = maage_store_crc(bytes->data, bytes->position);
     maage_store_put(bytes, crc, 4);
 }
-static int maage_store_metadata_write(maage_world_store *store, char error[256])
+static int maage_store_metadata_write(const maage_world_store *store,
+    const maage_world_record *record, char error[256])
 {
     unsigned char data[MAAGE_STORE_METADATA_MAX];
     maage_store_bytes bytes;
-    maage_world_record *record = &store->record;
     char path[MAAGE_PATH_CAPACITY];
     unsigned int i;
     bytes.data = data; bytes.length = sizeof(data); bytes.position = 0; bytes.failed = 0;
@@ -212,11 +213,11 @@ static int maage_store_metadata_write(maage_world_store *store, char error[256])
         return maage_store_error(error, "Could not encode world metadata.");
     return maage_store_write(path, data, bytes.position, error);
 }
-static int maage_store_metadata_load(maage_world_store *store, const char *expected_id, char error[256])
+static int maage_store_metadata_load(const maage_world_store *store,
+    const char *expected_id, maage_world_record *record, char error[256])
 {
     char path[MAAGE_PATH_CAPACITY];
     maage_store_bytes bytes;
-    maage_world_record *record = &store->record;
     unsigned long lengths[3];
     size_t i, j;
     char *texts[3];
@@ -328,8 +329,8 @@ int maage_world_store_open(const char *data_root, const char *id, int create,
         if (now == (time_t)-1 || !utc || strftime(store->record.created_utc, sizeof(store->record.created_utc), "%Y-%m-%dT%H:%M:%SZ", utc) != 20) {
             maage_store_error(error, "Could not determine the world's creation time."); goto done;
         }
-        if (!maage_store_metadata_write(store, error)) goto done;
-    } else if (!maage_store_metadata_load(store, chosen, error)) goto done;
+        if (!maage_store_metadata_write(store, &store->record, error)) goto done;
+    } else if (!maage_store_metadata_load(store, chosen, &store->record, error)) goto done;
     if (!maage_storage_join(store->chunks, sizeof(store->chunks), store->directory, "chunks") || !maage_storage_directories(store->chunks)) {
         maage_store_error(error, "Could not prepare chunk storage."); goto done;
     }
@@ -345,19 +346,17 @@ done:
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256])
 {
-    maage_world_record previous = store->record;
+    maage_world_record record = store->record, existing;
     /* Recheck the live metadata before replacement, just as chunk replacement
      * rechecks its old file. Corruption never becomes a successful overwrite. */
-    if (!maage_store_metadata_load(store, previous.id, error)) { store->record = previous; return 0; }
-    if (store->record.seed.high != previous.seed.high || store->record.seed.low != previous.seed.low) {
-        store->record = previous; return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
-    }
-    store->record = previous;
-    memcpy(store->record.position, position, sizeof(store->record.position));
-    store->record.yaw = yaw; store->record.pitch = pitch; store->record.new_world = 0;
-    if (!maage_store_player(&store->record)) { store->record = previous; return maage_store_error(error, "Player state is outside the world format's supported bounds."); }
-    if (!maage_store_metadata_write(store, error)) { store->record = previous; return 0; }
-    return 1;
+    if (!maage_store_metadata_load(store, record.id, &existing, error)) return 0;
+    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low)
+        return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
+    memcpy(record.position, position, sizeof(record.position));
+    record.yaw = yaw; record.pitch = pitch; record.new_world = 0;
+    if (!maage_store_player(&record)) return maage_store_error(error, "Player state is outside the world format's supported bounds.");
+    /* Store identity stays immutable while independent chunk jobs borrow it. */
+    return maage_store_metadata_write(store, &record, error);
 }
 void maage_world_store_close(maage_world_store *store)
 {
@@ -432,7 +431,6 @@ static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, i
             chunk->sections[section]->light[i] = (unsigned char)maage_store_get(&bytes, 1);
     }
     if (bytes.failed || bytes.position != bytes.length) goto failed;
-    chunk->state = MAAGE_CHUNK_GENERATED; chunk->revision = 1; chunk->dirty = 0; chunk->mesh_dirty = 1;
     *output = chunk; return 1;
 failed:
     maage_chunk_destroy(chunk); return 0;

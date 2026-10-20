@@ -19,7 +19,7 @@ size_t maage_chunk_cell(int x, int y, int z)
 maage_chunk *maage_chunk_create(int x, int z)
 {
     maage_chunk *chunk = (maage_chunk *)calloc(1, sizeof(*chunk));
-    if (chunk) { chunk->x = x; chunk->z = z; chunk->state = MAAGE_CHUNK_REQUESTED; }
+    if (chunk) { chunk->x = x; chunk->z = z; }
     return chunk;
 }
 void maage_chunk_destroy(maage_chunk *chunk)
@@ -27,7 +27,6 @@ void maage_chunk_destroy(maage_chunk *chunk)
     int section;
     if (!chunk) return;
     for (section = 0; section < 16; ++section) free(chunk->sections[section]);
-    maage_world_mesh_destroy(chunk->pending_mesh);
     free(chunk);
 }
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z)

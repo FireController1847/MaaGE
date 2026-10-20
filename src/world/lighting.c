@@ -1,4 +1,5 @@
 #include "world_internal.h"
+#include "maage/jobs.h"
 
 #include <stdlib.h>
 
@@ -32,10 +33,11 @@ static void maage_light_spread(maage_light_work *work, size_t destination,
     if (value > 1) maage_light_enqueue(work, destination);
 }
 
-static void maage_light_propagate(maage_light_work *work,
-    const maage_chunk *neighbors[4], int sky_channel)
+static int maage_light_propagate(maage_light_work *work,
+    const maage_chunk *neighbors[4], int sky_channel,
+    const maage_job_token *token)
 {
-    size_t index;
+    size_t index, steps = 0;
     unsigned int source;
     int x, y, z, side;
     work->levels = sky_channel ? work->sky : work->emitted;
@@ -46,6 +48,7 @@ static void maage_light_propagate(maage_light_work *work,
         for (side = 0; side < 4; ++side) {
             if (neighbors[side] == NULL) continue;
             for (y = 0; y < MAAGE_WORLD_HEIGHT; ++y) {
+                if (!(y & 15) && token && maage_job_cancelled(token)) return 0;
                 for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
                     x = side == 0 ? 0 : (side == 1 ? 15 : z);
                     index = (size_t)y * 256 +
@@ -59,9 +62,12 @@ static void maage_light_propagate(maage_light_work *work,
             }
         }
     }
-    for (index = 0; index < MAAGE_LIGHT_VOLUME; ++index)
+    for (index = 0; index < MAAGE_LIGHT_VOLUME; ++index) {
+        if (!(index & 2047) && token && maage_job_cancelled(token)) return 0;
         if (work->levels[index] > 1) maage_light_enqueue(work, index);
+    }
     while (work->count != 0) {
+        if (!(steps++ & 2047) && token && maage_job_cancelled(token)) return 0;
         index = work->queue[work->head];
         work->head = (work->head + 1) % MAAGE_LIGHT_VOLUME;
         --work->count;
@@ -79,10 +85,12 @@ static void maage_light_propagate(maage_light_work *work,
         if (y > 0) maage_light_spread(work, index - 256, source);
         if (y < 255) maage_light_spread(work, index + 256, source);
     }
+    return 1;
 }
 
-int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
-    const maage_chunk *neighbors[4], maage_section *added[16])
+int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks,
+    const maage_chunk *neighbors[4], maage_section *added[16],
+    const maage_job_token *token)
 {
     maage_light_work work;
     const maage_block_state_definition *state;
@@ -95,7 +103,8 @@ int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
     int x, y, z, section_y, changed, valid;
     if (added == NULL) return -1;
     for (section_y = 0; section_y < 16; ++section_y) added[section_y] = NULL;
-    if (chunk == NULL || !maage_block_registry_is_finalized(blocks)) return -1;
+    if (chunk == NULL || !maage_block_registry_is_finalized(blocks) ||
+        (token && maage_job_cancelled(token))) return -1;
     work.sky = (unsigned char *)malloc(MAAGE_LIGHT_VOLUME);
     work.emitted = (unsigned char *)malloc(MAAGE_LIGHT_VOLUME);
     work.attenuation = (unsigned char *)malloc(MAAGE_LIGHT_VOLUME);
@@ -107,6 +116,7 @@ int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
         work.queued != NULL && work.queue != NULL;
     if (!valid) goto maage_light_done;
     for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
+        if (token && maage_job_cancelled(token)) { valid = 0; goto maage_light_done; }
         for (x = 0; x < MAAGE_CHUNK_EDGE; ++x) {
             sky = 15;
             for (y = MAAGE_WORLD_HEIGHT - 1; y >= 0; --y) {
@@ -136,9 +146,13 @@ int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
             }
         }
     }
-    maage_light_propagate(&work, neighbors, 1);
-    maage_light_propagate(&work, neighbors, 0);
+    if (!maage_light_propagate(&work, neighbors, 1, token) ||
+        !maage_light_propagate(&work, neighbors, 0, token)) {
+        valid = 0;
+        goto maage_light_done;
+    }
     for (section_y = 0; section_y < 16; ++section_y) {
+        if (token && maage_job_cancelled(token)) { valid = 0; goto maage_light_done; }
         section = chunk->sections[section_y];
         for (y = 0; y < MAAGE_CHUNK_EDGE; ++y) {
             for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
@@ -179,4 +193,10 @@ maage_light_done:
     free(work.emitted);
     free(work.sky);
     return valid ? changed : -1;
+}
+
+int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
+    const maage_chunk *neighbors[4], maage_section *added[16])
+{
+    return maage_light_chunk_job(chunk, blocks, neighbors, added, NULL);
 }

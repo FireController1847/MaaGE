@@ -22,6 +22,7 @@
 typedef struct maage_client_world_options {
     const char *id, *name;
     maage_world_seed seed;
+    unsigned int workers;
     int create, seeded, radius;
 } maage_client_world_options;
 typedef struct maage_client_chunk_mesh {
@@ -36,7 +37,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     int i;
     const char *argument;
     char *end;
-    long distance;
+    long value;
     memset(options, 0, sizeof(*options)); options->radius = 3;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
@@ -54,11 +55,16 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             options->seeded = 1;
         } else if (!strncmp(argument, "--world-name=", 13)) options->name = argument + 13;
         else if (!strncmp(argument, "--render-distance=", 18)) {
-            errno = 0; distance = strtol(argument + 18, &end, 10);
-            if (errno || !argument[18] || *end || distance < 1 || distance > MAAGE_WORLD_MAX_RADIUS) return 0;
-            options->radius = (int)distance;
+            errno = 0; value = strtol(argument + 18, &end, 10);
+            if (errno || !argument[18] || *end || value < 1 || value > MAAGE_WORLD_MAX_RADIUS) return 0;
+            options->radius = (int)value;
+        } else if (!strncmp(argument, "--world-workers=", 16)) {
+            errno = 0; value = strtol(argument + 16, &end, 10);
+            if (errno || !argument[16] || *end || value < 0 || value > 32) return 0;
+            options->workers = (unsigned int)value;
         } else if (!strcmp(argument, "--world") || !strcmp(argument, "--create-world") ||
-            !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance")) return 0;
+            !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance") ||
+            !strcmp(argument, "--world-workers")) return 0;
     }
     if (options->seeded && options->id && !options->create) return 0;
     if (options->name && !options->create && !options->seeded) return 0;
@@ -66,7 +72,8 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
 }
 
 /* Client owns GPU meshes only; no renderer retains pointers into World columns.
- * Upload at most one changed column per frame and retain unchanged resources. */
+ * Poll without waiting, upload at most one changed column per frame, and retain
+ * unchanged resources. CPU results carry tokens across chunk unload/reload. */
 static maage_render_result maage_client_stream_meshes(maage_world *world,
     maage_renderer *renderer, maage_render_texture *atlas, maage_client_chunk_mesh *cache,
     int center_x, int center_z, int radius)
@@ -83,12 +90,16 @@ static maage_render_result maage_client_stream_meshes(maage_world *world,
         }
     }
     if (!maage_world_take_mesh(world, &update)) return MAAGE_RENDER_OK;
+    if (abs(update.x - center_x) > radius || abs(update.z - center_z) > radius ||
+        !maage_world_mesh_current(world, update.x, update.z, update.revision)) {
+        maage_world_mesh_destroy(update.mesh); return MAAGE_RENDER_OK;
+    }
     for (i = 0; i < MAAGE_WORLD_MAX_CHUNKS; ++i) {
         if (cache[i].used && cache[i].x == update.x && cache[i].z == update.z) { selected = i; break; }
         if (!cache[i].used && selected < 0) selected = i;
     }
     if (selected < 0) result = MAAGE_RENDER_OUT_OF_MEMORY;
-    else if (!cache[selected].used || update.revision > cache[selected].revision) {
+    else if (!cache[selected].used || update.revision != cache[selected].revision) {
         geometry = maage_world_mesh_data(update.mesh);
         if (geometry->index_count) result = maage_renderer_upload_geometry(renderer, geometry, atlas, &replacement);
         if (result == MAAGE_RENDER_OK) {
@@ -179,7 +190,7 @@ int maage_client_run(int argc, char *const argv[])
     rendered = maage_render_desc_parse_args(argc, argv, &render_config);
     if (rendered != MAAGE_RENDER_OK) goto done;
     if (!maage_client_world_options_parse(argc, argv, &options)) {
-        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, and --render-distance=1..8."); goto done;
+        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=1..8, and --world-workers=0..32 (0 automatic)."); goto done;
     }
     if (!maage_client_data_directory(argc, argv, directory)) {
         maage_log_error("maage.client.resources", "Cannot resolve MaaGE data directory; --data-directory requires an absolute path."); goto done;
@@ -207,15 +218,17 @@ int maage_client_run(int argc, char *const argv[])
     }
     memset(&world_config, 0, sizeof(world_config));
     world_config.registry = registry; world_config.biomes = &biomes; world_config.seed = record.seed;
+    world_config.worker_count = options.workers;
     world_config.store = store; world_config.render_distance = options.radius; world_config.new_world = record.new_world;
     memcpy(world_config.position, record.position, sizeof(world_config.position));
     world = maage_world_create(&world_config);
-    if (!world) { maage_log_error("maage.client.world", "World worker initialization failed."); goto done; }
+    if (!world) { maage_log_error("maage.client.world", "World worker pool initialization failed."); goto done; }
+    maage_world_get_stats(world, &stats);
     maage_player_spawn(&player, world); previous = player; player_ready = 1;
     yaw = record.yaw; pitch = record.pitch;
     maage_world_seed_format(record.seed, seed_text, sizeof(seed_text));
-    maage_log_info("maage.client.world", "%s world %s; seed=%s; generator=1; render distance=%d. Loading nearby columns asynchronously.",
-        record.new_world ? "Created" : "Restored", record.id, seed_text, options.radius);
+    maage_log_info("maage.client.world", "%s world %s; seed=%s; generator=1; render distance=%d; workers=%u. Loading nearby columns asynchronously.",
+        record.new_world ? "Created" : "Restored", record.id, seed_text, options.radius, stats.worker_count);
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
     if (rendered != MAAGE_RENDER_OK) goto done;
     rendered = maage_renderer_prepare_frame(renderer);
@@ -248,6 +261,8 @@ int maage_client_run(int argc, char *const argv[])
         if (elapsed > MAAGE_CLIENT_MAX_FRAME_SECONDS) elapsed = MAAGE_CLIENT_MAX_FRAME_SECONDS;
         cx = maage_world_chunk_coordinate((int)floor(player.position[0]));
         cz = maage_world_chunk_coordinate((int)floor(player.position[2]));
+        /* One owner commits worker results before the ordered fixed-step player
+         * phase. Collision observes stable published columns without waiting. */
         maage_world_stream(world, player.position[0], player.position[2], yaw);
         maage_world_get_stats(world, &stats);
         if (stats.failed) { maage_log_error("maage.client.world", "Streaming stopped after a world error; preserving existing save files."); goto done; }
@@ -288,6 +303,10 @@ int maage_client_run(int argc, char *const argv[])
             maage_log_debug("maage.client.world", "Loaded=%u; pending=%u; ready=%u; generated=%lu; disk=%lu; meshes=%lu; frame=%.1fms.",
                 stats.loaded, stats.pending, stats.ready, stats.generated, stats.loaded_from_disk, stats.meshes,
                 (now - diagnostic_time) * 1000.0 / frames);
+            maage_log_debug("maage.client.jobs", "Workers=%u; queued=%u; running=%u; generation=%u; lighting=%u; meshing=%u; I/O=%u; completed=%lu; cancelled=%lu; stale=%lu; scheduling=%.2fms.",
+                stats.worker_count, stats.queued_jobs, stats.running_jobs, stats.generation_jobs, stats.lighting_jobs,
+                stats.meshing_jobs, stats.io_jobs, stats.completed_jobs, stats.cancelled_jobs, stats.stale_jobs,
+                stats.scheduling_latency_ms);
             diagnostic_time = now; frames = 0;
         }
         result = maage_window_wait_events(system, active && rendered != MAAGE_RENDER_SKIPPED ? 1 : 100);
@@ -302,6 +321,7 @@ done:
     if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED)
         maage_log_error("maage.client", "Renderer failed: %s. Gameplay requires textured mesh support in the selected family.", maage_render_result_string(rendered));
     if (window) maage_window_capture_mouse(window, 0);
+    /* Waiting and final player metadata I/O occur only after rendering stops. */
     if (world && !maage_world_flush(world)) { maage_log_error("maage.client.world", "World shutdown reported a generation, loading or save failure."); ok = 0; }
     if (store && player_ready && !maage_world_store_save_player(store, player.position, yaw, pitch, error)) {
         maage_log_error("maage.client.world", "%s", error); ok = 0;
