@@ -142,6 +142,7 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_r
             continue;
         }
         renderer->api = api;
+        renderer->device_name[0] = 0;
         memset(&renderer->capabilities, 0, sizeof(renderer->capabilities));
         renderer->capabilities.version = MAAGE_RENDER_CAPABILITIES_VERSION;
         renderer->capabilities.features = MAAGE_RENDER_CAP_CLEAR | MAAGE_RENDER_CAP_PRESENT;
@@ -181,6 +182,10 @@ void maage_renderer_destroy(maage_renderer *renderer)
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer)
 {
     return renderer ? renderer->api->kind : MAAGE_RENDER_AUTO;
+}
+const char *maage_renderer_device_name(const maage_renderer *renderer)
+{
+    return renderer && renderer->device_name[0] ? renderer->device_name : NULL;
 }
 maage_render_result maage_renderer_get_capabilities(const maage_renderer *renderer,
     maage_render_capabilities *capabilities)
@@ -337,9 +342,9 @@ void maage_render_mesh_destroy(maage_render_mesh *mesh)
     maage_render_texture_release(mesh->texture);
     free(mesh);
 }
-maage_render_result maage_renderer_draw_meshes(maage_renderer *renderer,
+maage_render_result maage_renderer_draw_frame(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
-    const float view_projection[16])
+    const float view_projection[16], const maage_render_ui_data *ui)
 {
     maage_window_state state;
     maage_render_result result;
@@ -353,15 +358,39 @@ maage_render_result maage_renderer_draw_meshes(maage_renderer *renderer,
     for (index = 0; index < 16; ++index)
         if (!(view_projection[index] >= -FLT_MAX && view_projection[index] <= FLT_MAX))
             return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (ui && ui->index_count) {
+        if (!ui->texture || ui->texture->renderer != renderer || !ui->texture->owned ||
+            !ui->vertices || !ui->indices || !ui->vertex_count || ui->index_count % 3 ||
+            ui->vertex_count > UINT_MAX ||
+            ui->vertex_count > (size_t)-1 / sizeof(*ui->vertices) ||
+            ui->index_count > (size_t)-1 / sizeof(*ui->indices) ||
+            !(ui->logical_width > 0 && ui->logical_width <= FLT_MAX) ||
+            !(ui->logical_height > 0 && ui->logical_height <= FLT_MAX))
+            return MAAGE_RENDER_INVALID_ARGUMENT;
+        for (mesh_index = 0; mesh_index < ui->index_count; ++mesh_index)
+            if (ui->indices[mesh_index] >= ui->vertex_count)
+                return MAAGE_RENDER_INVALID_ARGUMENT;
+        if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_UI) ||
+            !renderer->api->draw_frame) return MAAGE_RENDER_UNSUPPORTED;
+    }
     if (renderer->failure != MAAGE_RENDER_OK) return renderer->failure;
-    if (!renderer->api->draw_meshes) return MAAGE_RENDER_UNSUPPORTED;
+    if (!renderer->api->draw_frame && !renderer->api->draw_meshes)
+        return MAAGE_RENDER_UNSUPPORTED;
     if (maage_window_get_state(renderer->window, &state) != MAAGE_WINDOW_OK)
         return MAAGE_RENDER_WINDOW_ERROR;
     if (!state.visible || state.framebuffer_width <= 0 || state.framebuffer_height <= 0)
         return MAAGE_RENDER_SKIPPED;
-    result = renderer->api->draw_meshes(renderer, meshes, count, &state, view_projection);
+    result = renderer->api->draw_frame ?
+        renderer->api->draw_frame(renderer, meshes, count, &state, view_projection, ui) :
+        renderer->api->draw_meshes(renderer, meshes, count, &state, view_projection);
     if (result != MAAGE_RENDER_OK && result != MAAGE_RENDER_SKIPPED) renderer->failure = result;
     return result;
+}
+maage_render_result maage_renderer_draw_meshes(maage_renderer *renderer,
+    const maage_render_mesh *const *meshes, size_t count,
+    const float view_projection[16])
+{
+    return maage_renderer_draw_frame(renderer, meshes, count, view_projection, NULL);
 }
 maage_render_result maage_renderer_draw_mesh(maage_renderer *renderer,
     const maage_render_mesh *mesh, const float view_projection[16])

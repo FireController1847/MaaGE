@@ -17,6 +17,7 @@ typedef struct maage_win32_window {
     HWND handle;
     RECT normal_rect;
 } maage_win32_window;
+static UINT maage_win32_dpi(maage_window *window);
 static unsigned int maage_win32_users;
 static const WCHAR maage_win32_class[] = L"MaaGEWindow";
 static maage_window_result maage_win32_capture(maage_window *, int);
@@ -30,6 +31,11 @@ static int maage_win32_key(LPARAM code)
     case 0x20: return MAAGE_INPUT_KEY_D;
     case 0x39: return MAAGE_INPUT_KEY_SPACE;
     case 0x01: return MAAGE_INPUT_KEY_ESCAPE;
+    case 0x3d: return MAAGE_INPUT_KEY_F3;
+    case 0x1c: return MAAGE_INPUT_KEY_ENTER;
+    case 0x0f: return MAAGE_INPUT_KEY_TAB;
+    case 0x48: return MAAGE_INPUT_KEY_UP;
+    case 0x50: return MAAGE_INPUT_KEY_DOWN;
     default: return -1;
     }
 }
@@ -51,7 +57,12 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
         case WM_KEYDOWN: case WM_KEYUP:
             maage_window_input_key(window, (maage_input_key)maage_win32_key(lp), message == WM_KEYDOWN);
             break;
-        case WM_LBUTTONDOWN: window->input.primary_pressed = 1; break;
+        case WM_MOUSEMOVE: case WM_LBUTTONDOWN: case WM_LBUTTONUP:
+            window->input.mouse_x = (double)(short)LOWORD(lp) * 96.0 / maage_win32_dpi(window);
+            window->input.mouse_y = (double)(short)HIWORD(lp) * 96.0 / maage_win32_dpi(window);
+            if (message == WM_LBUTTONDOWN) window->input.primary_pressed = window->input.primary_down = 1;
+            if (message == WM_LBUTTONUP) window->input.primary_down = 0;
+            break;
         case WM_INPUT:
             raw_size = sizeof(raw);
             if (window->input.captured && GetRawInputData((HRAWINPUT)lp, RID_INPUT,

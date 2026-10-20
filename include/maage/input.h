@@ -2,7 +2,7 @@
 #define MAAGE_INPUT_H
 #include "maage/window.h"
 
-#define MAAGE_INPUT_API_VERSION 1
+#define MAAGE_INPUT_API_VERSION 2
 
 /* Physical movement-key positions, independent of the current text layout. */
 typedef enum maage_input_key {
@@ -12,13 +12,19 @@ typedef enum maage_input_key {
     MAAGE_INPUT_KEY_D,
     MAAGE_INPUT_KEY_SPACE,
     MAAGE_INPUT_KEY_ESCAPE,
+    MAAGE_INPUT_KEY_F3,
+    MAAGE_INPUT_KEY_ENTER,
+    MAAGE_INPUT_KEY_TAB,
+    MAAGE_INPUT_KEY_UP,
+    MAAGE_INPUT_KEY_DOWN,
     MAAGE_INPUT_KEY_COUNT
 } maage_input_key;
 
 typedef struct maage_input_snapshot {
     int keys[MAAGE_INPUT_KEY_COUNT];
     int pressed[MAAGE_INPUT_KEY_COUNT];
-    int primary_pressed;
+    int primary_pressed, primary_down;
+    double mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
     double mouse_delta_x;
     double mouse_delta_y;
     int focused;

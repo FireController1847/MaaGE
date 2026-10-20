@@ -24,6 +24,15 @@ typedef struct maage_jobs_stats {
     double mean_queue_seconds, maximum_queue_seconds;
 } maage_jobs_stats;
 
+typedef enum maage_job_state {
+    MAAGE_JOB_STATE_QUEUED = 1, MAAGE_JOB_STATE_RUNNING, MAAGE_JOB_STATE_READY
+} maage_job_state;
+typedef struct maage_job_observation {
+    maage_job_id id;
+    void *context; /* identity only; snapshot does not transfer ownership */
+    maage_job_state state;
+} maage_job_observation;
+
 /* Nonzero requests pass through unchanged. Zero chooses detected logical
  * processors minus one (minimum one), or eight workers if detection fails.
  * There is no fixed worker limit. */
@@ -56,6 +65,13 @@ int maage_job_cancelled(const maage_job_token *token);
 int maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion);
 int maage_jobs_wait(maage_jobs *jobs);
 void maage_jobs_snapshot(maage_jobs *jobs, maage_jobs_stats *stats);
+/* One coherent scheduler snapshot, with at most capacity observations copied
+ * into caller-owned storage. Returns the copied count; aggregate stats include
+ * all accepted work even if observations are truncated. No callbacks or heap
+ * allocations; only a brief queue lock. Stats may be NULL. Observed contexts
+ * remain worker-owned until poll; never inspect fields workers may change. */
+unsigned maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats,
+    maage_job_observation *observations, unsigned capacity);
 
 /* Owner lifecycle: stop rejects submissions, cancels accepted work, and joins
  * every worker. Completions remain pollable. Destroy also calls dispose for

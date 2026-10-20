@@ -309,6 +309,7 @@ static maage_window_result maage_cocoa_create(maage_window *window, const maage_
         styleMask:maage_cocoa_style(window, 1) backing:NSBackingStoreBuffered defer:NO];
     if (!native->handle) return MAAGE_WINDOW_PLATFORM_ERROR;
     [native->handle setReleasedWhenClosed:NO];
+    [native->handle setAcceptsMouseMovedEvents:YES];
     [native->handle setTitlebarAppearsTransparent:window->full_display_content != 0];
     [native->handle setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary];
     [native->handle center];
@@ -388,15 +389,26 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
             case 2: key = MAAGE_INPUT_KEY_D; break;
             case 49: key = MAAGE_INPUT_KEY_SPACE; break;
             case 53: key = MAAGE_INPUT_KEY_ESCAPE; break;
+            case 99: key = MAAGE_INPUT_KEY_F3; break;
+            case 36: case 76: key = MAAGE_INPUT_KEY_ENTER; break;
+            case 48: key = MAAGE_INPUT_KEY_TAB; break;
+            case 126: key = MAAGE_INPUT_KEY_UP; break;
+            case 125: key = MAAGE_INPUT_KEY_DOWN; break;
             default: return 0;
             }
             maage_window_input_key(window, key, type == NSEventTypeKeyDown);
             return 1;
         }
-        if (type == NSEventTypeLeftMouseDown) {
-            NSPoint point = [[native->handle contentView] convertPoint:[event locationInWindow] fromView:nil];
-            if (NSPointInRect(point, [[native->handle contentView] bounds]))
-                window->input.primary_pressed = 1;
+        if (type == NSEventTypeMouseMoved || type == NSEventTypeLeftMouseDown ||
+            type == NSEventTypeLeftMouseUp || type == NSEventTypeLeftMouseDragged) {
+            NSView *view = [native->handle contentView];
+            NSPoint point = [view convertPoint:[event locationInWindow] fromView:nil];
+            NSRect bounds = [view bounds];
+            window->input.mouse_x = point.x - NSMinX(bounds);
+            window->input.mouse_y = [view isFlipped] ? point.y - NSMinY(bounds) : NSMaxY(bounds) - point.y;
+            if (type == NSEventTypeLeftMouseDown && NSPointInRect(point, bounds))
+                window->input.primary_pressed = window->input.primary_down = 1;
+            if (type == NSEventTypeLeftMouseUp) window->input.primary_down = 0;
         }
         if (window->input.captured && [event timestamp] >= native->capture_time && (type == NSEventTypeMouseMoved ||
             type == NSEventTypeLeftMouseDragged || type == NSEventTypeRightMouseDragged ||

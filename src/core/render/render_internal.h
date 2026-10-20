@@ -17,6 +17,10 @@ typedef struct maage_render_backend_api {
     maage_render_result (*create_texture)(maage_renderer *renderer,
         maage_render_texture *texture, const maage_pixel_buffer *atlas);
     void (*destroy_texture)(maage_render_texture *texture);
+    maage_render_result (*draw_frame)(maage_renderer *renderer,
+        const maage_render_mesh *const *meshes, size_t count,
+        const maage_window_state *state, const float view_projection[16],
+        const maage_render_ui_data *ui);
 } maage_render_backend_api;
 struct maage_render_texture {
     maage_renderer *renderer;
@@ -44,6 +48,7 @@ struct maage_renderer {
     maage_render_capabilities capabilities;
     maage_render_mesh *meshes;
     maage_render_texture *textures;
+    char device_name[256];
 };
 extern const maage_render_backend_api maage_render_metal_api;
 extern const maage_render_backend_api maage_render_vulkan_api;

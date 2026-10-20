@@ -4,7 +4,8 @@ if(NOT MAAGE_CLIENT_VERSION_PRERELEASE STREQUAL "")
 endif()
 maage_client_target_architecture(MAAGE_CLIENT_ARCH)
 set(MAAGE_CLIENT_ARTIFACT "MaaGE-Client-${MAAGE_CLIENT_RELEASE}")
-add_executable(maage_client main.c metadata.c viewport.c resources.c)
+add_executable(maage_client main.c metadata.c viewport.c resources.c debug.c
+    ui/ui.c ui/navigation.c ui/resources.c ui/font.c ui/draw.c)
 add_dependencies(maage_client maage_versions)
 maage_configure_portable_target(maage_client)
 maage_configure_gui_application(maage_client client LAUNCHER_MANAGED)
@@ -20,6 +21,9 @@ if(NOT MAAGE_BUILD_MINECRAFT_ASSETS OR NOT MAAGE_BUILD_IMAGE OR NOT MAAGE_BUILD_
 endif()
 # World supplies the Jobs/Core dependency after the libraries that use it.
 target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::World)
+if(WIN32)
+    target_link_libraries(maage_client PRIVATE psapi)
+endif()
 # A dedicated executable package on every OS; no desktop bundle or entry.
 set_target_properties(maage_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${MAAGE_OUTPUT_DIRECTORY}/bin/$<CONFIG>/${MAAGE_CLIENT_ARTIFACT}-${MAAGE_TARGET_SYSTEM}-${MAAGE_CLIENT_ARCH}")

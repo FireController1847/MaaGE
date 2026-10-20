@@ -41,14 +41,25 @@ typedef struct maage_world_config {
     double position[3];
 } maage_world_config;
 typedef struct maage_world_stats {
-    unsigned int loaded, pending, ready;
-    unsigned int worker_count, queued_jobs, running_jobs;
+    unsigned int loaded, loaded_sections, pending, ready;
+    unsigned int logical_processors, worker_count, queued_jobs, running_jobs;
+    /* Accepted contexts include completed work awaiting owner-thread commits. */
     unsigned int generation_jobs, lighting_jobs, meshing_jobs, io_jobs;
+    unsigned int generation_queued, generation_running;
+    unsigned int lighting_queued, lighting_running;
+    unsigned int meshing_queued, meshing_running;
+    unsigned int io_queued, io_running;
     unsigned long generated, loaded_from_disk, meshes;
     unsigned long completed_jobs, cancelled_jobs, stale_jobs;
     double scheduling_latency_ms;
     int failed;
 } maage_world_stats;
+typedef struct maage_world_observation {
+    maage_biome_id biome_id;
+    unsigned int section_count;
+    unsigned char light; /* skylight in high nibble, block light in low nibble */
+    int light_available;
+} maage_world_observation;
 typedef struct maage_world_mesh_update {
     int x, z;
     unsigned long revision;
@@ -66,7 +77,15 @@ maage_world *maage_world_create(const maage_world_config *config);
 /* Nonblocking owner pump: commit completed work and schedule near-player jobs.
  * Call regularly, including while simulation is paused; no frame-wide waits. */
 void maage_world_stream(maage_world *world, double x, double z, double yaw);
+/* Cheap owner status; full diagnostic snapshots may be sampled less often. */
+int maage_world_failed(const maage_world *world);
 void maage_world_get_stats(maage_world *world, maage_world_stats *stats);
+/* Owner-thread read-only diagnostics of published numeric column data. Returns
+ * zero for an unavailable column or out-of-world coordinates. Biome zero is a
+ * valid ID. Light is unavailable until the column lighting result is current.
+ * No job submission, world lock, allocation or filesystem work. */
+int maage_world_observe(const maage_world *world, int x, int y, int z,
+    maage_world_observation *observation);
 int maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update);
 /* Validate a detached CPU mesh immediately before owner-thread GPU upload. */
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision);

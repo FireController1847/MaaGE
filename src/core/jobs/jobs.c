@@ -5,9 +5,9 @@
 #include <string.h>
 
 #define MAAGE_JOB_FREE 0
-#define MAAGE_JOB_QUEUED 1
-#define MAAGE_JOB_RUNNING 2
-#define MAAGE_JOB_READY 3
+#define MAAGE_JOB_QUEUED MAAGE_JOB_STATE_QUEUED
+#define MAAGE_JOB_RUNNING MAAGE_JOB_STATE_RUNNING
+#define MAAGE_JOB_READY MAAGE_JOB_STATE_READY
 
 typedef struct maage_job_record {
     maage_job_id id;
@@ -258,15 +258,33 @@ int maage_jobs_wait(maage_jobs *jobs)
 
 void maage_jobs_snapshot(maage_jobs *jobs, maage_jobs_stats *stats)
 {
-    if (!stats) return;
-    memset(stats, 0, sizeof(*stats));
-    if (!jobs) return;
+    if (stats) maage_jobs_observe(jobs, stats, NULL, 0);
+}
+
+unsigned maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats,
+    maage_job_observation *observations, unsigned capacity)
+{
+    maage_job_record *record;
+    unsigned index, copied = 0;
+    if (stats) memset(stats, 0, sizeof(*stats));
+    if (!jobs) return 0;
     maage_mutex_lock(jobs->mutex);
-    stats->logical_processors = jobs->logical_processors; stats->workers = jobs->workers; stats->capacity = jobs->capacity;
-    stats->queued = jobs->queued; stats->running = jobs->running; stats->ready = jobs->ready;
-    stats->completed = jobs->completed; stats->cancelled = jobs->cancelled;
-    stats->mean_queue_seconds = jobs->mean_latency; stats->maximum_queue_seconds = jobs->maximum_latency;
+    if (stats) {
+        stats->logical_processors = jobs->logical_processors; stats->workers = jobs->workers; stats->capacity = jobs->capacity;
+        stats->queued = jobs->queued; stats->running = jobs->running; stats->ready = jobs->ready;
+        stats->completed = jobs->completed; stats->cancelled = jobs->cancelled;
+        stats->mean_queue_seconds = jobs->mean_latency; stats->maximum_queue_seconds = jobs->maximum_latency;
+    }
+    if (observations) for (index = 0; index < jobs->capacity && copied < capacity; ++index) {
+        record = &jobs->records[index];
+        if (record->state == MAAGE_JOB_FREE) continue;
+        observations[copied].id = record->id;
+        observations[copied].context = record->context;
+        observations[copied].state = (maage_job_state)record->state;
+        ++copied;
+    }
     maage_mutex_unlock(jobs->mutex);
+    return copied;
 }
 
 void maage_jobs_stop(maage_jobs *jobs)

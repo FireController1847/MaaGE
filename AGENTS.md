@@ -141,6 +141,27 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   serialize writers with locks and flush on clean shutdown. World/biome/storage
   services remain reusable by headless Server without graphical dependencies.
 
+### Client game UI
+
+- Client-owned `src/client/ui/` remains separate from native Launcher widgets.
+  Register screens before finalization through numeric IDs and direct O(1)
+  indexing; gameplay/HUD is ID 0, Pause 1 and Options 2. Navigation uses a numeric
+  stack: submenus push, Back/Escape pops, and the root returns to gameplay.
+  Unknown IDs and navigation cycles fail explicitly. No runtime name lookup.
+- Keep registration/navigation, input routing, immediate drawing primitives,
+  resource loading and debug collection separate. Reuse reconstructed 1.7.10
+  icons/widgets/ASCII font through existing Image/Texture APIs at initialization;
+  no resource acquisition, new texture manager or native widget toolkit.
+  Logical GUI coordinates scale independently of framebuffer resolution.
+- Modal screens release capture and pause fixed-step gameplay; closing them
+  restores gameplay capture appropriately. Keep rendering/events and the safe
+  World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
+- Debug telemetry is read-only, sampled at a modest interval, with no per-frame
+  allocation, World lock, job wait or file I/O. One brief scheduler snapshot lock
+  may copy bounded numeric job states; never read worker-owned output fields.
+  Diagnostic text/names are presentation only, never gameplay identifier lookup.
+  Omit unavailable data or report N/A; resident sections are not visibility counts.
+
 ### Mandatory token-efficient development
 
 - Make focused, minimal changes that solve the actual requirement. Avoid duplicated
@@ -195,7 +216,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   The Client initializes its own window/renderer. Never invent launch flags as
   authentication or implement remote distribution until requested.
   The Client extends Phase 1 movement/rendering with persistent seeded chunk
-  streaming, numeric biomes, basic lighting and Phase 2.5 asynchronous World jobs;
+  streaming, numeric biomes, basic lighting, Phase 2.5 asynchronous World jobs,
+  and Phase 2.75 HUD/F3/Pause UI;
   see `docs/development-roadmap.md` for implemented versus provisional behavior.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
@@ -339,6 +361,10 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   Other families retain their existing clear/presentation functionality and return
   unsupported for gameplay mesh commands. MSL lives in an original `.metal` asset,
   embedded at build time and compiled by native Metal at initialization.
+- Indexed UI batches use backend-neutral logical positions, atlas UVs and RGBA,
+  drawn after world geometry with alpha blending and depth disabled, then one
+  presentation. Advertise `UI` only where implemented: currently Metal. Other
+  families explicitly reject unsupported UI commands; no feature-parity claim.
 - Keep high-level voxel rendering separate from the low-level graphics device API.
   Chunk meshing, visibility, world simulation, and content must not depend directly
   on graphics APIs. Headless operation must not acquire graphics dependencies;

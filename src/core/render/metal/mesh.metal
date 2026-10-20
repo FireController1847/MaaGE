@@ -32,3 +32,27 @@ fragment float4 maage_mesh_fragment_shader(maage_fragment input [[stage_in]],
     if (texel.a < 0.5) discard_fragment();
     return texel * input.color;
 }
+
+struct maage_ui_vertex {
+    packed_float2 position;
+    packed_float2 uv;
+    packed_float4 color;
+};
+vertex maage_fragment maage_ui_vertex_shader(uint index [[vertex_id]],
+    const device maage_ui_vertex *vertices [[buffer(0)]],
+    constant float2 &logical_size [[buffer(1)]])
+{
+    maage_fragment result;
+    float2 point = vertices[index].position / logical_size;
+    result.position = float4(point.x * 2.0 - 1.0, 1.0 - point.y * 2.0, 0.0, 1.0);
+    result.uv = vertices[index].uv;
+    result.color = vertices[index].color;
+    return result;
+}
+fragment float4 maage_ui_fragment_shader(maage_fragment input [[stage_in]],
+    texture2d<float> atlas [[texture(0)]])
+{
+    constexpr sampler pixels(coord::normalized, address::clamp_to_edge,
+        filter::nearest, mip_filter::none);
+    return atlas.sample(pixels, input.uv) * input.color;
+}

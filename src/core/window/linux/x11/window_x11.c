@@ -54,7 +54,8 @@ static maage_window_result maage_x11_init(maage_window_system *system)
     int code, key;
     Bool detectable;
     static const char names[MAAGE_INPUT_KEY_COUNT][5] = {
-        "AD02", "AC01", "AC02", "AC03", "SPCE", "ESC "
+        "AD02", "AC01", "AC02", "AC03", "SPCE", "ESC",
+        "FK03", "RTRN", "TAB", "UP", "DOWN"
     };
     if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
     system->platform = native;
@@ -165,7 +166,7 @@ static maage_window_result maage_x11_create(maage_window *window, const maage_wi
         0, 0, (unsigned int)config->width, (unsigned int)config->height, 0, 0, 0);
     if (!native->handle) return MAAGE_WINDOW_PLATFORM_ERROR;
     XSelectInput(system->display, native->handle, StructureNotifyMask | ExposureMask | PropertyChangeMask |
-        KeyPressMask | KeyReleaseMask | FocusChangeMask | PointerMotionMask | ButtonPressMask);
+        KeyPressMask | KeyReleaseMask | FocusChangeMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask);
     XSetWMProtocols(system->display, native->handle, &system->close_atom, 1);
     result = maage_x11_title(window, config->title);
     if (result != MAAGE_WINDOW_OK) return result;
@@ -196,7 +197,8 @@ static maage_window_result maage_x11_capture(maage_window *window, int capture)
     static const char empty[1] = {0};
     if (capture == window->input.captured) return MAAGE_WINDOW_OK;
     if (capture) {
-        for (key = 0; key < MAAGE_INPUT_KEY_COUNT; ++key)
+        /* Optional UI keys must not disable an otherwise usable capture path. */
+        for (key = 0; key <= MAAGE_INPUT_KEY_ESCAPE; ++key)
             if (!system->keycodes[key]) return MAAGE_WINDOW_UNSUPPORTED;
         if (!XGetWindowAttributes(system->display, native->handle, &attributes))
             return MAAGE_WINDOW_PLATFORM_ERROR;
@@ -262,7 +264,16 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int timeo
                     if (native->keycodes[key] && native->keycodes[key] == (int)event.xkey.keycode)
                         maage_window_input_key(window, (maage_input_key)key, event.type == KeyPress);
             }
-            if (event.type == ButtonPress && event.xbutton.button == Button1) window->input.primary_pressed = 1;
+            if (event.type == ButtonPress || event.type == ButtonRelease) {
+                window->input.mouse_x = event.xbutton.x; window->input.mouse_y = event.xbutton.y;
+                if (event.xbutton.button == Button1) {
+                    window->input.primary_down = event.type == ButtonPress;
+                    if (event.type == ButtonPress) window->input.primary_pressed = 1;
+                }
+            }
+            if (event.type == MotionNotify) {
+                window->input.mouse_x = event.xmotion.x; window->input.mouse_y = event.xmotion.y;
+            }
             if (event.type == MotionNotify && window->input.captured) {
                 if (handle->warp_pending && event.xmotion.x == handle->warp_x && event.xmotion.y == handle->warp_y)
                     handle->warp_pending = 0;

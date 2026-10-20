@@ -55,6 +55,7 @@ typedef struct maage_render_desc {
 #define MAAGE_RENDER_CAP_CPU_FRAMEBUFFER   0x0800UL
 /* Implemented upload/draw commands, unlike the device capability flags above. */
 #define MAAGE_RENDER_CAP_TEXTURED_MESH     0x1000UL
+#define MAAGE_RENDER_CAP_UI                0x2000UL
 #define MAAGE_RENDER_FORMAT_RGBA8          0x01UL
 #define MAAGE_RENDER_FORMAT_BGRA8          0x02UL
 #define MAAGE_RENDER_SYNC_CPU_WAIT         0x01UL
@@ -73,6 +74,23 @@ typedef struct maage_render_capabilities {
     unsigned int max_texture_dimension_2d;
     unsigned int max_frames_in_flight;
 } maage_render_capabilities;
+
+/* Transient indexed UI triangles use top-left logical coordinates, normalized
+ * atlas coordinates and straight-alpha RGBA color components in [0, 1]. */
+typedef struct maage_render_ui_vertex {
+    float position[2];
+    float uv[2];
+    float color[4];
+} maage_render_ui_vertex;
+typedef struct maage_render_ui_data {
+    const maage_render_ui_vertex *vertices;
+    size_t vertex_count;
+    const unsigned int *indices;
+    size_t index_count;
+    maage_render_texture *texture;
+    float logical_width;
+    float logical_height;
+} maage_render_ui_data;
 
 const char *maage_render_backend_name(maage_render_backend backend);
 /* Compile-time availability only, not runtime device/display availability.
@@ -95,6 +113,8 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc,
     maage_renderer **renderer);
 void maage_renderer_destroy(maage_renderer *renderer);
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer);
+/* Borrowed device name, valid until renderer destruction; NULL if unavailable. */
+const char *maage_renderer_device_name(const maage_renderer *renderer);
 /* Components must be finite values in [0, 1]. */
 maage_render_result maage_renderer_set_clear_color(maage_renderer *renderer,
     float red, float green, float blue, float alpha);
@@ -136,6 +156,14 @@ maage_render_result maage_renderer_draw_mesh(maage_renderer *renderer,
 maage_render_result maage_renderer_draw_meshes(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const float view_projection[16]);
+/* Draws the world batch, then optional UI, and presents once. UI has nearest
+ * sampling, straight-alpha blending and no depth test/writes or face culling.
+ * Data and the owned texture handle are borrowed through this call. Reuse CPU
+ * batches afterward. Empty UI is permitted; unsupported UI returns UNSUPPORTED.
+ * Meshes retain the same matrix/depth contract as draw_meshes. */
+maage_render_result maage_renderer_draw_frame(maage_renderer *renderer,
+    const maage_render_mesh *const *meshes, size_t count,
+    const float view_projection[16], const maage_render_ui_data *ui);
 /* Force presentation resources to refresh on the next frame, if needed. */
 void maage_renderer_resize(maage_renderer *renderer);
 #endif

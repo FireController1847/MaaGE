@@ -1,8 +1,8 @@
 # MaaGE Gameplay Roadmap
 
-Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.3**
+Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.4**
 implements the Phase 1 foundation, Phase 2 world milestone and Phase 2.5
-multithreaded architecture below.
+multithreaded architecture, extended by the Phase 2.75 UI foundation below.
 Compilation does not establish runtime correctness or vanilla fidelity. Phases
 3–6 remain future work.
 
@@ -15,7 +15,7 @@ camera, fixed 20 TPS movement, jumping/gravity and swept AABB collision. Phase 2
 extends these same modules; the nine-section static demonstration is superseded
 by the normal generated world.
 
-WASD walks, Space jumps, Escape pauses/releases capture, and clicking resumes.
+WASD walks and Space jumps. Phase 2.75 adds Escape pause-menu navigation and F3.
 Focus loss releases capture and clears held keys. Camera position is interpolated;
 long frames cap simulation catch-up. Inactive/hidden windows use event waits.
 The player bounds, eye height, acceleration/drag/jump values and camera tuning
@@ -207,7 +207,7 @@ Implemented as an extension of the existing World and Client:
   resources. Resource/world metadata opens during hidden startup; blocking flush,
   join and final player metadata happen after the render loop stops.
 - **Diagnostics:** `--world-workers=<count>` configures the pool (0 is automatic). Startup reports its
-  actual count. Five-second DEBUG logs report queued/running jobs, active
+  actual count. Five-second DEBUG logs report queued/running jobs, accepted
   generation, lighting, meshing and I/O work, lifetime completed/cancelled/stale
   counts, and approximate mean scheduling latency. No per-task production logging
   or runtime benchmark is required.
@@ -219,6 +219,64 @@ Main-thread startup/shutdown metadata I/O is a lifecycle boundary; no chunk
 generation, serialization, mesh construction or disk I/O runs inside the render
 loop. Runtime concurrency, cancellation, determinism and recovery require programmer
 testing; compilation alone does not establish their behavior.
+
+## Phase 2.75 — Client UI Foundation
+
+Implemented as a small Client-owned UI, separate from the Launcher's native
+AppKit/Win32/GTK controls:
+
+- **Foundation:** immediate text, textured rectangles, panels and buttons, with
+  simple left/center/right alignment and viewport clipping. Registration,
+  navigation, input routing, drawing, resources and debug collection stay in
+  separate modules. One reusable CPU batch avoids per-frame heap allocation.
+- **Numeric screens:** finalized definitions use direct O(1) numeric indexing.
+  Gameplay/HUD **0** is the nonmodal state; Pause **1** and Options **2** are
+  registered modals. Opening a submenu pushes its numeric ID; Back/Escape pops
+  it. The root returns to gameplay. Stack storage follows the finalized screen
+  count; unknown IDs and navigation cycles fail explicitly.
+- **Screens and input:** the HUD contains a centered textured crosshair and an
+  independently toggled F3 overlay. Escape opens Pause, whose actions resume,
+  open an Options placeholder or exit through normal Client shutdown. Options
+  demonstrates Back navigation without adding a settings system. Mouse controls
+  and keyboard selection use native input snapshots; menus release capture and
+  pause fixed-step player updates. Rendering, native events and bounded World
+  completion/scheduling continue while paused. Closing menus restores gameplay
+  capture when focus permits; focus loss still releases capture and held keys.
+- **Resources and scaling:** existing reconstructed 1.7.10 `gui/icons.png`,
+  `gui/widgets.png` and `font/ascii.png` provide the crosshair, buttons and pixel
+  text. PNGs resolve once at initialization into a shared GUI atlas through the
+  existing Image/Texture APIs. No downloads, embedded Minecraft resources or new
+  texture manager. Integer GUI scaling uses logical coordinates independently of
+  native window/framebuffer scale. Columns clip independently on narrow views.
+- **Rendering:** backend-neutral indexed UI triangles carry positions, UVs and
+  RGBA. UI draws after world geometry with alpha blending and depth disabled,
+  followed by one presentation. **Metal currently implements UI and textured
+  gameplay.** Vulkan/OpenGL/Software retain existing clear/presentation behavior
+  and explicitly reject unsupported UI/gameplay commands; parity is deferred.
+- **F3 gameplay data:** the header uses the generated Client version and Git
+  metadata. Measured FPS/frame time and simulation TPS/tick cost accompany world
+  ID/seed, player XYZ, block/chunk coordinates, facing/yaw/pitch, numeric biome
+  and diagnostic name, current available sky/block light, render distance,
+  loaded/pending columns, resident sections and rendered mesh/vertex/triangle
+  counts. Resident sections are not a frustum-visibility estimate. Targeted-block
+  information is N/A because raycasting has not been implemented.
+- **F3 system data:** OS/architecture, renderer/backend and available GPU name,
+  Client build type, available process resident/peak memory, logical processors,
+  worker pool size, genuinely running generation workers, queued/running
+  generation, meshing, lighting and I/O, and completed/cancelled/stale counters.
+  Unavailable values are omitted or marked N/A rather than inferred.
+- **Read-only telemetry:** World/job, text and memory snapshots refresh at 4 Hz;
+  inexpensive frame/tick counters accumulate normally. A single brief scheduler
+  lock copies bounded context identities and numeric states, then World groups
+  immutable task kinds outside that lock. No worker output fields are read.
+  World observation reads owner-published biome/light/section data, with light
+  unavailable until current lighting completes. No World lock, job wait, GUI
+  dependency or diagnostic file I/O is introduced into the render loop.
+
+The ASCII font, compact layout, scaling, capture/navigation, pause behavior and
+Metal presentation require programmer runtime/visual verification. Non-macOS
+source paths remain uncompiled locally. Inventory, crafting, targeting, a full
+settings system and multiplayer menus remain future phases.
 
 ## Phase 3 — Player Interaction
 
