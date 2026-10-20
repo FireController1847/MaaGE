@@ -23,7 +23,6 @@ typedef struct maage_metal_renderer {
 typedef struct maage_metal_mesh {
     id<MTLBuffer> vertices;
     id<MTLBuffer> indices;
-    id<MTLTexture> atlas;
     NSUInteger index_count;
 } maage_metal_mesh;
 
@@ -138,7 +137,7 @@ static void maage_metal_destroy(maage_renderer *renderer)
     free(native);
 }
 static maage_render_result maage_metal_frame(maage_renderer *renderer, const maage_window_state *state,
-    int preparing, const maage_render_mesh *mesh, const float *view_projection)
+    int preparing, const maage_render_mesh *const *meshes, size_t count, const float *view_projection)
 {
     maage_metal_renderer *native = renderer->platform;
     NSWindow *window = renderer->native.handles.cocoa.window;
@@ -148,7 +147,8 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     id<MTLRenderCommandEncoder> encoder;
     MTLRenderPassDescriptor *pass;
     maage_render_result result;
-    maage_metal_mesh *geometry = mesh ? mesh->platform : NULL;
+    maage_metal_mesh *geometry;
+    size_t index;
     if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
     if (!preparing && ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible)))
         return MAAGE_RENDER_SKIPPED;
@@ -173,7 +173,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     renderer->refresh = 0;
     drawable = [native->layer nextDrawable];
     if (!drawable) { [pool drain]; return MAAGE_RENDER_SKIPPED; }
-    if (geometry && (!native->depth || native->depth.width != drawable.texture.width ||
+    if (count && (!native->depth || native->depth.width != drawable.texture.width ||
         native->depth.height != drawable.texture.height)) {
         MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
             MTLPixelFormatDepth32Float width:drawable.texture.width height:drawable.texture.height mipmapped:NO];
@@ -191,7 +191,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     pass.colorAttachments[0].clearColor = MTLClearColorMake(renderer->clear[0],
         renderer->clear[1], renderer->clear[2], renderer->clear[3]);
     if (!command || !pass) { [pool drain]; return MAAGE_RENDER_OUT_OF_MEMORY; }
-    if (geometry) {
+    if (count) {
         pass.depthAttachment.texture = native->depth;
         pass.depthAttachment.loadAction = MTLLoadActionClear;
         pass.depthAttachment.storeAction = MTLStoreActionDontCare;
@@ -199,18 +199,21 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     }
     encoder = [command renderCommandEncoderWithDescriptor:pass];
     if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
-    if (geometry) {
+    if (count) {
         MTLViewport viewport = {0, 0, drawable.texture.width, drawable.texture.height, 0, 1};
         [encoder setViewport:viewport];
         [encoder setRenderPipelineState:native->pipeline];
         [encoder setDepthStencilState:native->depth_state];
         [encoder setCullMode:MTLCullModeBack];
         [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
-        [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
         [encoder setVertexBytes:view_projection length:16 * sizeof(float) atIndex:1];
-        [encoder setFragmentTexture:geometry->atlas atIndex:0];
-        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:geometry->index_count
-            indexType:MTLIndexTypeUInt32 indexBuffer:geometry->indices indexBufferOffset:0];
+        for (index = 0; index < count; ++index) {
+            geometry = meshes[index]->platform;
+            [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
+            [encoder setFragmentTexture:(id<MTLTexture>)meshes[index]->texture->platform atIndex:0];
+            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:geometry->index_count
+                indexType:MTLIndexTypeUInt32 indexBuffer:geometry->indices indexBufferOffset:0];
+        }
     }
     [encoder endEncoding];
     if (!preparing) [command presentDrawable:drawable];
@@ -230,18 +233,47 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
 }
 static maage_render_result maage_metal_present(maage_renderer *renderer, const maage_window_state *state)
 {
-    return maage_metal_frame(renderer, state, 0, NULL, NULL);
+    return maage_metal_frame(renderer, state, 0, NULL, 0, NULL);
 }
 static maage_render_result maage_metal_prepare_frame(maage_renderer *renderer, const maage_window_state *state)
 {
-    return maage_metal_frame(renderer, state, 1, NULL, NULL);
+    return maage_metal_frame(renderer, state, 1, NULL, 0, NULL);
 }
-static maage_render_result maage_metal_upload_mesh(maage_renderer *renderer, maage_render_mesh *mesh,
-    const maage_mesh_data *data, const maage_pixel_buffer *atlas)
+static maage_render_result maage_metal_create_texture(maage_renderer *renderer,
+    maage_render_texture *resource, const maage_pixel_buffer *atlas)
+{
+    maage_metal_renderer *native = renderer->platform;
+    MTLTextureDescriptor *descriptor;
+    id<MTLTexture> texture;
+    NSAutoreleasePool *pool;
+    if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
+    pool = [[NSAutoreleasePool alloc] init];
+    descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+        width:atlas->width height:atlas->height mipmapped:NO];
+    descriptor.usage = MTLTextureUsageShaderRead;
+    descriptor.storageMode = MTLStorageModeManaged;
+    if (@available(macOS 10.15, *)) {
+        if ([native->device supportsFamily:MTLGPUFamilyApple1])
+            descriptor.storageMode = MTLStorageModeShared;
+    }
+    texture = [native->device newTextureWithDescriptor:descriptor];
+    if (texture)
+        [texture replaceRegion:MTLRegionMake2D(0, 0, atlas->width, atlas->height)
+            mipmapLevel:0 withBytes:atlas->pixels bytesPerRow:atlas->stride];
+    resource->platform = texture;
+    [pool drain];
+    return texture ? MAAGE_RENDER_OK : MAAGE_RENDER_OUT_OF_MEMORY;
+}
+static void maage_metal_destroy_texture(maage_render_texture *texture)
+{
+    [(id<MTLTexture>)texture->platform release];
+    texture->platform = NULL;
+}
+static maage_render_result maage_metal_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh,
+    const maage_mesh_data *data)
 {
     maage_metal_renderer *native = renderer->platform;
     maage_metal_mesh *geometry;
-    MTLTextureDescriptor *texture;
     NSAutoreleasePool *pool;
     maage_render_result result;
     if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
@@ -261,20 +293,8 @@ static maage_render_result maage_metal_upload_mesh(maage_renderer *renderer, maa
     geometry->indices = [native->device newBufferWithBytes:data->indices
         length:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
     geometry->index_count = data->index_count;
-    texture = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-        width:atlas->width height:atlas->height mipmapped:NO];
-    texture.usage = MTLTextureUsageShaderRead;
-    texture.storageMode = MTLStorageModeManaged;
-    if (@available(macOS 10.15, *)) {
-        if ([native->device supportsFamily:MTLGPUFamilyApple1])
-            texture.storageMode = MTLStorageModeShared;
-    }
-    geometry->atlas = [native->device newTextureWithDescriptor:texture];
-    if (geometry->atlas)
-        [geometry->atlas replaceRegion:MTLRegionMake2D(0, 0, atlas->width, atlas->height)
-            mipmapLevel:0 withBytes:atlas->pixels bytesPerRow:atlas->stride];
     [pool drain];
-    return geometry->vertices && geometry->indices && geometry->atlas ? MAAGE_RENDER_OK : MAAGE_RENDER_OUT_OF_MEMORY;
+    return geometry->vertices && geometry->indices ? MAAGE_RENDER_OK : MAAGE_RENDER_OUT_OF_MEMORY;
 }
 static void maage_metal_destroy_mesh(maage_render_mesh *mesh)
 {
@@ -282,17 +302,18 @@ static void maage_metal_destroy_mesh(maage_render_mesh *mesh)
     if (!geometry) return;
     [geometry->vertices release];
     [geometry->indices release];
-    [geometry->atlas release];
     free(geometry);
     mesh->platform = NULL;
 }
-static maage_render_result maage_metal_draw_mesh(maage_renderer *renderer, const maage_render_mesh *mesh,
+static maage_render_result maage_metal_draw_meshes(maage_renderer *renderer,
+    const maage_render_mesh *const *meshes, size_t count,
     const maage_window_state *state, const float view_projection[16])
 {
-    return maage_metal_frame(renderer, state, 0, mesh, view_projection);
+    return maage_metal_frame(renderer, state, 0, meshes, count, view_projection);
 }
 const maage_render_backend_api maage_render_metal_api = {
     MAAGE_RENDER_METAL, maage_metal_create, maage_metal_destroy, maage_metal_present,
-    MAAGE_RENDER_CAPABILITIES_VERSION, maage_metal_prepare_frame, maage_metal_upload_mesh,
-    maage_metal_destroy_mesh, maage_metal_draw_mesh
+    MAAGE_RENDER_CAPABILITIES_VERSION, maage_metal_prepare_frame, maage_metal_upload_geometry,
+    maage_metal_destroy_mesh, maage_metal_draw_meshes,
+    maage_metal_create_texture, maage_metal_destroy_texture
 };

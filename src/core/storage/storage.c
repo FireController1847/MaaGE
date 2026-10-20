@@ -8,13 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <openssl/evp.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <bcrypt.h>
 #include <shlobj.h>
 #include <aclapi.h>
 #include <wchar.h>
+#include <io.h>
 struct maage_storage_lock { HANDLE handle; };
 static wchar_t *maage_storage_wide(const char *path)
 {
@@ -130,6 +131,58 @@ FILE *maage_storage_open(const char *path, const char *mode)
     return file;
 #endif
 }
+int maage_storage_status(const char *path)
+{
+#ifdef _WIN32
+    wchar_t *wide = maage_storage_wide(path);
+    DWORD attributes, error;
+    if (!wide) return -1;
+    attributes = GetFileAttributesW(wide); error = GetLastError(); free(wide);
+    if (attributes == INVALID_FILE_ATTRIBUTES)
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? 0 : -1;
+    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return -1;
+    return attributes & FILE_ATTRIBUTE_DIRECTORY ? 2 : 1;
+#else
+    struct stat st;
+    if (lstat(path, &st)) return errno == ENOENT ? 0 : -1;
+    if (S_ISREG(st.st_mode)) return 1;
+    return S_ISDIR(st.st_mode) ? 2 : -1;
+#endif
+}
+int maage_storage_random(unsigned char *bytes, size_t count)
+{
+    size_t step;
+#ifdef _WIN32
+    while (count) {
+        step = count > 65536 ? 65536 : count;
+        if (BCryptGenRandom(NULL, bytes, (ULONG)step, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) return 0;
+        bytes += step; count -= step;
+    }
+    return 1;
+#else
+    int descriptor;
+    ssize_t received;
+    do { descriptor = open("/dev/urandom", O_RDONLY); } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) return 0;
+    while (count) {
+        step = count > 65536 ? 65536 : count;
+        received = read(descriptor, bytes, step);
+        if (received < 0 && errno == EINTR) continue;
+        if (received <= 0) { close(descriptor); return 0; }
+        bytes += received; count -= (size_t)received;
+    }
+    close(descriptor); return 1;
+#endif
+}
+int maage_storage_sync(FILE *file)
+{
+    if (!file || fflush(file)) return 0;
+#ifdef _WIN32
+    return FlushFileBuffers((HANDLE)_get_osfhandle(_fileno(file))) != 0;
+#else
+    return fsync(fileno(file)) == 0;
+#endif
+}
 int maage_storage_private_file(const char *path)
 {
 #ifdef _WIN32
@@ -210,27 +263,6 @@ int maage_storage_stat(const char *path, double *size, char fingerprint[128])
 #endif
 #endif
     return 1;
-}
-int maage_storage_sha1(const char *path, char hash[41], int (*cancel)(void *), void *context)
-{
-    FILE *file = maage_storage_open(path, "rb");
-    EVP_MD_CTX *digest;
-    unsigned char buffer[32768], bytes[EVP_MAX_MD_SIZE];
-    unsigned int length, i;
-    size_t n;
-    int ok = 1;
-    if (!file) return 0;
-    digest = EVP_MD_CTX_new();
-    if (!digest || EVP_DigestInit_ex(digest, EVP_sha1(), NULL) != 1) ok = 0;
-    while (ok && (n = fread(buffer, 1, sizeof(buffer), file)) != 0) {
-        if ((cancel && cancel(context)) || EVP_DigestUpdate(digest, buffer, n) != 1) ok = 0;
-    }
-    if (ferror(file)) ok = 0;
-    if (ok && (EVP_DigestFinal_ex(digest, bytes, &length) != 1 || length != 20)) ok = 0;
-    fclose(file); EVP_MD_CTX_free(digest);
-    if (!ok) return 0;
-    for (i = 0; i < 20; ++i) sprintf(hash + i * 2, "%02x", bytes[i]);
-    hash[40] = 0; return 1;
 }
 maage_storage_lock *maage_storage_acquire(const char *path)
 {

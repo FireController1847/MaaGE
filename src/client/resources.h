@@ -2,18 +2,31 @@
 #define MAAGE_CLIENT_RESOURCES_H
 #include "maage/image.h"
 #include "maage/pixels.h"
-/* Resolved numeric atlas slots, consumed by registration only. */
+#include "maage/biome.h"
+/* Atlas indices are resolved once, during registration. */
 #define MAAGE_CLIENT_TEXTURE_STONE 0
 #define MAAGE_CLIENT_TEXTURE_DIRT 1
 #define MAAGE_CLIENT_TEXTURE_GRASS_TOP 2
 #define MAAGE_CLIENT_TEXTURE_GRASS_SIDE 3
-#define MAAGE_CLIENT_TEXTURE_COUNT 4
+#define MAAGE_CLIENT_TEXTURE_BEDROCK 4
+#define MAAGE_CLIENT_TEXTURE_WATER 5
+#define MAAGE_CLIENT_TEXTURE_SAND 6
+#define MAAGE_CLIENT_TEXTURE_GRAVEL 7
+#define MAAGE_CLIENT_TEXTURE_SANDSTONE 8
+#define MAAGE_CLIENT_TEXTURE_SANDSTONE_TOP 9
+#define MAAGE_CLIENT_TEXTURE_SANDSTONE_BOTTOM 10
+#define MAAGE_CLIENT_TEXTURE_BIOME_TOP(id) (11 + 2 * (id))
+#define MAAGE_CLIENT_TEXTURE_BIOME_SIDE(id) (12 + 2 * (id))
+#define MAAGE_CLIENT_TEXTURE_COUNT (11 + 2 * MAAGE_BIOME_COUNT)
 typedef struct maage_client_resources {
     maage_image image;
     maage_pixel_buffer atlas;
     float uv[MAAGE_CLIENT_TEXTURE_COUNT][4];
 } maage_client_resources;
+/* Colormap samples populate mutable biome definitions before finalization. */
 int maage_client_resources_load(const char *application_data,
-    maage_client_resources *resources);
+    maage_client_resources *resources, maage_biome_registry *biomes);
+maage_block_registry *maage_client_register_blocks(
+    const maage_client_resources *resources, const maage_biome_registry *biomes);
 void maage_client_resources_destroy(maage_client_resources *resources);
 #endif

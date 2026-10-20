@@ -78,7 +78,9 @@ perform string-based identifier comparisons or name-to-ID lookups. Numeric
 ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 - Block types and states have distinct numeric domains; states reference types
-  and resolved numeric metadata/properties. Preserve 1.7.10 IDs/metadata where
+  and resolved numeric metadata/properties. Biome definitions also use direct
+  numeric indexing; generation, streaming and lighting never compare names.
+  Preserve 1.7.10 IDs/metadata where
   practical without permanently limiting ID capacity to the legacy format.
 - Finalize registries before gameplay. Definitions then remain immutable;
   unknown/unregistered numeric IDs return explicit failure, never unrelated blocks.
@@ -90,6 +92,28 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   movement/collision contracts independently of Client, graphics and native UI.
   Client coordinates input/camera/presentation; a future Server can consume the
   same portable simulation without graphical dependencies.
+
+### World architecture and persistence
+
+- Use 1.7.10 geometry: 16x16 columns, up to sixteen sparse 16x16x16 sections,
+  Y=0..255. Negative coordinates use floor division and positive modulo.
+  Coordinate-keyed hashing is expected O(1), not deterministic worst-case O(1).
+- Seeded generation is versioned and independent of load order/scheduling.
+  Signed 64-bit seeds use C90-compatible word pairs. Generator 1 approximates
+  classic terrain; never claim Java Random/GenLayer or seed-for-seed parity.
+- One bounded World worker owns column loading, generation, numeric sky/emitted
+  light propagation, CPU meshing, saving and eviction. Publish complete columns
+  and new section pointers under a mutex; graphics owns copied meshes and a
+  shared atlas on its rendering thread. Invalidate affected neighbor boundaries,
+  preserve unchanged GPU resources, and save dirty columns before eviction.
+- Missing/loading columns block collision; never turn unavailable terrain into
+  collision-free air or teleport the player. Preserve fixed-step movement.
+- Store worlds beneath `worlds/<safe-id>/`, separate from Minecraft resources.
+  Format/generator/blockset versions bind stable numeric state mappings; changes
+  require explicit migrations. Validate save lengths, coordinates, IDs and CRCs,
+  sync temporary files before atomic promotion, preserve corrupt originals,
+  serialize writers with locks and flush on clean shutdown. World/biome/storage
+  services remain reusable by headless Server without graphical dependencies.
 
 ### Mandatory token-efficient development
 
@@ -144,7 +168,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   contract as gameplay develops; no standalone desktop entry or macOS app bundle.
   The Client initializes its own window/renderer. Never invent launch flags as
   authentication or implement remote distribution until requested.
-  Phase 1 implements a finite static voxel world and first-person exploration;
+  The Client extends Phase 1 movement/rendering with persistent seeded chunk
+  streaming, numeric biomes and basic lighting;
   see `docs/development-roadmap.md` for implemented versus provisional behavior.
 - **Server (`src/server/`):** authoritative simulation of worlds, chunks, blocks,
   entities, ticks, scheduled updates, physics, interactions, generation, inventories,
@@ -282,8 +307,8 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   pipeline resources, resource binding, command submission, synchronization, render
   targets/presentation, capabilities, and optional features as needed. Backend
   replacement must be demonstrable, not merely theoretical.
-- The indexed textured-mesh command uses neutral CPU geometry, a copied RGBA8
-  atlas, opaque renderer-owned resources and column-major transforms (clip depth
+- The indexed textured-mesh commands use neutral CPU geometry, shared owned RGBA8
+  atlas resources, batched presentation and column-major transforms (clip depth
   0..1). Advertise `TEXTURED_MESH` only for implemented commands: currently Metal.
   Other families retain their existing clear/presentation functionality and return
   unsupported for gameplay mesh commands. MSL lives in an original `.metal` asset,
@@ -392,6 +417,13 @@ Native input snapshots/capture are separate from gameplay state; focus loss clea
 keys and releases capture. The Client uses bounded fixed 20 TPS updates with
 interpolated presentation, pausing when capture/focus is lost. Physics and camera
 tuning remain provisional until programmer fidelity verification.
+`--world=<id>` loads a saved world; `--new-world` or `--create-world=<id>` creates
+one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
+creates a unique world; default startup resumes `config/last-world` or creates a
+unique world if none exists. Never overwrite an existing ID during creation or
+change its generator/seed implicitly. `--render-distance=1..8` defaults to 3.
+Generic `MaaGE::Storage` and `MaaGE::Thread` have no Launcher acquisition
+dependencies; optional `MaaGE::StorageHash` owns OpenSSL SHA-1 for asset acquisition.
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
@@ -634,8 +666,8 @@ fork/exec and Windows CreateProcess never use shells or Launch Services. Launch
 validation/spawning runs on the Client worker; prevent duplicate launches and
 removal of the active build. Closing the Launcher releases monitoring without
 terminating the Client. The Client owns its native viewport and existing renderer
-selection; metadata queries bypass both. Phase 1 gameplay uses the portable world
-and Metal mesh renderer. Dedicated Server builds/registry/process management are a separate
+selection; metadata queries bypass both. Gameplay uses the portable persistent
+World and Metal mesh renderer. Dedicated Server builds/registry/process management are a separate
 future Launcher milestone; software versions do not define protocol compatibility.
 
 ## Conceptual development sequence

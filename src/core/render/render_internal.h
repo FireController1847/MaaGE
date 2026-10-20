@@ -9,14 +9,26 @@ typedef struct maage_render_backend_api {
     maage_render_result (*present)(maage_renderer *renderer, const maage_window_state *state);
     unsigned int version;
     maage_render_result (*prepare_frame)(maage_renderer *renderer, const maage_window_state *state);
-    maage_render_result (*upload_mesh)(maage_renderer *renderer, maage_render_mesh *mesh,
-        const maage_mesh_data *data, const maage_pixel_buffer *atlas);
+    maage_render_result (*upload_geometry)(maage_renderer *renderer, maage_render_mesh *mesh,
+        const maage_mesh_data *data);
     void (*destroy_mesh)(maage_render_mesh *mesh);
-    maage_render_result (*draw_mesh)(maage_renderer *renderer, const maage_render_mesh *mesh,
+    maage_render_result (*draw_meshes)(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count,
         const maage_window_state *state, const float view_projection[16]);
+    maage_render_result (*create_texture)(maage_renderer *renderer,
+        maage_render_texture *texture, const maage_pixel_buffer *atlas);
+    void (*destroy_texture)(maage_render_texture *texture);
 } maage_render_backend_api;
+struct maage_render_texture {
+    maage_renderer *renderer;
+    void *platform;
+    size_t references;
+    int owned;
+    maage_render_texture *next;
+    maage_render_texture *previous;
+};
 struct maage_render_mesh {
     maage_renderer *renderer;
+    maage_render_texture *texture;
     void *platform;
     maage_render_mesh *next;
     maage_render_mesh *previous;
@@ -31,6 +43,7 @@ struct maage_renderer {
     maage_render_result failure;
     maage_render_capabilities capabilities;
     maage_render_mesh *meshes;
+    maage_render_texture *textures;
 };
 extern const maage_render_backend_api maage_render_metal_api;
 extern const maage_render_backend_api maage_render_vulkan_api;

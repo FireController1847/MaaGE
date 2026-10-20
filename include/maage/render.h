@@ -5,6 +5,7 @@
 
 typedef struct maage_renderer maage_renderer;
 typedef struct maage_render_mesh maage_render_mesh;
+typedef struct maage_render_texture maage_render_texture;
 typedef enum maage_render_backend {
     MAAGE_RENDER_AUTO = 0,
     MAAGE_RENDER_VULKAN,
@@ -114,6 +115,15 @@ maage_render_result maage_renderer_present(maage_renderer *renderer);
 maage_render_result maage_renderer_upload_mesh(maage_renderer *renderer,
     const maage_mesh_data *data, const maage_pixel_buffer *atlas,
     maage_render_mesh **mesh);
+/* Copies one immutable RGBA8 atlas. Geometry retains it, allowing the caller to
+ * release its handle after upload. All resources belong to the renderer and are
+ * invalidated by renderer destruction. Use the window initialization thread. */
+maage_render_result maage_renderer_create_texture(maage_renderer *renderer,
+    const maage_pixel_buffer *atlas, maage_render_texture **texture);
+void maage_render_texture_destroy(maage_render_texture *texture);
+maage_render_result maage_renderer_upload_geometry(maage_renderer *renderer,
+    const maage_mesh_data *data, maage_render_texture *texture,
+    maage_render_mesh **mesh);
 void maage_render_mesh_destroy(maage_render_mesh *mesh);
 /* Clears, draws, and presents one mesh. Uses the same visibility/error behavior
  * as present, nearest texture sampling, depth testing and CCW front faces.
@@ -121,6 +131,11 @@ void maage_render_mesh_destroy(maage_render_mesh *mesh);
  * depth 0..W (normalized depth 0..1). No graphics API types enter the mesh. */
 maage_render_result maage_renderer_draw_mesh(maage_renderer *renderer,
     const maage_render_mesh *mesh, const float view_projection[16]);
+/* Clears and presents once for the entire batch. Meshes borrow a shared atlas;
+ * zero meshes presents the clear color. Mesh order is preserved. */
+maage_render_result maage_renderer_draw_meshes(maage_renderer *renderer,
+    const maage_render_mesh *const *meshes, size_t count,
+    const float view_projection[16]);
 /* Force presentation resources to refresh on the next frame, if needed. */
 void maage_renderer_resize(maage_renderer *renderer);
 #endif

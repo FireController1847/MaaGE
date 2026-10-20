@@ -11,6 +11,12 @@ int maage_storage_directories(const char *path);
 int maage_storage_directory_exists(const char *path);
 /* Binary read ("rb") or binary replacement ("wb"). */
 FILE *maage_storage_open(const char *path, const char *mode);
+/* No-follow status: 0 missing, 1 regular file, 2 directory, -1 unsafe/error. */
+int maage_storage_status(const char *path);
+/* Cryptographic OS-backed randomness; no application/credential dependency. */
+int maage_storage_random(unsigned char *bytes, size_t count);
+/* Flush stdio and the underlying regular file before atomic promotion. */
+int maage_storage_sync(FILE *file);
 /* Restricts an existing regular file to the current user (0600 / protected DACL). */
 int maage_storage_private_file(const char *path);
 int maage_storage_remove(const char *path);
@@ -26,6 +32,8 @@ int maage_storage_same_file(const char *left, const char *right);
 void maage_storage_remove_directory(const char *path);
 /* Regular files only. Fingerprints detect size/time changes, not malicious tampering. */
 int maage_storage_stat(const char *path, double *size, char fingerprint[128]);
+/* SHA-1 file hashing requires the optional MaaGE::StorageHash target, enabled
+ * for Launcher acquisition. Generic Storage has no OpenSSL dependency. */
 int maage_storage_sha1(const char *path, char hash[41], int (*cancel)(void *), void *context);
 typedef struct maage_storage_lock maage_storage_lock;
 maage_storage_lock *maage_storage_acquire(const char *path);

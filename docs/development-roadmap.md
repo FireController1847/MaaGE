@@ -1,77 +1,160 @@
 # MaaGE Gameplay Roadmap
 
-Minecraft: Java Edition **1.7.10** is the reference. The following phases describe
-gameplay development, separately from Launcher releases. Only Phase 1 is currently
-implemented in source; compilation does not establish runtime correctness or
-vanilla fidelity. Client remains **0.1.0-alpha.1**.
+Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.2**
+implements the Phase 1 foundation and the scoped Phase 2 world milestone below.
+Compilation does not establish runtime correctness or vanilla fidelity. Phases
+3–6 remain future work.
 
 ## Phase 1 — Rendering and Movement
 
-Implemented:
+Implemented foundation: standalone `maage-client`, version queries, native Window
+and Input, reconstructed PNG resources, frozen numeric block/state registration,
+indexed visible-face cube meshing, native Metal textured rendering, first-person
+camera, fixed 20 TPS movement, jumping/gravity and swept AABB collision. Phase 2
+extends these same modules; the nine-section static demonstration is superseded
+by the normal generated world.
 
-- Standalone `maage-client` lifecycle using existing native Window, Render, Log,
-  Time, Storage and MinecraftAssets modules. Version queries still bypass game
-  initialization. Launcher passes its resource root via `--data-directory=<path>`;
-  direct startup defaults to the shared platform MaaGE data directory.
-- Separate numeric block-type and state IDs. Air, stone, grass and dirt retain
-  type IDs 0–3; their first states occupy a distinct numeric domain. State records
-  reference types, numeric metadata and resolved per-face textures. Registration
-  rejects duplicate names/IDs and invalid definitions, then freezes definitions.
-- Direct, deterministic O(1) numeric definition arrays. External names use an
-  initialization/import-only, collision-checked hash table with expected O(1)
-  resolution. World cells, collision, movement, meshing and draw commands contain
-  no namespaced identity lookups or string comparisons.
-- Portable `MaaGE::World`: nine contiguous 16×16×16 sections, a deterministic
-  48×16×48 grass/dirt/stone landscape, modest raised terraces and a safe spawn.
-  World storage owns no GPU resources; future headless simulation can reuse it.
-- One-time indexed CPU meshing, with outward normals/winding, four shared vertices
-  per face and hidden-face culling across section boundaries. Only visible faces
-  are uploaded; the immutable world never rebuilds meshes per frame.
-- Startup PNG decoding through `MaaGE::Image` (libpng 1.6+). Actual reconstructed
-  `minecraft/textures/blocks/{stone,dirt,grass_top,grass_side,grass_side_overlay}.png`
-  and `minecraft/textures/colormap/grass.png` produce a padded, nearest-filtered
-  atlas. Grass top/overlay tint and per-face UVs are computed before gameplay.
-  Required files must exist and decode correctly; Client never downloads or
-  authenticates. No acquired textures are embedded or distributed.
-- Renderer-neutral opaque indexed-mesh upload/destroy/draw commands, implemented
-  by native Metal: perspective, camera transform, depth testing, back-face culling,
-  viewport/depth resizing and sky clear. GPU geometry/atlas are uploaded once.
-  Original MSL is embedded during the build and compiled by Metal at initialization
-  of mesh rendering; an offline Metal compiler is not required.
-- Native physical WASD/Space/Escape input, relative capture and focus-loss cleanup
-  for Cocoa, Win32 and X11. Camera input remains separate from portable physics.
-  WASD walks, Space jumps, Escape pauses/releases capture, and clicking resumes.
-- Fixed 20 TPS player simulation with bounded catch-up and interpolated camera
-  position. Gravity, jumping, ground detection and swept axis-aligned voxel
-  collision run independently of rendering. Focus loss/capture release pauses
-  simulation; inactive/hidden windows use event waits.
+WASD walks, Space jumps, Escape pauses/releases capture, and clicking resumes.
+Focus loss releases capture and clears held keys. Camera position is interpolated;
+long frames cap simulation catch-up. Inactive/hidden windows use event waits.
+The player bounds, eye height, acceleration/drag/jump values and camera tuning
+remain provisional pending programmer fidelity verification.
 
-Current limitations and provisional behavior:
+**Metal remains the only textured-mesh renderer.** Vulkan, OpenGL and Software
+preserve their existing clear/presentation paths and reject unsupported gameplay
+commands. Explicit renderer requests never switch families. Cocoa, Win32 and X11
+have native gameplay input; Wayland gameplay capture remains unsupported. X11's
+warp-relative fallback retains native pointer acceleration.
 
-- **Metal is the only textured-mesh implementation.** Vulkan, OpenGL and Software
-  retain existing clear/presentation paths but reject this gameplay requirement.
-  Explicit renderer requests never switch families. Wayland gameplay input/capture
-  is unsupported; X11's warp-relative mouse path retains native pointer acceleration.
-- Static finite terrain has an invisible collision boundary at its horizontal
-  edges and a solid floor. There is no chunk streaming, terrain generation,
-  block interaction, save format or network authority yet.
-- Centralized movement constants approximate classic 20 TPS movement: 0.6×1.8
-  player bounds, 1.62 eye height, per-tick gravity/drag/jump and ground/air
-  acceleration. Exact 1.7.10 fidelity and platform input feel need programmer
-  verification. There is no automatic step-up, sprinting, sneaking, flying or water.
-- Fixed grass colormap sample (51,173), precomputed directional face shading and
-  a fixed sky replace biome tinting, light propagation and time of day. Camera
-  sensitivity/FOV are provisional. The atlas has no mipmaps or resource-pack stack.
-- Local builds cover macOS arm64. Windows/Linux source paths and runtime shader
-  compilation, visual appearance, movement and collision require programmer testing.
-  No applications, automated tests, downloaded assets or CI runs are part of this
-  implementation's build verification.
+## Phase 2 — World Architecture, Generation, Streaming, Lighting and Persistence
 
-## Phase 2 — World Architecture and Generation
+Implemented in the existing portable `MaaGE::World` library:
 
-Planned: faithful 16×16 chunk columns, 16×16×16 sections and original 256-block
-world-height compatibility; block updates/tick scheduling, lighting, world seeds,
-terrain noise, biomes, procedural generation, chunk loading/unloading and persistence.
+- **Columns and sections:** 16×16 horizontal columns, up to sixteen sparse
+  16×16×16 sections, Y=0–255. Each allocated section holds contiguous numeric
+  states and packed skylight/block-light bytes. Columns hold numeric biomes,
+  heightmaps, lifecycle, dirty flags and mesh revisions. No per-block heap objects
+  or GPU resources live in World data.
+- **Coordinates:** world X/Z map by mathematical floor division and positive
+  modulo, including negative coordinates. Column lookup uses a collision-checked
+  integer hash table with expected O(1) access and cluster repair on eviction.
+  Numeric block/state/biome definitions use deterministic direct O(1) arrays.
+- **IDs:** terrain types retain legacy IDs air 0, stone 1, grass 2, dirt 3,
+  bedrock 7, water 9, sand 12, gravel 13 and sandstone 24. State IDs are a separate
+  domain; biome grass states 256–261 reference grass with numeric metadata 1–6.
+  All texture references are precomputed. Name parsing occurs only at argument,
+  registration or save/import boundaries, never in generation, collision,
+  streaming, lighting, meshing or draw loops.
+- **Seeded generation:** signed 64-bit seeds are represented as two masked 32-bit
+  words in C90. Generator **1** hashes seed bits, stable coordinates and numeric
+  stages into gradient Perlin/fractal noise. Climate sampling selects numeric
+  ocean/plains/desert/extreme-hills/forest/taiga biomes; blended heights produce
+  stone, surface/filler layers, bedrock and static ocean water at Y=63. Heightmaps
+  and initial lighting precede meshing. A bounded deterministic surface search
+  selects the initial spawn. Generation has no mutable global PRNG and does not
+  depend on request order, worker scheduling or render radius.
+- **Streaming:** one native worker handles loading/generation, lighting, CPU
+  meshing, save and eviction. The bounded desired grid prioritizes nearby and
+  view-facing columns. Render radius defaults to **3**, configurable from 1–8;
+  one extra column provides a lighting/meshing halo. The cache is capped at 512
+  columns. Fully constructed columns are published under a mutex. Missing/loading
+  columns block collision, and simulation waits for the player's column. Dirty
+  columns are saved before eviction; shutdown joins the worker and flushes saves.
+- **Lifecycle and meshes:** requested → loading/generating → generated → lighting
+  → mesh pending → ready, with saving/unloading and explicit failure states.
+  The worker alone owns column membership and borrowed neighbors. CPU mesh updates
+  transfer ownership under the mutex; the Client owns copied GPU resources.
+  Neighbor arrival/removal invalidates affected boundaries and lighting. Existing
+  meshes survive unrelated movement. Missing neighbors expose exterior faces
+  until an updated culled mesh arrives. Water interiors are culled numerically.
+- **Presentation:** one shared nearest-filtered atlas serves all chunk meshes.
+  The graphics thread uploads at most one changed column per frame and batches
+  draws into one clear/depth/presentation pass. Actual reconstructed 1.7.10 grass,
+  dirt, stone, bedrock, water, sand, gravel and sandstone PNGs are loaded once.
+  Real grass/foliage colormaps populate biome definitions; grass atlas variants
+  and sandstone top/bottom/side references are resolved before gameplay.
+- **Lighting:** packed sky-high/block-low 0–15 levels. Direct sky, opaque occlusion,
+  water attenuation and bounded six-neighbor propagation run on the worker.
+  Both channels import neighboring column light and converge after arrivals,
+  removals or changed boundary light. Numeric block emission properties seed the
+  emitted channel; current terrain blocks emit zero. Meshing combines neighboring
+  light levels with temporary directional face shading. Lighting-only sections
+  are published under the World mutex without copying block arrays.
+- **Diagnostics:** startup logs world ID, signed seed, generator and radius.
+  Periodic DEBUG diagnostics report loaded/pending/ready columns, generated versus
+  disk-loaded counts, mesh rebuilds and approximate frame time.
+
+### Creation and Selection
+
+Resources must already be prepared by the Launcher. Direct startup defaults to
+MaaGE's platform application-data directory; `--data-directory=<absolute root>`
+overrides it. Client never authenticates or downloads Minecraft resources.
+
+```sh
+maage-client                         # Resume last world; create one if none exists
+maage-client --new-world              # Unique world ID and automatic seed
+maage-client --seed=-123456789         # Unique world ID with the specified seed
+maage-client --create-world=example --seed=42 --world-name="Example World"
+maage-client --world=example --render-distance=4
+```
+
+`--world=<id>` loads an existing world. Creating an existing ID fails instead of
+replacing it. Supplying a seed for an existing world is rejected. IDs are bounded,
+path-safe lowercase ASCII identifiers; generated IDs and automatic seeds use OS
+cryptographic randomness. `config/last-world` remembers the selection. Separate
+selection and lifetime world locks prevent concurrent writers.
+
+### Save Format and Recovery
+
+Data lives beneath `worlds/<id>/`: `world.bin` metadata and
+`chunks/<signed-x>_<signed-z>.chunk`. Metadata records ID/name, signed seed,
+creation UTC, format/generator/blockset versions and player position/orientation.
+Player state saves after the worker's clean-shutdown flush. An interrupted first
+launch retains a pending-spawn flag; later interrupted launches resume the last
+successfully saved player state.
+
+Format **1**, generator **1**, blockset **1** use explicit little-endian encoding
+and CRC32. Sparse chunk files store a section mask, numeric 16-bit state IDs,
+packed light, numeric biomes and heightmaps. Runtime IDs remain independent of
+this storage width. The exact state/type/metadata mapping above is frozen by the
+blockset version; changing IDs requires an explicit migration. Unsupported versions,
+coordinates, lengths, mappings, heightmaps or checksums fail clearly. Corrupt
+existing files are preserved, never silently regenerated or overwritten.
+
+Writes sync complete temporary files before atomic promotion. Abandoned `.tmp`
+files are ignored on read and removed before another write. Failed writes retain
+the previous save. This provides interrupted-write recovery; directory-entry
+power-loss durability and automatic recovery from existing file corruption are
+not claimed. Restore damaged files explicitly from a backup.
+
+### Compatibility and Remaining Limits
+
+Generator 1 is an original **approximation**, with coarse climate cells, blended
+height fields and seeded gradient noise. It does not reproduce Java Random,
+GenLayer, vanilla three-dimensional density, exact biome distribution or
+seed-for-seed 1.7.10 terrain. The generator version is persisted and unsupported
+versions are rejected rather than silently changing terrain.
+
+Trees, caves, ores, structures, decorations, fluids, weather, inventories, block
+interaction and multiplayer are deferred. Forest/taiga currently describe terrain
+and color parameters without trees or snow. Water uses an opaque tinted first
+texture frame; there is no animation, fluid simulation, swimming or underwater
+presentation. Lighting is a basic model, without vanilla lighting parity,
+ambient occlusion or day/night. GPU positions remain floating-point world
+coordinates, so precision decreases far from the origin. World coordinates are
+bounded to the classic-scale ±30-million range.
+
+Native threading, storage and randomness stay behind Core APIs. Generic storage
+and headless World persistence require no Launcher UI, HTTP, JSON, OpenSSL,
+archive, window or graphics dependencies. Optional asset hashing remains a
+separate acquisition dependency. The existing Server can consume these same
+portable data/simulation modules later; networking and authoritative server
+integration are not implemented in this phase.
+
+Local build coverage is macOS arm64. Windows/Linux source paths and all runtime
+world generation, streaming, lighting, save/reload and movement behavior require
+programmer validation. No applications, tests, benchmarks, world-generation tools,
+asset downloads or GitHub Actions runs form part of this implementation's checks.
 
 ## Phase 3 — Player Interaction
 
@@ -81,7 +164,8 @@ creative/survival player state, health/hunger and basic world interactions.
 ## Phase 4 — World Systems
 
 Planned: caves/structures, ores/vegetation, fluids, day/night, weather, block
-entities, more complete block behavior and world simulation fidelity.
+entities, block updates/tick scheduling, more complete block behavior and world
+simulation fidelity.
 
 ## Phase 5 — Full Classic Gameplay
 
@@ -92,6 +176,6 @@ Nether/End, progression and faithful Minecraft 1.7.10 mechanics.
 
 Planned: authoritative dedicated Server simulation, a versioned network protocol,
 compatibility rules, multiplayer, player/world synchronization and Launcher server
-hosting integration. Portable world/simulation must remain independent of graphical
-Client ownership. The Server stays headless; optional administration UI remains a
-frontend over its simulation, rather than a second implementation.
+hosting integration. Portable world/simulation stays independent of graphical
+Client ownership. Optional Server administration UI will be a frontend over the
+same simulation, rather than a second implementation.

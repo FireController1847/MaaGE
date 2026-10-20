@@ -130,7 +130,7 @@ maage_registry_result maage_block_registry_register_block(
     char *copy;
     if (registry == NULL || definition == NULL) return MAAGE_REGISTRY_INVALID;
     if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
-    if (definition->id >= registry->block_capacity ||
+    if (definition->id >= registry->block_capacity || definition->emitted_light > 15 ||
         !maage_block_name_valid(external_name)) return MAAGE_REGISTRY_INVALID;
     if (registry->blocks[definition->id].name != NULL)
         return MAAGE_REGISTRY_DUPLICATE;

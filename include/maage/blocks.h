@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /* Separate numeric domains: a state selects a type plus its resolved properties.
- * unsigned long provides at least 32 bits in ISO C90; IDs are session-local. */
+ * unsigned long provides at least 32 bits in ISO C90; persistence defines a versioned stable mapping. */
 typedef unsigned long maage_block_id;
 typedef unsigned long maage_block_state_id;
 typedef unsigned long maage_texture_id;
@@ -17,13 +17,23 @@ enum {
     MAAGE_BLOCK_AIR = 0,
     MAAGE_BLOCK_STONE = 1,
     MAAGE_BLOCK_GRASS = 2,
-    MAAGE_BLOCK_DIRT = 3
+    MAAGE_BLOCK_DIRT = 3,
+    MAAGE_BLOCK_BEDROCK = 7,
+    MAAGE_BLOCK_WATER = 9,
+    MAAGE_BLOCK_SAND = 12,
+    MAAGE_BLOCK_GRAVEL = 13,
+    MAAGE_BLOCK_SANDSTONE = 24
 };
 enum {
     MAAGE_STATE_AIR = 0,
     MAAGE_STATE_STONE = 1,
     MAAGE_STATE_GRASS = 2,
-    MAAGE_STATE_DIRT = 3
+    MAAGE_STATE_DIRT = 3,
+    MAAGE_STATE_BEDROCK = 7,
+    MAAGE_STATE_WATER = 9,
+    MAAGE_STATE_SAND = 12,
+    MAAGE_STATE_GRAVEL = 13,
+    MAAGE_STATE_SANDSTONE = 24
 };
 
 typedef enum maage_block_face {
@@ -47,6 +57,7 @@ typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
     int opaque;
+    unsigned int emitted_light; /* 0..15; resolved during registration. */
 } maage_block_definition;
 
 typedef struct maage_block_state_definition {
