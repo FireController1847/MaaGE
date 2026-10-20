@@ -156,8 +156,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
-- Debug telemetry is read-only, sampled at a modest interval, with no per-frame
-  allocation, World lock, job wait or file I/O. One brief scheduler snapshot lock
+- Visible UI, input and F3 telemetry update every rendered frame without
+  artificial menu delays. Rolling timing statistics may smooth measurements;
+  never throttle live state. Read-only telemetry uses no per-frame allocation,
+  World lock, job wait or disk I/O. One brief scheduler snapshot lock
   may copy bounded numeric job states; never read worker-owned output fields.
   Diagnostic text/names are presentation only, never gameplay identifier lookup.
   Omit unavailable data or report N/A; resident sections are not visibility counts.

@@ -55,19 +55,25 @@ static const char *maage_client_debug_biome(maage_biome_id biome)
 void maage_client_debug_frame(maage_client_debug *debug, double now,
     double elapsed, int presented, unsigned long ticks, double tick_seconds)
 {
-    double duration;
-    if (!debug->initialized) { debug->sample_start = now; debug->initialized = 1; }
-    if (presented) { ++debug->frames; debug->frame_seconds += elapsed; }
-    debug->ticks += ticks; debug->tick_seconds += tick_seconds;
+    double duration, retained, weight;
+    if (!debug->initialized) { debug->sample_start = now - elapsed; debug->initialized = 1; }
     duration = now - debug->sample_start;
-    if (duration < 0.25) return;
-    debug->fps = debug->frames / duration;
-    debug->frame_ms = debug->frames ? debug->frame_seconds * 1000.0 / debug->frames : 0;
-    debug->tps = debug->ticks / duration;
+    debug->sample_start = now;
+    if (!(duration > 0)) return;
+    /* Update every frame. Integrating the interval's weight keeps a long stall
+     * from dominating this one-second history after normal frames resume. */
+    retained = exp(-duration);
+    weight = retained < 1.0 ? (1.0 - retained) / duration : 1.0;
+    debug->sample_seconds = debug->sample_seconds * retained + duration * weight;
+    debug->frames = debug->frames * retained + (presented ? weight : 0);
+    debug->ticks = debug->ticks * retained + (double)ticks * weight;
+    debug->tick_seconds = debug->tick_seconds * retained + tick_seconds * weight;
+    debug->fps = debug->frames / debug->sample_seconds;
+    if (presented) debug->frame_ms = duration * 1000.0;
+    debug->tps = debug->ticks / debug->sample_seconds;
     debug->tick_sample = debug->ticks != 0;
     debug->tick_ms = debug->ticks ? debug->tick_seconds * 1000.0 / debug->ticks : 0;
-    debug->frames = debug->ticks = 0; debug->frame_seconds = debug->tick_seconds = 0;
-    debug->sample_start = now; debug->timing_ready = 1;
+    debug->timing_ready = 1;
 }
 const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug,
     double now, const maage_world *world, const maage_world_record *record,
@@ -84,8 +90,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     double degrees, resident, peak;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
-    if (now < debug->refresh_after && text->left_count) return text;
-    debug->refresh_after = now + 0.25;
+    (void)now;
     x = (int)floor(player->position[0]); y = (int)floor(player->position[1]); z = (int)floor(player->position[2]);
     degrees = fmod(yaw * 57.29577951308232, 360.0);
     if (degrees < 0) degrees += 360.0;

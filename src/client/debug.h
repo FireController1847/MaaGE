@@ -10,13 +10,15 @@ typedef struct maage_client_mesh_stats {
 } maage_client_mesh_stats;
 typedef struct maage_client_debug {
     maage_client_ui_debug text;
-    double sample_start, refresh_after, frame_seconds, tick_seconds;
+    double sample_start, sample_seconds, tick_seconds;
     double fps, frame_ms, tps, tick_ms;
-    unsigned long frames, ticks;
+    double frames, ticks; /* exponentially weighted event counts */
     int initialized, timing_ready, tick_sample;
 } maage_client_debug;
-/* Cheap rolling counters; formatting and native memory queries run at 4 Hz
- * only while F3 is visible. All observations belong to the Client owner. */
+/* Frame time is the latest completed interval; FPS/TPS/tick averages update
+ * every frame with a one-second exponential history.
+ * Formatting and native memory observations update every visible F3 frame.
+ * All observations belong to the Client owner; no update-frequency throttle. */
 void maage_client_debug_frame(maage_client_debug *debug, double now,
     double elapsed, int presented, unsigned long ticks, double tick_seconds);
 const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug,

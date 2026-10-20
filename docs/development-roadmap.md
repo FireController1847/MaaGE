@@ -242,6 +242,7 @@ AppKit/Win32/GTK controls:
   pause fixed-step player updates. Rendering, native events and bounded World
   completion/scheduling continue while paused. Closing menus restores gameplay
   capture when focus permits; focus loss still releases capture and held keys.
+  Visible UI and input update every rendered frame without artificial menu delays.
 - **Resources and scaling:** existing reconstructed 1.7.10 `gui/icons.png`,
   `gui/widgets.png` and `font/ascii.png` provide the crosshair, buttons and pixel
   text. PNGs resolve once at initialization into a shared GUI atlas through the
@@ -265,8 +266,9 @@ AppKit/Win32/GTK controls:
   worker pool size, genuinely running generation workers, queued/running
   generation, meshing, lighting and I/O, and completed/cancelled/stale counters.
   Unavailable values are omitted or marked N/A rather than inferred.
-- **Read-only telemetry:** World/job, text and memory snapshots refresh at 4 Hz;
-  inexpensive frame/tick counters accumulate normally. A single brief scheduler
+- **Read-only telemetry:** visible F3 World/job, text and memory snapshots refresh
+  every rendered frame. Rolling frame/tick timing statistics may smooth
+  measurements without throttling live state. A single brief scheduler
   lock copies bounded context identities and numeric states, then World groups
   immutable task kinds outside that lock. No worker output fields are read.
   World observation reads owner-published biome/light/section data, with light

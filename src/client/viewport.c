@@ -193,7 +193,7 @@ int maage_client_run(int argc, char *const argv[])
     maage_render_result rendered = MAAGE_RENDER_OK;
     char directory[MAAGE_PATH_CAPACITY], error[256], seed_text[32];
     double last, now, elapsed, raw_elapsed, accumulator = 0, alpha, eye[3], yaw = 0, pitch = 0, diagnostic_time;
-    double tick_start = 0, tick_seconds, frame_end, stats_after = 0;
+    double tick_start = 0, tick_seconds, frame_end;
     float matrix[16];
     size_t draw_count;
     unsigned long frames = 0, tick_count;
@@ -304,7 +304,8 @@ int maage_client_run(int argc, char *const argv[])
          * phase. Collision observes stable published columns without waiting. */
         maage_world_stream(world, player.position[0], player.position[2], yaw);
         if (maage_world_failed(world)) { maage_log_error("maage.client.world", "Streaming stopped after a world error; preserving existing save files."); goto done; }
-        if (now >= stats_after) { maage_world_get_stats(world, &stats); stats_after = now + 0.25; }
+        if (maage_client_ui_debug_visible(ui) || now - diagnostic_time >= 5.0)
+            maage_world_get_stats(world, &stats);
         rendered = maage_client_stream_meshes(world, renderer, atlas, cache, cx, cz, options.radius);
         if (rendered != MAAGE_RENDER_OK) goto done;
         active = !maage_client_ui_modal(ui) && input.focused && input.captured && state.visible && state.framebuffer_width > 0 && state.framebuffer_height > 0;
@@ -365,8 +366,10 @@ int maage_client_run(int argc, char *const argv[])
                 stats.scheduling_latency_ms);
             diagnostic_time = now; frames = 0;
         }
-        result = maage_window_wait_events(system, active && rendered != MAAGE_RENDER_SKIPPED ? 1 : 100);
-        if (result != MAAGE_WINDOW_OK) goto window_failed;
+        if (rendered == MAAGE_RENDER_SKIPPED) {
+            result = maage_window_wait_events(system, 100);
+            if (result != MAAGE_WINDOW_OK) goto window_failed;
+        }
     }
     goto done;
 clock_failed:
