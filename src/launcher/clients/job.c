@@ -10,7 +10,7 @@
 struct maage_client_job {
     maage_client_registry registry;
     maage_client_candidate candidate;
-    char source[MAAGE_PATH_CAPACITY], error[256];
+    char source[MAAGE_PATH_CAPACITY], instance_id[37], error[256];
     int mode, done, ok;
     maage_access *access;
     maage_process *process;
@@ -36,7 +36,7 @@ static void *maage_client_worker(void *context)
     else
 #endif
     if(job->mode==3) ok=maage_clients_remove(&job->registry,job->source,job->error);
-    else if(job->mode==4) ok=maage_client_launch(job->registry.root,job->source,job->access,&job->process,job->error);
+    else if(job->mode==4) ok=maage_client_launch(job->registry.root,job->source,job->instance_id,job->access,&job->process,job->error);
 #ifdef _WIN32
     EnterCriticalSection(&job->mutex); job->ok=ok; job->done=1; LeaveCriticalSection(&job->mutex);
     return 0;
@@ -45,16 +45,18 @@ static void *maage_client_worker(void *context)
     return NULL;
 #endif
 }
-maage_client_job *maage_client_job_start(const char *root, int mode, const char *source, const maage_client_candidate *candidate, maage_access *access)
+maage_client_job *maage_client_job_start(const char *root, int mode, const char *source, const maage_client_candidate *candidate, maage_access *access, const char *instance_id)
 {
     maage_client_job *job;
 #if !MAAGE_LAUNCHER_DEVELOPMENT
     if(mode!=3 && mode!=4) return NULL;
 #endif
-    if(strlen(root)>=MAAGE_PATH_CAPACITY || (source && strlen(source)>=MAAGE_PATH_CAPACITY)) return NULL;
+    if(strlen(root)>=MAAGE_PATH_CAPACITY || (source && strlen(source)>=MAAGE_PATH_CAPACITY) ||
+        (instance_id && !maage_storage_uuid_valid(instance_id)) || (mode==4 && !instance_id)) return NULL;
     job=(maage_client_job *)calloc(1,sizeof(*job)); if(!job) return NULL;
     strcpy(job->registry.root,root); job->mode=mode; job->access=access;
     if(source) strcpy(job->source,source);
+    if(instance_id) strcpy(job->instance_id,instance_id);
     if(candidate) job->candidate=*candidate;
 #ifdef _WIN32
     InitializeCriticalSection(&job->mutex); job->thread=CreateThread(NULL,0,maage_client_worker,job,0,NULL);

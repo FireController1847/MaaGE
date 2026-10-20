@@ -11,14 +11,24 @@ typedef struct maage_world_record {
     int new_world; /* pending initial spawn; persists until first player save */
     maage_gameplay_save gameplay;
 } maage_world_record;
-/* Metadata/import boundary only. IDs contain lowercase ASCII letters, digits,
- * '-' or '_'. NULL id resumes the last selection, creating a unique world if
+/* Metadata/import boundary only. instance_root is an absolute physical instance
+ * directory containing instance.json; global application-data roots are rejected.
+ * New world IDs are canonical UUIDs. Legacy safe IDs remain loadable unchanged.
+ * NULL id resumes the instance's last selection, creating a unique world if
  * none exists. A seed with NULL id creates a unique new world. create requests
  * a new world; an existing requested ID is never overwritten. Owns a lifetime
  * exclusive world lock. Errors are static, credential-free text (256 bytes). */
-int maage_world_store_open(const char *data_root, const char *id, int create,
+int maage_world_store_open(const char *instance_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **store,
     maage_world_record *record, char error[256]);
+/* Startup/import only, before opening an instance world. The caller owns the
+ * destination instance lease and must establish unambiguous/explicit ownership.
+ * Legacy selection and every world lock exclude active writers. Atomic moves
+ * preserve data in place; cross-filesystem fallback verifies copies before
+ * promotion and retains originals. Journaled retries never overwrite worlds. */
+int maage_world_store_legacy_pending(const char *data_root);
+int maage_world_store_migrate_legacy(const char *data_root,
+    const char *instance_root, char error[256]);
 /* Saves a caller-owned player snapshot without changing shared store data.
  * Serialize metadata saves with each other; chunk files are independent. */
 int maage_world_store_save_player(maage_world_store *store,

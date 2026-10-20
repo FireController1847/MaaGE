@@ -221,7 +221,7 @@ static NSTableView *maage_ui_navigation_table(void)
 {
     (void)sender; NSInteger row = self.installations.selectedRow; if (row < 0) return;
     NSAlert *alert = [[NSAlert alloc] init]; alert.messageText = @"Remove Installation?";
-    alert.informativeText = @"Only this MaaGE configuration will be removed. Minecraft accounts and resources are preserved.";
+    alert.informativeText = @"This instance will be removed from the Launcher and its gameplay folder archived. Worlds and private files remain recoverable; shared resources are preserved.";
     [alert addButtonWithTitle:@"Remove"]; [alert addButtonWithTitle:@"Cancel"];
     if ([alert runModal] == NSAlertFirstButtonReturn) { maage_launcher_installation_remove(self.state, (unsigned)row); [self reloadInstallations]; }
 }

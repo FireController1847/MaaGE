@@ -15,6 +15,10 @@ FILE *maage_storage_open(const char *path, const char *mode);
 int maage_storage_status(const char *path);
 /* Cryptographic OS-backed randomness; no application/credential dependency. */
 int maage_storage_random(unsigned char *bytes, size_t count);
+/* Canonical lowercase, hyphenated, nonzero UUIDs. Generator uses OS randomness
+ * and emits RFC UUID version 4 with the standard variant bits. */
+int maage_storage_uuid_valid(const char *uuid);
+int maage_storage_uuid_generate(char uuid[37]);
 /* Flush stdio and the underlying regular file before atomic promotion. */
 int maage_storage_sync(FILE *file);
 /* Restricts an existing regular file to the current user (0600 / protected DACL). */
@@ -36,6 +40,8 @@ int maage_storage_stat(const char *path, double *size, char fingerprint[128]);
  * for Launcher acquisition. Generic Storage has no OpenSSL dependency. */
 int maage_storage_sha1(const char *path, char hash[41], int (*cancel)(void *), void *context);
 typedef struct maage_storage_lock maage_storage_lock;
+/* Exclusive writer ownership of the lock object. Reads and directory moves may
+ * proceed while held; callers serialize changes to its containing namespace. */
 maage_storage_lock *maage_storage_acquire(const char *path);
 void maage_storage_release(maage_storage_lock *lock);
 #endif

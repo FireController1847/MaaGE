@@ -1,17 +1,18 @@
 #include "launch.h"
 #include "files.h"
 #include "maage/log.h"
+#include "maage/instance.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-int maage_client_launch(const char *root, const char *id, maage_access *access,
+int maage_client_launch(const char *root, const char *id, const char *instance_id, maage_access *access,
     maage_process **process, char error[256])
 {
     maage_client_registry *registry=(maage_client_registry *)malloc(sizeof(*registry));
     char executable[MAAGE_PATH_CAPACITY], directory[MAAGE_PATH_CAPACITY], logs[MAAGE_PATH_CAPACITY];
-    char output[MAAGE_PATH_CAPACITY], errors[MAAGE_PATH_CAPACITY], log[MAAGE_PATH_CAPACITY], argument[MAAGE_PATH_CAPACITY+12], data_argument[MAAGE_PATH_CAPACITY+18], name[128];
-    const char *argv[5];
-    char *slash;
+    char output[MAAGE_PATH_CAPACITY], errors[MAAGE_PATH_CAPACITY], log[MAAGE_PATH_CAPACITY], argument[MAAGE_PATH_CAPACITY+12], data_argument[MAAGE_PATH_CAPACITY+18], instance_argument[48], name[128];
+    const char *argv[6];
+    maage_instance *instance=NULL;
     maage_storage_lock *lock=NULL;
     unsigned attempt;
     double now=difftime(time(NULL),(time_t)0);
@@ -21,8 +22,12 @@ int maage_client_launch(const char *root, const char *id, maage_access *access,
     if(!registry || !maage_clients_load(registry,root,error) || !maage_clients_path(registry,id,executable)) {
         if(!*error) strcpy(error,"The selected Client is missing, modified or incompatible. Import/select a valid standalone Client."); goto done;
     }
-    strcpy(directory,executable); slash=strrchr(directory,'/'); if(!slash) goto done; *slash=0;
-    if(!maage_storage_join(logs,sizeof(logs),root,"logs/clients") || !maage_storage_directories(logs) ||
+    if(!maage_instance_open(root,instance_id,0,&instance,error)) goto done;
+    if(strcmp(maage_instance_get_info(instance)->client_build,id)) {
+        strcpy(error,"Instance Client assignment changed. Select the instance again before launching."); goto done;
+    }
+    strcpy(directory,maage_instance_directory(instance));
+    if(!maage_instance_resolve_path(instance,MAAGE_INSTANCE_FOLDER_LOGS,NULL,logs,sizeof(logs)) || !maage_storage_directories(logs) ||
         !maage_storage_join(output,sizeof(output),logs,"launch.lock") || !(lock=maage_storage_acquire(output))) goto done;
     for(attempt=0;attempt<1000;++attempt) {
         sprintf(name,"client-%.12s-%.0f-%u.stdout.log",id,now,attempt);
@@ -36,12 +41,14 @@ int maage_client_launch(const char *root, const char *id, maage_access *access,
     if(attempt==1000 || !maage_access_allowed(access)) goto done;
     sprintf(argument,"--log-file=%s",log);
     sprintf(data_argument,"--data-directory=%s",root);
-    argv[0]=executable; argv[1]=argument; argv[2]="--log-console=on"; argv[3]=data_argument; argv[4]=NULL;
+    sprintf(instance_argument,"--instance=%s",instance_id);
+    argv[0]=executable; argv[1]=argument; argv[2]="--log-console=on"; argv[3]=data_argument; argv[4]=instance_argument; argv[5]=NULL;
     ok=maage_process_start(executable,argv,directory,output,errors,process,error);
     if(ok) maage_log_info("maage.launcher.clients","Starting selected Client %.12s directly; stdout=%s; stderr=%s.",id,output,errors);
 done:
     if(!ok && !*error) strcpy(error,"Cannot start Client. Check current Minecraft access and permissions for the Client and logs folders.");
     if(!ok) maage_log_error("maage.launcher.clients","%s",error);
     if(lock) maage_storage_release(lock);
+    maage_instance_close(instance);
     free(registry); return ok;
 }

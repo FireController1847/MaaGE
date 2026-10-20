@@ -165,7 +165,7 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id)
     const char *client = ""; LRESULT selected;
     if (id != MAAGE_UI_NEW && row < 0) return;
     if (id == MAAGE_UI_REMOVE) {
-        if (MessageBoxW(ui->window,L"Remove this MaaGE configuration? Minecraft accounts and resources are preserved.",L"Remove Installation",MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
+        if (MessageBoxW(ui->window,L"Remove this MaaGE instance? Its gameplay folder will be archived, preserving worlds and private files. Shared resources and accounts are preserved.",L"Remove Installation",MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
             maage_launcher_installation_remove(ui->state,(unsigned)row);
     } else if (id == MAAGE_UI_DEFAULT) maage_launcher_installation_default(ui->state,(unsigned)row);
     else {

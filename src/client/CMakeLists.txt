@@ -4,13 +4,13 @@ if(NOT MAAGE_CLIENT_VERSION_PRERELEASE STREQUAL "")
 endif()
 maage_client_target_architecture(MAAGE_CLIENT_ARCH)
 set(MAAGE_CLIENT_ARTIFACT "MaaGE-Client-${MAAGE_CLIENT_RELEASE}")
-add_executable(maage_client main.c metadata.c viewport.c resources.c debug.c interaction.c
+add_executable(maage_client main.c metadata.c viewport.c storage_context.c resources.c debug.c interaction.c
     ui/ui.c ui/gameplay.c ui/navigation.c ui/resources.c ui/font.c ui/draw.c)
 add_dependencies(maage_client maage_versions)
 maage_configure_portable_target(maage_client)
 maage_configure_gui_application(maage_client client LAUNCHER_MANAGED)
 set_target_properties(maage_client PROPERTIES OUTPUT_NAME "maage-client")
-target_compile_definitions(maage_client PRIVATE MAAGE_APPLICATION_METADATA_QUERY
+target_compile_definitions(maage_client PRIVATE MAAGE_APPLICATION_METADATA_QUERY MAAGE_APPLICATION_LOG_CONFIGURE
     "MAAGE_CLIENT_BUILD_TYPE=\"$<CONFIG>\"" "MAAGE_CLIENT_PLATFORM=\"${MAAGE_TARGET_SYSTEM}\""
     "MAAGE_CLIENT_ARCHITECTURE=\"${MAAGE_CLIENT_ARCH}\"")
 if(NOT MAAGE_BUILD_RENDER)
@@ -19,8 +19,11 @@ endif()
 if(NOT MAAGE_BUILD_MINECRAFT_ASSETS OR NOT MAAGE_BUILD_IMAGE OR NOT MAAGE_BUILD_WORLD)
     message(FATAL_ERROR "Client requires MAAGE_BUILD_MINECRAFT_ASSETS, MAAGE_BUILD_IMAGE and MAAGE_BUILD_WORLD.")
 endif()
+if(NOT MAAGE_BUILD_INSTANCE)
+    message(FATAL_ERROR "Client requires MAAGE_BUILD_INSTANCE=ON.")
+endif()
 # World supplies the Jobs/Core dependency after the libraries that use it.
-target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::World)
+target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::World MaaGE::Instance)
 if(WIN32)
     target_link_libraries(maage_client PRIVATE psapi)
 endif()

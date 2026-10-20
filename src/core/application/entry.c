@@ -23,6 +23,7 @@
 #endif
 #endif
 
+#ifndef MAAGE_APPLICATION_LOG_CONFIGURE
 #ifdef MAAGE_APPLICATION_USER_DATA
 #include "maage/storage.h"
 static char *maage_application_log_path(void)
@@ -113,6 +114,8 @@ static char *maage_application_log_path(void)
 
 #endif
 
+#endif
+
 static int maage_application_run(int argc, char *const argv[])
 {
     maage_log_config config;
@@ -122,14 +125,22 @@ static int maage_application_run(int argc, char *const argv[])
     extern int maage_application_query(int argc, char *const argv[], int *result);
     if (maage_application_query(argc, argv, &result)) return result;
 #endif
-    path = maage_application_log_path();
+    path = NULL;
     maage_log_config_init(&config);
+#ifdef MAAGE_APPLICATION_LOG_CONFIGURE
+    {
+        extern int maage_application_configure_log(int argc, char *const argv[], maage_log_config *config);
+        if (!maage_application_configure_log(argc, argv, &config)) return 1;
+    }
+#else
+    path = maage_application_log_path();
 #ifdef MAAGE_APPLICATION_USER_DATA
     config.file = path != NULL;
     config.file_path = path;
 #else
     config.file = 1;
     config.file_path = path ? path : "logs/" MAAGE_APPLICATION_KEY ".log";
+#endif
 #endif
     maage_log_init(&config, argc, argv);
 #ifdef MAAGE_APPLICATION_USER_DATA
@@ -138,6 +149,12 @@ static int maage_application_run(int argc, char *const argv[])
     free(path);
     result = maage_application_main(argc, argv);
     maage_log_shutdown();
+#ifdef MAAGE_APPLICATION_LOG_CONFIGURE
+    {
+        extern void maage_application_finish(void);
+        maage_application_finish();
+    }
+#endif
     return result;
 }
 

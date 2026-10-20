@@ -1,6 +1,9 @@
 if(NOT MAAGE_BUILD_MINECRAFT_ASSETS)
     message(FATAL_ERROR "Launcher setup requires MAAGE_BUILD_MINECRAFT_ASSETS=ON.")
 endif()
+if(NOT MAAGE_BUILD_INSTANCE)
+    message(FATAL_ERROR "Launcher requires MAAGE_BUILD_INSTANCE=ON.")
+endif()
 find_package(json-c CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 if(MAAGE_PLATFORM_LINUX)
@@ -32,7 +35,7 @@ target_compile_definitions(maage_launcher_clients PUBLIC
 target_compile_definitions(maage_launcher_clients PRIVATE
     "MAAGE_CLIENT_HOST_PLATFORM=\"${MAAGE_TARGET_SYSTEM}\""
     "MAAGE_CLIENT_HOST_ARCH=\"${MAAGE_CLIENT_HOST_ARCH}\"")
-target_link_libraries(maage_launcher_clients PUBLIC MaaGE::Storage MaaGE::Process PRIVATE maage_launcher_access json-c::json-c OpenSSL::Crypto Threads::Threads)
+target_link_libraries(maage_launcher_clients PUBLIC MaaGE::Storage MaaGE::Process MaaGE::Instance PRIVATE maage_launcher_access json-c::json-c OpenSSL::Crypto Threads::Threads)
 add_library(maage_launcher_ui STATIC ui/launcher.c)
 maage_configure_portable_target(maage_launcher_ui)
 target_link_libraries(maage_launcher_ui PUBLIC maage_launcher_assets maage_launcher_clients PRIVATE MaaGE::Storage json-c::json-c maage_core)

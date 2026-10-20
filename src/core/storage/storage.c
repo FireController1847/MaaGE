@@ -174,6 +174,38 @@ int maage_storage_random(unsigned char *bytes, size_t count)
     close(descriptor); return 1;
 #endif
 }
+int maage_storage_uuid_valid(const char *uuid)
+{
+    size_t index;
+    int nonzero = 0;
+    if (!uuid || strlen(uuid) != 36) return 0;
+    for (index = 0; index < 36; ++index) {
+        if (index == 8 || index == 13 || index == 18 || index == 23) {
+            if (uuid[index] != '-') return 0;
+        } else {
+            if (!((uuid[index] >= '0' && uuid[index] <= '9') ||
+                (uuid[index] >= 'a' && uuid[index] <= 'f'))) return 0;
+            if (uuid[index] != '0') nonzero = 1;
+        }
+    }
+    return nonzero;
+}
+int maage_storage_uuid_generate(char uuid[37])
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned char bytes[16];
+    size_t index, output = 0;
+    if (!uuid || !maage_storage_random(bytes, sizeof(bytes))) return 0;
+    bytes[6] = (unsigned char)((bytes[6] & 15) | 64);
+    bytes[8] = (unsigned char)((bytes[8] & 63) | 128);
+    for (index = 0; index < sizeof(bytes); ++index) {
+        if (index == 4 || index == 6 || index == 8 || index == 10) uuid[output++] = '-';
+        uuid[output++] = hex[bytes[index] >> 4];
+        uuid[output++] = hex[bytes[index] & 15];
+    }
+    uuid[output] = '\0';
+    return 1;
+}
 int maage_storage_sync(FILE *file)
 {
     if (!file || fflush(file)) return 0;
@@ -271,7 +303,12 @@ maage_storage_lock *maage_storage_acquire(const char *path)
 #ifdef _WIN32
     {
         wchar_t *wide = maage_storage_wide(path);
-        lock->handle = wide ? CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL) : INVALID_HANDLE_VALUE;
+        /* Read/copy and rename preserve the held object's ownership, like a
+         * POSIX flock on an inode. Never share writes: another lock requests
+         * GENERIC_WRITE and cannot acquire this object until release. */
+        lock->handle = wide ? CreateFileW(wide, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL) : INVALID_HANDLE_VALUE;
         free(wide);
         if (lock->handle == INVALID_HANDLE_VALUE) { free(lock); return NULL; }
     }

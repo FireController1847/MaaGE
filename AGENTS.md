@@ -137,7 +137,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   registries, stores and snapshots must outlive all jobs that access them.
 - Missing/loading columns block collision; never turn unavailable terrain into
   collision-free air or teleport the player. Preserve fixed-step movement.
-- Store worlds beneath `worlds/<safe-id>/`, separate from Minecraft resources.
+- Store new worlds beneath `instances/<instance-uuid>/worlds/<world-uuid>/`,
+  separate from shared Minecraft resources. Preserve imported legacy IDs.
   Format/generator/blockset versions bind stable numeric state mappings; changes
   require explicit migrations. Validate save lengths, coordinates, IDs and CRCs,
   sync temporary files before atomic promotion, preserve corrupt originals,
@@ -185,6 +186,33 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   metadata only after rendering and successful World flush. Respawn currently
   retains inventory at session-start position; full death/entity/food rules remain
   provisional against Java Edition 1.7.10.
+
+### Physical instances and shared folders
+
+- Instances are persistent UUID-identified gameplay environments, with authoritative
+  `instances/<uuid>/instance.json` manifests. Launcher schema 3 stores UUID references
+  and selected/default UUIDs, not duplicate name/build/mapping records. Display names
+  never determine paths; Client binaries and Minecraft resources stay globally shared.
+- `MaaGE::Instance` is reusable, C90 and independent of Launcher/UI/graphics. Numeric
+  folder kinds select cached startup paths. Worlds, mods, config and logs are private;
+  only screenshots, shaderpacks and resourcepacks currently support explicit private,
+  managed-shared or user-selected external mappings. No virtual/home instances,
+  global world library, implicit data moves or version-dependent config sharing.
+- Manifests govern links; Core Storage implements POSIX directory symlinks and
+  Windows local-volume junctions. Validate UUIDs, root containment, link targets and
+  conflicts. Never replace populated directories. Serialize admin changes with the
+  UUID-scoped use lease; currently one Client per instance. Preserve world locks,
+  async chunk I/O, atomic saves and revision rejection without a global World lock.
+- Resolve `--instance=<uuid>` (or the Launcher selection) before Client logging and
+  world startup. The global data root locates shared resources only; gameplay never
+  falls back to global worlds. Resolve paths only at initialization/I/O boundaries.
+  Client descriptors declare numeric `instance_storage: 1`; retain but refuse to
+  launch legacy builds that could ignore instance selection and use global worlds.
+- Legacy migration requires the sole configured instance or explicit destination.
+  Lock all source worlds, journal before atomic relocation, verify copy fallbacks,
+  retain copy originals/recovery data and refuse occupied destinations. Ambiguity,
+  active writers and invalid data defer migration without resetting saves. Instance
+  deletion archives its physical directory, preserving worlds and shared targets.
 
 ### Mandatory token-efficient development
 
@@ -409,8 +437,8 @@ native sidebar with Play as the default page/principal action; News, Installatio
 and Settings (including About) remain separate. Account selection belongs in the
 Play header and controls service authorization. Keep Launcher state/configurations
 in Launcher-owned modules, independent of game UI/rendering; use `config/launcher.json`
-for nonsecret preferences and minimal MaaGE configurations, never Minecraft instances
-or versions. Persist installation/account selections and supported appearance
+for nonsecret global preferences and UUID instance references; each instance manifest
+owns its name, Client association and folder mappings. Persist instance/account selections and supported appearance
 preferences; default appearance follows the system. Reuse existing account/setup
 services for management and repair. Play starts the exact selected available Client
 after access/resource prerequisites; show an empty News state until a real source exists. Do not introduce
@@ -495,7 +523,7 @@ interpolated presentation, pausing when capture/focus is lost. Physics and camer
 tuning remain provisional until programmer fidelity verification.
 `--world=<id>` loads a saved world; `--new-world` or `--create-world=<id>` creates
 one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
-creates a unique world; default startup resumes `config/last-world` or creates a
+creates a unique UUID world; default startup resumes the instance's `config/last-world` or creates a
 unique world if none exists. Never overwrite an existing ID during creation or
 change its generator/seed implicitly. `--render-distance=1..8` defaults to 3;
 `--world-workers=<count>` selects a positive pool size (0 uses the automatic policy).
@@ -681,7 +709,8 @@ unless explicitly requested.
   Launcher logs belong in `logs/` beneath the platform MaaGE application-data
   directory described above. Create directories
   as needed; never fall back to working/install directories for Launcher logs.
-  Client logs currently remain beside its executable. Logging overrides remain
+  Client logs and Launcher process captures belong to the selected instance's `logs/`.
+  Logging overrides remain
   supported; Server keeps console output.
   Configuration precedence is defaults → optional INI → explicit `--log-*` CLI
   overrides. Initialize early and shut down cleanly; FATAL never exits by itself.
@@ -720,7 +749,7 @@ do not bump it automatically for builds or commits.
 
 The Launcher owns `config/client-builds.json` and side-by-side `clients/<build-id>/`
 packages, separate from installation configurations and shared `minecraft/` resources.
-Installations in `config/launcher.json` reference stable build IDs; never silently
+UUID-referenced instance manifests select stable build IDs; never silently
 substitute another Client. Migrate old configurations only when one available build
 is unambiguous. Strict SemVer ordering ignores build metadata; identity also includes
 build/platform/type and executable SHA-256. Exact duplicate imports are rejected;
@@ -740,7 +769,7 @@ bundle registry records retain their IDs/references but require standalone reimp
 Play starts only the exact selected verified build, with current Minecraft access
 and prepared resources. The reusable Core Process API invokes executables directly
 with structured arguments, an explicit working directory, inherited environment,
-nonblocking monitoring and file capture beneath Launcher `logs/clients/`. POSIX
+nonblocking monitoring and file capture beneath the instance's `logs/`. POSIX
 fork/exec and Windows CreateProcess never use shells or Launch Services. Launch
 validation/spawning runs on the Client worker; prevent duplicate launches and
 removal of the active build. Closing the Launcher releases monitoring without

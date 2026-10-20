@@ -2,7 +2,7 @@
 
 Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.4**
 implements the Phase 1 foundation, Phase 2 world milestone and Phase 2.5
-multithreaded architecture, Phase 2.75 UI and Phase 3 gameplay foundations below.
+multithreaded architecture, Phase 2.75 UI, Phase 3 gameplay and Phase 3.5 instance storage below.
 Compilation does not establish runtime correctness or vanilla fidelity. Phases
 4–6 remain future work; Phase 3 limitations are explicit below.
 
@@ -89,27 +89,29 @@ Implemented in the existing portable `MaaGE::World` library:
 
 ### Creation and Selection
 
-Resources must already be prepared by the Launcher. Direct startup defaults to
-MaaGE's platform application-data directory; `--data-directory=<absolute root>`
-overrides it. Client never authenticates or downloads Minecraft resources.
+Resources and a physical instance must already be prepared by the Launcher.
+Direct startup uses its selected/default instance; `--instance=<uuid>` selects one
+explicitly. `--data-directory=<absolute root>` overrides the global resource and
+registry root. Client never authenticates or downloads Minecraft resources.
 
 ```sh
 maage-client                         # Resume last world; create one if none exists
 maage-client --new-world              # Unique world ID and automatic seed
 maage-client --seed=-123456789         # Unique world ID with the specified seed
-maage-client --create-world=example --seed=42 --world-name="Example World"
-maage-client --world=example --render-distance=4
+maage-client --create-world=f4a2c9b1-8e36-4f1c-91ac-7d02ee39d82c --seed=42 --world-name="Example World"
+maage-client --world=f4a2c9b1-8e36-4f1c-91ac-7d02ee39d82c --render-distance=4
 ```
 
 `--world=<id>` loads an existing world. Creating an existing ID fails instead of
 replacing it. Supplying a seed for an existing world is rejected. IDs are bounded,
-path-safe lowercase ASCII identifiers; generated IDs and automatic seeds use OS
-cryptographic randomness. `config/last-world` remembers the selection. Separate
+canonical UUIDs for new worlds; migrated legacy IDs remain loadable. Generated
+UUIDs and automatic seeds use OS cryptographic randomness. Instance-local
+`config/last-world` remembers the selection. Separate
 selection and lifetime world locks prevent concurrent writers.
 
 ### Save Format and Recovery
 
-Data lives beneath `worlds/<id>/`: `world.bin` metadata and
+Data lives beneath `instances/<instance-uuid>/worlds/<world-uuid>/`: `world.bin` metadata and
 `chunks/<signed-x>_<signed-z>.chunk`. Metadata records ID/name, signed seed,
 creation UTC, format/generator/blockset versions and player position/orientation.
 Player state saves after the pool's clean-shutdown flush. An interrupted first
@@ -351,6 +353,116 @@ macOS ARM64 Debug/Release Client (native Metal) and portable headless Release
 World/Server compilation passed. No application, test, benchmark, UI/runtime
 validation or GitHub Actions run was performed. Windows/Linux input source
 changes remain uncompiled locally; Wayland gameplay input remains unsupported.
+
+## Phase 3.5 — Instance Storage & Shared Folder Mapping
+
+Instances are physical UUID environments, extending the existing Installations
+controls and Client-build registry. Names and selected Client labels remain the
+visible UI; UUIDs determine storage identity. Minecraft resources and Client
+executables are not copied into instances.
+
+```text
+MaaGE/
+  minecraft/                      shared reconstructed Minecraft resources
+  clients/<build-id>/              shared installed Client packages
+  servers/                        reserved for future Server management
+  shared/{screenshots,shaderpacks,resourcepacks}/
+  instances/<instance-uuid>/
+    instance.json
+    worlds/<world-uuid>/{world.bin,chunks/}
+    mods/  config/  resourcepacks/  shaderpacks/  screenshots/  logs/
+  config/                         global Launcher/account/build preferences
+```
+
+The reusable, graphics-independent `MaaGE::Instance` library uses json-c >=0.15
+and generic Storage. Manifest schema 1 contains `schema`, UUID `id`, display
+`name`, `clientBuildId`, optional `createdUtc`, and `folders`. Unknown root fields,
+including future modpack metadata, survive edits. A folder entry is one of:
+
+```json
+{"mode":"private"}
+{"mode":"shared","library":"screenshots"}
+{"mode":"custom","path":"/absolute/external/folder","userSelected":true}
+```
+
+The shared library must match its folder kind. Worlds, mods, config and logs
+always remain private. Screenshots, shaderpacks and resourcepacks default private
+and may explicitly map to their managed shared directory or a selected external
+directory. Configuration sharing and `shared/configurations` remain deferred.
+Missing custom targets, loops, root escapes, conflicting links and populated
+private destinations fail clearly. No data is silently moved into shared folders.
+
+Generic Storage implements directory symlinks on macOS/Linux and local-volume
+directory junctions on Windows, without an elevation-dependent symlink requirement.
+Administrative remaps stage the new association, retain the exact old link/empty
+directory and atomically save the manifest; failures restore the old association.
+Interrupted remaps retain `.<folder>.mapping-new` / `.mapping-old` entries for
+explicit recovery while the instance is closed. Targets are never recursively
+deleted. Instance deletion removes its Launcher reference and archives the physical
+directory as `instances/.deleted-<uuid>` for recovery.
+
+Launcher schema 3 retains the existing installation registry as UUID references:
+`selected` and `default` UUIDs, and `installations: [{"uuid":"..."}]`. Name,
+Client association and mappings are read from manifests. Legacy Launcher schemas
+1/2 create manifests before replacing the registry atomically; invalid manifests
+fail without resetting configuration. Installed Client packages remain independent
+and can serve several instances. Play validates the manifest/build pair on its
+existing worker and passes `--instance=<uuid>` plus the shared data root. The
+Client holds its own instance lease after Launcher exit.
+Client metadata/descriptors declare numeric `instance_storage: 1`. Older packages
+remain installed and referenced but are unavailable for Play until an instance-aware
+Client is imported; the Launcher never starts an old Client that would ignore its
+instance argument and write global worlds. No network protocol is implied.
+
+Direct CLI startup accepts the same `--instance=<uuid>` or uses the selected/default
+Launcher UUID. It never creates a random instance or falls back to global worlds.
+Default Client logs and process captures are instance-local. An explicit startup
+mapping operation is available without adding a settings UI:
+
+```sh
+maage-client --instance=<uuid> --map-folder=screenshots:shared
+maage-client --instance=<uuid> --map-folder=resourcepacks:custom:/absolute/external/folder
+maage-client --instance=<uuid> --map-folder=shaderpacks:private
+```
+
+Only one mapping may change per startup; it requires an explicit instance UUID
+and refuses busy instances or populated private folders. The Client then starts
+normally. Numeric folder kinds resolve and cache paths during initialization;
+world simulation/meshing performs no name lookup or instance-path probing.
+
+Legacy global `worlds/` migrates automatically only for the sole configured
+instance. With multiple instances, the Launcher reports migration pending and
+preserves legacy data. Choose a destination explicitly while Clients are closed:
+
+```sh
+maage-client --instance=<destination-uuid> --migrate-legacy-worlds
+```
+
+Migration holds the legacy selection lock and every world writer lock, validates
+metadata and refuses occupied destinations or conflicting last-world selections.
+A CRC journal at `config/worlds-migration` records the destination and selection
+before an exclusive atomic directory move. If relocation is unavailable, a bounded
+copy into `.worlds-migration-<uuid>` verifies synced files byte for byte and checks
+the whole tree before atomic promotion; original legacy files remain as backup.
+The completion receipt is `config/legacy-worlds-migrated`. Journal recovery resumes
+an interrupted atomic move or accepts an already promoted copy only if its source
+and destination trees still match. Interrupted partial copies remain available for
+manual cleanup/recovery; retries preserve originals and never overwrite worlds.
+Existing IDs, seeds, generator versions, chunks and player data are retained;
+new worlds use canonical UUIDs, while old non-UUID IDs remain a compatibility case.
+
+An exclusive UUID-scoped instance lease currently permits one Client per instance
+and blocks rename, deletion and remapping during use. Each world retains its own
+lifetime writer lock. There is no lock across ordinary operations in different
+instances; legacy migration alone serializes access to the old global collection.
+The existing asynchronous chunk saves/revisions and post-render shutdown remain.
+Server management can opt into the same storage library without UI/graphics;
+Server hosting, mod loading and complete shared-folder settings remain deferred.
+
+macOS ARM64 Debug/Release Launcher/Client and headless Release Instance/World/Server
+builds passed. No applications, tests, benchmarks, runtime migrations, UI validation
+or GitHub Actions were run. Windows/Linux implementations remain uncompiled here;
+filesystem/link/remapping/migration behavior requires programmer runtime testing.
 
 ## Phase 4 — World Systems
 

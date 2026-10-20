@@ -22,6 +22,7 @@ file(CONFIGURE OUTPUT "${MAAGE_MANIFEST}" CONTENT [=[
   "architecture": "@MAAGE_ARCH@",
   "executable": "@MAAGE_FILENAME@",
   "sha256": "@MAAGE_SHA256@",
+  "instance_storage": 1,
   "protocol": null
 }
 ]=] @ONLY)

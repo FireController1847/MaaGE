@@ -95,8 +95,8 @@ static void maage_ui_installation_action(GtkButton *button, gpointer context)
     if (action && row < 0) return;
     if (action == 4) { maage_launcher_installation_default(ui->state, (unsigned)row); maage_ui_installations_reload(ui); return; }
     if (action == 3) {
-        dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "Remove this MaaGE configuration?");
-        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "Minecraft accounts and resources are preserved.");
+        dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "Remove this MaaGE instance?");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "Its gameplay folder will be archived, preserving worlds and private files. Shared resources and accounts are preserved.");
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_installation_remove(ui->state, (unsigned)row);
     } else {
         const char *titles[] = {"New Installation", "Edit Installation", "Duplicate Installation"};

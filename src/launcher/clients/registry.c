@@ -35,9 +35,20 @@ static struct json_object *maage_client_json(const char *path)
     if (f) { n = fread(data, 1, 262145, f); if (!ferror(f) && n < 262145) o = maage_access_json(data, n); fclose(f); }
     free(data); return o;
 }
+static int maage_client_instance_storage(struct json_object *o, maage_client_build *b)
+{
+    struct json_object *value;
+    int version;
+    b->instance_storage = 0;
+    if (!json_object_object_get_ex(o, "instance_storage", &value)) return 1;
+    if (!json_object_is_type(value, json_type_int)) return 0;
+    version = json_object_get_int(value);
+    if (version < 0 || json_object_get_double(value) != (double)version) return 0;
+    b->instance_storage = version; return 1;
+}
 static int maage_client_fields(struct json_object *o, maage_client_build *b)
 {
-    return maage_client_text(o,"version",b->version,sizeof(b->version),0) && maage_semver_valid(b->version) &&
+    return maage_client_instance_storage(o,b) && maage_client_text(o,"version",b->version,sizeof(b->version),0) && maage_semver_valid(b->version) &&
         maage_client_text(o,"build",b->build,sizeof(b->build),1) &&
         maage_client_text(o,"build_type",b->build_type,sizeof(b->build_type),0) &&
         maage_client_text(o,"platform",b->platform,sizeof(b->platform),0) &&
@@ -91,6 +102,9 @@ static int maage_client_inspect(const char *package, maage_client_build *b, char
     if (ok && json_object_object_get_ex(o,"protocol",&v) && v) ok = json_object_is_type(v,json_type_null);
     if (o) json_object_put(o);
     if (!ok || !maage_client_compatible(b)) { strcpy(error,"Select a MaaGE Client package for this platform and architecture with a valid schema-1 manifest. Network protocol must be undefined."); return 0; }
+    if (b->instance_storage != 1) {
+        strcpy(error,"Reimport an instance-capable Client declaring instance_storage version 1. Legacy Clients use global worlds and cannot launch inside an instance."); return 0;
+    }
     if (!maage_client_executable(package,b,path) || !maage_client_executable_file(path) || !(f=maage_storage_open(path,"rb"))) goto failed;
     ok = fread(magic,1,4,f)==4; fclose(f);
 #ifdef __APPLE__
@@ -122,7 +136,7 @@ int maage_clients_path(const maage_client_registry *r, const char *id, char path
 {
     int index=maage_clients_find(r,id);
     char package[MAAGE_PATH_CAPACITY];
-    return index>=0 && r->builds[index].available && maage_client_package(r,id,package) && maage_client_executable(package,&r->builds[index],path) && maage_client_executable_file(path);
+    return index>=0 && r->builds[index].available && r->builds[index].instance_storage==1 && maage_client_package(r,id,package) && maage_client_executable(package,&r->builds[index],path) && maage_client_executable_file(path);
 }
 void maage_client_build_label(const maage_client_build *b, char label[384])
 { sprintf(label,"%s%s%s | %.24s | %.12s | %.96s",b->version,*b->build ? " + " : "",b->build,b->build_type,b->origin,b->status); }
@@ -139,6 +153,8 @@ static int maage_client_save(maage_client_registry *r)
         MAAGE_CLIENT_FIELD(platform); MAAGE_CLIENT_FIELD(architecture); MAAGE_CLIENT_FIELD(executable);
         MAAGE_CLIENT_FIELD(sha256); MAAGE_CLIENT_FIELD(origin); MAAGE_CLIENT_FIELD(channel);
 #undef MAAGE_CLIENT_FIELD
+        if (item->instance_storage)
+            json_object_object_add(b,"instance_storage",json_object_new_int(item->instance_storage));
         json_object_object_add(b,"imported",json_object_new_double(item->imported)); json_object_array_add(list,b);
     }
     json_object_object_add(o,"builds",list); text=json_object_to_json_string_ext(o,JSON_C_TO_STRING_PRETTY);
@@ -177,8 +193,10 @@ int maage_clients_load(maage_client_registry *r, const char *root, char error[25
         if(json_object_object_get_ex(b,"imported",&v)) item->imported=json_object_get_double(v);
         memset(&candidate,0,sizeof(candidate));
         if(maage_client_package(r,item->id,path) && maage_client_inspect(path,&candidate,why) && !strcmp(item->id,candidate.id)) {
-            item->available=1; strcpy(item->status,"Available");
-        } else strcpy(item->status,maage_client_compatible(item) ? "Missing/legacy package; import standalone Client" : "Incompatible platform or architecture");
+            item->available=1; item->instance_storage=candidate.instance_storage; strcpy(item->status,"Available");
+        } else if (item->instance_storage != 1)
+            strcpy(item->status,"Legacy storage; reimport an instance-capable Client");
+        else strcpy(item->status,maage_client_compatible(item) ? "Missing/legacy package; import standalone Client" : "Incompatible platform or architecture");
         ++r->count;
     }
     /* Highest SemVer first; build metadata never changes SemVer precedence. */

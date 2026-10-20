@@ -22,6 +22,7 @@ endif()
 option(MAAGE_BUILD_MINECRAFT_ASSETS "Build the shared Minecraft logical resource path library" ${MAAGE_RESOURCE_DEFAULT})
 option(MAAGE_BUILD_IMAGE "Build the PNG resource decoder" ${MAAGE_BUILD_CLIENT})
 option(MAAGE_BUILD_WORLD "Build portable block, world, meshing and player modules" ${MAAGE_BUILD_CLIENT})
+option(MAAGE_BUILD_INSTANCE "Build reusable instance storage and manifests" ${MAAGE_RESOURCE_DEFAULT})
 option(MAAGE_BUILD_TESTS "Register application smoke tests" OFF)
 
 # Single-config builds use bin/ and lib/; multi-config builds append Debug/, etc.
@@ -124,6 +125,9 @@ if(MAAGE_BUILD_TESTS)
 endif()
 
 add_subdirectory(src/core)
+if(MAAGE_BUILD_INSTANCE)
+    add_subdirectory(src/instance)
+endif()
 if(MAAGE_BUILD_MINECRAFT_ASSETS OR MAAGE_BUILD_IMAGE)
     add_subdirectory(src/resources)
 endif()

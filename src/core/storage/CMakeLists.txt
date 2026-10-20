@@ -1,4 +1,4 @@
-add_library(maage_storage STATIC storage.c)
+add_library(maage_storage STATIC storage.c folder_link.c)
 add_library(MaaGE::Storage ALIAS maage_storage)
 maage_configure_portable_target(maage_storage)
 target_include_directories(maage_storage PUBLIC "${PROJECT_SOURCE_DIR}/include")

@@ -1,6 +1,7 @@
 #include "world_internal.h"
 #include "maage/world_store.h"
 #include "maage/storage.h"
+#include "maage/folder_link.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -354,14 +355,9 @@ static int maage_store_metadata_load(const maage_world_store *store,
 }
 static int maage_store_random_id(char id[65])
 {
-    unsigned char bytes[16];
-    const char *digits = "0123456789abcdef";
-    size_t i;
-    if (!maage_storage_random(bytes, sizeof(bytes))) return 0;
-    for (i = 0; i < sizeof(bytes); ++i) { id[i * 2] = digits[bytes[i] >> 4]; id[i * 2 + 1] = digits[bytes[i] & 15]; }
-    id[32] = 0; return 1;
+    return maage_storage_uuid_generate(id);
 }
-int maage_world_store_open(const char *data_root, const char *id, int create,
+int maage_world_store_open(const char *instance_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **output,
     maage_world_record *record, char error[256])
 {
@@ -376,9 +372,13 @@ int maage_world_store_open(const char *data_root, const char *id, int create,
     int status, ok = 0;
     *output = NULL;
     if (error) error[0] = 0;
-    if ((id && !maage_store_id(id)) || (name && !maage_store_name(name))) return maage_store_error(error, "Invalid world ID or name.");
-    if (!maage_storage_join(worlds, sizeof(worlds), data_root, "worlds") || !maage_storage_directories(worlds) ||
-        !maage_storage_join(config, sizeof(config), data_root, "config") || !maage_storage_directories(config) ||
+    if ((id && (!maage_store_id(id) || (create && !maage_storage_uuid_valid(id)))) ||
+        (name && !maage_store_name(name))) return maage_store_error(error, "New world IDs must be canonical UUIDs; world names are separate display metadata.");
+    if (!maage_folder_link_managed_path(instance_root, 0) ||
+        !maage_storage_join(path, sizeof(path), instance_root, "instance.json") || maage_storage_status(path) != 1)
+        return maage_store_error(error, "World storage requires a physical instance root, never the global data directory.");
+    if (!maage_storage_join(worlds, sizeof(worlds), instance_root, "worlds") || !maage_storage_directories(worlds) ||
+        !maage_storage_join(config, sizeof(config), instance_root, "config") || !maage_storage_directories(config) ||
         !maage_storage_join(last, sizeof(last), config, "last-world") ||
         !maage_storage_join(path, sizeof(path), worlds, ".selection.lock")) return maage_store_error(error, "Could not prepare world storage directories.");
     selection = maage_storage_acquire(path);
@@ -440,6 +440,215 @@ random_failed:
 done:
     maage_world_store_close(store); maage_storage_release(selection); return ok;
 }
+
+typedef struct maage_store_migration {
+    char source[MAAGE_PATH_CAPACITY];
+    maage_storage_lock **locks;
+    size_t count, capacity;
+    char *error;
+} maage_store_migration;
+
+static int maage_store_migration_entry(const char *name, maage_folder_link_kind kind, void *context)
+{
+    maage_store_migration *migration = (maage_store_migration *)context;
+    maage_world_store *world;
+    maage_storage_lock *lock, **grown;
+    char path[MAAGE_PATH_CAPACITY];
+    size_t capacity;
+    int ok;
+    /* Preserve ordinary root files, including the selection lock, verbatim. */
+    if (kind == MAAGE_FOLDER_LINK_FILE) return 1;
+    if (kind != MAAGE_FOLDER_LINK_DIRECTORY || !maage_store_id(name))
+        return maage_store_error(migration->error, "Legacy world storage contains an unsafe or unrecognized directory; migration is pending.");
+    world = (maage_world_store *)calloc(1, sizeof(*world));
+    if (!world) return maage_store_error(migration->error, "Not enough memory to inspect legacy worlds.");
+    ok = maage_storage_join(world->directory, sizeof(world->directory), migration->source, name) &&
+        maage_storage_join(path, sizeof(path), world->directory, ".world.lock");
+    lock = ok ? maage_storage_acquire(path) : NULL;
+    if (!lock) { free(world); return maage_store_error(migration->error, "A legacy world is active or inaccessible; close its Client/Server before migrating."); }
+    ok = maage_store_metadata_load(world, name, &world->record, migration->error) &&
+        maage_storage_join(path, sizeof(path), world->directory, "chunks") && maage_storage_directory_exists(path);
+    free(world);
+    if (!ok) { maage_storage_release(lock); return 0; }
+    if (migration->count == migration->capacity) {
+        capacity = migration->capacity ? migration->capacity * 2 : 16;
+        if (capacity < migration->capacity || capacity > (size_t)-1 / sizeof(*grown)) {
+            maage_storage_release(lock); return maage_store_error(migration->error, "Too many legacy worlds to acquire safely.");
+        }
+        grown = (maage_storage_lock **)realloc(migration->locks, capacity * sizeof(*grown));
+        if (!grown) { maage_storage_release(lock); return maage_store_error(migration->error, "Not enough memory to lock legacy worlds."); }
+        migration->locks = grown; migration->capacity = capacity;
+    }
+    migration->locks[migration->count++] = lock;
+    return 1;
+}
+
+static int maage_store_migration_record(const char *path, const char *id,
+    const char *last, int complete, char error[256])
+{
+    unsigned char data[128];
+    maage_store_bytes bytes;
+    bytes.data = data; bytes.length = sizeof(data); bytes.position = 0; bytes.failed = 0;
+    maage_store_text_put(&bytes, "MGWMIGR1", 8); maage_store_put(&bytes, complete ? 1 : 0, 1);
+    maage_store_text_put(&bytes, id, 36); maage_store_put(&bytes, strlen(last), 1);
+    maage_store_text_put(&bytes, last, strlen(last)); maage_store_checksum_put(&bytes);
+    return !bytes.failed && maage_store_write(path, data, bytes.position, error);
+}
+
+static int maage_store_migration_read(const char *path, char id[37], char last[65],
+    int *complete, char error[256])
+{
+    maage_store_bytes bytes;
+    unsigned int i, length;
+    int ok;
+    bytes.data = maage_store_read(path, 128, &bytes.length, error);
+    if (!bytes.data) return 0;
+    bytes.position = 0; bytes.failed = 0;
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWMIGR1");
+    *complete = (int)maage_store_get(&bytes, 1);
+    for (i = 0; i < 36; ++i) id[i] = (char)maage_store_get(&bytes, 1);
+    id[36] = 0; length = (unsigned int)maage_store_get(&bytes, 1);
+    if (length > 64) ok = 0;
+    else {
+        for (i = 0; i < length; ++i) last[i] = (char)maage_store_get(&bytes, 1);
+        last[length] = 0;
+        if (strlen(last) != length || (length && !maage_store_id(last))) ok = 0;
+    }
+    ok = ok && !bytes.failed && bytes.position == bytes.length && *complete <= 1 && maage_storage_uuid_valid(id);
+    free(bytes.data);
+    return ok ? 1 : maage_store_error(error, "Legacy migration journal is invalid; existing data is preserved.");
+}
+
+int maage_world_store_legacy_pending(const char *data_root)
+{
+    char path[MAAGE_PATH_CAPACITY], id[37], last[65], error[256];
+    unsigned char *receipt;
+    size_t length;
+    int complete, matches;
+    if (!maage_storage_join(path, sizeof(path), data_root, "config/worlds-migration")) return 1;
+    if (maage_storage_status(path)) {
+        if (!maage_store_migration_read(path, id, last, &complete, error)) return 1;
+        if (complete) {
+            if (!maage_storage_join(path, sizeof(path), data_root, "config/legacy-worlds-migrated")) return 1;
+            receipt = maage_store_read(path, 36, &length, error);
+            if (!receipt) return 1;
+            matches = length == 36 && !memcmp(receipt, id, 36); free(receipt);
+            return !matches; /* Verified-copy originals are retained as backup. */
+        }
+        return 1;
+    }
+    return !maage_storage_join(path, sizeof(path), data_root, "worlds") || maage_storage_status(path) != 0;
+}
+
+static int maage_store_migration_selection(const char *path, const char *last,
+    int write, char error[256])
+{
+    unsigned char *data;
+    size_t length;
+    int status = maage_storage_status(path), matches;
+    if (status == 0) return !write || !last[0] || maage_store_write(path, (const unsigned char *)last, strlen(last), error);
+    if (status != 1) return maage_store_error(error, "Destination last-world selection is unsafe; migration is pending.");
+    data = maage_store_read(path, 65, &length, error);
+    if (!data) return 0;
+    if (length && data[length - 1] == '\n') --length;
+    matches = length == strlen(last) && !memcmp(data, last, length);
+    free(data);
+    return matches ? 1 : maage_store_error(error, "Destination last-world selection conflicts with migration; both collections are preserved.");
+}
+
+int maage_world_store_migrate_legacy(const char *data_root,
+    const char *instance_root, char error[256])
+{
+    maage_store_migration migration;
+    maage_storage_lock *guard = NULL, *selection = NULL;
+    char destination[MAAGE_PATH_CAPACITY], config[MAAGE_PATH_CAPACITY], journal[MAAGE_PATH_CAPACITY];
+    char path[MAAGE_PATH_CAPACITY], selected_path[MAAGE_PATH_CAPACITY], staged[MAAGE_PATH_CAPACITY];
+    char destination_id[37], recorded_id[37], last[65] = "", recorded_last[65], attempt[37], stage_name[64];
+    const char *id;
+    unsigned char *data;
+    size_t length, i;
+    int status, recorded = 0, complete = 0, moved, ok = 0;
+    memset(&migration, 0, sizeof(migration)); migration.error = error;
+    if (error) error[0] = 0;
+    id = strrchr(instance_root, '/'); id = id ? id + 1 : "";
+    if (!maage_storage_uuid_valid(id) || !maage_folder_link_managed_path(data_root, 0) ||
+        !maage_folder_link_managed_path(instance_root, 0)) goto failed;
+    strcpy(destination_id, id);
+    if (!maage_storage_join(path, sizeof(path), data_root, "instances") ||
+        !maage_folder_link_within(path, instance_root) ||
+        !maage_storage_join(config, sizeof(config), data_root, "config") || !maage_storage_directories(config) ||
+        !maage_storage_join(journal, sizeof(journal), config, "worlds-migration") ||
+        !maage_storage_join(path, sizeof(path), config, "worlds-migration.lock") ||
+        !(guard = maage_storage_acquire(path)) ||
+        !maage_storage_join(migration.source, sizeof(migration.source), data_root, "worlds") ||
+        !maage_storage_join(destination, sizeof(destination), instance_root, "worlds") ||
+        !maage_storage_join(path, sizeof(path), instance_root, "config") || !maage_storage_directories(path) ||
+        !maage_storage_join(selected_path, sizeof(selected_path), path, "last-world")) goto failed;
+    if (maage_storage_status(journal)) {
+        if (!maage_store_migration_read(journal, recorded_id, recorded_last, &complete, error)) goto done;
+        if (strcmp(recorded_id, destination_id)) { maage_store_error(error, "Legacy migration belongs to another instance; its journal and worlds are preserved."); goto done; }
+        if (complete) goto receipt;
+        recorded = 1; strcpy(last, recorded_last);
+    }
+    status = maage_storage_status(migration.source);
+    if (status == 0) {
+        if (!recorded) { ok = 1; goto done; }
+        if (maage_storage_status(destination) != 2) goto failed;
+        goto finalize;
+    }
+    if (status != 2 || !maage_folder_link_managed_path(migration.source, 0) ||
+        !maage_storage_join(path, sizeof(path), migration.source, ".selection.lock") ||
+        !(selection = maage_storage_acquire(path))) goto failed;
+    if (!maage_folder_link_list(migration.source, maage_store_migration_entry, &migration)) goto failed;
+    if (!recorded) {
+        if (!maage_storage_join(path, sizeof(path), config, "last-world")) goto failed;
+        status = maage_storage_status(path);
+        if (status) {
+            data = maage_store_read(path, 65, &length, error);
+            if (!data) goto done;
+            if (length && data[length - 1] == '\n') --length;
+            if (!length || length > 64 || memchr(data, 0, length)) { free(data); goto failed; }
+            memcpy(last, data, length); last[length] = 0; free(data);
+            if (!maage_store_id(last) || !maage_storage_join(path, sizeof(path), migration.source, last) ||
+                maage_storage_status(path) != 2) goto failed;
+        }
+    }
+    if (!maage_store_migration_selection(selected_path, last, 0, error)) goto done;
+    /* A completed copy may have been promoted immediately before interruption. */
+    if (recorded && maage_storage_status(destination) == 2 &&
+        maage_folder_link_equal_tree(migration.source, destination)) goto finalize;
+    if (maage_storage_status(destination) == 2) maage_storage_remove_directory(destination);
+    if (maage_storage_status(destination) != 0) {
+        maage_store_error(error, "Destination already contains world data; legacy migration is pending without overwriting it."); goto done;
+    }
+    if (!maage_store_migration_record(journal, destination_id, last, 0, error)) goto done;
+    moved = maage_folder_link_move(migration.source, destination);
+    if (moved != 1) {
+        /* Different volumes or open Windows directory handles use a verified
+         * private staging copy. Originals remain available as legacy backup. */
+        if (!maage_storage_uuid_generate(attempt)) goto failed;
+        sprintf(stage_name, ".worlds-migration-%s", attempt);
+        if (!maage_storage_join(staged, sizeof(staged), instance_root, stage_name) ||
+            !maage_folder_link_copy_verified(migration.source, staged) ||
+            maage_folder_link_move(staged, destination) != 1) goto failed;
+    }
+finalize:
+    if (!maage_store_migration_selection(selected_path, last, 1, error)) goto done;
+    if (!maage_store_migration_record(journal, destination_id, last, 1, error)) goto done;
+receipt:
+    /* A simple UI receipt complements the CRC journal; it never authorizes
+     * migration or replaces the world's lifetime lock. */
+    if (!maage_storage_join(path, sizeof(path), config, "legacy-worlds-migrated") ||
+        !maage_store_write(path, (const unsigned char *)destination_id, 36, error)) goto failed;
+    ok = 1; goto done;
+failed:
+    if (!error || !*error) maage_store_error(error, "Legacy migration is pending: active data, unsafe paths, conflicting files or unavailable atomic storage. Originals/staging are preserved.");
+done:
+    for (i = 0; i < migration.count; ++i) maage_storage_release(migration.locks[i]);
+    free(migration.locks); maage_storage_release(selection); maage_storage_release(guard);
+    return ok;
+}
+
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256])
 {

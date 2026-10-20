@@ -12,6 +12,7 @@
 #include "ui/ui.h"
 #include "debug.h"
 #include "interaction.h"
+#include "storage_context.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -130,22 +131,6 @@ static maage_render_result maage_client_stream_meshes(maage_world *world,
     return result;
 }
 
-static int maage_client_data_directory(int argc, char *const argv[], char path[MAAGE_PATH_CAPACITY])
-{
-    int i;
-    const char *selected = NULL;
-    char probe[MAAGE_PATH_CAPACITY];
-    for (i = 1; i < argc; ++i) {
-        if (!strncmp(argv[i], "--data-directory=", 17)) selected = argv[i] + 17;
-        else if (!strcmp(argv[i], "--data-directory")) return 0;
-    }
-    if (selected) {
-        if (!*selected || strlen(selected) >= MAAGE_PATH_CAPACITY) return 0;
-        strcpy(path, selected);
-    } else if (!maage_storage_data_path(path, MAAGE_PATH_CAPACITY)) return 0;
-    return maage_minecraft_asset_path(path, "minecraft", probe, sizeof(probe));
-}
-
 static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect)
 {
     double sy = sin(yaw), cy = cos(yaw), sp = sin(pitch), cp = cos(pitch);
@@ -190,6 +175,7 @@ int maage_client_run(int argc, char *const argv[])
     maage_client_interaction_visual interaction;
     maage_world *world = NULL;
     maage_world_store *store = NULL;
+    maage_instance *instance = maage_client_storage_instance();
     maage_client_chunk_mesh cache[MAAGE_WORLD_MAX_CHUNKS];
     const maage_render_mesh *draws[MAAGE_WORLD_MAX_CHUNKS + 1];
     maage_client_world_options options;
@@ -224,8 +210,17 @@ int maage_client_run(int argc, char *const argv[])
     if (!maage_client_world_options_parse(argc, argv, &options)) {
         maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=1..8, and --world-workers=<nonnegative count> (0 automatic)."); goto done;
     }
-    if (!maage_client_data_directory(argc, argv, directory)) {
-        maage_log_error("maage.client.resources", "Cannot resolve MaaGE data directory; --data-directory requires an absolute path."); goto done;
+    if (!instance) { maage_log_error("maage.client.instance", "No validated instance was selected at startup."); goto done; }
+    strcpy(directory, maage_client_storage_data_root());
+    maage_log_info("maage.client.instance", "Instance: %s (%s).", maage_instance_get_info(instance)->name,
+        maage_instance_get_info(instance)->id);
+    if (maage_world_store_legacy_pending(directory)) {
+        if (maage_client_storage_migrate_requested() || maage_instance_only_configured(instance)) {
+            if (!maage_world_store_migrate_legacy(directory, maage_instance_directory(instance), error)) {
+                maage_log_error("maage.client.instance", "%s", error); goto done;
+            }
+            maage_log_info("maage.client.instance", "Legacy world migration completed for the selected instance.");
+        } else maage_log_warn("maage.client.instance", "Legacy global worlds are preserved pending an explicit destination. Close Clients, then launch --instance=<UUID> --migrate-legacy-worlds to choose this instance. Its private worlds remain independent.");
     }
     maage_biome_registry_init(&biomes);
     maage_log_info("maage.client.resources", "Resource directory: %s/minecraft/assets/reconst", directory);
@@ -250,7 +245,7 @@ int maage_client_run(int argc, char *const argv[])
     maage_client_resources_destroy(&resources);
     if (!ui || !maage_client_ui_finalize(ui)) { maage_log_error("maage.client.ui", "Cannot initialize Client GUI resources or screen registry."); goto done; }
     maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
-    if (!maage_world_store_open(directory, options.id, options.create, options.name,
+    if (!maage_world_store_open(maage_instance_directory(instance), options.id, options.create, options.name,
         options.seeded ? &options.seed : NULL, &store, &record, error)) {
         maage_log_error("maage.client.world", "%s", error); goto done;
     }

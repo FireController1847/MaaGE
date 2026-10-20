@@ -1,0 +1,6 @@
+find_package(json-c CONFIG REQUIRED)
+add_library(maage_instance STATIC instance.c)
+add_library(MaaGE::Instance ALIAS maage_instance)
+maage_configure_portable_target(maage_instance)
+target_include_directories(maage_instance PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(maage_instance PUBLIC MaaGE::Storage PRIVATE json-c::json-c)

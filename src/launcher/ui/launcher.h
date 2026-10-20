@@ -2,6 +2,7 @@
 #define MAAGE_LAUNCHER_UI_H
 #include "../assets.h"
 #include "maage/storage.h"
+#include "maage/instance.h"
 #include "../clients/registry.h"
 #include "../clients/job.h"
 #define MAAGE_INSTALLATIONS 32
@@ -11,7 +12,7 @@ typedef enum maage_launcher_page {
 } maage_launcher_page;
 typedef struct maage_installation {
     unsigned id;
-    char name[96], client[65];
+    char uuid[37], name[96], client[65];
 } maage_installation;
 typedef struct maage_launcher_ui {
     maage_access *access;
@@ -28,8 +29,8 @@ typedef struct maage_launcher_ui {
     maage_client_registry *clients;
     maage_client_job *client_job;
     maage_process *client_process;
-    int can_play;
-    char running_client[65];
+    int can_play, legacy_worlds_pending;
+    char running_client[65], running_instance[37];
     maage_client_candidate client_candidate;
     unsigned client_revision;
     int client_operation, client_confirmation, clients_valid;
