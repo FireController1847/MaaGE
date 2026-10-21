@@ -160,7 +160,7 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui,
     for (slot = 0; slot < MAAGE_INVENTORY_SLOTS; ++slot) {
         rectangle = maage_client_ui_inventory_slot(frame, slot);
         if (maage_client_ui_slot_contains(ui, rectangle)) {
-            maage_inventory_click(&ui->game->inventory, ui->items, slot, input->secondary_pressed);
+            ui->route_result = maage_inventory_click(&ui->game->inventory, ui->items, slot, input->secondary_pressed);
             return 0;
         }
     }
@@ -173,7 +173,7 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui,
             rectangle.width = rectangle.height = 16;
             if (maage_client_ui_slot_contains(ui, rectangle)) {
                 item = maage_item_registry_at(ui->items, first + slot);
-                if (item) maage_inventory_creative(&ui->game->inventory, ui->items, item->id);
+                if (item) ui->route_result = maage_inventory_creative(&ui->game->inventory, ui->items, item->id);
                 return 0;
             }
         }
@@ -256,15 +256,16 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context)
     maage_client_ui_stack(ui, &ui->game->inventory.cursor, ui->mouse_x - 8, ui->mouse_y - 8);
 }
 
-int maage_client_ui_inventory_register(maage_client_ui *ui)
+maage_status maage_client_ui_inventory_register(maage_client_ui *ui)
 {
     return maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_INVENTORY,
         maage_client_ui_inventory_draw, maage_client_ui_inventory_input, NULL);
 }
 
-void maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,
+maage_status maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,
     maage_gameplay *game, const maage_block_registry *blocks)
 {
-    if (!ui) return;
+    if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
     ui->items = items; ui->game = game; ui->blocks = blocks;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }

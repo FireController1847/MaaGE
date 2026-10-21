@@ -1,6 +1,7 @@
 #ifndef MAAGE_WINDOW_H
 #define MAAGE_WINDOW_H
 #include "maage/pixels.h"
+#include "maage/status.h"
 
 /* All calls, including destruction, belong to the initialization thread (the
  * main thread on macOS). One system may own multiple windows. No thread safety.
@@ -9,15 +10,6 @@
 typedef struct maage_window_system maage_window_system;
 typedef struct maage_window maage_window;
 
-typedef enum maage_window_result {
-    MAAGE_WINDOW_OK = 0,
-    MAAGE_WINDOW_INVALID_ARGUMENT,
-    MAAGE_WINDOW_OUT_OF_MEMORY,
-    MAAGE_WINDOW_UNAVAILABLE,
-    MAAGE_WINDOW_UNSUPPORTED,
-    MAAGE_WINDOW_PLATFORM_ERROR,
-    MAAGE_WINDOW_WRONG_THREAD
-} maage_window_result;
 
 typedef enum maage_window_backend {
     MAAGE_WINDOW_AUTO = 0,
@@ -80,26 +72,26 @@ typedef struct maage_window_native {
     } handles;
 } maage_window_native;
 
-void maage_window_config_init(maage_window_config *config);
-const char *maage_window_result_string(maage_window_result result);
+maage_status maage_window_config_init(maage_window_config *config);
 /* AUTO: native backend; on Linux try Wayland when advertised, then X11.
- * Explicit selection never falls back. Failure sets *system to null. */
-maage_window_result maage_window_system_create(maage_window_backend backend,
-    maage_window_system **system);
-void maage_window_system_destroy(maage_window_system *system);
-maage_window_result maage_window_create(maage_window_system *system,
-    const maage_window_config *config, maage_window **window);
-void maage_window_destroy(maage_window *window);
+ * Explicit selection never falls back. Failure sets *system to null; PARTIAL
+ * owns a usable system after recovering with another native backend. */
+maage_status maage_window_system_create(maage_window_backend backend,
+    maage_window_system **system, maage_status_trace *trace);
+maage_status maage_window_system_destroy(maage_window_system *system);
+maage_status maage_window_create(maage_window_system *system,
+    const maage_window_config *config, maage_window **window, maage_status_trace *trace);
+maage_status maage_window_destroy(maage_window *window);
 /* wait != 0 may block until OS events arrive; otherwise dispatch available
  * events only. Close requests remain set; resized is consumed by get_state.
  * A failed poll means the application should destroy its windows and exit. */
-maage_window_result maage_window_poll_events(maage_window_system *system, int wait);
+maage_status maage_window_poll_events(maage_window_system *system, int wait);
 /* Process events, waiting at most timeout_ms milliseconds (zero never blocks). */
-maage_window_result maage_window_wait_events(maage_window_system *system, int timeout_ms);
-maage_window_result maage_window_get_state(maage_window *window,
+maage_status maage_window_wait_events(maage_window_system *system, int timeout_ms);
+maage_status maage_window_get_state(maage_window *window,
     maage_window_state *state);
-maage_window_result maage_window_set_title(maage_window *window, const char *title);
-maage_window_result maage_window_set_visible(maage_window *window, int visible);
+maage_status maage_window_set_title(maage_window *window, const char *title);
+maage_status maage_window_set_visible(maage_window *window, int visible);
 /* Sizes are logical content dimensions, not outer frames. Fullscreen sizes are
  * OS-controlled; resize returns UNSUPPORTED there. Mode changes may be async:
  * OK acknowledges a request, not compositor acceptance. Query state after polls.
@@ -108,23 +100,23 @@ maage_window_result maage_window_set_visible(maage_window *window, int visible);
  * Wayland client-requested resize and forced borderless mode without decoration
  * negotiation return UNSUPPORTED. Normal Wayland decoration is compositor-owned.
  * Unsupported native fullscreen/borderless semantics return UNSUPPORTED. */
-maage_window_result maage_window_resize(maage_window *window, int width, int height);
-maage_window_result maage_window_set_mode(maage_window *window, maage_window_mode mode);
-maage_window_result maage_window_get_native(maage_window *window,
+maage_status maage_window_resize(maage_window *window, int width, int height);
+maage_status maage_window_set_mode(maage_window *window, maage_window_mode mode);
+maage_status maage_window_get_native(maage_window *window,
     maage_window_native *native);
 /* Exclusive native-content ownership for a renderer or other surface producer.
  * Acquire once before attaching graphics resources; release after destroying
  * them, before window destruction. Borrowed native handles keep their lifetime.
  * Wayland suspends its empty wl_shm backing while an external owner is active. */
-maage_window_result maage_window_acquire_surface(maage_window *window,
+maage_status maage_window_acquire_surface(maage_window *window,
     maage_window_native *native);
-maage_window_result maage_window_release_surface(maage_window *window);
+maage_status maage_window_release_surface(maage_window *window);
 /* Native CPU-image presentation while the caller owns the surface. Copies or
  * consumes the image before returning; never retains borrowed pixel storage.
  * UNAVAILABLE means the native surface/buffer is not ready; process events and
  * retry. Size must match the current framebuffer. Native surfaces may ignore
  * alpha. No GPU SDK is required. */
-maage_window_result maage_window_present_pixels(maage_window *window,
+maage_status maage_window_present_pixels(maage_window *window,
     const maage_pixel_buffer *buffer);
 
 #endif

@@ -96,7 +96,7 @@ static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
-int maage_setup_native_run(maage_assets *assets)
+maage_status maage_setup_native_run(maage_assets *assets, int *action)
 {
     maage_setup_win32 ui;
     WNDCLASSW klass;
@@ -104,6 +104,9 @@ int maage_setup_native_run(maage_assets *assets)
     MSG message;
     INITCOMMONCONTROLSEX controls;
     int received;
+    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.assets = assets;
     controls.dwSize = sizeof(controls); controls.dwICC = ICC_PROGRESS_CLASS; InitCommonControlsEx(&controls);
     ui.background = CreateSolidBrush(RGB(28,28,28)); ui.panel = CreateSolidBrush(RGB(41,41,41));
@@ -114,7 +117,7 @@ int maage_setup_native_run(maage_assets *assets)
     RegisterClassW(&klass); AdjustWindowRect(&bounds, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
     ui.window = CreateWindowExW(WS_EX_CONTROLPARENT, klass.lpszClassName, L"MaaGE Launcher — Initial setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,NULL,NULL,klass.hInstance,&ui);
-    if (!ui.window) { ui.result = -1; goto cleanup; }
+    if (!ui.window) { outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); goto cleanup; }
     maage_setup_win32_control(&ui,L"STATIC",L"MaaGE Launcher",0,28,22,360,24,0);
     maage_setup_win32_control(&ui,L"STATIC",L"Initial setup",SS_RIGHT,474,22,118,24,0);
     maage_setup_win32_control(&ui,L"STATIC",L"↓",0,34,75,36,42,0);
@@ -135,12 +138,12 @@ int maage_setup_native_run(maage_assets *assets)
     ui.cancel = maage_setup_win32_control(&ui,L"BUTTON",L"Cancel",WS_TABSTOP | BS_PUSHBUTTON,378,511,100,30,IDCANCEL);
     ui.next = maage_setup_win32_control(&ui,L"BUTTON",L"Continue",WS_TABSTOP | BS_DEFPUSHBUTTON,488,511,104,30,IDOK);
     EnableWindow(ui.next,FALSE); SetFocus(ui.cancel);
-    if (!SetTimer(ui.window,1,100,NULL)) { DestroyWindow(ui.window); ui.result = -1; goto cleanup; }
+    if (!SetTimer(ui.window,1,100,NULL)) { DestroyWindow(ui.window); outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); goto cleanup; }
     while ((received = GetMessageW(&message,NULL,0,0)) > 0) {
         if (!IsDialogMessageW(ui.window,&message)) { TranslateMessage(&message); DispatchMessageW(&message); }
     }
-    if (received < 0) { DestroyWindow(ui.window); ui.result = -1; }
+    if (received < 0) { DestroyWindow(ui.window); outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); }
 cleanup:
     DeleteObject(ui.font); DeleteObject(ui.heading_font); DeleteObject(ui.background); DeleteObject(ui.panel);
-    UnregisterClassW(klass.lpszClassName,klass.hInstance); return ui.result;
+    UnregisterClassW(klass.lpszClassName,klass.hInstance); *action = ui.result; return outcome;
 }

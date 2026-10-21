@@ -12,7 +12,7 @@ typedef struct maage_profile_session {
 /* AES-256-GCM records with a random local key and owner-only permissions.
  * Explicit project policy: no native credential stores. The local user can read
  * both key and ciphertext. Callers wipe sessions after use. */
-int maage_profile_store_load(const char *root, const char *uuid, maage_profile_session *session);
-int maage_profile_store_save(const char *root, const maage_profile_session *session);
-int maage_profile_store_remove(const char *root, const char *uuid);
+maage_status maage_profile_store_load(const char *root, const char *uuid, maage_profile_session *session, maage_status_trace *trace);
+maage_status maage_profile_store_save(const char *root, const maage_profile_session *session, maage_status_trace *trace);
+maage_status maage_profile_store_remove(const char *root, const char *uuid, maage_status_trace *trace);
 #endif

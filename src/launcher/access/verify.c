@@ -5,14 +5,16 @@
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
-struct json_object *maage_access_json(const char *data, size_t size)
+maage_status maage_access_json(const char *data, size_t size, struct json_object **output)
 {
     struct json_tokener *tokener;
     struct json_object *object;
     size_t end;
-    if (size > INT_MAX || memchr(data, 0, size)) return NULL;
+    if (output) *output = NULL;
+    if (!data || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, !data ? 0 : 2);
+    if (size > INT_MAX || memchr(data, 0, size)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
     tokener = json_tokener_new_ex(32);
-    if (!tokener) return NULL;
+    if (!tokener) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
     json_tokener_set_flags(tokener, JSON_TOKENER_STRICT | JSON_TOKENER_VALIDATE_UTF8);
     object = json_tokener_parse_ex(tokener, data, (int)size);
     end = json_tokener_get_parse_end(tokener);
@@ -21,7 +23,9 @@ struct json_object *maage_access_json(const char *data, size_t size)
         if (object) json_object_put(object);
         object = NULL;
     }
-    json_tokener_free(tokener); return object;
+    json_tokener_free(tokener);
+    *output = object;
+    return maage_status_make(object ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
 }
 const char *maage_access_json_string(struct json_object *object, const char *key)
 {
@@ -54,8 +58,9 @@ static int maage_access_java_items(struct json_object *response, int license)
     }
     return game;
 }
-maage_access_state maage_access_verify(const char *token, char uuid[33],
-    char name[17], char detail[256], int (*cancelled)(void *), void *context)
+maage_status maage_access_verify(const char *token, char uuid[33],
+    char name[17], char detail[256], int (*cancelled)(void *), void *context,
+    maage_access_state *output_state, maage_status_trace *trace)
 {
     maage_auth_observer observer;
     struct json_object *profile = NULL, *entitlements = NULL, *license = NULL;
@@ -65,20 +70,25 @@ maage_access_state maage_access_verify(const char *token, char uuid[33],
     const char *text;
     long status;
     int game = 0, licensed = 0, profile_valid = 0;
+    maage_status outcome;
+    if (output_state) *output_state = MAAGE_ACCESS_FAILED;
+    if (!token || !uuid || !name || !detail || !cancelled || !output_state)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
     memset(&observer, 0, sizeof(observer)); observer.cancelled = cancelled; observer.context = context;
+    observer.trace = trace;
     maage_log_info("maage.launcher.access.verify", "Checking authenticated Minecraft Java profile.");
-    profile = maage_auth_request("https://api.minecraftservices.com/minecraft/profile", token, NULL, 0, &observer, &status, detail);
+    outcome = maage_auth_request("https://api.minecraftservices.com/minecraft/profile", token, NULL, 0, &observer, &status, detail, &profile);
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (!profile || status != 200) goto done;
     text = maage_access_json_string(profile, "name");
     if (!maage_access_username(text) || !maage_access_uuid(maage_access_json_string(profile, "id"), normalized) || (*uuid && strcmp(normalized, uuid))) {
-        maage_log_warn("maage.launcher.access.verify", "Profile response rejected: invalid Java identity or mismatch with selected account.");
+        maage_log_verbose("maage.launcher.access.verify", "Profile response rejected: invalid Java identity or mismatch with selected account.");
         strcpy(detail, "Minecraft Java profile missing or different from the selected account. Sign in with the correct Microsoft account."); goto done;
     }
     profile_valid = 1;
     maage_log_info("maage.launcher.access.verify", "Java profile validated; checking explicit Java entitlements.");
     strcpy(name, text);
-    entitlements = maage_auth_request("https://api.minecraftservices.com/entitlements/mcstore", token, NULL, 0, &observer, &status, detail);
+    outcome = maage_auth_request("https://api.minecraftservices.com/entitlements/mcstore", token, NULL, 0, &observer, &status, detail, &entitlements);
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && entitlements) game = maage_access_java_items(entitlements, 0);
@@ -87,12 +97,12 @@ maage_access_state maage_access_verify(const char *token, char uuid[33],
     /* The license endpoint includes non-store access (e.g. subscriptions).
      * Its signed aggregate has item name/source, not per-item signatures.
      * Treat source as opaque; it is not a permanent-ownership warranty. */
-    if (!maage_auth_random(random, sizeof(random))) { maage_log_error("maage.launcher.access.verify", "Cannot generate entitlement request identifier; verification stopped."); strcpy(detail, "Cannot generate a secure entitlement request identifier."); goto done; }
+    if (maage_status_failed(maage_auth_random(random, sizeof(random)))) { maage_log_verbose("maage.launcher.access.verify", "Cannot generate entitlement request identifier; verification stopped."); strcpy(detail, "Cannot generate a secure entitlement request identifier."); goto done; }
     random[6] = (unsigned char)((random[6] & 15) | 64); random[8] = (unsigned char)((random[8] & 63) | 128);
     sprintf(request, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
         random[0], random[1], random[2], random[3], random[4], random[5], random[6], random[7], random[8], random[9], random[10], random[11], random[12], random[13], random[14], random[15]);
     sprintf(endpoint, "https://api.minecraftservices.com/entitlements/license?requestId=%s", request);
-    license = maage_auth_request(endpoint, token, NULL, 0, &observer, &status, detail);
+    outcome = maage_auth_request(endpoint, token, NULL, 0, &observer, &status, detail, &license);
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && license) licensed = maage_access_java_items(license, 1);
@@ -108,6 +118,11 @@ maage_access_state maage_access_verify(const char *token, char uuid[33],
     }
 done:
     if (state == MAAGE_ACCESS_VERIFIED) maage_log_info("maage.launcher.access.verify", "Java access verified (store entitlement=%s; license entitlement=%s).", game ? "confirmed" : "not confirmed", licensed ? "confirmed" : "not confirmed");
-    else if (!cancelled(context)) maage_log_warn("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed");
-    maage_auth_json_free(profile); maage_auth_json_free(entitlements); maage_auth_json_free(license); return state;
+    else if (!cancelled(context)) maage_log_verbose("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed");
+    maage_auth_json_free(profile); maage_auth_json_free(entitlements); maage_auth_json_free(license);
+    *output_state = state;
+    if (state == MAAGE_ACCESS_VERIFIED) outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VERIFY, 0);
+    else if (cancelled(context)) outcome = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+    else if (!maage_status_failed(outcome)) outcome = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+    return MAAGE_STATUS_PROPAGATE(trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY);
 }

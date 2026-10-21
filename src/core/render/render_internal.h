@@ -4,20 +4,20 @@
 
 typedef struct maage_render_backend_api {
     maage_render_backend kind;
-    maage_render_result (*create)(maage_renderer *renderer);
-    void (*destroy)(maage_renderer *renderer);
-    maage_render_result (*present)(maage_renderer *renderer, const maage_window_state *state);
+    maage_status (*create)(maage_renderer *renderer);
+    maage_status (*destroy)(maage_renderer *renderer);
+    maage_status (*present)(maage_renderer *renderer, const maage_window_state *state);
     unsigned int version;
-    maage_render_result (*prepare_frame)(maage_renderer *renderer, const maage_window_state *state);
-    maage_render_result (*upload_geometry)(maage_renderer *renderer, maage_render_mesh *mesh,
+    maage_status (*prepare_frame)(maage_renderer *renderer, const maage_window_state *state);
+    maage_status (*upload_geometry)(maage_renderer *renderer, maage_render_mesh *mesh,
         const maage_mesh_data *data);
     void (*destroy_mesh)(maage_render_mesh *mesh);
-    maage_render_result (*draw_meshes)(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count,
+    maage_status (*draw_meshes)(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count,
         const maage_window_state *state, const float view_projection[16]);
-    maage_render_result (*create_texture)(maage_renderer *renderer,
+    maage_status (*create_texture)(maage_renderer *renderer,
         maage_render_texture *texture, const maage_pixel_buffer *atlas);
     void (*destroy_texture)(maage_render_texture *texture);
-    maage_render_result (*draw_frame)(maage_renderer *renderer,
+    maage_status (*draw_frame)(maage_renderer *renderer,
         const maage_render_mesh *const *meshes, size_t count,
         const maage_window_state *state, const float view_projection[16],
         const maage_render_ui_data *ui);
@@ -45,7 +45,11 @@ struct maage_renderer {
     float clear[4], sky_light;
     const maage_render_ui_data *background, *overlay;
     int refresh;
-    maage_render_result failure;
+    maage_status failure;
+    /* Borrowed only during a synchronous backend call; always cleared before
+     * returning to the caller. Backends never retain it in GPU work. */
+    maage_status_trace *operation_trace;
+    unsigned char trace_operation;
     maage_render_capabilities capabilities;
     maage_render_mesh *meshes;
     maage_render_texture *textures;

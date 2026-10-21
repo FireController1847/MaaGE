@@ -10,7 +10,7 @@ typedef struct maage_opengl_context {
     HGLRC context;
 } maage_opengl_context;
 
-maage_render_result maage_opengl_context_create(maage_renderer *renderer, int modern)
+maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
 {
     maage_opengl_context *native;
     PIXELFORMATDESCRIPTOR format;
@@ -19,13 +19,13 @@ maage_render_result maage_opengl_context_create(maage_renderer *renderer, int mo
     HGLRC context;
     int selected;
     const int attributes[] = { 0x2091, 3, 0x2092, 3, 0x9126, 1, 0 };
-    if (renderer->native.backend != MAAGE_WINDOW_WIN32) return MAAGE_RENDER_UNSUPPORTED;
+    if (renderer->native.backend != MAAGE_WINDOW_WIN32) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native = (maage_opengl_context *)calloc(1, sizeof(*native));
-    if (!native) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     renderer->platform = native;
     native->window = renderer->native.handles.win32.window;
     native->dc = GetDC(native->window);
-    if (!native->dc) return MAAGE_RENDER_WINDOW_ERROR;
+    if (!native->dc) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_STATUS_INVALID_STATE);
     memset(&format, 0, sizeof(format));
     format.nSize = sizeof(format); format.nVersion = 1;
     format.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
@@ -34,25 +34,25 @@ maage_render_result maage_opengl_context_create(maage_renderer *renderer, int mo
     selected = GetPixelFormat(native->dc);
     if (!selected) {
         selected = ChoosePixelFormat(native->dc, &format);
-        if (!selected || !SetPixelFormat(native->dc, selected, &format)) return MAAGE_RENDER_UNAVAILABLE;
+        if (!selected || !SetPixelFormat(native->dc, selected, &format)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     if (!DescribePixelFormat(native->dc, selected, sizeof(format), &format) ||
         (format.dwFlags & (PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER)) != (PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER))
-        return MAAGE_RENDER_UNSUPPORTED;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native->context = wglCreateContext(native->dc);
-    if (!native->context || !wglMakeCurrent(native->dc, native->context)) return MAAGE_RENDER_UNAVAILABLE;
+    if (!native->context || !wglMakeCurrent(native->dc, native->context)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     if (modern) {
         address = wglGetProcAddress("wglCreateContextAttribsARB");
         if (!address || address == (PROC)1 || address == (PROC)2 || address == (PROC)3 || address == (PROC)-1)
-            return MAAGE_RENDER_UNSUPPORTED;
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
         create = (maage_wgl_create_context)address;
         context = create(native->dc, NULL, attributes);
-        if (!context) return MAAGE_RENDER_UNAVAILABLE;
+        if (!context) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
         wglMakeCurrent(NULL, NULL);
         wglDeleteContext(native->context);
         native->context = context;
     }
-    return MAAGE_RENDER_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
 void maage_opengl_context_destroy(maage_renderer *renderer)
 {
@@ -63,13 +63,13 @@ void maage_opengl_context_destroy(maage_renderer *renderer)
     if (native->dc) ReleaseDC(native->window, native->dc);
     free(native);
 }
-int maage_opengl_context_bind(maage_renderer *renderer)
+maage_status maage_opengl_context_bind(maage_renderer *renderer)
 {
     maage_opengl_context *native = renderer->platform;
-    return wglMakeCurrent(native->dc, native->context) != 0;
+    return maage_status_from_win32(wglMakeCurrent(native->dc, native->context) ? 0 : GetLastError(), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_ACQUIRE);
 }
-int maage_opengl_context_swap(maage_renderer *renderer)
+maage_status maage_opengl_context_swap(maage_renderer *renderer)
 {
     maage_opengl_context *native = renderer->platform;
-    return SwapBuffers(native->dc) != 0;
+    return maage_status_from_win32(SwapBuffers(native->dc) ? 0 : GetLastError(), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
 }

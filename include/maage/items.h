@@ -7,7 +7,7 @@
 typedef unsigned long maage_item_id;
 enum { MAAGE_TOOL_NONE = 0, MAAGE_TOOL_PICKAXE, MAAGE_TOOL_SHOVEL, MAAGE_TOOL_AXE };
 struct maage_item_definition;
-typedef int (*maage_item_placement)(const struct maage_item_definition *item,
+typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item,
     unsigned int metadata, maage_block_face face, double yaw,
     maage_block_state_id *state);
 typedef struct maage_item_definition {
@@ -33,11 +33,11 @@ typedef struct maage_item_registry maage_item_registry;
 
 /* Definitions and both names are copied. Finalization makes direct numeric
  * lookup immutable; strings are used only at registration/UI boundaries. */
-maage_item_registry *maage_item_registry_create(size_t capacity);
-void maage_item_registry_destroy(maage_item_registry *registry);
-maage_registry_result maage_item_registry_register(maage_item_registry *registry,
+maage_status maage_item_registry_create(size_t capacity, maage_item_registry **output);
+maage_status maage_item_registry_destroy(maage_item_registry *registry);
+maage_status maage_item_registry_register(maage_item_registry *registry,
     const char *external_name, const maage_item_definition *definition);
-maage_registry_result maage_item_registry_finalize(maage_item_registry *registry);
+maage_status maage_item_registry_finalize(maage_item_registry *registry);
 int maage_item_registry_is_finalized(const maage_item_registry *registry);
 const maage_item_definition *maage_item_registry_get(const maage_item_registry *registry,
     maage_item_id id);
@@ -46,20 +46,23 @@ const maage_item_definition *maage_item_registry_at(const maage_item_registry *r
     size_t index);
 /* For persistence/import only, never the fixed-step simulation. */
 const char *maage_item_registry_name(const maage_item_registry *registry, maage_item_id id);
-maage_registry_result maage_item_registry_resolve_name(
+maage_status maage_item_registry_resolve_name(
     const maage_item_registry *registry, const char *name, maage_item_id *id);
-maage_item_registry *maage_item_registry_create_builtin(const maage_block_registry *blocks);
+maage_status maage_item_registry_create_builtin(const maage_block_registry *blocks,
+    maage_item_registry **output);
 int maage_item_stack_valid(const maage_item_registry *registry, const maage_item_stack *stack);
 const maage_item_stack *maage_inventory_selected(const maage_inventory *inventory);
-/* Returns uninserted count. Existing compatible stacks merge before empty slots. */
-unsigned int maage_inventory_add(maage_inventory *inventory,
-    const maage_item_registry *registry, const maage_item_stack *stack);
+/* Remaining is initialized to input count; PARTIAL retains uninserted items.
+ * Existing compatible stacks merge before empty slots. Empty input is NOOP. */
+maage_status maage_inventory_add(maage_inventory *inventory,
+    const maage_item_registry *registry, const maage_item_stack *stack,
+    unsigned int *remaining);
 /* Primary picks up/merges/swaps; secondary picks up half or places one. */
-int maage_inventory_click(maage_inventory *inventory,
+maage_status maage_inventory_click(maage_inventory *inventory,
     const maage_item_registry *registry, unsigned int slot, int secondary);
-int maage_inventory_creative(maage_inventory *inventory,
+maage_status maage_inventory_creative(maage_inventory *inventory,
     const maage_item_registry *registry, maage_item_id item);
-int maage_item_placement_state(const maage_item_definition *item,
+maage_status maage_item_placement_state(const maage_item_definition *item,
     unsigned int metadata, maage_block_face face, double yaw,
     maage_block_state_id *state);
 #endif

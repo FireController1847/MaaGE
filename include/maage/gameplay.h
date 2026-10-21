@@ -42,27 +42,27 @@ typedef struct maage_gameplay_intent {
     int attack, use, jump_pressed, descend;
 } maage_gameplay_intent;
 
-void maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
-int maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
+maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
+maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
 /* Foundation respawn returns to the session's start and retains inventory;
  * persistent spawn points and full death-drop rules are deferred. */
-void maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
+maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
     const maage_world *world);
 /* Call destroy/clear when an initialized game/save is no longer used. An
  * open world_store owns its record's save; returned record copies borrow it.
  * Snapshot allocates a deep copy and reports allocation failure. */
-void maage_gameplay_destroy(maage_gameplay *game);
-void maage_gameplay_save_clear(maage_gameplay_save *save);
-int maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
-int maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
+maage_status maage_gameplay_destroy(maage_gameplay *game);
+maage_status maage_gameplay_save_clear(maage_gameplay_save *save);
+maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
+maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
     const maage_gameplay_save *save);
 /* Owner-thread targeting may run every frame. Reach zero uses classic 5/4.5
  * Creative/Survival blocks; positive configured reach is bounded to 64. */
-void maage_gameplay_target(maage_gameplay *game, const maage_player *player,
+maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player,
     const maage_world *world, double yaw, double pitch);
 /* One 20 TPS owner-thread simulation phase: movement, damage, interactions.
  * No graphics, filesystem I/O, worker waits, or string identity operations. */
-void maage_gameplay_tick(maage_gameplay *game, maage_player *player,
+maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
-    const maage_gameplay_intent *intent);
+    const maage_gameplay_intent *intent, maage_status_trace *trace);
 #endif

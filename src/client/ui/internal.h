@@ -52,21 +52,22 @@ struct maage_client_ui {
     maage_window_insets safe_area;
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
-    int debug, overflow, overflow_reported, gui_scale;
-    maage_status notice_result;
+    int debug, gui_scale;
+    maage_status draw_result;
+    maage_status notice_result, route_result;
     double notice_until, notice_now;
     char notice_text[64];
 };
-int maage_client_ui_resources_load(maage_client_ui_resources *resources,
-    maage_renderer *renderer, const char *application_data, const maage_pixel_buffer *block_atlas);
-void maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
+maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources,
+    maage_renderer *renderer, const char *application_data, const maage_pixel_buffer *block_atlas, maage_status_trace *trace);
+maage_status maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
 maage_status maage_client_ui_font_fallback(maage_image *font);
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
     float x, float y, float red, float green, float blue);
-int maage_client_ui_inventory_register(maage_client_ui *ui);
+maage_status maage_client_ui_inventory_register(maage_client_ui *ui);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
 void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
     const float uv[4], float shade);

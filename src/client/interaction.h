@@ -12,9 +12,9 @@ typedef struct maage_client_interaction_visual {
 } maage_client_interaction_visual;
 /* Copies pre-resolved crack UVs. The frame path uses bounded stack geometry and
  * uploads only when the target or damage stage changes. */
-void maage_client_interaction_init(maage_client_interaction_visual *visual,
+maage_status maage_client_interaction_init(maage_client_interaction_visual *visual,
     const maage_client_resources *resources);
-maage_render_result maage_client_interaction_update(maage_client_interaction_visual *visual,
+maage_status maage_client_interaction_update(maage_client_interaction_visual *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
-    const maage_world *world, const maage_gameplay *game);
+    const maage_world *world, const maage_gameplay *game, maage_status_trace *trace);
 #endif

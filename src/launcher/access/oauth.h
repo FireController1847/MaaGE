@@ -11,34 +11,37 @@ typedef struct maage_auth_observer {
     void (*status)(void *context, const char *text);
     void (*device)(void *context, const char *url, const char *code, double deadline);
     void *context;
+    maage_status_trace *trace; /* Worker-owned; never contains token/URL text. */
 } maage_auth_observer;
 /* Worker-only. Refresh persists rotated OAuth credentials before downstream
  * exchanges, even if Minecraft is temporarily unavailable. No token in snapshots. */
-int maage_oauth_login(maage_profile_session *session, int device,
+maage_status maage_oauth_login(maage_profile_session *session, int device,
     const maage_auth_observer *observer, char detail[256]);
-int maage_oauth_refresh(const char *root, maage_profile_session *session,
+maage_status maage_oauth_refresh(const char *root, maage_profile_session *session,
     const maage_auth_observer *observer, char detail[256]);
-struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
+/* A valid JSON error response may be returned alongside an HTTP failure so
+ * OAuth protocol fields remain inspectable. Always wipe/free *response. */
+maage_status maage_auth_request(const char *endpoint, const char *bearer,
     const char *body, int form, const maage_auth_observer *observer,
-    long *status, char detail[256]);
+    long *status, char detail[256], struct json_object **response);
 /* Returns a static allowlisted error name; never echoes untrusted input. */
 const char *maage_auth_error_name(const char *error);
-void maage_auth_json_free(struct json_object *object);
+maage_status maage_auth_json_free(struct json_object *object);
 double maage_auth_number(struct json_object *object, const char *key);
-int maage_auth_token(char *out, size_t capacity, struct json_object *object, const char *key);
-int maage_auth_wait(double seconds, const maage_auth_observer *observer);
+maage_status maage_auth_token(char *out, size_t capacity, struct json_object *object, const char *key);
+maage_status maage_auth_wait(double seconds, const maage_auth_observer *observer);
 /* OS adapters: no credentials in command lines or browser URLs. */
-int maage_auth_random(unsigned char *bytes, size_t count);
-int maage_auth_browser(const char *url);
-void maage_auth_sleep(unsigned milliseconds);
+maage_status maage_auth_random(unsigned char *bytes, size_t count);
+maage_status maage_auth_browser(const char *url);
+maage_status maage_auth_sleep(unsigned milliseconds);
 /* Temporary IPv4 HTTP loopback callback. All calls belong to the access worker.
  * receive: 1 valid HTTP envelope (OAuth state not yet checked), 0 pending/rejected,
  * -1 transport failure. Only a state-validated result may complete the attempt.
  * reply: 1 authorization received, -1 validated OAuth error, 0 reject/keep waiting. */
 typedef struct maage_auth_listener maage_auth_listener;
-maage_auth_listener *maage_auth_listen(unsigned *port);
-int maage_auth_receive(maage_auth_listener *listener, char *query, size_t capacity,
+maage_status maage_auth_listen(unsigned *port, maage_auth_listener **output, maage_status_trace *trace);
+maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size_t capacity,
     const maage_auth_observer *observer);
-void maage_auth_reply(maage_auth_listener *listener, int accepted);
-void maage_auth_close(maage_auth_listener *listener);
+maage_status maage_auth_reply(maage_auth_listener *listener, int accepted);
+maage_status maage_auth_close(maage_auth_listener *listener);
 #endif

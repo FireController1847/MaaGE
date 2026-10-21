@@ -36,9 +36,10 @@ typedef struct maage_client_resources {
     unsigned int failed_resources;
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
-int maage_client_resources_load(const char *application_data,
-    maage_client_resources *resources, maage_biome_registry *biomes);
-maage_block_registry *maage_client_register_blocks(
-    const maage_client_resources *resources, const maage_biome_registry *biomes);
-void maage_client_resources_destroy(maage_client_resources *resources);
+maage_status maage_client_resources_load(const char *application_data,
+    maage_client_resources *resources, maage_biome_registry *biomes, maage_status_trace *trace);
+maage_status maage_client_register_blocks(
+    const maage_client_resources *resources, const maage_biome_registry *biomes,
+    maage_block_registry **output, maage_status_trace *trace);
+maage_status maage_client_resources_destroy(maage_client_resources *resources);
 #endif

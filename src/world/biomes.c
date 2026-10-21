@@ -21,7 +21,7 @@ static int maage_biome_name_valid(const char *name)
     return colon;
 }
 
-void maage_biome_registry_init(maage_biome_registry *registry)
+maage_status maage_biome_registry_init(maage_biome_registry *registry)
 {
     static const double parameters[MAAGE_BIOME_COUNT][4] = {
         { 46.0, 8.0, 0.5, 0.5 }, { 65.0, 3.0, 0.8, 0.4 },
@@ -34,7 +34,7 @@ void maage_biome_registry_init(maage_biome_registry *registry)
     };
     maage_biome_definition *definition;
     unsigned int id, component;
-    if (!registry) return;
+    if (!registry) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
     memset(registry, 0, sizeof(*registry));
     registry->definitions = registry->builtin_definitions;
     registry->occupied = registry->builtin_occupied;
@@ -63,19 +63,21 @@ void maage_biome_registry_init(maage_biome_registry *registry)
         registry->names[id] = names[id];
         registry->occupied[id] = 1;
     }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
-void maage_biome_registry_destroy(maage_biome_registry *registry)
+maage_status maage_biome_registry_destroy(maage_biome_registry *registry)
 {
     size_t i;
-    if (!registry) return;
+    if (!registry) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     if (registry->names) for (i = MAAGE_BIOME_COUNT; i < registry->capacity; ++i)
         free((void *)registry->names[i]);
     if (registry->definitions != registry->builtin_definitions) free(registry->definitions);
     if (registry->occupied != registry->builtin_occupied) free(registry->occupied);
     if (registry->names != registry->builtin_names) free((void *)registry->names);
     memset(registry, 0, sizeof(*registry));
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
-maage_registry_result maage_biome_registry_register(maage_biome_registry *registry,
+maage_status maage_biome_registry_register(maage_biome_registry *registry,
     const char *name, const maage_biome_definition *definition)
 {
     size_t i, count, old, length;
@@ -85,22 +87,22 @@ maage_registry_result maage_biome_registry_register(maage_biome_registry *regist
     char *copy;
     if (!registry || !definition || !maage_biome_name_valid(name) ||
         !registry->definitions || definition->id < MAAGE_BIOME_COUNT)
-        return MAAGE_REGISTRY_INVALID;
-    if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     for (i = 0; i < registry->capacity; ++i)
         if (registry->occupied[i] && !strcmp(registry->names[i], name))
-            return MAAGE_REGISTRY_DUPLICATE;
+            return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->id >= registry->capacity) {
         size_t requested = (size_t)definition->id;
         /* Check representability and the requested slot count before growth.
          * Use size_t arithmetic, not an ID-width comparison against SIZE_MAX. */
         if ((maage_biome_id)requested != definition->id ||
             requested == (size_t)-1)
-            return MAAGE_REGISTRY_OUT_OF_MEMORY;
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         ++requested;
         if (requested > (size_t)-1 / sizeof(*definitions) ||
             requested > (size_t)-1 / sizeof(*names))
-            return MAAGE_REGISTRY_OUT_OF_MEMORY;
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         old = registry->capacity;
         count = old;
         while (count < requested) {
@@ -116,7 +118,7 @@ maage_registry_result maage_biome_registry_register(maage_biome_registry *regist
         names = (const char **)calloc(count, sizeof(*names));
         if (!definitions || !occupied || !names) {
             free(definitions); free(occupied); free(names);
-            return MAAGE_REGISTRY_OUT_OF_MEMORY;
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         }
         memcpy(definitions, registry->definitions, old * sizeof(*definitions));
         memcpy(occupied, registry->occupied, old * sizeof(*occupied));
@@ -129,24 +131,25 @@ maage_registry_result maage_biome_registry_register(maage_biome_registry *regist
         registry->names = names;
         registry->capacity = count;
     }
-    if (registry->occupied[definition->id]) return MAAGE_REGISTRY_DUPLICATE;
+    if (registry->occupied[definition->id]) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     length = strlen(name);
     copy = (char *)malloc(length + 1);
-    if (!copy) return MAAGE_REGISTRY_OUT_OF_MEMORY;
+    if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     memcpy(copy, name, length + 1);
     registry->names[definition->id] = copy;
     registry->definitions[definition->id] = *definition;
     registry->occupied[definition->id] = 1;
-    return MAAGE_REGISTRY_OK;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
-int maage_biome_registry_finalize(maage_biome_registry *registry)
+maage_status maage_biome_registry_finalize(maage_biome_registry *registry)
 {
     const maage_biome_definition *definition;
     size_t id;
     unsigned int component;
-    if (!registry || !registry->definitions || registry->finalized) return 0;
+    if (!registry || !registry->definitions) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    if (registry->finalized) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_FINALIZE, 0);
     for (id = 0; id < MAAGE_BIOME_COUNT; ++id)
-        if (!registry->occupied[id]) return 0;
+        if (!registry->occupied[id]) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     for (id = 0; id < registry->capacity; ++id) {
         if (!registry->occupied[id]) continue;
         definition = &registry->definitions[id];
@@ -154,15 +157,15 @@ int maage_biome_registry_finalize(maage_biome_registry *registry)
             !(definition->base_height >= 1.0 && definition->base_height <= 240.0) ||
             !(definition->variation >= 0.0 && definition->variation <= 120.0) ||
             !(definition->temperature >= 0.0 && definition->temperature <= 2.0) ||
-            !(definition->rainfall >= 0.0 && definition->rainfall <= 1.0)) return 0;
+            !(definition->rainfall >= 0.0 && definition->rainfall <= 1.0)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (component = 0; component < 3; ++component)
             if (!(definition->grass_color[component] >= 0.0f &&
                 definition->grass_color[component] <= 1.0f &&
                 definition->foliage_color[component] >= 0.0f &&
-                definition->foliage_color[component] <= 1.0f)) return 0;
+                definition->foliage_color[component] <= 1.0f)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     registry->finalized = 1;
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_FINALIZE, 0);
 }
 const maage_biome_definition *maage_biome_registry_get(
     const maage_biome_registry *registry, maage_biome_id id)
@@ -175,16 +178,16 @@ const char *maage_biome_registry_name(
 {
     return maage_biome_registry_get(registry, id) ? registry->names[id] : NULL;
 }
-maage_registry_result maage_biome_registry_resolve_name(
+maage_status maage_biome_registry_resolve_name(
     const maage_biome_registry *registry, const char *name, maage_biome_id *id)
 {
     size_t i;
-    if (!registry || !name || !id) return MAAGE_REGISTRY_INVALID;
+    if (!registry || !name || !id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     for (i = 0; i < registry->capacity; ++i) {
         if (registry->occupied[i] && !strcmp(registry->names[i], name)) {
             *id = (maage_biome_id)i;
-            return MAAGE_REGISTRY_OK;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
         }
     }
-    return MAAGE_REGISTRY_INVALID;
+    return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
 }

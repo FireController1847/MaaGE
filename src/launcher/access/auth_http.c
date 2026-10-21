@@ -42,13 +42,14 @@ static void maage_auth_json_wipe(struct json_object *object)
         }
     }
 }
-void maage_auth_json_free(struct json_object *object)
+maage_status maage_auth_json_free(struct json_object *object)
 {
     const char *serialized;
-    if (!object) return;
+    if (!object) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RELEASE, 0);
     serialized = json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN);
     if (serialized) OPENSSL_cleanse((char *)serialized, strlen(serialized));
     maage_auth_json_wipe(object); json_object_put(object);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RELEASE, 0);
 }
 double maage_auth_number(struct json_object *object, const char *key)
 {
@@ -57,13 +58,13 @@ double maage_auth_number(struct json_object *object, const char *key)
     if (!object || !json_object_object_get_ex(object, key, &value) || (!json_object_is_type(value, json_type_int) && !json_object_is_type(value, json_type_double))) return -1;
     number = json_object_get_double(value); return number >= 0 && number < 1.0e12 ? number : -1;
 }
-int maage_auth_token(char *out, size_t capacity, struct json_object *object, const char *key)
+maage_status maage_auth_token(char *out, size_t capacity, struct json_object *object, const char *key)
 {
     const char *value = maage_access_json_string(object, key);
     size_t i, count = strlen(value);
-    if (!count || count >= capacity) return 0;
-    for (i = 0; i < count; ++i) if ((unsigned char)value[i] <= 32 || (unsigned char)value[i] >= 127) return 0;
-    memcpy(out, value, count + 1); return 1;
+    if (!count || count >= capacity) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
+    for (i = 0; i < count; ++i) if ((unsigned char)value[i] <= 32 || (unsigned char)value[i] >= 127) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
+    memcpy(out, value, count + 1); return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
 }
 const char *maage_auth_error_name(const char *error)
 {
@@ -109,9 +110,9 @@ static const char *maage_auth_error(struct json_object *object)
     if (!strcmp(error, "NOT_FOUND")) return "Minecraft Java profile not found. Confirm Java Edition access and finish profile setup.";
     return "Service rejected the request (unrecognized details withheld). Retry or sign in again.";
 }
-struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
+maage_status maage_auth_request(const char *endpoint, const char *bearer,
     const char *body, int form, const maage_auth_observer *observer,
-    long *status, char detail[256])
+    long *status, char detail[256], struct json_object **response)
 {
     maage_auth_http *http = (maage_auth_http *)calloc(1, sizeof(*http));
     CURL *curl = NULL;
@@ -119,11 +120,21 @@ struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
     struct curl_slist *headers = NULL, *entry;
     struct json_object *json = NULL;
     char *authorization = NULL;
-    const char *route = maage_auth_log_endpoint(endpoint), *setup = "initialize HTTP client", *error;
+    const char *route, *setup = "initialize HTTP client", *error;
     double elapsed = 0, xerr;
     int performed = 0;
+    maage_status outcome;
+    unsigned char code;
+    if (response) *response = NULL;
+    if (!endpoint || !observer || !observer->cancelled || !status || !detail || !response) {
+        free(http);
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
+    }
+    route = maage_auth_log_endpoint(endpoint);
     *status = 0; strcpy(detail, "Cannot initialize a secure authentication request.");
-    if (!http) { maage_log_error("maage.launcher.access.http", "Cannot allocate HTTP response buffer for %s.", route); return NULL; }
+    if (!http) return MAAGE_STATUS_TRACE(observer->trace,
+        maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0),
+        MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ);
     http->observer = observer; curl = curl_easy_init(); if (!curl) goto done;
     setup = "allocate request headers";
     headers = curl_slist_append(NULL, body ? (form ? "Content-Type: application/x-www-form-urlencoded" : "Content-Type: application/json") : "Accept: application/json");
@@ -156,33 +167,57 @@ struct json_object *maage_auth_request(const char *endpoint, const char *bearer,
     maage_log_debug("maage.launcher.access.http", "%s %s started.", body ? "POST" : "GET", route);
     performed = 1; result = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status); curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &elapsed);
-    if (result == CURLE_OK) json = maage_access_json(http->data, http->used);
+    if (result == CURLE_OK) maage_access_json(http->data, http->used, &json);
     if (observer->cancelled(observer->context)) strcpy(detail, "Authentication cancelled. No access was granted.");
     else if (result != CURLE_OK) strcpy(detail, "Cannot reach authentication services securely. Check your connection and retry.");
     else if (*status != 200) {
         /* Endpoint is a compile-time constant. No server-supplied URL/error text
          * is echoed. Known errors are mapped to bounded, actionable messages. */
-        sprintf(detail, "%.105s: HTTP %ld. %.130s", endpoint, *status, maage_auth_error(json));
+        sprintf(detail, "%.105s: HTTP %ld. %.130s", route, *status, maage_auth_error(json));
     } else if (!json) strcpy(detail, "Authentication service returned a malformed or oversized response.");
     else strcpy(detail, "Authentication response received.");
 done:
+    if (observer->cancelled(observer->context)) code = MAAGE_STATUS_INTERRUPTED;
+    else if (!performed) code = result == CURLE_OUT_OF_MEMORY ? MAAGE_STATUS_ALLOCATION_FAILED : MAAGE_STATUS_ERROR;
+    else if (http->oversized) code = MAAGE_STATUS_BUFFER_OVERFLOW;
+    else if (result == CURLE_OPERATION_TIMEDOUT) code = MAAGE_STATUS_TIMEOUT;
+    else if (result != CURLE_OK) code = MAAGE_STATUS_IO_ERROR;
+    else if (*status == 401 || *status == 403) code = MAAGE_STATUS_ACCESS_DENIED;
+    else if (*status == 404) code = MAAGE_STATUS_NOT_FOUND;
+    else if (*status == 408 || *status == 504) code = MAAGE_STATUS_TIMEOUT;
+    else if (*status == 429 || *status >= 500) code = MAAGE_STATUS_IO_ERROR;
+    else if (*status != 200) code = MAAGE_STATUS_ERROR;
+    else if (!json) code = MAAGE_STATUS_MALFORMED_INPUT;
+    else code = MAAGE_STATUS_SUCCESS;
+    outcome = maage_status_make(code, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
+    /* Polling protocol states are expected, not failures of the encompassing
+     * sign-in attempt. Their JSON remains available without filling its trace. */
+    error = maage_auth_error_name(maage_access_json_string(json, "error"));
+    if (!maage_status_is_success(outcome) && strcmp(error, "authorization_pending") && strcmp(error, "slow_down")) {
+        maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ,
+            __FILE__, (unsigned long)__LINE__, (long)result);
+        if (*status) maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH,
+            MAAGE_OPERATION_VERIFY, __FILE__, (unsigned long)__LINE__, *status);
+    }
     if (observer->cancelled(observer->context)) maage_log_info("maage.launcher.access.http", "Request cancelled: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else if (!performed) maage_log_error("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int)result);
-    else if (http->oversized) maage_log_warn("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else if (result != CURLE_OK) maage_log_warn("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int)result, curl_easy_strerror(result), *status, elapsed);
+    else if (!performed) maage_log_verbose("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int)result);
+    else if (http->oversized) maage_log_verbose("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    else if (result != CURLE_OK) maage_log_verbose("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int)result, curl_easy_strerror(result), *status, elapsed);
     else if (*status != 200) {
         error = maage_auth_error_name(maage_access_json_string(json, "error"));
         if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down"))
             maage_log_debug("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
         else {
-            maage_log_warn("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed);
+            maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed);
             xerr = maage_auth_number(json, "XErr");
-            if (xerr >= 0) maage_log_warn("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr);
+            if (xerr >= 0) maage_log_verbose("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr);
         }
-    } else if (!json) maage_log_warn("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    } else if (!json) maage_log_verbose("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
     else maage_log_debug("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
     if (curl) curl_easy_cleanup(curl);
     if (authorization) { OPENSSL_cleanse(authorization, strlen(authorization)); free(authorization); }
     for (entry = headers; entry; entry = entry->next) OPENSSL_cleanse(entry->data, strlen(entry->data));
-    curl_slist_free_all(headers); OPENSSL_cleanse(http, sizeof(*http)); free(http); return json;
+    curl_slist_free_all(headers); OPENSSL_cleanse(http, sizeof(*http)); free(http);
+    *response = json;
+    return outcome;
 }

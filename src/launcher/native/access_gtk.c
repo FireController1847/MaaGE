@@ -102,14 +102,17 @@ static GtkWidget *maage_access_gtk_button(GtkWidget *box, const char *text, GCal
     if (callback) g_signal_connect(button, "clicked", callback, ui);
     return button;
 }
-int maage_access_native_run(maage_access *access, int manage_accounts)
+maage_status maage_access_native_run(maage_access *access, int manage_accounts, int *action)
 {
     maage_access_gtk ui;
     GtkWidget *outer, *header, *panel, *row, *label;
     GtkCssProvider *css;
     guint timer;
+    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.access = access; ui.manage_accounts = manage_accounts; ui.revision = (unsigned)-1;
-    if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return -1; }
+    if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0); }
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
     css = gtk_css_provider_new(); gtk_css_provider_load_from_data(css,
         "window.maage-access { background: #1c1c1c; color: #e6e6e6; } .maage-access label { color: #e6e6e6; }"
@@ -144,5 +147,5 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
     ui.next = maage_access_gtk_button(row, "Continue", G_CALLBACK(maage_access_gtk_next), &ui); ui.cancel = maage_access_gtk_button(row, "Cancel", G_CALLBACK(maage_access_gtk_cancel), &ui); gtk_style_context_add_class(gtk_widget_get_style_context(ui.next), "accent");
     g_signal_connect(ui.profiles, "changed", G_CALLBACK(maage_access_gtk_select), &ui); g_signal_connect(ui.window, "delete-event", G_CALLBACK(maage_access_gtk_close), &ui);
     gtk_widget_set_sensitive(ui.next, FALSE); timer = g_timeout_add(100, maage_access_gtk_tick, &ui); gtk_widget_show_all(outer); maage_access_gtk_tick(&ui); gtk_main();
-    g_source_remove(timer); gtk_widget_destroy(ui.window); maage_access_snapshot_release(&ui.snapshot); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css)); g_object_unref(css); return ui.result;
+    g_source_remove(timer); gtk_widget_destroy(ui.window); maage_access_snapshot_release(&ui.snapshot); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css)); g_object_unref(css); *action = ui.result; return outcome;
 }

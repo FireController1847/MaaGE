@@ -103,7 +103,7 @@ static NSTableView *maage_ui_navigation_table(void)
 { (void)application; [self finish:0]; return NSTerminateCancel; }
 - (void)manage:(id)sender { (void)sender; if (!self.state->accounts.busy) [self finish:1]; }
 - (void)addAccount:(id)sender
-{ (void)sender; if (!self.state->client_job && maage_access_sign_in(self.state->access, 0)) [self finish:1]; }
+{ (void)sender; if (!self.state->client_job && (!maage_status_failed(maage_access_sign_in(self.state->access, 0)))) [self finish:1]; }
 - (void)signOutAccount:(id)sender
 { (void)sender; if (*self.state->account) maage_access_sign_out(self.state->access, self.state->account); [self refresh:nil]; }
 - (void)removeAccount:(id)sender
@@ -267,7 +267,7 @@ static NSTableView *maage_ui_navigation_table(void)
     (void)sender; NSInteger row = self.installations.selectedRow;
     char path[MAAGE_PATH_CAPACITY];
     if (row < 0) return;
-    if (maage_launcher_installation_directory(self.state, (unsigned)row, path) &&
+    if ((!maage_status_failed(maage_launcher_installation_directory(self.state, (unsigned)row, path))) &&
         ![NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:@(path) isDirectory:YES]])
         strcpy(self.state->error, "Cannot open the installation folder in Finder.");
     [self refresh:nil];
@@ -280,7 +280,7 @@ static NSTableView *maage_ui_navigation_table(void)
 - (void)appearanceChanged:(NSPopUpButton *)sender
 {
     int previous = self.state->appearance; self.state->appearance = (int)sender.indexOfSelectedItem;
-    if (!maage_launcher_ui_save(self.state)) { self.state->appearance = previous; [sender selectItemAtIndex:previous]; }
+    if (maage_status_failed(maage_launcher_ui_save(self.state))) { self.state->appearance = previous; [sender selectItemAtIndex:previous]; }
     [self applyAppearance]; [self refresh:nil];
 }
 - (void)refresh:(NSTimer *)timer
@@ -597,8 +597,10 @@ static NSTableView *maage_ui_navigation_table(void)
     [self.window center]; [self.window makeKeyAndOrderFront:nil];
 }
 @end
-int maage_launcher_native_run(maage_launcher_ui *state)
+maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action)
 {
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     @autoreleasepool {
         [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         MaaGELauncherController *controller = [[MaaGELauncherController alloc] init]; controller.state = state;
@@ -613,6 +615,6 @@ int maage_launcher_native_run(maage_launcher_ui *state)
         NSMenuItem *editItem = [[NSMenuItem alloc] init]; [menu addItem:editItem]; NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"]; editItem.submenu = edit;
         [edit addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"]; [edit addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"]; [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"]; [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
         NSApp.mainMenu = menu; [controller show]; [NSApp activateIgnoringOtherApps:YES]; [NSApp run];
-        NSApp.delegate = previous; NSApp.mainMenu = nil; controller.window.delegate = nil; [controller.window close]; return controller.result;
+        NSApp.delegate = previous; NSApp.mainMenu = nil; controller.window.delegate = nil; [controller.window close]; *action = controller.result; return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     }
 }

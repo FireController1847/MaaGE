@@ -32,7 +32,7 @@ typedef struct maage_log_config {
  * level and every more severe level. Build classification is compiled into Log.
  * init copies strings; caller storage need only survive the call. Precedence:
  * supplied defaults, optional INI, then recognized --log-* arguments. Missing
- * INI files are optional; other errors return zero with usable settings retained.
+ * INI files are optional; malformed options return PARTIAL with usable settings retained.
  * With file output enabled, the configured filename is live while running.
  * Shutdown/reinit creates a dated .gz copy of a nonempty session while retaining
  * the latest plain log. Empty files create no archive. Init preserves unarchived
@@ -47,36 +47,43 @@ typedef struct maage_log_config {
  * unbuffered before their first I/O when immediate raw output is required.
  * File records are flushed immediately and the file permits external sharing.
  * Unknown application arguments are ignored and argv is never modified. */
-void maage_log_config_init(maage_log_config *config);
-int maage_log_init(const maage_log_config *config, int argc, char *const argv[]);
+maage_status maage_log_config_init(maage_log_config *config);
+maage_status maage_log_init(const maage_log_config *config, int argc, char *const argv[]);
 /* Exact logger overrides inherit at dot boundaries; NULL/empty selects root.
- * Returns zero for invalid levels, overlong names, or a full override table. */
-int maage_log_set_level(const char *logger, maage_log_level level);
+ * Invalid levels/names and allocation failures return explicit errors. */
+maage_status maage_log_set_level(const char *logger, maage_log_level level);
 int maage_log_enabled(const char *logger, maage_log_level level);
-void maage_log_flush(void);
+maage_status maage_log_flush(void);
 /* Flushes/closes owned files, GZip-copies the session and resets defaults.
  * Archive failures preserve the current file and emit an error. Logging before init or after
  * shutdown is safe and uses defaults. FATAL never terminates the process.
  * Operations are serialized; do not call from signal handlers. Messages longer
  * than the internal bound are marked truncated. printf arguments must be valid. */
-void maage_log_shutdown(void);
-void maage_log_write(maage_log_level level, const char *logger, const char *format, ...);
-void maage_log_vwrite(maage_log_level level, const char *logger, const char *format, va_list args);
+maage_status maage_log_shutdown(void);
+/* Write outcomes describe diagnostic delivery, independently of any attached
+ * operation result. Disabled records return NOOP; output errors return IO_ERROR.
+ * Callers preserve their operation result even if a diagnostic was delivered. */
+maage_status maage_log_write(maage_log_level level, const char *logger, const char *format, ...);
+maage_status maage_log_vwrite(maage_log_level level, const char *logger, const char *format, va_list args);
 /* Structured occurrence: includes stable Operation Status identity and caller
  * context (path, numeric ID, OS error, job ID). Severity is the caller's logging
  * decision, independent of result severity. Success never logs automatically.
  * Formatting is skipped when filtered. Report once at the handling boundary;
  * callers own occurrence/failure caches rather than global last-error state. */
-void maage_log_status(maage_log_level level, const char *logger,
+maage_status maage_log_status(maage_log_level level, const char *logger,
     maage_status result, const char *format, ...);
-void maage_log_verbose(const char *logger, const char *format, ...);
-void maage_log_warning(const char *logger, const char *format, ...);
-void maage_log_trace(const char *logger, const char *format, ...);
-void maage_log_debug(const char *logger, const char *format, ...);
-void maage_log_info(const char *logger, const char *format, ...);
-void maage_log_warn(const char *logger, const char *format, ...);
-void maage_log_error(const char *logger, const char *format, ...);
-void maage_log_fatal(const char *logger, const char *format, ...);
+/* One bounded single-line causal diagnostic. No trace formatting or allocation
+ * occurs if filtered; trace/source strings are borrowed only during this call. */
+maage_status maage_log_trace_status(maage_log_level level, const char *logger,
+    maage_status result, const maage_status_trace *trace, const char *format, ...);
+maage_status maage_log_verbose(const char *logger, const char *format, ...);
+maage_status maage_log_warning(const char *logger, const char *format, ...);
+maage_status maage_log_trace(const char *logger, const char *format, ...);
+maage_status maage_log_debug(const char *logger, const char *format, ...);
+maage_status maage_log_info(const char *logger, const char *format, ...);
+maage_status maage_log_warn(const char *logger, const char *format, ...);
+maage_status maage_log_error(const char *logger, const char *format, ...);
+maage_status maage_log_fatal(const char *logger, const char *format, ...);
 
 #ifdef __cplusplus
 }

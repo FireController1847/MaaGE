@@ -21,9 +21,9 @@ typedef struct maage_cocoa_window {
 } maage_cocoa_window;
 
 static maage_window_system *maage_cocoa_active;
-static maage_window_result maage_cocoa_mode(maage_window *, maage_window_mode);
-static maage_window_result maage_cocoa_state(maage_window *);
-static maage_window_result maage_cocoa_capture(maage_window *, int);
+static maage_status maage_cocoa_mode(maage_window *, maage_window_mode);
+static maage_status maage_cocoa_state(maage_window *);
+static maage_status maage_cocoa_capture(maage_window *, int);
 
 @interface MaaGEPlatformWindow : NSWindow
 @end
@@ -200,13 +200,13 @@ static void maage_cocoa_presentation(maage_window_system *system)
     [NSApp setPresentationOptions:native->presentation];
 }
 
-static maage_window_result maage_cocoa_init(maage_window_system *system)
+static maage_status maage_cocoa_init(maage_window_system *system)
 {
     maage_cocoa_system *native;
-    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
-    if (maage_cocoa_active) return MAAGE_WINDOW_UNAVAILABLE;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, MAAGE_DETAIL_WRONG_THREAD);
+    if (maage_cocoa_active) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     native = calloc(1, sizeof(*native));
-    if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     system->platform = native;
     native->pool = [[NSAutoreleasePool alloc] init];
     [NSApplication sharedApplication];
@@ -217,7 +217,7 @@ static maage_window_result maage_cocoa_init(maage_window_system *system)
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [NSApp finishLaunching];
     maage_cocoa_active = system;
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
 }
 static void maage_cocoa_shutdown(maage_window_system *system)
 {
@@ -231,15 +231,15 @@ static void maage_cocoa_shutdown(maage_window_system *system)
     maage_cocoa_active = NULL;
     free(native);
 }
-static maage_window_result maage_cocoa_title(maage_window *window, const char *title)
+static maage_status maage_cocoa_title(maage_window *window, const char *title)
 {
     maage_cocoa_window *native = window->platform;
     NSString *text = [NSString stringWithUTF8String:title];
-    if (!text) return MAAGE_WINDOW_INVALID_ARGUMENT;
+    if (!text) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     [native->handle setTitle:text];
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
-static maage_window_result maage_cocoa_visible(maage_window *window, int visible)
+static maage_status maage_cocoa_visible(maage_window *window, int visible)
 {
     maage_cocoa_window *native = window->platform;
     if (visible) {
@@ -248,23 +248,23 @@ static maage_window_result maage_cocoa_visible(maage_window *window, int visible
     } else [native->handle orderOut:nil];
     window->state.visible = visible != 0;
     maage_cocoa_presentation(window->system);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
-static maage_window_result maage_cocoa_mode(maage_window *window, maage_window_mode mode)
+static maage_status maage_cocoa_mode(maage_window *window, maage_window_mode mode)
 {
     maage_cocoa_window *native = window->platform;
     NSWindow *handle = native->handle;
     NSScreen *screen = [handle screen] ?: [NSScreen mainScreen];
     NSRect frame;
-    if (native->transitioning) return MAAGE_WINDOW_UNSUPPORTED;
+    if (native->transitioning) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN && ![handle isVisible])
-        return MAAGE_WINDOW_UNSUPPORTED;
-    if (mode == window->state.mode) return MAAGE_WINDOW_OK;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode == window->state.mode) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     native->desired_mode = mode;
     if (window->state.mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) {
         native->transitioning = 1;
         [handle toggleFullScreen:nil];
-        return MAAGE_WINDOW_OK;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     }
     if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
         native->normal_frame = [handle frame];
@@ -295,19 +295,19 @@ static maage_window_result maage_cocoa_mode(maage_window *window, maage_window_m
     }
     maage_cocoa_presentation(window->system);
     window->state.resized = 1;
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
-static maage_window_result maage_cocoa_create(maage_window *window, const maage_window_config *config)
+static maage_status maage_cocoa_create(maage_window *window, const maage_window_config *config)
 {
     maage_cocoa_window *native = calloc(1, sizeof(*native));
     MaaGEWindowDelegate *delegate;
-    maage_window_result result;
-    if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    maage_status result;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     window->platform = native;
     native->handle = [[MaaGEPlatformWindow alloc] initWithContentRect:
         NSMakeRect(0, 0, config->width, config->height)
         styleMask:maage_cocoa_style(window, 1) backing:NSBackingStoreBuffered defer:NO];
-    if (!native->handle) return MAAGE_WINDOW_PLATFORM_ERROR;
+    if (!native->handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     [native->handle setReleasedWhenClosed:NO];
     [native->handle setAcceptsMouseMovedEvents:YES];
     [native->handle setTitlebarAppearsTransparent:window->full_display_content != 0];
@@ -319,9 +319,9 @@ static maage_window_result maage_cocoa_create(maage_window *window, const maage_
     native->delegate = delegate;
     [native->handle setDelegate:delegate];
     result = maage_cocoa_title(window, config->title);
-    if (result != MAAGE_WINDOW_OK) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     result = maage_cocoa_visible(window, config->visible);
-    if (result != MAAGE_WINDOW_OK) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     return maage_cocoa_mode(window, config->mode);
 }
 static void maage_cocoa_destroy(maage_window *window)
@@ -337,21 +337,21 @@ static void maage_cocoa_destroy(maage_window *window)
     free(native);
     maage_cocoa_presentation(window->system);
 }
-static maage_window_result maage_cocoa_capture(maage_window *window, int capture)
+static maage_status maage_cocoa_capture(maage_window *window, int capture)
 {
     maage_cocoa_window *native = window->platform;
     maage_window *other;
     NSView *view;
     NSRect content;
     CGPoint point;
-    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
-    if (capture == window->input.captured) return MAAGE_WINDOW_OK;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_WRONG_THREAD);
+    if (capture == window->input.captured) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
     if (capture) {
-        if (![native->handle isKeyWindow] || ![NSApp isActive]) return MAAGE_WINDOW_UNAVAILABLE;
+        if (![native->handle isKeyWindow] || ![NSApp isActive]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         for (other = window->system->windows; other; other = other->next)
             if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
         if (CGAssociateMouseAndMouseCursorPosition(0) != kCGErrorSuccess)
-            return MAAGE_WINDOW_PLATFORM_ERROR;
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         /* Freeze the native cursor inside this viewport even when activation
          * happened through the Dock or keyboard with the pointer elsewhere. */
         view = [native->handle contentView];
@@ -360,7 +360,7 @@ static maage_window_result maage_cocoa_capture(maage_window *window, int capture
         point.y = CGDisplayBounds(CGMainDisplayID()).size.height - NSMidY(content);
         if (CGWarpMouseCursorPosition(point) != kCGErrorSuccess) {
             CGAssociateMouseAndMouseCursorPosition(1);
-            return MAAGE_WINDOW_PLATFORM_ERROR;
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         }
         native->capture_time = [[NSProcessInfo processInfo] systemUptime];
         [native->handle setAcceptsMouseMovedEvents:YES];
@@ -369,7 +369,7 @@ static maage_window_result maage_cocoa_capture(maage_window *window, int capture
         CGAssociateMouseAndMouseCursorPosition(1);
         [NSCursor unhide];
     }
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
 }
 static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
 {
@@ -440,11 +440,11 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
     }
     return 0;
 }
-static maage_window_result maage_cocoa_poll(maage_window_system *system, int timeout_ms)
+static maage_status maage_cocoa_poll(maage_window_system *system, int timeout_ms)
 {
     NSAutoreleasePool *pool;
     NSEvent *event;
-    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, MAAGE_DETAIL_WRONG_THREAD);
     pool = [[NSAutoreleasePool alloc] init];
     event = [NSApp nextEventMatchingMask:NSEventMaskAny
         untilDate:timeout_ms < 0 ? [NSDate distantFuture] :
@@ -457,9 +457,9 @@ static maage_window_result maage_cocoa_poll(maage_window_system *system, int tim
     }
     [NSApp updateWindows];
     [pool drain];
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
 }
-static maage_window_result maage_cocoa_state(maage_window *window)
+static maage_status maage_cocoa_state(maage_window *window)
 {
     maage_cocoa_window *native = window->platform;
     NSView *view;
@@ -469,7 +469,7 @@ static maage_window_result maage_cocoa_state(maage_window *window)
     NSRect content;
     NSRect safe;
     NSEdgeInsets inset;
-    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, MAAGE_DETAIL_WRONG_THREAD);
     view = [native->handle contentView];
     screen = [native->handle screen];
     logical = [view bounds];
@@ -496,15 +496,15 @@ static maage_window_result maage_cocoa_state(maage_window *window)
             window->state.safe_area.right = MAX(0, NSMaxX(content) - NSMaxX(safe));
         }
     }
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
 }
-static maage_window_result maage_cocoa_resize(maage_window *window, int width, int height)
+static maage_status maage_cocoa_resize(maage_window *window, int width, int height)
 {
     maage_cocoa_window *native = window->platform;
-    if (native->transitioning) return MAAGE_WINDOW_UNSUPPORTED;
+    if (native->transitioning) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
     [native->handle setContentSize:NSMakeSize(width, height)];
     window->state.resized = 1;
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
 }
 static void maage_cocoa_native(maage_window *window, maage_window_native *output)
 {
@@ -512,7 +512,7 @@ static void maage_cocoa_native(maage_window *window, maage_window_native *output
     output->handles.cocoa.window = native->handle;
     output->handles.cocoa.view = [native->handle contentView];
 }
-static maage_window_result maage_cocoa_surface(maage_window *window, int external)
+static maage_status maage_cocoa_surface(maage_window *window, int external)
 {
     maage_cocoa_window *native = window->platform;
     if (!external && native->bitmap_view) {
@@ -520,9 +520,9 @@ static maage_window_result maage_cocoa_surface(maage_window *window, int externa
         [native->bitmap_view release];
         native->bitmap_view = nil;
     }
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
 }
-static maage_window_result maage_cocoa_pixels(maage_window *window, const maage_pixel_buffer *buffer)
+static maage_status maage_cocoa_pixels(maage_window *window, const maage_pixel_buffer *buffer)
 {
     maage_cocoa_window *native = window->platform;
     NSView *parent = [native->handle contentView];
@@ -530,11 +530,11 @@ static maage_window_result maage_cocoa_pixels(maage_window *window, const maage_
     NSAutoreleasePool *pool;
     NSBitmapImageRep *image;
     int row;
-    if (![NSThread isMainThread]) return MAAGE_WINDOW_WRONG_THREAD;
-    if ([native->handle isMiniaturized]) return MAAGE_WINDOW_UNAVAILABLE;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, MAAGE_DETAIL_WRONG_THREAD);
+    if ([native->handle isMiniaturized]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     if (!view) {
         view = [[MaaGEBitmapView alloc] initWithFrame:[parent bounds]];
-        if (!view) return MAAGE_WINDOW_OUT_OF_MEMORY;
+        if (!view) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
         [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
         [parent addSubview:view];
         native->bitmap_view = view;
@@ -545,7 +545,7 @@ static maage_window_result maage_cocoa_pixels(maage_window *window, const maage_
             pixelsHigh:buffer->height bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
             colorSpaceName:NSDeviceRGBColorSpace bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
             bytesPerRow:0 bitsPerPixel:32];
-        if (!image) { [pool drain]; return MAAGE_WINDOW_OUT_OF_MEMORY; }
+        if (!image) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0); }
         [view->image release];
         view->image = image;
     }
@@ -555,7 +555,7 @@ static maage_window_result maage_cocoa_pixels(maage_window *window, const maage_
     [view setNeedsDisplay:YES];
     [view displayIfNeeded];
     [pool drain];
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
 }
 const maage_window_backend_api maage_window_cocoa_api = {
     MAAGE_WINDOW_COCOA, maage_cocoa_init, maage_cocoa_shutdown, maage_cocoa_create,

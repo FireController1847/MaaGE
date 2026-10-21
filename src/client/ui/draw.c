@@ -11,7 +11,7 @@ static int maage_client_ui_reserve_quad(maage_client_ui *ui)
     maage_render_ui_vertex *vertices;
     unsigned int *indices;
     unsigned char failure = MAAGE_STATUS_ALLOCATION_FAILED;
-    if (ui->overflow) return 0;
+    if (maage_status_failed(ui->draw_result)) return 0;
     maximum = ((size_t)-1) / sizeof(*ui->vertices) / 4;
     if (maximum > ((size_t)-1) / sizeof(*ui->indices) / 6)
         maximum = ((size_t)-1) / sizeof(*ui->indices) / 6;
@@ -36,13 +36,7 @@ static int maage_client_ui_reserve_quad(maage_client_ui *ui)
     ui->quad_capacity = capacity;
     return 1;
 failed:
-    ui->overflow = 1;
-    if (!ui->overflow_reported) {
-        maage_log_status(MAAGE_LOG_FATAL, "maage.client.ui",
-            maage_status_make(failure, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0),
-            "GUI geometry cannot be constructed; frame rejected.");
-        ui->overflow_reported = 1;
-    }
+    ui->draw_result = maage_status_make(failure, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
     return 0;
 }
 

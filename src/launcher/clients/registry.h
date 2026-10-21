@@ -20,17 +20,17 @@ typedef struct maage_client_candidate {
     maage_client_build build;
     char source[MAAGE_PATH_CAPACITY];
 } maage_client_candidate;
-void maage_clients_dispose(maage_client_registry *registry);
-int maage_clients_load(maage_client_registry *registry, const char *root, char error[256]);
+maage_status maage_clients_dispose(maage_client_registry *registry);
+maage_status maage_clients_load(maage_client_registry *registry, const char *root, char error[256], maage_status_trace *trace);
 int maage_clients_find(const maage_client_registry *registry, const char *id);
-int maage_clients_path(const maage_client_registry *registry, const char *id, char path[MAAGE_PATH_CAPACITY]);
+maage_status maage_clients_path(const maage_client_registry *registry, const char *id, char path[MAAGE_PATH_CAPACITY], maage_status_trace *trace);
 void maage_client_build_label(const maage_client_build *build, char label[384]);
 /* Only unreferenced local builds may be passed for removal by the controller. */
-int maage_clients_remove(maage_client_registry *registry, const char *id, char error[256]);
+maage_status maage_clients_remove(maage_client_registry *registry, const char *id, char error[256], maage_status_trace *trace);
 #if MAAGE_LAUNCHER_DEVELOPMENT
 /* Explicitly trusted developer packages, inspected without execution. A manifest
  * and matching SHA-256 are required. Import revalidates after copying. */
-int maage_clients_probe(const char *source, maage_client_candidate *candidate, char error[256]);
-int maage_clients_import(maage_client_registry *registry, const maage_client_candidate *candidate, char error[256]);
+maage_status maage_clients_probe(const char *source, maage_client_candidate *candidate, char error[256], maage_status_trace *trace);
+maage_status maage_clients_import(maage_client_registry *registry, const maage_client_candidate *candidate, char error[256], maage_status_trace *trace);
 #endif
 #endif

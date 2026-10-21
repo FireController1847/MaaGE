@@ -5,7 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-maage_status maage_image_load_png_status(const char *path, maage_image *output)
+maage_status maage_image_load_png(const char *path, maage_image *output,
+    maage_status_trace *trace)
 {
     png_image image;
     FILE *file;
@@ -14,35 +15,37 @@ maage_status maage_image_load_png_status(const char *path, maage_image *output)
     unsigned char code;
     int ok;
     if (!path || !output || output->pixels)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE,
-            MAAGE_OPERATION_DECODE, (unsigned char)(!path ? 0 : 1));
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE,
+            MAAGE_OPERATION_DECODE, (unsigned char)(!path ? 0 : 1)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE);
     errno = 0;
     file = maage_storage_open(path, "rb");
     if (!file) {
         code = errno == ENOENT || errno == ENOTDIR ? MAAGE_STATUS_NOT_FOUND :
             (errno == EACCES || errno == EPERM ? MAAGE_STATUS_ACCESS_DENIED : MAAGE_STATUS_IO_ERROR);
-        return maage_status_make(code, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
+        return maage_status_trace_record(trace,
+            maage_status_make(code, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN, 0),
+            MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN, __FILE__, __LINE__, errno);
     }
     code = MAAGE_STATUS_MALFORMED_INPUT;
     if (fread(signature, 1, sizeof(signature), file) != sizeof(signature)) {
         if (ferror(file)) code = MAAGE_STATUS_IO_ERROR;
         fclose(file);
-        return maage_status_make(code, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0);
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(code, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE);
     }
     if (png_sig_cmp(signature, 0, sizeof(signature))) {
         fclose(file);
-        return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0);
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE);
     }
     rewind(file);
     memset(&image, 0, sizeof(image));
     image.version = PNG_IMAGE_VERSION;
     if (!png_image_begin_read_from_stdio(&image, file)) {
         png_image_free(&image); fclose(file);
-        return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0);
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE);
     }
     if (!image.width || !image.height || image.width > 2048 || image.height > 2048) {
         png_image_free(&image); fclose(file);
-        return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0);
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE);
     }
     image.format = PNG_FORMAT_RGBA;
     pixels = (unsigned char *)malloc(PNG_IMAGE_SIZE(image));
@@ -59,14 +62,11 @@ maage_status maage_image_load_png_status(const char *path, maage_image *output)
     }
     png_image_free(&image);
     fclose(file);
-    return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : code,
-        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0);
+    return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(ok ? MAAGE_STATUS_SUCCESS : code,
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DECODE);
 }
 
-int maage_image_load_png(const char *path, maage_image *output)
-{
-    return !maage_status_failed(maage_image_load_png_status(path, output));
-}
+
 
 maage_status maage_image_make_missing(maage_image *image, int width, int height)
 {
@@ -94,9 +94,13 @@ maage_status maage_image_make_missing(maage_image *image, int width, int height)
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ATLAS, 0);
 }
 
-void maage_image_destroy(maage_image *image)
+maage_status maage_image_destroy(maage_image *image)
 {
-    if (!image) return;
+    int present;
+    if (!image) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    present = image->pixels != NULL;
     free(image->pixels);
     memset(image, 0, sizeof(*image));
+    return maage_status_make(present ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP,
+        0, MAAGE_OPERATION_DESTROY, 0);
 }

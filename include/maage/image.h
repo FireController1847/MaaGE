@@ -10,13 +10,12 @@ typedef struct maage_image {
     size_t stride;
 } maage_image;
 /* Output must be zero-initialized and empty. Rejects images above 2048x2048.
- * UTF-8 file path; returns zero on missing, malformed or oversized input. */
-int maage_image_load_png(const char *path, maage_image *image);
-/* Detailed initialization outcome; the legacy boolean adapter is retained.
+ * UTF-8 file path; optional caller-owned trace preserves file/decode causes.
  * Failure leaves an empty output and never retains decoder-owned storage. */
-maage_status maage_image_load_png_status(const char *path, maage_image *image);
+maage_status maage_image_load_png(const char *path, maage_image *image,
+    maage_status_trace *trace);
 /* Original, asset-independent magenta/black checkerboard. Caller owns pixels;
  * nearest sampling is provided by the existing renderer texture contract. */
 maage_status maage_image_make_missing(maage_image *image, int width, int height);
-void maage_image_destroy(maage_image *image);
+maage_status maage_image_destroy(maage_image *image);
 #endif

@@ -68,15 +68,22 @@ static wchar_t *maage_process_arguments(const char *const argv[])
     }
     *out=0; return line;
 }
-int maage_process_start(const char *exe, const char *const argv[], const char *directory,
-    const char *stdout_path, const char *stderr_path, maage_process **process, char error[256])
+maage_status maage_process_start(const char *exe, const char *const argv[], const char *directory,
+    const char *stdout_path, const char *stderr_path, maage_process **process, char error[256], maage_status_trace *trace)
 {
     STARTUPINFOEXW startup; PROCESS_INFORMATION info;
     HANDLE handles[3];
     SECURITY_ATTRIBUTES security;
     wchar_t *native=NULL, *cwd=NULL, *command=NULL;
     SIZE_T size=0, handle_bytes=sizeof(handles); int initialized=0, ok=0; DWORD failure=0;
-    maage_process *p=(maage_process *)calloc(1,sizeof(*p));
+    maage_process *p;
+    maage_status result;
+    if (process) *process = NULL;
+    if (!exe || !argv || !argv[0] || !directory || !stdout_path || !stderr_path || !process || !error)
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START);
+    error[0] = 0;
+    p=(maage_process *)calloc(1,sizeof(*p));
     *process=NULL; memset(&startup,0,sizeof(startup)); memset(&info,0,sizeof(info));
     memset(handles,0,sizeof(handles)); memset(&security,0,sizeof(security));
     security.nLength=sizeof(security); security.bInheritHandle=TRUE;
@@ -108,18 +115,42 @@ int maage_process_start(const char *exe, const char *const argv[], const char *d
     if(handles[1] && handles[1]!=INVALID_HANDLE_VALUE) CloseHandle(handles[1]);
     if(handles[2] && handles[2]!=INVALID_HANDLE_VALUE && handles[2]!=handles[1]) CloseHandle(handles[2]);
     if(!ok) { free(p); sprintf(error,"Cannot create Client process (Windows error %lu).",(unsigned long)failure); }
-    return ok;
+    result = ok ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_START, 0) :
+        maage_status_from_win32(failure, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START);
+    if (!ok && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START, 0);
+    return maage_status_is_success(result) ? result : maage_status_trace_record(trace, result,
+        MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START, __FILE__, (unsigned long)__LINE__, (long)failure);
 }
-maage_process_state maage_process_poll(maage_process *p, int *code, char error[256])
+maage_status maage_process_poll(maage_process *p, int *code, maage_process_state *state,
+    char error[256], maage_status_trace *trace)
 {
-    DWORD status=WaitForSingleObject(p->handle,0), exit;
+    DWORD status, exit, failure = 0;
+    maage_status result;
+    if (state) *state = MAAGE_PROCESS_FAILED;
+    if (code) *code = 0;
+    if (!p || !code || !state || !error) return MAAGE_STATUS_TRACE(trace,
+        maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL,
+            MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL);
+    error[0] = 0;
+    status=WaitForSingleObject(p->handle,0);
     if(status==WAIT_OBJECT_0 && p->state==MAAGE_PROCESS_RUNNING) {
         if(GetExitCodeProcess(p->handle,&exit)) { p->state=MAAGE_PROCESS_EXITED; p->code=(int)exit; }
         else { p->state=MAAGE_PROCESS_FAILED; sprintf(error,"Cannot read process exit status (Windows error %lu).",(unsigned long)GetLastError()); }
     } else if(status==WAIT_FAILED) { p->state=MAAGE_PROCESS_FAILED; sprintf(error,"Cannot monitor process (Windows error %lu).",(unsigned long)GetLastError()); }
-    *code=p->code; return p->state;
+    if (p->state == MAAGE_PROCESS_FAILED) failure = GetLastError();
+    *code=p->code; *state=p->state;
+    result = p->state == MAAGE_PROCESS_FAILED ? maage_status_from_win32(failure ? failure : ERROR_GEN_FAILURE,
+        MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_POLL, 0);
+    return maage_status_is_success(result) ? result : maage_status_trace_record(trace, result,
+        MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL, __FILE__, (unsigned long)__LINE__, (long)failure);
 }
-void maage_process_close(maage_process *p) { if(p) { CloseHandle(p->handle); free(p); } }
+maage_status maage_process_close(maage_process *p)
+{
+    maage_status result;
+    if (!p) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CLOSE, 0);
+    result = maage_status_from_win32(CloseHandle(p->handle) ? 0 : GetLastError(), MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_CLOSE);
+    free(p); return result;
+}
 #else
 #include <unistd.h>
 #include <fcntl.h>
@@ -145,12 +176,19 @@ static int maage_process_capture(const char *path)
     }
     return fd;
 }
-int maage_process_start(const char *exe, const char *const argv[], const char *directory,
-    const char *stdout_path, const char *stderr_path, maage_process **process, char error[256])
+maage_status maage_process_start(const char *exe, const char *const argv[], const char *directory,
+    const char *stdout_path, const char *stderr_path, maage_process **process, char error[256], maage_status_trace *trace)
 {
     int pipefd[2]={-1,-1}, input=-1, output=-1, errors=-1, flags, failure, ok=0;
     long fd, maximum=sysconf(_SC_OPEN_MAX);
-    maage_process *p=(maage_process *)calloc(1,sizeof(*p));
+    maage_process *p;
+    maage_status result;
+    if (process) *process = NULL;
+    if (!exe || !argv || !argv[0] || !directory || !stdout_path || !stderr_path || !process || !error)
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START);
+    error[0] = 0;
+    p=(maage_process *)calloc(1,sizeof(*p));
     *process=NULL;
     if(!p || !argv || !argv[0]) goto done;
     output=maage_process_capture(stdout_path);
@@ -183,7 +221,11 @@ int maage_process_start(const char *exe, const char *const argv[], const char *d
     if(pipefd[0]>=0) close(pipefd[0]); if(pipefd[1]>=0) close(pipefd[1]); if(input>=0) close(input);
     if(output>=0) close(output); if(errors>=0 && errors!=output) close(errors);
     if(!ok) { free(p); sprintf(error,"Cannot create process (OS error %d).",failure); }
-    return ok;
+    result = ok ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_START, 0) :
+        maage_status_from_errno(failure, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START);
+    if (!ok && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START, 0);
+    return maage_status_is_success(result) ? result : maage_status_trace_record(trace, result,
+        MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_START, __FILE__, (unsigned long)__LINE__, failure);
 }
 static void maage_process_handshake(maage_process *p)
 {
@@ -197,10 +239,18 @@ static void maage_process_handshake(maage_process *p)
         p->failure=errno; close(p->pipe); p->pipe=-1;
     }
 }
-maage_process_state maage_process_poll(maage_process *p, int *code, char error[256])
+maage_status maage_process_poll(maage_process *p, int *code, maage_process_state *state,
+    char error[256], maage_status_trace *trace)
 {
     int status;
     pid_t result;
+    maage_status outcome;
+    if (code) *code = 0;
+    if (state) *state = MAAGE_PROCESS_FAILED;
+    if (!p || !code || !state || !error) return MAAGE_STATUS_TRACE(trace,
+        maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL,
+            MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL);
+    error[0] = 0;
     maage_process_handshake(p);
     if(p->pid>0) {
         result=waitpid(p->pid,&status,WNOHANG);
@@ -213,7 +263,11 @@ maage_process_state maage_process_poll(maage_process *p, int *code, char error[2
         } else if(result<0 && errno!=EINTR) { p->failure=errno; p->pid=0; p->state=MAAGE_PROCESS_FAILED; }
     }
     if(p->failure) sprintf(error,"Client startup/monitoring failed (OS error %d).",p->failure);
-    *code=p->code; return p->state;
+    *code=p->code; *state=p->state;
+    outcome = p->failure ? maage_status_from_errno(p->failure, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL) :
+        maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_POLL, 0);
+    return maage_status_is_success(outcome) ? outcome : maage_status_trace_record(trace, outcome,
+        MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_POLL, __FILE__, (unsigned long)__LINE__, p->failure);
 }
 static void *maage_process_reap(void *context)
 {
@@ -221,17 +275,26 @@ static void *maage_process_reap(void *context)
     while(waitpid(p->pid,NULL,0)<0 && errno==EINTR) { }
     free(p); return NULL;
 }
-void maage_process_close(maage_process *p)
+maage_status maage_process_close(maage_process *p)
 {
     pthread_t thread;
     pid_t result;
-    if(!p) return;
+    int native;
+    if(!p) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CLOSE, 0);
     if(p->pipe>=0) close(p->pipe);
     result=0;
     if(p->pid>0) do { result=waitpid(p->pid,NULL,WNOHANG); } while(result<0 && errno==EINTR);
     if(p->pid>0 && result==0) {
-        if(!pthread_create(&thread,NULL,maage_process_reap,p)) { pthread_detach(thread); return; }
+        native = pthread_create(&thread,NULL,maage_process_reap,p);
+        if(!native) {
+            native = pthread_detach(thread);
+            return maage_status_make(native ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS,
+                MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_CLOSE, 0);
+        }
+        free(p);
+        return maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_PROCESS, MAAGE_OPERATION_CLOSE, 0);
     }
     free(p);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CLOSE, 0);
 }
 #endif

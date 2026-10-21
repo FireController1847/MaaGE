@@ -85,18 +85,20 @@ static void maage_client_colormap(const maage_image *map,
 }
 
 static void maage_client_resource_failure(maage_client_resources *resources,
-    int index, maage_status result)
+    int index, maage_status result, maage_status_trace *trace)
 {
     resources->source_results[index] = result;
     if (!resources->failed_resources) resources->load_status = result;
     ++resources->failed_resources;
-    maage_log_status(MAAGE_LOG_WARNING, "maage.client.resources", result,
+    MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE);
+    maage_status_trace_recover(trace, maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ATLAS, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, __FILE__, __LINE__);
+    maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.resources", result, trace,
         "%s; using an initialized visual fallback. Repair resources with the Launcher.",
         maage_client_texture_names[index]);
 }
 
-int maage_client_resources_load(const char *application_data,
-    maage_client_resources *resources, maage_biome_registry *biomes)
+maage_status maage_client_resources_load(const char *application_data,
+    maage_client_resources *resources, maage_biome_registry *biomes, maage_status_trace *trace)
 {
     static const int atlas_sources[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};
     static const float default_grass[3] = {0.50f, 0.72f, 0.35f};
@@ -105,13 +107,14 @@ int maage_client_resources_load(const char *application_data,
     const maage_image *selected;
     maage_biome_definition *biome;
     maage_status result;
+    maage_status_trace source_trace, recovered_trace;
     char path[MAAGE_PATH_CAPACITY];
     const float *tint;
     unsigned char *pixel, *source, *overlay;
     unsigned int channel, alpha, value;
     int i, j, x, y, sx, sy, edge = 16, tile, source_index, biome_id, stage, ok = 0;
     int columns = 32, rows, tile_x, tile_y, group_height;
-    if (!resources || !biomes || biomes->finalized) return 0;
+    if (!resources || !biomes || biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !resources ? 1 : 2);
     memset(sources, 0, sizeof(sources)); memset(&missing, 0, sizeof(missing));
     memset(resources, 0, sizeof(*resources));
     resources->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
@@ -122,9 +125,13 @@ int maage_client_resources_load(const char *application_data,
     /* External names are consumed here only; mesh faces retain numeric UVs.
      * Each result is cached once for this immutable resource generation. */
     for (i = 0; i < MAAGE_CLIENT_SOURCE_COUNT; ++i) {
-        result = maage_minecraft_asset_path_status(application_data,
-            maage_client_texture_names[i], path, sizeof(path));
-        if (!maage_status_failed(result)) result = maage_image_load_png_status(path, &sources[i]);
+        maage_status_trace_init(&source_trace);
+        MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
+        MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE);
+        MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS);
+        result = maage_minecraft_asset_path(application_data,
+            maage_client_texture_names[i], path, sizeof(path), &source_trace);
+        if (!maage_status_failed(result)) result = maage_image_load_png(path, &sources[i], &source_trace);
         if (!maage_status_failed(result)) {
             /* Normalize each valid source independently into the canonical
              * 16px atlas. One unusual texture cannot resize unrelated tiles. */
@@ -137,7 +144,8 @@ int maage_client_resources_load(const char *application_data,
         resources->source_results[i] = result;
         if (maage_status_failed(result)) {
             maage_image_destroy(&sources[i]);
-            maage_client_resource_failure(resources, i, result);
+            maage_client_resource_failure(resources, i, result, &source_trace);
+            if (resources->failed_resources == 1) recovered_trace = source_trace;
         } else maage_log_verbose("maage.client.resources", "Loaded %s (%dx%d).",
             maage_client_texture_names[i], sources[i].width, sources[i].height);
     }
@@ -251,12 +259,14 @@ done:
     if (!ok) {
         maage_image_destroy(&resources->image);
         memset(&resources->atlas, 0, sizeof(resources->atlas));
-        maage_log_status(MAAGE_LOG_FATAL, "maage.client.resources", resources->recovery_status, "Cannot construct the required resource atlas.");
     }
-    return ok;
+    if (!ok) return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE);
+    if (trace && resources->failed_resources) *trace = recovered_trace;
+    return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(resources->failed_resources ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS,
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
 }
 
-static int maage_client_register_state(maage_block_registry *registry,
+static maage_status maage_client_register_state(maage_block_registry *registry,
     const maage_client_resources *resources, maage_block_state_id id,
     maage_block_id block, unsigned int metadata, int texture, int grass_biome)
 {
@@ -296,23 +306,26 @@ static int maage_client_register_state(maage_block_registry *registry,
         memcpy(state.faces[face].uv, resources->uv[selected], sizeof(state.faces[face].uv));
         for (channel = 0; channel < 4; ++channel) state.faces[face].tint[channel] = 1.0f;
     }
-    return maage_block_registry_register_state(registry, &state) == MAAGE_REGISTRY_OK;
+    return maage_block_registry_register_state(registry, &state);
 }
 
-maage_block_registry *maage_client_register_blocks(
-    const maage_client_resources *resources, const maage_biome_registry *biomes)
+maage_status maage_client_register_blocks(
+    const maage_client_resources *resources, const maage_biome_registry *biomes,
+    maage_block_registry **output, maage_status_trace *trace)
 {
     static const char *const names[] = {"minecraft:air", "minecraft:stone", "minecraft:grass", "minecraft:dirt", "minecraft:bedrock", "minecraft:water", "minecraft:sand", "minecraft:gravel", "minecraft:sandstone"};
     static const maage_block_id ids[] = {0, 1, 2, 3, 7, 9, 12, 13, 24};
     static const int textures[] = {0, 0, 2, 1, 4, 5, 6, 7, 8};
     static const double hardness[] = {0, 1.5, 0.6, 0.5, -1, 100, 0.5, 0.6, 0.8};
     static const unsigned long drops[] = {0, 1, 3, 3, 0, 0, 12, 13, 24};
-    maage_block_registry *registry;
+    maage_block_registry *registry = NULL;
+    maage_status result;
     maage_block_definition block;
     int i;
-    if (!resources || !biomes) return NULL;
-    registry = maage_block_registry_create(0, 0);
-    if (!registry) return NULL;
+    if (output) *output = NULL;
+    if (!resources || !biomes || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, !resources ? 0 : (!biomes ? 1 : 2));
+    result = maage_block_registry_create(0, 0, &registry);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_REGISTER);
     for (i = 0; i < 9; ++i) {
         memset(&block, 0, sizeof(block));
         block.id = ids[i];
@@ -331,8 +344,8 @@ maage_block_registry *maage_client_register_blocks(
             block.collision_shape.maximum[0] = block.collision_shape.maximum[1] = block.collision_shape.maximum[2] = 1;
             block.selection_shape = block.collision_shape;
         }
-        if (maage_block_registry_register_block(registry, names[i], &block) != MAAGE_REGISTRY_OK ||
-            !maage_client_register_state(registry, resources, ids[i], ids[i], 0, textures[i], -1)) goto failed;
+        if (maage_status_failed(result = maage_block_registry_register_block(registry, names[i], &block)) ||
+            maage_status_failed(result = maage_client_register_state(registry, resources, ids[i], ids[i], 0, textures[i], -1))) goto failed;
     }
     {
         static const struct {
@@ -397,38 +410,41 @@ maage_block_registry *maage_client_register_blocks(
                 block.required_tool = MAAGE_TOOL_PICKAXE; block.required_tool_level = block.id == MAAGE_BLOCK_OBSIDIAN ? 3U : 1U;
             }
             strcpy(name, "minecraft:"); strcat(name, content[entry].name);
-            if (maage_block_registry_register_block(registry, name, &block) != MAAGE_REGISTRY_OK ||
-                !maage_client_register_state(registry, resources, block.id, block.id,
-                    block.id == MAAGE_BLOCK_TALL_GRASS ? 1U : 0U, MAAGE_CLIENT_TEXTURE_EXTRA + content[entry].texture, -1)) goto failed;
+            if (maage_status_failed(result = maage_block_registry_register_block(registry, name, &block)) ||
+                maage_status_failed(result = maage_client_register_state(registry, resources, block.id, block.id,
+                    block.id == MAAGE_BLOCK_TALL_GRASS ? 1U : 0U, MAAGE_CLIENT_TEXTURE_EXTRA + content[entry].texture, -1))) goto failed;
         }
-        if (!maage_client_register_state(registry, resources, MAAGE_STATE_SPRUCE_LOG, MAAGE_BLOCK_LOG, 1, 0, -1) ||
-            !maage_client_register_state(registry, resources, MAAGE_STATE_BIRCH_LOG, MAAGE_BLOCK_LOG, 2, 0, -1) ||
-            !maage_client_register_state(registry, resources, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_BLOCK_LEAVES, 1, 0, -1) ||
-            !maage_client_register_state(registry, resources, MAAGE_STATE_BIRCH_LEAVES, MAAGE_BLOCK_LEAVES, 2, 0, -1)) goto failed;
+        if (maage_status_failed(result = maage_client_register_state(registry, resources, MAAGE_STATE_SPRUCE_LOG, MAAGE_BLOCK_LOG, 1, 0, -1)) ||
+            maage_status_failed(result = maage_client_register_state(registry, resources, MAAGE_STATE_BIRCH_LOG, MAAGE_BLOCK_LOG, 2, 0, -1)) ||
+            maage_status_failed(result = maage_client_register_state(registry, resources, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_BLOCK_LEAVES, 1, 0, -1)) ||
+            maage_status_failed(result = maage_client_register_state(registry, resources, MAAGE_STATE_BIRCH_LEAVES, MAAGE_BLOCK_LEAVES, 2, 0, -1))) goto failed;
         for (i = 1; i < 16; ++i) {
-            if (!maage_client_register_state(registry, resources, MAAGE_STATE_WATER_FLOW_BASE + i - 1,
-                    MAAGE_BLOCK_WATER, (unsigned int)i, MAAGE_CLIENT_TEXTURE_WATER, -1) ||
-                !maage_client_register_state(registry, resources, MAAGE_STATE_LAVA_FLOW_BASE + i - 1,
-                    MAAGE_BLOCK_LAVA, (unsigned int)i, MAAGE_CLIENT_TEXTURE_EXTRA + 2, -1)) goto failed;
+            if (maage_status_failed(result = maage_client_register_state(registry, resources, MAAGE_STATE_WATER_FLOW_BASE + i - 1,
+                    MAAGE_BLOCK_WATER, (unsigned int)i, MAAGE_CLIENT_TEXTURE_WATER, -1)) ||
+                maage_status_failed(result = maage_client_register_state(registry, resources, MAAGE_STATE_LAVA_FLOW_BASE + i - 1,
+                    MAAGE_BLOCK_LAVA, (unsigned int)i, MAAGE_CLIENT_TEXTURE_EXTRA + 2, -1))) goto failed;
         }
     }
     for (i = 0; i < MAAGE_BIOME_COUNT; ++i) {
-        if (!biomes->occupied[i] || !maage_client_register_state(registry, resources,
+        if (!biomes->occupied[i] || maage_status_failed(result = maage_client_register_state(registry, resources,
                 MAAGE_STATE_BIOME_GRASS(i), MAAGE_BLOCK_GRASS,
-                (unsigned int)i + 1, MAAGE_CLIENT_TEXTURE_GRASS_TOP, i)) goto failed;
+                (unsigned int)i + 1, MAAGE_CLIENT_TEXTURE_GRASS_TOP, i))) goto failed;
     }
-    if (maage_block_registry_finalize(registry) != MAAGE_REGISTRY_OK) goto failed;
+    if (maage_status_failed(result = maage_block_registry_finalize(registry))) goto failed;
     maage_log_info("maage.client.world", "Finalized %lu block types / %lu states; direct numeric runtime indexing.",
         (unsigned long)maage_block_registry_block_count(registry), (unsigned long)maage_block_registry_state_count(registry));
-    return registry;
+    *output = registry;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
 failed:
     maage_block_registry_destroy(registry);
-    return NULL;
+    if (!maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_REGISTER);
 }
 
-void maage_client_resources_destroy(maage_client_resources *resources)
+maage_status maage_client_resources_destroy(maage_client_resources *resources)
 {
-    if (!resources) return;
+    if (!resources) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_image_destroy(&resources->image);
     memset(resources, 0, sizeof(*resources));
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }

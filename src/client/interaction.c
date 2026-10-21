@@ -41,16 +41,18 @@ static void maage_interaction_box(maage_mesh_vertex *vertices, unsigned int *ind
     }
 }
 
-void maage_client_interaction_init(maage_client_interaction_visual *visual,
+maage_status maage_client_interaction_init(maage_client_interaction_visual *visual,
     const maage_client_resources *resources)
 {
+    if (!visual || !resources) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE, !visual ? 0 : 1);
     memset(visual, 0, sizeof(*visual)); visual->stage = -1;
     memcpy(visual->breaking_uv, resources->breaking_uv, sizeof(visual->breaking_uv));
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
-maage_render_result maage_client_interaction_update(maage_client_interaction_visual *visual,
+maage_status maage_client_interaction_update(maage_client_interaction_visual *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
-    const maage_world *world, const maage_gameplay *game)
+    const maage_world *world, const maage_gameplay *game, maage_status_trace *trace)
 {
     maage_mesh_vertex vertices[13 * 24];
     unsigned int indices[13 * 36];
@@ -58,14 +60,18 @@ maage_render_result maage_client_interaction_update(maage_client_interaction_vis
     maage_world_observation observation;
     const maage_block_state_definition *state;
     maage_render_mesh *replacement = NULL;
-    maage_render_result result;
+    maage_status result;
     double minimum[3], maximum[3], low[3], high[3];
     int stage = -1, axis, first, second, a, b, component;
     unsigned int light;
     size_t faces = 0;
+    if (!visual || !renderer || !atlas || !world || !game)
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     if (!game->has_target) {
+        result = maage_status_make(visual->visible ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
         maage_render_mesh_destroy(visual->mesh); visual->mesh = NULL; visual->visible = 0;
-        return MAAGE_RENDER_OK;
+        return result;
     }
     if (game->breaking_active && game->break_progress > 0) {
         stage = (int)(game->break_progress * MAAGE_CLIENT_BREAK_STAGES);
@@ -73,9 +79,9 @@ maage_render_result maage_client_interaction_update(maage_client_interaction_vis
     }
     if (visual->visible && visual->target.x == game->target.x && visual->target.y == game->target.y &&
         visual->target.z == game->target.z && visual->target.state_id == game->target.state_id && visual->stage == stage)
-        return MAAGE_RENDER_OK;
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     state = maage_block_registry_state(maage_world_registry(world), game->target.state_id);
-    if (!state) return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (!state) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     for (axis = 0; axis < 3; ++axis) {
         component = axis == 0 ? game->target.x : (axis == 1 ? game->target.y : game->target.z);
         minimum[axis] = component + game->target.bounds.minimum[axis];
@@ -98,7 +104,7 @@ maage_render_result maage_client_interaction_update(maage_client_interaction_vis
     }
     if (stage >= 0) {
         for (axis = 0; axis < MAAGE_FACE_COUNT; ++axis)
-            if (state->faces[axis].texture_id >= MAAGE_CLIENT_TEXTURE_COUNT) return MAAGE_RENDER_INVALID_ARGUMENT;
+            if (state->faces[axis].texture_id >= MAAGE_CLIENT_TEXTURE_COUNT) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
         for (axis = 0; axis < 3; ++axis) { low[axis] = minimum[axis] - 0.001; high[axis] = maximum[axis] + 0.001; }
         light = 15;
         if (maage_world_observe(world, game->target.x, game->target.y, game->target.z, &observation) && observation.light_available) {
@@ -110,21 +116,23 @@ maage_render_result maage_client_interaction_update(maage_client_interaction_vis
     }
     data.vertices = vertices; data.vertex_count = faces * 4;
     data.indices = indices; data.index_count = faces * 6;
-    result = maage_renderer_upload_geometry(renderer, &data, atlas, &replacement);
-    if (result != MAAGE_RENDER_OK) {
+    result = maage_renderer_upload_geometry(renderer, &data, atlas, &replacement, trace);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
         maage_render_mesh_destroy(replacement);
-        if (result != MAAGE_RENDER_OUT_OF_MEMORY) return result;
-        if (visual->last_result != maage_render_operation_status(result, MAAGE_OPERATION_UPLOAD)) {
-            visual->last_result = maage_render_operation_status(result, MAAGE_OPERATION_UPLOAD);
-            maage_log_status(MAAGE_LOG_WARNING, "maage.client.interaction", visual->last_result,
+        if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED) return result;
+        maage_status_trace_recover(trace, maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0),
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
+        if (visual->last_result != result) {
+            visual->last_result = result;
+            maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.interaction", visual->last_result, trace,
                 "Target %d,%d,%d: omitting the optional selection visual.",
                 game->target.x, game->target.y, game->target.z);
         }
         maage_render_mesh_destroy(visual->mesh); visual->mesh = NULL;
         visual->visible = 1; visual->target = game->target; visual->stage = stage;
-        return MAAGE_RENDER_OK;
+        return maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
     }
     maage_render_mesh_destroy(visual->mesh); visual->mesh = replacement;
     visual->visible = 1; visual->target = game->target; visual->stage = stage;
-    return MAAGE_RENDER_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }

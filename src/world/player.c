@@ -99,14 +99,15 @@ static int maage_player_sweep(maage_player *player, const maage_world *world,
     return collided;
 }
 
-void maage_player_spawn(maage_player *player, const maage_world *world)
+maage_status maage_player_spawn(maage_player *player, const maage_world *world)
 {
-    if (player == NULL) return;
+    if (player == NULL || world == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     memset(player, 0, sizeof(*player));
     maage_world_spawn(world, player->position);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
-void maage_player_tick(maage_player *player, const maage_world *world,
+maage_status maage_player_tick(maage_player *player, const maage_world *world,
     const maage_player_input *input)
 {
     double forward;
@@ -118,7 +119,7 @@ void maage_player_tick(maage_player *player, const maage_world *world,
     double cosine;
     double vertical;
     int hit_vertical;
-    if (player == NULL || world == NULL || input == NULL) return;
+    if (player == NULL || world == NULL || input == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
     forward = input->forward;
     strafe = input->strafe;
     if (forward > 1.0) forward = 1.0;
@@ -155,4 +156,5 @@ void maage_player_tick(maage_player *player, const maage_world *world,
     if (input->flying) drag = 0.6;
     player->velocity[0] *= drag;
     player->velocity[2] *= drag;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
 }

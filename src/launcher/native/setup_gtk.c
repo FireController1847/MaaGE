@@ -62,14 +62,17 @@ static gboolean maage_setup_gtk_tick(gpointer context)
     if (!gtk_widget_get_visible(ui->window) && (p.needs_setup || t.failed)) gtk_widget_show(ui->window);
     return G_SOURCE_CONTINUE;
 }
-int maage_setup_native_run(maage_assets *assets)
+maage_status maage_setup_native_run(maage_assets *assets, int *action)
 {
     maage_setup_gtk ui;
     GtkWidget *outer, *header, *intro, *titles, *panel, *row, *buttons, *label;
     GtkCssProvider *css;
     guint timer;
+    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.assets = assets;
-    if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return -1; }
+    if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0); }
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
     css = gtk_css_provider_new();
     gtk_css_provider_load_from_data(css,
@@ -122,5 +125,5 @@ int maage_setup_native_run(maage_assets *assets)
     timer = g_timeout_add(100, maage_setup_gtk_tick, &ui);
     gtk_widget_show_all(outer); gtk_main(); g_source_remove(timer); gtk_widget_destroy(ui.window);
     gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css)); g_object_unref(css);
-    return ui.result;
+    *action = ui.result; return outcome;
 }

@@ -88,9 +88,9 @@ static int maage_light_propagate(maage_light_work *work,
     return 1;
 }
 
-int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks,
+maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_chunk *neighbors[4], maage_section *added[16],
-    const maage_job_token *token)
+    const maage_job_token *token, maage_status_trace *trace)
 {
     maage_light_work work;
     const maage_block_state_definition *state;
@@ -101,10 +101,14 @@ int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks
     unsigned int sky;
     unsigned char desired;
     int x, y, z, section_y, changed, valid;
-    if (added == NULL) return -1;
+    unsigned char failure = MAAGE_STATUS_ALLOCATION_FAILED;
+    maage_status result;
+    if (added == NULL) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 3), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
     for (section_y = 0; section_y < 16; ++section_y) added[section_y] = NULL;
-    if (chunk == NULL || !maage_block_registry_is_finalized(blocks) ||
-        (token && maage_job_cancelled(token))) return -1;
+    if (chunk == NULL || !maage_block_registry_is_finalized(blocks))
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, chunk ? 1 : 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
+    if (token && maage_job_cancelled(token))
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, MAAGE_DETAIL_CANCELLED), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
     work.sky = (unsigned char *)malloc(MAAGE_LIGHT_VOLUME);
     work.emitted = (unsigned char *)malloc(MAAGE_LIGHT_VOLUME);
     work.attenuation = (unsigned char *)malloc(MAAGE_LIGHT_VOLUME);
@@ -116,7 +120,7 @@ int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks
         work.queued != NULL && work.queue != NULL;
     if (!valid) goto maage_light_done;
     for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
-        if (token && maage_job_cancelled(token)) { valid = 0; goto maage_light_done; }
+        if (token && maage_job_cancelled(token)) { failure = MAAGE_STATUS_INTERRUPTED; valid = 0; goto maage_light_done; }
         for (x = 0; x < MAAGE_CHUNK_EDGE; ++x) {
             sky = 15;
             for (y = MAAGE_WORLD_HEIGHT - 1; y >= 0; --y) {
@@ -126,7 +130,7 @@ int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks
                 block = state == NULL ? NULL :
                     maage_block_registry_block(blocks, state->block_id);
                 if (block == NULL) {
-                    valid = 0;
+                    failure = MAAGE_STATUS_INVARIANT_VIOLATION; valid = 0;
                     goto maage_light_done;
                 }
                 if (block->opaque) {
@@ -148,11 +152,11 @@ int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks
     }
     if (!maage_light_propagate(&work, neighbors, 1, token) ||
         !maage_light_propagate(&work, neighbors, 0, token)) {
-        valid = 0;
+        failure = MAAGE_STATUS_INTERRUPTED; valid = 0;
         goto maage_light_done;
     }
     for (section_y = 0; section_y < 16; ++section_y) {
-        if (token && maage_job_cancelled(token)) { valid = 0; goto maage_light_done; }
+        if (token && maage_job_cancelled(token)) { failure = MAAGE_STATUS_INTERRUPTED; valid = 0; goto maage_light_done; }
         section = chunk->sections[section_y];
         for (y = 0; y < MAAGE_CHUNK_EDGE; ++y) {
             for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
@@ -192,11 +196,7 @@ maage_light_done:
     free(work.attenuation);
     free(work.emitted);
     free(work.sky);
-    return valid ? changed : -1;
-}
-
-int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
-    const maage_chunk *neighbors[4], maage_section *added[16])
-{
-    return maage_light_chunk_job(chunk, blocks, neighbors, added, NULL);
+    result = maage_status_make(valid ? (changed ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP) : failure,
+        MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, failure == MAAGE_STATUS_INTERRUPTED ? MAAGE_DETAIL_CANCELLED : 0);
+    return valid ? result : MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
 }

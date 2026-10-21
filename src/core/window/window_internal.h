@@ -5,20 +5,20 @@
 
 typedef struct maage_window_backend_api {
     maage_window_backend kind;
-    maage_window_result (*init)(maage_window_system *system);
+    maage_status (*init)(maage_window_system *system);
     void (*shutdown)(maage_window_system *system);
-    maage_window_result (*create)(maage_window *window, const maage_window_config *config);
+    maage_status (*create)(maage_window *window, const maage_window_config *config);
     void (*destroy)(maage_window *window);
-    maage_window_result (*poll)(maage_window_system *system, int timeout_ms);
-    maage_window_result (*state)(maage_window *window);
-    maage_window_result (*title)(maage_window *window, const char *title);
-    maage_window_result (*visible)(maage_window *window, int visible);
-    maage_window_result (*resize)(maage_window *window, int width, int height);
-    maage_window_result (*mode)(maage_window *window, maage_window_mode mode);
+    maage_status (*poll)(maage_window_system *system, int timeout_ms);
+    maage_status (*state)(maage_window *window);
+    maage_status (*title)(maage_window *window, const char *title);
+    maage_status (*visible)(maage_window *window, int visible);
+    maage_status (*resize)(maage_window *window, int width, int height);
+    maage_status (*mode)(maage_window *window, maage_window_mode mode);
     void (*native)(maage_window *window, maage_window_native *native);
-    maage_window_result (*surface)(maage_window *window, int external);
-    maage_window_result (*pixels)(maage_window *window, const maage_pixel_buffer *buffer);
-    maage_window_result (*capture)(maage_window *window, int capture);
+    maage_status (*surface)(maage_window *window, int external);
+    maage_status (*pixels)(maage_window *window, const maage_pixel_buffer *buffer);
+    maage_status (*capture)(maage_window *window, int capture);
 } maage_window_backend_api;
 
 struct maage_window_system {

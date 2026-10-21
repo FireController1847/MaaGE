@@ -134,7 +134,7 @@ static LRESULT CALLBACK maage_access_win32_proc(HWND window, UINT message, WPARA
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
-int maage_access_native_run(maage_access *access, int manage_accounts)
+maage_status maage_access_native_run(maage_access *access, int manage_accounts, int *action)
 {
     maage_access_win32 ui;
     WNDCLASSW klass;
@@ -142,6 +142,9 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
     MSG message;
     int received;
     HWND label;
+    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.access = access; ui.manage_accounts = manage_accounts; ui.revision = (unsigned)-1;
     ui.background = CreateSolidBrush(RGB(28,28,28)); ui.panel = CreateSolidBrush(RGB(41,41,41));
     ui.font = CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
@@ -149,7 +152,7 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
     memset(&klass, 0, sizeof(klass)); klass.lpfnWndProc = maage_access_win32_proc; klass.hInstance = GetModuleHandleW(NULL); klass.hCursor = LoadCursor(NULL, IDC_ARROW); klass.lpszClassName = L"MaaGEVerifyAccess";
     RegisterClassW(&klass); AdjustWindowRect(&bounds, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
     ui.window = CreateWindowExW(WS_EX_CONTROLPARENT, klass.lpszClassName, L"MaaGE Launcher — Initial setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,NULL,NULL,klass.hInstance,&ui);
-    if (!ui.window) { ui.result = -1; goto cleanup; }
+    if (!ui.window) { outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); goto cleanup; }
     maage_access_win32_control(&ui,L"STATIC",L"MaaGE Launcher",0,28,22,260,24,0);
     maage_access_win32_control(&ui,L"STATIC",L"Initial setup · 1 of 2",SS_RIGHT,402,22,220,24,0);
     label = maage_access_win32_control(&ui,L"STATIC",L"✓ Verify Minecraft Access",0,30,76,590,38,106); SendMessageW(label,WM_SETFONT,(WPARAM)ui.heading,TRUE);
@@ -170,10 +173,10 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
     ui.cancel = maage_access_win32_control(&ui,L"BUTTON",L"Cancel",WS_TABSTOP | BS_PUSHBUTTON,402,586,100,30,IDCANCEL);
     ui.next = maage_access_win32_control(&ui,L"BUTTON",L"Continue",WS_TABSTOP | BS_DEFPUSHBUTTON,512,586,110,30,IDOK);
     EnableWindow(ui.next,FALSE);
-    if (!SetTimer(ui.window,1,100,NULL)) { DestroyWindow(ui.window); ui.result = -1; goto cleanup; }
+    if (!SetTimer(ui.window,1,100,NULL)) { DestroyWindow(ui.window); outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); goto cleanup; }
     while ((received = GetMessageW(&message,NULL,0,0)) > 0) if (!IsDialogMessageW(ui.window,&message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    if (received < 0) { DestroyWindow(ui.window); ui.result = -1; }
+    if (received < 0) { DestroyWindow(ui.window); outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); }
 cleanup:
     maage_access_snapshot_release(&ui.snapshot);
-    DeleteObject(ui.font); DeleteObject(ui.heading); DeleteObject(ui.background); DeleteObject(ui.panel); UnregisterClassW(klass.lpszClassName,klass.hInstance); return ui.result;
+    DeleteObject(ui.font); DeleteObject(ui.heading); DeleteObject(ui.background); DeleteObject(ui.panel); UnregisterClassW(klass.lpszClassName,klass.hInstance); *action = ui.result; return outcome;
 }

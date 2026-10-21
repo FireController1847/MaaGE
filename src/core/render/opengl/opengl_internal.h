@@ -12,11 +12,11 @@
 #include <GL/gl.h>
 #endif
 
-maage_render_result maage_opengl_context_create(maage_renderer *renderer, int modern);
+maage_status maage_opengl_context_create(maage_renderer *renderer, int modern);
 void maage_opengl_context_destroy(maage_renderer *renderer);
-int maage_opengl_context_bind(maage_renderer *renderer);
-int maage_opengl_context_swap(maage_renderer *renderer);
-maage_render_result maage_opengl_create(maage_renderer *renderer, int modern);
-void maage_opengl_destroy(maage_renderer *renderer);
-maage_render_result maage_opengl_present(maage_renderer *renderer, const maage_window_state *state);
+maage_status maage_opengl_context_bind(maage_renderer *renderer);
+maage_status maage_opengl_context_swap(maage_renderer *renderer);
+maage_status maage_opengl_create(maage_renderer *renderer, int modern);
+maage_status maage_opengl_destroy(maage_renderer *renderer);
+maage_status maage_opengl_present(maage_renderer *renderer, const maage_window_state *state);
 #endif

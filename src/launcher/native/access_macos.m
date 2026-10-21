@@ -133,8 +133,10 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     maage_access_snapshot_release(&_snapshot);
 }
 @end
-int maage_access_native_run(maage_access *access, int manage_accounts)
+maage_status maage_access_native_run(maage_access *access, int manage_accounts, int *action)
 {
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     @autoreleasepool {
         [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         MaaGEAccessController *controller = [[MaaGEAccessController alloc] init]; controller.access = access; controller.manageAccounts = manage_accounts != 0;
@@ -143,6 +145,6 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
         NSMenu *application = [[NSMenu alloc] initWithTitle:@"MaaGE"];
         NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"Quit MaaGE" action:@selector(cancelAccess:) keyEquivalent:@"q"]; quit.target = controller; [application addItem:quit]; item.submenu = application; NSApp.mainMenu = menu;
         [controller show]; [NSApp activateIgnoringOtherApps:YES]; [NSApp run];
-        NSApp.delegate = previous; NSApp.mainMenu = nil; controller.window.delegate = nil; [controller.window close]; return controller.result;
+        NSApp.delegate = previous; NSApp.mainMenu = nil; controller.window.delegate = nil; [controller.window close]; *action = controller.result; return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     }
 }

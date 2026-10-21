@@ -45,7 +45,7 @@ typedef struct maage_generation_policy {
     int spawn_search_radius;
     int spawn_search_step;
 } maage_generation_policy;
-int maage_generation_policy_default(unsigned long generator_version,
+maage_status maage_generation_policy_default(unsigned long generator_version,
     maage_generation_policy *policy);
 int maage_generation_policy_valid(const maage_generation_policy *policy);
 
@@ -104,7 +104,8 @@ typedef struct maage_world_stats {
     double scheduling_latency_ms;
     int failed;
     maage_status last_result;
-    maage_status last_job_result; /* Includes expected NOT_FOUND, cancellation and stale results. */
+    maage_status last_job_result; /* Owner disposition, including cancellation/stale. */
+    maage_status last_job_operation_result; /* Original callback outcome survives disposition. */
     unsigned long failure_reports; /* Owner failures; cancellation/staleness excluded. */
 } maage_world_stats;
 typedef struct maage_world_observation {
@@ -128,13 +129,6 @@ typedef struct maage_world_target {
     double distance;
     maage_block_shape bounds; /* Local selection shape. */
 } maage_world_target;
-typedef enum maage_world_mutation_result {
-    MAAGE_WORLD_MUTATION_OK = 0,
-    MAAGE_WORLD_MUTATION_UNAVAILABLE,
-    MAAGE_WORLD_MUTATION_STALE,
-    MAAGE_WORLD_MUTATION_INVALID,
-    MAAGE_WORLD_MUTATION_OUT_OF_MEMORY
-} maage_world_mutation_result;
 /* Floor division/positive modulo, including negative world coordinates. */
 int maage_world_chunk_coordinate(int coordinate);
 int maage_world_local_coordinate(int coordinate);
@@ -143,18 +137,24 @@ int maage_world_local_coordinate(int coordinate);
  * generation/loading/lighting/CPU meshing/saving on privately owned data; tasks
  * never hold graphical objects or mutate published columns. Finalized registry,
  * biomes and store must outlive World shutdown. */
-maage_world *maage_world_create(const maage_world_config *config);
+/* Initial scheduling failure may transfer a partially running World through
+ * output; always destroy a non-NULL output before releasing borrowed services. */
+maage_status maage_world_create(const maage_world_config *config, maage_world **output,
+    maage_status_trace *trace);
 /* Nonblocking owner pump: commit completed work and schedule near-player jobs.
  * Call regularly, including while simulation is paused; no frame-wide waits. */
-void maage_world_stream(maage_world *world, double x, double z, double yaw);
+maage_status maage_world_stream(maage_world *world, double x, double z, double yaw,
+    maage_status_trace *trace);
 /* One ordered 20 TPS environment phase, with bounded scheduled block work.
  * Call only while simulation is active; streaming continues while paused. */
-void maage_world_tick(maage_world *world);
+maage_status maage_world_tick(maage_world *world);
 /* Cheap owner status; full diagnostic snapshots may be sampled less often. */
 int maage_world_failed(const maage_world *world);
 /* Latest important owner-observed failure, retained across successful jobs.
  * SUCCESS before any failure; no global last-error state. */
 maage_status maage_world_status(const maage_world *world);
+const maage_status_trace *maage_world_trace(const maage_world *world);
+const maage_status_trace *maage_world_last_job_trace(const maage_world *world);
 void maage_world_get_stats(maage_world *world, maage_world_stats *stats);
 /* Owner-thread read-only diagnostics of published numeric column data. Returns
  * zero for an unavailable column or out-of-world coordinates. Biome zero is a
@@ -162,14 +162,16 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats);
  * No job submission, world lock, allocation or filesystem work. */
 int maage_world_observe(const maage_world *world, int x, int y, int z,
     maage_world_observation *observation);
-int maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update);
+maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update);
 /* Validate a detached CPU mesh immediately before owner-thread GPU upload. */
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision);
 int maage_world_chunk_loaded(const maage_world *world, int x, int z);
 /* Blocking lifecycle boundary only: cancel obsolete work, finish saves and join
- * the pool. Never call inside the render loop. Zero means a failed world/save. */
-int maage_world_flush(maage_world *world);
-void maage_world_destroy(maage_world *world);
+ * the pool. Never call inside the render loop. Failures preserve dirty save data. */
+maage_status maage_world_flush(maage_world *world, maage_status_trace *trace);
+/* A native join failure retains World and every borrowed dependency for retry.
+ * SUCCESS consumes World even if an earlier completed flush reported data errors. */
+maage_status maage_world_destroy(maage_world *world);
 const maage_block_registry *maage_world_registry(const maage_world *world);
 void maage_world_spawn(const maage_world *world, double feet[3]);
 /* Missing/loading columns return air for visual queries but are solid barriers
@@ -178,20 +180,20 @@ maage_block_state_id maage_world_get(const maage_world *world, int x, int y, int
 int maage_world_solid(const maage_world *world, int x, int y, int z);
 /* Allocation-free DDA through selection shapes. Direction is normalized here;
  * range and returned distance are blocks. Missing columns stop traversal with
- * -1, never permit targeting through unavailable terrain. 0 miss, 1 hit. */
-int maage_world_raycast(const maage_world *world, const double origin[3],
+ * NOT_FOUND, never permit targeting through unavailable terrain. SUCCESS hit, NOOP miss. */
+maage_status maage_world_raycast(const maage_world *world, const double origin[3],
     const double direction[3], double range, maage_world_target *target);
 /* Owner simulation phase only. Compare expected numeric state, then publish a
  * private copy; workers retain their old immutable snapshots. Invalidates
  * lighting/meshes and obsolete jobs without waiting. No filesystem work. */
-maage_world_mutation_result maage_world_set(maage_world *world,
+maage_status maage_world_set(maage_world *world,
     int x, int y, int z, maage_block_state_id expected,
     maage_block_state_id replacement);
 /* Local AABB; unavailable cells are full-cube collision barriers. */
 int maage_world_collision_shape(const maage_world *world, int x, int y, int z,
     maage_block_shape *shape);
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh);
-void maage_world_mesh_destroy(maage_world_mesh *mesh);
+maage_status maage_world_mesh_destroy(maage_world_mesh *mesh);
 #ifdef __cplusplus
 }
 #endif

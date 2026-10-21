@@ -168,7 +168,7 @@ static void maage_ui_open_installation(maage_launcher_win32 *ui)
 {
     int row = maage_ui_selected(ui);
     char path[MAAGE_PATH_CAPACITY]; wchar_t wide[MAAGE_PATH_CAPACITY];
-    if (row < 0 || !maage_launcher_installation_directory(ui->state, (unsigned)row, path)) return;
+    if (row < 0 || maage_status_failed(maage_launcher_installation_directory(ui->state, (unsigned)row, path))) return;
     if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, MAAGE_PATH_CAPACITY) ||
         (INT_PTR)ShellExecuteW(ui->window, L"open", wide, NULL, NULL, SW_SHOWNORMAL) <= 32)
         strcpy(ui->state->error, "Windows could not open the installation folder in File Explorer.");
@@ -244,7 +244,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
                 if (index>=0 && (unsigned)index<ui->state->accounts.count) maage_launcher_account_select(ui->state,ui->state->accounts.profiles[index].uuid);
                 else if (index==-2 && !ui->state->accounts.busy) { ui->result=1; DestroyWindow(window); return 0; }
                 else if (index==-3 && ui->state->account[0]) maage_access_verify_local(ui->state->access,ui->state->account);
-                else if (index==-4 && maage_access_sign_in(ui->state->access,0)) { ui->result=1; DestroyWindow(window); return 0; }
+                else if (index==-4 && (!maage_status_failed(maage_access_sign_in(ui->state->access,0)))) { ui->result=1; DestroyWindow(window); return 0; }
                 else if (index==-5 && ui->state->account[0]) maage_access_sign_out(ui->state->access,ui->state->account);
                 else if (index==-6 && ui->state->account[0]) maage_access_disconnect(ui->state->access,ui->state->account);
                 ui->revision=0;
@@ -285,10 +285,13 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     }
     return DefWindowProcW(window,message,wparam,lparam);
 }
-int maage_launcher_native_run(maage_launcher_ui *state)
+maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action)
 {
     maage_launcher_win32 ui; WNDCLASSW klass; MSG message; int received, i; HWND control; LVCOLUMNW column;
     const wchar_t *names[]={L"\x25b6  Play",L"\x2261  News",L"\x25a4  Installations",L"\x2699\xfe0e  Settings",L"\x24d8  About"}; INITCOMMONCONTROLSEX common;
+    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     memset(&ui,0,sizeof(ui)); ui.state=state;
     common.dwSize=sizeof(common); common.dwICC=ICC_LISTVIEW_CLASSES; InitCommonControlsEx(&common);
     ui.font=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
@@ -297,7 +300,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     ui.background=CreateSolidBrush(GetSysColor(COLOR_WINDOW)); ui.sidebar=CreateSolidBrush(GetSysColor(COLOR_BTNFACE)); ui.magenta=CreateSolidBrush(RGB(151,57,116));
     memset(&klass,0,sizeof(klass)); klass.lpfnWndProc=maage_ui_proc; klass.hInstance=GetModuleHandleW(NULL); klass.hCursor=LoadCursor(NULL,IDC_ARROW); klass.lpszClassName=L"MaaGELauncher";
     RegisterClassW(&klass); ui.window=CreateWindowExW(WS_EX_CONTROLPARENT,klass.lpszClassName,L"MaaGE Launcher",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1080,780,NULL,NULL,klass.hInstance,&ui);
-    if (!ui.window) { ui.result=-1; goto cleanup; }
+    if (!ui.window) { outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); goto cleanup; }
     maage_ui_label(&ui,-1,L"MAAGE",20,24,130,24);
     for(i=0;i<5;++i) ui.navigation[i]=maage_ui_control(&ui,-1,L"BUTTON",names[i],WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,14,i>=3 ? -104+(i-3)*46 : 72+i*44,142,34,100+i);
     { const wchar_t *headings[]={L"Play MaaGE",L"News",L"Installations",L"Settings",L"About MaaGE"};
@@ -357,10 +360,10 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     maage_ui_label(&ui,-1,L"Development build - " MAAGE_LAUNCHER_VERSION,198,-42,410,26);
     ui.status=maage_ui_button(&ui,-1,L"",-360,-48,330,MAAGE_UI_STATUS); ui.error=maage_ui_label(&ui,-1,L"",198,-87,-230,36);
     maage_ui_installations_reload(&ui); maage_ui_refresh(&ui); maage_ui_layout(&ui); SetFocus(ui.navigation[0]);
-    if (!SetTimer(ui.window,1,250,NULL)) { ui.result=-1; DestroyWindow(ui.window); }
+    if (!SetTimer(ui.window,1,250,NULL)) { outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); DestroyWindow(ui.window); }
     else ShowWindow(ui.window,SW_SHOW);
     while ((received=GetMessageW(&message,NULL,0,0))>0) if (!IsDialogMessageW(ui.window,&message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    if (received<0) { ui.result=-1; if (IsWindow(ui.window)) DestroyWindow(ui.window); }
+    if (received<0) { outcome = maage_status_from_win32((unsigned long)GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN); if (IsWindow(ui.window)) DestroyWindow(ui.window); }
 cleanup:
-    DeleteObject(ui.font); DeleteObject(ui.heading); DeleteObject(ui.brand); DeleteObject(ui.background); DeleteObject(ui.sidebar); DeleteObject(ui.magenta); UnregisterClassW(klass.lpszClassName,klass.hInstance); return ui.result;
+    DeleteObject(ui.font); DeleteObject(ui.heading); DeleteObject(ui.brand); DeleteObject(ui.background); DeleteObject(ui.sidebar); DeleteObject(ui.magenta); UnregisterClassW(klass.lpszClassName,klass.hInstance); *action = ui.result; return outcome;
 }

@@ -1,5 +1,6 @@
 #include "assets.h"
 #include "client_resources.h"
+#include "access/verify.h"
 #include <ctype.h>
 #include "maage/storage.h"
 #include "maage/minecraft_assets.h"
@@ -26,7 +27,7 @@
 #define MAAGE_MANIFEST "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 
 /* Environment policy is opt-in; defaults preserve historical network behavior. */
-static int maage_assets_download_config(maage_download_options *options)
+static maage_status maage_assets_download_config(maage_download_options *options)
 {
     const char *names[] = { "MAAGE_DOWNLOAD_CONCURRENCY", "MAAGE_DOWNLOAD_ATTEMPTS",
         "MAAGE_DOWNLOAD_CONNECT_TIMEOUT", "MAAGE_DOWNLOAD_TIMEOUT",
@@ -46,18 +47,18 @@ static int maage_assets_download_config(maage_download_options *options)
         if (!text || !*text) continue;
         errno = 0; end = NULL;
         if (i < 2) {
-            if (*text == '-' || *text == '+') return 0;
+            if (*text == '-' || *text == '+') return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DOWNLOAD, 0);
             value = strtoul(text, &end, 10);
-            if (errno || !end || *end || !value || value > UINT_MAX) return 0;
+            if (errno || !end || *end || !value || value > UINT_MAX) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DOWNLOAD, 0);
             if (i == 0) options->max_concurrent = (unsigned int)value;
             else options->max_attempts = (unsigned int)value;
         } else {
             parsed = strtol(text, &end, 10);
-            if (errno || !end || *end || parsed < (i == 3 ? 0L : 1L)) return 0;
+            if (errno || !end || *end || parsed < (i == 3 ? 0L : 1L)) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DOWNLOAD, 0);
             *settings[i - 2] = parsed;
         }
     }
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DOWNLOAD, 0);
 }
 typedef struct maage_asset_object {
     const char *name; /* One indexed name for download diagnostics; aliases remain logical entries. */
@@ -82,6 +83,7 @@ struct maage_assets {
     int has_thread, running, repair;
     maage_access *access;
     maage_setup_progress progress;
+    maage_status_trace trace; /* Written only by the active setup worker. */
     char root[MAAGE_PATH_CAPACITY];
 };
 static void maage_assets_lock(maage_assets *assets)
@@ -100,13 +102,19 @@ static void maage_assets_unlock(maage_assets *assets)
     pthread_mutex_unlock(&assets->mutex);
 #endif
 }
-void maage_assets_snapshot(maage_assets *assets, maage_setup_progress *progress)
+maage_status maage_assets_snapshot(maage_assets *assets, maage_setup_progress *progress)
 {
+    if (!assets || !progress) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SNAPSHOT, !assets ? 0 : 1);
     maage_assets_lock(assets); *progress = assets->progress; maage_assets_unlock(assets);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
-void maage_assets_cancel(maage_assets *assets)
+maage_status maage_assets_cancel(maage_assets *assets)
 {
-    maage_assets_lock(assets); assets->progress.cancellation_requested = 1; maage_assets_unlock(assets);
+    int changed;
+    if (!assets) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CANCEL, 0);
+    maage_assets_lock(assets); changed = !assets->progress.cancellation_requested;
+    assets->progress.cancellation_requested = 1; maage_assets_unlock(assets);
+    return maage_status_make(changed ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CANCEL, 0);
 }
 static int maage_assets_cancelled(void *context)
 {
@@ -159,84 +167,89 @@ static int maage_assets_official(const char *url)
         if (!strncmp(url, hosts[i], strlen(hosts[i]))) return 1;
     return 0;
 }
-static struct json_object *maage_assets_json(const char *path)
+static maage_status maage_assets_json(const char *path, struct json_object **output, maage_status_trace *trace)
 {
     FILE *file;
     double size;
     char fingerprint[128], *text;
-    struct json_object *object;
-    struct json_tokener *tokener;
+    maage_status result;
     size_t count;
-    if (!maage_storage_stat(path, &size, fingerprint) || size <= 0 || size > MAAGE_METADATA_LIMIT) return NULL;
+    if (!path || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE, 0);
+    *output = NULL;
+    result = maage_storage_stat(path, &size, fingerprint);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_READ);
+    if (size <= 0 || size > MAAGE_METADATA_LIMIT) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE);
     file = maage_storage_open(path, "rb");
-    if (!file) return NULL;
+    if (!file) return MAAGE_STATUS_PROPAGATE(trace, maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_READ);
     text = (char *)malloc((size_t)size + 1);
-    if (!text) { fclose(file); return NULL; }
+    if (!text) { fclose(file); return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE); }
     count = fread(text, 1, (size_t)size, file);
-    if (count != (size_t)size || ferror(file)) { free(text); fclose(file); return NULL; }
-    fclose(file); text[count] = 0;
-    tokener = json_tokener_new_ex(32);
-    if (!tokener) { free(text); return NULL; }
-    json_tokener_set_flags(tokener, JSON_TOKENER_STRICT | JSON_TOKENER_VALIDATE_UTF8);
-    object = json_tokener_parse_ex(tokener, text, (int)count + 1);
-    if (json_tokener_get_error(tokener) != json_tokener_success || !json_object_is_type(object, json_type_object)) {
-        if (object) json_object_put(object);
-        object = NULL;
-    }
-    json_tokener_free(tokener); free(text); return object;
+    result = count == (size_t)size && !ferror(file) ? maage_access_json(text, count, output) : maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ);
+    if (fclose(file) && !maage_status_failed(result)) result = maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
+    free(text);
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE);
 }
-static int maage_assets_write_json(const char *path, struct json_object *object)
+static maage_status maage_assets_write_json(const char *path, struct json_object *object, maage_status_trace *trace)
 {
     char temporary[MAAGE_PATH_CAPACITY];
     const char *text = json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN);
     FILE *file;
-    int ok;
-    if (!text || strlen(path) + 6 >= sizeof(temporary)) return 0;
+    maage_status result;
+    if (!text) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_FORMAT, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE);
+    if (strlen(path) + 6 >= sizeof(temporary)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE);
     strcpy(temporary, path); strcat(temporary, ".part");
-    maage_storage_remove(temporary);
+    result = maage_storage_remove(temporary);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE);
     file = maage_storage_open(temporary, "wb");
-    if (!file) return 0;
-    ok = fwrite(text, 1, strlen(text), file) == strlen(text);
-    if (fclose(file)) ok = 0;
-    if (ok) ok = maage_storage_replace(temporary, path);
-    if (!ok) maage_storage_remove(temporary);
-    return ok;
+    if (!file) return MAAGE_STATUS_PROPAGATE(trace, maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE);
+    result = fwrite(text, 1, strlen(text), file) == strlen(text) ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WRITE, 0) : maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE);
+    if (fclose(file) && !maage_status_failed(result)) result = maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
+    if (!maage_status_failed(result)) result = maage_storage_replace(temporary, path);
+    if (maage_status_failed(result)) maage_storage_remove(temporary);
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE);
 }
-static int maage_assets_file(maage_assets *assets, const char *path, const char *expected, double expected_size)
+static maage_status maage_assets_file(maage_assets *assets, const char *path, const char *expected, double expected_size)
 {
     char hash[41], fingerprint[128];
     double size;
-    int valid;
-    maage_log_debug("maage.launcher.assets", "Hash-verifying %s (expected SHA-1 %s, bytes %.0f)", path, expected, expected_size);
-    valid = maage_storage_stat(path, &size, fingerprint) && (expected_size < 0 || size == expected_size) &&
-        maage_storage_sha1(path, hash, maage_assets_cancelled, assets) && !strcmp(hash, expected);
-    maage_log_debug("maage.launcher.assets", "Verification %s: %s", valid ? "passed" : "failed", path);
-    return valid;
+    maage_status result = maage_storage_stat(path, &size, fingerprint);
+    if (!maage_status_failed(result) && expected_size >= 0 && size != expected_size) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, 0);
+    if (!maage_status_failed(result)) result = maage_storage_sha1(path, hash, maage_assets_cancelled, assets);
+    if (!maage_status_failed(result) && strcmp(hash, expected)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, 0);
+    /* Missing or stale caches are expected probes; acquisition owns the trace. */
+    return result;
 }
-static int maage_assets_download(maage_assets *assets, const char *url, const char *path, const char *hash, double size, char error[512])
+static maage_status maage_assets_download(maage_assets *assets, const char *url, const char *path, const char *hash, double size, char error[512])
 {
     maage_download_request request;
     maage_download_observer observer;
     maage_download_options options;
-    if (!maage_assets_download_config(&options)) {
-        strcpy(error, "Invalid MAAGE_DOWNLOAD_* policy."); return 0;
+    if (maage_status_failed(maage_assets_download_config(&options))) {
+        strcpy(error, "Invalid MAAGE_DOWNLOAD_* policy."); return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DOWNLOAD, 0);
     }
     request.url = url; request.destination = path; request.sha1 = hash;
     request.size = size; request.limit = MAAGE_METADATA_LIMIT;
     observer.cancelled = maage_assets_cancelled; observer.bytes = NULL; observer.context = assets;
-    return maage_download_batch_with_options(&request, 1, &observer, &options, error);
+    return MAAGE_STATUS_PROPAGATE(&assets->trace,
+        maage_download_batch_with_options(&request, 1, &observer, &options, error, &assets->trace),
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DOWNLOAD);
 }
 static int maage_assets_compare(const void *left, const void *right)
 {
     return strcmp(((const maage_asset_object *)left)->hash, ((const maage_asset_object *)right)->hash);
 }
-static int maage_assets_object_path(maage_assets *assets, const char *hash, char path[MAAGE_PATH_CAPACITY])
+static maage_status maage_assets_object_path(maage_assets *assets, const char *hash, char path[MAAGE_PATH_CAPACITY])
 {
     char relative[80];
+    maage_status result;
     sprintf(relative, "minecraft/assets/objects/%.2s", hash);
-    if (!maage_storage_join(path, MAAGE_PATH_CAPACITY, assets->root, relative) || !maage_storage_directories(path)) return 0;
-    sprintf(relative, "minecraft/assets/objects/%.2s/%s", hash, hash);
-    return maage_storage_join(path, MAAGE_PATH_CAPACITY, assets->root, relative);
+    result = maage_storage_join(path, MAAGE_PATH_CAPACITY, assets->root, relative);
+    if (!maage_status_failed(result)) result = maage_storage_directories(path);
+    if (!maage_status_failed(result)) {
+        sprintf(relative, "minecraft/assets/objects/%.2s/%s", hash, hash);
+        result = maage_storage_join(path, MAAGE_PATH_CAPACITY, assets->root, relative);
+    }
+    return MAAGE_STATUS_PROPAGATE(&assets->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
 }
 static void maage_assets_count(maage_assets *assets, unsigned long objects, unsigned long logical)
 {
@@ -253,38 +266,44 @@ static void maage_assets_count(maage_assets *assets, unsigned long objects, unsi
     maage_assets_unlock(assets);
 }
 /* Migrate only verified files. Repeated/interrupted attempts can mix both layouts. */
-static int maage_assets_reuse(maage_assets *assets, const char *destination,
+static maage_status maage_assets_reuse(maage_assets *assets, const char *destination,
     const char *legacy_relative, const char *hash, double size)
 {
     char source[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], temporary[MAAGE_PATH_CAPACITY];
     char *separator;
-    int result;
-    if (!maage_storage_join(source, sizeof(source), assets->root, legacy_relative)) return 0;
+    int cloned;
+    maage_status result, recovery;
+    result = maage_storage_join(source, sizeof(source), assets->root, legacy_relative);
+    if (maage_status_failed(result)) return result;
     strcpy(parent, source); separator = strrchr(parent, '/');
-    if (!separator) return 0;
+    if (!separator) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_MIGRATE, 0);
     *separator = 0;
-    if (!maage_storage_directory_exists(parent) || !maage_assets_file(assets, source, hash, size)) return 0;
-    maage_log_info("maage.launcher.assets", "Migrating verified file: %s -> %s (SHA-1 %s)", source, destination, hash);
+    if (!maage_storage_directory_exists(parent)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_MIGRATE, 0);
+    result = maage_assets_file(assets, source, hash, size);
+    if (maage_status_failed(result)) return result;
     result = maage_storage_replace(source, destination);
-    if (!result && strlen(destination) + 6 < sizeof(temporary)) {
+    if (maage_status_failed(result) && strlen(destination) + 6 < sizeof(temporary)) {
+        MAAGE_STATUS_PROPAGATE(&assets->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_MIGRATE);
         strcpy(temporary, destination); strcat(temporary, ".part");
-        if (maage_storage_clone(source, temporary, maage_assets_cancelled, assets) &&
-            maage_assets_file(assets, temporary, hash, size)) result = maage_storage_replace(temporary, destination);
+        recovery = maage_storage_clone(source, temporary, maage_assets_cancelled, assets, &cloned, &assets->trace);
+        if (!maage_status_failed(recovery)) recovery = maage_assets_file(assets, temporary, hash, size);
+        if (!maage_status_failed(recovery)) recovery = maage_storage_replace(temporary, destination);
         maage_storage_remove(temporary);
-        if (result) maage_storage_remove(source);
+        maage_status_trace_recover(&assets->trace, recovery, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_MIGRATE, __FILE__, (unsigned long)__LINE__);
+        if (!maage_status_failed(recovery)) { result = recovery; maage_storage_remove(source); }
     }
-    if (result) {
+    if (!maage_status_failed(result)) {
         maage_log_info("maage.launcher.assets", "Migration complete: %s", destination);
         maage_storage_remove_directory(parent);
         maage_assets_lock(assets); assets->progress.needs_setup = 1; maage_assets_unlock(assets);
     }
-    return result;
+    return MAAGE_STATUS_PROPAGATE(&assets->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_MIGRATE);
 }
 /* Remove only recognized obsolete cache paths after the new installation is complete. */
 static void maage_assets_cleanup_legacy(maage_assets *assets, const char *relative)
 {
     char path[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], *separator;
-    if (!maage_storage_join(path, sizeof(path), assets->root, relative) || strlen(path) + 6 >= sizeof(path)) return;
+    if (maage_status_failed(maage_storage_join(path, sizeof(path), assets->root, relative)) || strlen(path) + 6 >= sizeof(path)) return;
     strcpy(parent, path); separator = strrchr(parent, '/');
     if (!separator) return;
     *separator = 0;
@@ -293,14 +312,15 @@ static void maage_assets_cleanup_legacy(maage_assets *assets, const char *relati
     strcat(path, ".part"); maage_storage_remove(path);
     maage_storage_remove_directory(parent);
 }
-static int maage_assets_logical_path(maage_assets *assets, const char *name, char path[MAAGE_PATH_CAPACITY])
+static maage_status maage_assets_logical_path(maage_assets *assets, const char *name, char path[MAAGE_PATH_CAPACITY])
 {
     char parent[MAAGE_PATH_CAPACITY], *separator;
-    if (!maage_minecraft_asset_path(assets->root, name, path, MAAGE_PATH_CAPACITY)) return 0;
+    maage_status result = maage_minecraft_asset_path(assets->root, name, path, MAAGE_PATH_CAPACITY, &assets->trace);
+    if (maage_status_failed(result)) return result;
     strcpy(parent, path); separator = strrchr(parent, '/');
-    if (!separator) return 0;
+    if (!separator) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     *separator = 0;
-    return maage_storage_directories(parent);
+    return MAAGE_STATUS_PROPAGATE(&assets->trace, maage_storage_directories(parent), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
 }
 typedef struct maage_assets_client_context {
     maage_assets *assets;
@@ -313,7 +333,7 @@ static void maage_assets_client_bytes(void *context, double bytes)
     maage_assets *assets = (maage_assets *)context;
     maage_assets_lock(assets); assets->progress.client_downloaded_bytes += bytes; maage_assets_unlock(assets);
 }
-static int maage_assets_client_collision(void *context, const char *name, const char *hash, double size, char error[512])
+static maage_status maage_assets_client_collision(void *context, const char *name, const char *hash, double size, char error[512])
 {
     maage_assets_client_context *client = (maage_assets_client_context *)context;
     struct json_object_iter iterator;
@@ -330,13 +350,13 @@ static int maage_assets_client_collision(void *context, const char *name, const 
                 maage_assets_size(iterator.val, MAAGE_OBJECT_LIMIT, &indexed_size) && size == indexed_size) {
                 maage_log_info("maage.launcher.assets", "Identical resource shared by index and client JAR: '%s' (SHA-1 %s)", name, hash); continue;
             }
-            strcpy(error, "Asset-index and client-JAR resources conflict at the same path. Setup stopped without overwriting that resource."); return 0;
+            strcpy(error, "Asset-index and client-JAR resources conflict at the same path. Setup stopped without overwriting that resource."); return MAAGE_STATUS_PROPAGATE(&client->assets->trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
         }
         if ((!left && right == '/') || (!right && left == '/')) {
-            strcpy(error, "Asset-index and client-JAR resource paths conflict as files/directories. Setup stopped before reconstruction."); return 0;
+            strcpy(error, "Asset-index and client-JAR resource paths conflict as files/directories. Setup stopped before reconstruction."); return MAAGE_STATUS_PROPAGATE(&client->assets->trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
         }
     }
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VALIDATE, 0);
 }
 static void maage_assets_client_progress(void *context, maage_client_phase phase,
     unsigned long done, unsigned long total, const char *name, int changed)
@@ -353,16 +373,16 @@ static void maage_assets_client_progress(void *context, maage_client_phase phase
     maage_assets_unlock(assets);
     maage_assets_count(assets, objects, logical);
 }
-static int maage_assets_client_record(void *context, const char *name, const char *archive_name, const char *hash, double size, const char *fingerprint)
+static maage_status maage_assets_client_record(void *context, const char *name, const char *archive_name, const char *hash, double size, const char *fingerprint)
 {
     struct json_object *record = json_object_new_object();
     maage_assets_client_context *client = (maage_assets_client_context *)context;
-    if (!record) return 0;
+    if (!record) return MAAGE_STATUS_PROPAGATE(&client->assets->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER);
     json_object_object_add(record, "archive_path", json_object_new_string(archive_name));
     json_object_object_add(record, "sha1", json_object_new_string(hash));
     json_object_object_add(record, "size", json_object_new_double(size));
     json_object_object_add(record, "fingerprint", json_object_new_string(fingerprint));
-    return json_object_object_add(client->records, name, record) == 0;
+    return MAAGE_STATUS_PROPAGATE(&client->assets->trace, maage_status_make(json_object_object_add(client->records, name, record) == 0 ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER);
 }
 static int maage_assets_client_path_owned(struct json_object *records, const char *name)
 {
@@ -383,7 +403,7 @@ static void maage_assets_client_cleanup(maage_assets_client_context *client)
     char path[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], boundary[MAAGE_PATH_CAPACITY], *separator;
     const char *archive_name, *legacy, *hash;
     unsigned candidate;
-    if (!maage_storage_join(boundary, sizeof(boundary), client->assets->root, "minecraft/assets/reconst")) return;
+    if (maage_status_failed(maage_storage_join(boundary, sizeof(boundary), client->assets->root, "minecraft/assets/reconst"))) return;
     json_object_object_foreachC(client->records, iterator) {
         archive_name = maage_assets_string(iterator.val, "archive_path"); hash = maage_assets_string(iterator.val, "sha1");
         if (!archive_name || strncmp(archive_name, "assets/", sizeof("assets/") - 1) || !maage_assets_hash(hash)) continue;
@@ -396,10 +416,10 @@ static void maage_assets_client_cleanup(maage_assets_client_context *client)
             }
             if (!strcmp(legacy, iterator.key) || maage_assets_client_path_owned(client->index_objects, legacy) ||
                 maage_assets_client_path_owned(client->records, legacy) ||
-                !maage_minecraft_asset_path(client->assets->root, legacy, path, sizeof(path))) continue;
+                !(!maage_status_failed(maage_minecraft_asset_path(client->assets->root, legacy, path, sizeof(path), &client->assets->trace)))) continue;
             strcpy(parent, path); separator = strrchr(parent, '/'); if (!separator) continue; *separator = 0;
-            if (!maage_storage_directory_exists(parent) || !maage_assets_file(client->assets, path, hash, -1)) continue;
-            if (!maage_storage_remove(path)) { maage_log_warn("maage.launcher.assets", "Cannot remove migrated client resource: %s", path); continue; }
+            if (!maage_storage_directory_exists(parent) || maage_status_failed(maage_assets_file(client->assets, path, hash, -1))) continue;
+            if (maage_status_failed(maage_storage_remove(path))) { maage_log_warn("maage.launcher.assets", "Cannot remove migrated client resource: %s", path); continue; }
             maage_log_info("maage.launcher.assets", "Removed verified obsolete client resource: %s", path);
             while (strlen(parent) > strlen(boundary)) {
                 maage_storage_remove_directory(parent);
@@ -408,7 +428,7 @@ static void maage_assets_client_cleanup(maage_assets_client_context *client)
         }
     }
 }
-static int maage_assets_install(maage_assets *assets, char error[512])
+static maage_status maage_assets_install(maage_assets *assets, char error[512])
 {
     char metadata_path[MAAGE_PATH_CAPACITY], index_path[MAAGE_PATH_CAPACITY], state_path[MAAGE_PATH_CAPACITY];
     char path[MAAGE_PATH_CAPACITY], manifest_path[MAAGE_PATH_CAPACITY], metadata_hash[41], index_hash[41];
@@ -435,21 +455,22 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     unsigned int batch, slots;
     double size, index_size = -1, total = 0, client_size;
     int ok = 0, trusted = 0, same, cloned, completed_installation = 0, legacy_objects;
+    maage_status cleanup, result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     maage_assets_stage(assets, MAAGE_SETUP_PREPARING, "Preparing application directories");
-    if (!maage_storage_data_path(assets->root, sizeof(assets->root)) || strlen(assets->root) > MAAGE_PATH_CAPACITY - 160 || !maage_storage_directories(assets->root)) {
+    if (maage_status_failed(result = maage_storage_data_path(assets->root, sizeof(assets->root))) || strlen(assets->root) > MAAGE_PATH_CAPACITY - 160 || maage_status_failed(result = maage_storage_directories(assets->root))) {
         strcpy(error, "Cannot create the per-user MaaGE data directory. Check permissions and your home directory."); goto cleanup;
     }
     maage_log_info("maage.launcher.assets", "%s in %s", assets->repair ? "Repairing Minecraft 1.7.10 resources" : "Assessing Minecraft 1.7.10 resources", assets->root);
     maage_storage_join(path, sizeof(path), assets->root, "config");
-    if (!maage_storage_directories(path)) goto storage_error;
+    if (maage_status_failed(result = maage_storage_directories(path))) goto storage_error;
     maage_storage_join(path, sizeof(path), assets->root, "config/assets.lock");
-    lock = maage_storage_acquire(path);
-    if (!lock) { strcpy(error, "Another Launcher may be preparing assets. Close it and Retry; check data-directory permissions if it is already closed."); goto cleanup; }
+    result = maage_storage_acquire(path, &lock, &assets->trace);
+    if (maage_status_failed(result)) { strcpy(error, "Another Launcher may be preparing assets. Close it and Retry; check data-directory permissions if it is already closed."); goto cleanup; }
     maage_storage_join(path, sizeof(path), assets->root, "minecraft/assets/reconstructed");
     maage_storage_join(destination, sizeof(destination), assets->root, "minecraft/assets/reconst");
     if (maage_storage_directory_exists(path)) {
         if (!maage_storage_directory_exists(destination)) {
-            if (!maage_storage_replace(path, destination)) {
+            if (maage_status_failed(result = maage_storage_replace(path, destination))) {
                 strcpy(error, "Cannot rename reconstructed resources to reconst. Check data-directory permissions and retry."); goto cleanup;
             }
             maage_log_info("maage.launcher.assets", "Renamed resource directory: %s -> %s", path, destination);
@@ -458,7 +479,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     }
     for (i = 0; i < sizeof(directories) / sizeof(directories[0]); ++i) {
         maage_storage_join(path, sizeof(path), assets->root, directories[i]);
-        if (!maage_storage_directories(path)) goto storage_error;
+        if (maage_status_failed(result = maage_storage_directories(path))) goto storage_error;
         maage_log_debug("maage.launcher.assets", "Directory ready: %s", path);
     }
     maage_storage_join(metadata_path, sizeof(metadata_path), assets->root, "minecraft/metadata/1.7.10.json");
@@ -468,32 +489,32 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     maage_storage_join(manifest_path, sizeof(manifest_path), assets->root, "minecraft/metadata/version-manifest.json");
     maage_storage_join(staging, sizeof(staging), assets->root, "minecraft/assets/.staging/reconstruct.part");
     maage_storage_join(client_path, sizeof(client_path), assets->root, "minecraft/cache/client-1.7.10.jar");
-    if (!maage_storage_remove(staging)) goto storage_error;
+    if (maage_status_failed(result = maage_storage_remove(staging))) goto storage_error;
     /* All generated temporary names are predictable under the installation lock. */
     {
         const char *files[4];
         files[0] = metadata_path; files[1] = index_path; files[2] = state_path; files[3] = manifest_path;
-        for (i = 0; i < 4; ++i) { strcpy(path, files[i]); strcat(path, ".part"); if (!maage_storage_remove(path)) goto storage_error; }
+        for (i = 0; i < 4; ++i) { strcpy(path, files[i]); strcat(path, ".part"); if (maage_status_failed(result = maage_storage_remove(path))) goto storage_error; }
     }
     maage_assets_lock(assets); assets->progress.directories_ready = 1; maage_assets_unlock(assets);
     maage_storage_join(path, sizeof(path), assets->root, "assets/objects");
     legacy_objects = maage_storage_directory_exists(path);
     maage_assets_stage(assets, MAAGE_SETUP_METADATA, "Checking Minecraft 1.7.10 metadata");
-    state = maage_assets_json(state_path);
-    if (!state) state = maage_assets_json(legacy_state_path);
+    result = maage_assets_json(state_path, &state, &assets->trace);
+    if (!state) result = maage_assets_json(legacy_state_path, &state, &assets->trace);
     if (state && json_object_object_get_ex(state, "complete", &value))
         completed_installation = json_object_is_type(value, json_type_boolean) && json_object_get_boolean(value);
     text = maage_assets_string(state, "metadata_sha1");
-    if (maage_assets_hash(text) && (maage_assets_file(assets, metadata_path, text, -1) ||
-        maage_assets_reuse(assets, metadata_path, "versions/1.7.10/metadata.json", text, -1))) {
-        strcpy(metadata_hash, text); metadata = maage_assets_json(metadata_path);
+    if (maage_assets_hash(text) && ((!maage_status_failed(result = maage_assets_file(assets, metadata_path, text, -1))) ||
+        (!maage_status_failed(result = maage_assets_reuse(assets, metadata_path, "versions/1.7.10/metadata.json", text, -1))))) {
+        strcpy(metadata_hash, text); result = maage_assets_json(metadata_path, &metadata, &assets->trace);
         text = maage_assets_string(metadata, "id");
         trusted = text && !strcmp(text, "1.7.10");
     }
     if (!trusted) {
         maage_assets_lock(assets); assets->progress.needs_setup = 1; maage_assets_unlock(assets);
-        if (!maage_assets_download(assets, MAAGE_MANIFEST, manifest_path, NULL, -1, error)) goto cleanup;
-        manifest = maage_assets_json(manifest_path);
+        if (maage_status_failed(result = maage_assets_download(assets, MAAGE_MANIFEST, manifest_path, NULL, -1, error))) goto cleanup;
+        result = maage_assets_json(manifest_path, &manifest, &assets->trace);
         if (!manifest || !json_object_object_get_ex(manifest, "versions", &versions) || !json_object_is_type(versions, json_type_array) || json_object_array_length(versions) > 100000) goto metadata_error;
         version = NULL;
         for (i = 0; i < (unsigned long)json_object_array_length(versions); ++i) {
@@ -504,20 +525,20 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         url = maage_assets_string(version, "url"); expected = maage_assets_string(version, "sha1");
         if (!maage_assets_official(url) || !maage_assets_hash(expected)) goto metadata_error;
         strcpy(metadata_hash, expected);
-        if (!maage_assets_file(assets, metadata_path, metadata_hash, -1) &&
-            !maage_assets_reuse(assets, metadata_path, "versions/1.7.10/metadata.json", metadata_hash, -1) && !maage_assets_download(assets, url, metadata_path, metadata_hash, -1, error)) goto cleanup;
+        if (maage_status_failed(result = maage_assets_file(assets, metadata_path, metadata_hash, -1)) &&
+            maage_status_failed(result = maage_assets_reuse(assets, metadata_path, "versions/1.7.10/metadata.json", metadata_hash, -1)) && maage_status_failed(result = maage_assets_download(assets, url, metadata_path, metadata_hash, -1, error))) goto cleanup;
         if (metadata) json_object_put(metadata);
-        metadata = maage_assets_json(metadata_path);
+        result = maage_assets_json(metadata_path, &metadata, &assets->trace);
     }
     text = maage_assets_string(metadata, "id");
     if (!text || strcmp(text, "1.7.10") || !json_object_object_get_ex(metadata, "assetIndex", &reference)) goto metadata_error;
     expected = maage_assets_string(reference, "sha1"); url = maage_assets_string(reference, "url");
     if (!maage_assets_hash(expected) || !maage_assets_official(url) || !maage_assets_size(reference, MAAGE_METADATA_LIMIT, &index_size)) goto metadata_error;
     strcpy(index_hash, expected);
-    if (!maage_assets_file(assets, index_path, index_hash, index_size) &&
-        !maage_assets_reuse(assets, index_path, "assets/indexes/1.7.10.json", index_hash, index_size)) {
+    if (maage_status_failed(result = maage_assets_file(assets, index_path, index_hash, index_size)) &&
+        maage_status_failed(result = maage_assets_reuse(assets, index_path, "assets/indexes/1.7.10.json", index_hash, index_size))) {
         maage_assets_lock(assets); assets->progress.needs_setup = 1; maage_assets_unlock(assets);
-        if (!maage_assets_download(assets, url, index_path, index_hash, index_size, error)) goto cleanup;
+        if (maage_status_failed(result = maage_assets_download(assets, url, index_path, index_hash, index_size, error))) goto cleanup;
     }
     if (!json_object_object_get_ex(metadata, "downloads", &downloads) ||
         !json_object_object_get_ex(downloads, "client", &client_reference)) goto metadata_error;
@@ -527,7 +548,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         strchr(client_url, '\\') || strchr(client_url, '\r') || strchr(client_url, '\n') ||
         !maage_assets_hash(expected) || !maage_assets_size(client_reference, MAAGE_OBJECT_LIMIT, &client_size) || client_size <= 0) goto metadata_error;
     strcpy(client_hash, expected);
-    index = maage_assets_json(index_path);
+    result = maage_assets_json(index_path, &index, &assets->trace);
     if (!index || !json_object_object_get_ex(index, "objects", &objects) || !json_object_is_type(objects, json_type_object)) goto metadata_error;
     count = (unsigned long)json_object_object_length(objects);
     if (!count || count > 100000) goto metadata_error;
@@ -536,7 +557,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     if (!list || !logical) goto memory_error;
     i = 0;
     json_object_object_foreachC(objects, iterator) {
-        if (!maage_minecraft_asset_path(assets->root, iterator.key, path, sizeof(path))) {
+        if (!(!maage_status_failed(result = maage_minecraft_asset_path(assets->root, iterator.key, path, sizeof(path), &assets->trace)))) {
             strcpy(error, "The asset index contains an unsafe or unsupported logical resource path."); goto cleanup;
         }
         logical[i].name = list[i].name = iterator.key;
@@ -581,7 +602,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     json_object_object_get_ex(receipt, "reconstructed", &new_logical);
     if (!new_logical) goto memory_error;
     /* A checkpoint authenticates cached metadata even if download is interrupted. */
-    if (!maage_assets_write_json(state_path, receipt)) goto storage_error;
+    if (!(!maage_status_failed(result = maage_assets_write_json(state_path, receipt, &assets->trace)))) goto storage_error;
     maage_assets_lock(assets);
     assets->progress.metadata_ready = 1; assets->progress.total_objects = unique;
     assets->progress.total_logical_assets = count;
@@ -591,23 +612,23 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     maage_assets_stage(assets, MAAGE_SETUP_VERIFYING, assets->repair ? "Repairing assets: verifying every resource" : "Checking installed resources");
     for (i = 0; i < unique; ++i) {
         if (maage_assets_cancelled(assets)) goto cleanup;
-        if (!maage_assets_object_path(assets, list[i].hash, path)) goto storage_error;
+        if (maage_status_failed(result = maage_assets_object_path(assets, list[i].hash, path))) goto storage_error;
         {
             char temporary[MAAGE_PATH_CAPACITY];
             strcpy(temporary, path); strcat(temporary, ".part");
-            if (!maage_storage_remove(temporary)) goto storage_error;
+            if (maage_status_failed(result = maage_storage_remove(temporary))) goto storage_error;
         }
         same = 0;
-        if (maage_storage_stat(path, &size, fingerprint) && size == list[i].size) {
+        if ((!maage_status_failed(result = maage_storage_stat(path, &size, fingerprint))) && size == list[i].size) {
             cached = maage_assets_string(saved, list[i].hash);
             same = completed_installation && !assets->repair && cached && !strcmp(cached, fingerprint);
-            if (!same) same = maage_assets_file(assets, path, list[i].hash, list[i].size);
+            if (!same) same = !maage_status_failed(result = maage_assets_file(assets, path, list[i].hash, list[i].size));
         }
         if (!same && legacy_objects) {
             sprintf(relative, "assets/objects/%.2s/%s", list[i].hash, list[i].hash);
-            same = maage_assets_reuse(assets, path, relative, list[i].hash, list[i].size);
+            same = !maage_status_failed(result = maage_assets_reuse(assets, path, relative, list[i].hash, list[i].size));
             if (same) list[i].repaired = 1;
-            if (same && !maage_storage_stat(path, &size, fingerprint)) goto storage_error;
+            if (same && maage_status_failed(result = maage_storage_stat(path, &size, fingerprint))) goto storage_error;
         }
         if (same) {
             maage_log_debug("maage.launcher.assets", "Using verified cached object for '%s': %s (SHA-1 %s)", list[i].name, path, list[i].hash);
@@ -621,8 +642,8 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         }
         maage_assets_count(assets, completed, 0);
     }
-    if (!maage_assets_write_json(state_path, receipt)) goto storage_error;
-    if (!maage_assets_download_config(&download_options)) {
+    if (!(!maage_status_failed(result = maage_assets_write_json(state_path, receipt, &assets->trace)))) goto storage_error;
+    if (maage_status_failed(result = maage_assets_download_config(&download_options))) {
         strcpy(error, "Invalid MAAGE_DOWNLOAD_* policy. Check configured concurrency, attempts, and timeout values."); goto cleanup;
     }
     slots = download_options.max_concurrent;
@@ -653,7 +674,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         while (i < unique && batch < slots) {
             j = i++;
             if (list[j].verified) continue;
-            if (!maage_assets_object_path(assets, list[j].hash, destinations[batch])) goto storage_error;
+            if (maage_status_failed(result = maage_assets_object_path(assets, list[j].hash, destinations[batch]))) goto storage_error;
             sprintf(urls[batch], "https://resources.download.minecraft.net/%.2s/%s", list[j].hash, list[j].hash);
             requests[batch].url = urls[batch]; requests[batch].destination = destinations[batch];
             requests[batch].sha1 = list[j].hash; requests[batch].size = list[j].size;
@@ -662,9 +683,9 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         }
         if (maage_assets_cancelled(assets)) goto cleanup;
         if (!batch) continue;
-        if (!maage_download_batch_with_options(requests, batch, &observer, &download_options, error)) goto cleanup;
+        if (maage_status_failed(result = maage_download_batch_with_options(requests, batch, &observer, &download_options, error, &assets->trace))) goto cleanup;
         for (j = 0; j < batch; ++j) {
-            if (!maage_storage_stat(destinations[j], &size, fingerprint) || size != list[batch_indices[j]].size) goto storage_error;
+            if (maage_status_failed(result = maage_storage_stat(destinations[j], &size, fingerprint)) || size != list[batch_indices[j]].size) goto storage_error;
             list[batch_indices[j]].verified = 1; list[batch_indices[j]].repaired = 1; strcpy(list[batch_indices[j]].fingerprint, fingerprint);
             json_object_object_add(new_saved, list[batch_indices[j]].hash, json_object_new_string(fingerprint));
             ++completed;
@@ -672,46 +693,46 @@ static int maage_assets_install(maage_assets *assets, char error[512])
             --assets->progress.missing_objects; maage_assets_unlock(assets);
         }
         maage_assets_count(assets, completed, 0);
-        if (!maage_assets_write_json(state_path, receipt)) goto storage_error;
+        if (!(!maage_status_failed(result = maage_assets_write_json(state_path, receipt, &assets->trace)))) goto storage_error;
     }
     maage_assets_lock(assets); assets->progress.objects_ready = 1; maage_assets_unlock(assets);
     maage_assets_stage(assets, MAAGE_SETUP_CLIENT_ARCHIVE, "Checking Minecraft 1.7.10 client resource archive");
-    if (!maage_assets_file(assets, client_path, client_hash, client_size)) {
+    if (maage_status_failed(result = maage_assets_file(assets, client_path, client_hash, client_size))) {
         if (maage_assets_cancelled(assets)) goto cleanup;
         maage_assets_lock(assets); assets->progress.needs_setup = 1; maage_assets_unlock(assets);
         requests[0].url = client_url; requests[0].destination = client_path;
         requests[0].sha1 = client_hash; requests[0].size = client_size; requests[0].limit = client_size;
         observer.bytes = maage_assets_client_bytes;
         maage_assets_stage(assets, MAAGE_SETUP_CLIENT_ARCHIVE, "Downloading and verifying Minecraft client resources");
-        if (!maage_download_batch_with_options(requests, 1, &observer, &download_options, error)) goto cleanup;
-        if (!maage_assets_file(assets, client_path, client_hash, client_size)) {
+        if (maage_status_failed(result = maage_download_batch_with_options(requests, 1, &observer, &download_options, error, &assets->trace))) goto cleanup;
+        if (maage_status_failed(result = maage_assets_file(assets, client_path, client_hash, client_size))) {
             strcpy(error, "The downloaded client JAR failed SHA-1 or size verification. Retry to reacquire it."); goto cleanup;
         }
     }
     maage_assets_lock(assets); assets->progress.client_archive_ready = 1; maage_assets_unlock(assets);
     client_context.assets = assets; client_context.index_objects = objects;
     client_observer.cancelled = maage_assets_client_cancel; client_observer.collision = maage_assets_client_collision;
-    client_observer.progress = maage_assets_client_progress; client_observer.record = maage_assets_client_record; client_observer.context = &client_context;
+    client_observer.progress = maage_assets_client_progress; client_observer.record = maage_assets_client_record; client_observer.context = &client_context; client_observer.trace = &assets->trace;
     maage_assets_stage(assets, MAAGE_SETUP_CLIENT_EXTRACT, "Inspecting and verifying client JAR resources");
-    client_resources = maage_client_resources_open(client_path, assets->root, &client_observer, error);
-    if (!client_resources) goto cleanup;
+    result = maage_client_resources_open(client_path, assets->root, &client_observer, error, &client_resources);
+    if (maage_status_failed(result)) goto cleanup;
     maage_assets_stage(assets, MAAGE_SETUP_RECONSTRUCTING, "Reconstructing Minecraft resources");
     for (i = 0; i < count; ++i) {
         maage_asset_object *object = logical[i].object;
         if (maage_assets_cancelled(assets)) goto cleanup;
-        if (!maage_assets_object_path(assets, object->hash, path) ||
-            !maage_assets_logical_path(assets, logical[i].name, destination)) goto storage_error;
-        if (!maage_storage_stat(path, &size, fingerprint) || size != object->size) goto changed_error;
+        if (maage_status_failed(result = maage_assets_object_path(assets, object->hash, path)) ||
+            !(!maage_status_failed(result = maage_assets_logical_path(assets, logical[i].name, destination)))) goto storage_error;
+        if (maage_status_failed(result = maage_storage_stat(path, &size, fingerprint)) || size != object->size) goto changed_error;
         if (strcmp(fingerprint, object->fingerprint)) {
-            if (!maage_assets_file(assets, path, object->hash, object->size)) goto changed_error;
+            if (maage_status_failed(result = maage_assets_file(assets, path, object->hash, object->size))) goto changed_error;
             strcpy(object->fingerprint, fingerprint);
         }
         same = 0;
-        if (maage_storage_stat(destination, &size, fingerprint) && size == object->size) {
+        if ((!maage_status_failed(result = maage_storage_stat(destination, &size, fingerprint))) && size == object->size) {
             cached = maage_assets_string(saved_logical, logical[i].name);
             same = maage_storage_same_file(path, destination) ||
                 (completed_installation && !assets->repair && !object->repaired && cached && !strcmp(cached, fingerprint));
-            if (!same) same = maage_assets_file(assets, destination, object->hash, object->size);
+            if (!same) same = !maage_status_failed(result = maage_assets_file(assets, destination, object->hash, object->size));
         }
         if (same) {
             maage_log_debug("maage.launcher.assets", "Using verified reconstructed resource '%s': %s (object %s)", logical[i].name, destination, object->hash);
@@ -729,54 +750,54 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         maage_asset_object *object = logical[i].object;
         if (maage_assets_cancelled(assets)) goto cleanup;
         if (logical[i].verified) continue;
-        if (!maage_assets_object_path(assets, object->hash, path) ||
-            !maage_assets_logical_path(assets, logical[i].name, destination)) goto storage_error;
-        if (!maage_storage_stat(path, &size, fingerprint) || size != object->size) goto changed_error;
-        if (strcmp(fingerprint, object->fingerprint) && !maage_assets_file(assets, path, object->hash, object->size)) goto changed_error;
+        if (maage_status_failed(result = maage_assets_object_path(assets, object->hash, path)) ||
+            !(!maage_status_failed(result = maage_assets_logical_path(assets, logical[i].name, destination)))) goto storage_error;
+        if (maage_status_failed(result = maage_storage_stat(path, &size, fingerprint)) || size != object->size) goto changed_error;
+        if (strcmp(fingerprint, object->fingerprint) && maage_status_failed(result = maage_assets_file(assets, path, object->hash, object->size))) goto changed_error;
         maage_log_info("maage.launcher.assets", "Reconstructing '%s': %s -> %s", logical[i].name, path, destination);
-        cloned = maage_storage_clone(path, staging, maage_assets_cancelled, assets);
-        if (!cloned || !maage_assets_file(assets, staging, object->hash, object->size) ||
+        result = maage_storage_clone(path, staging, maage_assets_cancelled, assets, &cloned, &assets->trace);
+        if (!cloned || maage_status_failed(result = maage_assets_file(assets, staging, object->hash, object->size)) ||
             (cloned == 1 && !maage_storage_same_file(path, staging)) ||
-            maage_assets_cancelled(assets) || !maage_storage_replace(staging, destination)) goto storage_error;
+            maage_assets_cancelled(assets) || maage_status_failed(result = maage_storage_replace(staging, destination))) goto storage_error;
         maage_log_info("maage.launcher.assets", "Reconstructed '%s' via %s: %s (SHA-1 %s, %.0f bytes)", logical[i].name, cloned == 1 ? "hard link" : "copy", destination, object->hash, object->size);
         /* Link creation/promotion changes ctime on the verified source object. */
-        if (!maage_storage_stat(path, &size, object->fingerprint) || size != object->size ||
-            !maage_storage_stat(destination, &size, logical[i].fingerprint) || size != object->size) goto changed_error;
+        if (maage_status_failed(result = maage_storage_stat(path, &size, object->fingerprint)) || size != object->size ||
+            maage_status_failed(result = maage_storage_stat(destination, &size, logical[i].fingerprint)) || size != object->size) goto changed_error;
         logical[i].verified = 1; ++reconstructed;
         json_object_object_add(new_logical, logical[i].name, json_object_new_string(logical[i].fingerprint));
         json_object_object_add(new_saved, object->hash, json_object_new_string(object->fingerprint));
         maage_assets_lock(assets); --assets->progress.missing_reconstructed_files; maage_assets_unlock(assets);
         maage_assets_count(assets, completed, reconstructed);
-        if (reconstructed % 32 == 0 && !maage_assets_write_json(state_path, receipt)) goto storage_error;
+        if (reconstructed % 32 == 0 && !(!maage_status_failed(result = maage_assets_write_json(state_path, receipt, &assets->trace)))) goto storage_error;
     }
     maage_assets_stage(assets, MAAGE_SETUP_CLIENT_EXTRACT, "Extracting and reconstructing client JAR resources");
-    if (!maage_client_resources_reconstruct(client_resources, assets->root, staging, &client_observer, error)) goto cleanup;
+    if (maage_status_failed(result = maage_client_resources_reconstruct(client_resources, assets->root, staging, &client_observer, error))) goto cleanup;
     maage_assets_lock(assets); assets->progress.client_resources_ready = 1; maage_assets_unlock(assets);
     maage_assets_stage(assets, MAAGE_SETUP_VERIFYING, "Completing setup: checking both resource forms");
     for (i = 0; i < unique; ++i) {
         if (maage_assets_cancelled(assets)) goto cleanup;
-        if (!maage_assets_object_path(assets, list[i].hash, path) || !maage_storage_stat(path, &size, fingerprint) ||
+        if (maage_status_failed(result = maage_assets_object_path(assets, list[i].hash, path)) || maage_status_failed(result = maage_storage_stat(path, &size, fingerprint)) ||
             !list[i].verified || size != list[i].size) goto changed_error;
-        if (strcmp(list[i].fingerprint, fingerprint) && !maage_assets_file(assets, path, list[i].hash, list[i].size)) goto changed_error;
+        if (strcmp(list[i].fingerprint, fingerprint) && maage_status_failed(result = maage_assets_file(assets, path, list[i].hash, list[i].size))) goto changed_error;
         strcpy(list[i].fingerprint, fingerprint);
         json_object_object_add(new_saved, list[i].hash, json_object_new_string(fingerprint));
     }
     for (i = 0; i < count; ++i) {
         if (maage_assets_cancelled(assets)) goto cleanup;
-        if (!logical[i].verified || !maage_assets_logical_path(assets, logical[i].name, destination) ||
-            !maage_storage_stat(destination, &size, fingerprint) || size != logical[i].object->size) goto changed_error;
+        if (!logical[i].verified || !(!maage_status_failed(result = maage_assets_logical_path(assets, logical[i].name, destination))) ||
+            maage_status_failed(result = maage_storage_stat(destination, &size, fingerprint)) || size != logical[i].object->size) goto changed_error;
         if (strcmp(logical[i].fingerprint, fingerprint)) {
-            if (!maage_assets_object_path(assets, logical[i].hash, path) ||
-                (!maage_storage_same_file(path, destination) && !maage_assets_file(assets, destination, logical[i].hash, size))) goto changed_error;
+            if (maage_status_failed(result = maage_assets_object_path(assets, logical[i].hash, path)) ||
+                (!maage_storage_same_file(path, destination) && maage_status_failed(result = maage_assets_file(assets, destination, logical[i].hash, size)))) goto changed_error;
         }
         json_object_object_add(new_logical, logical[i].name, json_object_new_string(fingerprint));
     }
-    if (!maage_assets_file(assets, client_path, client_hash, client_size)) goto changed_error;
+    if (maage_status_failed(result = maage_assets_file(assets, client_path, client_hash, client_size))) goto changed_error;
     maage_assets_client_cleanup(&client_context);
-    if (!maage_client_resources_check(client_resources, assets->root, &client_observer, error)) goto cleanup;
+    if (maage_status_failed(result = maage_client_resources_check(client_resources, assets->root, &client_observer, error))) goto cleanup;
     maage_assets_lock(assets); assets->progress.reconstruction_ready = 1; maage_assets_unlock(assets);
     json_object_object_add(receipt, "complete", json_object_new_boolean(1));
-    if (!maage_assets_write_json(state_path, receipt)) goto storage_error;
+    if (!(!maage_status_failed(result = maage_assets_write_json(state_path, receipt, &assets->trace)))) goto storage_error;
     if (legacy_objects) {
         for (i = 0; i < unique; ++i) {
             sprintf(relative, "assets/objects/%.2s/%s", list[i].hash, list[i].hash);
@@ -795,12 +816,16 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     maage_log_info("maage.launcher.assets", "Client resources verified: %lu files from %s; %.0f JAR bytes transferred", progress.client_resource_count, client_path, progress.client_downloaded_bytes);
     ok = 1; goto cleanup;
 changed_error:
+    result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, 0);
     strcpy(error, "A Minecraft resource changed during setup. Retry to verify and repair both resource forms."); goto cleanup;
 metadata_error:
+    result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_PARSE, 0);
     strcpy(error, "Minecraft 1.7.10 metadata is missing or invalid. Check your connection and Retry."); goto cleanup;
 storage_error:
+    if (!maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE, 0);
     strcpy(error, "Cannot read or write MaaGE resources. Check data-directory permissions and free disk space, then Retry."); goto cleanup;
 memory_error:
+    result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     strcpy(error, "Not enough memory to prepare resources. Close other applications and Retry.");
 cleanup:
     maage_client_resources_close(client_resources);
@@ -810,11 +835,23 @@ cleanup:
     if (state) json_object_put(state);
     if (receipt) json_object_put(receipt);
     else if (new_saved) json_object_put(new_saved);
-    if (staging[0] && !maage_storage_remove(staging))
-        maage_log_warn("maage.launcher.assets", "Cannot remove reconstruction staging file: %s", staging);
+    if (staging[0]) {
+        cleanup = maage_storage_remove(staging);
+        if (maage_status_failed(cleanup)) { MAAGE_STATUS_PROPAGATE(&assets->trace, cleanup, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REMOVE); if (ok) result = maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REMOVE, 0); }
+    }
     free(batch_indices); free(requests); free(urls); free(destinations);
-    free(logical); free(list); maage_storage_release(lock);
-    return ok;
+    free(logical); free(list);
+    cleanup = maage_storage_release(lock);
+    if (maage_status_failed(cleanup)) { MAAGE_STATUS_PROPAGATE(&assets->trace, cleanup, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RELEASE); if (ok) result = maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RELEASE, 0); }
+    if (ok) {
+        if (maage_status_severity(result) != MAAGE_SEVERITY_WARNING) {
+            result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
+            if (assets->trace.count) maage_status_trace_recover(&assets->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, __FILE__, (unsigned long)__LINE__);
+        }
+    }
+    else if (maage_assets_cancelled(assets)) result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
+    else if (!maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
+    return MAAGE_STATUS_PROPAGATE(&assets->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
 }
 #ifdef _WIN32
 static DWORD WINAPI maage_assets_worker(LPVOID context)
@@ -825,14 +862,18 @@ static void *maage_assets_worker(void *context)
     maage_assets *assets = (maage_assets *)context;
     char error[512] = "";
     int ok = 0;
-    if (maage_access_allowed(assets->access)) ok = maage_assets_install(assets, error);
+    maage_status result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
+    if (maage_access_allowed(assets->access)) result = maage_assets_install(assets, error);
+    ok = !maage_status_failed(result);
     if (!maage_access_allowed(assets->access)) {
+        result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
         ok = 0; strcpy(error, "Minecraft access is no longer verified. Choose Verify Access and verify again in MaaGE. Existing resources are preserved.");
     }
     maage_assets_lock(assets);
     if (assets->progress.cancellation_requested) {
         assets->progress.stage = MAAGE_SETUP_CANCELLED;
         strcpy(assets->progress.activity, "Setup cancelled. Verified resources are saved.");
+        result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     } else if (ok) {
         assets->progress.stage = MAAGE_SETUP_COMPLETE; assets->progress.percent = 100;
         strcpy(assets->progress.activity, "Resources are ready. You can continue to MaaGE.");
@@ -842,52 +883,79 @@ static void *maage_assets_worker(void *context)
         strcpy(assets->progress.activity, "Setup could not finish");
     }
     assets->running = 0;
+    MAAGE_STATUS_PROPAGATE(&assets->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE);
+    assets->progress.result = result; assets->progress.trace = assets->trace;
     maage_assets_unlock(assets);
     if (maage_assets_cancelled(assets))
         maage_log_info("maage.launcher.assets", "Asset operation cancelled; verified objects and reconstructed files are retained for resume.");
-    else if (!ok) maage_log_error("maage.launcher.assets", "%s", error[0] ? error : "Asset operation failed");
+    else if (!ok) maage_log_trace_status(MAAGE_LOG_ERROR, "maage.launcher.assets", result,
+        &assets->trace, "%s", error[0] ? error : "Asset operation failed");
 #ifdef _WIN32
     return 0;
 #else
     return NULL;
 #endif
 }
-maage_assets *maage_assets_create(maage_access *access)
+maage_status maage_assets_create(maage_access *access, maage_assets **output, maage_status_trace *trace)
 {
-    maage_assets *assets = (maage_assets *)calloc(1, sizeof(*assets));
-    if (!assets) return NULL;
+    maage_assets *assets;
+    if (output) *output = NULL;
+    if (!access || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE, !access ? 0 : 1);
+    assets = (maage_assets *)calloc(1, sizeof(*assets));
+    if (!assets) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE);
 #ifdef _WIN32
     InitializeCriticalSection(&assets->mutex);
 #else
-    if (pthread_mutex_init(&assets->mutex, NULL)) { free(assets); return NULL; }
+    {
+        int native = pthread_mutex_init(&assets->mutex, NULL);
+        if (native) { free(assets); return maage_status_trace_record(trace, maage_status_from_errno(native, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE, __FILE__, (unsigned long)__LINE__, native); }
+    }
 #endif
     assets->access = access; assets->progress.percent = -1;
-    return assets;
+    *output = assets;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
-static void maage_assets_join(maage_assets *assets)
+static maage_status maage_assets_join(maage_assets *assets)
 {
-    if (!assets->has_thread) return;
+#ifndef _WIN32
+    int native;
+#endif
+    if (!assets->has_thread) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WAIT, 0);
 #ifdef _WIN32
-    WaitForSingleObject(assets->thread, INFINITE); CloseHandle(assets->thread);
+    if (WaitForSingleObject(assets->thread, INFINITE) != WAIT_OBJECT_0) return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_WAIT);
+    if (!CloseHandle(assets->thread)) return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RELEASE);
 #else
-    pthread_join(assets->thread, NULL);
+    native = pthread_join(assets->thread, NULL);
+    if (native) return maage_status_from_errno(native, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_WAIT);
 #endif
     assets->has_thread = 0;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WAIT, 0);
 }
-int maage_assets_start(maage_assets *assets, int repair)
+maage_status maage_assets_start(maage_assets *assets, int repair)
 {
+    maage_status result;
+#ifndef _WIN32
+    int native;
+#endif
+    if (!assets) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
     maage_assets_lock(assets);
-    if (assets->running) { maage_assets_unlock(assets); return 0; }
+    if (assets->running) { maage_assets_unlock(assets); return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0); }
     maage_assets_unlock(assets);
-    maage_assets_join(assets);
+    result = maage_assets_join(assets);
+    if (maage_status_failed(result)) return result;
     maage_assets_lock(assets);
     memset(&assets->progress, 0, sizeof(assets->progress));
+    maage_status_trace_init(&assets->trace);
+    MAAGE_STATUS_TRACE(&assets->trace, maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT);
     assets->progress.percent = -1; assets->progress.needs_setup = repair;
     assets->repair = repair;
     if (!maage_access_allowed(assets->access)) {
         assets->progress.stage = MAAGE_SETUP_FAILED;
         strcpy(assets->progress.error, "Verify Minecraft access before starting or repairing resources. Choose Verify Access and verify again.");
-        maage_assets_unlock(assets); return 0;
+        assets->progress.result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+        MAAGE_STATUS_TRACE(&assets->trace, assets->progress.result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT);
+        assets->progress.trace = assets->trace;
+        maage_assets_unlock(assets); return assets->progress.result;
     }
     assets->running = 1;
     maage_assets_unlock(assets);
@@ -895,28 +963,37 @@ int maage_assets_start(maage_assets *assets, int repair)
     assets->thread = CreateThread(NULL, 0, maage_assets_worker, assets, 0, NULL);
     assets->has_thread = assets->thread != NULL;
 #else
-    assets->has_thread = pthread_create(&assets->thread, NULL, maage_assets_worker, assets) == 0;
+    native = pthread_create(&assets->thread, NULL, maage_assets_worker, assets); assets->has_thread = native == 0;
+#endif
+    result = assets->has_thread ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0) :
+#ifdef _WIN32
+        maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT);
+#else
+        maage_status_from_errno(native, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT);
 #endif
     if (!assets->has_thread) {
-        maage_assets_lock(assets); assets->running = 0; assets->progress.stage = MAAGE_SETUP_FAILED;
+        maage_assets_lock(assets); assets->progress.result = result; MAAGE_STATUS_TRACE(&assets->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT); assets->progress.trace = assets->trace; assets->running = 0; assets->progress.stage = MAAGE_SETUP_FAILED;
         strcpy(assets->progress.error, "Cannot start the setup worker. Close other applications and Retry."); maage_assets_unlock(assets);
     }
-    return assets->has_thread;
+    return result;
 }
 int maage_assets_access_allowed(maage_assets *assets)
 { return assets && maage_access_allowed(assets->access); }
-int maage_assets_retry(maage_assets *assets)
+maage_status maage_assets_retry(maage_assets *assets)
 {
-    return maage_assets_start(assets, assets->repair);
+    return assets ? maage_assets_start(assets, assets->repair) : maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
 }
-void maage_assets_destroy(maage_assets *assets)
+maage_status maage_assets_destroy(maage_assets *assets)
 {
-    if (!assets) return;
-    maage_assets_cancel(assets); maage_assets_join(assets);
+    maage_status result;
+    if (!assets) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    maage_assets_cancel(assets); result = maage_assets_join(assets);
+    if (maage_status_failed(result)) return result;
 #ifdef _WIN32
     DeleteCriticalSection(&assets->mutex);
 #else
     pthread_mutex_destroy(&assets->mutex);
 #endif
     free(assets);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }

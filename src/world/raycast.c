@@ -38,7 +38,7 @@ static int maage_ray_shape(const double origin[3], const double direction[3],
     return 1;
 }
 
-int maage_world_raycast(const maage_world *world, const double origin[3],
+maage_status maage_world_raycast(const maage_world *world, const double origin[3],
     const double direction[3], double range, maage_world_target *target)
 {
     const maage_block_state_definition *state;
@@ -49,14 +49,14 @@ int maage_world_raycast(const maage_world *world, const double origin[3],
     maage_block_face face;
     if (target) memset(target, 0, sizeof(*target));
     if (!world || !origin || !direction || !target ||
-        !(range > 0.0 && range <= MAAGE_WORLD_LIMIT)) return -1;
+        !(range > 0.0 && range <= MAAGE_WORLD_LIMIT)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RAYCAST, 0);
     scale = 0.0;
     for (axis = 0; axis < 3; ++axis) {
         if (!(origin[axis] > -MAAGE_WORLD_LIMIT && origin[axis] < MAAGE_WORLD_LIMIT) ||
-            !(direction[axis] >= -DBL_MAX && direction[axis] <= DBL_MAX)) return -1;
+            !(direction[axis] >= -DBL_MAX && direction[axis] <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RAYCAST, 0);
         if (fabs(direction[axis]) > scale) scale = fabs(direction[axis]);
     }
-    if (!(scale > 0.0)) return -1;
+    if (!(scale > 0.0)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RAYCAST, 0);
     magnitude = 0.0;
     for (axis = 0; axis < 3; ++axis) {
         ray[axis] = direction[axis] / scale;
@@ -77,21 +77,21 @@ int maage_world_raycast(const maage_world *world, const double origin[3],
     travelled = 0.0;
     while (travelled <= range) {
         if (cell[0] <= -MAAGE_WORLD_LIMIT || cell[0] >= MAAGE_WORLD_LIMIT ||
-            cell[2] <= -MAAGE_WORLD_LIMIT || cell[2] >= MAAGE_WORLD_LIMIT) return -1;
+            cell[2] <= -MAAGE_WORLD_LIMIT || cell[2] >= MAAGE_WORLD_LIMIT) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RAYCAST, 0);
         if (cell[1] >= 0 && cell[1] < MAAGE_WORLD_HEIGHT) {
             if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(cell[0]),
-                maage_world_chunk_coordinate(cell[2]))) return -1;
+                maage_world_chunk_coordinate(cell[2]))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RAYCAST, 0);
             state_id = maage_world_get(world, cell[0], cell[1], cell[2]);
             state = maage_block_registry_state(maage_world_registry(world), state_id);
             block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-            if (!block) return -1;
+            if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RAYCAST, 0);
             if (block->selectable && maage_ray_shape(origin, ray, cell,
                 &block->selection_shape, range, &distance, &face)) {
                 target->x = cell[0]; target->y = cell[1]; target->z = cell[2];
                 target->state_id = state_id; target->block_id = state->block_id;
                 target->face = face; target->distance = distance;
                 target->bounds = block->selection_shape;
-                return 1;
+                return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RAYCAST, 0);
             }
         }
         chosen = 0;
@@ -100,5 +100,5 @@ int maage_world_raycast(const maage_world *world, const double origin[3],
         travelled = next[chosen]; next[chosen] += delta[chosen];
         cell[chosen] += step[chosen];
     }
-    return 0;
+    return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RAYCAST, 0);
 }

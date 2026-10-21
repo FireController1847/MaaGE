@@ -30,7 +30,7 @@ typedef struct maage_x11_window {
     int warp_x;
     int warp_y;
 } maage_x11_window;
-static maage_window_result maage_x11_capture(maage_window *, int);
+static maage_status maage_x11_capture(maage_window *, int);
 
 static int maage_x11_contains(Display *display, Window window, Atom property, Atom atom)
 {
@@ -47,7 +47,7 @@ static int maage_x11_contains(Display *display, Window window, Atom property, At
     if (data) XFree(data);
     return found;
 }
-static maage_window_result maage_x11_init(maage_window_system *system)
+static maage_status maage_x11_init(maage_window_system *system)
 {
     maage_x11_system *native = (maage_x11_system *)calloc(1, sizeof(*native));
     XkbDescPtr keyboard;
@@ -58,10 +58,10 @@ static maage_window_result maage_x11_init(maage_window_system *system)
         "FK03", "RTRN", "TAB", "UP", "DOWN", "AD03",
         "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "LFSH"
     };
-    if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     system->platform = native;
     native->display = XOpenDisplay(NULL);
-    if (!native->display) return MAAGE_WINDOW_UNAVAILABLE;
+    if (!native->display) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     keyboard = XkbGetKeyboard(native->display, XkbAllComponentsMask, XkbUseCoreKbd);
     if (keyboard && keyboard->names && keyboard->names->keys) {
         for (code = keyboard->min_key_code; code <= keyboard->max_key_code; ++code)
@@ -78,7 +78,7 @@ static maage_window_result maage_x11_init(maage_window_system *system)
     native->motif = XInternAtom(native->display, "_MOTIF_WM_HINTS", False);
     native->has_fullscreen = maage_x11_contains(native->display, DefaultRootWindow(native->display),
         XInternAtom(native->display, "_NET_SUPPORTED", False), native->fullscreen);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
 }
 static void maage_x11_shutdown(maage_window_system *system)
 {
@@ -87,7 +87,7 @@ static void maage_x11_shutdown(maage_window_system *system)
     if (native->display) XCloseDisplay(native->display);
     free(native);
 }
-static maage_window_result maage_x11_title(maage_window *window, const char *title)
+static maage_status maage_x11_title(maage_window *window, const char *title)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
@@ -97,9 +97,9 @@ static maage_window_result maage_x11_title(maage_window *window, const char *tit
         (const unsigned char *)title, (int)strlen(title));
     XStoreName(system->display, native->handle, title);
     XFlush(system->display);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
-static maage_window_result maage_x11_visible(maage_window *window, int visible)
+static maage_status maage_x11_visible(maage_window *window, int visible)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
@@ -107,9 +107,9 @@ static maage_window_result maage_x11_visible(maage_window *window, int visible)
     else XUnmapWindow(system->display, native->handle);
     XFlush(system->display);
     window->state.visible = visible != 0;
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
-static maage_window_result maage_x11_resize(maage_window *window, int width, int height)
+static maage_status maage_x11_resize(maage_window *window, int width, int height)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
@@ -117,17 +117,17 @@ static maage_window_result maage_x11_resize(maage_window *window, int width, int
     native->normal_width = width;
     native->normal_height = height;
     XFlush(system->display);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
 }
-static maage_window_result maage_x11_mode(maage_window *window, maage_window_mode mode)
+static maage_status maage_x11_mode(maage_window *window, maage_window_mode mode)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
     XEvent event;
     unsigned long hints[5];
-    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_WINDOW_UNSUPPORTED;
+    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN && !system->has_fullscreen)
-        return MAAGE_WINDOW_UNSUPPORTED;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     memset(hints, 0, sizeof(hints));
     hints[0] = 2;
     hints[2] = mode == MAAGE_WINDOW_WINDOWED ? 1 : 0;
@@ -144,7 +144,7 @@ static maage_window_result maage_x11_mode(maage_window *window, maage_window_mod
         event.xclient.data.l[1] = (long)system->fullscreen;
         event.xclient.data.l[3] = 1;
         if (!XSendEvent(system->display, DefaultRootWindow(system->display), False,
-            SubstructureRedirectMask | SubstructureNotifyMask, &event)) return MAAGE_WINDOW_PLATFORM_ERROR;
+            SubstructureRedirectMask | SubstructureNotifyMask, &event)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     } else {
         if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
             XChangeProperty(system->display, native->handle, system->state_atom, XA_ATOM,
@@ -152,27 +152,27 @@ static maage_window_result maage_x11_mode(maage_window *window, maage_window_mod
         else XDeleteProperty(system->display, native->handle, system->state_atom);
     }
     XFlush(system->display);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
-static maage_window_result maage_x11_create(maage_window *window, const maage_window_config *config)
+static maage_status maage_x11_create(maage_window *window, const maage_window_config *config)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = (maage_x11_window *)calloc(1, sizeof(*native));
-    maage_window_result result;
-    if (!native) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    maage_status result;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     window->platform = native;
     native->normal_width = config->width;
     native->normal_height = config->height;
     native->handle = XCreateSimpleWindow(system->display, DefaultRootWindow(system->display),
         0, 0, (unsigned int)config->width, (unsigned int)config->height, 0, 0, 0);
-    if (!native->handle) return MAAGE_WINDOW_PLATFORM_ERROR;
+    if (!native->handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     XSelectInput(system->display, native->handle, StructureNotifyMask | ExposureMask | PropertyChangeMask |
         KeyPressMask | KeyReleaseMask | FocusChangeMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask);
     XSetWMProtocols(system->display, native->handle, &system->close_atom, 1);
     result = maage_x11_title(window, config->title);
-    if (result != MAAGE_WINDOW_OK) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     result = maage_x11_mode(window, config->mode);
-    if (result != MAAGE_WINDOW_OK) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     return maage_x11_visible(window, config->visible);
 }
 static void maage_x11_destroy(maage_window *window)
@@ -186,7 +186,7 @@ static void maage_x11_destroy(maage_window *window)
     XFlush(system->display);
     free(native);
 }
-static maage_window_result maage_x11_capture(maage_window *window, int capture)
+static maage_status maage_x11_capture(maage_window *window, int capture)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
@@ -196,27 +196,27 @@ static maage_window_result maage_x11_capture(maage_window *window, int capture)
     XColor color;
     int key;
     static const char empty[1] = {0};
-    if (capture == window->input.captured) return MAAGE_WINDOW_OK;
+    if (capture == window->input.captured) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
     if (capture) {
         /* Optional UI keys must not disable an otherwise usable capture path. */
         for (key = 0; key <= MAAGE_INPUT_KEY_ESCAPE; ++key)
-            if (!system->keycodes[key]) return MAAGE_WINDOW_UNSUPPORTED;
+            if (!system->keycodes[key]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         if (!XGetWindowAttributes(system->display, native->handle, &attributes))
-            return MAAGE_WINDOW_PLATFORM_ERROR;
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         for (other = window->system->windows; other; other = other->next)
             if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
         if (!native->hidden_cursor) {
             bitmap = XCreateBitmapFromData(system->display, native->handle, empty, 1, 1);
-            if (!bitmap) return MAAGE_WINDOW_PLATFORM_ERROR;
+            if (!bitmap) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
             memset(&color, 0, sizeof(color));
             native->hidden_cursor = XCreatePixmapCursor(system->display, bitmap, bitmap, &color, &color, 0, 0);
             XFreePixmap(system->display, bitmap);
-            if (!native->hidden_cursor) return MAAGE_WINDOW_PLATFORM_ERROR;
+            if (!native->hidden_cursor) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         }
         if (XGrabPointer(system->display, native->handle, False,
             PointerMotionMask | ButtonPressMask, GrabModeAsync, GrabModeAsync,
             native->handle, native->hidden_cursor, CurrentTime) != GrabSuccess)
-            return MAAGE_WINDOW_UNAVAILABLE;
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         native->pointer_x = native->warp_x = attributes.width / 2;
         native->pointer_y = native->warp_y = attributes.height / 2;
         native->warp_pending = 1;
@@ -226,9 +226,9 @@ static maage_window_result maage_x11_capture(maage_window *window, int capture)
         native->warp_pending = 0;
     }
     XFlush(system->display);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
 }
-static maage_window_result maage_x11_poll(maage_window_system *system, int timeout_ms)
+static maage_status maage_x11_poll(maage_window_system *system, int timeout_ms)
 {
     maage_x11_system *native = system->platform;
     maage_x11_window *handle;
@@ -241,8 +241,8 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int timeo
         fd.fd = ConnectionNumber(native->display);
         fd.events = POLLIN;
         result = poll(&fd, 1, timeout_ms);
-        if (result < 0) return errno == EINTR ? MAAGE_WINDOW_OK : MAAGE_WINDOW_PLATFORM_ERROR;
-        if (fd.revents & (POLLERR | POLLHUP | POLLNVAL)) return MAAGE_WINDOW_PLATFORM_ERROR;
+        if (result < 0) return errno == EINTR ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
+        if (fd.revents & (POLLERR | POLLHUP | POLLNVAL)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
     }
     while (XPending(native->display)) {
         XNextEvent(native->display, &event);
@@ -313,21 +313,21 @@ static maage_window_result maage_x11_poll(maage_window_system *system, int timeo
         }
     }
     XFlush(native->display);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
 }
-static maage_window_result maage_x11_state(maage_window *window)
+static maage_status maage_x11_state(maage_window *window)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
     XWindowAttributes attributes;
-    if (!native->handle) return MAAGE_WINDOW_OK;
-    if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_WINDOW_PLATFORM_ERROR;
+    if (!native->handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
+    if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
     window->state.width = window->state.framebuffer_width = attributes.width;
     window->state.height = window->state.framebuffer_height = attributes.height;
     window->state.visible = attributes.map_state != IsUnmapped;
     window->state.mode = maage_x11_contains(system->display, native->handle, system->state_atom,
         system->fullscreen) ? MAAGE_WINDOW_BORDERLESS_FULLSCREEN : native->decoration;
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
 }
 static void maage_x11_native(maage_window *window, maage_window_native *output)
 {
@@ -343,7 +343,7 @@ static unsigned long maage_x11_channel(unsigned char value, unsigned long mask)
     while (!(mask & 1)) { mask >>= 1; ++shift; }
     return (((unsigned long)value * mask + 127) / 255) << shift;
 }
-static maage_window_result maage_x11_pixels(maage_window *window, const maage_pixel_buffer *buffer)
+static maage_status maage_x11_pixels(maage_window *window, const maage_pixel_buffer *buffer)
 {
     maage_x11_system *system = window->system->platform;
     maage_x11_window *native = window->platform;
@@ -353,17 +353,17 @@ static maage_window_result maage_x11_pixels(maage_window *window, const maage_pi
     int x, y;
     unsigned long pixel;
     const unsigned char *source;
-    if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_WINDOW_PLATFORM_ERROR;
-    if (attributes.visual->class != TrueColor) return MAAGE_WINDOW_UNSUPPORTED;
+    if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
+    if (attributes.visual->class != TrueColor) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     image = XCreateImage(system->display, attributes.visual, (unsigned int)attributes.depth, ZPixmap,
         0, NULL, (unsigned int)buffer->width, (unsigned int)buffer->height, 32, 0);
-    if (!image) return MAAGE_WINDOW_OUT_OF_MEMORY;
+    if (!image) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     if (image->bytes_per_line <= 0 || (size_t)image->bytes_per_line > (size_t)-1 / (size_t)buffer->height) {
         XDestroyImage(image);
-        return MAAGE_WINDOW_UNSUPPORTED;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     }
     image->data = (char *)calloc((size_t)image->bytes_per_line, (size_t)buffer->height);
-    if (!image->data) { XDestroyImage(image); return MAAGE_WINDOW_OUT_OF_MEMORY; }
+    if (!image->data) { XDestroyImage(image); return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0); }
     for (y = 0; y < buffer->height; ++y) {
         source = buffer->pixels + (size_t)y * buffer->stride;
         for (x = 0; x < buffer->width; ++x) {
@@ -374,13 +374,13 @@ static maage_window_result maage_x11_pixels(maage_window *window, const maage_pi
         }
     }
     gc = XCreateGC(system->display, native->handle, 0, NULL);
-    if (!gc) { XDestroyImage(image); return MAAGE_WINDOW_PLATFORM_ERROR; }
+    if (!gc) { XDestroyImage(image); return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0); }
     XPutImage(system->display, native->handle, gc, image, 0, 0, 0, 0,
         (unsigned int)buffer->width, (unsigned int)buffer->height);
     XFreeGC(system->display, gc);
     XDestroyImage(image);
     XFlush(system->display);
-    return MAAGE_WINDOW_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
 }
 const maage_window_backend_api maage_window_x11_api = {
     MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,

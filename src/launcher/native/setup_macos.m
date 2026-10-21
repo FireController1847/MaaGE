@@ -138,8 +138,10 @@ static NSTextField *maage_setup_label(NSView *parent, NSString *value, NSRect re
     self.timer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
 }
 @end
-int maage_setup_native_run(maage_assets *assets)
+maage_status maage_setup_native_run(maage_assets *assets, int *action)
 {
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -154,6 +156,6 @@ int maage_setup_native_run(maage_assets *assets)
         quit.target = controller; [application addItem:quit]; item.submenu = application; NSApp.mainMenu = menu;
         [controller show]; [NSApp activateIgnoringOtherApps:YES]; [NSApp run];
         NSApp.delegate = previousDelegate; NSApp.mainMenu = nil; controller.window.delegate = nil; [controller.window close];
-        return controller.result;
+        *action = controller.result; return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     }
 }

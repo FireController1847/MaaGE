@@ -70,10 +70,12 @@ maage_status maage_client_ui_font_fallback(maage_image *font)
 }
 
 
-void maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font)
+maage_status maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font)
 {
     int character, x, y, width;
     const unsigned char *pixel;
+    if (!resources || !font || !font->pixels || font->width != 128 || font->height != 128)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, !resources ? 0 : 1);
     for (character = 0; character < 256; ++character) {
         width = 0;
         for (y = 0; y < 8; ++y) for (x = 0; x < 8; ++x) {
@@ -84,6 +86,7 @@ void maage_client_ui_font_initialize(maage_client_ui_resources *resources, const
         resources->glyph_width[character] = (unsigned char)(width + 1);
     }
     resources->glyph_width[' '] = 4;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text)

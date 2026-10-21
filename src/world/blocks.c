@@ -184,20 +184,23 @@ static int maage_block_grow_names(maage_block_registry *registry)
     return 1;
 }
 
-maage_block_registry *maage_block_registry_create(size_t block_capacity,
-    size_t state_capacity)
+maage_status maage_block_registry_create(size_t block_capacity,
+    size_t state_capacity, maage_block_registry **output)
 {
     maage_block_registry *registry;
     size_t maximum;
+    if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 2);
+    *output = NULL;
     maximum = (size_t)-1;
     if (!block_capacity) block_capacity = 16;
     if (!state_capacity) state_capacity = 16;
     if (
         block_capacity > maximum / sizeof(maage_block_slot) ||
         state_capacity > maximum / sizeof(maage_state_slot) ||
-        block_capacity > (maximum / sizeof(size_t) - 1) / 2) return NULL;
+        block_capacity > (maximum / sizeof(size_t) - 1) / 2)
+        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
     registry = (maage_block_registry *)calloc(1, sizeof(*registry));
-    if (registry == NULL) return NULL;
+    if (registry == NULL) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
     registry->block_capacity = block_capacity;
     registry->state_capacity = state_capacity;
     registry->bucket_count = block_capacity * 2 + 1;
@@ -213,15 +216,16 @@ maage_block_registry *maage_block_registry_create(size_t block_capacity,
     if (registry->blocks == NULL || registry->states == NULL ||
         registry->name_buckets == NULL || registry->state_buckets == NULL) {
         maage_block_registry_destroy(registry);
-        return NULL;
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
     }
-    return registry;
+    *output = registry;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
 
-void maage_block_registry_destroy(maage_block_registry *registry)
+maage_status maage_block_registry_destroy(maage_block_registry *registry)
 {
     size_t index;
-    if (registry == NULL) return;
+    if (registry == NULL) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     if (registry->blocks != NULL) {
         for (index = 0; index < registry->block_capacity; ++index)
             free(registry->blocks[index].name);
@@ -231,9 +235,10 @@ void maage_block_registry_destroy(maage_block_registry *registry)
     free(registry->states);
     free(registry->blocks);
     free(registry);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
-maage_registry_result maage_block_registry_register_block(
+maage_status maage_block_registry_register_block(
     maage_block_registry *registry, const char *external_name,
     const maage_block_definition *definition)
 {
@@ -242,42 +247,42 @@ maage_registry_result maage_block_registry_register_block(
     int found;
     char *copy;
     int axis;
-    if (registry == NULL || definition == NULL) return MAAGE_REGISTRY_INVALID;
-    if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
+    if (registry == NULL || definition == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->emitted_light > 15 || definition->mesh_shape>MAAGE_BLOCK_MESH_CROSS ||
-        !maage_block_name_valid(external_name)) return MAAGE_REGISTRY_INVALID;
+        !maage_block_name_valid(external_name)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!(definition->hardness >= -DBL_MAX && definition->hardness <= DBL_MAX))
-        return MAAGE_REGISTRY_INVALID;
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     for (axis = 0; axis < 3; ++axis) {
         if (definition->solid && !(definition->collision_shape.minimum[axis] >= 0.0 &&
             definition->collision_shape.maximum[axis] <= 1.0 &&
             definition->collision_shape.minimum[axis] < definition->collision_shape.maximum[axis]))
-            return MAAGE_REGISTRY_INVALID;
+            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         if (definition->selectable && !(definition->selection_shape.minimum[axis] >= 0.0 &&
             definition->selection_shape.maximum[axis] <= 1.0 &&
             definition->selection_shape.minimum[axis] < definition->selection_shape.maximum[axis]))
-            return MAAGE_REGISTRY_INVALID;
+            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     }
     /* Reject a duplicate name before growing a potentially sparse ID domain. */
     bucket = maage_block_name_bucket(registry, external_name, &found);
-    if (found) return MAAGE_REGISTRY_DUPLICATE;
+    if (found) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!maage_block_grow_blocks(registry, definition->id) ||
-        !maage_block_grow_names(registry)) return MAAGE_REGISTRY_OUT_OF_MEMORY;
+        !maage_block_grow_names(registry)) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->blocks[definition->id].name != NULL)
-        return MAAGE_REGISTRY_DUPLICATE;
+        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     bucket = maage_block_name_bucket(registry, external_name, &found);
     length = strlen(external_name) + 1;
     copy = (char *)malloc(length);
-    if (copy == NULL) return MAAGE_REGISTRY_OUT_OF_MEMORY;
+    if (copy == NULL) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     memcpy(copy, external_name, length);
     registry->blocks[definition->id].name = copy;
     registry->blocks[definition->id].definition = *definition;
     registry->name_buckets[bucket] = (size_t)definition->id + 1;
     ++registry->block_count;
-    return MAAGE_REGISTRY_OK;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
 
-maage_registry_result maage_block_registry_register_state(
+maage_status maage_block_registry_register_state(
     maage_block_registry *registry,
     const maage_block_state_definition *definition)
 {
@@ -286,24 +291,24 @@ maage_registry_result maage_block_registry_register_state(
     size_t bucket;
     int found;
     const maage_block_face_definition *texture;
-    if (registry == NULL || definition == NULL) return MAAGE_REGISTRY_INVALID;
-    if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
+    if (registry == NULL || definition == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->fluid_kind>MAAGE_FLUID_LAVA || definition->fluid_level>15 ||
         (definition->fluid_kind==MAAGE_FLUID_NONE &&
-         (definition->fluid_level || definition->fluid_source_state))) return MAAGE_REGISTRY_INVALID;
+         (definition->fluid_level || definition->fluid_source_state))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->fluid_kind==MAAGE_FLUID_NONE)
         for (component=0;component<16;++component)
-            if (definition->fluid_states[component]) return MAAGE_REGISTRY_INVALID;
+            if (definition->fluid_states[component]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (maage_block_registry_block(registry, definition->block_id) == NULL)
-        return MAAGE_REGISTRY_INVALID;
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!maage_block_grow_states(registry, definition->id) ||
         !maage_block_grow_state_buckets(registry))
-        return MAAGE_REGISTRY_OUT_OF_MEMORY;
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->states[definition->id].occupied)
-        return MAAGE_REGISTRY_DUPLICATE;
+        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     bucket = maage_block_state_bucket(registry, definition->block_id,
         definition->metadata, &found);
-    if (found) return MAAGE_REGISTRY_DUPLICATE;
+    if (found) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->block_id != MAAGE_BLOCK_AIR) {
         for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
             texture = &definition->faces[face];
@@ -312,47 +317,47 @@ maage_registry_result maage_block_registry_register_state(
                     texture->uv[component] <= 1.0f &&
                     texture->tint[component] >= 0.0f &&
                     texture->tint[component] <= 1.0f))
-                    return MAAGE_REGISTRY_INVALID;
+                    return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
             }
             if (texture->uv[0] >= texture->uv[2] ||
-                texture->uv[1] >= texture->uv[3]) return MAAGE_REGISTRY_INVALID;
+                texture->uv[1] >= texture->uv[3]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         }
     }
     registry->states[definition->id].definition = *definition;
     registry->states[definition->id].occupied = 1;
     registry->state_buckets[bucket] = (size_t)definition->id + 1;
     ++registry->state_count;
-    return MAAGE_REGISTRY_OK;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
 
-maage_registry_result maage_block_registry_finalize(maage_block_registry *registry)
+maage_status maage_block_registry_finalize(maage_block_registry *registry)
 {
     const maage_block_definition *air;
     const maage_block_state_definition *air_state;
     const maage_block_state_definition *state, *flow;
     size_t bucket;
     unsigned int level;
-    if (registry == NULL) return MAAGE_REGISTRY_INVALID;
-    if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
+    if (registry == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     air = maage_block_registry_block(registry, MAAGE_BLOCK_AIR);
     air_state = maage_block_registry_state(registry, MAAGE_STATE_AIR);
     if (air == NULL || air->solid || air->opaque || air_state == NULL ||
-        air_state->block_id != MAAGE_BLOCK_AIR) return MAAGE_REGISTRY_INVALID;
+        air_state->block_id != MAAGE_BLOCK_AIR) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     for (bucket=0;bucket<registry->state_bucket_count;++bucket) {
         if (!registry->state_buckets[bucket]) continue;
         state=&registry->states[registry->state_buckets[bucket]-1].definition;
         if (!state->fluid_kind) continue;
-        if (state->fluid_states[0]!=state->fluid_source_state) return MAAGE_REGISTRY_INVALID;
+        if (state->fluid_states[0]!=state->fluid_source_state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (level=0;level<16;++level) {
             flow=maage_block_registry_state(registry,state->fluid_states[level]);
             if (!flow || flow->fluid_kind!=state->fluid_kind || flow->fluid_level!=level ||
                 flow->block_id!=state->block_id || flow->fluid_source_state!=state->fluid_source_state)
-                return MAAGE_REGISTRY_INVALID;
+                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         }
-        if (state->fluid_states[state->fluid_level]!=state->id) return MAAGE_REGISTRY_INVALID;
+        if (state->fluid_states[state->fluid_level]!=state->id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     registry->finalized = 1;
-    return MAAGE_REGISTRY_OK;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
 }
 
 int maage_block_registry_is_finalized(const maage_block_registry *registry)
@@ -370,18 +375,18 @@ size_t maage_block_registry_state_count(const maage_block_registry *registry)
     return registry != NULL ? registry->state_count : 0;
 }
 
-maage_registry_result maage_block_registry_resolve_name(
+maage_status maage_block_registry_resolve_name(
     const maage_block_registry *registry, const char *external_name,
     maage_block_id *block_id)
 {
     size_t bucket;
     int found;
     if (registry == NULL || external_name == NULL || block_id == NULL)
-        return MAAGE_REGISTRY_INVALID;
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     bucket = maage_block_name_bucket(registry, external_name, &found);
-    if (!found) return MAAGE_REGISTRY_INVALID;
+    if (!found) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     *block_id = (maage_block_id)(registry->name_buckets[bucket] - 1);
-    return MAAGE_REGISTRY_OK;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
 }
 
 const maage_block_definition *maage_block_registry_block(
@@ -405,16 +410,16 @@ const char *maage_block_registry_block_name(
 {
     return maage_block_registry_block(registry, id) ? registry->blocks[id].name : NULL;
 }
-maage_registry_result maage_block_registry_resolve_state(
+maage_status maage_block_registry_resolve_state(
     const maage_block_registry *registry, maage_block_id block,
     unsigned int metadata, maage_block_state_id *id)
 {
     size_t bucket;
     int found;
     if (!registry || !id || !maage_block_registry_block(registry, block))
-        return MAAGE_REGISTRY_INVALID;
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     bucket = maage_block_state_bucket(registry, block, metadata, &found);
-    if (!found) return MAAGE_REGISTRY_INVALID;
+    if (!found) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     *id = (maage_block_state_id)(registry->state_buckets[bucket] - 1);
-    return MAAGE_REGISTRY_OK;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
 }

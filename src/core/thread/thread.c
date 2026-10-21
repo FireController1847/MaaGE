@@ -33,26 +33,35 @@ static void *maage_thread_entry(void *context)
     thread->function(thread->context); return NULL;
 }
 #endif
-maage_mutex *maage_mutex_create(void)
+maage_status maage_mutex_create(maage_mutex **output)
 {
-    maage_mutex *mutex = (maage_mutex *)malloc(sizeof(*mutex));
-    if (!mutex) return NULL;
+    maage_mutex *mutex;
+    int native = 0;
+    if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE, 0);
+    *output = NULL;
+    mutex = (maage_mutex *)malloc(sizeof(*mutex));
+    if (!mutex) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE, 0);
 #ifdef _WIN32
     InitializeCriticalSection(&mutex->handle);
 #else
-    if (pthread_mutex_init(&mutex->handle, NULL)) { free(mutex); return NULL; }
+    native = pthread_mutex_init(&mutex->handle, NULL);
 #endif
-    return mutex;
+    if (native) { free(mutex); return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE); }
+    *output = mutex;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
-void maage_mutex_destroy(maage_mutex *mutex)
+maage_status maage_mutex_destroy(maage_mutex *mutex)
 {
-    if (!mutex) return;
+    int native = 0;
+    if (!mutex) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
 #ifdef _WIN32
     DeleteCriticalSection(&mutex->handle);
 #else
-    pthread_mutex_destroy(&mutex->handle);
+    native = pthread_mutex_destroy(&mutex->handle);
 #endif
+    if (native) return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_DESTROY);
     free(mutex);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 void maage_mutex_lock(maage_mutex *mutex)
 {
@@ -70,26 +79,33 @@ void maage_mutex_unlock(maage_mutex *mutex)
     pthread_mutex_unlock(&mutex->handle);
 #endif
 }
-maage_condition *maage_condition_create(void)
+maage_status maage_condition_create(maage_condition **output)
 {
-    maage_condition *condition = (maage_condition *)malloc(sizeof(*condition));
-    if (!condition) return NULL;
+    maage_condition *condition;
+    int native = 0;
+    if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE, 0);
+    *output = NULL;
+    condition = (maage_condition *)malloc(sizeof(*condition));
+    if (!condition) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE, 0);
 #ifdef _WIN32
     InitializeConditionVariable(&condition->handle);
 #else
-    if (pthread_cond_init(&condition->handle, NULL)) { free(condition); return NULL; }
+    native = pthread_cond_init(&condition->handle, NULL);
 #endif
-    return condition;
+    if (native) { free(condition); return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE); }
+    *output = condition;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
-void maage_condition_destroy(maage_condition *condition)
+maage_status maage_condition_destroy(maage_condition *condition)
 {
-    if (!condition) return;
-#ifdef _WIN32
-    /* Native condition variables have no destruction operation. */
-#else
-    pthread_cond_destroy(&condition->handle);
+    int native = 0;
+    if (!condition) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+#ifndef _WIN32
+    native = pthread_cond_destroy(&condition->handle);
 #endif
+    if (native) return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_DESTROY);
     free(condition);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 void maage_condition_wait(maage_condition *condition, maage_mutex *mutex)
 {
@@ -115,30 +131,43 @@ void maage_condition_broadcast(maage_condition *condition)
     pthread_cond_broadcast(&condition->handle);
 #endif
 }
-maage_thread *maage_thread_start(void (*function)(void *), void *context)
+maage_status maage_thread_start(void (*function)(void *), void *context, maage_thread **output)
 {
     maage_thread *thread;
-    if (!function) return NULL;
+    maage_status result;
+    int native = 0;
+    if (!function || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START, !function ? 0 : 2);
+    *output = NULL;
     thread = (maage_thread *)malloc(sizeof(*thread));
-    if (!thread) return NULL;
+    if (!thread) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START, 0);
     thread->function = function; thread->context = context;
 #ifdef _WIN32
     thread->handle = CreateThread(NULL, 0, maage_thread_entry, thread, 0, NULL);
-    if (!thread->handle) { free(thread); return NULL; }
+    result = maage_status_from_win32(thread->handle ? 0 : GetLastError(), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START);
 #else
-    if (pthread_create(&thread->handle, NULL, maage_thread_entry, thread)) { free(thread); return NULL; }
+    native = pthread_create(&thread->handle, NULL, maage_thread_entry, thread);
+    result = maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START);
 #endif
-    return thread;
+    (void)native;
+    if (maage_status_failed(result)) { free(thread); return result; }
+    *output = thread;
+    return result;
 }
-void maage_thread_join(maage_thread *thread)
+maage_status maage_thread_join(maage_thread *thread)
 {
-    if (!thread) return;
+    maage_status result;
+    if (!thread) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WAIT, 0);
 #ifdef _WIN32
-    WaitForSingleObject(thread->handle, INFINITE); CloseHandle(thread->handle);
+    result = maage_status_from_win32(WaitForSingleObject(thread->handle, INFINITE) == WAIT_OBJECT_0 ?
+        0 : GetLastError(), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
+    if (!maage_status_failed(result) && !CloseHandle(thread->handle))
+        result = maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CLOSE);
 #else
-    pthread_join(thread->handle, NULL);
+    result = maage_status_from_errno(pthread_join(thread->handle, NULL), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
 #endif
-    free(thread);
+    if (!maage_status_failed(result)) free(thread);
+    return result;
 }
 unsigned maage_thread_processor_count(void)
 {

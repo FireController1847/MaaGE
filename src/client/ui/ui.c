@@ -46,15 +46,15 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     if (!activate) return 0;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
         if (ui->game && !ui->selected)
-            maage_gameplay_set_mode(ui->game, ui->game->mode == MAAGE_GAME_MODE_CREATIVE ?
+            ui->route_result = maage_gameplay_set_mode(ui->game, ui->game->mode == MAAGE_GAME_MODE_CREATIVE ?
                 MAAGE_GAME_MODE_SURVIVAL : MAAGE_GAME_MODE_CREATIVE);
-        else maage_client_ui_back(ui);
+        else ui->route_result = maage_client_ui_back(ui);
     }
     else if (ui->selected == 0) {
         if (ui->game && !ui->game->health) return MAAGE_CLIENT_UI_RESPAWN;
-        maage_client_ui_back(ui);
+        ui->route_result = maage_client_ui_back(ui);
     }
-    else if (ui->selected == 1) maage_client_ui_open(ui, MAAGE_CLIENT_UI_OPTIONS);
+    else if (ui->selected == 1) ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_OPTIONS);
     else return MAAGE_CLIENT_UI_EXIT;
     return 0;
 }
@@ -89,17 +89,9 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
     }
 }
 
-maage_client_ui *maage_client_ui_create(maage_renderer *renderer, const char *application_data,
-    const maage_pixel_buffer *block_atlas)
-{
-    maage_client_ui *ui = NULL;
-    maage_client_ui_create_status(renderer, application_data, block_atlas, &ui);
-    return ui;
-}
-
-maage_status maage_client_ui_create_status(maage_renderer *renderer,
+maage_status maage_client_ui_create(maage_renderer *renderer,
     const char *application_data, const maage_pixel_buffer *block_atlas,
-    maage_client_ui **output)
+    maage_client_ui **output, maage_status_trace *trace)
 {
     maage_client_ui *ui;
     maage_status result;
@@ -112,25 +104,26 @@ maage_status maage_client_ui_create_status(maage_renderer *renderer,
     ui->width = 320; ui->height = 240; ui->gui_scale = 1;
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;
-    if (!maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas)) {
+    result = maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas, trace);
+    if (maage_status_failed(result)) {
         result = maage_status_failed(ui->resources.recovery_status) ? ui->resources.recovery_status :
             maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
         maage_client_ui_destroy(ui);
         return result;
     }
-    if (!maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_PAUSE,
-            maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL) ||
-        !maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_OPTIONS,
-            maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL) ||
-        !maage_client_ui_inventory_register(ui)) {
+    result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_PAUSE,
+        maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL);
+    if (!maage_status_failed(result)) result = maage_client_ui_register_screen(ui,
+        MAAGE_CLIENT_UI_OPTIONS, maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL);
+    if (!maage_status_failed(result)) result = maage_client_ui_inventory_register(ui);
+    if (maage_status_failed(result)) {
         maage_client_ui_destroy(ui);
-        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-            MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
+        return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
     }
     ui->batch.vertices = ui->vertices; ui->batch.indices = ui->indices;
     ui->batch.texture = ui->resources.texture;
     *output = ui;
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
+    return maage_status_make(ui->resources.failed_resources ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
 maage_status maage_client_ui_resource_status(const maage_client_ui *ui)
@@ -152,25 +145,30 @@ void maage_client_ui_notice_time(maage_client_ui *ui, double now)
     if (ui) ui->notice_now = now;
 }
 
-void maage_client_ui_destroy(maage_client_ui *ui)
+maage_status maage_client_ui_destroy(maage_client_ui *ui)
 {
-    if (!ui) return;
+    if (!ui) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_render_texture_destroy(ui->resources.texture);
     free(ui->debug_cache.vertices);
     free(ui->vertices); free(ui->indices);
     free(ui->navigation.screens); free(ui->navigation.stack); free(ui);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
-unsigned int maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,
-    int framebuffer_width, int framebuffer_height, int window_width, int window_height)
+maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,
+    int framebuffer_width, int framebuffer_height, int window_width, int window_height, unsigned int *actions)
 {
     maage_client_ui_screen *screen;
     maage_client_ui_screen_id id;
     unsigned int action = 0;
     int scale, vertical;
     float x_scale, y_scale, right, bottom;
-    if (!ui || !input || framebuffer_width <= 0 || framebuffer_height <= 0 ||
-        window_width <= 0 || window_height <= 0 || !ui->navigation.finalized) return 0;
+    if (actions) *actions = 0;
+    if (!ui || !input || !actions) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE, !ui ? 0 : (!input ? 1 : 6));
+    if (!ui->navigation.finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE, 0);
+    if (framebuffer_width <= 0 || framebuffer_height <= 0 || window_width <= 0 || window_height <= 0)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    ui->route_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
     scale = framebuffer_width / 320; vertical = framebuffer_height / 240;
     if (scale > vertical) scale = vertical;
     if (scale < 1) scale = 1;
@@ -194,21 +192,20 @@ unsigned int maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->mouse_y = input->mouse_y * (float)framebuffer_height / (float)window_height / scale;
     if (input->f3) ui->debug = !ui->debug;
     if (input->escape) {
-        if (maage_client_ui_modal(ui)) maage_client_ui_back(ui);
-        else maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
-        return 0;
+        return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
     if (input->inventory && ui->game) {
-        if (id == MAAGE_CLIENT_UI_INVENTORY) maage_client_ui_back(ui);
-        else if (!id) maage_client_ui_open(ui, MAAGE_CLIENT_UI_INVENTORY);
-        return 0;
+        if (id == MAAGE_CLIENT_UI_INVENTORY) return maage_client_ui_back(ui);
+        if (!id) return maage_client_ui_open(ui, MAAGE_CLIENT_UI_INVENTORY);
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     }
     if (id) {
         screen = &ui->navigation.screens[id];
         if (screen->input) action = screen->input(ui, input, screen->context);
     }
-    return action;
+    *actions = action;
+    return ui->route_result;
 }
 
 int maage_client_ui_debug_visible(const maage_client_ui *ui)
@@ -216,11 +213,12 @@ int maage_client_ui_debug_visible(const maage_client_ui *ui)
     return ui && ui->debug;
 }
 
-void maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets)
+maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets)
 {
-    if (!ui) return;
+    if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
     if (insets) ui->safe_area = *insets;
     else memset(&ui->safe_area, 0, sizeof(ui->safe_area));
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 
 float maage_client_ui_width(const maage_client_ui *ui) { return ui ? ui->width : 0; }
@@ -302,7 +300,7 @@ static void maage_client_ui_debug_right(maage_client_ui *ui,
     first = ui->batch.vertex_count;
     maage_client_ui_debug_column(ui, debug->right, count, 1);
     cache->valid = 0;
-    if (ui->overflow || cache->disabled) return;
+    if (maage_status_failed(ui->draw_result) || cache->disabled) return;
     quads = (ui->batch.vertex_count - first) / 4;
     /* At most one background and one quad per bounded character per line. */
     if (quads > MAAGE_CLIENT_UI_DEBUG_LINES * (MAAGE_CLIENT_UI_DEBUG_CHARACTERS + 1) ||
@@ -328,15 +326,17 @@ static void maage_client_ui_debug_right(maage_client_ui *ui,
     cache->valid = 1;
 }
 
-const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
-    const maage_client_ui_debug *debug)
+maage_status maage_client_ui_draw(maage_client_ui *ui,
+    const maage_client_ui_debug *debug, const maage_render_ui_data **output)
 {
     maage_client_ui_rect rectangle;
     maage_client_ui_screen_id id;
     maage_client_ui_screen *screen;
-    if (!ui || !ui->navigation.finalized) return NULL;
+    if (output) *output = NULL;
+    if (!ui || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_PRESENT, !ui ? 0 : 2);
+    if (!ui->navigation.finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.vertex_count = ui->batch.index_count = 0;
-    ui->overflow = 0;
+    ui->draw_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.logical_width = ui->width; ui->batch.logical_height = ui->height;
     ui->clip.x = ui->clip.y = 0; ui->clip.width = ui->width; ui->clip.height = ui->height;
     maage_client_ui_gameplay_draw(ui);
@@ -373,5 +373,7 @@ const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
         maage_client_ui_text(ui, "See logs/client.log", rectangle.x + 4, rectangle.y + 13,
             MAAGE_CLIENT_UI_LEFT, 0.88f, 0.88f, 0.88f);
     }
-    return ui->overflow ? NULL : &ui->batch;
+    if (maage_status_failed(ui->draw_result)) return ui->draw_result;
+    *output = &ui->batch;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
 }

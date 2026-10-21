@@ -30,13 +30,15 @@ typedef struct maage_metal_mesh {
     NSUInteger index_count;
 } maage_metal_mesh;
 
-static id<MTLRenderPipelineState> maage_metal_compile_pipeline(
-    maage_metal_renderer *native, id<MTLLibrary> library, int ui)
+static maage_status maage_metal_compile_pipeline(maage_renderer *renderer,
+    id<MTLLibrary> library, int ui, id<MTLRenderPipelineState> *output)
 {
+    maage_metal_renderer *native = renderer->platform;
     id<MTLFunction> vertex, fragment;
     id<MTLRenderPipelineState> compiled;
     MTLRenderPipelineDescriptor *pipeline;
     NSError *error = nil;
+    *output = nil;
     vertex = [library newFunctionWithName:ui ? @"maage_ui_vertex_shader" : @"maage_mesh_vertex_shader"];
     fragment = [library newFunctionWithName:ui ? @"maage_ui_fragment_shader" : @"maage_mesh_fragment_shader"];
     pipeline = [[MTLRenderPipelineDescriptor alloc] init];
@@ -55,34 +57,38 @@ static id<MTLRenderPipelineState> maage_metal_compile_pipeline(
     [pipeline release];
     [vertex release];
     [fragment release];
-    if (!compiled) maage_log_error("maage.render.metal", "%s pipeline unavailable: %s",
-        ui ? "UI" : "Mesh", error ? [[error localizedDescription] UTF8String] : "missing shader function");
-    return compiled;
+    if (!compiled) return maage_status_trace_record(renderer->operation_trace,
+        maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0),
+        MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, __FILE__, __LINE__, error ? (long)[error code] : 0);
+    *output = compiled;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
-static maage_render_result maage_metal_pipeline(maage_metal_renderer *native)
+static maage_status maage_metal_pipeline(maage_renderer *renderer)
 {
+    maage_metal_renderer *native = renderer->platform;
     NSString *source;
     id<MTLLibrary> library;
-    id<MTLRenderPipelineState> compiled, ui_pipeline;
+    id<MTLRenderPipelineState> compiled = nil, ui_pipeline = nil;
+    maage_status result;
     id<MTLDepthStencilState> depth_state;
     MTLDepthStencilDescriptor *depth;
     NSError *error = nil;
     source = [[NSString alloc] initWithUTF8String:maage_metal_mesh_source];
-    if (!source) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!source) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     library = [native->device newLibraryWithSource:source options:nil error:&error];
     [source release];
     if (!library) {
-        maage_log_error("maage.render.metal", "Mesh shader library unavailable: %s",
-            error ? [[error localizedDescription] UTF8String] : "unknown error");
-        return MAAGE_RENDER_PLATFORM_ERROR;
+        return maage_status_trace_record(renderer->operation_trace,
+            maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0),
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, __FILE__, __LINE__, error ? (long)[error code] : 0);
     }
-    compiled = maage_metal_compile_pipeline(native, library, 0);
-    ui_pipeline = compiled ? maage_metal_compile_pipeline(native, library, 1) : nil;
+    result = maage_metal_compile_pipeline(renderer, library, 0, &compiled);
+    if (!maage_status_failed(result)) result = maage_metal_compile_pipeline(renderer, library, 1, &ui_pipeline);
     [library release];
     if (!compiled || !ui_pipeline) {
         [compiled release];
         [ui_pipeline release];
-        return MAAGE_RENDER_PLATFORM_ERROR;
+        return MAAGE_STATUS_PROPAGATE(renderer->operation_trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE);
     }
     depth = [[MTLDepthStencilDescriptor alloc] init];
     depth.depthCompareFunction = MTLCompareFunctionLessEqual;
@@ -92,34 +98,34 @@ static maage_render_result maage_metal_pipeline(maage_metal_renderer *native)
     if (!depth_state) {
         [compiled release];
         [ui_pipeline release];
-        return MAAGE_RENDER_OUT_OF_MEMORY;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     native->pipeline = compiled;
     native->ui_pipeline = ui_pipeline;
     native->depth_state = depth_state;
-    return MAAGE_RENDER_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
-static maage_render_result maage_metal_create(maage_renderer *renderer)
+static maage_status maage_metal_create(maage_renderer *renderer)
 {
     maage_metal_renderer *native;
-    if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
-    if (renderer->native.backend != MAAGE_WINDOW_COCOA) return MAAGE_RENDER_UNSUPPORTED;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_STATUS_INVALID_STATE);
+    if (renderer->native.backend != MAAGE_WINDOW_COCOA) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native = calloc(1, sizeof(*native));
-    if (!native) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     renderer->platform = native;
     native->device = MTLCreateSystemDefaultDevice();
-    if (!native->device) return MAAGE_RENDER_UNAVAILABLE;
+    if (!native->device) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     if ([native->device name]) {
         strncpy(renderer->device_name, [[native->device name] UTF8String], sizeof(renderer->device_name) - 1);
         renderer->device_name[sizeof(renderer->device_name) - 1] = 0;
     }
     native->queue = [native->device newCommandQueue];
-    if (!native->queue) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native->queue) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native->view = renderer->native.handles.cocoa.view;
-    if (!native->view) return MAAGE_RENDER_WINDOW_ERROR;
+    if (!native->view) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_STATUS_INVALID_STATE);
     native->layer = [[CAMetalLayer alloc] init];
-    if (!native->layer) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native->layer) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native->layer.device = native->device;
     native->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     native->layer.framebufferOnly = YES;
@@ -141,12 +147,12 @@ static maage_render_result maage_metal_create(maage_renderer *renderer)
     renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT;
     /* Texture limits vary by GPU family; leave unknown until resource creation
      * needs family-specific queries rather than promising an unqueried limit. */
-    return MAAGE_RENDER_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
-static void maage_metal_destroy(maage_renderer *renderer)
+static maage_status maage_metal_destroy(maage_renderer *renderer)
 {
     maage_metal_renderer *native = renderer->platform;
-    if (!native) return;
+    if (!native) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     /* Present waits for completion, so no submitted frame outlives these objects. */
     if (native->installed) {
         [(NSWindow *)renderer->native.handles.cocoa.window setBackgroundColor:native->previous_background];
@@ -169,25 +175,26 @@ static void maage_metal_destroy(maage_renderer *renderer)
     [native->queue release];
     [native->device release];
     free(native);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
-static maage_render_result maage_metal_ui_buffer(maage_metal_renderer *native,
+static maage_status maage_metal_ui_buffer(maage_metal_renderer *native,
     id<MTLBuffer> *buffer, size_t bytes)
 {
     id<MTLBuffer> replacement;
     size_t capacity;
-    if (*buffer && [*buffer length] >= bytes) return MAAGE_RENDER_OK;
+    if (*buffer && [*buffer length] >= bytes) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     capacity = *buffer ? [*buffer length] : 4096;
     while (capacity < bytes) {
         if (capacity > (size_t)-1 / 2) { capacity = bytes; break; }
         capacity *= 2;
     }
     replacement = [native->device newBufferWithLength:capacity options:MTLResourceStorageModeShared];
-    if (!replacement) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!replacement) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     [*buffer release];
     *buffer = replacement;
-    return MAAGE_RENDER_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
 }
-static maage_render_result maage_metal_frame(maage_renderer *renderer, const maage_window_state *state,
+static maage_status maage_metal_frame(maage_renderer *renderer, const maage_window_state *state,
     int preparing, const maage_render_mesh *const *meshes, size_t count, const float *view_projection,
     const maage_render_ui_data *ui)
 {
@@ -198,33 +205,33 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     id<MTLCommandBuffer> command;
     id<MTLRenderCommandEncoder> encoder;
     MTLRenderPassDescriptor *pass;
-    maage_render_result result;
+    maage_status result;
     maage_metal_mesh *geometry;
     size_t index;
     const maage_render_ui_data *layers[3], *batch;
     int layer;
     layers[0] = preparing ? NULL : renderer->background;
     layers[1] = preparing ? NULL : renderer->overlay; layers[2] = ui;
-    if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, MAAGE_STATUS_INVALID_STATE);
     if (!preparing && ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible)))
-        return MAAGE_RENDER_SKIPPED;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     pool = [[NSAutoreleasePool alloc] init];
     for (layer = 0; layer < 3; ++layer) {
         batch = layers[layer];
         if (!batch || !batch->index_count) continue;
         if (sizeof(unsigned int) != 4 || sizeof(maage_render_ui_vertex) != 32) {
-            [pool drain]; return MAAGE_RENDER_UNSUPPORTED;
+            [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
         }
         if (!native->pipeline) {
-            result = maage_metal_pipeline(native);
-            if (result != MAAGE_RENDER_OK) { [pool drain]; return result; }
+            result = maage_metal_pipeline(renderer);
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
         }
         result = maage_metal_ui_buffer(native, &native->ui_vertices[layer],
             batch->vertex_count * sizeof(*batch->vertices));
-        if (result == MAAGE_RENDER_OK)
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
             result = maage_metal_ui_buffer(native, &native->ui_indices[layer],
                 batch->index_count * sizeof(*batch->indices));
-        if (result != MAAGE_RENDER_OK) { [pool drain]; return result; }
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
         /* The existing presentation path completes its command before returning,
          * so these persistent buffers can be reused without another frame wait. */
         memcpy([native->ui_vertices[layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
@@ -249,7 +256,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     if (preparing) [CATransaction flush];
     renderer->refresh = 0;
     drawable = [native->layer nextDrawable];
-    if (!drawable) { [pool drain]; return MAAGE_RENDER_SKIPPED; }
+    if (!drawable) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
     if (count && (!native->depth || native->depth.width != drawable.texture.width ||
         native->depth.height != drawable.texture.height)) {
         MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
@@ -258,7 +265,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
         descriptor.storageMode = MTLStorageModePrivate;
         descriptor.usage = MTLTextureUsageRenderTarget;
         native->depth = [native->device newTextureWithDescriptor:descriptor];
-        if (!native->depth) { [pool drain]; return MAAGE_RENDER_OUT_OF_MEMORY; }
+        if (!native->depth) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
     }
     command = [native->queue commandBuffer];
     pass = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -267,11 +274,11 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     pass.colorAttachments[0].storeAction = MTLStoreActionStore;
     pass.colorAttachments[0].clearColor = MTLClearColorMake(renderer->clear[0],
         renderer->clear[1], renderer->clear[2], renderer->clear[3]);
-    if (!command || !pass) { [pool drain]; return MAAGE_RENDER_OUT_OF_MEMORY; }
+    if (!command || !pass) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
     if (layers[0] && layers[0]->index_count) {
         float logical_size[2] = {layers[0]->logical_width, layers[0]->logical_height};
         encoder = [command renderCommandEncoderWithDescriptor:pass];
-        if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
+        if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
         [encoder setRenderPipelineState:native->ui_pipeline];
         [encoder setCullMode:MTLCullModeNone];
         [encoder setVertexBuffer:native->ui_vertices[0] offset:0 atIndex:0];
@@ -288,7 +295,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
         pass.depthAttachment.clearDepth = 1.0;
     }
     encoder = [command renderCommandEncoderWithDescriptor:pass];
-    if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
+    if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
     if (count) {
         MTLViewport viewport = {0, 0, drawable.texture.width, drawable.texture.height, 0, 1};
         [encoder setViewport:viewport];
@@ -314,7 +321,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
         pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
         pass.colorAttachments[0].storeAction = MTLStoreActionStore;
         encoder = [command renderCommandEncoderWithDescriptor:pass];
-        if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
+        if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
         [encoder setViewport:viewport]; [encoder setRenderPipelineState:native->ui_pipeline];
         [encoder setDepthStencilState:nil]; [encoder setCullMode:MTLCullModeNone];
         for (layer = 1; layer < 3; ++layer) {
@@ -332,8 +339,8 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     if (!preparing) [command presentDrawable:drawable];
     [command commit];
     [command waitUntilCompleted];
-    result = [command status] == MTLCommandBufferStatusError ? MAAGE_RENDER_PLATFORM_ERROR : MAAGE_RENDER_OK;
-    if (preparing && result == MAAGE_RENDER_OK) {
+    result = [command status] == MTLCommandBufferStatusError ? MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+    if (preparing && maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
         /* Present completed content with the layer transaction before reveal. */
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
@@ -344,22 +351,22 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     [pool drain];
     return result;
 }
-static maage_render_result maage_metal_present(maage_renderer *renderer, const maage_window_state *state)
+static maage_status maage_metal_present(maage_renderer *renderer, const maage_window_state *state)
 {
     return maage_metal_frame(renderer, state, 0, NULL, 0, NULL, NULL);
 }
-static maage_render_result maage_metal_prepare_frame(maage_renderer *renderer, const maage_window_state *state)
+static maage_status maage_metal_prepare_frame(maage_renderer *renderer, const maage_window_state *state)
 {
     return maage_metal_frame(renderer, state, 1, NULL, 0, NULL, NULL);
 }
-static maage_render_result maage_metal_create_texture(maage_renderer *renderer,
+static maage_status maage_metal_create_texture(maage_renderer *renderer,
     maage_render_texture *resource, const maage_pixel_buffer *atlas)
 {
     maage_metal_renderer *native = renderer->platform;
     MTLTextureDescriptor *descriptor;
     id<MTLTexture> texture;
     NSAutoreleasePool *pool;
-    if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_CREATE, MAAGE_STATUS_INVALID_STATE);
     pool = [[NSAutoreleasePool alloc] init];
     descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
         width:atlas->width height:atlas->height mipmapped:NO];
@@ -375,31 +382,31 @@ static maage_render_result maage_metal_create_texture(maage_renderer *renderer,
             mipmapLevel:0 withBytes:atlas->pixels bytesPerRow:atlas->stride];
     resource->platform = texture;
     [pool drain];
-    return texture ? MAAGE_RENDER_OK : MAAGE_RENDER_OUT_OF_MEMORY;
+    return texture ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_CREATE, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_CREATE, 0);
 }
 static void maage_metal_destroy_texture(maage_render_texture *texture)
 {
     [(id<MTLTexture>)texture->platform release];
     texture->platform = NULL;
 }
-static maage_render_result maage_metal_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh,
+static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh,
     const maage_mesh_data *data)
 {
     maage_metal_renderer *native = renderer->platform;
     maage_metal_mesh *geometry;
     NSAutoreleasePool *pool;
-    maage_render_result result;
-    if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
+    maage_status result;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, MAAGE_STATUS_INVALID_STATE);
     if (sizeof(unsigned int) != 4 || sizeof(maage_mesh_vertex) != 56)
-        return MAAGE_RENDER_UNSUPPORTED;
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     pool = [[NSAutoreleasePool alloc] init];
     /* Clear-only renderers do not need the mesh shaders or depth state. */
     if (!native->pipeline) {
-        result = maage_metal_pipeline(native);
-        if (result != MAAGE_RENDER_OK) { [pool drain]; return result; }
+        result = maage_metal_pipeline(renderer);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
     }
     geometry = calloc(1, sizeof(*geometry));
-    if (!geometry) { [pool drain]; return MAAGE_RENDER_OUT_OF_MEMORY; }
+    if (!geometry) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0); }
     mesh->platform = geometry;
     geometry->vertices = [native->device newBufferWithBytes:data->vertices
         length:data->vertex_count * sizeof(*data->vertices) options:MTLResourceStorageModeShared];
@@ -407,7 +414,7 @@ static maage_render_result maage_metal_upload_geometry(maage_renderer *renderer,
         length:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
     geometry->index_count = data->index_count;
     [pool drain];
-    return geometry->vertices && geometry->indices ? MAAGE_RENDER_OK : MAAGE_RENDER_OUT_OF_MEMORY;
+    return geometry->vertices && geometry->indices ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
 }
 static void maage_metal_destroy_mesh(maage_render_mesh *mesh)
 {
@@ -418,13 +425,13 @@ static void maage_metal_destroy_mesh(maage_render_mesh *mesh)
     free(geometry);
     mesh->platform = NULL;
 }
-static maage_render_result maage_metal_draw_meshes(maage_renderer *renderer,
+static maage_status maage_metal_draw_meshes(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const maage_window_state *state, const float view_projection[16])
 {
     return maage_metal_frame(renderer, state, 0, meshes, count, view_projection, NULL);
 }
-static maage_render_result maage_metal_draw_frame(maage_renderer *renderer,
+static maage_status maage_metal_draw_frame(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const maage_window_state *state, const float view_projection[16],
     const maage_render_ui_data *ui)

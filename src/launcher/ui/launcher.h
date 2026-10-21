@@ -22,6 +22,8 @@ typedef struct maage_launcher_ui {
     int appearance; /* 0 system, 1 light, 2 dark */
     char account[33], root[MAAGE_PATH_CAPACITY], resources[MAAGE_PATH_CAPACITY];
     char error[256], account_status[512];
+    maage_status result;
+    maage_status_trace trace;
     maage_access_snapshot accounts;
     maage_setup_progress progress;
     const char *readiness;
@@ -36,28 +38,28 @@ typedef struct maage_launcher_ui {
     int client_operation, client_confirmation, clients_valid;
     char client_status[512];
 } maage_launcher_ui;
-int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_assets *assets);
-void maage_launcher_ui_refresh(maage_launcher_ui *ui);
-int maage_launcher_ui_save(maage_launcher_ui *ui);
-int maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client);
-int maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned index);
-int maage_launcher_installation_select(maage_launcher_ui *ui, unsigned index);
-int maage_launcher_installation_default(maage_launcher_ui *ui, unsigned index);
+maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_assets *assets);
+maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui);
+maage_status maage_launcher_ui_save(maage_launcher_ui *ui);
+maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client);
+maage_status maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned index);
+maage_status maage_launcher_installation_select(maage_launcher_ui *ui, unsigned index);
+maage_status maage_launcher_installation_default(maage_launcher_ui *ui, unsigned index);
 /* Copies the physical instance directory after opening its manifest read-only. */
-int maage_launcher_installation_directory(maage_launcher_ui *ui, unsigned index, char path[MAAGE_PATH_CAPACITY]);
-void maage_launcher_ui_destroy(maage_launcher_ui *ui);
+maage_status maage_launcher_installation_directory(maage_launcher_ui *ui, unsigned index, char path[MAAGE_PATH_CAPACITY]);
+maage_status maage_launcher_ui_destroy(maage_launcher_ui *ui);
 const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned index);
-int maage_launcher_client_play(maage_launcher_ui *ui);
-int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index);
+maage_status maage_launcher_client_play(maage_launcher_ui *ui);
+maage_status maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index);
 #if MAAGE_LAUNCHER_DEVELOPMENT
-int maage_launcher_client_probe(maage_launcher_ui *ui, const char *path);
-int maage_launcher_client_import(maage_launcher_ui *ui);
-int maage_launcher_client_replace(maage_launcher_ui *ui, unsigned index, const char *path);
-void maage_launcher_client_cancel_import(maage_launcher_ui *ui);
+maage_status maage_launcher_client_probe(maage_launcher_ui *ui, const char *path);
+maage_status maage_launcher_client_import(maage_launcher_ui *ui);
+maage_status maage_launcher_client_replace(maage_launcher_ui *ui, unsigned index, const char *path);
+maage_status maage_launcher_client_cancel_import(maage_launcher_ui *ui);
 #endif
-int maage_launcher_account_select(maage_launcher_ui *ui, const char *uuid);
-void maage_launcher_account_restore(maage_launcher_ui *ui);
+maage_status maage_launcher_account_select(maage_launcher_ui *ui, const char *uuid);
+maage_status maage_launcher_account_restore(maage_launcher_ui *ui);
 /* Main-thread native shell: 0 close, 1 manage accounts, 2 repair assets, -1 error.
  * Services outlive the shell. Returning to it preserves navigation in ui. */
-int maage_launcher_native_run(maage_launcher_ui *ui);
+maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action);
 #endif

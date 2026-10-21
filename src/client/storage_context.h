@@ -5,4 +5,6 @@
 maage_instance *maage_client_storage_instance(void);
 const char *maage_client_storage_data_root(void);
 int maage_client_storage_migrate_requested(void);
+/* Retain the use lease until process exit if worker shutdown cannot complete. */
+void maage_client_storage_retain(void);
 #endif

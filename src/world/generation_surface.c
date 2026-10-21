@@ -21,14 +21,14 @@ static int maage_cactus_height(const maage_generation_context *context,
     }
     return 1 + (int)((random >> 8) % 3UL);
 }
-int maage_generation_decorate(maage_generation_context *context)
+maage_status maage_generation_decorate(maage_generation_context *context)
 {
     maage_block_state_id state;
     maage_biome_id biome;
     unsigned long random;
     int x, z, y, wx, wz, height, result, cactus;
     for (z = 0; z < 16; ++z) {
-        if (context->token && maage_job_cancelled(context->token)) return 0;
+        if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SURFACE);
         for (x = 0; x < 16; ++x) {
             wx = context->chunk->x * 16 + x; wz = context->chunk->z * 16 + z;
             height = context->surface[z * 16 + x]; biome = context->chunk->biomes[z * 16 + x];
@@ -41,7 +41,7 @@ int maage_generation_decorate(maage_generation_context *context)
                     for (y = 1; y <= cactus; ++y) {
                         result = maage_generation_write(context, wx, height + y, wz,
                             MAAGE_STATE_CACTUS, MAAGE_GENERATION_WRITE_AIR);
-                        if (result < 0) return 0;
+                        if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SURFACE);
                     }
                     ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_SURFACE];
                 } else if (!(random % 43UL)) state = MAAGE_STATE_DEAD_BUSH;
@@ -52,12 +52,12 @@ int maage_generation_decorate(maage_generation_context *context)
             }
             if (state != MAAGE_STATE_AIR) {
                 result = maage_generation_write(context, wx, height + 1, wz, state, MAAGE_GENERATION_WRITE_AIR);
-                if (result < 0) return 0;
+                if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SURFACE);
                 if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_SURFACE];
             }
         }
     }
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SURFACE, 0);
 }
 
 typedef struct maage_tree_feature {
@@ -179,7 +179,7 @@ int maage_generation_spawn_floor(maage_world_seed seed, const maage_biome_regist
     if (ground > policy->sea_level && maage_surface_cold(&context, biome, ground)) *feet_y += 0.125;
     return 1;
 }
-int maage_generation_vegetation(maage_generation_context *context)
+maage_status maage_generation_vegetation(maage_generation_context *context)
 {
     const maage_tree_feature *tree;
     unsigned long random;
@@ -187,10 +187,10 @@ int maage_generation_vegetation(maage_generation_context *context)
     int gx, gz, x, z, height, result, top, local_x, local_z;
     for (gz = context->chunk->z * 2 - 1; gz <= context->chunk->z * 2 + 2; ++gz)
         for (gx = context->chunk->x * 2 - 1; gx <= context->chunk->x * 2 + 2; ++gx) {
-            if (context->token && maage_job_cancelled(context->token)) return 0;
+            if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
             if (!maage_tree_candidate(context, gx, gz, &x, &height, &z, &tree, &random)) continue;
             result = maage_tree_place(context, tree, x, height, z, random);
-            if (result < 0) return 0;
+            if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
             if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_VEGETATION];
         }
     /* Snow rests on the final canopy; occasional forest-floor mushrooms use
@@ -203,7 +203,7 @@ int maage_generation_vegetation(maage_generation_context *context)
         random = maage_generation_feature_hash(context->seed, x, z, 14001UL);
         if (height > context->policy->sea_level && maage_surface_cold(context, biome, height) && top > height + 1 && top < 255) {
             result = maage_generation_write(context, x, top + 1, z, MAAGE_STATE_SNOW, MAAGE_GENERATION_WRITE_AIR);
-            if (result < 0) return 0;
+            if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
         } else if (biome == MAAGE_BIOME_FOREST && !(random % 73UL)) {
             for (top = height + 2; top < height + 12 && top < 255; ++top) {
                 if (maage_chunk_get(context->chunk, local_x, top, local_z) == MAAGE_STATE_LEAVES ||
@@ -211,13 +211,13 @@ int maage_generation_vegetation(maage_generation_context *context)
                     result = maage_generation_write(context, x, height + 1, z,
                         (random & 256UL) ? MAAGE_STATE_BROWN_MUSHROOM : MAAGE_STATE_RED_MUSHROOM,
                         MAAGE_GENERATION_WRITE_AIR);
-                    if (result < 0) return 0;
+                    if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
                     break;
                 }
             }
         }
     }
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VEGETATION, 0);
 }
 
 typedef struct maage_structure_feature {
@@ -253,7 +253,7 @@ static int maage_structure_box(maage_generation_context *context,
             }
     return changed;
 }
-int maage_generation_structures(maage_generation_context *context)
+maage_status maage_generation_structures(maage_generation_context *context)
 {
     const maage_structure_feature *feature = &maage_dungeon_feature;
     unsigned long random;
@@ -262,7 +262,7 @@ int maage_generation_structures(maage_generation_context *context)
     center_x = maage_generation_region(context->chunk->x * 16, feature->region_edge);
     center_z = maage_generation_region(context->chunk->z * 16, feature->region_edge);
     for (rz = center_z - 1; rz <= center_z + 1; ++rz) for (rx = center_x - 1; rx <= center_x + 1; ++rx) {
-        if (context->token && maage_job_cancelled(context->token)) return 0;
+        if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_STRUCTURES);
         random = maage_generation_feature_hash(context->seed, rx, rz, 15000UL);
         if (random % (unsigned long)feature->chance) continue;
         x = rx * feature->region_edge + (int)(maage_generation_feature_next(&random) % (unsigned long)feature->region_edge);
@@ -277,8 +277,8 @@ int maage_generation_structures(maage_generation_context *context)
             }
         if (!fit) continue;
         result = maage_structure_box(context, feature, x, y, z, random);
-        if (result < 0) return 0;
+        if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_STRUCTURES);
         if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_STRUCTURES];
     }
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_STRUCTURES, 0);
 }

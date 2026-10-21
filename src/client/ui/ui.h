@@ -33,43 +33,41 @@ typedef unsigned int (*maage_client_ui_screen_input)(maage_client_ui *ui,
 
 /* Owns one GUI atlas and reusable CPU batch; destroy before the renderer.
  * Resources resolve only here, from the existing reconstructed installation. */
-maage_client_ui *maage_client_ui_create(maage_renderer *renderer, const char *application_data,
-    const maage_pixel_buffer *block_atlas);
-maage_status maage_client_ui_create_status(maage_renderer *renderer,
+maage_status maage_client_ui_create(maage_renderer *renderer,
     const char *application_data, const maage_pixel_buffer *block_atlas,
-    maage_client_ui **output);
+    maage_client_ui **output, maage_status_trace *trace);
 /* Returns the first original resource failure, even after successful recovery. */
 maage_status maage_client_ui_resource_status(const maage_client_ui *ui);
 /* Owner-only, bounded, nonmodal and deduplicated by result. Callers log the
  * occurrence once; the brief notice cross-references its exact result code. */
 void maage_client_ui_notify(maage_client_ui *ui, maage_status result, double now);
 void maage_client_ui_notice_time(maage_client_ui *ui, double now);
-void maage_client_ui_destroy(maage_client_ui *ui);
+maage_status maage_client_ui_destroy(maage_client_ui *ui);
 /* Borrow finalized registries and owner-thread gameplay for HUD and inventory. */
-void maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,
+maage_status maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,
     maage_gameplay *game, const maage_block_registry *blocks);
 /* Registration grows direct numeric indexing before finalization. ID zero is
  * gameplay (no modal). Unknown IDs and navigation cycles fail explicitly. */
-int maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,
+maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,
     maage_client_ui_screen_draw draw, maage_client_ui_screen_input input, void *context);
-int maage_client_ui_finalize(maage_client_ui *ui);
-int maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id id);
-int maage_client_ui_back(maage_client_ui *ui);
+maage_status maage_client_ui_finalize(maage_client_ui *ui);
+maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id id);
+maage_status maage_client_ui_back(maage_client_ui *ui);
 int maage_client_ui_modal(const maage_client_ui *ui);
 int maage_client_ui_debug_visible(const maage_client_ui *ui);
 /* Insets are window logical units. Only GUI content avoids these obstructions;
  * the world and crosshair retain the full drawable rectangle. */
-void maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets);
+maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.
  * Integer GUI scale uses framebuffer pixels, with a 320x240 logical minimum. */
-unsigned int maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,
-    int framebuffer_width, int framebuffer_height, int window_width, int window_height);
+maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,
+    int framebuffer_width, int framebuffer_height, int window_width, int window_height, unsigned int *actions);
 /* Build the UI after world preparation; returned CPU data is borrowed until
  * the next draw/destroy and submitted with the world in renderer_draw_frame.
  * NULL indicates an invalid UI or exhausted geometry allocation/index range;
  * no partial batch is returned. The caller treats that as a frame-build failure. */
-const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
-    const maage_client_ui_debug *debug);
+maage_status maage_client_ui_draw(maage_client_ui *ui,
+    const maage_client_ui_debug *debug, const maage_render_ui_data **output);
 float maage_client_ui_width(const maage_client_ui *ui);
 float maage_client_ui_height(const maage_client_ui *ui);
 

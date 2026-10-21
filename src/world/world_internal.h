@@ -35,39 +35,32 @@ struct maage_chunk {
     unsigned int generation_stages;
     unsigned long generation_features[8];
 };
-maage_chunk *maage_chunk_create(int x, int z);
-void maage_chunk_destroy(maage_chunk *chunk);
+maage_status maage_chunk_create(int x, int z, maage_chunk **output);
+maage_status maage_chunk_destroy(maage_chunk *chunk);
 size_t maage_chunk_cell(int x, int y, int z);
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z);
-int maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_block_state_id state);
+maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_block_state_id state);
 unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z);
 /* Private/owner-edit columns only. Queue entries are unique per (kind,cell),
  * ordered by due time; the finite voxel domain bounds fluid pending work. */
-int maage_chunk_schedule_update(maage_chunk *chunk, const maage_scheduled_update *update);
-int maage_chunk_take_update(maage_chunk *chunk, unsigned long now_low,
+maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_scheduled_update *update);
+maage_status maage_chunk_take_update(maage_chunk *chunk, unsigned long now_low,
     unsigned long now_high, maage_scheduled_update *update);
-int maage_chunk_copy_environment(maage_chunk *destination, const maage_chunk *source);
-int maage_chunk_replace_environment(maage_chunk *destination, const maage_chunk *source);
-int maage_chunk_environment_initialize(maage_chunk *chunk,
+maage_status maage_chunk_copy_environment(maage_chunk *destination, const maage_chunk *source);
+maage_status maage_chunk_replace_environment(maage_chunk *destination, const maage_chunk *source);
+maage_status maage_chunk_environment_initialize(maage_chunk *chunk,
     const maage_block_registry *blocks, unsigned long now_low, unsigned long now_high);
-int maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell,
+maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell,
     unsigned long type, unsigned long version, const void *data, size_t length);
-int maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int cell);
+maage_status maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int cell);
 /* Workers mutate only detached columns. Published columns are immutable and
  * pinned by the owner until every snapshot job has returned its completion.
  * Versioned algorithms are original approximations, not seed-compatible vanilla. */
-int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes);
-void maage_generator_spawn(maage_world_seed seed, const maage_biome_registry *biomes, double feet[3]);
-/* Opt-in versioned APIs: an explicit, immutable policy is passed with each
- * job instead of consulting mutable process-wide generation settings. */
-int maage_generate_chunk_policy(maage_chunk *chunk, maage_world_seed seed,
+maage_status maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_generation_policy *policy);
-int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_generation_policy *policy, const maage_job_token *token);
-int maage_generator_spawn_policy(maage_world_seed seed,
+    const maage_generation_policy *policy, const maage_job_token *token,
+    maage_status_trace *trace);
+maage_status maage_generator_spawn_policy(maage_world_seed seed,
     const maage_biome_registry *biomes, const maage_generation_policy *policy,
     double feet[3]);
 /* Generator-3 stages replay bounded regional owners in coordinate order and
@@ -79,6 +72,8 @@ typedef struct maage_generation_context {
     const maage_biome_registry *biomes;
     const maage_generation_policy *policy;
     const maage_job_token *token;
+    maage_status_trace *trace;
+    maage_status failure;
     int surface[256];
 } maage_generation_context;
 enum { MAAGE_STRUCTURE_DUNGEON = 1 };
@@ -98,35 +93,26 @@ int maage_generation_region(int coordinate, int edge);
 /* -1 allocation failure, zero clipped/rejected/unchanged, one changed cell. */
 int maage_generation_write(maage_generation_context *context, int x, int y, int z,
     maage_block_state_id state, maage_generation_write_rule rule);
+maage_status maage_generation_outcome(maage_generation_context *context, unsigned char code, unsigned char operation);
 int maage_generation_features_valid(const maage_block_registry *blocks);
-int maage_generation_carve(maage_generation_context *context);
-int maage_generation_underground(maage_generation_context *context);
-int maage_generation_decorate(maage_generation_context *context);
-int maage_generation_vegetation(maage_generation_context *context);
-int maage_generation_structures(maage_generation_context *context);
+maage_status maage_generation_carve(maage_generation_context *context);
+maage_status maage_generation_underground(maage_generation_context *context);
+maage_status maage_generation_decorate(maage_generation_context *context);
+maage_status maage_generation_vegetation(maage_generation_context *context);
+maage_status maage_generation_structures(maage_generation_context *context);
 int maage_generation_spawn_clear(maage_world_seed seed, const maage_biome_registry *biomes,
     const maage_generation_policy *policy, int x, int z);
 int maage_generation_spawn_floor(maage_world_seed seed, const maage_biome_registry *biomes,
     const maage_generation_policy *policy, int x, int z, double *feet_y);
-int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
-    const maage_chunk *neighbors[4], maage_section *added[16]);
 /* Neighbors are -X,+X,-Z,+Z, read-only. Newly needed air sections transfer via
  * added, including on failure; attach to the private result or destroy them. */
 /* All inputs are pinned immutable snapshots. Client retains copied CPU/GPU
  * geometry, never borrowed columns. Cancellation leaves partial output private. */
-maage_world_mesh *maage_world_mesh_create_chunk(const maage_block_registry *blocks,
+maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks,
     const maage_biome_registry *biomes, const maage_chunk *chunk,
-    const maage_chunk *neighbors[4]);
-int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_job_token *token);
-int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks,
+    const maage_chunk *neighbors[4], const maage_job_token *token,
+    maage_world_mesh **output, maage_status_trace *trace);
+maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_chunk *neighbors[4], maage_section *added[16],
-    const maage_job_token *token);
-maage_world_mesh *maage_world_mesh_create_chunk_job(const maage_block_registry *blocks,
-    const maage_biome_registry *biomes, const maage_chunk *chunk,
-    const maage_chunk *neighbors[4], const maage_job_token *token);
-maage_world_mesh *maage_world_mesh_create_chunk_job_status(const maage_block_registry *blocks,
-    const maage_biome_registry *biomes, const maage_chunk *chunk,
-    const maage_chunk *neighbors[4], const maage_job_token *token, maage_status *result);
+    const maage_job_token *token, maage_status_trace *trace);
 #endif

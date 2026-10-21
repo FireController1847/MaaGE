@@ -40,35 +40,56 @@ typedef struct maage_vulkan_renderer {
     int compute;
 } maage_vulkan_renderer;
 
-static maage_render_result maage_vulkan_result(VkResult result)
+static maage_status maage_vulkan_code(VkResult result)
 {
     switch (result) {
-    case VK_SUCCESS: return MAAGE_RENDER_OK;
-    case VK_NOT_READY: case VK_TIMEOUT: case VK_ERROR_OUT_OF_DATE_KHR: return MAAGE_RENDER_SKIPPED;
-    case VK_ERROR_OUT_OF_HOST_MEMORY: case VK_ERROR_OUT_OF_DEVICE_MEMORY: return MAAGE_RENDER_OUT_OF_MEMORY;
-    case VK_ERROR_DEVICE_LOST: return MAAGE_RENDER_DEVICE_LOST;
-    case VK_ERROR_SURFACE_LOST_KHR: return MAAGE_RENDER_SURFACE_LOST;
-    case VK_ERROR_EXTENSION_NOT_PRESENT: case VK_ERROR_FEATURE_NOT_PRESENT: return MAAGE_RENDER_UNSUPPORTED;
-    case VK_ERROR_INCOMPATIBLE_DRIVER: case VK_ERROR_INITIALIZATION_FAILED: return MAAGE_RENDER_UNAVAILABLE;
-    default: return MAAGE_RENDER_PLATFORM_ERROR;
+    case VK_SUCCESS: case VK_SUBOPTIMAL_KHR: return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    case VK_INCOMPLETE: return MAAGE_STATUS_VALUE(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    case VK_NOT_READY: case VK_TIMEOUT: case VK_ERROR_OUT_OF_DATE_KHR: return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    case VK_ERROR_OUT_OF_HOST_MEMORY: case VK_ERROR_OUT_OF_DEVICE_MEMORY: return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    case VK_ERROR_DEVICE_LOST: return MAAGE_STATUS_VALUE(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_DETAIL_DEVICE_LOST);
+    case VK_ERROR_SURFACE_LOST_KHR: return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_DETAIL_SURFACE_LOST);
+    case VK_ERROR_EXTENSION_NOT_PRESENT: case VK_ERROR_FEATURE_NOT_PRESENT: return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    case VK_ERROR_INCOMPATIBLE_DRIVER: case VK_ERROR_INITIALIZATION_FAILED: return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    default: return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
 }
-static int maage_vulkan_instance_extension(maage_vulkan_renderer *native, const char *name)
+static maage_status maage_vulkan_record(maage_renderer *renderer, VkResult native,
+    const char *file, unsigned long line)
 {
-    uint32_t count, index;
-    VkExtensionProperties *properties;
-    int found = 0;
-    (void)native;
-    if (vkEnumerateInstanceExtensionProperties(NULL, &count, NULL) != VK_SUCCESS) return 0;
-    properties = calloc(count, sizeof(*properties));
-    if (!properties) return 0;
-    if (vkEnumerateInstanceExtensionProperties(NULL, &count, properties) == VK_SUCCESS)
-        for (index = 0; index < count; ++index)
-            if (!strcmp(properties[index].extensionName, name)) found = 1;
-    free(properties);
-    return found;
+    maage_status result = maage_vulkan_code(native);
+    result = maage_status_make(maage_status_code(result), MAAGE_CONTEXT_RENDER,
+        renderer->trace_operation, maage_status_detail(result));
+    if (native != VK_SUCCESS)
+        maage_status_trace_record(renderer->operation_trace, result, MAAGE_CONTEXT_RENDER,
+            renderer->trace_operation, file, line, (long)native);
+    return result;
 }
-static maage_render_result maage_vulkan_surface(maage_renderer *renderer)
+#define maage_vulkan_result(value) maage_vulkan_record(renderer, (value), __FILE__, (unsigned long)__LINE__)
+static maage_status maage_vulkan_instance_extension(maage_renderer *renderer,
+    const char *name, int *found)
+{
+    maage_vulkan_renderer *native = renderer->platform;
+    uint32_t count = 0, index;
+    VkExtensionProperties *properties;
+    VkResult result;
+    *found = 0;
+    (void)native;
+    result = vkEnumerateInstanceExtensionProperties(NULL, &count, NULL);
+    if (result != VK_SUCCESS) return maage_vulkan_result(result);
+    if (!count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    if ((size_t)count > (size_t)-1 / sizeof(*properties))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
+    properties = calloc(count, sizeof(*properties));
+    if (!properties) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
+    result = vkEnumerateInstanceExtensionProperties(NULL, &count, properties);
+    if (result == VK_SUCCESS)
+        for (index = 0; index < count; ++index)
+            if (!strcmp(properties[index].extensionName, name)) *found = 1;
+    free(properties);
+    return maage_vulkan_result(result);
+}
+static maage_status maage_vulkan_surface(maage_renderer *renderer)
 {
     maage_vulkan_renderer *native = renderer->platform;
     const maage_window_native *window = &renderer->native;
@@ -102,28 +123,40 @@ static maage_render_result maage_vulkan_surface(maage_renderer *renderer)
         return maage_vulkan_result(vkCreateWaylandSurfaceKHR(native->instance, &info, NULL, &native->surface));
     }
 #endif
-    return MAAGE_RENDER_UNSUPPORTED;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
-static int maage_vulkan_device_suitable(maage_vulkan_renderer *native, VkPhysicalDevice physical,
-    uint32_t *graphics, uint32_t *present)
+static maage_status maage_vulkan_device_suitable(maage_renderer *renderer, VkPhysicalDevice physical,
+    uint32_t *graphics, uint32_t *present, int *suitable)
 {
+    maage_vulkan_renderer *native = renderer->platform;
     VkExtensionProperties *extensions;
     VkQueueFamilyProperties *queues;
     VkSurfaceCapabilitiesKHR capabilities;
-    uint32_t count, index, format_count, mode_count;
+    uint32_t count = 0, index, format_count, mode_count;
     int has_extension = 0, has_graphics = 0, has_present = 0;
     VkBool32 supported;
-    if (vkEnumerateDeviceExtensionProperties(physical, NULL, &count, NULL) != VK_SUCCESS) return 0;
+    VkResult result;
+    *suitable = 0;
+    result = vkEnumerateDeviceExtensionProperties(physical, NULL, &count, NULL);
+    if (result != VK_SUCCESS) return maage_vulkan_result(result);
+    if (!count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    if ((size_t)count > (size_t)-1 / sizeof(*extensions))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
     extensions = calloc(count, sizeof(*extensions));
-    if (!extensions) return 0;
-    if (vkEnumerateDeviceExtensionProperties(physical, NULL, &count, extensions) == VK_SUCCESS)
+    if (!extensions) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
+    result = vkEnumerateDeviceExtensionProperties(physical, NULL, &count, extensions);
+    if (result == VK_SUCCESS)
         for (index = 0; index < count; ++index)
             if (!strcmp(extensions[index].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) has_extension = 1;
     free(extensions);
-    if (!has_extension) return 0;
+    if (result != VK_SUCCESS) return maage_vulkan_result(result);
+    if (!has_extension) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, NULL);
+    if (!count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    if ((size_t)count > (size_t)-1 / sizeof(*queues))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
     queues = calloc(count, sizeof(*queues));
-    if (!queues) return 0;
+    if (!queues) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, queues);
     for (index = 0; index < count; ++index) {
         if (!queues[index].queueCount) continue;
@@ -133,20 +166,25 @@ static int maage_vulkan_device_suitable(maage_vulkan_renderer *native, VkPhysica
             has_graphics = 1;
         }
         supported = VK_FALSE;
-        if (vkGetPhysicalDeviceSurfaceSupportKHR(physical, index, native->surface, &supported) == VK_SUCCESS && supported) {
-            *present = index;
-            has_present = 1;
-        }
+        result = vkGetPhysicalDeviceSurfaceSupportKHR(physical, index, native->surface, &supported);
+        if (result != VK_SUCCESS) { free(queues); return maage_vulkan_result(result); }
+        if (supported) { *present = index; has_present = 1; }
     }
     free(queues);
-    if (!has_graphics || !has_present) return 0;
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, native->surface, &capabilities) != VK_SUCCESS ||
-        !(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return 0;
-    if (vkGetPhysicalDeviceSurfaceFormatsKHR(physical, native->surface, &format_count, NULL) != VK_SUCCESS || !format_count) return 0;
-    if (vkGetPhysicalDeviceSurfacePresentModesKHR(physical, native->surface, &mode_count, NULL) != VK_SUCCESS || !mode_count) return 0;
-    return 1;
+    if (!has_graphics || !has_present) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, native->surface, &capabilities);
+    if (result != VK_SUCCESS) return maage_vulkan_result(result);
+    if (!(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    result = vkGetPhysicalDeviceSurfaceFormatsKHR(physical, native->surface, &format_count, NULL);
+    if (result != VK_SUCCESS) return maage_vulkan_result(result);
+    if (!format_count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    result = vkGetPhysicalDeviceSurfacePresentModesKHR(physical, native->surface, &mode_count, NULL);
+    if (result != VK_SUCCESS) return maage_vulkan_result(result);
+    *suitable = mode_count != 0;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
 }
-static maage_render_result maage_vulkan_create(maage_renderer *renderer)
+static maage_status maage_vulkan_create(maage_renderer *renderer)
 {
     maage_vulkan_renderer *native;
     const char *extensions[2] = { VK_KHR_SURFACE_EXTENSION_NAME, NULL };
@@ -161,7 +199,8 @@ static maage_render_result maage_vulkan_create(maage_renderer *renderer)
     VkFenceCreateInfo fence;
     VkSemaphoreCreateInfo semaphore;
     VkResult result;
-    maage_render_result surface_result;
+    maage_status surface_result, probe_result, first_probe_failure = 0;
+    int found, suitable;
     uint32_t count, index, queue_count;
     float priority = 1.0f;
     VkPhysicalDeviceProperties properties;
@@ -176,16 +215,20 @@ static maage_render_result maage_vulkan_create(maage_renderer *renderer)
 #if defined(MAAGE_RENDER_WAYLAND)
     case MAAGE_WINDOW_WAYLAND: extensions[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME; break;
 #endif
-    default: return MAAGE_RENDER_UNSUPPORTED;
+    default: return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     native = calloc(1, sizeof(*native));
-    if (!native) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     renderer->platform = native;
 #if defined(MAAGE_RENDER_WIN32)
-    if (!maage_vulkan_load_win32(&native->library, &native->dispatch)) return MAAGE_RENDER_UNAVAILABLE;
+    probe_result = maage_vulkan_load_win32(renderer, &native->library, &native->dispatch);
+    if (maage_status_code(probe_result) != MAAGE_STATUS_SUCCESS) return probe_result;
 #endif
-    if (!maage_vulkan_instance_extension(native, extensions[0]) || !maage_vulkan_instance_extension(native, extensions[1]))
-        return MAAGE_RENDER_UNSUPPORTED;
+    for (index = 0; index < 2; ++index) {
+        probe_result = maage_vulkan_instance_extension(renderer, extensions[index], &found);
+        if (maage_status_code(probe_result) != MAAGE_STATUS_SUCCESS) return probe_result;
+        if (!found) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    }
     memset(&application, 0, sizeof(application));
     application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application.pApplicationName = "MaaGE";
@@ -199,24 +242,30 @@ static maage_render_result maage_vulkan_create(maage_renderer *renderer)
     result = vkCreateInstance(&instance, NULL, &native->instance);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     surface_result = maage_vulkan_surface(renderer);
-    if (surface_result != MAAGE_RENDER_OK) return surface_result;
+    if (maage_status_code(surface_result) != MAAGE_STATUS_SUCCESS) return surface_result;
     result = vkEnumeratePhysicalDevices(native->instance, &count, NULL);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
-    if (!count) return MAAGE_RENDER_UNAVAILABLE;
+    if (!count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    if ((size_t)count > (size_t)-1 / sizeof(*devices))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     devices = calloc(count, sizeof(*devices));
-    if (!devices) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!devices) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     result = vkEnumeratePhysicalDevices(native->instance, &count, devices);
     if (result == VK_SUCCESS) {
         for (index = 0; index < count; ++index) {
-            if (maage_vulkan_device_suitable(native, devices[index], &native->graphics_family, &native->present_family)) {
-                native->physical = devices[index];
-                break;
+            probe_result = maage_vulkan_device_suitable(renderer, devices[index], &native->graphics_family, &native->present_family, &suitable);
+            if (maage_status_code(probe_result) != MAAGE_STATUS_SUCCESS) {
+                MAAGE_STATUS_TRACE(renderer->operation_trace, probe_result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY);
+                if (maage_status_code(first_probe_failure) == MAAGE_STATUS_SUCCESS) first_probe_failure = probe_result;
+                continue;
             }
+            if (suitable) { native->physical = devices[index]; break; }
         }
     }
     free(devices);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
-    if (!native->physical) return MAAGE_RENDER_UNAVAILABLE;
+    if (!native->physical) return maage_status_code(first_probe_failure) != MAAGE_STATUS_SUCCESS ? first_probe_failure :
+        MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     vkGetPhysicalDeviceProperties(native->physical, &properties);
     renderer->capabilities.max_texture_dimension_2d = properties.limits.maxImageDimension2D;
     renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS |
@@ -294,12 +343,13 @@ static void maage_vulkan_drop_swapchain(maage_vulkan_renderer *native)
     if (native->swapchain) vkDestroySwapchainKHR(native->device, native->swapchain, NULL);
     native->swapchain = VK_NULL_HANDLE;
 }
-static void maage_vulkan_destroy(maage_renderer *renderer)
+static maage_status maage_vulkan_destroy(maage_renderer *renderer)
 {
     maage_vulkan_renderer *native = renderer->platform;
-    if (!native) return;
+    maage_status result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     if (native->device) {
-        vkDeviceWaitIdle(native->device);
+        result = maage_vulkan_result(vkDeviceWaitIdle(native->device));
         maage_vulkan_drop_swapchain(native);
         if (native->acquired) vkDestroySemaphore(native->device, native->acquired, NULL);
         if (native->fence) vkDestroyFence(native->device, native->fence, NULL);
@@ -309,11 +359,19 @@ static void maage_vulkan_destroy(maage_renderer *renderer)
     if (native->surface) vkDestroySurfaceKHR(native->instance, native->surface, NULL);
     if (native->instance) vkDestroyInstance(native->instance, NULL);
 #if defined(MAAGE_RENDER_WIN32)
-    if (native->library) FreeLibrary(native->library);
+    if (native->library && !FreeLibrary(native->library)) {
+        DWORD error = GetLastError();
+        maage_status unloaded = error ? maage_status_from_win32(error, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_DESTROY) :
+            MAAGE_STATUS_VALUE(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_DESTROY, 0);
+        maage_status_trace_record(renderer->operation_trace, unloaded, MAAGE_CONTEXT_RENDER,
+            MAAGE_OPERATION_DESTROY, __FILE__, __LINE__, (long)error);
+        if (!maage_status_failed(result)) result = unloaded;
+    }
 #endif
-    free(native);
+    free(native); renderer->platform = NULL;
+    return result;
 }
-static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, const maage_window_state *state)
+static maage_status maage_vulkan_swapchain(maage_renderer *renderer, const maage_window_state *state)
 {
     maage_vulkan_renderer *native = renderer->platform;
     VkSurfaceCapabilitiesKHR capabilities;
@@ -326,7 +384,7 @@ static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, cons
     uint32_t count, index, families[2];
     result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(native->physical, native->surface, &capabilities);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
-    if (!(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return MAAGE_RENDER_UNSUPPORTED;
+    if (!(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     extent = capabilities.currentExtent;
     if (extent.width == (uint32_t)-1) {
         extent.width = (uint32_t)state->framebuffer_width;
@@ -336,12 +394,12 @@ static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, cons
         if (extent.height < capabilities.minImageExtent.height) extent.height = capabilities.minImageExtent.height;
         if (extent.height > capabilities.maxImageExtent.height) extent.height = capabilities.maxImageExtent.height;
     }
-    if (!extent.width || !extent.height) return MAAGE_RENDER_SKIPPED;
+    if (!extent.width || !extent.height) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(native->physical, native->surface, &count, NULL);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
-    if (!count) return MAAGE_RENDER_UNSUPPORTED;
+    if (!count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     formats = calloc(count, sizeof(*formats));
-    if (!formats) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!formats) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(native->physical, native->surface, &count, formats);
     if (result != VK_SUCCESS) { free(formats); return maage_vulkan_result(result); }
     selected = formats[0];
@@ -356,10 +414,10 @@ static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, cons
             selected = formats[index];
     }
     free(formats);
-    if (selected.format == VK_FORMAT_UNDEFINED) return MAAGE_RENDER_UNSUPPORTED;
+    if (selected.format == VK_FORMAT_UNDEFINED) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     for (index = 0; index < 4; ++index)
         if (capabilities.supportedCompositeAlpha & (1u << index)) break;
-    if (index == 4) return MAAGE_RENDER_UNSUPPORTED;
+    if (index == 4) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     alpha = (VkCompositeAlphaFlagBitsKHR)(1u << index);
     result = vkDeviceWaitIdle(native->device);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
@@ -392,7 +450,7 @@ static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, cons
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     native->images = calloc(native->image_count, sizeof(*native->images));
     native->finished = calloc(native->image_count, sizeof(*native->finished));
-    if (!native->images || !native->finished) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native->images || !native->finished) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     result = vkGetSwapchainImagesKHR(native->device, native->swapchain, &native->image_count, native->images);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     memset(&semaphore, 0, sizeof(semaphore));
@@ -405,13 +463,13 @@ static maage_render_result maage_vulkan_swapchain(maage_renderer *renderer, cons
     native->requested_width = state->framebuffer_width;
     native->requested_height = state->framebuffer_height;
     renderer->refresh = 0;
-    return MAAGE_RENDER_OK;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
 }
-static maage_render_result maage_vulkan_present(maage_renderer *renderer, const maage_window_state *state)
+static maage_status maage_vulkan_present(maage_renderer *renderer, const maage_window_state *state)
 {
     maage_vulkan_renderer *native = renderer->platform;
     VkResult result, presented;
-    maage_render_result rebuilt;
+    maage_status rebuilt;
     VkCommandBufferBeginInfo begin;
     VkImageMemoryBarrier barrier;
     VkClearColorValue color;
@@ -423,13 +481,14 @@ static maage_render_result maage_vulkan_present(maage_renderer *renderer, const 
     if (renderer->refresh || !native->swapchain || native->requested_width != state->framebuffer_width ||
         native->requested_height != state->framebuffer_height) {
         rebuilt = maage_vulkan_swapchain(renderer, state);
-        if (rebuilt != MAAGE_RENDER_OK) return rebuilt;
+        if (maage_status_code(rebuilt) != MAAGE_STATUS_SUCCESS) return rebuilt;
     }
     result = vkWaitForFences(native->device, 1, &native->fence, VK_TRUE, 16000000);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     result = vkAcquireNextImageKHR(native->device, native->swapchain, 0, native->acquired, VK_NULL_HANDLE, &image);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) { renderer->refresh = 1; return MAAGE_RENDER_SKIPPED; }
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) { renderer->refresh = 1; return maage_vulkan_result(result); }
     suboptimal = result == VK_SUBOPTIMAL_KHR;
+    if (suboptimal) maage_vulkan_result(result);
     if (result != VK_SUCCESS && !suboptimal) return maage_vulkan_result(result);
     result = vkResetCommandBuffer(native->command, 0);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
@@ -484,8 +543,8 @@ static maage_render_result maage_vulkan_present(maage_renderer *renderer, const 
     present.pImageIndices = &image;
     presented = vkQueuePresentKHR(native->present_queue, &present);
     if (suboptimal || presented == VK_SUBOPTIMAL_KHR || presented == VK_ERROR_OUT_OF_DATE_KHR) renderer->refresh = 1;
-    if (presented == VK_ERROR_OUT_OF_DATE_KHR) return MAAGE_RENDER_SKIPPED;
-    return presented == VK_SUBOPTIMAL_KHR ? MAAGE_RENDER_OK : maage_vulkan_result(presented);
+    if (presented == VK_ERROR_OUT_OF_DATE_KHR) return maage_vulkan_result(presented);
+    return maage_vulkan_result(presented);
 }
 const maage_render_backend_api maage_render_vulkan_api = {
     MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy, maage_vulkan_present,

@@ -1,5 +1,5 @@
 #include "../opengl_internal.h"
-static maage_render_result maage_opengl_modern_create(maage_renderer *renderer)
+static maage_status maage_opengl_modern_create(maage_renderer *renderer)
 {
     return maage_opengl_create(renderer, 1);
 }

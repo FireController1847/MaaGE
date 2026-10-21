@@ -19,7 +19,7 @@ static int maage_glx_error_handler(Display *display, XErrorEvent *error)
     maage_glx_error = 1;
     return 0;
 }
-maage_render_result maage_opengl_context_create(maage_renderer *renderer, int modern)
+maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
 {
     maage_opengl_context *native;
     XWindowAttributes attributes;
@@ -31,16 +31,16 @@ maage_render_result maage_opengl_context_create(maage_renderer *renderer, int mo
     int count, index, id;
     const int requested[] = { GLX_CONTEXT_MAJOR_VERSION_ARB, 3, GLX_CONTEXT_MINOR_VERSION_ARB, 3,
         GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, None };
-    if (renderer->native.backend != MAAGE_WINDOW_X11) return MAAGE_RENDER_UNSUPPORTED;
+    if (renderer->native.backend != MAAGE_WINDOW_X11) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native = (maage_opengl_context *)calloc(1, sizeof(*native));
-    if (!native) return MAAGE_RENDER_OUT_OF_MEMORY;
+    if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     renderer->platform = native;
     native->display = renderer->native.handles.x11.display;
     native->window = renderer->native.handles.x11.window;
-    if (!XGetWindowAttributes(native->display, native->window, &attributes)) return MAAGE_RENDER_WINDOW_ERROR;
+    if (!XGetWindowAttributes(native->display, native->window, &attributes)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_STATUS_INVALID_STATE);
     query.visualid = XVisualIDFromVisual(attributes.visual);
     visual = XGetVisualInfo(native->display, VisualIDMask, &query, &count);
-    if (!visual) return MAAGE_RENDER_UNSUPPORTED;
+    if (!visual) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     XSync(native->display, False);
     maage_glx_error = 0;
     previous = XSetErrorHandler(maage_glx_error_handler);
@@ -70,7 +70,7 @@ maage_render_result maage_opengl_context_create(maage_renderer *renderer, int mo
     }
     XSetErrorHandler(previous);
     XFree(visual);
-    return native->context && !maage_glx_error ? MAAGE_RENDER_OK : MAAGE_RENDER_UNAVAILABLE;
+    return native->context && !maage_glx_error ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
 void maage_opengl_context_destroy(maage_renderer *renderer)
 {
@@ -80,14 +80,14 @@ void maage_opengl_context_destroy(maage_renderer *renderer)
     if (native->context) glXDestroyContext(native->display, native->context);
     free(native);
 }
-int maage_opengl_context_bind(maage_renderer *renderer)
+maage_status maage_opengl_context_bind(maage_renderer *renderer)
 {
     maage_opengl_context *native = renderer->platform;
-    return glXMakeCurrent(native->display, native->window, native->context) != 0;
+    return maage_status_make(glXMakeCurrent(native->display, native->window, native->context) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_ACQUIRE, 0);
 }
-int maage_opengl_context_swap(maage_renderer *renderer)
+maage_status maage_opengl_context_swap(maage_renderer *renderer)
 {
     maage_opengl_context *native = renderer->platform;
     glXSwapBuffers(native->display, native->window);
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
 }

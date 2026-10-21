@@ -1,5 +1,6 @@
 #ifndef MAAGE_PROCESS_H
 #define MAAGE_PROCESS_H
+#include "maage/status.h"
 /* Direct executable invocation. argv is a NULL-terminated UTF-8 array whose
  * first element names executable. No shell; inherits the caller's environment.
  * stdout/stderr append to caller-selected files; the caller owns rotation.
@@ -11,8 +12,9 @@ typedef struct maage_process maage_process;
 typedef enum maage_process_state {
     MAAGE_PROCESS_STARTING, MAAGE_PROCESS_RUNNING, MAAGE_PROCESS_EXITED, MAAGE_PROCESS_FAILED
 } maage_process_state;
-int maage_process_start(const char *executable, const char *const argv[], const char *directory,
-    const char *stdout_path, const char *stderr_path, maage_process **process, char error[256]);
-maage_process_state maage_process_poll(maage_process *process, int *exit_code, char error[256]);
-void maage_process_close(maage_process *process);
+maage_status maage_process_start(const char *executable, const char *const argv[], const char *directory,
+    const char *stdout_path, const char *stderr_path, maage_process **process, char error[256], maage_status_trace *trace);
+maage_status maage_process_poll(maage_process *process, int *exit_code,
+    maage_process_state *state, char error[256], maage_status_trace *trace);
+maage_status maage_process_close(maage_process *process);
 #endif

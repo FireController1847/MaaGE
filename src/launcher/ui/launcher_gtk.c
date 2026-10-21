@@ -68,7 +68,7 @@ static void maage_ui_installation_open(GtkWidget *widget, gpointer context)
 {
     maage_launcher_gtk *ui = context; int row = maage_ui_row(ui);
     char path[MAAGE_PATH_CAPACITY]; gchar *uri; GError *error = NULL; (void)widget;
-    if (row < 0 || !maage_launcher_installation_directory(ui->state, (unsigned)row, path)) return;
+    if (row < 0 || maage_status_failed(maage_launcher_installation_directory(ui->state, (unsigned)row, path))) return;
     uri = g_filename_to_uri(path, NULL, &error);
     if (!uri || !gtk_show_uri_on_window(GTK_WINDOW(ui->window), uri, GDK_CURRENT_TIME, &error))
         g_strlcpy(ui->state->error, error ? error->message : "Cannot open the installation folder.", sizeof(ui->state->error));
@@ -105,7 +105,7 @@ static void maage_ui_account_changed(GtkComboBox *box, gpointer context)
     if (ui->updating) return; uuid = gtk_combo_box_get_active_id(box);
     if (uuid && !strcmp(uuid, "manage")) maage_ui_manage(NULL, ui);
     else if (uuid && !strcmp(uuid, "verify")) maage_ui_verify(NULL, ui);
-    else if (uuid && !strcmp(uuid, "add")) { if (maage_access_sign_in(ui->state->access, 0)) { ui->result = 1; gtk_main_quit(); } }
+    else if (uuid && !strcmp(uuid, "add")) { if ((!maage_status_failed(maage_access_sign_in(ui->state->access, 0)))) { ui->result = 1; gtk_main_quit(); } }
     else if (uuid && !strcmp(uuid, "signout")) maage_access_sign_out(ui->state->access, ui->state->account);
     else if (uuid && !strcmp(uuid, "remove")) maage_access_disconnect(ui->state->access, ui->state->account);
     else if (uuid) maage_launcher_account_select(ui->state, uuid);
@@ -157,7 +157,7 @@ static void maage_ui_appearance(GtkComboBox *box, gpointer context)
     maage_launcher_gtk *ui = context; int previous = ui->state->appearance;
     if (ui->updating) return;
     ui->state->appearance = gtk_combo_box_get_active(box);
-    if (!maage_launcher_ui_save(ui->state)) { ui->state->appearance = previous; ui->updating = 1; gtk_combo_box_set_active(box, previous); ui->updating = 0; }
+    if (maage_status_failed(maage_launcher_ui_save(ui->state))) { ui->state->appearance = previous; ui->updating = 1; gtk_combo_box_set_active(box, previous); ui->updating = 0; }
     maage_ui_appearance_apply(ui);
 }
 static gboolean maage_ui_tick(gpointer context)
@@ -251,13 +251,16 @@ static void maage_ui_client_remove(GtkWidget *widget, gpointer context)
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_client_remove(ui->state, (unsigned)index);
     gtk_widget_destroy(dialog);
 }
-int maage_launcher_native_run(maage_launcher_ui *state)
+maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action)
 {
     maage_launcher_gtk ui; GtkWidget *split, *sidebar, *navigation, *right, *header, *page, *center, *button, *scroll, *footer, *appearance, *actions;
     const char *names[] = {"Play", "News", "Installations"}, *icons[] = {"media-playback-start-symbolic", "text-x-generic-symbolic", "view-list-symbolic"};
     guint timer; int i; const char *pages[] = {"play", "news", "installations", "settings", "about"};
+    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
+    *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.state = state;
-    if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return -1; }
+    if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0); }
     /* Setup requests dark temporarily; main Launcher restores the desktop preference. */
     gtk_settings_reset_property(gtk_settings_get_default(), "gtk-application-prefer-dark-theme");
     maage_ui_appearance_apply(&ui);
@@ -348,5 +351,5 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     maage_ui_installations_reload(&ui); maage_ui_tick(&ui); gtk_widget_show_all(ui.window);
     if (state->page < MAAGE_PAGE_SETTINGS) gtk_list_box_select_row(GTK_LIST_BOX(navigation), gtk_list_box_get_row_at_index(GTK_LIST_BOX(navigation), (int)state->page));
     gtk_stack_set_visible_child_name(GTK_STACK(ui.stack), pages[state->page]); timer = g_timeout_add(250, maage_ui_tick, &ui); gtk_main();
-    g_source_remove(timer); gtk_widget_destroy(ui.window); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(ui.css)); g_object_unref(ui.css); return ui.result;
+    g_source_remove(timer); gtk_widget_destroy(ui.window); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(ui.css)); g_object_unref(ui.css); *action = ui.result; return outcome;
 }

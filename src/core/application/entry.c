@@ -30,11 +30,11 @@ static char *maage_application_log_path(void)
 {
     char directory[MAAGE_PATH_CAPACITY];
     char *path;
-    if (!maage_storage_data_path(directory, sizeof(directory)) ||
-        !maage_storage_join(directory, sizeof(directory), directory, "logs") ||
-        !maage_storage_directories(directory)) return NULL;
+    if (maage_status_failed(maage_storage_data_path(directory, sizeof(directory))) ||
+        maage_status_failed(maage_storage_join(directory, sizeof(directory), directory, "logs")) ||
+        maage_status_failed(maage_storage_directories(directory))) return NULL;
     path = (char *)malloc(MAAGE_PATH_CAPACITY);
-    if (path && !maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, MAAGE_APPLICATION_KEY ".log")) {
+    if (path && maage_status_failed(maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, MAAGE_APPLICATION_KEY ".log"))) {
         free(path); return NULL;
     }
     return path;
@@ -119,9 +119,10 @@ static char *maage_application_log_path(void)
 static int maage_application_run(int argc, char *const argv[])
 {
     maage_log_config config;
-    int result;
+    maage_status outcome, finished;
     char *path;
 #ifdef MAAGE_APPLICATION_METADATA_QUERY
+    int result;
     extern int maage_application_query(int argc, char *const argv[], int *result);
 #endif
     /* Captured diagnostics must reach their file while the process is running,
@@ -135,8 +136,9 @@ static int maage_application_run(int argc, char *const argv[])
     maage_log_config_init(&config);
 #ifdef MAAGE_APPLICATION_LOG_CONFIGURE
     {
-        extern int maage_application_configure_log(int argc, char *const argv[], maage_log_config *config);
-        if (!maage_application_configure_log(argc, argv, &config)) return 1;
+        extern maage_status maage_application_configure_log(int argc, char *const argv[], maage_log_config *config);
+        outcome = maage_application_configure_log(argc, argv, &config);
+        if (maage_status_failed(outcome)) return 1;
     }
 #else
     path = maage_application_log_path();
@@ -148,20 +150,26 @@ static int maage_application_run(int argc, char *const argv[])
     config.file_path = path ? path : "logs/" MAAGE_APPLICATION_KEY ".log";
 #endif
 #endif
-    maage_log_init(&config, argc, argv);
+    outcome = maage_log_init(&config, argc, argv);
+    if (!maage_status_is_success(outcome)) maage_log_status(MAAGE_LOG_WARNING,
+        "maage.core.application", outcome, "Logging initialization retained its usable settings.");
 #ifdef MAAGE_APPLICATION_USER_DATA
     if (!path) maage_log_error("maage.core.application", "Cannot resolve or create the per-user MaaGE logs directory.");
 #endif
     free(path);
-    result = maage_application_main(argc, argv);
-    maage_log_shutdown();
+    outcome = maage_application_main(argc, argv);
+    finished = maage_log_shutdown();
+    if (maage_status_is_success(outcome) && maage_status_failed(finished)) outcome = finished;
 #ifdef MAAGE_APPLICATION_LOG_CONFIGURE
     {
-        extern void maage_application_finish(void);
-        maage_application_finish();
+        extern maage_status maage_application_finish(void);
+        finished = maage_application_finish();
+        if (maage_status_is_success(outcome) && maage_status_failed(finished)) outcome = finished;
     }
 #endif
-    return result;
+    /* OS process exit is an explicit lossy boundary, never a 32-bit engine
+     * status returned as an implementation-defined signed shell exit code. */
+    return maage_status_failed(outcome) ? 1 : 0;
 }
 
 #if MAAGE_PLATFORM_WINDOWS

@@ -2,6 +2,7 @@
 #include "maage/jobs.h"
 
 #include <math.h>
+#include <string.h>
 
 #define MAAGE_GENERATION_V1_SEA_Y 63
 #define MAAGE_GENERATION_V1_SPAWN_RADIUS 4096
@@ -9,18 +10,18 @@
 #define MAAGE_GENERATION_WORD_MASK 4294967295UL
 #define MAAGE_GENERATION_BIOME_SCALE 128
 
-int maage_generation_policy_default(unsigned long generator_version,
+maage_status maage_generation_policy_default(unsigned long generator_version,
     maage_generation_policy *policy)
 {
     if (!policy || (generator_version != MAAGE_WORLD_GENERATOR_VERSION &&
         generator_version != MAAGE_GENERATION_CONFIGURABLE_VERSION &&
-        generator_version != MAAGE_GENERATION_FEATURES_VERSION)) return 0;
+        generator_version != MAAGE_GENERATION_FEATURES_VERSION)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     policy->schema_version = MAAGE_GENERATION_POLICY_SCHEMA;
     policy->generator_version = generator_version;
     policy->sea_level = MAAGE_GENERATION_V1_SEA_Y;
     policy->spawn_search_radius = MAAGE_GENERATION_V1_SPAWN_RADIUS;
     policy->spawn_search_step = MAAGE_GENERATION_V1_SPAWN_STEP;
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
 int maage_generation_policy_valid(const maage_generation_policy *policy)
@@ -210,43 +211,71 @@ int maage_generation_surface(maage_world_seed seed,
     if (!height || !biome || !maage_generation_column_at(seed, biomes, x, z, &column)) return 0;
     *height = column.height; *biome = column.biome; return 1;
 }
-static int maage_generation_stage_begin(maage_generation_context *context,
+maage_status maage_generation_outcome(maage_generation_context *context,
+    unsigned char code, unsigned char operation)
+{
+    maage_status result;
+    if (code >= 0x80) {
+        if (context->token && maage_job_cancelled(context->token))
+            result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, operation, MAAGE_DETAIL_CANCELLED);
+        else if (maage_status_failed(context->failure)) result = context->failure;
+        else result = maage_status_make(code, MAAGE_CONTEXT_WORLD, operation, 0);
+        return MAAGE_STATUS_TRACE(context->trace, result, MAAGE_CONTEXT_WORLD, operation);
+    }
+    return maage_status_make(code, 0, operation, 0);
+}
+static maage_status maage_generation_stage_begin(maage_generation_context *context,
     maage_generation_stage stage)
 {
-    if (context->token) maage_job_set_stage(context->token, (unsigned int)stage + 1U);
-    return !context->token || !maage_job_cancelled(context->token);
+    static const unsigned char operations[] = {MAAGE_OPERATION_GENERATE, MAAGE_OPERATION_TERRAIN,
+        MAAGE_OPERATION_CAVES, MAAGE_OPERATION_ORES, MAAGE_OPERATION_SURFACE,
+        MAAGE_OPERATION_VEGETATION, MAAGE_OPERATION_STRUCTURES, MAAGE_OPERATION_FINALIZE};
+    maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, operations[stage], 0);
+    if (context->token) {
+        if (maage_job_cancelled(context->token))
+            return maage_generation_outcome(context, MAAGE_STATUS_INTERRUPTED, operations[stage]);
+        result = maage_job_set_stage(context->token, (unsigned int)stage + 1U);
+    }
+    return MAAGE_STATUS_TRACE(context->trace, result, MAAGE_CONTEXT_WORLD, operations[stage]);
 }
-static int maage_generation_features(maage_generation_context *context)
+static maage_status maage_generation_features(maage_generation_context *context)
 {
     int x, z, top;
-    if (!maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_CAVES) ||
-        !maage_generation_carve(context)) return 0;
+    maage_status result;
+    result = maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_CAVES);
+    if (!maage_status_failed(result)) result = maage_generation_carve(context);
+    if (maage_status_failed(result)) return result;
     context->chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_CAVES;
-    if (!maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_UNDERGROUND) ||
-        !maage_generation_underground(context)) return 0;
+    result = maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_UNDERGROUND);
+    if (!maage_status_failed(result)) result = maage_generation_underground(context);
+    if (maage_status_failed(result)) return result;
     context->chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_UNDERGROUND;
-    if (!maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_SURFACE) ||
-        !maage_generation_decorate(context)) return 0;
+    result = maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_SURFACE);
+    if (!maage_status_failed(result)) result = maage_generation_decorate(context);
+    if (maage_status_failed(result)) return result;
     context->chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_SURFACE;
-    if (!maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_VEGETATION) ||
-        !maage_generation_vegetation(context)) return 0;
+    result = maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_VEGETATION);
+    if (!maage_status_failed(result)) result = maage_generation_vegetation(context);
+    if (maage_status_failed(result)) return result;
     context->chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_VEGETATION;
-    if (!maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_STRUCTURES) ||
-        !maage_generation_structures(context)) return 0;
+    result = maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_STRUCTURES);
+    if (!maage_status_failed(result)) result = maage_generation_structures(context);
+    if (maage_status_failed(result)) return result;
     context->chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_STRUCTURES;
-    if (!maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_FINALIZE)) return 0;
+    result = maage_generation_stage_begin(context, MAAGE_GENERATION_STAGE_FINALIZE);
+    if (maage_status_failed(result)) return result;
     for (z = 0; z < 16; ++z) for (x = 0; x < 16; ++x) {
         top = MAAGE_WORLD_HEIGHT;
         while (top > 0 && maage_chunk_get(context->chunk, x, top - 1, z) == MAAGE_STATE_AIR) --top;
         context->chunk->heightmap[z * 16 + x] = (unsigned short)top;
     }
     context->chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_FINALIZE;
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_GENERATE, 0);
 }
 
-int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
+maage_status maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_generation_policy *policy, const maage_job_token *token)
+    const maage_generation_policy *policy, const maage_job_token *token, maage_status_trace *trace)
 {
     const maage_biome_definition *biome;
     maage_generation_column column;
@@ -254,34 +283,38 @@ int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
     maage_block_state_id state;
     unsigned long random;
     int x, z, y, wx, wz, top, depth;
+    maage_status result;
+    memset(&context, 0, sizeof(context)); context.trace = trace; context.token = token;
     if (!maage_generation_policy_valid(policy) || chunk == NULL ||
         !maage_block_registry_is_finalized(blocks) ||
         biomes == NULL || !biomes->finalized ||
         chunk->x < -MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE ||
         chunk->x >= MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE ||
         chunk->z < -MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE ||
-        chunk->z >= MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE) return 0;
+        chunk->z >= MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE) return maage_generation_outcome(&context, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_GENERATE);
     context.chunk = chunk; context.seed = seed; context.blocks = blocks;
     context.biomes = biomes; context.policy = policy; context.token = token;
     if (policy->generator_version == MAAGE_GENERATION_FEATURES_VERSION) {
-        if (!maage_generation_features_valid(blocks) ||
-            !maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_BASE)) return 0;
+        if (!maage_generation_features_valid(blocks))
+            return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_GENERATE);
+        if (maage_status_failed(maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_BASE)))
+            return maage_generation_outcome(&context, MAAGE_STATUS_INTERRUPTED, MAAGE_OPERATION_GENERATE);
         for (z = 0; z < 16; ++z) for (x = 0; x < 16; ++x) {
-            if (!maage_generation_column_at(seed, biomes, chunk->x * 16 + x, chunk->z * 16 + z, &column)) return 0;
+            if (!maage_generation_column_at(seed, biomes, chunk->x * 16 + x, chunk->z * 16 + z, &column)) return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_GENERATE);
             context.surface[z * 16 + x] = column.height;
             chunk->biomes[z * 16 + x] = column.biome;
         }
         chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_BASE;
-        if (!maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_TERRAIN)) return 0;
+        if (maage_status_failed(maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_TERRAIN))) return maage_generation_outcome(&context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_GENERATE);
     }
     for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
-        if (token && maage_job_cancelled(token)) return 0;
+        if (token && maage_job_cancelled(token)) return maage_generation_outcome(&context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_GENERATE);
         for (x = 0; x < MAAGE_CHUNK_EDGE; ++x) {
             wx = chunk->x * MAAGE_CHUNK_EDGE + x;
             wz = chunk->z * MAAGE_CHUNK_EDGE + z;
             if (policy->generator_version == MAAGE_GENERATION_FEATURES_VERSION) {
                 column.height = context.surface[z * 16 + x]; column.biome = chunk->biomes[z * 16 + x];
-            } else if (!maage_generation_column_at(seed, biomes, wx, wz, &column)) return 0;
+            } else if (!maage_generation_column_at(seed, biomes, wx, wz, &column)) return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_GENERATE);
             biome = maage_biome_registry_get(biomes, column.biome);
             chunk->biomes[z * MAAGE_CHUNK_EDGE + x] = column.biome;
             top = column.height > policy->sea_level ?
@@ -301,8 +334,13 @@ int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
                 else if (column.biome == MAAGE_BIOME_DESERT &&
                     y >= column.height - depth - 2) state = MAAGE_STATE_SANDSTONE;
                 else state = MAAGE_STATE_STONE;
-                if (maage_block_registry_state(blocks, state) == NULL ||
-                    !maage_chunk_set(chunk, x, y, z, state)) return 0;
+                if (!maage_block_registry_state(blocks, state))
+                    return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_GENERATE);
+                result = maage_chunk_set(chunk, x, y, z, state);
+                if (maage_status_failed(result)) {
+                    context.failure = result;
+                    return maage_generation_outcome(&context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_GENERATE);
+                }
             }
             chunk->heightmap[z * MAAGE_CHUNK_EDGE + x] = (unsigned short)(top + 1);
         }
@@ -311,39 +349,17 @@ int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
         chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_TERRAIN;
         return maage_generation_features(&context);
     }
-    return 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_GENERATE, 0);
 }
 
-int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_job_token *token)
-{
-    maage_generation_policy policy;
-    maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &policy);
-    return maage_generate_chunk_job_policy(chunk, seed, blocks, biomes, &policy, token);
-}
-
-int maage_generate_chunk_policy(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_generation_policy *policy)
-{
-    return maage_generate_chunk_job_policy(chunk, seed, blocks, biomes, policy, NULL);
-}
-
-int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes)
-{
-    return maage_generate_chunk_job(chunk, seed, blocks, biomes, NULL);
-}
-
-int maage_generator_spawn_policy(maage_world_seed seed,
+maage_status maage_generator_spawn_policy(maage_world_seed seed,
     const maage_biome_registry *biomes, const maage_generation_policy *policy,
     double feet[3])
 {
     maage_generation_column column;
     int radius, side, offset, x, z, best_height, best_x, best_z;
     if (!feet || !biomes || !biomes->finalized ||
-        !maage_generation_policy_valid(policy)) return 0;
+        !maage_generation_policy_valid(policy)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, 0);
     best_height = -1;
     best_x = best_z = 0;
     /* Deterministic bounded spiral of surface samples. A finite fallback
@@ -368,9 +384,9 @@ int maage_generator_spawn_policy(maage_world_seed seed,
                         feet[0] = x + 0.5;
                         feet[1] = column.height + 1.0;
                         if (policy->generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
-                            !maage_generation_spawn_floor(seed, biomes, policy, x, z, &feet[1])) return 0;
+                            !maage_generation_spawn_floor(seed, biomes, policy, x, z, &feet[1])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, 0);
                         feet[2] = z + 0.5;
-                        return 1;
+                        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_GENERATE, 0);
                     }
                 }
                 if (offset > radius - policy->spawn_search_step) break;
@@ -386,15 +402,7 @@ int maage_generator_spawn_policy(maage_world_seed seed,
     feet[1] = (best_height > policy->sea_level ?
         best_height : policy->sea_level) + 1.0;
     if (policy->generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
-        !maage_generation_spawn_floor(seed, biomes, policy, best_x, best_z, &feet[1])) return 0;
+        !maage_generation_spawn_floor(seed, biomes, policy, best_x, best_z, &feet[1])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, 0);
     feet[2] = best_z + 0.5;
-    return 1;
-}
-
-void maage_generator_spawn(maage_world_seed seed,
-    const maage_biome_registry *biomes, double feet[3])
-{
-    maage_generation_policy policy;
-    maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &policy);
-    maage_generator_spawn_policy(seed, biomes, &policy, feet);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_GENERATE, 0);
 }

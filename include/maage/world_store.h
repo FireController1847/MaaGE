@@ -26,71 +26,53 @@ typedef struct maage_world_record {
  * none exists. A seed with NULL id creates a unique new world. create requests
  * a new world; an existing requested ID is never overwritten. Owns a lifetime
  * exclusive world lock. Errors are static, credential-free text (256 bytes). */
-int maage_world_store_open(const char *instance_root, const char *id, int create,
-    const char *name, const maage_world_seed *seed, maage_world_store **store,
-    maage_world_record *record, char error[256]);
+
 /* With NULL id, generation_policy supplies creation defaults only if automatic
  * selection creates a world; resuming always uses the saved policy. An explicit
  * existing id requires NULL policy, rejecting overrides. NULL selects frozen
  * generator 1 for new worlds. Configured generators 2/3 require item definitions. */
-int maage_world_store_open_configured(const char *instance_root, const char *id,
+maage_status maage_world_store_open_configured(const char *instance_root, const char *id,
     int create, const char *name, const maage_world_seed *seed,
     const maage_generation_policy *generation_policy, const maage_item_registry *items,
-    maage_world_store **store, maage_world_record *record, char error[256]);
-/* Metadata compatibility adapters retain the existing parser's exact error text.
- * Pointer preconditions are INVALID_ARGUMENT; other legacy failures are ERROR
- * rather than guessing a cause from text. No diagnostics are emitted here. */
-maage_status maage_world_store_open_configured_status(const char *instance_root, const char *id,
-    int create, const char *name, const maage_world_seed *seed,
-    const maage_generation_policy *generation_policy, const maage_item_registry *items,
-    maage_world_store **store, maage_world_record *record, char error[256]);
-/* Modded worlds must use this variant before reading player metadata. It
- * borrows finalized item definitions until close so schemas 4-6 resolve stable
- * namespaced names to runtime IDs. The original open remains an adapter for
- * legacy numeric item mapping 1; it refuses named schemas rather than guessing. */
-int maage_world_store_open_with_items(const char *instance_root, const char *id,
-    int create, const char *name, const maage_world_seed *seed,
-    const maage_item_registry *items, maage_world_store **store,
-    maage_world_record *record, char error[256]);
+    maage_world_store **store, maage_world_record *record, char error[256], maage_status_trace *trace);
+/* Borrows finalized item definitions until close so schemas 4-6 resolve stable
+ * names to runtime IDs at import. NULL items retains legacy numeric mapping 1
+ * and refuses named schemas. Caller owns optional occurrence trace; no logging. */
+
 /* Startup/import only, before opening an instance world. The caller owns the
  * destination instance lease and must establish unambiguous/explicit ownership.
  * Legacy selection and every world lock exclude active writers. Atomic moves
  * preserve data in place; cross-filesystem fallback verifies copies before
  * promotion and retains originals. Journaled retries never overwrite worlds. */
 int maage_world_store_legacy_pending(const char *data_root);
-int maage_world_store_migrate_legacy(const char *data_root,
-    const char *instance_root, char error[256]);
+maage_status maage_world_store_migrate_legacy(const char *data_root,
+    const char *instance_root, char error[256], maage_status_trace *trace);
 /* Saves a caller-owned player snapshot without changing shared store data.
  * Serialize metadata saves with each other; chunk files are independent. */
-int maage_world_store_save_player(maage_world_store *store,
-    const double position[3], double yaw, double pitch, char error[256]);
+maage_status maage_world_store_save_player(maage_world_store *store,
+    const double position[3], double yaw, double pitch, char error[256], maage_status_trace *trace);
 /* Metadata schemas 1-5 remain readable; schema 1 starts with Creative and empty
  * inventory, schema 2 has at most 64 pickups, schema 3 has a checked 32-bit
  * count and legacy numeric item mapping 1. Schema 4 writes stable namespaced
  * item names in each inventory/cursor/pickup stack and a checked pickup count.
  * Schema 5 adds generator-2 policy. New named writes use schema 6, preserving
  * generator 1/2/3 policy and the clock/weather snapshot alongside player data.
- * Named schemas require open_with_items; missing names fail without overwriting.
- * The legacy open adapter writes schema 3 and rejects unmapped modded items. */
-int maage_world_store_save_gameplay(maage_world_store *store,
-    const double position[3], double yaw, double pitch,
-    const maage_gameplay *game, const maage_item_registry *items, char error[256]);
-int maage_world_store_save_environment_gameplay(maage_world_store *store,
+ * Named schemas require item definitions; missing names fail without overwriting.
+ * Without item definitions writes use schema 3 and reject unmapped modded items. */
+
+maage_status maage_world_store_save_environment_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
     const maage_gameplay *game, const maage_item_registry *items,
-    const maage_environment_state *environment, char error[256]);
-maage_status maage_world_store_save_environment_gameplay_status(maage_world_store *store,
-    const double position[3], double yaw, double pitch,
-    const maage_gameplay *game, const maage_item_registry *items,
-    const maage_environment_state *environment, char error[256]);
+    const maage_environment_state *environment, char error[256], maage_status_trace *trace);
+
 /* All jobs borrowing this store must finish before close releases its lock. */
-void maage_world_store_close(maage_world_store *store);
+maage_status maage_world_store_close(maage_world_store *store);
 /* Distinct coordinates may load/save concurrently: each job owns its buffers,
  * error storage and an immutable chunk snapshot, borrowing finalized registries.
  * The task owner serializes/coalesces writes to the same coordinate and keeps
  * store/registries alive until completion; no store-wide I/O mutex is needed.
- * Detached loaded columns transfer to caller. 1 loaded, 0 absent, -1 invalid/I/O
- * error; corruption never means air.
+ * Detached loaded columns transfer to caller. SUCCESS loads; dedicated
+ * WORLD_IO/LOAD/NOT_FOUND means absent. Corruption never means air.
  * Format 1 remains readable with its original fixed numeric mappings (states
  * 0,1,2,3,7,9,12,13,24,256..261; biomes 0..5). Format 2 remains readable.
  * New writes use format 3, retaining format-2 identity palettes:
@@ -102,29 +84,22 @@ void maage_world_store_close(maage_world_store *store);
  * chunk-owned numeric block entities with checked versioned opaque payloads.
  * Older chunks migrate atomically on save; unknown/corrupt data is preserved.
  * Each chunk header generator version matches its parent world metadata. */
-int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
+maage_status maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    maage_chunk **chunk, char error[256]);
-/* Primary outcome API: NOT_FOUND alone permits generation. Malformed/unmapped
+    maage_chunk **chunk, char error[256], maage_status_trace *trace);
+/* Only WORLD_IO/LOAD/NOT_FOUND permits generation; registry NOT_FOUND is unmapped save data. Malformed/unmapped
  * saves and inaccessible files remain failures and preserve the original data.
  * Caller-owned outputs keep concurrent column I/O independent. */
-maage_status maage_world_store_load_chunk_status(maage_world_store *store, int x, int z,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    maage_chunk **chunk, char error[256]);
-int maage_world_store_save_chunk(maage_world_store *store,
-    const maage_chunk *chunk, const maage_block_registry *blocks,
-    const maage_biome_registry *biomes, char error[256]);
+
+
 /* Snapshot clock is captured when the async save is submitted. Pending updates
  * serialize remaining delays, so an older clock checkpoint after a crash cannot
  * postpone them by an entire previous session. Import rebases on column load. */
-int maage_world_store_save_chunk_at(maage_world_store *store,
+maage_status maage_world_store_save_chunk_at(maage_world_store *store,
     const maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_biome_registry *biomes, unsigned long tick_low,
-    unsigned long tick_high, char error[256]);
-maage_status maage_world_store_save_chunk_at_status(maage_world_store *store,
-    const maage_chunk *chunk, const maage_block_registry *blocks,
-    const maage_biome_registry *biomes, unsigned long tick_low,
-    unsigned long tick_high, char error[256]);
+    unsigned long tick_high, char error[256], maage_status_trace *trace);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2,6 +2,7 @@
 #define MAAGE_BLOCKS_H
 
 #include <stddef.h>
+#include "maage/status.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -136,14 +137,6 @@ typedef struct maage_block_state_definition {
     maage_block_face_definition faces[MAAGE_FACE_COUNT];
 } maage_block_state_definition;
 
-typedef enum maage_registry_result {
-    MAAGE_REGISTRY_OK = 0,
-    MAAGE_REGISTRY_INVALID,
-    MAAGE_REGISTRY_DUPLICATE,
-    MAAGE_REGISTRY_FROZEN,
-    MAAGE_REGISTRY_OUT_OF_MEMORY
-} maage_registry_result;
-
 typedef struct maage_block_registry maage_block_registry;
 
 /* Capacities are initial hints (zero selects a small default). Both direct-indexed
@@ -151,16 +144,16 @@ typedef struct maage_block_registry maage_block_registry;
  *
  * The caller owns the registry. Definitions are borrowed until its destruction;
  * after finalize they are immutable. Registration copies names and definitions. */
-maage_block_registry *maage_block_registry_create(size_t block_capacity,
-    size_t state_capacity);
-void maage_block_registry_destroy(maage_block_registry *registry);
-maage_registry_result maage_block_registry_register_block(
+maage_status maage_block_registry_create(size_t block_capacity,
+    size_t state_capacity, maage_block_registry **output);
+maage_status maage_block_registry_destroy(maage_block_registry *registry);
+maage_status maage_block_registry_register_block(
     maage_block_registry *registry, const char *external_name,
     const maage_block_definition *definition);
-maage_registry_result maage_block_registry_register_state(
+maage_status maage_block_registry_register_state(
     maage_block_registry *registry,
     const maage_block_state_definition *definition);
-maage_registry_result maage_block_registry_finalize(
+maage_status maage_block_registry_finalize(
     maage_block_registry *registry);
 int maage_block_registry_is_finalized(const maage_block_registry *registry);
 size_t maage_block_registry_block_count(const maage_block_registry *registry);
@@ -168,7 +161,7 @@ size_t maage_block_registry_state_count(const maage_block_registry *registry);
 
 /* Registration / explicit import boundary only. Open-addressed hashing gives
  * expected O(1) lookup with exact collision checks, not worst-case O(1). */
-maage_registry_result maage_block_registry_resolve_name(
+maage_status maage_block_registry_resolve_name(
     const maage_block_registry *registry, const char *external_name,
     maage_block_id *block_id);
 
@@ -183,7 +176,7 @@ const maage_block_state_definition *maage_block_registry_state(
  * Within one block, state metadata must be unique. */
 const char *maage_block_registry_block_name(
     const maage_block_registry *registry, maage_block_id id);
-maage_registry_result maage_block_registry_resolve_state(
+maage_status maage_block_registry_resolve_state(
     const maage_block_registry *registry, maage_block_id block,
     unsigned int metadata, maage_block_state_id *id);
 

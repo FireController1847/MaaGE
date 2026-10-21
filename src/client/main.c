@@ -41,9 +41,12 @@ int maage_application_query(int argc, char *const argv[], int *result)
     free(output); return 1;
 }
 
-int maage_client_run(int argc, char *const argv[]);
-int maage_application_main(int argc, char *const argv[])
+maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *trace);
+maage_status maage_application_main(int argc, char *const argv[])
 {
+    maage_status_trace trace;
+    maage_status_trace_init(&trace);
+    MAAGE_STATUS_TRACE(&trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     maage_log_info("maage.client", "%s Client %s", maage_core_project_name, MAAGE_CLIENT_VERSION);
-    return maage_client_run(argc, argv);
+    return maage_client_run(argc, argv, &trace);
 }

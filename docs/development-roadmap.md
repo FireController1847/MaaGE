@@ -6,7 +6,7 @@ multithreaded architecture, Phase 2.75 UI, Phase 3 gameplay, Phase 3.5 instance 
 and the Phase 4 environment foundation below. Compilation does not establish
 runtime correctness or vanilla fidelity. Phases 5–6 remain future work.
 
-## Phase 1 — Rendering and Movement
+## Phase 1 — Initial Voxel Client
 
 Implemented foundation: standalone `maage-client`, version queries, native Window
 and Input, reconstructed PNG resources, frozen numeric block/state registration,
@@ -27,7 +27,7 @@ commands. Explicit renderer requests never switch families. Cocoa, Win32 and X11
 have native gameplay input; Wayland gameplay capture remains unsupported. X11's
 warp-relative fallback retains native pointer acceleration.
 
-## Phase 2 — World Architecture, Generation, Streaming, Lighting and Persistence
+## Phase 2 — World Generation and Chunk Streaming
 
 Implemented in the existing portable `MaaGE::World` library:
 
@@ -277,7 +277,7 @@ source paths remain uncompiled locally. Phase 3 extends this UI with inventory,
 targeting and basic game-mode controls. Crafting, a full settings system and
 multiplayer menus remain future phases.
 
-## Phase 3 — Player Interaction, Inventory and Core Gameplay
+## Phase 3 — Player Interaction and Core Gameplay
 
 Implemented foundations extend the existing World, scheduler, input and Client UI:
 
@@ -347,7 +347,7 @@ World/Server compilation passed. No application, test, benchmark, UI/runtime
 validation or GitHub Actions run was performed. Windows/Linux input source
 changes remain uncompiled locally; Wayland gameplay input remains unsupported.
 
-## Phase 3.5 — Instance Storage & Shared Folder Mapping
+## Phase 3.5 — Instance Storage and Shared Folder Mapping
 
 Instances are physical UUID environments, extending the existing Installations
 controls and Client-build registry. Names and selected Client labels remain the
@@ -459,7 +459,7 @@ builds passed. No applications, tests, benchmarks, runtime migrations, UI valida
 or GitHub Actions were run. Windows/Linux implementations remain uncompiled here;
 filesystem/link/remapping/migration behavior requires programmer runtime testing.
 
-## Phase 4 — World Systems
+## Phase 4 — World Simulation and Environmental Systems
 
 Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
 
@@ -531,7 +531,7 @@ macOS ARM64 Debug/Release Client and headless World/Server builds passed. No app
 benchmarks, runtime/visual validation or GitHub Actions ran. Windows/Linux and
 runtime shader compilation remain unverified; only Metal implements gameplay drawing.
 
-## Phase 4.5 — Client Resilience, Operation Status and Debug Refinement
+## Phase 4.5 — Client Resilience and Operation Status
 
 - **Operation Status:** independent C90 `MaaGE::Status` provides an explicitly
   verified unsigned 32-bit `0xSSCCOODD`, field extraction, numeric severity,
@@ -583,12 +583,55 @@ concurrency and shader behavior require programmer verification. Windows/Linux
 and other gameplay-renderer capabilities remain unverified. No applications,
 tests, benchmarks, graphical validation or GitHub Actions are run for this phase.
 
-## Phase 5 — Full Classic Gameplay
+## Phase 5 — Universal Operation Status & Execution Tracing
+
+- **Universal outcomes:** Core, platform services, Window/Input/Render, resource
+  loading, World/simulation/registries/persistence, GUI, instances, Launcher/auth
+  and the implemented Server lifecycle use canonical `maage_status` results.
+  Factories return owned outputs explicitly; SUCCESS and NOOP remain distinct,
+  warnings retain usable output, and failures describe the originating operation.
+  Superseded renderer/window/registry result enums and resource/World compatibility
+  wrappers are removed. Native callback actions, direct observations/predicates,
+  arithmetic and invariant-only lock/wake primitives remain intentional exceptions.
+  Immediate drawing reports through the enclosing GUI batch's canonical result.
+- **Causal diagnostics:** `include/maage/status.h` remains the sole authoritative
+  registry and tracing reference. The stable unsigned `0xSSCCOODD` result is usable
+  alone. An optional caller/task-owned trace stores twelve fixed-capacity frames,
+  original outcome, final disposition, recovery and an overflow count. Frames use
+  numeric operations, static source locations and separate native error numbers;
+  there are no dynamic diagnostic strings or global last-error state. Forwarding
+  preserves the original result rather than repeatedly replacing it with generic
+  dependency errors. Handlers log one causal diagnostic and reset before unrelated
+  operations. A bounded trace is a logical operation history, not native unwinding.
+- **Async ownership:** Jobs copy submission context and worker-owned trace records
+  through existing queue/completion handoffs. World generation stages, lighting,
+  meshing, load/save and Launcher worker services retain originating failures.
+  Cancellation preserves callback outcome; stale rejection is a separate disposition.
+  No caller stack pointers cross jobs, and tracing adds no global lock, barrier or
+  render-loop wait. Shutdown keeps borrowed World storage/registries alive if worker
+  termination fails; unsaved data cannot be reported as successfully flushed.
+- **Cost and recovery:** ordinary success propagation is a numeric check, with no
+  allocation, formatting or trace append. Trace reset touches metadata only;
+  bounded records copy at existing async handoffs. Log filtering precedes diagnostic
+  formatting. Phase 4.5 fallback textures/fonts/omitted decorations, deduplicated
+  notices, compact realtime F3 and immutable revision rejection remain. Deferred
+  gameplay actions report PARTIAL while preserving the original failure and state.
+- **Limits:** this is authored logical tracing, not exhaustive native stack capture
+  or a profiler. Traces may truncate after twelve frames and report the dropped
+  count. Native API translations cover the implemented boundaries; no networking,
+  protocol, remote distribution or additional renderer features are introduced.
+  Runtime behavior and Windows/Linux compilation remain programmer/platform work.
+
+macOS ARM64 Debug/Release Client, Launcher and Server builds and the separate
+headless Release World/Server build passed. No applications, tests, benchmarks,
+runtime/visual validation or GitHub Actions were executed.
+
+## Phase 6 — Full Gameplay Systems
 
 Planned: entities/mobs, AI, combat, crafting/furnaces, redstone, enchanting,
 Nether/End, progression and faithful Minecraft 1.7.10 mechanics.
 
-## Phase 6 — Client/Server Architecture
+## Phase 7 — Client/Server Architecture & Multiplayer
 
 Planned: authoritative dedicated Server simulation, a versioned network protocol,
 compatibility rules, multiplayer, player/world synchronization and Launcher server

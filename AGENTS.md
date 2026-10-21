@@ -71,16 +71,28 @@ before claiming functionality or successful platform validation.
 
 ### Operation outcomes and resource resilience
 
-- Core `MaaGE::Status` (`maage/status.h`) is the standard machine-readable outcome:
+- Core `MaaGE::Status` (`maage/status.h`) is the universal operation-outcome contract:
   verified unsigned 32-bit `0xSSCCOODD` (Status, Context, Operation, Detail).
   The public header is the authoritative stable numeric registry; unassigned bytes
   remain unknown. Severity derives from the top two status bits; success context
   is zero. Serialize explicitly as SS, CC, OO, DD bytes, independently of host layout.
-- Preserve original failures across compatibility adapters and worker completion;
-  recovery has its own result. Log hex results with paths/IDs/native errors as
-  separate occurrence context, once at the handling boundary. No global last-error
-  state, extra World lock or worker wait. Callback outcome survives cancellation;
-  cancelled and stale dispositions remain distinguishable.
+- Nearly all meaningful operations return or participate in status reporting,
+  including successful mutations/lifecycle changes and explicit NOOP outcomes.
+  Keep exceptions intentional: pure math/predicates, direct getters, native ABI
+  callbacks/action outputs and invariant-only synchronization primitives. Immediate
+  UI drawing accumulates a canonical batch result instead of checking each glyph.
+  Native process exits explicitly convert results. Do not reintroduce competing
+  error enums, boolean wrappers or logging-only operation contracts.
+- Preserve originating results through synchronous propagation and task-owned
+  bounded causal traces; recovery has its own result. Jobs copy traces by value
+  through existing handoffs, never borrowing caller stack data. Callback outcome
+  survives cancellation; cancelled and stale dispositions remain distinct. Reset
+  a trace after handling an occurrence, before unrelated work. No global last-error,
+  trace locks, unbounded histories, per-call heap allocation or hot-path formatting.
+- Success/NOOP, usable warnings/partial results, errors and fatal outcomes remain
+  distinct. Status severity and log verbosity are independent. Log hex results,
+  causal operations/source locations and separate paths/IDs/native errors once at
+  the handling boundary; filter logging before formatting trace diagnostics.
 - Optional visual failures use a generated magenta/black nearest-sampled atlas tile,
   minimal font/default tints or omitted decorations, retaining useful visuals.
   Cache failures per immutable resource generation; explicit destroy/reload retries.
