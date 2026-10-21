@@ -149,33 +149,65 @@ int maage_clients_path(const maage_client_registry *r, const char *id, char path
 }
 void maage_client_build_label(const maage_client_build *b, char label[384])
 { sprintf(label,"%s%s%s | %.24s | %.12s | %.96s",b->version,*b->build ? " + " : "",b->build,b->build_type,b->origin,b->status); }
+static int maage_client_add_string(struct json_object *o, const char *key, const char *value)
+{
+    struct json_object *child = json_object_new_string(value);
+    if (!child) return 0;
+    if (json_object_object_add(o, key, child)) { json_object_put(child); return 0; }
+    return 1;
+}
 static int maage_client_save(maage_client_registry *r)
 {
-    struct json_object *o=json_object_new_object(), *list=json_object_new_array(), *b;
+    struct json_object *o = json_object_new_object(), *list = json_object_new_array();
+    struct json_object *b, *number;
     char path[MAAGE_PATH_CAPACITY], tmp[MAAGE_PATH_CAPACITY];
-    const char *text; unsigned i; FILE *f; int ok=0;
-    if (!o || !list) { if (o) json_object_put(o); if (list) json_object_put(list); return 0; }
-    json_object_object_add(o,"schema",json_object_new_int(1));
-    for(i=0;i<r->count;++i) {
-        maage_client_build *item=&r->builds[i]; b=json_object_new_object();
-#define MAAGE_CLIENT_FIELD(key) json_object_object_add(b,#key,json_object_new_string(item->key))
+    const char *text;
+    unsigned i;
+    FILE *f;
+    int ok = 0;
+    if (!o || !list) goto failed;
+    number = json_object_new_int(1);
+    if (!number) goto failed;
+    if (json_object_object_add(o,"schema",number)) { json_object_put(number); goto failed; }
+    for (i = 0; i < r->count; ++i) {
+        const maage_client_build *item = &r->builds[i];
+        b = json_object_new_object();
+        if (!b) goto failed;
+#define MAAGE_CLIENT_FIELD(key) if (!maage_client_add_string(b,#key,item->key)) { json_object_put(b); goto failed; }
         MAAGE_CLIENT_FIELD(id); MAAGE_CLIENT_FIELD(version); MAAGE_CLIENT_FIELD(build); MAAGE_CLIENT_FIELD(build_type);
         MAAGE_CLIENT_FIELD(platform); MAAGE_CLIENT_FIELD(architecture); MAAGE_CLIENT_FIELD(executable);
         MAAGE_CLIENT_FIELD(sha256); MAAGE_CLIENT_FIELD(origin); MAAGE_CLIENT_FIELD(channel);
 #undef MAAGE_CLIENT_FIELD
-        if (item->instance_storage)
-            json_object_object_add(b,"instance_storage",json_object_new_int(item->instance_storage));
-        json_object_object_add(b,"imported",json_object_new_double(item->imported)); json_object_array_add(list,b);
+        if (item->instance_storage) {
+            number = json_object_new_int(item->instance_storage);
+            if (!number) { json_object_put(b); goto failed; }
+            if (json_object_object_add(b,"instance_storage",number)) {
+                json_object_put(number); json_object_put(b); goto failed;
+            }
+        }
+        number = json_object_new_double(item->imported);
+        if (!number) { json_object_put(b); goto failed; }
+        if (json_object_object_add(b,"imported",number)) {
+            json_object_put(number); json_object_put(b); goto failed;
+        }
+        if (json_object_array_add(list,b)) { json_object_put(b); goto failed; }
     }
-    json_object_object_add(o,"builds",list); text=json_object_to_json_string_ext(o,JSON_C_TO_STRING_PRETTY);
-    if (!text || strlen(text) > MAAGE_CLIENT_REGISTRY_BYTES) { json_object_put(o); return 0; }
+    if (json_object_object_add(o,"builds",list)) goto failed;
+    list = NULL;
+    text = json_object_to_json_string_ext(o,JSON_C_TO_STRING_PRETTY);
+    if (!text || strlen(text) > MAAGE_CLIENT_REGISTRY_BYTES) goto failed;
     if (maage_storage_join(path,sizeof(path),r->root,"config/client-builds.json") &&
-        maage_storage_join(tmp,sizeof(tmp),r->root,"config/client-builds.json.tmp") && (f=maage_storage_open(tmp,"wb"))!=NULL) {
-        ok=fwrite(text,1,strlen(text),f)==strlen(text); if(fclose(f)) ok=0;
-        if(ok) ok=maage_storage_replace(tmp,path);
-        if(!ok) maage_storage_remove(tmp);
+        maage_storage_join(tmp,sizeof(tmp),r->root,"config/client-builds.json.tmp") &&
+        (f = maage_storage_open(tmp,"wb")) != NULL) {
+        ok = fwrite(text,1,strlen(text),f) == strlen(text);
+        if (fclose(f)) ok = 0;
+        if (ok) ok = maage_storage_replace(tmp,path);
+        if (!ok) maage_storage_remove(tmp);
     }
-    json_object_put(o); return ok;
+failed:
+    if (list) json_object_put(list);
+    if (o) json_object_put(o);
+    return ok;
 }
 static int maage_client_sort(const void *left, const void *right)
 {
@@ -228,7 +260,7 @@ static int maage_clients_read(maage_client_registry *r, const char *root, char e
         ++r->count;
     }
     /* Highest SemVer first; build metadata never changes SemVer precedence. */
-    qsort(r->builds,r->count,sizeof(*r->builds),maage_client_sort);
+    if (r->count > 1) qsort(r->builds,r->count,sizeof(*r->builds),maage_client_sort);
     json_object_put(o); return 1;
 invalid:
     json_object_put(o); r->count=0; strcpy(error,"Invalid Client registry entry; restore the registry before managing builds."); return 0;
