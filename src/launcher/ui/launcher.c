@@ -117,7 +117,7 @@ int maage_launcher_ui_save(maage_launcher_ui *ui)
     if (!text || (length = strlen(text)) > MAAGE_LAUNCHER_PREFERENCES_BYTES) goto release;
     file = maage_storage_open(temporary, "wb");
     if (file) {
-        ok = fwrite(text, 1, length) == length && maage_storage_sync(file);
+        ok = fwrite(text, 1, length, file) == length && maage_storage_sync(file);
         if (fclose(file)) ok = 0;
         if (ok) ok = maage_storage_replace(temporary, path);
     }
