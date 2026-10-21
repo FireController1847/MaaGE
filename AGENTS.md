@@ -219,7 +219,9 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Non-macOS Fullscreen uses supported borderless fullscreen, never fabricated exclusive mode.
   macOS Borderless stays in its desktop Space and covers the display, while Fullscreen
   uses native AppKit Spaces. Both request full-display content; GUI respects the safe
-  area without cropping the world. Track asynchronous mode completion and restore
+  area without cropping the world. Embed a Client-specific Info.plist in its standalone
+  Mach-O executable (not the Launcher bundle) to disable notch compatibility mode;
+  native AppKit fullscreen may still reserve the top camera/menu-bar strip. Track asynchronous mode completion and restore
   windowed geometry and input capture correctly.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe

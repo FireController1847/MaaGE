@@ -33,6 +33,12 @@ set_target_properties(maage_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY
 set(MAAGE_CLIENT_MANIFEST "$<TARGET_FILE_DIR:maage_client>/maage-client.json")
 if(MAAGE_PLATFORM_MACOS)
     set_target_properties(maage_client PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+    # This Launcher-managed executable has no bundle Info.plist. Embed its
+    # generated plist into Mach-O so AppKit opts out of notch compatibility mode.
+    set(MAAGE_CLIENT_PLIST "${PROJECT_BINARY_DIR}/generated/maage/client_Info.plist")
+    target_link_options(maage_client PRIVATE
+        "LINKER:-sectcreate,__TEXT,__info_plist,${MAAGE_CLIENT_PLIST}")
+    set_property(TARGET maage_client APPEND PROPERTY LINK_DEPENDS "${MAAGE_CLIENT_PLIST}")
 elseif(MAAGE_PLATFORM_LINUX)
     set_target_properties(maage_client PROPERTIES BUILD_RPATH_USE_ORIGIN ON BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
 endif()

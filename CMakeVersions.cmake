@@ -7,7 +7,7 @@ set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.34")
 set(MAAGE_CLIENT_VERSION_MAJOR 0)
 set(MAAGE_CLIENT_VERSION_MINOR 1)
 set(MAAGE_CLIENT_VERSION_PATCH 0)
-set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.18")
+set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.19")
 
 set(MAAGE_SERVER_VERSION_MAJOR 1)
 set(MAAGE_SERVER_VERSION_MINOR 0)
@@ -73,6 +73,26 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
 #endif
 ]=] @ONLY)
+        # The Client is a standalone Mach-O executable, not an .app bundle.
+        # Embed its own Info.plist so macOS honors notch compatibility settings.
+        if(application STREQUAL "client")
+            file(CONFIGURE OUTPUT "${MAAGE_VERSION_OUTPUT_DIR}/maage/client_Info.plist" CONTENT [=[
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>maage-client</string>
+    <key>CFBundleName</key><string>@MAAGE_CLIENT_NAME@</string>
+    <key>CFBundleIdentifier</key><string>@MAAGE_CLIENT_IDENTIFIER@</string>
+    <key>CFBundleShortVersionString</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
+    <key>CFBundleVersion</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
+    <key>MaaGESemanticVersion</key><string>@MAAGE_VERSION@</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
+</dict>
+</plist>
+]=] @ONLY)
+        endif()
         if(NOT application STREQUAL "launcher")
             continue()
         endif()
@@ -113,6 +133,7 @@ else()
         BYPRODUCTS
             "${PROJECT_BINARY_DIR}/generated/maage/launcher_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/client_version.h"
+            "${PROJECT_BINARY_DIR}/generated/maage/client_Info.plist"
             "${PROJECT_BINARY_DIR}/generated/maage/server_version.h"
             "${PROJECT_BINARY_DIR}/generated/maage/launcher_Info.plist"
         COMMENT "Refreshing application versions from Git HEAD"
