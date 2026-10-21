@@ -628,15 +628,24 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     slots = download_options.max_concurrent;
     if (!unique) slots = 1;
     else if ((unsigned long)slots > unique) slots = (unsigned int)unique;
-    if (!slots || (size_t)slots > (size_t)-1 / sizeof(*destinations) ||
-        (size_t)slots > (size_t)-1 / sizeof(*urls) ||
-        (size_t)slots > (size_t)-1 / sizeof(*requests) ||
-        (size_t)slots > (size_t)-1 / sizeof(*batch_indices)) goto memory_error;
-    destinations = (char (*)[MAAGE_PATH_CAPACITY])calloc(slots, sizeof(*destinations));
-    urls = (char (*)[160])calloc(slots, sizeof(*urls));
-    requests = (maage_download_request *)calloc(slots, sizeof(*requests));
-    batch_indices = (unsigned long *)calloc(slots, sizeof(*batch_indices));
-    if (!destinations || !urls || !requests || !batch_indices) goto memory_error;
+    /* Resource pressure reduces effective parallelism without losing objects. */
+    for (;;) {
+        if ((size_t)slots <= (size_t)-1 / sizeof(*destinations) &&
+            (size_t)slots <= (size_t)-1 / sizeof(*urls) &&
+            (size_t)slots <= (size_t)-1 / sizeof(*requests) &&
+            (size_t)slots <= (size_t)-1 / sizeof(*batch_indices)) {
+            destinations = (char (*)[MAAGE_PATH_CAPACITY])calloc(slots, sizeof(*destinations));
+            urls = (char (*)[160])calloc(slots, sizeof(*urls));
+            requests = (maage_download_request *)calloc(slots, sizeof(*requests));
+            batch_indices = (unsigned long *)calloc(slots, sizeof(*batch_indices));
+            if (destinations && urls && requests && batch_indices) break;
+        }
+        free(destinations); free(urls); free(requests); free(batch_indices);
+        destinations = NULL; urls = NULL; requests = NULL; batch_indices = NULL;
+        if (slots <= 1) goto memory_error;
+        slots /= 2;
+        maage_log_warn("maage.launcher.assets", "Reducing download batch concurrency to %u due to resource limits.", slots);
+    }
     observer.cancelled = maage_assets_cancelled; observer.bytes = maage_assets_bytes; observer.context = assets;
     if (completed < unique) maage_assets_stage(assets, MAAGE_SETUP_DOWNLOADING, "Downloading and verifying resources");
     for (i = 0; i < unique; ) {
