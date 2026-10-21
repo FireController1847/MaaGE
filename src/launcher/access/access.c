@@ -226,8 +226,13 @@ static void maage_access_load(maage_access *a)
     root = count == size && !ferror(file) ? maage_access_json(data, size) : NULL;
     fclose(file); free(data);
     if (!root) { a->loaded = -1; maage_log_warn("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return; }
+    if (!json_object_object_get_ex(root, "profiles", &list) || !json_object_is_type(list, json_type_array)) {
+        a->loaded = -1;
+        maage_log_warn("maage.launcher.access", "Profile registry has no valid profiles array; refusing to overwrite it.");
+        json_object_put(root); return;
+    }
     maage_access_lock(a);
-    if (json_object_object_get_ex(root, "profiles", &list) && json_object_is_type(list, json_type_array)) {
+    {
         count = json_object_array_length(list);
         for (i = 0; i < count; ++i) {
             maage_access_profile *p;
