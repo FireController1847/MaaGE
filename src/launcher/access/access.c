@@ -212,16 +212,20 @@ static void maage_access_load(maage_access *a)
     const char *name;
     a->loaded = 1;
     if (!maage_access_path(a, path, "minecraft-profiles.json")) return;
-    file = maage_storage_open(path, "rb"); if (!file) return;
+    file = maage_storage_open(path, "rb");
+    if (!file) {
+        if (maage_storage_status(path)) a->loaded = -1;
+        return;
+    }
     /* File-size limit protects untrusted metadata; no entry-count ceiling. */
     if (fseek(file, 0, SEEK_END) || (size = (size_t)ftell(file)) > 8UL * 1024UL * 1024UL ||
-        fseek(file, 0, SEEK_SET)) { fclose(file); maage_log_warn("maage.launcher.access", "Profile registry exceeds safe metadata size or cannot be read."); return; }
+        fseek(file, 0, SEEK_SET)) { fclose(file); a->loaded = -1; maage_log_warn("maage.launcher.access", "Profile registry exceeds safe metadata size or cannot be read."); return; }
     data = (char *)malloc(size + 1);
-    if (!data) { fclose(file); maage_log_error("maage.launcher.access", "Cannot allocate profile metadata."); return; }
+    if (!data) { fclose(file); a->loaded = -1; maage_log_error("maage.launcher.access", "Cannot allocate profile metadata."); return; }
     count = fread(data, 1, size, file);
     root = count == size && !ferror(file) ? maage_access_json(data, size) : NULL;
     fclose(file); free(data);
-    if (!root) { maage_log_warn("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return; }
+    if (!root) { a->loaded = -1; maage_log_warn("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return; }
     maage_access_lock(a);
     if (json_object_object_get_ex(root, "profiles", &list) && json_object_is_type(list, json_type_array)) {
         count = json_object_array_length(list);
@@ -232,7 +236,7 @@ static void maage_access_load(maage_access *a)
             if (a->view.count == UINT_MAX || !maage_access_reserve(a,a->view.count + 1)) {
                 maage_log_error("maage.launcher.access", "Cannot allocate additional profile metadata; remaining entries not loaded.");
                 strcpy(a->view.status,"Cannot load all saved accounts: insufficient memory.");
-                break;
+                a->loaded = -1; break;
             }
             p = &a->view.profiles[a->view.count++]; strcpy(p->uuid, uuid); strcpy(p->name, name);
             p->connected = 1; p->state = MAAGE_ACCESS_DETECTED; strcpy(p->sources, "Microsoft");
@@ -258,6 +262,10 @@ static int maage_access_save(maage_access *a)
     unsigned i;
     FILE *file;
     int ok = 0, entries_ok = 1;
+    if (a->loaded < 0) {
+        maage_log_error("maage.launcher.access", "Profile registry could not be loaded completely; refusing to overwrite saved account metadata.");
+        return 0;
+    }
     if (!maage_access_path(a, path, "minecraft-profiles.json") ||
         !maage_access_path(a, temporary, "minecraft-profiles.part") ||
         !maage_access_path(a, lockpath, "minecraft-profiles.lock")) return 0;
