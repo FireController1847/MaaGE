@@ -99,7 +99,7 @@ maage_status maage_window_create(maage_window_system *system,
     *output = NULL;
     if (!system || !config || !config->title || config->width <= 0 ||
         config->height <= 0 || config->mode < MAAGE_WINDOW_WINDOWED ||
-        config->mode > MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE, !system ? 0 : 1), MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE);
+        config->mode > MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE, !system ? 0 : 1), MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE);
     window = (maage_window *)calloc(1, sizeof(*window));
     if (!window) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE);
     window->system = system;
@@ -263,7 +263,7 @@ maage_status maage_window_resize(maage_window *window, int width, int height)
 }
 maage_status maage_window_set_mode(maage_window *window, maage_window_mode mode)
 {
-    if (!window || mode < MAAGE_WINDOW_WINDOWED || mode > MAAGE_WINDOW_NATIVE_FULLSCREEN)
+    if (!window || mode < MAAGE_WINDOW_WINDOWED || mode > MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     return window->system->api->mode(window, mode);
 }

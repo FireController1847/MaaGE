@@ -412,6 +412,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int player_ready = 0, cx, cz, i, was_modal, was_focused = 0;
     int attack_pending = 0, use_pending = 0, changing_mode = 0, was_changing_mode = 0;
     int options_ready = 0, options_save_needed = 0, was_options_visible = 0;
+    int resize_pending = 0, logged_max_fps = -1, logged_vsync = -1;
     memset(&resources, 0, sizeof(resources)); memset(&cache, 0, sizeof(cache)); memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&debug, 0, sizeof(debug));
     memset(&interaction, 0, sizeof(interaction)); memset(&intent, 0, sizeof(intent));
@@ -582,6 +583,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
         result = maage_window_get_state(window, &state);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+        state.resized = state.resized || resize_pending;
+        resize_pending = 0;
         if (state.close_requested) { ok = 1; break; }
         result = maage_window_get_input(window, &input);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
@@ -612,6 +615,14 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             maage_client_ui_notify(ui, operation, maage_time_monotonic_seconds());
             maage_status_trace_init(trace);
             MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
+        }
+        if (logged_max_fps != maage_client_ui_max_fps(ui) || logged_vsync != maage_client_ui_vsync(ui)) {
+            logged_max_fps = maage_client_ui_max_fps(ui);
+            logged_vsync = maage_client_ui_vsync(ui);
+            maage_log_status(MAAGE_LOG_INFO, "maage.client.options",
+                maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0),
+                "Frame pacing: max_fps=%d (0 is unlimited); VSync=%s.",
+                logged_max_fps, logged_vsync ? "on" : "off");
         }
         changing_mode = maage_client_ui_window_mode_changing(ui);
         if (was_options_visible && !maage_client_ui_options_visible(ui))
@@ -819,13 +830,26 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             result = maage_window_wait_events(system, 100);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
         } else if (maage_client_ui_max_fps(ui) > 0) {
-            double remaining = 1.0 / maage_client_ui_max_fps(ui) - (frame_end - now);
-            /* Integer-millisecond event waits never spin and leave fixed-step
-             * simulation driven by measured monotonic elapsed time. */
-            int milliseconds = (int)(remaining * 1000.0);
-            if (milliseconds > 0) {
+            maage_window_state waited_state;
+            double deadline = now + 1.0 / maage_client_ui_max_fps(ui);
+            double remaining = deadline - frame_end;
+            int milliseconds;
+            /* Events may wake a wait early. Keep pumping until the deadline;
+             * round upward so a sub-millisecond remainder still yields. */
+            while (remaining > 0) {
+                milliseconds = (int)ceil(remaining * 1000.0);
+                if (milliseconds > 100) milliseconds = 100;
                 result = maage_window_wait_events(system, milliseconds);
                 if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+                /* Consume resize notifications to let event backends wait
+                 * again, retaining the renderer's resize for the next frame. */
+                result = maage_window_get_state(window, &waited_state);
+                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+                resize_pending = resize_pending || waited_state.resized;
+                if (waited_state.close_requested) break;
+                frame_end = maage_time_monotonic_seconds();
+                if (frame_end < 0) goto clock_failed;
+                remaining = deadline - frame_end;
             }
         }
     }

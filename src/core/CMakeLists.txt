@@ -34,7 +34,7 @@ if(MAAGE_BUILD_LAUNCHER OR MAAGE_BUILD_MINECRAFT_ASSETS OR MAAGE_BUILD_IMAGE OR 
     add_subdirectory(storage)
 endif()
 option(MAAGE_BUILD_JOBS "Build the reusable bounded CPU job scheduler" ${MAAGE_BUILD_WORLD})
-if(MAAGE_BUILD_WORLD OR MAAGE_BUILD_JOBS)
+if((MAAGE_BUILD_WORLD OR MAAGE_BUILD_JOBS) AND NOT TARGET MaaGE::Thread)
     add_subdirectory(thread)
 endif()
 if(MAAGE_BUILD_JOBS)

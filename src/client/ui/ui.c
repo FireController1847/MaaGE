@@ -49,14 +49,12 @@ static void maage_client_ui_slider_draw(maage_client_ui *ui, maage_client_ui_rec
     handle.width = 6; handle.y -= 2; handle.height = 6;
     maage_client_ui_panel(ui, handle, 0.9f, 0.9f, 0.9f, 1);
 }
-/* Fullscreen on non-AppKit backends is compositor/WM borderless fullscreen,
- * never a claim of exclusive display ownership. */
+/* The three game choices map to distinct window contracts. Unsupported
+ * exclusive display ownership is reported by the platform adapter. */
 static maage_window_mode maage_client_ui_platform_mode(maage_client_window_choice choice)
 {
     if (choice == MAAGE_CLIENT_WINDOWED) return MAAGE_WINDOW_WINDOWED;
-#if defined(__APPLE__)
-    if (choice == MAAGE_CLIENT_FULLSCREEN) return MAAGE_WINDOW_NATIVE_FULLSCREEN;
-#endif
+    if (choice == MAAGE_CLIENT_FULLSCREEN) return MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN;
     return MAAGE_WINDOW_BORDERLESS_FULLSCREEN;
 }
 static void maage_client_ui_request_window_mode(maage_client_ui *ui, maage_client_window_choice choice)
@@ -90,13 +88,14 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
         unsigned int game_index = ui->game ? 5 : 99;
         unsigned int back_index = ui->game ? 6 : 5;
-        if (input->primary_pressed && hover == 0) ui->dragging_fps = 1;
-        if (!input->primary_down) ui->dragging_fps = 0;
-        if (ui->dragging_fps && input->primary_down) {
+        if ((input->primary_pressed && hover == 0) ||
+            (ui->dragging_fps && input->primary_down)) {
             rectangle = maage_client_ui_menu_rectangle(ui, 0, screen);
             rectangle.x += 12; rectangle.width -= 24;
             maage_client_ui_slider_move(ui, rectangle);
         }
+        if (input->primary_pressed && hover == 0) ui->dragging_fps = 1;
+        if (!input->primary_down) ui->dragging_fps = 0;
         if (ui->selected == 0) {
             if (input->left && ui->fps_step > 0) --ui->fps_step;
             if (input->right && ui->fps_step < 26) ++ui->fps_step;
@@ -349,7 +348,7 @@ maage_status maage_client_ui_set_window_state(maage_client_ui *ui, const maage_w
         }
     } else {
         if (state->mode == MAAGE_WINDOW_WINDOWED) ui->window_mode = MAAGE_CLIENT_WINDOWED;
-        else if (state->mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) ui->window_mode = MAAGE_CLIENT_FULLSCREEN;
+        else if (state->mode == MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN) ui->window_mode = MAAGE_CLIENT_FULLSCREEN;
         else if (state->mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN &&
             ui->window_mode == MAAGE_CLIENT_WINDOWED) ui->window_mode = MAAGE_CLIENT_BORDERLESS;
         if (ui->window_mode) ui->last_nonwindowed_mode = ui->window_mode;
@@ -372,9 +371,8 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
             ui->vsync_supported = 0;
             ui->route_result = result;
-        }
+        } else ui->vsync = options->vsync;
     }
-    ui->vsync = options->vsync;
     ui->last_nonwindowed_mode = options->fullscreen_style;
     ui->confirmed_fullscreen_style = options->fullscreen_style;
     if (options->window_mode != MAAGE_CLIENT_WINDOWED)

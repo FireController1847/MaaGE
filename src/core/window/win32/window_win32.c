@@ -203,7 +203,7 @@ static maage_status maage_win32_mode(maage_window *window, maage_window_mode mod
     MONITORINFO monitor;
     RECT frame;
     LONG_PTR style;
-    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode >= MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == window->state.mode) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
         GetWindowRect(native->handle, &native->normal_rect);

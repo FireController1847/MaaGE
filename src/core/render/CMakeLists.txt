@@ -15,6 +15,9 @@ option(MAAGE_ENABLE_OPENGL_LEGACY "Build OpenGL 1.1 compatibility when available
 option(MAAGE_ENABLE_SOFTWARE "Build the portable CPU framebuffer renderer" ON)
 
 if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
+    if(NOT TARGET MaaGE::Thread)
+        add_subdirectory("${PROJECT_SOURCE_DIR}/src/core/thread" "${PROJECT_BINARY_DIR}/src/core/thread")
+    endif()
     enable_language(OBJC)
     find_library(MAAGE_METAL_FRAMEWORK Metal REQUIRED)
     find_library(MAAGE_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
@@ -31,7 +34,7 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
     target_compile_definitions(maage_render PRIVATE MAAGE_RENDER_HAS_METAL)
     target_compile_options(maage_render PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>")
     target_link_libraries(maage_render PRIVATE "${MAAGE_METAL_FRAMEWORK}"
-        "${MAAGE_QUARTZCORE_FRAMEWORK}" "${MAAGE_RENDER_APPKIT_FRAMEWORK}")
+        "${MAAGE_QUARTZCORE_FRAMEWORK}" "${MAAGE_RENDER_APPKIT_FRAMEWORK}" MaaGE::Thread)
 endif()
 if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
     # Required for Vulkan-enabled builds: never silently drop the native backend.

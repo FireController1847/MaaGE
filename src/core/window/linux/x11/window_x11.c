@@ -125,7 +125,7 @@ static maage_status maage_x11_mode(maage_window *window, maage_window_mode mode)
     maage_x11_window *native = window->platform;
     XEvent event;
     unsigned long hints[5];
-    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode >= MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN && !system->has_fullscreen)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     memset(hints, 0, sizeof(hints));

@@ -255,7 +255,7 @@ static maage_status maage_wayland_title(maage_window *window, const char *title)
 static maage_status maage_wayland_mode(maage_window *window, maage_window_mode mode)
 {
     maage_wayland_window *native = window->platform;
-    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode >= MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == MAAGE_WINDOW_BORDERLESS_WINDOWED && !native->decoration)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     native->requested_mode = mode;

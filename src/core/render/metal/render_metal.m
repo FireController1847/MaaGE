@@ -4,9 +4,12 @@
 #import <QuartzCore/CATransaction.h>
 #include "../render_internal.h"
 #include "maage/log.h"
+#include "maage/thread.h"
 #include "maage_mesh.h"
 #include <stdlib.h>
 #include <string.h>
+
+#define MAAGE_METAL_FRAME_SLOTS 4
 
 typedef struct maage_metal_renderer {
     id<MTLDevice> device;
@@ -21,14 +24,175 @@ typedef struct maage_metal_renderer {
     id<MTLDepthStencilState> depth_state;
     id<MTLTexture> depth;
     id<MTLRenderPipelineState> ui_pipeline;
-    id<MTLBuffer> ui_vertices[3];
-    id<MTLBuffer> ui_indices[3];
+    id<MTLBuffer> ui_vertices[MAAGE_METAL_FRAME_SLOTS][3];
+    id<MTLBuffer> ui_indices[MAAGE_METAL_FRAME_SLOTS][3];
+    id<MTLCommandBuffer> frames[MAAGE_METAL_FRAME_SLOTS];
+    id<MTLTexture> colors[MAAGE_METAL_FRAME_SLOTS];
+    id<MTLCommandQueue> present_queue;
+    maage_mutex *present_mutex;
+    maage_condition *present_condition;
+    maage_thread *present_thread;
+    unsigned long sequence[MAAGE_METAL_FRAME_SLOTS], submitted, presented;
+    int asynchronous, stopping, presenting;
+    maage_status present_result;
+    maage_status_trace frame_traces[MAAGE_METAL_FRAME_SLOTS], present_trace;
+    unsigned int frame_slot;
+    double sample_start, drawable_seconds, wait_seconds, gpu_seconds;
+    unsigned long sample_frames, gpu_samples;
 } maage_metal_renderer;
 typedef struct maage_metal_mesh {
     id<MTLBuffer> vertices;
     id<MTLBuffer> indices;
     NSUInteger index_count;
 } maage_metal_mesh;
+
+/* Only the cached layer and immutable Metal objects cross this boundary.
+ * NSWindow/NSView and all geometry changes remain on the main thread. */
+static void maage_metal_present_loop(void *context)
+{
+    maage_metal_renderer *native = context;
+    for (;;) {
+        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+        id<MTLCommandBuffer> rendered = nil, command = nil;
+        id<CAMetalDrawable> drawable;
+        id<MTLTexture> color, previous_color = nil;
+        id<MTLBlitCommandEncoder> copy;
+        unsigned int slot, newest = 0;
+        unsigned long sequence = 0, pending = 0;
+        unsigned int pending_slot = 0;
+        maage_status_trace trace;
+        double acquired, waited;
+        maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+        long native_error = 0;
+        int cancelled;
+        maage_mutex_lock(native->present_mutex);
+        for (;;) {
+            for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot) {
+                if (native->sequence[slot] > pending) {
+                    pending = native->sequence[slot]; pending_slot = slot;
+                }
+                if (native->sequence[slot] > sequence &&
+                    ([native->frames[slot] status] == MTLCommandBufferStatusCompleted ||
+                     [native->frames[slot] status] == MTLCommandBufferStatusError)) {
+                    sequence = native->sequence[slot]; newest = slot;
+                }
+            }
+            if (native->stopping || pending) break;
+            maage_condition_wait(native->present_condition, native->present_mutex);
+        }
+        if (native->stopping) {
+            maage_mutex_unlock(native->present_mutex); [pool drain]; break;
+        }
+        if (!sequence) {
+            /* GPU completion, never drawable availability, may delay selection.
+             * Retaining the command lets the owner recycle unrelated slots. */
+            rendered = [native->frames[pending_slot] retain];
+            maage_mutex_unlock(native->present_mutex);
+            [rendered waitUntilCompleted]; [rendered release]; [pool drain]; continue;
+        }
+        rendered = [native->frames[newest] retain];
+        trace = native->frame_traces[newest];
+        if ([rendered status] == MTLCommandBufferStatusError) {
+            native_error = (long)[[rendered error] code];
+            native->present_result = maage_status_trace_record(&trace,
+                maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0),
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__, native_error);
+            native->present_trace = trace;
+            native->stopping = 1;
+            maage_mutex_unlock(native->present_mutex);
+            [rendered release]; [pool drain]; break;
+        }
+        native->presenting = (int)newest;
+        color = [native->colors[newest] retain];
+        for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot)
+            if (native->sequence[slot] <= sequence) native->sequence[slot] = 0;
+        maage_mutex_unlock(native->present_mutex);
+        [rendered release];
+        acquired = CACurrentMediaTime();
+        drawable = [native->layer nextDrawable];
+        waited = CACurrentMediaTime() - acquired;
+        /* Drawable acquisition can span a refresh. Use the newest completed
+         * image now available, rather than the image selected before the wait. */
+        maage_mutex_lock(native->present_mutex);
+        cancelled = native->stopping;
+        if (!cancelled && drawable) {
+            for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot)
+                if (native->sequence[slot] > sequence &&
+                    [native->frames[slot] status] == MTLCommandBufferStatusCompleted) {
+                    sequence = native->sequence[slot]; newest = slot;
+                }
+            if ((int)newest != native->presenting) {
+                previous_color = color;
+                color = [native->colors[newest] retain];
+                trace = native->frame_traces[newest];
+                native->presenting = (int)newest;
+                for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot)
+                    if (native->sequence[slot] <= sequence) native->sequence[slot] = 0;
+            }
+        }
+        maage_mutex_unlock(native->present_mutex);
+        [previous_color release];
+        if (!cancelled && drawable && color.width == drawable.texture.width && color.height == drawable.texture.height) {
+            command = [native->present_queue commandBuffer];
+            copy = [command blitCommandEncoder];
+            if (command && copy) {
+                [copy copyFromTexture:color sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+                    sourceSize:MTLSizeMake(color.width, color.height, 1) toTexture:drawable.texture
+                    destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake(0, 0, 0)];
+                [copy endEncoding];
+                [command presentDrawable:drawable];
+                [command commit];
+                /* Keep this color slot immutable through the GPU copy. */
+                [command waitUntilCompleted];
+                if ([command status] == MTLCommandBufferStatusError) {
+                    result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+                    native_error = (long)[[command error] code];
+                }
+            } else result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+        }
+        [color release];
+        maage_mutex_lock(native->present_mutex);
+        native->drawable_seconds += waited;
+        if (command && !maage_status_failed(result)) ++native->presented;
+        native->presenting = -1;
+        if (maage_status_failed(result)) {
+            native->present_result = maage_status_trace_record(&trace, result,
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__, native_error);
+            native->present_trace = trace; native->stopping = 1;
+        }
+        maage_mutex_unlock(native->present_mutex);
+        [pool drain];
+    }
+}
+
+static maage_status maage_metal_stop_presenter(maage_metal_renderer *native)
+{
+    maage_status result;
+    if (!native->present_thread) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_STOP, 0);
+    maage_mutex_lock(native->present_mutex);
+    native->stopping = 1;
+    maage_condition_signal(native->present_condition);
+    maage_mutex_unlock(native->present_mutex);
+    result = maage_thread_join(native->present_thread);
+    if (!maage_status_failed(result)) {
+        native->present_thread = NULL; native->asynchronous = 0;
+        memset(native->sequence, 0, sizeof(native->sequence));
+    }
+    return result;
+}
+
+static maage_status maage_metal_present_result(maage_renderer *renderer)
+{
+    maage_metal_renderer *native = renderer->platform;
+    maage_status result;
+    maage_mutex_lock(native->present_mutex);
+    result = native->present_result;
+    if (maage_status_failed(result) && renderer->operation_trace)
+        *renderer->operation_trace = native->present_trace;
+    maage_mutex_unlock(native->present_mutex);
+    return result;
+}
 
 static maage_status maage_metal_compile_pipeline(maage_renderer *renderer,
     id<MTLLibrary> library, int ui, id<MTLRenderPipelineState> *output)
@@ -109,11 +273,17 @@ static maage_status maage_metal_pipeline(maage_renderer *renderer)
 static maage_status maage_metal_create(maage_renderer *renderer)
 {
     maage_metal_renderer *native;
+    maage_status result;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_STATUS_INVALID_STATE);
     if (renderer->native.backend != MAAGE_WINDOW_COCOA) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native = calloc(1, sizeof(*native));
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     renderer->platform = native;
+    native->presenting = -1;
+    result = maage_mutex_create(&native->present_mutex);
+    if (maage_status_failed(result)) return result;
+    result = maage_condition_create(&native->present_condition);
+    if (maage_status_failed(result)) return result;
     native->device = MTLCreateSystemDefaultDevice();
     if (!native->device) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     if ([native->device name]) {
@@ -122,6 +292,8 @@ static maage_status maage_metal_create(maage_renderer *renderer)
     }
     native->queue = [native->device newCommandQueue];
     if (!native->queue) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    native->present_queue = [native->device newCommandQueue];
+    if (!native->present_queue) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native->view = renderer->native.handles.cocoa.view;
     if (!native->view) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, MAAGE_STATUS_INVALID_STATE);
     native->layer = [[CAMetalLayer alloc] init];
@@ -131,13 +303,14 @@ static maage_status maage_metal_create(maage_renderer *renderer)
     native->layer.framebufferOnly = YES;
     native->layer.opaque = YES;
     native->layer.displaySyncEnabled = YES;
+    native->layer.maximumDrawableCount = 3;
     native->layer.allowsNextDrawableTimeout = YES;
     native->layer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
     native->previous_background = [[(NSWindow *)renderer->native.handles.cocoa.window backgroundColor] retain];
     native->previous_wants_layer = [native->view wantsLayer];
     native->previous_layer = [[native->view layer] retain];
-    [native->view setWantsLayer:YES];
     [native->view setLayer:native->layer];
+    [native->view setWantsLayer:YES];
     native->installed = 1;
     renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS |
         MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH |
@@ -145,15 +318,60 @@ static maage_status maage_metal_create(maage_renderer *renderer)
         MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
     renderer->capabilities.texture_formats = MAAGE_RENDER_FORMAT_RGBA8 | MAAGE_RENDER_FORMAT_BGRA8;
     renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT;
+    renderer->capabilities.max_frames_in_flight = MAAGE_METAL_FRAME_SLOTS;
     /* Texture limits vary by GPU family; leave unknown until resource creation
      * needs family-specific queries rather than promising an unqueried limit. */
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
+static maage_status maage_metal_complete(maage_renderer *renderer, unsigned int slot)
+{
+    maage_metal_renderer *native = renderer->platform;
+    id<MTLCommandBuffer> command = native->frames[slot];
+    maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+    if (!command) return result;
+    [command waitUntilCompleted];
+    if ([command status] == MTLCommandBufferStatusError) {
+        if (renderer->operation_trace) *renderer->operation_trace = native->frame_traces[slot];
+        result = maage_status_trace_record(renderer->operation_trace,
+            maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0),
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__, (long)[[command error] code]);
+    }
+    if (@available(macOS 10.15, *)) {
+        if (command.GPUStartTime > 0 && command.GPUEndTime >= command.GPUStartTime) {
+            native->gpu_seconds += command.GPUEndTime - command.GPUStartTime;
+            ++native->gpu_samples;
+        }
+    }
+    [command release];
+    native->frames[slot] = nil;
+    return result;
+}
 static maage_status maage_metal_destroy(maage_renderer *renderer)
 {
     maage_metal_renderer *native = renderer->platform;
+    maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0), completed;
+    maage_status_trace failure_trace;
+    int have_failure_trace = 0;
+    unsigned int slot;
     if (!native) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
-    /* Present waits for completion, so no submitted frame outlives these objects. */
+    result = maage_metal_stop_presenter(native);
+    if (maage_status_failed(result)) return result;
+    if (maage_status_failed(native->present_result)) {
+        failure_trace = native->present_trace; have_failure_trace = 1;
+        if (renderer->operation_trace) *renderer->operation_trace = failure_trace;
+        result = MAAGE_STATUS_PROPAGATE(renderer->operation_trace, native->present_result,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_DESTROY);
+    }
+    for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot) {
+        completed = maage_metal_complete(renderer, slot);
+        if (!maage_status_failed(result)) {
+            result = completed;
+            if (maage_status_failed(result) && renderer->operation_trace) {
+                failure_trace = *renderer->operation_trace; have_failure_trace = 1;
+            }
+        }
+        [native->colors[slot] release];
+    }
     if (native->installed) {
         [(NSWindow *)renderer->native.handles.cocoa.window setBackgroundColor:native->previous_background];
         [native->view setLayer:native->previous_layer];
@@ -168,14 +386,22 @@ static maage_status maage_metal_destroy(maage_renderer *renderer)
     [native->ui_pipeline release];
     {
         int layer;
-        for (layer = 0; layer < 3; ++layer) {
-            [native->ui_vertices[layer] release]; [native->ui_indices[layer] release];
-        }
+        for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot)
+            for (layer = 0; layer < 3; ++layer) {
+                [native->ui_vertices[slot][layer] release]; [native->ui_indices[slot][layer] release];
+            }
     }
     [native->queue release];
+    [native->present_queue release];
     [native->device release];
+    completed = maage_condition_destroy(native->present_condition);
+    if (!maage_status_failed(result)) result = completed;
+    if (have_failure_trace && renderer->operation_trace) *renderer->operation_trace = failure_trace;
+    completed = maage_mutex_destroy(native->present_mutex);
+    if (!maage_status_failed(result)) result = completed;
     free(native);
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    return MAAGE_STATUS_PROPAGATE(renderer->operation_trace, maage_status_failed(result) ? result :
+        maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_DESTROY);
 }
 static maage_status maage_metal_ui_buffer(maage_metal_renderer *native,
     id<MTLBuffer> *buffer, size_t bytes)
@@ -202,6 +428,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     NSWindow *window = renderer->native.handles.cocoa.window;
     NSAutoreleasePool *pool;
     id<CAMetalDrawable> drawable;
+    id<MTLTexture> color;
     id<MTLCommandBuffer> command;
     id<MTLRenderCommandEncoder> encoder;
     MTLRenderPassDescriptor *pass;
@@ -210,12 +437,41 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     size_t index;
     const maage_render_ui_data *layers[3], *batch;
     int layer;
+    CGRect frame;
+    CGSize drawable_size;
+    CGFloat scale;
+    BOOL transaction;
+    unsigned int slot = native->frame_slot;
+    unsigned int candidate;
+    int asynchronous = native->asynchronous && !preparing;
+    double started, acquired;
     layers[0] = preparing ? NULL : renderer->background;
     layers[1] = preparing ? NULL : renderer->overlay; layers[2] = ui;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, MAAGE_STATUS_INVALID_STATE);
+    result = maage_metal_present_result(renderer);
+    if (maage_status_failed(result)) return result;
     if (!preparing && ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible)))
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     pool = [[NSAutoreleasePool alloc] init];
+    started = CACurrentMediaTime();
+    if (asynchronous) {
+        maage_mutex_lock(native->present_mutex);
+        result = native->present_result;
+        if (!maage_status_failed(result)) {
+            /* One presenter leases at most one slot. Other slots can be
+             * recycled after rendering completes, regardless of display pace. */
+            for (candidate = 0; candidate < MAAGE_METAL_FRAME_SLOTS; ++candidate) {
+                slot = (native->frame_slot + candidate) % MAAGE_METAL_FRAME_SLOTS;
+                if ((int)slot != native->presenting) break;
+            }
+            native->sequence[slot] = 0;
+        } else if (renderer->operation_trace) *renderer->operation_trace = native->present_trace;
+        maage_mutex_unlock(native->present_mutex);
+        if (maage_status_failed(result)) { [pool drain]; return result; }
+    }
+    result = maage_metal_complete(renderer, slot);
+    native->wait_seconds += CACurrentMediaTime() - started;
+    if (maage_status_failed(result)) { [pool drain]; return result; }
     for (layer = 0; layer < 3; ++layer) {
         batch = layers[layer];
         if (!batch || !batch->index_count) continue;
@@ -226,41 +482,81 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
             result = maage_metal_pipeline(renderer);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
         }
-        result = maage_metal_ui_buffer(native, &native->ui_vertices[layer],
+        result = maage_metal_ui_buffer(native, &native->ui_vertices[slot][layer],
             batch->vertex_count * sizeof(*batch->vertices));
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
-            result = maage_metal_ui_buffer(native, &native->ui_indices[layer],
+            result = maage_metal_ui_buffer(native, &native->ui_indices[slot][layer],
                 batch->index_count * sizeof(*batch->indices));
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
-        /* The existing presentation path completes its command before returning,
-         * so these persistent buffers can be reused without another frame wait. */
-        memcpy([native->ui_vertices[layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
-        memcpy([native->ui_indices[layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
+        /* Only this slot has completed; other frames retain their own data. */
+        memcpy([native->ui_vertices[slot][layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
+        memcpy([native->ui_indices[slot][layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
     }
     /* Use the entire content view, including permitted notch-adjacent regions.
      * Safe-area insets are for UI placement, not drawable cropping. */
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    native->layer.presentsWithTransaction = preparing != 0;
-    if (preparing) {
-        NSColor *color = [NSColor colorWithSRGBRed:renderer->clear[0] green:renderer->clear[1]
-            blue:renderer->clear[2] alpha:renderer->clear[3]];
-        [window setBackgroundColor:color];
-        native->layer.backgroundColor = [color CGColor];
-    }
-    native->layer.frame = NSRectToCGRect([native->view bounds]);
-    native->layer.contentsScale = state->width > 0 ?
+    frame = NSRectToCGRect([native->view bounds]);
+    scale = state->width > 0 ?
         (double)state->framebuffer_width / state->width : [window backingScaleFactor];
-    native->layer.drawableSize = CGSizeMake(state->framebuffer_width, state->framebuffer_height);
-    [CATransaction commit];
-    if (preparing) [CATransaction flush];
+    drawable_size = CGSizeMake(state->framebuffer_width, state->framebuffer_height);
+    transaction = preparing != 0;
+    /* Reconfiguring the drawable pool every frame can stall acquisition even
+     * with display sync disabled. Publish actual changes before acquisition. */
+    if (preparing || native->layer.presentsWithTransaction != transaction ||
+        !CGRectEqualToRect(native->layer.frame, frame) || native->layer.contentsScale != scale ||
+        !CGSizeEqualToSize(native->layer.drawableSize, drawable_size)) {
+        /* Geometry transitions retire the old drawable acquisition before
+         * changing its pool. This wait is absent from steady-state frames. */
+        if (asynchronous) {
+            result = maage_metal_stop_presenter(native);
+            if (!maage_status_failed(result)) result = maage_metal_present_result(renderer);
+            if (maage_status_failed(result)) { [pool drain]; return result; }
+        }
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        native->layer.presentsWithTransaction = transaction;
+        if (preparing) {
+            NSColor *color = [NSColor colorWithSRGBRed:renderer->clear[0] green:renderer->clear[1]
+                blue:renderer->clear[2] alpha:renderer->clear[3]];
+            [window setBackgroundColor:color];
+            native->layer.backgroundColor = [color CGColor];
+        }
+        if (!CGRectEqualToRect(native->layer.frame, frame)) native->layer.frame = frame;
+        if (native->layer.contentsScale != scale) native->layer.contentsScale = scale;
+        if (!CGSizeEqualToSize(native->layer.drawableSize, drawable_size)) native->layer.drawableSize = drawable_size;
+        [CATransaction commit];
+        [CATransaction flush];
+        if (asynchronous) {
+            native->stopping = 0;
+            result = maage_thread_start(maage_metal_present_loop, native, &native->present_thread);
+            if (maage_status_failed(result)) { [pool drain]; return result; }
+            native->asynchronous = 1;
+        }
+    }
     renderer->refresh = 0;
-    drawable = [native->layer nextDrawable];
-    if (!drawable) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
-    if (count && (!native->depth || native->depth.width != drawable.texture.width ||
-        native->depth.height != drawable.texture.height)) {
+    drawable = nil;
+    if (asynchronous) {
+        if (!native->colors[slot] || native->colors[slot].width != (NSUInteger)state->framebuffer_width ||
+            native->colors[slot].height != (NSUInteger)state->framebuffer_height) {
+            MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+                MTLPixelFormatBGRA8Unorm width:state->framebuffer_width height:state->framebuffer_height mipmapped:NO];
+            descriptor.storageMode = MTLStorageModePrivate;
+            descriptor.usage = MTLTextureUsageRenderTarget;
+            [native->colors[slot] release];
+            native->colors[slot] = [native->device newTextureWithDescriptor:descriptor];
+            if (!native->colors[slot]) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+        }
+        color = native->colors[slot];
+    } else {
+        acquired = CACurrentMediaTime();
+        drawable = [native->layer nextDrawable];
+        native->drawable_seconds += CACurrentMediaTime() - acquired;
+        if (!drawable) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+        color = drawable.texture;
+    }
+    if (count && (!native->depth || native->depth.width != color.width ||
+        native->depth.height != color.height)) {
         MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
-            MTLPixelFormatDepth32Float width:drawable.texture.width height:drawable.texture.height mipmapped:NO];
+            MTLPixelFormatDepth32Float width:color.width height:color.height mipmapped:NO];
         [native->depth release];
         descriptor.storageMode = MTLStorageModePrivate;
         descriptor.usage = MTLTextureUsageRenderTarget;
@@ -269,7 +565,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     }
     command = [native->queue commandBuffer];
     pass = [MTLRenderPassDescriptor renderPassDescriptor];
-    pass.colorAttachments[0].texture = [drawable texture];
+    pass.colorAttachments[0].texture = color;
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
     pass.colorAttachments[0].storeAction = MTLStoreActionStore;
     pass.colorAttachments[0].clearColor = MTLClearColorMake(renderer->clear[0],
@@ -281,11 +577,11 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
         [encoder setRenderPipelineState:native->ui_pipeline];
         [encoder setCullMode:MTLCullModeNone];
-        [encoder setVertexBuffer:native->ui_vertices[0] offset:0 atIndex:0];
+        [encoder setVertexBuffer:native->ui_vertices[slot][0] offset:0 atIndex:0];
         [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
         [encoder setFragmentTexture:(id<MTLTexture>)layers[0]->texture->platform atIndex:0];
         [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:layers[0]->index_count
-            indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[0] indexBufferOffset:0];
+            indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][0] indexBufferOffset:0];
         [encoder endEncoding]; pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
     }
     if (count) {
@@ -297,7 +593,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     encoder = [command renderCommandEncoderWithDescriptor:pass];
     if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
     if (count) {
-        MTLViewport viewport = {0, 0, drawable.texture.width, drawable.texture.height, 0, 1};
+        MTLViewport viewport = {0, 0, color.width, color.height, 0, 1};
         [encoder setViewport:viewport];
         [encoder setRenderPipelineState:native->pipeline];
         [encoder setDepthStencilState:native->depth_state];
@@ -315,9 +611,9 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     }
     [encoder endEncoding];
     if ((layers[1] && layers[1]->index_count) || (layers[2] && layers[2]->index_count)) {
-        MTLViewport viewport = {0, 0, drawable.texture.width, drawable.texture.height, 0, 1};
+        MTLViewport viewport = {0, 0, color.width, color.height, 0, 1};
         pass = [MTLRenderPassDescriptor renderPassDescriptor];
-        pass.colorAttachments[0].texture = drawable.texture;
+        pass.colorAttachments[0].texture = color;
         pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
         pass.colorAttachments[0].storeAction = MTLStoreActionStore;
         encoder = [command renderCommandEncoderWithDescriptor:pass];
@@ -328,18 +624,29 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
             float logical_size[2];
             batch = layers[layer]; if (!batch || !batch->index_count) continue;
             logical_size[0] = batch->logical_width; logical_size[1] = batch->logical_height;
-            [encoder setVertexBuffer:native->ui_vertices[layer] offset:0 atIndex:0];
+            [encoder setVertexBuffer:native->ui_vertices[slot][layer] offset:0 atIndex:0];
             [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
             [encoder setFragmentTexture:(id<MTLTexture>)batch->texture->platform atIndex:0];
             [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:batch->index_count
-                indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[layer] indexBufferOffset:0];
+                indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][layer] indexBufferOffset:0];
         }
         [encoder endEncoding];
     }
-    if (!preparing) [command presentDrawable:drawable];
+    if (!preparing && !asynchronous) [command presentDrawable:drawable];
+    if (renderer->operation_trace) native->frame_traces[slot] = *renderer->operation_trace;
+    else maage_status_trace_init(&native->frame_traces[slot]);
+    MAAGE_STATUS_TRACE(&native->frame_traces[slot], 0, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
+    native->frames[slot] = [command retain];
     [command commit];
-    [command waitUntilCompleted];
-    result = [command status] == MTLCommandBufferStatusError ? MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+    native->frame_slot = (slot + 1) % MAAGE_METAL_FRAME_SLOTS;
+    if (asynchronous) {
+        maage_mutex_lock(native->present_mutex);
+        native->sequence[slot] = ++native->submitted;
+        maage_condition_signal(native->present_condition);
+        maage_mutex_unlock(native->present_mutex);
+    } else ++native->presented;
+    result = preparing ? maage_metal_complete(renderer, slot) :
+        maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     if (preparing && maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
         /* Present completed content with the layer transaction before reveal. */
         [CATransaction begin];
@@ -347,6 +654,26 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [drawable present];
         [CATransaction commit];
         [CATransaction flush];
+    }
+    if (!native->sample_start) native->sample_start = started;
+    ++native->sample_frames;
+    acquired = CACurrentMediaTime();
+    if (acquired - native->sample_start >= 5.0) {
+        double drawable_seconds;
+        unsigned long presented;
+        maage_mutex_lock(native->present_mutex);
+        drawable_seconds = native->drawable_seconds; presented = native->presented;
+        native->drawable_seconds = 0; native->presented = 0;
+        maage_mutex_unlock(native->present_mutex);
+        maage_log_verbose("maage.render.metal", "Rendered=%.1f FPS; presented=%.1f FPS; display sync=%s; path=%s; drawable wait=%.3fms/present; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame.",
+            native->sample_frames / (acquired - native->sample_start),
+            presented / (acquired - native->sample_start),
+            native->layer.displaySyncEnabled ? "on" : "off", asynchronous ? "mailbox" : "direct",
+            presented ? drawable_seconds * 1000.0 / presented : 0,
+            native->wait_seconds * 1000.0 / native->sample_frames,
+            native->gpu_samples ? native->gpu_seconds * 1000.0 / native->gpu_samples : 0);
+        native->sample_start = acquired; native->sample_frames = 0;
+        native->wait_seconds = native->gpu_seconds = 0; native->gpu_samples = 0;
     }
     [pool drain];
     return result;
@@ -441,8 +768,38 @@ static maage_status maage_metal_draw_frame(maage_renderer *renderer,
 static maage_status maage_metal_set_vsync(maage_renderer *renderer, int enabled)
 {
     maage_metal_renderer *native = (maage_metal_renderer *)renderer->platform;
+    maage_status result;
+    unsigned int slot;
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
     if (!native || !native->layer) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    result = maage_metal_present_result(renderer);
+    if (maage_status_failed(result)) return result;
+    if ((enabled && native->asynchronous) || (!enabled && !native->asynchronous)) {
+        result = maage_metal_stop_presenter(native);
+        if (!maage_status_failed(result)) result = maage_metal_present_result(renderer);
+        if (maage_status_failed(result)) return result;
+        for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot) {
+            result = maage_metal_complete(renderer, slot);
+            if (maage_status_failed(result)) return result;
+        }
+    }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     native->layer.displaySyncEnabled = enabled ? YES : NO;
+    native->layer.framebufferOnly = enabled ? YES : NO;
+    [CATransaction commit];
+    /* The polling loop need not idle long enough to flush implicit changes. */
+    [CATransaction flush];
+    if (!enabled && !native->asynchronous) {
+        native->stopping = 0;
+        result = maage_thread_start(maage_metal_present_loop, native, &native->present_thread);
+        if (maage_status_failed(result)) {
+            native->layer.displaySyncEnabled = YES; native->layer.framebufferOnly = YES;
+            [CATransaction flush];
+            return result;
+        }
+        native->asynchronous = 1;
+    }
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
 }
 const maage_render_backend_api maage_render_metal_api = {

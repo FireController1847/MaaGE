@@ -220,12 +220,17 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   and normal shutdown, never per FPS-slider frame or during native transitions.
   Client Window Mode cycles Windowed, Borderless and Fullscreen in one Options button.
   F11 toggles Windowed and the last non-windowed choice (default Borderless).
-  Non-macOS Fullscreen uses supported borderless fullscreen, never fabricated exclusive mode.
-  macOS Borderless stays in its desktop Space and covers the display, while Fullscreen
-  uses native AppKit Spaces. Both request full-display content; GUI respects the safe
+  Exactly three modes exist: Windowed, Borderless, and Fullscreen (exclusive).
+  Unsupported exclusive ownership returns an explicit unsupported result; never
+  relabel borderless or native fullscreen Spaces as exclusive.
+  macOS Borderless stays in its desktop Space; Fullscreen captures the selected
+  display exclusively at its current resolution and covers the entire display,
+  including notch-adjacent pixels. Full coverage takes priority over native AppKit
+  Spaces. Release display ownership on mode exit, deactivation and destruction;
+  report capture failures explicitly. GUI respects the safe
   area without cropping the world. Embed a Client-specific Info.plist in its standalone
   Mach-O executable (not the Launcher bundle) to disable notch compatibility mode;
-  native AppKit fullscreen may still reserve the top camera/menu-bar strip. Track asynchronous mode completion and restore
+  native AppKit fullscreen Spaces are not an additional mode. Restore
   windowed geometry and input capture correctly.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
@@ -394,21 +399,20 @@ behind C90-compatible public interfaces. Do not require SDL or GLFW as foundatio
 
 Windowing is a reusable Core library, independent of applications and renderers;
 use native implementations without general-purpose third-party windowing frameworks.
-Its C90 public API uses opaque owned windows, explicit results, distinct windowed,
-borderless-windowed, borderless-fullscreen, and native-fullscreen modes, and typed
-native-handle interoperability. Report unsupported operations explicitly. Linux
+Its C90 public API uses opaque owned windows, explicit results, exactly three modes
+(Windowed, Borderless fullscreen, Exclusive fullscreen), and typed native-handle
+interoperability. Report unsupported operations explicitly. Linux
 backends are independently selectable; automatic selection prefers an available
 Wayland session with X11 fallback. Keep OS/protocol language exceptions backend-local.
 Wayland generated inline helpers require C99 only in its adapter target; the public
 API and common implementation remain C90. Linux builds require the selected native
 development libraries and protocol tools. Disable the optional windowing target for
 headless-only workspaces; never link it into Server core or the headless executable.
-A future optional GUI frontend inside the Server process may consume it. Native fullscreen
-is currently AppKit-only; other adapters offer borderless fullscreen. Wayland
-client-requested resize and unnegotiable borderless decorations return unsupported.
+A future optional GUI frontend inside the Server process may consume it. Exclusive
+fullscreen currently uses macOS display capture; other adapters report unsupported.
+Wayland client-requested resize returns unsupported.
 macOS calls belong on the main thread. Full-display content is configurable:
-borderless fullscreen uses the screen frame, and native fullscreen requests maximum
-permitted content via public AppKit APIs. Expose safe-area insets for UI; never
+borderless and exclusive fullscreen use the screen frame. Expose safe-area insets for UI; never
 unnecessarily crop drawable content to the safe area. The physical camera cutout
 cannot display pixels, and macOS retains control over Spaces/menu-bar/Dock policy.
 
@@ -451,6 +455,11 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
 - **Metal:** prepare the initial frame before revealing the Launcher window; match
   native backing to the initial clear color and synchronize the first drawable
   with Core Animation. Normal presentation continues to skip hidden windows.
+  Keep normal frames bounded in flight with independently owned mutable UI buffers;
+  wait only before slot reuse or shutdown, retaining synchronous first-frame preparation.
+  VSync Off renders into bounded offscreen targets; a backend presenter acquires
+  drawables independently and shows the latest completed target. Retain target
+  ownership through its GPU copy; never borrow caller batches or traces across threads.
   Use Apple's Metal API, with Cocoa/AppKit and `CAMetalLayer` where
   appropriate. MoltenVK must not be the required implementation. Isolate necessary
   Objective-C/Objective-C++ translation units in macOS implementation directories;

@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #include "../window_internal.h"
+#include "maage/log.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,6 +10,7 @@ typedef struct maage_cocoa_system {
     id delegate;
     id previous_delegate;
     NSApplicationPresentationOptions presentation;
+    maage_status event_result;
 } maage_cocoa_system;
 typedef struct maage_cocoa_window {
     NSWindow *handle;
@@ -16,6 +18,9 @@ typedef struct maage_cocoa_window {
     NSRect normal_frame;
     maage_window_mode desired_mode;
     int transitioning;
+    CGDirectDisplayID exclusive_display;
+    int exclusive_captured, exclusive_suspended;
+    NSWindowLevel normal_level;
     NSView *bitmap_view;
     double capture_time;
 } maage_cocoa_window;
@@ -25,6 +30,16 @@ static maage_status maage_cocoa_mode(maage_window *, maage_window_mode);
 static maage_status maage_cocoa_state(maage_window *);
 static maage_status maage_cocoa_capture(maage_window *, int);
 static void maage_cocoa_presentation(maage_window_system *);
+static maage_status maage_cocoa_exclusive_release(maage_window *);
+static maage_status maage_cocoa_exclusive_acquire(maage_window *);
+static maage_status maage_cocoa_exclusive_suspend(maage_window *);
+static maage_status maage_cocoa_exclusive_refresh(maage_window *);
+
+static void maage_cocoa_event_result(maage_window *window, maage_status result)
+{
+    maage_cocoa_system *native = window->system->platform;
+    if (maage_status_failed(result) && !maage_status_failed(native->event_result)) native->event_result = result;
+}
 
 @interface MaaGEPlatformWindow : NSWindow
 @end
@@ -54,15 +69,46 @@ static void maage_cocoa_presentation(maage_window_system *);
     maage_window *window;
     (void)notification;
     if (!maage_cocoa_active) return;
-    for (window = maage_cocoa_active->windows; window; window = window->next)
+    for (window = maage_cocoa_active->windows; window; window = window->next) {
         maage_window_input_focus(window, 0);
+        maage_cocoa_event_result(window, maage_cocoa_exclusive_suspend(window));
+    }
+}
+- (void)applicationDidBecomeActive:(NSNotification *)notification
+{
+    maage_window *window;
+    maage_cocoa_window *native;
+    maage_status result;
+    (void)notification;
+    if (!maage_cocoa_active) return;
+    for (window = maage_cocoa_active->windows; window; window = window->next) {
+        native = window->platform;
+        if (!native || !native->exclusive_suspended || [native->handle isMiniaturized] || window->state.close_requested) continue;
+        result = maage_cocoa_exclusive_acquire(window);
+        maage_cocoa_event_result(window, result);
+        if (!maage_status_failed(result)) {
+            native->exclusive_suspended = 0;
+        }
+    }
+    maage_cocoa_presentation(maage_cocoa_active);
+}
+- (void)applicationDidChangeScreenParameters:(NSNotification *)notification
+{
+    maage_window *window;
+    (void)notification;
+    if (!maage_cocoa_active) return;
+    for (window = maage_cocoa_active->windows; window; window = window->next)
+        maage_cocoa_event_result(window, maage_cocoa_exclusive_refresh(window));
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)application
 {
     maage_window *window;
     (void)application;
-    for (window = maage_cocoa_active->windows; window; window = window->next)
+    for (window = maage_cocoa_active->windows; window; window = window->next) {
+        maage_window_input_focus(window, 0);
+        maage_cocoa_event_result(window, maage_cocoa_exclusive_release(window));
         window->state.close_requested = 1;
+    }
     return NSTerminateCancel;
 }
 @end
@@ -76,6 +122,7 @@ static void maage_cocoa_presentation(maage_window_system *);
 - (BOOL)windowShouldClose:(NSWindow *)sender
 {
     (void)sender;
+    maage_cocoa_event_result(owner, maage_cocoa_exclusive_release(owner));
     owner->state.close_requested = 1;
     return NO;
 }
@@ -98,6 +145,21 @@ static void maage_cocoa_presentation(maage_window_system *);
 {
     (void)notification;
     maage_window_input_focus(owner, 0);
+    maage_cocoa_event_result(owner, maage_cocoa_exclusive_suspend(owner));
+}
+- (void)windowDidDeminiaturize:(NSNotification *)notification
+{
+    maage_cocoa_window *native = owner->platform;
+    maage_status result;
+    (void)notification;
+    if (native->exclusive_suspended && [NSApp isActive]) {
+        result = maage_cocoa_exclusive_acquire(owner);
+        maage_cocoa_event_result(owner, result);
+        if (!maage_status_failed(result)) {
+            native->exclusive_suspended = 0;
+            maage_cocoa_presentation(owner->system);
+        }
+    }
 }
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification
 {
@@ -113,6 +175,8 @@ static void maage_cocoa_presentation(maage_window_system *);
 {
     maage_cocoa_window *native = owner->platform;
     (void)notification;
+    if (owner->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
+        native->normal_frame = [native->handle frame];
     native->desired_mode = MAAGE_WINDOW_NATIVE_FULLSCREEN;
     native->transitioning = 1;
 }
@@ -184,6 +248,91 @@ static NSUInteger maage_cocoa_style(maage_window *window, int decorated)
     return style;
 }
 
+static maage_status maage_cocoa_exclusive_result(CGError error, unsigned char operation)
+{
+    maage_status result = maage_status_make(error == kCGErrorSuccess ? MAAGE_STATUS_SUCCESS :
+        MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, operation, 0);
+    if (error != kCGErrorSuccess)
+        maage_log_status(MAAGE_LOG_ERROR, "maage.window.cocoa", result,
+            "Exclusive display operation failed; CGError=%ld.", (long)error);
+    return result;
+}
+static maage_status maage_cocoa_exclusive_release(maage_window *window)
+{
+    maage_cocoa_window *native = window->platform;
+    maage_status result;
+    if (!native || !native->exclusive_captured)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RELEASE, 0);
+    result = maage_cocoa_exclusive_result(CGDisplayRelease(native->exclusive_display), MAAGE_OPERATION_RELEASE);
+    if (maage_status_failed(result)) return result;
+    native->exclusive_captured = 0;
+    [native->handle setLevel:native->normal_level];
+    maage_cocoa_presentation(window->system);
+    return result;
+}
+static maage_status maage_cocoa_exclusive_acquire(maage_window *window)
+{
+    maage_cocoa_window *native = window->platform;
+    NSScreen *screen = nil, *candidate;
+    NSNumber *number;
+    maage_status result;
+    if (native->exclusive_captured) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_ACQUIRE, 0);
+    if (![NSApp isActive]) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+    if (native->exclusive_display) {
+        for (candidate in [NSScreen screens])
+            if ([[[candidate deviceDescription] objectForKey:@"NSScreenNumber"] unsignedIntValue] == native->exclusive_display) {
+                screen = candidate;
+                break;
+            }
+    } else screen = [native->handle screen] ?: [NSScreen mainScreen];
+    number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
+    if (!screen || !number) return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+    native->exclusive_display = [number unsignedIntValue];
+    result = maage_cocoa_exclusive_result(CGDisplayCapture(native->exclusive_display), MAAGE_OPERATION_ACQUIRE);
+    if (maage_status_failed(result)) return result;
+    native->exclusive_captured = 1;
+    /* Capture owns a shielding window. Keep our existing drawable view above
+     * it, filling the display without AppKit's native fullscreen safe frame. */
+    [native->handle setStyleMask:maage_cocoa_style(window, 0)];
+    [native->handle setLevel:(NSWindowLevel)CGShieldingWindowLevel() + 1];
+    [native->handle setFrame:[screen frame] display:YES];
+    [native->handle makeKeyAndOrderFront:nil];
+    window->state.resized = 1;
+    return result;
+}
+static maage_status maage_cocoa_exclusive_suspend(maage_window *window)
+{
+    maage_cocoa_window *native = window->platform;
+    maage_status result;
+    if (!native || !native->exclusive_captured)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RELEASE, 0);
+    result = maage_cocoa_exclusive_release(window);
+    if (!maage_status_failed(result)) {
+        native->exclusive_suspended = 1;
+        [native->handle orderOut:nil];
+        maage_cocoa_presentation(window->system);
+    }
+    return result;
+}
+static maage_status maage_cocoa_exclusive_refresh(maage_window *window)
+{
+    maage_cocoa_window *native = window->platform;
+    NSScreen *screen;
+    maage_status result;
+    if (!native || window->state.mode != MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    for (screen in [NSScreen screens])
+        if ([[[screen deviceDescription] objectForKey:@"NSScreenNumber"] unsignedIntValue] == native->exclusive_display) {
+            if (native->exclusive_captured) [native->handle setFrame:[screen frame] display:YES];
+            window->state.resized = 1;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
+        }
+    result = maage_cocoa_exclusive_suspend(window);
+    if (!maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_NOT_FOUND,
+        MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_UPDATE, 0);
+    return result;
+}
+
 /* Custom fullscreen may cover the screen frame. Native fullscreen remains
  * subject to AppKit's Spaces and display policies, even with full-size content. */
 static void maage_cocoa_presentation(maage_window_system *system)
@@ -195,6 +344,13 @@ static void maage_cocoa_presentation(maage_window_system *system)
         handle = window->platform;
         if (handle && (handle->transitioning || window->state.mode == MAAGE_WINDOW_NATIVE_FULLSCREEN))
             return;
+    }
+    for (window = system->windows; window; window = window->next) {
+        handle = window->platform;
+        if (handle && handle->exclusive_captured) {
+            [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
+            return;
+        }
     }
     for (window = system->windows; window; window = window->next) {
         if (window->state.visible && window->state.mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN) {
@@ -248,9 +404,19 @@ static maage_status maage_cocoa_title(maage_window *window, const char *title)
 static maage_status maage_cocoa_visible(maage_window *window, int visible)
 {
     maage_cocoa_window *native = window->platform;
+    maage_status result;
+    if (!visible) {
+        result = maage_cocoa_exclusive_release(window);
+        if (maage_status_failed(result)) return result;
+        native->exclusive_suspended = 0;
+    }
     if (visible) {
         [native->handle makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
+        if (window->state.mode == MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN) {
+            result = maage_cocoa_exclusive_acquire(window);
+            if (maage_status_failed(result)) return result;
+        }
     } else [native->handle orderOut:nil];
     window->state.visible = visible != 0;
     maage_cocoa_presentation(window->system);
@@ -262,6 +428,7 @@ static maage_status maage_cocoa_mode(maage_window *window, maage_window_mode mod
     NSWindow *handle = native->handle;
     NSScreen *screen = [handle screen] ?: [NSScreen mainScreen];
     NSRect frame;
+    maage_status result;
     if (native->transitioning) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN && ![handle isVisible])
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
@@ -274,6 +441,25 @@ static maage_status maage_cocoa_mode(maage_window *window, maage_window_mode mod
     }
     if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
         native->normal_frame = [handle frame];
+    if (window->state.mode == MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN) {
+        result = maage_cocoa_exclusive_release(window);
+        if (maage_status_failed(result)) return result;
+        native->exclusive_suspended = 0;
+        native->exclusive_display = 0;
+    }
+    if (mode == MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN) {
+        if (![handle isVisible]) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        native->normal_level = [handle level];
+        result = maage_cocoa_exclusive_acquire(window);
+        if (maage_status_failed(result)) {
+            native->exclusive_display = 0;
+            native->desired_mode = window->state.mode;
+            return result;
+        }
+        window->state.mode = mode;
+        maage_cocoa_presentation(window->system);
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+    }
     if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) {
         [handle setStyleMask:maage_cocoa_style(window, 1)];
         [handle setFrame:native->normal_frame display:YES];
@@ -334,6 +520,7 @@ static void maage_cocoa_destroy(maage_window *window)
 {
     maage_cocoa_window *native = window->platform;
     if (!native) return;
+    maage_cocoa_exclusive_release(window);
     maage_window_input_focus(window, 0);
     [native->handle setDelegate:nil];
     [native->handle orderOut:nil];
@@ -451,6 +638,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
 }
 static maage_status maage_cocoa_poll(maage_window_system *system, int timeout_ms)
 {
+    maage_cocoa_system *native = system->platform;
     NSAutoreleasePool *pool;
     NSEvent *event;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, MAAGE_DETAIL_WRONG_THREAD);
@@ -466,6 +654,11 @@ static maage_status maage_cocoa_poll(maage_window_system *system, int timeout_ms
     }
     [NSApp updateWindows];
     [pool drain];
+    if (maage_status_failed(native->event_result)) {
+        maage_status result = native->event_result;
+        native->event_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_POLL, 0);
+        return result;
+    }
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
 }
 static maage_status maage_cocoa_state(maage_window *window)

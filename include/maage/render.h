@@ -104,7 +104,9 @@ maage_status maage_renderer_create(const maage_render_desc *desc,
     maage_renderer **renderer, maage_status_trace *trace);
 maage_status maage_renderer_destroy(maage_renderer *renderer, maage_status_trace *trace);
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer);
-/* Runtime presentation synchronization. Unsupported implementations return NOT_IMPLEMENTED. */
+/* Runtime presentation synchronization. Disabling allows independently paced
+ * rendering; the display may still present only the latest completed frame.
+ * Unsupported implementations return NOT_IMPLEMENTED. */
 maage_status maage_renderer_set_vsync(maage_renderer *renderer, int enabled);
 /* Borrowed device name, valid until renderer destruction; NULL if unavailable. */
 const char *maage_renderer_device_name(const maage_renderer *renderer);
@@ -159,7 +161,10 @@ maage_status maage_renderer_draw_meshes(maage_renderer *renderer,
  * sampling, straight-alpha blending and no depth test/writes or face culling.
  * Data and the owned texture handle are borrowed through this call. Reuse CPU
  * batches afterward. Empty UI is permitted; unsupported UI returns UNSUPPORTED.
- * Meshes retain the same matrix/depth contract as draw_meshes. */
+ * Meshes retain the same matrix/depth contract as draw_meshes. SUCCESS accepts
+ * the frame; GPU completion/presentation may be asynchronous. With VSync off,
+ * presentation may coalesce completed frames. Backend-owned copies/resources
+ * outlive submitted work; deferred failures surface on a later call or destroy. */
 maage_status maage_renderer_draw_frame(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const float view_projection[16], const maage_render_ui_data *ui,
