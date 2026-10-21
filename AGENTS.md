@@ -106,8 +106,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   its frozen Y=63 and spawn-search behavior. Generator 2 permits explicit,
   immutable per-world sea level and spawn-search policy, saved in metadata
   schema 5 and propagated into asynchronous World jobs. Existing worlds
-  retain their recorded version/policy; never change one on load. Neither
-  generator claims Java Random/GenLayer or seed-for-seed parity.
+  retain their recorded version/policy; never change one on load. Generator 3
+  adds ordered feature stages, bounded regional cave/ore/tree/structure plans
+  clipped independently to worker-owned columns, without neighbor waits. New
+  Clients select version 3 only for new worlds. No generator claims Java
+  Random/GenLayer or seed-for-seed parity.
 - Parallelize independent CPU-intensive world work by default through reusable
   `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
@@ -142,6 +145,13 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   registries, stores and snapshots must outlive all jobs that access them.
 - Missing/loading columns block collision; never turn unavailable terrain into
   collision-free air or teleport the player. Preserve fixed-step movement.
+- Advance environment time/weather and bounded numeric scheduled updates on the
+  owner at 20 TPS, respecting pause. Deduplicate column-owned fluid queues and
+  batch copied publications; auxiliary-only edits preserve geometry epochs, and
+  lighting commits retain current auxiliary state. Persist remaining update delays,
+  numeric block-entity payloads and clock/weather (chunk 3, metadata 6), reading
+  older formats without changing generators. Static sky/block light remains 0..15;
+  frame daylight scales sky only, without tick-driven global relighting.
 - Store new worlds beneath `instances/<instance-uuid>/worlds/<world-uuid>/`,
   separate from shared Minecraft resources. Preserve imported legacy IDs.
   Format/generator/blockset versions bind stable numeric state mappings; changes

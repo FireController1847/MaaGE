@@ -186,10 +186,9 @@ const maage_item_definition *maage_item_registry_at(const maage_item_registry *r
 }
 maage_item_registry *maage_item_registry_create_builtin(const maage_block_registry *blocks)
 {
-    static const maage_block_id ids[] = {1, 2, 3, 7, 12, 13, 24};
-    static const char *const names[] = {"minecraft:stone", "minecraft:grass", "minecraft:dirt",
-        "minecraft:bedrock", "minecraft:sand", "minecraft:gravel", "minecraft:sandstone"};
-    static const char *const displays[] = {"Stone", "Grass Block", "Dirt", "Bedrock", "Sand", "Gravel", "Sandstone"};
+    static const maage_block_id ids[] = {1, 2, 3, 7, 12, 13, 24, 4, 5, 14, 15, 16, 17, 18, 21, 31, 32, 37, 38, 39, 40, 48, 49, 50, 56, 73, 78, 79, 81, 129};
+    static const char *const names[] = {"minecraft:stone", "minecraft:grass", "minecraft:dirt", "minecraft:bedrock", "minecraft:sand", "minecraft:gravel", "minecraft:sandstone", "minecraft:cobblestone", "minecraft:planks", "minecraft:gold_ore", "minecraft:iron_ore", "minecraft:coal_ore", "minecraft:log", "minecraft:leaves", "minecraft:lapis_ore", "minecraft:tall_grass", "minecraft:dead_bush", "minecraft:dandelion", "minecraft:poppy", "minecraft:brown_mushroom", "minecraft:red_mushroom", "minecraft:mossy_cobblestone", "minecraft:obsidian", "minecraft:torch", "minecraft:diamond_ore", "minecraft:redstone_ore", "minecraft:snow", "minecraft:ice", "minecraft:cactus", "minecraft:emerald_ore"};
+    static const char *const displays[] = {"Stone", "Grass Block", "Dirt", "Bedrock", "Sand", "Gravel", "Sandstone", "Cobblestone", "Oak Planks", "Gold Ore", "Iron Ore", "Coal Ore", "Oak Log", "Oak Leaves", "Lapis Ore", "Tall Grass", "Dead Bush", "Dandelion", "Poppy", "Brown Mushroom", "Red Mushroom", "Mossy Cobblestone", "Obsidian", "Torch", "Diamond Ore", "Redstone Ore", "Snow Layer", "Ice", "Cactus", "Emerald Ore"};
     maage_item_registry *registry;
     maage_item_definition item;
     const maage_block_state_definition *state;
@@ -199,7 +198,8 @@ maage_item_registry *maage_item_registry_create_builtin(const maage_block_regist
     if (!registry) return NULL;
     for (i = 0; i < sizeof(ids) / sizeof(ids[0]); ++i) {
         state = maage_block_registry_state(blocks, ids[i]);
-        if (!state || state->block_id != ids[i]) goto failed;
+        if (!state) continue;
+        if (state->block_id != ids[i]) goto failed;
         memset(&item, 0, sizeof(item));
         item.id = ids[i]; item.has_block = 1; item.block_id = ids[i];
         item.placement_state_id = item.icon_state_id = ids[i]; item.max_stack = 64;

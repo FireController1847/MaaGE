@@ -11,7 +11,7 @@
 
 typedef struct maage_job_record {
     maage_job_id id;
-    unsigned priority, heap_index;
+    unsigned priority, heap_index, stage;
     unsigned long order_high, order_low;
     int state, cancelled;
     double submitted;
@@ -192,7 +192,7 @@ int maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run,
     record->id = jobs->next_id; record->priority = priority;
     ++jobs->order_low; if (!jobs->order_low) ++jobs->order_high;
     record->order_high = jobs->order_high; record->order_low = jobs->order_low;
-    record->state = MAAGE_JOB_QUEUED; record->cancelled = 0;
+    record->state = MAAGE_JOB_QUEUED; record->cancelled = 0; record->stage = 0;
     record->run = run; record->context = context; record->submitted = maage_time_monotonic_seconds();
     maage_jobs_heap_up(jobs, jobs->queued++, slot);
     *id = record->id;
@@ -228,6 +228,14 @@ int maage_job_cancelled(const maage_job_token *token)
     cancelled = token->record->cancelled;
     maage_mutex_unlock(token->jobs->mutex);
     return cancelled;
+}
+
+void maage_job_set_stage(const maage_job_token *token, unsigned stage)
+{
+    if (!token) return;
+    maage_mutex_lock(token->jobs->mutex);
+    token->record->stage = stage;
+    maage_mutex_unlock(token->jobs->mutex);
 }
 
 int maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion)
@@ -281,6 +289,7 @@ unsigned maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats,
         observations[copied].id = record->id;
         observations[copied].context = record->context;
         observations[copied].state = (maage_job_state)record->state;
+        observations[copied].stage = record->stage;
         ++copied;
     }
     maage_mutex_unlock(jobs->mutex);

@@ -18,23 +18,76 @@ enum {
     MAAGE_BLOCK_STONE = 1,
     MAAGE_BLOCK_GRASS = 2,
     MAAGE_BLOCK_DIRT = 3,
+    MAAGE_BLOCK_COBBLESTONE = 4,
+    MAAGE_BLOCK_PLANKS = 5,
     MAAGE_BLOCK_BEDROCK = 7,
     MAAGE_BLOCK_WATER = 9,
+    MAAGE_BLOCK_LAVA = 11,
     MAAGE_BLOCK_SAND = 12,
     MAAGE_BLOCK_GRAVEL = 13,
-    MAAGE_BLOCK_SANDSTONE = 24
+    MAAGE_BLOCK_GOLD_ORE = 14,
+    MAAGE_BLOCK_IRON_ORE = 15,
+    MAAGE_BLOCK_COAL_ORE = 16,
+    MAAGE_BLOCK_LOG = 17,
+    MAAGE_BLOCK_LEAVES = 18,
+    MAAGE_BLOCK_LAPIS_ORE = 21,
+    MAAGE_BLOCK_SANDSTONE = 24,
+    MAAGE_BLOCK_TALL_GRASS = 31,
+    MAAGE_BLOCK_DEAD_BUSH = 32,
+    MAAGE_BLOCK_DANDELION = 37,
+    MAAGE_BLOCK_POPPY = 38,
+    MAAGE_BLOCK_BROWN_MUSHROOM = 39,
+    MAAGE_BLOCK_RED_MUSHROOM = 40,
+    MAAGE_BLOCK_MOSSY_COBBLESTONE = 48,
+    MAAGE_BLOCK_OBSIDIAN = 49,
+    MAAGE_BLOCK_TORCH = 50,
+    MAAGE_BLOCK_DIAMOND_ORE = 56,
+    MAAGE_BLOCK_REDSTONE_ORE = 73,
+    MAAGE_BLOCK_SNOW = 78,
+    MAAGE_BLOCK_ICE = 79,
+    MAAGE_BLOCK_CACTUS = 81,
+    MAAGE_BLOCK_EMERALD_ORE = 129
 };
 enum {
     MAAGE_STATE_AIR = 0,
     MAAGE_STATE_STONE = 1,
     MAAGE_STATE_GRASS = 2,
     MAAGE_STATE_DIRT = 3,
+    MAAGE_STATE_COBBLESTONE = 4,
+    MAAGE_STATE_PLANKS = 5,
     MAAGE_STATE_BEDROCK = 7,
     MAAGE_STATE_WATER = 9,
+    MAAGE_STATE_LAVA = 11,
     MAAGE_STATE_SAND = 12,
     MAAGE_STATE_GRAVEL = 13,
-    MAAGE_STATE_SANDSTONE = 24
+    MAAGE_STATE_GOLD_ORE = 14,
+    MAAGE_STATE_IRON_ORE = 15,
+    MAAGE_STATE_COAL_ORE = 16,
+    MAAGE_STATE_LOG = 17,
+    MAAGE_STATE_LEAVES = 18,
+    MAAGE_STATE_LAPIS_ORE = 21,
+    MAAGE_STATE_SANDSTONE = 24,
+    MAAGE_STATE_TALL_GRASS = 31,
+    MAAGE_STATE_DEAD_BUSH = 32,
+    MAAGE_STATE_DANDELION = 37,
+    MAAGE_STATE_POPPY = 38,
+    MAAGE_STATE_BROWN_MUSHROOM = 39,
+    MAAGE_STATE_RED_MUSHROOM = 40,
+    MAAGE_STATE_MOSSY_COBBLESTONE = 48,
+    MAAGE_STATE_OBSIDIAN = 49,
+    MAAGE_STATE_TORCH = 50,
+    MAAGE_STATE_DIAMOND_ORE = 56,
+    MAAGE_STATE_REDSTONE_ORE = 73,
+    MAAGE_STATE_SNOW = 78,
+    MAAGE_STATE_ICE = 79,
+    MAAGE_STATE_CACTUS = 81,
+    MAAGE_STATE_EMERALD_ORE = 129,
+    MAAGE_STATE_SPRUCE_LOG = 272, MAAGE_STATE_BIRCH_LOG = 273,
+    MAAGE_STATE_SPRUCE_LEAVES = 274, MAAGE_STATE_BIRCH_LEAVES = 275,
+    MAAGE_STATE_WATER_FLOW_BASE = 512, MAAGE_STATE_LAVA_FLOW_BASE = 528
 };
+enum { MAAGE_BLOCK_MESH_CUBE = 0, MAAGE_BLOCK_MESH_CROSS = 1 };
+enum { MAAGE_FLUID_NONE = 0, MAAGE_FLUID_WATER = 1, MAAGE_FLUID_LAVA = 2 };
 
 typedef enum maage_block_face {
     MAAGE_FACE_NEGATIVE_X = 0,
@@ -65,6 +118,7 @@ typedef struct maage_block_definition {
     int opaque;
     unsigned int emitted_light; /* 0..15; resolved during registration. */
     int selectable, replaceable;
+    unsigned int mesh_shape; /* Numeric CUBE or crossed cutout quads. */
     double hardness; /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
     unsigned long drop_item_id; /* Item domain, resolved at registration. */
@@ -77,6 +131,8 @@ typedef struct maage_block_state_definition {
     maage_block_id block_id;
     /* Legacy metadata-compatible numeric property payload; no text at runtime. */
     unsigned int metadata;
+    unsigned int fluid_kind, fluid_level;
+    maage_block_state_id fluid_source_state, fluid_states[16];
     maage_block_face_definition faces[MAAGE_FACE_COUNT];
 } maage_block_state_definition;
 

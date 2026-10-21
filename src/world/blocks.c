@@ -244,7 +244,7 @@ maage_registry_result maage_block_registry_register_block(
     int axis;
     if (registry == NULL || definition == NULL) return MAAGE_REGISTRY_INVALID;
     if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
-    if (definition->emitted_light > 15 ||
+    if (definition->emitted_light > 15 || definition->mesh_shape>MAAGE_BLOCK_MESH_CROSS ||
         !maage_block_name_valid(external_name)) return MAAGE_REGISTRY_INVALID;
     if (!(definition->hardness >= -DBL_MAX && definition->hardness <= DBL_MAX))
         return MAAGE_REGISTRY_INVALID;
@@ -288,6 +288,12 @@ maage_registry_result maage_block_registry_register_state(
     const maage_block_face_definition *texture;
     if (registry == NULL || definition == NULL) return MAAGE_REGISTRY_INVALID;
     if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
+    if (definition->fluid_kind>MAAGE_FLUID_LAVA || definition->fluid_level>15 ||
+        (definition->fluid_kind==MAAGE_FLUID_NONE &&
+         (definition->fluid_level || definition->fluid_source_state))) return MAAGE_REGISTRY_INVALID;
+    if (definition->fluid_kind==MAAGE_FLUID_NONE)
+        for (component=0;component<16;++component)
+            if (definition->fluid_states[component]) return MAAGE_REGISTRY_INVALID;
     if (maage_block_registry_block(registry, definition->block_id) == NULL)
         return MAAGE_REGISTRY_INVALID;
     if (!maage_block_grow_states(registry, definition->id) ||
@@ -323,12 +329,28 @@ maage_registry_result maage_block_registry_finalize(maage_block_registry *regist
 {
     const maage_block_definition *air;
     const maage_block_state_definition *air_state;
+    const maage_block_state_definition *state, *flow;
+    size_t bucket;
+    unsigned int level;
     if (registry == NULL) return MAAGE_REGISTRY_INVALID;
     if (registry->finalized) return MAAGE_REGISTRY_FROZEN;
     air = maage_block_registry_block(registry, MAAGE_BLOCK_AIR);
     air_state = maage_block_registry_state(registry, MAAGE_STATE_AIR);
     if (air == NULL || air->solid || air->opaque || air_state == NULL ||
         air_state->block_id != MAAGE_BLOCK_AIR) return MAAGE_REGISTRY_INVALID;
+    for (bucket=0;bucket<registry->state_bucket_count;++bucket) {
+        if (!registry->state_buckets[bucket]) continue;
+        state=&registry->states[registry->state_buckets[bucket]-1].definition;
+        if (!state->fluid_kind) continue;
+        if (state->fluid_states[0]!=state->fluid_source_state) return MAAGE_REGISTRY_INVALID;
+        for (level=0;level<16;++level) {
+            flow=maage_block_registry_state(registry,state->fluid_states[level]);
+            if (!flow || flow->fluid_kind!=state->fluid_kind || flow->fluid_level!=level ||
+                flow->block_id!=state->block_id || flow->fluid_source_state!=state->fluid_source_state)
+                return MAAGE_REGISTRY_INVALID;
+        }
+        if (state->fluid_states[state->fluid_level]!=state->id) return MAAGE_REGISTRY_INVALID;
+    }
     registry->finalized = 1;
     return MAAGE_REGISTRY_OK;
 }

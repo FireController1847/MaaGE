@@ -12,6 +12,7 @@
 #include "ui/ui.h"
 #include "debug.h"
 #include "interaction.h"
+#include "environment.h"
 #include "storage_context.h"
 #include <math.h>
 #include <string.h>
@@ -32,6 +33,7 @@ typedef struct maage_client_world_options {
     const char *id, *name;
     maage_world_seed seed;
     unsigned int workers;
+    unsigned long generator_version;
     int create, seeded, radius, mode;
     double reach, mesh_budget_ms, frame_target_ms;
 } maage_client_world_options;
@@ -61,6 +63,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     long value;
     unsigned long workers;
     memset(options, 0, sizeof(*options)); options->radius = 8; options->mode = -1;
+    options->generator_version = MAAGE_GENERATION_FEATURES_VERSION;
     options->frame_target_ms = 1000.0 / 60.0;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
@@ -89,6 +92,11 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             errno = 0; options->frame_target_ms = strtod(argument + 23, &end);
             if (errno || !argument[23] || *end ||
                 !(options->frame_target_ms > 0.0 && options->frame_target_ms <= DBL_MAX)) return 0;
+        } else if (!strncmp(argument, "--generator-version=", 20)) {
+            maage_generation_policy policy;
+            if (argument[20] < '0' || argument[20] > '9') return 0;
+            errno = 0; options->generator_version = strtoul(argument + 20, &end, 10);
+            if (errno || *end || !maage_generation_policy_default(options->generator_version, &policy)) return 0;
         } else if (!strncmp(argument, "--world-workers=", 16)) {
             if (argument[16] < '0' || argument[16] > '9') return 0;
             errno = 0; workers = strtoul(argument + 16, &end, 10);
@@ -103,7 +111,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             if (errno || !argument[20] || *end || !(options->reach > 0 && options->reach <= 64)) return 0;
         } else if (!strcmp(argument, "--world") || !strcmp(argument, "--create-world") ||
             !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance") ||
-            !strcmp(argument, "--world-workers") || !strcmp(argument, "--mesh-upload-budget-ms") ||
+            !strcmp(argument, "--world-workers") || !strcmp(argument, "--generator-version") || !strcmp(argument, "--mesh-upload-budget-ms") ||
             !strcmp(argument, "--mesh-frame-target-ms") || !strcmp(argument, "--gamemode") ||
             !strcmp(argument, "--interaction-range")) return 0;
     }
@@ -328,6 +336,9 @@ int maage_client_run(int argc, char *const argv[])
     maage_biome_registry biomes;
     maage_world_config world_config;
     maage_world_record record;
+    maage_generation_policy generation_policy;
+    maage_environment_state environment_state;
+    maage_client_environment *environment_view = NULL;
     maage_world_stats stats;
     maage_window_config window_config;
     maage_window_state state;
@@ -354,7 +365,7 @@ int maage_client_run(int argc, char *const argv[])
     rendered = maage_render_desc_parse_args(argc, argv, &render_config);
     if (rendered != MAAGE_RENDER_OK) goto done;
     if (!maage_client_world_options_parse(argc, argv, &options)) {
-        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=<positive int>, --world-workers=<nonnegative count> (0 automatic), --mesh-upload-budget-ms=<milliseconds> (0 auto), and --mesh-frame-target-ms=<milliseconds>."); goto done;
+        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --generator-version=1|2|3 for creation, --world=<id> to load, --render-distance=<positive int>, --world-workers=<nonnegative count> (0 automatic), --mesh-upload-budget-ms=<milliseconds> (0 auto), and --mesh-frame-target-ms=<milliseconds>."); goto done;
     }
     if (!instance) { maage_log_error("maage.client.instance", "No validated instance was selected at startup."); goto done; }
     strcpy(directory, maage_client_storage_data_root());
@@ -381,7 +392,7 @@ int maage_client_run(int argc, char *const argv[])
     maage_window_config_init(&window_config); window_config.title = "MaaGE Client"; window_config.visible = 0;
     result = maage_window_create(system, &window_config, &window);
     if (result != MAAGE_WINDOW_OK) goto window_failed;
-    render_config.window = window; render_config.required_features |= MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI;
+    render_config.window = window; render_config.required_features |= MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
     rendered = maage_renderer_create(&render_config, &renderer);
     if (rendered != MAAGE_RENDER_OK) goto done;
     rendered = maage_renderer_create_texture(renderer, &resources.atlas, &atlas);
@@ -390,15 +401,19 @@ int maage_client_run(int argc, char *const argv[])
     ui = maage_client_ui_create(renderer, directory, &resources.atlas);
     maage_client_resources_destroy(&resources);
     if (!ui || !maage_client_ui_finalize(ui)) { maage_log_error("maage.client.ui", "Cannot initialize Client GUI resources or screen registry."); goto done; }
+    environment_view = maage_client_environment_create(renderer, directory);
+    if (!environment_view) { maage_log_error("maage.client.environment", "Cannot initialize environmental presentation resources."); goto done; }
     maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
-    if (!maage_world_store_open_with_items(maage_instance_directory(instance), options.id, options.create, options.name,
-        options.seeded ? &options.seed : NULL, items, &store, &record, error)) {
+    maage_generation_policy_default(options.generator_version, &generation_policy);
+    if (!maage_world_store_open_configured(maage_instance_directory(instance), options.id, options.create, options.name,
+        options.seeded ? &options.seed : NULL, &generation_policy, items, &store, &record, error)) {
         maage_log_error("maage.client.world", "%s", error); goto done;
     }
     memset(&world_config, 0, sizeof(world_config));
     world_config.registry = registry; world_config.biomes = &biomes; world_config.seed = record.seed;
     world_config.worker_count = options.workers;
     world_config.generation_policy = record.generation_policy;
+    world_config.initial_environment = &record.environment;
     world_config.store = store; world_config.render_distance = options.radius; world_config.new_world = record.new_world;
     memcpy(world_config.position, record.position, sizeof(world_config.position));
     world = maage_world_create(&world_config);
@@ -526,6 +541,7 @@ int maage_client_run(int argc, char *const argv[])
                 intent.attack = !was_modal && (input.primary_down || attack_pending);
                 intent.use = !was_modal && (input.secondary_down || use_pending);
                 previous = player; maage_gameplay_tick(&game, &player, world, items, &intent);
+                maage_world_tick(world);
                 accumulator -= MAAGE_PLAYER_TICK_SECONDS; ++tick_count;
                 jump_pending = attack_pending = use_pending = 0;
                 if (!game.health && game.mode == MAAGE_GAME_MODE_SURVIVAL) {
@@ -549,6 +565,10 @@ int maage_client_run(int argc, char *const argv[])
         if (rendered != MAAGE_RENDER_OK) goto done;
         for (axis = 0; axis < 3; ++axis) eye[axis] = previous.position[axis] + (player.position[axis] - previous.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
+        maage_world_environment(world, &environment_state);
+        rendered = maage_client_environment_update(environment_view, renderer, &environment_state,
+            world, &player, yaw, pitch, maage_client_ui_width(ui), maage_client_ui_height(ui), MAAGE_CLIENT_FOV_RADIANS);
+        if (rendered != MAAGE_RENDER_OK) goto done;
         if (state.resized) maage_renderer_resize(renderer);
         draw_count = resident_count = 0; memset(&mesh_stats, 0, sizeof(mesh_stats));
         for (slot_index = 0; slot_index < cache.capacity; ++slot_index) if (cache.slots[slot_index].used) {
@@ -618,10 +638,14 @@ done:
         maage_log_error("maage.client.world", "World shutdown reported a generation, loading or save failure; existing player metadata is preserved.");
         ok = 0; player_ready = 0;
     }
-    if (store && player_ready && !maage_world_store_save_gameplay(store, player.position, yaw, pitch, &game, items, error)) {
-        maage_log_error("maage.client.world", "%s", error); ok = 0;
+    if (store && player_ready) {
+        maage_world_environment(world, &environment_state);
+        if (!maage_world_store_save_environment_gameplay(store, player.position, yaw, pitch, &game, items, &environment_state, error)) {
+            maage_log_error("maage.client.world", "%s", error); ok = 0;
+        }
     }
     maage_client_mesh_cache_clear(&cache);
+    maage_client_environment_destroy(environment_view);
     maage_render_mesh_destroy(interaction.mesh);
     maage_client_ui_destroy(ui); maage_render_texture_destroy(atlas); maage_renderer_destroy(renderer);
     if (window) maage_window_destroy(window);

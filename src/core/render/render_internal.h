@@ -42,7 +42,8 @@ struct maage_renderer {
     maage_window_native native;
     const maage_render_backend_api *api;
     void *platform;
-    float clear[4];
+    float clear[4], sky_light;
+    const maage_render_ui_data *background, *overlay;
     int refresh;
     maage_render_result failure;
     maage_render_capabilities capabilities;

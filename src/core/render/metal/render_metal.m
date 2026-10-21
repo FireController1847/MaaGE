@@ -21,8 +21,8 @@ typedef struct maage_metal_renderer {
     id<MTLDepthStencilState> depth_state;
     id<MTLTexture> depth;
     id<MTLRenderPipelineState> ui_pipeline;
-    id<MTLBuffer> ui_vertices;
-    id<MTLBuffer> ui_indices;
+    id<MTLBuffer> ui_vertices[3];
+    id<MTLBuffer> ui_indices[3];
 } maage_metal_renderer;
 typedef struct maage_metal_mesh {
     id<MTLBuffer> vertices;
@@ -136,7 +136,7 @@ static maage_render_result maage_metal_create(maage_renderer *renderer)
     renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS |
         MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH |
         MAAGE_RENDER_CAP_STENCIL | MAAGE_RENDER_CAP_INSTANCING | MAAGE_RENDER_CAP_COMPUTE |
-        MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI;
+        MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
     renderer->capabilities.texture_formats = MAAGE_RENDER_FORMAT_RGBA8 | MAAGE_RENDER_FORMAT_BGRA8;
     renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT;
     /* Texture limits vary by GPU family; leave unknown until resource creation
@@ -160,8 +160,12 @@ static void maage_metal_destroy(maage_renderer *renderer)
     [native->depth_state release];
     [native->pipeline release];
     [native->ui_pipeline release];
-    [native->ui_vertices release];
-    [native->ui_indices release];
+    {
+        int layer;
+        for (layer = 0; layer < 3; ++layer) {
+            [native->ui_vertices[layer] release]; [native->ui_indices[layer] release];
+        }
+    }
     [native->queue release];
     [native->device release];
     free(native);
@@ -197,11 +201,17 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     maage_render_result result;
     maage_metal_mesh *geometry;
     size_t index;
+    const maage_render_ui_data *layers[3], *batch;
+    int layer;
+    layers[0] = preparing ? NULL : renderer->background;
+    layers[1] = preparing ? NULL : renderer->overlay; layers[2] = ui;
     if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
     if (!preparing && ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible)))
         return MAAGE_RENDER_SKIPPED;
     pool = [[NSAutoreleasePool alloc] init];
-    if (ui && ui->index_count) {
+    for (layer = 0; layer < 3; ++layer) {
+        batch = layers[layer];
+        if (!batch || !batch->index_count) continue;
         if (sizeof(unsigned int) != 4 || sizeof(maage_render_ui_vertex) != 32) {
             [pool drain]; return MAAGE_RENDER_UNSUPPORTED;
         }
@@ -209,16 +219,16 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
             result = maage_metal_pipeline(native);
             if (result != MAAGE_RENDER_OK) { [pool drain]; return result; }
         }
-        result = maage_metal_ui_buffer(native, &native->ui_vertices,
-            ui->vertex_count * sizeof(*ui->vertices));
+        result = maage_metal_ui_buffer(native, &native->ui_vertices[layer],
+            batch->vertex_count * sizeof(*batch->vertices));
         if (result == MAAGE_RENDER_OK)
-            result = maage_metal_ui_buffer(native, &native->ui_indices,
-                ui->index_count * sizeof(*ui->indices));
+            result = maage_metal_ui_buffer(native, &native->ui_indices[layer],
+                batch->index_count * sizeof(*batch->indices));
         if (result != MAAGE_RENDER_OK) { [pool drain]; return result; }
         /* The existing presentation path completes its command before returning,
          * so these persistent buffers can be reused without another frame wait. */
-        memcpy([native->ui_vertices contents], ui->vertices, ui->vertex_count * sizeof(*ui->vertices));
-        memcpy([native->ui_indices contents], ui->indices, ui->index_count * sizeof(*ui->indices));
+        memcpy([native->ui_vertices[layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
+        memcpy([native->ui_indices[layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
     }
     /* Use the entire content view, including permitted notch-adjacent regions.
      * Safe-area insets are for UI placement, not drawable cropping. */
@@ -258,6 +268,19 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
     pass.colorAttachments[0].clearColor = MTLClearColorMake(renderer->clear[0],
         renderer->clear[1], renderer->clear[2], renderer->clear[3]);
     if (!command || !pass) { [pool drain]; return MAAGE_RENDER_OUT_OF_MEMORY; }
+    if (layers[0] && layers[0]->index_count) {
+        float logical_size[2] = {layers[0]->logical_width, layers[0]->logical_height};
+        encoder = [command renderCommandEncoderWithDescriptor:pass];
+        if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
+        [encoder setRenderPipelineState:native->ui_pipeline];
+        [encoder setCullMode:MTLCullModeNone];
+        [encoder setVertexBuffer:native->ui_vertices[0] offset:0 atIndex:0];
+        [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
+        [encoder setFragmentTexture:(id<MTLTexture>)layers[0]->texture->platform atIndex:0];
+        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:layers[0]->index_count
+            indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[0] indexBufferOffset:0];
+        [encoder endEncoding]; pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
+    }
     if (count) {
         pass.depthAttachment.texture = native->depth;
         pass.depthAttachment.loadAction = MTLLoadActionClear;
@@ -274,6 +297,7 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
         [encoder setCullMode:MTLCullModeBack];
         [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
         [encoder setVertexBytes:view_projection length:16 * sizeof(float) atIndex:1];
+        [encoder setFragmentBytes:&renderer->sky_light length:sizeof(float) atIndex:0];
         for (index = 0; index < count; ++index) {
             geometry = meshes[index]->platform;
             [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
@@ -283,26 +307,26 @@ static maage_render_result maage_metal_frame(maage_renderer *renderer, const maa
         }
     }
     [encoder endEncoding];
-    if (ui && ui->index_count) {
-        float logical_size[2] = {ui->logical_width, ui->logical_height};
+    if ((layers[1] && layers[1]->index_count) || (layers[2] && layers[2]->index_count)) {
         MTLViewport viewport = {0, 0, drawable.texture.width, drawable.texture.height, 0, 1};
-        /* A second pass loads the World color without attaching its depth buffer;
-         * both passes share the command buffer and the single presentation. */
         pass = [MTLRenderPassDescriptor renderPassDescriptor];
         pass.colorAttachments[0].texture = drawable.texture;
         pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
         pass.colorAttachments[0].storeAction = MTLStoreActionStore;
         encoder = [command renderCommandEncoderWithDescriptor:pass];
         if (!encoder) { [pool drain]; return MAAGE_RENDER_PLATFORM_ERROR; }
-        [encoder setViewport:viewport];
-        [encoder setRenderPipelineState:native->ui_pipeline];
-        [encoder setDepthStencilState:nil];
-        [encoder setCullMode:MTLCullModeNone];
-        [encoder setVertexBuffer:native->ui_vertices offset:0 atIndex:0];
-        [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
-        [encoder setFragmentTexture:(id<MTLTexture>)ui->texture->platform atIndex:0];
-        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:ui->index_count
-            indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices indexBufferOffset:0];
+        [encoder setViewport:viewport]; [encoder setRenderPipelineState:native->ui_pipeline];
+        [encoder setDepthStencilState:nil]; [encoder setCullMode:MTLCullModeNone];
+        for (layer = 1; layer < 3; ++layer) {
+            float logical_size[2];
+            batch = layers[layer]; if (!batch || !batch->index_count) continue;
+            logical_size[0] = batch->logical_width; logical_size[1] = batch->logical_height;
+            [encoder setVertexBuffer:native->ui_vertices[layer] offset:0 atIndex:0];
+            [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
+            [encoder setFragmentTexture:(id<MTLTexture>)batch->texture->platform atIndex:0];
+            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:batch->index_count
+                indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[layer] indexBufferOffset:0];
+        }
         [encoder endEncoding];
     }
     if (!preparing) [command presentDrawable:drawable];
@@ -366,7 +390,7 @@ static maage_render_result maage_metal_upload_geometry(maage_renderer *renderer,
     NSAutoreleasePool *pool;
     maage_render_result result;
     if (![NSThread isMainThread]) return MAAGE_RENDER_WINDOW_ERROR;
-    if (sizeof(unsigned int) != 4 || sizeof(maage_mesh_vertex) != 48)
+    if (sizeof(unsigned int) != 4 || sizeof(maage_mesh_vertex) != 56)
         return MAAGE_RENDER_UNSUPPORTED;
     pool = [[NSAutoreleasePool alloc] init];
     /* Clear-only renderers do not need the mesh shaders or depth state. */

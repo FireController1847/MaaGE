@@ -18,13 +18,25 @@ typedef char maage_world_required_address_space[((size_t)-1 >= 262144UL) ? 1 : -
  * cache occupancy; use the runtime capacity in maage_world_stats instead. */
 #define MAAGE_WORLD_MAX_RADIUS (MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 4)
 #define MAAGE_WORLD_MAX_CHUNKS 512
-/* Version 1 is frozen; version 2 accepts persisted per-world policies. */
+/* Versions 1/2 are frozen; 3 layers regional features over the same base terrain. */
 #define MAAGE_WORLD_GENERATOR_VERSION 1UL
 #define MAAGE_GENERATION_CONFIGURABLE_VERSION 2UL
+#define MAAGE_GENERATION_FEATURES_VERSION 3UL
 #define MAAGE_GENERATION_POLICY_SCHEMA 1U
 #ifdef __cplusplus
 extern "C" {
 #endif
+typedef enum maage_generation_stage {
+    MAAGE_GENERATION_STAGE_BASE = 0,
+    MAAGE_GENERATION_STAGE_TERRAIN,
+    MAAGE_GENERATION_STAGE_CAVES,
+    MAAGE_GENERATION_STAGE_UNDERGROUND,
+    MAAGE_GENERATION_STAGE_SURFACE,
+    MAAGE_GENERATION_STAGE_VEGETATION,
+    MAAGE_GENERATION_STAGE_STRUCTURES,
+    MAAGE_GENERATION_STAGE_FINALIZE,
+    MAAGE_GENERATION_STAGE_COUNT
+} maage_generation_stage;
 typedef struct maage_generation_policy {
     unsigned int schema_version;
     unsigned long generator_version;
@@ -40,6 +52,7 @@ typedef struct maage_world maage_world;
 typedef struct maage_chunk maage_chunk;
 typedef struct maage_world_mesh maage_world_mesh;
 typedef struct maage_world_store maage_world_store;
+struct maage_environment_state;
 typedef enum maage_chunk_state {
     MAAGE_CHUNK_REQUESTED = 0, MAAGE_CHUNK_LOADING, MAAGE_CHUNK_GENERATING,
     MAAGE_CHUNK_GENERATED, MAAGE_CHUNK_LIGHTING, MAAGE_CHUNK_MESH_PENDING,
@@ -61,6 +74,8 @@ typedef struct maage_world_config {
     unsigned int job_capacity;
     /* All-zero selects frozen generator-1 defaults. */
     maage_generation_policy generation_policy;
+    /* Copied during creation; NULL starts the seeded clock/weather defaults. */
+    const struct maage_environment_state *initial_environment;
 } maage_world_config;
 typedef struct maage_world_stats {
     unsigned int loaded, loaded_sections, pending, ready;
@@ -68,6 +83,12 @@ typedef struct maage_world_stats {
     /* Accepted contexts include completed work awaiting owner-thread commits. */
     unsigned int generation_jobs, lighting_jobs, meshing_jobs, io_jobs;
     unsigned int generation_queued, generation_running;
+    /* Coarse stages reported through scheduler-owned progress snapshots.
+     * Zero entries mean no accepted worker currently reports that stage. */
+    unsigned int generation_stage_jobs[8];
+    unsigned long decorated_columns, structure_fragments;
+    size_t pending_block_updates, pending_fluid_updates, block_entities;
+    unsigned long block_updates_processed;
     unsigned int lighting_queued, lighting_running;
     unsigned int meshing_queued, meshing_running;
     unsigned int io_queued, io_running;
@@ -87,6 +108,8 @@ typedef struct maage_world_observation {
     unsigned int section_count;
     unsigned char light; /* skylight in high nibble, block light in low nibble */
     int light_available;
+    double temperature, rainfall; /* temperature includes generator-3 altitude cooling */
+    int sky_exposed;
 } maage_world_observation;
 typedef struct maage_world_mesh_update {
     int x, z;
@@ -120,6 +143,9 @@ maage_world *maage_world_create(const maage_world_config *config);
 /* Nonblocking owner pump: commit completed work and schedule near-player jobs.
  * Call regularly, including while simulation is paused; no frame-wide waits. */
 void maage_world_stream(maage_world *world, double x, double z, double yaw);
+/* One ordered 20 TPS environment phase, with bounded scheduled block work.
+ * Call only while simulation is active; streaming continues while paused. */
+void maage_world_tick(maage_world *world);
 /* Cheap owner status; full diagnostic snapshots may be sampled less often. */
 int maage_world_failed(const maage_world *world);
 void maage_world_get_stats(maage_world *world, maage_world_stats *stats);

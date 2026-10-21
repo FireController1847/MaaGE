@@ -1,6 +1,7 @@
 #include "debug.h"
 #include "mesh_diagnostics.h"
 #include "maage/client.h"
+#include "maage/environment.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -87,6 +88,8 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     const char *gpu = maage_renderer_device_name(renderer);
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
     maage_world_observation observation;
+    maage_environment_state environment;
+    static const char *const weather_names[3] = {"Clear", "Rain", "Thunder"};
     char seed[32];
     double degrees, resident, peak;
     int x, y, z, direction;
@@ -113,7 +116,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->left[left++], "Facing: %s", facing[direction]);
     sprintf(text->left[left++], "Yaw: %.1f  pitch: %.1f", degrees, pitch * 57.29577951308232);
     if (maage_world_observe(world, x, y, z, &observation)) {
-        sprintf(text->left[left++], "Biome: %u (%s)", observation.biome_id, maage_client_debug_biome(observation.biome_id));
+        sprintf(text->left[left++], "Biome: %u (%s)  temp: %.2f", observation.biome_id, maage_client_debug_biome(observation.biome_id), observation.temperature);
         if (observation.light_available)
             sprintf(text->left[left++], "Light: %u sky / %u block", (unsigned)observation.light >> 4, (unsigned)observation.light & 15);
         else strcpy(text->left[left++], "Light: N/A (pending)");
@@ -140,6 +143,12 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
             game->reach > 0 ? game->reach : (game->mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5));
         sprintf(text->left[left++], "Mutations: %lu broken / %lu placed", game->blocks_broken, game->blocks_placed);
     }
+    maage_world_environment(world, &environment);
+    sprintf(text->left[left++], "Generator: %lu", record->generation_policy.generator_version);
+    if (environment.day_high) sprintf(text->left[left++], "Time: %lu  day: %lu:%lu", environment.day_tick, environment.day_high, environment.day_low);
+    else sprintf(text->left[left++], "Time: %lu / 24000  day: %lu", environment.day_tick, environment.day_low);
+    sprintf(text->left[left++], "Weather: %s  rain: %.2f  thunder: %.2f",
+        weather_names[maage_environment_weather(&environment)], environment.rain_intensity, environment.thunder_intensity);
     sprintf(text->right[right++], "OS: %.48s / %.48s", identity->platform, identity->architecture);
     sprintf(text->right[right++], "Renderer: %s", maage_render_backend_name(maage_renderer_get_backend(renderer)));
     sprintf(text->right[right++], "GPU: %.144s", gpu ? gpu : "N/A");
@@ -154,7 +163,8 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     else strcpy(text->right[right++], "Logical CPUs: N/A (undetected)");
     sprintf(text->right[right++], "Pool workers: %u", stats->worker_count);
     sprintf(text->right[right++], "Active generation workers: %u", stats->generation_running);
-    sprintf(text->right[right++], "Generation: %u queued / %u running", stats->generation_queued, stats->generation_running);
+    sprintf(text->right[right++], "Generation: %u queued / %u running (%.1f cols/s)",
+        stats->generation_queued, stats->generation_running, stats->generated_columns_per_second);
     sprintf(text->right[right++], "Meshing: %u queued / %u running", stats->meshing_queued, stats->meshing_running);
     sprintf(text->right[right++], "Lighting: %u queued / %u running", stats->lighting_queued, stats->lighting_running);
     sprintf(text->right[right++], "I/O: %u queued / %u running", stats->io_queued, stats->io_running);
@@ -164,6 +174,13 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->right[right++], "Queue latency: %.2f ms", stats->scheduling_latency_ms);
     sprintf(text->right[right++], "Mutations: %lu  rejected: %lu", stats->mutations, stats->rejected_mutations);
     sprintf(text->right[right++], "Dirty columns: %u", stats->dirty_columns);
+    sprintf(text->right[right++], "Stages base/terrain: %u / %u", stats->generation_stage_jobs[0], stats->generation_stage_jobs[1]);
+    sprintf(text->right[right++], "Stages caves/ores: %u / %u", stats->generation_stage_jobs[2], stats->generation_stage_jobs[3]);
+    sprintf(text->right[right++], "Stages surface/trees: %u / %u", stats->generation_stage_jobs[4], stats->generation_stage_jobs[5]);
+    sprintf(text->right[right++], "Stages structure/final: %u / %u", stats->generation_stage_jobs[6], stats->generation_stage_jobs[7]);
+    sprintf(text->right[right++], "Decorated: %lu  structure fragments: %lu", stats->decorated_columns, stats->structure_fragments);
+    sprintf(text->right[right++], "Updates: %lu pending / %lu fluid", (unsigned long)stats->pending_block_updates, (unsigned long)stats->pending_fluid_updates);
+    sprintf(text->right[right++], "Block entities: %lu  updates done: %lu", (unsigned long)stats->block_entities, stats->block_updates_processed);
     text->left_count = left; text->right_count = right;
     return text;
 }

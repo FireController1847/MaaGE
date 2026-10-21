@@ -31,6 +31,7 @@ typedef struct maage_job_observation {
     maage_job_id id;
     void *context; /* identity only; snapshot does not transfer ownership */
     maage_job_state state;
+    unsigned stage; /* callback-defined numeric progress, zero until reported */
 } maage_job_observation;
 
 /* Nonzero requests pass through unchanged. Zero chooses detected logical
@@ -58,6 +59,9 @@ int maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run,
  * Cancellation may win after run returns, so discard results marked cancelled. */
 int maage_jobs_cancel(maage_jobs *jobs, maage_job_id id);
 int maage_job_cancelled(const maage_job_token *token);
+/* Optional coarse stage transition. Uses the existing brief scheduler lock;
+ * publish only at stage boundaries, never from an inner workload loop. */
+void maage_job_set_stage(const maage_job_token *token, unsigned stage);
 
 /* Poll transfers one context to the caller; callbacks never run here. Wait is
  * optional owner-thread notification, returning 0 once stopped and drained.

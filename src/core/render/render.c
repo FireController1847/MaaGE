@@ -128,7 +128,7 @@ maage_render_result maage_renderer_create(const maage_render_desc *desc, maage_r
     renderer = (maage_renderer *)calloc(1, sizeof(*renderer));
     if (!renderer) return MAAGE_RENDER_OUT_OF_MEMORY;
     renderer->window = desc->window;
-    renderer->clear[3] = 1.0f;
+    renderer->clear[3] = 1.0f; renderer->sky_light = 1.0f;
     renderer->refresh = 1;
     if (maage_window_acquire_surface(desc->window, &renderer->native) != MAAGE_WINDOW_OK) {
         free(renderer);
@@ -203,6 +203,15 @@ maage_render_result maage_renderer_set_clear_color(maage_renderer *renderer,
     renderer->clear[1] = green;
     renderer->clear[2] = blue;
     renderer->clear[3] = alpha;
+    return MAAGE_RENDER_OK;
+}
+maage_render_result maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
+    const maage_render_ui_data *background, const maage_render_ui_data *overlay)
+{
+    if (!renderer || !(sky_light >= 0 && sky_light <= 1)) return MAAGE_RENDER_INVALID_ARGUMENT;
+    if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_SCENE) || !renderer->api->draw_frame)
+        return MAAGE_RENDER_UNSUPPORTED;
+    renderer->sky_light = sky_light; renderer->background = background; renderer->overlay = overlay;
     return MAAGE_RENDER_OK;
 }
 maage_render_result maage_renderer_prepare_frame(maage_renderer *renderer)
@@ -349,7 +358,8 @@ maage_render_result maage_renderer_draw_frame(maage_renderer *renderer,
     maage_window_state state;
     maage_render_result result;
     size_t mesh_index;
-    int index;
+    int index, layer;
+    const maage_render_ui_data *layers[3], *batch;
     if (!renderer || (count && !meshes) || !view_projection)
         return MAAGE_RENDER_INVALID_ARGUMENT;
     for (mesh_index = 0; mesh_index < count; ++mesh_index)
@@ -358,17 +368,20 @@ maage_render_result maage_renderer_draw_frame(maage_renderer *renderer,
     for (index = 0; index < 16; ++index)
         if (!(view_projection[index] >= -FLT_MAX && view_projection[index] <= FLT_MAX))
             return MAAGE_RENDER_INVALID_ARGUMENT;
-    if (ui && ui->index_count) {
-        if (!ui->texture || ui->texture->renderer != renderer || !ui->texture->owned ||
-            !ui->vertices || !ui->indices || !ui->vertex_count || ui->index_count % 3 ||
-            ui->vertex_count > UINT_MAX ||
-            ui->vertex_count > (size_t)-1 / sizeof(*ui->vertices) ||
-            ui->index_count > (size_t)-1 / sizeof(*ui->indices) ||
-            !(ui->logical_width > 0 && ui->logical_width <= FLT_MAX) ||
-            !(ui->logical_height > 0 && ui->logical_height <= FLT_MAX))
+    layers[0] = renderer->background; layers[1] = renderer->overlay; layers[2] = ui;
+    for (layer = 0; layer < 3; ++layer) {
+        batch = layers[layer];
+        if (!batch || !batch->index_count) continue;
+        if (!batch->texture || batch->texture->renderer != renderer || !batch->texture->owned ||
+            !batch->vertices || !batch->indices || !batch->vertex_count || batch->index_count % 3 ||
+            batch->vertex_count > UINT_MAX ||
+            batch->vertex_count > (size_t)-1 / sizeof(*batch->vertices) ||
+            batch->index_count > (size_t)-1 / sizeof(*batch->indices) ||
+            !(batch->logical_width > 0 && batch->logical_width <= FLT_MAX) ||
+            !(batch->logical_height > 0 && batch->logical_height <= FLT_MAX))
             return MAAGE_RENDER_INVALID_ARGUMENT;
-        for (mesh_index = 0; mesh_index < ui->index_count; ++mesh_index)
-            if (ui->indices[mesh_index] >= ui->vertex_count)
+        for (mesh_index = 0; mesh_index < batch->index_count; ++mesh_index)
+            if (batch->indices[mesh_index] >= batch->vertex_count)
                 return MAAGE_RENDER_INVALID_ARGUMENT;
         if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_UI) ||
             !renderer->api->draw_frame) return MAAGE_RENDER_UNSUPPORTED;

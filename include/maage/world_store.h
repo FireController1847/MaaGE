@@ -2,13 +2,19 @@
 #define MAAGE_WORLD_STORE_H
 #include "maage/world.h"
 #include "maage/gameplay.h"
-#define MAAGE_WORLD_FORMAT_VERSION 2UL
+#include "maage/environment.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+#define MAAGE_WORLD_FORMAT_VERSION 3UL
 #define MAAGE_PLAYER_FORMAT_VERSION 4UL
 #define MAAGE_WORLD_CONFIGURED_FORMAT_VERSION 5UL
+#define MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION 6UL
 typedef struct maage_world_record {
     char id[65], name[128], created_utc[32];
     maage_world_seed seed;
     maage_generation_policy generation_policy;
+    maage_environment_state environment;
     double position[3], yaw, pitch;
     int new_world; /* pending initial spawn; persists until first player save */
     maage_gameplay_save gameplay;
@@ -23,16 +29,16 @@ typedef struct maage_world_record {
 int maage_world_store_open(const char *instance_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **store,
     maage_world_record *record, char error[256]);
-/* An explicit generator-2 policy is accepted only for new worlds; saved
+/* Explicit generator-2/3 policies are accepted only for new worlds; saved
  * worlds always use their persisted policy. NULL selects frozen generator 1. */
 int maage_world_store_open_configured(const char *instance_root, const char *id,
     int create, const char *name, const maage_world_seed *seed,
     const maage_generation_policy *generation_policy, const maage_item_registry *items,
     maage_world_store **store, maage_world_record *record, char error[256]);
 /* Modded worlds must use this variant before reading player metadata. It
- * borrows finalized item definitions until close so schema 4 resolves stable
+ * borrows finalized item definitions until close so schemas 4-6 resolve stable
  * namespaced names to runtime IDs. The original open remains an adapter for
- * legacy numeric item mapping 1; it refuses schema 4 rather than guessing. */
+ * legacy numeric item mapping 1; it refuses named schemas rather than guessing. */
 int maage_world_store_open_with_items(const char *instance_root, const char *id,
     int create, const char *name, const maage_world_seed *seed,
     const maage_item_registry *items, maage_world_store **store,
@@ -49,17 +55,21 @@ int maage_world_store_migrate_legacy(const char *data_root,
  * Serialize metadata saves with each other; chunk files are independent. */
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256]);
-/* Metadata schemas 1-5 remain readable; schema 5 stores generator-2 policy.
- * Generator-1 saves retain existing formats and defaults.
- * Schema 1-4 remain readable; schema 1 starts with Creative and empty
+/* Metadata schemas 1-5 remain readable; schema 1 starts with Creative and empty
  * inventory, schema 2 has at most 64 pickups, schema 3 has a checked 32-bit
  * count and legacy numeric item mapping 1. Schema 4 writes stable namespaced
  * item names in each inventory/cursor/pickup stack and a checked pickup count.
- * Schema 4 requires open_with_items; missing names fail without overwriting.
+ * Schema 5 adds generator-2 policy. New named writes use schema 6, preserving
+ * generator 1/2/3 policy and the clock/weather snapshot alongside player data.
+ * Named schemas require open_with_items; missing names fail without overwriting.
  * The legacy open adapter writes schema 3 and rejects unmapped modded items. */
 int maage_world_store_save_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
     const maage_gameplay *game, const maage_item_registry *items, char error[256]);
+int maage_world_store_save_environment_gameplay(maage_world_store *store,
+    const double position[3], double yaw, double pitch,
+    const maage_gameplay *game, const maage_item_registry *items,
+    const maage_environment_state *environment, char error[256]);
 /* All jobs borrowing this store must finish before close releases its lock. */
 void maage_world_store_close(maage_world_store *store);
 /* Distinct coordinates may load/save concurrently: each job owns its buffers,
@@ -69,12 +79,15 @@ void maage_world_store_close(maage_world_store *store);
  * Detached loaded columns transfer to caller. 1 loaded, 0 absent, -1 invalid/I/O
  * error; corruption never means air.
  * Format 1 remains readable with its original fixed numeric mappings (states
- * 0,1,2,3,7,9,12,13,24,256..261; biomes 0..5). New writes use format 2:
+ * 0,1,2,3,7,9,12,13,24,256..261; biomes 0..5). Format 2 remains readable.
+ * New writes use format 3, retaining format-2 identity palettes:
  * per-chunk palettes of stable namespaced biome names and block names plus
  * state metadata, with 8-bit biome and 16-bit palette indices. These indices
  * are local to a chunk, not runtime IDs; a chunk contains at most 65536 cells.
  * Unknown identities reject load/save without replacing existing data.
- * Existing format-1 chunks migrate atomically to format 2 on save.
+ * Format 3 adds generation-stage counts, relative pending fluid delays and
+ * chunk-owned numeric block entities with checked versioned opaque payloads.
+ * Older chunks migrate atomically on save; unknown/corrupt data is preserved.
  * Each chunk header generator version matches its parent world metadata. */
 int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
@@ -82,4 +95,14 @@ int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
 int maage_world_store_save_chunk(maage_world_store *store,
     const maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_biome_registry *biomes, char error[256]);
+/* Snapshot clock is captured when the async save is submitted. Pending updates
+ * serialize remaining delays, so an older clock checkpoint after a crash cannot
+ * postpone them by an entire previous session. Import rebases on column load. */
+int maage_world_store_save_chunk_at(maage_world_store *store,
+    const maage_chunk *chunk, const maage_block_registry *blocks,
+    const maage_biome_registry *biomes, unsigned long tick_low,
+    unsigned long tick_high, char error[256]);
+#ifdef __cplusplus
+}
+#endif
 #endif

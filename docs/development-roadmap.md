@@ -1,10 +1,10 @@
 # MaaGE Gameplay Roadmap
 
-Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.4**
+Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.6**
 implements the Phase 1 foundation, Phase 2 world milestone and Phase 2.5
-multithreaded architecture, Phase 2.75 UI, Phase 3 gameplay and Phase 3.5 instance storage below.
-Compilation does not establish runtime correctness or vanilla fidelity. Phases
-4–6 remain future work; Phase 3 limitations are explicit below.
+multithreaded architecture, Phase 2.75 UI, Phase 3 gameplay, Phase 3.5 instance storage
+and the Phase 4 environment foundation below. Compilation does not establish
+runtime correctness or vanilla fidelity. Phases 5–6 remain future work.
 
 ## Phase 1 — Rendering and Movement
 
@@ -122,10 +122,12 @@ launch retains a pending-spawn flag; later interrupted launches resume the last
 successfully saved player state.
 
 Legacy chunk format **1**, generator **1**, blockset **1** remain readable with
-frozen numeric identities. New chunk format **2** uses namespaced block/state and
-biome palettes local to each chunk, preserving expanded runtime ID registries.
+frozen numeric identities. Chunk format **2** introduced namespaced block/state and
+biome palettes local to each chunk, preserving expanded runtime ID registries;
+Phase 4 format **3** retains those palettes and adds column simulation state.
 Metadata schemas 1–4 retain generator-1 behavior; configured generator 2 uses
-metadata schema **5** with sea-level and spawn-search parameters. Headers carry
+metadata schema **5** with sea-level and spawn-search parameters. Phase 4 metadata
+schema **6** additionally persists clock/weather and supports generator 3. Headers carry
 matching generator/blockset versions. All files use explicit little-endian encoding
 and CRC32. Unsupported versions, lengths, coordinates, identities or checksums
 fail without replacing corrupt originals. Explicit migrations remain necessary
@@ -145,12 +147,12 @@ GenLayer, vanilla three-dimensional density, exact biome distribution or
 seed-for-seed 1.7.10 terrain. The generator version is persisted and unsupported
 versions are rejected rather than silently changing terrain.
 
-Trees, caves, ores, structures, decorations, fluids, weather, inventories, block
-interaction and multiplayer are deferred. Forest/taiga currently describe terrain
-and color parameters without trees or snow. Water uses an opaque tinted first
-texture frame; there is no animation, fluid simulation, swimming or underwater
-presentation. Lighting is a basic model, without vanilla lighting parity,
-ambient occlusion or day/night. GPU positions remain floating-point world
+Generators 1/2 retain their original terrain without Phase 4 features; generator 3
+adds the generation features described below. Phase 3 supplies inventory and
+interaction, and Phase 4 supplies fluid updates and environmental presentation.
+Water still uses an opaque tinted first texture frame without animation, swimming
+or underwater presentation. Lighting lacks vanilla parity and ambient occlusion.
+GPU positions remain floating-point world
 coordinates, so precision decreases far from the origin. World coordinates are
 bounded to the classic-scale ±30-million range.
 
@@ -346,14 +348,14 @@ Implemented foundations extend the existing World, scheduler, input and Client U
 
 This is an independent 1.7.10-style foundation, not gameplay or visual parity.
 Tools are defined by the API but none are registered yet, so bare-hand mining
-cannot harvest stone/sandstone. Drops are simplified (no cobblestone item, gravel
+cannot harvest stone/sandstone. Drops are simplified (Phase 4 adds cobblestone, but no gravel
 flint chance or item-entity simulation). Hunger uses provisional walking/jump/
 mining costs, 80-tick regeneration/starvation and a one-health starvation floor;
 food, difficulty selection, armor, combat and crafting remain deferred. Respawn
 has no persistent bed/spawn point or death drops. Held blocks are perspective UI
 quads with fixed idle positioning, without an arm, equip animation or models.
 Cracks use opaque precompositing rather than vanilla's dedicated blend pass.
-Full-cube placement is the only current content behavior; fluids do not simulate.
+Phase 4 extends content with shaped decoration and scheduled fluids below.
 
 macOS ARM64 Debug/Release Client (native Metal) and portable headless Release
 World/Server compilation passed. No application, test, benchmark, UI/runtime
@@ -472,9 +474,76 @@ filesystem/link/remapping/migration behavior requires programmer runtime testing
 
 ## Phase 4 — World Systems
 
-Planned: caves/structures, ores/vegetation, fluids, day/night, weather, block
-entities, block updates/tick scheduling, more complete block behavior and world
-simulation fidelity.
+Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
+
+- **Generation:** new worlds default to generator **3**. `--generator-version=1|2|3`
+  selects a creation policy; loads retain the recorded policy. Generators 1/2
+  remain frozen. Eight numeric stages cover biome selection, terrain shaping,
+  caves, underground resources, surface decoration, vegetation, structures and
+  final heightmaps. Fluid initialization and existing asynchronous lighting follow;
+  the final generation stage does not claim completed lighting.
+- **Underground:** branching tunnels, air pockets, ravines, dirt/gravel deposits,
+  underground water/lava pools and bedrock. Numeric feature tables use classic
+  height bands for coal, iron, gold, redstone, lapis, diamond and hills-only emeralds.
+- **Surface:** grass/flowers, oak/birch/spruce trees, cacti/dead bushes, forest
+  mushrooms, snow and biome surfaces. Blocks use the existing reconstructed atlas;
+  plants use crossed geometry, and snow/cactus/torch content has explicit shapes.
+  Spawn planning shares tree/cactus geometry and accounts for snow thickness.
+- **Structures:** numeric, versioned regional placement generates underground
+  cobblestone/mossy dungeon shells with terrain constraints and an entrance.
+  Chests, spawners, loot, encounters, pyramids, temples and villages are deferred.
+- **Determinism/concurrency:** workers replay bounded regional owners in fixed
+  coordinate order, with private seed-derived plans and writes clipped to their
+  own column. Caves, veins, trees and rooms cross chunk boundaries without neighbor
+  waits, a global PRNG or a new pool. Existing snapshot/revision checks still reject
+  obsolete results. Coarse stage progress shares the existing brief Jobs lock.
+- **Scheduled updates:** `maage_world_tick` runs once per active 20 TPS player step,
+  processing at most 128 updates. Per-column heaps/hash indices deduplicate numeric
+  `(kind, cell)` entries; an active-column cursor bounds inspection. Unavailable
+  boundaries retain delayed entries without generating neighbor jobs. Each touched
+  column publishes once per phase. Auxiliary-only changes preserve geometry epochs;
+  lighting commits merge current queues/entities rather than overwriting newer state.
+- **Fluids:** numeric water/lava sources, horizontal levels and falling states;
+  downward-first spreading, recession, water source renewal, barriers and
+  obsidian/cobblestone/stone interactions. Water updates every five ticks, lava
+  thirty. Placement/removal wakes nearby fluids through the same mutation path.
+  Private lighting jobs handle emission, caves, edits and cross-column propagation.
+- **Time/weather/rendering:** a persisted two-word clock advances a 24,000-tick day.
+  Modal/focus pauses stop simulation while streaming continues. Seeded clear/rain/
+  thunder timers and intensity transitions advance on simulation ticks. Cold/wet
+  observations select snow and deserts suppress precipitation. Metal combines static
+  sky/block light channels with a frame sky factor, preserving emitted light at night
+  without relighting. Existing draw submission accepts optional background/overlay
+  batches for sky color, sun/moon movement/phases, bounded rain/snow and thunder flashes.
+- **Persistence:** metadata **6** reads schemas 1–5 and retains policies/stable item
+  identities, adding clock/weather to the final player checkpoint after successful
+  World flush. Chunk **3** reads formats 1/2 and retains stable palettes, stage/feature
+  counts, updates and block entities. Pending work serializes remaining two-word
+  delays and rebases on load, independent of an interrupted session's older clock.
+  Instance paths, asynchronous single-writer saves, CRC/identity/length checks,
+  atomic promotion and dirty-eviction protection remain intact.
+- **Block entities:** chunk-owned numeric type/version/cell records with copied,
+  bounded payloads and owner set/get/remove APIs. Block-type replacement removes
+  the record. Container/furnace/sign identities are reserved; gameplay is deferred.
+- **F3:** clock/day, weather/intensities, temperature/static light, generator, eight
+  job stages, decoration-stage completions/structure fragments, pending fluid/block
+  updates and entities join existing worker, lighting, memory, mesh/upload diagnostics.
+  Snapshots never read worker-owned output or wait for jobs, graphics or I/O.
+
+This remains original approximate generation without Java Random/GenLayer,
+vanilla three-dimensional density or seed parity. Built-in feature tables are
+frozen by generator 3; sea level and spawn search remain its per-world controls.
+No jungle biome or surface lakes are implemented. Ore blocks drop themselves;
+tree variants use base-log drops. Fluids omit vanilla slope search/exact update
+order, swimming, buoyancy and lava damage. Plant support/leaf decay, snow
+accumulation/melting and weather audio remain deferred. Fluid textures are opaque
+first frames. Precipitation is a screen-space overlay gated by the player's sky/
+climate observation, without world-depth particles or distant roof occlusion.
+Clock/player checkpoints occur on clean shutdown; chunks save independently.
+
+macOS ARM64 Debug/Release Client and headless World/Server builds passed. No applications, tests,
+benchmarks, runtime/visual validation or GitHub Actions ran. Windows/Linux and
+runtime shader compilation remain unverified; only Metal implements gameplay drawing.
 
 ## Phase 5 — Full Classic Gameplay
 

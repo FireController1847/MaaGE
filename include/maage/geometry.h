@@ -8,6 +8,7 @@ typedef struct maage_mesh_vertex {
     float normal[3];
     float uv[2];
     float color[4];
+    float light[2]; /* Independent normalized static skylight and block emission. */
 } maage_mesh_vertex;
 typedef struct maage_mesh_data {
     const maage_mesh_vertex *vertices;

@@ -33,6 +33,7 @@ static void maage_interaction_box(maage_mesh_vertex *vertices, unsigned int *ind
             for (axis = 0; axis < 3; ++axis)
                 vertex->color[axis] = brightness * shade[face] * state->faces[face].tint[axis];
             vertex->color[3] = 1;
+            vertex->light[1] = 1;
         }
         for (corner = 0; corner < 6; ++corner) indices[*faces * 6 + corner] = base + offsets[corner];
         ++*faces;

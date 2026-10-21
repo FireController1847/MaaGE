@@ -27,6 +27,11 @@ void maage_chunk_destroy(maage_chunk *chunk)
     int section;
     if (!chunk) return;
     for (section = 0; section < 16; ++section) free(chunk->sections[section]);
+    {
+        size_t i;
+        for (i = 0; i < chunk->entity_count; ++i) free(chunk->entities[i].data);
+    }
+    free(chunk->entities); free(chunk->updates); free(chunk->update_index);
     free(chunk);
 }
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z)

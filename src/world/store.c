@@ -485,11 +485,13 @@ static int maage_store_metadata_write(const maage_world_store *store,
     char path[MAAGE_PATH_CAPACITY];
     unsigned int i;
     if (!maage_generation_policy_valid(&record->generation_policy) ||
-        (record->generation_policy.generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION &&
+        (record->generation_policy.generator_version >= MAAGE_GENERATION_CONFIGURABLE_VERSION &&
          !store->items))
         return maage_store_error(error, "World generation policy is invalid or lacks item mapping.");
     if (!maage_store_gameplay_valid(&record->gameplay, store->items))
         return maage_store_error(error, "Player gameplay identity or pickup data is invalid.");
+    if (!maage_environment_state_valid(&record->environment))
+        return maage_store_error(error,"World environment snapshot is invalid.");
     named_length = maage_store_named_length(&record->gameplay, store->items);
     if (named_length == (size_t)-1 || named_length > MAAGE_STORE_METADATA_MAX)
         return maage_store_error(error, "Player item identity cannot be serialized.");
@@ -507,9 +509,7 @@ static int maage_store_metadata_write(const maage_world_store *store,
     if (!data) return maage_store_error(error, "Not enough memory to encode player metadata.");
     bytes.data = data; bytes.length = capacity; bytes.position = 0; bytes.failed = 0;
     maage_store_text_put(&bytes, "MGWORLD1", 8);
-    maage_store_put(&bytes, record->generation_policy.generator_version ==
-        MAAGE_GENERATION_CONFIGURABLE_VERSION ? MAAGE_WORLD_CONFIGURED_FORMAT_VERSION :
-        (store->items ? MAAGE_PLAYER_FORMAT_VERSION : 3UL), 4);
+    maage_store_put(&bytes,store->items ? MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION : 3UL,4);
     maage_store_put(&bytes, record->generation_policy.generator_version, 4);
     maage_store_put(&bytes, MAAGE_WORLD_BLOCKSET_VERSION, 4);
     maage_store_put(&bytes, record->seed.low, 4); maage_store_put(&bytes, record->seed.high, 4);
@@ -521,11 +521,23 @@ static int maage_store_metadata_write(const maage_world_store *store,
     for (i = 0; i < 3; ++i) maage_store_double_put(&bytes, record->position[i]);
     maage_store_double_put(&bytes, record->yaw); maage_store_double_put(&bytes, record->pitch);
     maage_store_gameplay_put(&bytes, &record->gameplay, store->items);
-    if (record->generation_policy.generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION) {
+    if (store->items) {
         maage_store_put(&bytes, record->generation_policy.schema_version, 4);
         maage_store_put(&bytes, (unsigned long)record->generation_policy.sea_level, 4);
         maage_store_put(&bytes, (unsigned long)record->generation_policy.spawn_search_radius, 4);
         maage_store_put(&bytes, (unsigned long)record->generation_policy.spawn_search_step, 4);
+        maage_store_put(&bytes,record->environment.ticks_low,4);
+        maage_store_put(&bytes,record->environment.ticks_high,4);
+        maage_store_put(&bytes,record->environment.day_tick,4);
+        maage_store_put(&bytes,record->environment.day_low,4);
+        maage_store_put(&bytes,record->environment.day_high,4);
+        maage_store_put(&bytes,record->environment.random,4);
+        maage_store_put(&bytes,record->environment.rain_ticks,4);
+        maage_store_put(&bytes,record->environment.thunder_ticks,4);
+        maage_store_put(&bytes,record->environment.raining,1);
+        maage_store_put(&bytes,record->environment.thundering,1);
+        maage_store_double_put(&bytes,record->environment.rain_intensity);
+        maage_store_double_put(&bytes,record->environment.thunder_intensity);
     }
     maage_store_checksum_put(&bytes);
     if (bytes.failed || !maage_storage_join(path, sizeof(path), store->directory, "world.bin")) {
@@ -558,15 +570,19 @@ static int maage_store_metadata_load(const maage_world_store *store,
     }
     ok = ok && (format == 1 || format == 2 || format == 3 ||
         ((format == MAAGE_PLAYER_FORMAT_VERSION ||
-          format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION) && store->items != NULL)) &&
+          format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION ||
+          format == MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION) && store->items != NULL)) &&
         ((generator_version == MAAGE_WORLD_GENERATOR_VERSION &&
           format != MAAGE_WORLD_CONFIGURED_FORMAT_VERSION) ||
          (generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION &&
-          format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION)) &&
+          (format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION || format == MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION)) ||
+         (generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
+          format == MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION)) &&
         blockset_version == MAAGE_WORLD_BLOCKSET_VERSION &&
         maage_generation_policy_default(generator_version, &record->generation_policy);
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4); record->seed.high = maage_store_get(&bytes, 4);
+        maage_environment_default(record->seed,&record->environment);
         for (i = 0; i < 3; ++i) lengths[i] = maage_store_get(&bytes, 1);
         record->new_world = (int)maage_store_get(&bytes, 1);
         ok = record->new_world <= 1 && lengths[0] > 0 && lengths[0] < sizeof(record->id) &&
@@ -584,7 +600,7 @@ static int maage_store_metadata_load(const maage_world_store *store,
         if (format == 1) maage_store_gameplay_default(&record->gameplay);
         else maage_store_gameplay_get(&bytes, &record->gameplay, format, store->items);
         gameplay_read = 1;
-        if (format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION) {
+        if (format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION || format == MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION) {
             value = maage_store_get(&bytes, 4);
             if (value > UINT_MAX) bytes.failed = 1;
             record->generation_policy.schema_version = (unsigned int)value;
@@ -598,7 +614,22 @@ static int maage_store_metadata_load(const maage_world_store *store,
             if (value > INT_MAX) bytes.failed = 1;
             record->generation_policy.spawn_search_step = (int)value;
         }
+        if (format == MAAGE_WORLD_ENVIRONMENT_FORMAT_VERSION) {
+            record->environment.ticks_low=maage_store_get(&bytes,4);
+            record->environment.ticks_high=maage_store_get(&bytes,4);
+            record->environment.day_tick=maage_store_get(&bytes,4);
+            record->environment.day_low=maage_store_get(&bytes,4);
+            record->environment.day_high=maage_store_get(&bytes,4);
+            record->environment.random=maage_store_get(&bytes,4);
+            record->environment.rain_ticks=maage_store_get(&bytes,4);
+            record->environment.thunder_ticks=maage_store_get(&bytes,4);
+            record->environment.raining=(unsigned int)maage_store_get(&bytes,1);
+            record->environment.thundering=(unsigned int)maage_store_get(&bytes,1);
+            record->environment.rain_intensity=maage_store_double_get(&bytes);
+            record->environment.thunder_intensity=maage_store_double_get(&bytes);
+        }
         ok = ok && !bytes.failed && maage_generation_policy_valid(&record->generation_policy) &&
+            maage_environment_state_valid(&record->environment) &&
             bytes.position == bytes.length && maage_store_id(record->id) &&
             !strcmp(record->id, expected_id) && maage_store_name(record->name) && maage_store_player(record);
         for (i = 0; i < 20; ++i) {
@@ -632,7 +663,7 @@ int maage_world_store_open_configured(const char *instance_root, const char *id,
     *output = NULL;
     if (error) error[0] = 0;
     if (generation_policy && (!maage_generation_policy_valid(generation_policy) ||
-        (generation_policy->generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION &&
+        (generation_policy->generator_version >= MAAGE_GENERATION_CONFIGURABLE_VERSION &&
          !items))) return maage_store_error(error, "Invalid configured generator or missing item registry.");
     if (items && !maage_item_registry_is_finalized(items))
         return maage_store_error(error, "World storage requires finalized item definitions.");
@@ -697,6 +728,7 @@ int maage_world_store_open_configured(const char *instance_root, const char *id,
         if (now == (time_t)-1 || !utc || strftime(store->record.created_utc, sizeof(store->record.created_utc), "%Y-%m-%dT%H:%M:%SZ", utc) != 20) {
             maage_store_error(error, "Could not determine the world's creation time."); goto done;
         }
+        maage_environment_default(store->record.seed,&store->record.environment);
         if (!maage_store_metadata_write(store, &store->record, error)) goto done;
     } else if (!maage_store_metadata_load(store, chosen, &store->record, error)) goto done;
     if (!maage_storage_join(store->chunks, sizeof(store->chunks), store->directory, "chunks") || !maage_storage_directories(store->chunks)) {
@@ -954,6 +986,7 @@ int maage_world_store_save_player(maage_world_store *store,
     }
     memcpy(record.position, position, sizeof(record.position));
     record.gameplay = existing.gameplay;
+    record.environment=existing.environment;
     record.yaw = yaw; record.pitch = pitch; record.new_world = 0;
     if (!maage_store_player(&record)) {
         maage_gameplay_save_clear(&existing.gameplay);
@@ -966,9 +999,10 @@ int maage_world_store_save_player(maage_world_store *store,
         return saved;
     }
 }
-int maage_world_store_save_gameplay(maage_world_store *store,
+int maage_world_store_save_environment_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
-    const maage_gameplay *game, const maage_item_registry *items, char error[256])
+    const maage_gameplay *game, const maage_item_registry *items,
+    const maage_environment_state *environment, char error[256])
 {
     maage_world_record record, existing;
     maage_gameplay restored;
@@ -988,6 +1022,7 @@ int maage_world_store_save_gameplay(maage_world_store *store,
         return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
     }
     memcpy(record.position, position, sizeof(record.position)); record.yaw = yaw; record.pitch = pitch;
+    record.environment=environment ? *environment : existing.environment;
     record.new_world = 0;
     if (!maage_gameplay_snapshot(game, &record.gameplay)) {
         maage_gameplay_save_clear(&existing.gameplay);
@@ -995,6 +1030,7 @@ int maage_world_store_save_gameplay(maage_world_store *store,
     }
     memset(&restored, 0, sizeof(restored));
     valid = maage_store_player(&record) &&
+        maage_environment_state_valid(&record.environment) &&
         maage_store_gameplay_valid(&record.gameplay, store->items) &&
         maage_gameplay_restore(&restored, items, &record.gameplay);
     saved = valid && maage_store_metadata_write(store, &record, error);
@@ -1004,6 +1040,12 @@ int maage_world_store_save_gameplay(maage_world_store *store,
     if (!valid)
         return maage_store_error(error, "Player gameplay snapshot is invalid or uses an unmapped item identity.");
     return saved;
+}
+int maage_world_store_save_gameplay(maage_world_store *store,
+    const double position[3], double yaw, double pitch,
+    const maage_gameplay *game, const maage_item_registry *items, char error[256])
+{
+    return maage_world_store_save_environment_gameplay(store,position,yaw,pitch,game,items,NULL,error);
 }
 void maage_world_store_close(maage_world_store *store)
 {
@@ -1105,6 +1147,120 @@ static void maage_store_identity_put(maage_store_bytes *bytes, const char *name)
     maage_store_put(bytes, (unsigned long)length, 1);
     maage_store_text_put(bytes, name, length);
 }
+static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chunk *chunk,
+    const maage_block_registry *blocks)
+{
+    maage_scheduled_update update;
+    maage_block_entity *entity;
+    unsigned char occupied[8192];
+    unsigned long count, i, length, stages;
+    const maage_block_state_definition *state;
+    size_t before;
+    memset(occupied,0,sizeof(occupied));
+    stages=maage_store_get(bytes,4);
+    if (stages>255UL) return 0;
+    chunk->generation_stages=(unsigned int)stages;
+    for (i=0;i<8;++i) chunk->generation_features[i]=maage_store_get(bytes,4);
+    chunk->environment_initialized=(int)maage_store_get(bytes,1);
+    count=maage_store_get(bytes,4);
+    if (bytes->failed || chunk->environment_initialized>1 || count>65536UL || count>(bytes->length-bytes->position)/14UL) return 0;
+    for (i=0;i<count;++i) {
+        if (maage_store_get(bytes,4)!=MAAGE_BLOCK_UPDATE_FLUID) return 0;
+        update.kind=MAAGE_BLOCK_UPDATE_FLUID; update.cell=(unsigned int)maage_store_get(bytes,2);
+        update.due_low=maage_store_get(bytes,4); update.due_high=maage_store_get(bytes,4);
+        before=chunk->update_count;
+        if (bytes->failed || !maage_chunk_schedule_update(chunk,&update) || chunk->update_count!=before+1) return 0;
+    }
+    count=maage_store_get(bytes,4);
+    if (bytes->failed || count>65536UL || count>(bytes->length-bytes->position)/14UL ||
+        count>(size_t)-1/sizeof(*chunk->entities)) return 0;
+    if (count) {
+        chunk->entities=(maage_block_entity *)calloc((size_t)count,sizeof(*chunk->entities));
+        if (!chunk->entities) return 0;
+        chunk->entity_capacity=(size_t)count;
+    }
+    for (i=0;i<count;++i) {
+        entity=&chunk->entities[chunk->entity_count++];
+        entity->cell=(unsigned int)maage_store_get(bytes,2);
+        entity->type=maage_store_get(bytes,4); entity->version=maage_store_get(bytes,4);
+        length=maage_store_get(bytes,4);
+        if (bytes->failed || !entity->type || !entity->version || length>65536UL ||
+            length>bytes->length-bytes->position || (occupied[entity->cell/8]&(1U<<(entity->cell%8)))) return 0;
+        state=maage_block_registry_state(blocks,maage_chunk_get(chunk,(int)(entity->cell%16),
+            (int)(entity->cell/256),(int)((entity->cell/16)%16)));
+        if (!state || state->block_id==MAAGE_BLOCK_AIR) return 0;
+        occupied[entity->cell/8]|=(unsigned char)(1U<<(entity->cell%8));
+        entity->length=(size_t)length;
+        if (length) {
+            entity->data=(unsigned char *)malloc((size_t)length);
+            if (!entity->data) return 0;
+            memcpy(entity->data,bytes->data+bytes->position,(size_t)length); bytes->position+=(size_t)length;
+        }
+    }
+    chunk->updates_relative=1;
+    return !bytes->failed;
+}
+static int maage_store_chunk_simulation_size(const maage_chunk *chunk,
+    const maage_block_registry *blocks, size_t *length)
+{
+    unsigned char occupied[8192];
+    const maage_block_entity *entity;
+    const maage_block_state_definition *state;
+    size_t i, size=45UL;
+    if (chunk->update_count>65536UL || chunk->entity_count>65536UL ||
+        chunk->generation_stages>255U || (chunk->environment_initialized!=0 && chunk->environment_initialized!=1)) return 0;
+    size+=chunk->update_count*14UL+chunk->entity_count*14UL;
+    memset(occupied,0,sizeof(occupied));
+    for (i=0;i<chunk->update_count;++i) {
+        const maage_scheduled_update *update=&chunk->updates[i];
+        if (update->kind!=MAAGE_BLOCK_UPDATE_FLUID || update->cell>65535U ||
+            update->due_low>MAAGE_STORE_WORD || update->due_high>MAAGE_STORE_WORD ||
+            (occupied[update->cell/8]&(1U<<(update->cell%8)))) return 0;
+        occupied[update->cell/8]|=(unsigned char)(1U<<(update->cell%8));
+    }
+    memset(occupied,0,sizeof(occupied));
+    for (i=0;i<chunk->entity_count;++i) {
+        entity=&chunk->entities[i];
+        if (entity->cell>65535U || !entity->type || entity->type>MAAGE_STORE_WORD || !entity->version ||
+            entity->version>MAAGE_STORE_WORD || entity->length>65536UL || (entity->length && !entity->data) ||
+            (occupied[entity->cell/8]&(1U<<(entity->cell%8))) || entity->length>MAAGE_STORE_CHUNK_MAX-size) return 0;
+        state=maage_block_registry_state(blocks,maage_chunk_get(chunk,(int)(entity->cell%16),
+            (int)(entity->cell/256),(int)((entity->cell/16)%16)));
+        if (!state || state->block_id==MAAGE_BLOCK_AIR) return 0;
+        occupied[entity->cell/8]|=(unsigned char)(1U<<(entity->cell%8)); size+=entity->length;
+    }
+    for (i=0;i<8;++i) if (chunk->generation_features[i]>MAAGE_STORE_WORD) return 0;
+    *length=size; return 1;
+}
+static void maage_store_chunk_simulation_put(maage_store_bytes *bytes, const maage_chunk *chunk,
+    unsigned long now_low, unsigned long now_high)
+{
+    size_t i,j;
+    unsigned long low, high;
+    const maage_scheduled_update *update;
+    const maage_block_entity *entity;
+    maage_store_put(bytes,chunk->generation_stages,4);
+    for (i=0;i<8;++i) maage_store_put(bytes,chunk->generation_features[i],4);
+    maage_store_put(bytes,chunk->environment_initialized ? 1UL : 0UL,1);
+    maage_store_put(bytes,(unsigned long)chunk->update_count,4);
+    for (i=0;i<chunk->update_count;++i) {
+        update=&chunk->updates[i]; low=high=0;
+        if (chunk->updates_relative) { low=update->due_low; high=update->due_high; }
+        else if (update->due_high>now_high || (update->due_high==now_high && update->due_low>now_low)) {
+            low=(update->due_low-now_low)&MAAGE_STORE_WORD;
+            high=(update->due_high-now_high-(update->due_low<now_low ? 1UL : 0UL))&MAAGE_STORE_WORD;
+        }
+        maage_store_put(bytes,update->kind,4); maage_store_put(bytes,update->cell,2);
+        maage_store_put(bytes,low,4); maage_store_put(bytes,high,4);
+    }
+    maage_store_put(bytes,(unsigned long)chunk->entity_count,4);
+    for (i=0;i<chunk->entity_count;++i) {
+        entity=&chunk->entities[i];
+        maage_store_put(bytes,entity->cell,2); maage_store_put(bytes,entity->type,4);
+        maage_store_put(bytes,entity->version,4); maage_store_put(bytes,(unsigned long)entity->length,4);
+        for (j=0;j<entity->length;++j) maage_store_put(bytes,entity->data[j],1);
+    }
+}
 static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
     unsigned long generator_version, maage_chunk **output)
@@ -1119,14 +1275,15 @@ static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, i
     size_t i, section, expected_length = 800, active_cells = 0;
     unsigned int metadata;
     char name[256];
-    int modern;
+    int modern, simulation;
     bytes.data = data; bytes.length = length; bytes.position = 0; bytes.failed = 0;
     if (length < 804 || !maage_store_checksum(&bytes)) return 0;
-    modern = memcmp(data, "MGCHNK2\0", 8) == 0;
-    if (!maage_store_magic(&bytes, modern ? "MGCHNK2\0" : "MGCHNK1\0"))
+    simulation=memcmp(data,"MGCHNK3\0",8)==0;
+    modern = simulation || memcmp(data, "MGCHNK2\0", 8) == 0;
+    if (!maage_store_magic(&bytes,simulation ? "MGCHNK3\0" : (modern ? "MGCHNK2\0" : "MGCHNK1\0")))
         return 0;
     format = maage_store_get(&bytes, 4);
-    if (format != (modern ? 2UL : 1UL) ||
+    if (format != (simulation ? 3UL : (modern ? 2UL : 1UL)) ||
         maage_store_get(&bytes, 4) != generator_version ||
         maage_store_get(&bytes, 4) != MAAGE_WORLD_BLOCKSET_VERSION) return 0;
     stored_x = maage_store_get(&bytes, 4); stored_z = maage_store_get(&bytes, 4);
@@ -1168,7 +1325,8 @@ static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, i
                 goto failed;
             biome_palette[i] = biome;
         }
-        if (bytes.failed || bytes.length - bytes.position != expected_length - 32) goto failed;
+        if (bytes.failed || (simulation ? bytes.length-bytes.position<expected_length-32+45UL :
+            bytes.length-bytes.position!=expected_length-32)) goto failed;
     }
     chunk = maage_chunk_create(x, z);
     if (!chunk) goto failed;
@@ -1206,6 +1364,7 @@ static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, i
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i)
             chunk->sections[section]->light[i] = (unsigned char)maage_store_get(&bytes, 1);
     }
+    if (simulation && !maage_store_chunk_simulation_get(&bytes,chunk,blocks)) goto failed;
     if (bytes.failed || bytes.position != bytes.length) goto failed;
     free(palette);
     *output = chunk;
@@ -1242,8 +1401,9 @@ int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     }
     return 1;
 }
-int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *chunk,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes, char error[256])
+int maage_world_store_save_chunk_at(maage_world_store *store, const maage_chunk *chunk,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    unsigned long tick_low, unsigned long tick_high, char error[256])
 {
     char path[MAAGE_PATH_CAPACITY];
     maage_store_bytes bytes;
@@ -1255,7 +1415,7 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     const char *name;
     unsigned long mask = 0;
     size_t i, section, j, count = 0, unique = 0, biome_count = 0, cells = 0;
-    size_t capacity = 800UL + 8UL + 4UL;
+    size_t capacity = 800UL + 8UL + 4UL, simulation_length;
     int result;
     if (!store || !chunk || !blocks || !biomes ||
         !maage_store_chunk_path(store, chunk->x, chunk->z, path))
@@ -1263,6 +1423,9 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     result = maage_world_store_load_chunk(store, chunk->x, chunk->z, blocks, biomes, &existing, error);
     if (result < 0) return 0;
     maage_chunk_destroy(existing);
+    if (tick_low>MAAGE_STORE_WORD || tick_high>MAAGE_STORE_WORD ||
+        !maage_store_chunk_simulation_size(chunk,blocks,&simulation_length)) goto incompatible;
+    capacity+=simulation_length;
     for (section = 0; section < 16; ++section)
         if (chunk->sections[section]) { mask |= 1UL << section; cells += MAAGE_SECTION_VOLUME; }
     if (cells) {
@@ -1312,7 +1475,7 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
         free(states); return maage_store_error(error, "Not enough memory to encode a chunk.");
     }
     bytes.length = capacity; bytes.position = 0; bytes.failed = 0;
-    maage_store_text_put(&bytes, "MGCHNK2\0", 8);
+    maage_store_text_put(&bytes, "MGCHNK3\0", 8);
     maage_store_put(&bytes, MAAGE_WORLD_FORMAT_VERSION, 4);
     maage_store_put(&bytes, store->record.generation_policy.generator_version, 4);
     maage_store_put(&bytes, MAAGE_WORLD_BLOCKSET_VERSION, 4);
@@ -1351,6 +1514,7 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i)
             maage_store_put(&bytes, chunk->sections[section]->light[i], 1);
     }
+    maage_store_chunk_simulation_put(&bytes,chunk,tick_low,tick_high);
     maage_store_checksum_put(&bytes);
     result = !bytes.failed && bytes.position == capacity &&
         maage_store_write(path, bytes.data, bytes.position, error);
@@ -1359,4 +1523,11 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
 incompatible:
     free(encoded); free(states);
     return maage_store_error(error, "Chunk has invalid heights or unresolved registered content identities.");
+}
+int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *chunk,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes, char error[256])
+{
+    if (!store) return maage_store_error(error,"Missing world store.");
+    return maage_world_store_save_chunk_at(store,chunk,blocks,biomes,
+        store->record.environment.ticks_low,store->record.environment.ticks_high,error);
 }

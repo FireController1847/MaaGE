@@ -56,6 +56,7 @@ typedef struct maage_render_desc {
 /* Implemented upload/draw commands, unlike the device capability flags above. */
 #define MAAGE_RENDER_CAP_TEXTURED_MESH     0x1000UL
 #define MAAGE_RENDER_CAP_UI                0x2000UL
+#define MAAGE_RENDER_CAP_SCENE             0x4000UL
 #define MAAGE_RENDER_FORMAT_RGBA8          0x01UL
 #define MAAGE_RENDER_FORMAT_BGRA8          0x02UL
 #define MAAGE_RENDER_SYNC_CPU_WAIT         0x01UL
@@ -118,6 +119,12 @@ const char *maage_renderer_device_name(const maage_renderer *renderer);
 /* Components must be finite values in [0, 1]. */
 maage_render_result maage_renderer_set_clear_color(maage_renderer *renderer,
     float red, float green, float blue, float alpha);
+/* Static vertex sky/block channels are combined with this frame's sky factor.
+ * Optional screen batches draw behind geometry and before the main UI. Borrow
+ * data/textures through subsequent draw_frame calls; clear before destruction.
+ * Implemented mesh/UI backends only; others return UNSUPPORTED. */
+maage_render_result maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
+    const maage_render_ui_data *background, const maage_render_ui_data *overlay);
 /* Prime the initial clear frame before showing a hidden window. Currently Metal
  * only; UNSUPPORTED leaves other backends unchanged. SKIPPED means no drawable
  * yet. Does not change window visibility; normal present still skips hidden windows. */
