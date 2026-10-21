@@ -24,6 +24,7 @@ static maage_window_system *maage_cocoa_active;
 static maage_status maage_cocoa_mode(maage_window *, maage_window_mode);
 static maage_status maage_cocoa_state(maage_window *);
 static maage_status maage_cocoa_capture(maage_window *, int);
+static void maage_cocoa_presentation(maage_window_system *);
 
 @interface MaaGEPlatformWindow : NSWindow
 @end
@@ -138,6 +139,7 @@ static maage_status maage_cocoa_capture(maage_window *, int);
     native->transitioning = 0;
     owner->state.mode = MAAGE_WINDOW_WINDOWED;
     maage_cocoa_mode(owner, native->desired_mode);
+    maage_cocoa_presentation(owner->system);
     owner->state.resized = 1;
 }
 - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
@@ -146,6 +148,8 @@ static maage_status maage_cocoa_capture(maage_window *, int);
     (void)window;
     native->transitioning = 0;
     native->desired_mode = owner->state.mode;
+    owner->state.resized = 1;
+    maage_cocoa_presentation(owner->system);
 }
 - (void)windowDidFailToExitFullScreen:(NSWindow *)window
 {
@@ -153,6 +157,8 @@ static maage_status maage_cocoa_capture(maage_window *, int);
     (void)window;
     native->transitioning = 0;
     native->desired_mode = owner->state.mode;
+    owner->state.resized = 1;
+    maage_cocoa_presentation(owner->system);
 }
 - (NSSize)window:(NSWindow *)window willUseFullScreenContentSize:(NSSize)proposed
 {
@@ -394,6 +400,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
             case 49: key = MAAGE_INPUT_KEY_SPACE; break;
             case 53: key = MAAGE_INPUT_KEY_ESCAPE; break;
             case 99: key = MAAGE_INPUT_KEY_F3; break;
+            case 103: key = MAAGE_INPUT_KEY_F11; break;
             case 36: case 76: key = MAAGE_INPUT_KEY_ENTER; break;
             case 48: key = MAAGE_INPUT_KEY_TAB; break;
             case 126: key = MAAGE_INPUT_KEY_UP; break;
@@ -483,6 +490,7 @@ static maage_status maage_cocoa_state(maage_window *window)
     window->state.framebuffer_width = (int)backing.size.width;
     window->state.framebuffer_height = (int)backing.size.height;
     window->state.visible = [native->handle isVisible];
+    window->state.mode_transitioning = native->transitioning;
     if (screen) {
         if (@available(macOS 12.0, *)) {
             inset = [screen safeAreaInsets];

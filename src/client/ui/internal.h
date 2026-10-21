@@ -39,6 +39,7 @@ typedef struct maage_client_ui_debug_cache {
 struct maage_client_ui {
     maage_client_ui_navigation navigation;
     maage_renderer *renderer;
+    maage_window *window;
     const maage_item_registry *items;
     const maage_block_registry *blocks;
     maage_gameplay *game;
@@ -54,6 +55,7 @@ struct maage_client_ui {
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, dragging_fps, leaves_mode;
+    int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;
     maage_status draw_result;
     maage_status notice_result, route_result;
     double notice_until, notice_now;

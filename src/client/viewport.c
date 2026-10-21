@@ -393,7 +393,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     unsigned ui_actions;
     int ok = 0, initial_capture = 1, active, was_active = 0, jump_pending = 0, axis;
     int player_ready = 0, cx, cz, i, was_modal, was_focused = 0;
-    int attack_pending = 0, use_pending = 0;
+    int attack_pending = 0, use_pending = 0, changing_mode = 0, was_changing_mode = 0;
     memset(&resources, 0, sizeof(resources)); memset(&cache, 0, sizeof(cache)); memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&debug, 0, sizeof(debug));
     memset(&interaction, 0, sizeof(interaction)); memset(&intent, 0, sizeof(intent));
@@ -451,7 +451,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.window", result, trace, "Recovered with an available native window backend.");
         maage_status_trace_init(trace);
     }
-    maage_window_config_init(&window_config); window_config.title = "MaaGE Client"; window_config.visible = 0;
+    maage_window_config_init(&window_config); window_config.title = "MaaGE Client";
+    window_config.visible = 0; window_config.full_display_content = 1;
     result = maage_window_create(system, &window_config, &window, trace);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
     render_config.window = window; render_config.required_features |= MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
@@ -465,7 +466,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_interaction_init(&interaction, &resources);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_create(renderer, directory, &resources.atlas, &ui, trace);
+    operation = maage_client_ui_create(renderer, window, directory, &resources.atlas, &ui, trace);
     maage_client_resources_destroy(&resources);
     if (maage_status_failed(operation)) {
         failure_message = "Cannot initialize the required Client GUI."; goto done;
@@ -541,7 +542,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS && maage_status_code(rendered) != MAAGE_STATUS_NOOP) goto done;
     result = maage_window_set_visible(window, 1);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-    maage_log_info("maage.client", "WASD walks; Space jumps (double tap for Creative flight), Shift descends; mouse buttons break/place; 1-9 or wheel selects; E opens inventory; Escape returns; F3 shows diagnostics. Options selects game mode. Unavailable columns block interaction and movement.");
+    maage_log_info("maage.client", "WASD walks; Space jumps (double tap for Creative flight), Shift descends; mouse buttons break/place; 1-9 or wheel selects; E opens inventory; Escape returns; F3 shows diagnostics; F11 toggles window mode. Options selects game mode. Unavailable columns block interaction and movement.");
     last = maage_time_monotonic_seconds(); diagnostic_time = last;
     mesh_activity.sample_start = last;
     if (last < 0) goto clock_failed;
@@ -561,6 +562,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (input.focused) {
             ui_input.escape = input.pressed[MAAGE_INPUT_KEY_ESCAPE];
             ui_input.f3 = input.pressed[MAAGE_INPUT_KEY_F3];
+            ui_input.f11 = input.pressed[MAAGE_INPUT_KEY_F11];
             ui_input.accept = input.pressed[MAAGE_INPUT_KEY_ENTER];
             ui_input.previous = input.pressed[MAAGE_INPUT_KEY_UP];
             ui_input.next = input.pressed[MAAGE_INPUT_KEY_TAB] || input.pressed[MAAGE_INPUT_KEY_DOWN];
@@ -573,6 +575,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         }
         ui_input.mouse_x = (float)input.mouse_x; ui_input.mouse_y = (float)input.mouse_y;
         maage_client_ui_set_safe_area(ui, &state.safe_area);
+        maage_client_ui_set_window_state(ui, &state);
         operation = maage_client_ui_update(ui, &ui_input, state.framebuffer_width, state.framebuffer_height, state.width, state.height, &ui_actions);
         if (maage_status_failed(operation)) {
             MAAGE_STATUS_TRACE(trace, operation, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE);
@@ -581,9 +584,13 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             maage_status_trace_init(trace);
             MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
         }
-        if ((was_focused && !input.focused) || (was_active && !input.captured)) {
+        changing_mode = maage_client_ui_window_mode_changing(ui);
+        if (was_changing_mode && !changing_mode) initial_capture = 1;
+        if (!changing_mode && !was_changing_mode &&
+            ((was_focused && !input.focused) || (was_active && !input.captured))) {
             if (!maage_client_ui_modal(ui)) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
         }
+        was_changing_mode = changing_mode;
         was_focused = input.focused;
         if (ui_actions & MAAGE_CLIENT_UI_EXIT) { ok = 1; break; }
         if (ui_actions & MAAGE_CLIENT_UI_RESPAWN) {
@@ -597,7 +604,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             initial_capture = 0;
             if (input.captured) result = maage_window_capture_mouse(window, 0);
             input.captured = 0;
-        } else if (input.focused && !input.captured && (initial_capture || was_modal || input.primary_pressed)) {
+        } else if (!changing_mode && input.focused && !input.captured && (initial_capture || was_modal || input.primary_pressed)) {
             result = maage_window_capture_mouse(window, 1); initial_capture = 0;
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 input.captured = 1; input.mouse_delta_x = input.mouse_delta_y = 0;
@@ -631,7 +638,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (mesh_notice != mesh_activity.last_result) {
             mesh_notice = mesh_activity.last_result; maage_client_ui_notify(ui, mesh_notice, now);
         }
-        active = !maage_client_ui_modal(ui) && input.focused && input.captured && state.visible && state.framebuffer_width > 0 && state.framebuffer_height > 0;
+        active = !maage_client_ui_modal(ui) && !changing_mode && input.focused && input.captured && state.visible && state.framebuffer_width > 0 && state.framebuffer_height > 0;
         if (active && !was_active) elapsed = 0;
         was_active = active;
         tick_count = 0; tick_seconds = 0;

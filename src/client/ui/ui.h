@@ -16,7 +16,7 @@ typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_DEBUG_CHARACTERS 192
 
 typedef struct maage_client_ui_input {
-    int escape, f3, accept, previous, next, left, right, primary_pressed, primary_down, secondary_pressed, inventory;
+    int escape, f3, f11, accept, previous, next, left, right, primary_pressed, primary_down, secondary_pressed, inventory;
     float mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
 } maage_client_ui_input;
 typedef struct maage_client_ui_debug {
@@ -34,7 +34,7 @@ typedef unsigned int (*maage_client_ui_screen_input)(maage_client_ui *ui,
 
 /* Owns one GUI atlas and reusable CPU batch; destroy before the renderer.
  * Resources resolve only here, from the existing reconstructed installation. */
-maage_status maage_client_ui_create(maage_renderer *renderer,
+maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *window,
     const char *application_data, const maage_pixel_buffer *block_atlas,
     maage_client_ui **output, maage_status_trace *trace);
 /* Returns the first original resource failure, even after successful recovery. */
@@ -59,6 +59,9 @@ int maage_client_ui_debug_visible(const maage_client_ui *ui);
 /* Insets are window logical units. Only GUI content avoids these obstructions;
  * the world and crosshair retain the full drawable rectangle. */
 maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets);
+/* Synchronize observed mode/completion before the frame's GUI input is routed. */
+maage_status maage_client_ui_set_window_state(maage_client_ui *ui, const maage_window_state *state);
+int maage_client_ui_window_mode_changing(const maage_client_ui *ui);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.
  * Integer GUI scale uses framebuffer pixels, with a 320x240 logical minimum. */
 maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,

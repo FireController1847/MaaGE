@@ -214,6 +214,13 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   must meaningfully reduce geometry without Fast's hollow-canopy appearance.
   Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
+- Client Window Mode cycles Windowed, Borderless and Fullscreen in one session-only Options button.
+  F11 toggles Windowed and the last non-windowed choice (default Borderless).
+  Non-macOS Fullscreen uses supported borderless fullscreen, never fabricated exclusive mode.
+  macOS Borderless stays in its desktop Space and covers the display, while Fullscreen
+  uses native AppKit Spaces. Both request full-display content; GUI respects the safe
+  area without cropping the world. Track asynchronous mode completion and restore
+  windowed geometry and input capture correctly.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.

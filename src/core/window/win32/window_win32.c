@@ -32,6 +32,7 @@ static int maage_win32_key(LPARAM code)
     case 0x39: return MAAGE_INPUT_KEY_SPACE;
     case 0x01: return MAAGE_INPUT_KEY_ESCAPE;
     case 0x3d: return MAAGE_INPUT_KEY_F3;
+    case 0x57: return MAAGE_INPUT_KEY_F11;
     case 0x1c: return MAAGE_INPUT_KEY_ENTER;
     case 0x0f: return MAAGE_INPUT_KEY_TAB;
     case 0x48: return MAAGE_INPUT_KEY_UP;

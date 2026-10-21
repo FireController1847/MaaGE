@@ -54,6 +54,7 @@ typedef struct maage_window_state {
     int visible;
     int close_requested;
     int resized;
+    int mode_transitioning; /* Native fullscreen is still entering or exiting. */
     maage_window_mode mode;
     maage_window_insets safe_area;
 } maage_window_state;

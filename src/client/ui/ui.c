@@ -14,7 +14,7 @@ static maage_client_ui_rect maage_client_ui_menu_rectangle(const maage_client_ui
     rectangle.x = (float)(int)(ui->content.x + (ui->content.width - rectangle.width) * 0.5f);
     rectangle.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) - 18 + (float)index * 24;
     if (screen == MAAGE_CLIENT_UI_OPTIONS)
-        rectangle.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) - 54 + (float)index * 24;
+        rectangle.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) - 66 + (float)index * 24;
     return rectangle;
 }
 
@@ -48,12 +48,33 @@ static void maage_client_ui_slider_draw(maage_client_ui *ui, maage_client_ui_rec
     handle.width = 6; handle.y -= 2; handle.height = 6;
     maage_client_ui_panel(ui, handle, 0.9f, 0.9f, 0.9f, 1);
 }
+/* Fullscreen on non-AppKit backends is compositor/WM borderless fullscreen,
+ * never a claim of exclusive display ownership. */
+static maage_window_mode maage_client_ui_platform_mode(int choice)
+{
+    if (choice == 0) return MAAGE_WINDOW_WINDOWED;
+#if defined(__APPLE__)
+    if (choice == 2) return MAAGE_WINDOW_NATIVE_FULLSCREEN;
+#endif
+    return MAAGE_WINDOW_BORDERLESS_FULLSCREEN;
+}
+static void maage_client_ui_request_window_mode(maage_client_ui *ui, int choice)
+{
+    maage_status result;
+    if (ui->mode_pending || ui->mode_changing) return;
+    result = maage_window_set_mode(ui->window, maage_client_ui_platform_mode(choice));
+    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+        ui->window_mode = choice;
+        if (choice) ui->last_nonwindowed_mode = choice;
+        ui->mode_pending = 1;
+    } else ui->route_result = result;
+}
 static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     const maage_client_ui_input *input, void *context)
 {
     maage_client_ui_screen_id screen = maage_client_ui_current(ui);
     maage_client_ui_rect rectangle;
-    unsigned int count = screen == MAAGE_CLIENT_UI_PAUSE ? 3 : (ui->game ? 6 : 5), i;
+    unsigned int count = screen == MAAGE_CLIENT_UI_PAUSE ? 3 : (ui->game ? 7 : 6), i;
     int hover = -1, activate;
     (void)context;
     for (i = 0; i < count; ++i) {
@@ -65,8 +86,8 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     if (hover >= 0 && (input->primary_pressed || ui->mouse_x != ui->previous_mouse_x ||
         ui->mouse_y != ui->previous_mouse_y)) ui->selected = (unsigned int)hover;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
-        unsigned int game_index = ui->game ? 4 : 99;
-        unsigned int back_index = ui->game ? 5 : 4;
+        unsigned int game_index = ui->game ? 5 : 99;
+        unsigned int back_index = ui->game ? 6 : 5;
         if (input->primary_pressed && hover == 0) ui->dragging_fps = 1;
         if (!input->primary_down) ui->dragging_fps = 0;
         if (ui->dragging_fps && input->primary_down) {
@@ -97,6 +118,7 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
             }
         } else if (ui->selected == 2) ui->requested_scale = (ui->requested_scale + 1) % 5;
         else if (ui->selected == 3) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
+        else if (ui->selected == 4) maage_client_ui_request_window_mode(ui, (ui->window_mode + 1) % 3);
         else if (ui->selected == game_index)
             ui->route_result = maage_gameplay_set_mode(ui->game, ui->game->mode == MAAGE_GAME_MODE_CREATIVE ?
                 MAAGE_GAME_MODE_SURVIVAL : MAAGE_GAME_MODE_CREATIVE);
@@ -117,6 +139,7 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
     static const char *const labels[3] = {"Resume Game", "Options...", "Exit Client"};
     static const char *const scales[5] = {"Auto", "1x", "2x", "3x", "4x"};
     static const char *const leaves[3] = {"Fast", "Smart", "Fancy"};
+    static const char *const window_modes[3] = {"Windowed", "Borderless", "Fullscreen"};
     maage_client_ui_screen_id screen = maage_client_ui_current(ui);
     maage_client_ui_rect rectangle;
     unsigned int i;
@@ -125,7 +148,7 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
     char text[64];
     (void)context;
     maage_client_ui_text(ui, screen == MAAGE_CLIENT_UI_PAUSE ? "Game Menu" : "Options",
-        center, middle - (screen == MAAGE_CLIENT_UI_PAUSE ? 54 : 88),
+        center, middle - (screen == MAAGE_CLIENT_UI_PAUSE ? 54 : 100),
         MAAGE_CLIENT_UI_CENTER, 1, 1, 1);
     if (screen == MAAGE_CLIENT_UI_PAUSE) {
         for (i = 0; i < 3; ++i) {
@@ -145,30 +168,35 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
         rectangle = maage_client_ui_menu_rectangle(ui, 3, screen);
         sprintf(text, "Leaves: %s", leaves[ui->leaves_mode]);
         maage_client_ui_button(ui, rectangle, text, ui->selected == 3);
+        rectangle = maage_client_ui_menu_rectangle(ui, 4, screen);
+        sprintf(text, "Window Mode: %s", ui->mode_pending || ui->mode_changing ?
+            "Switching..." : window_modes[ui->window_mode]);
+        maage_client_ui_button(ui, rectangle, text, ui->selected == 4);
         if (ui->game) {
-            rectangle = maage_client_ui_menu_rectangle(ui, 4, screen);
+            rectangle = maage_client_ui_menu_rectangle(ui, 5, screen);
             maage_client_ui_button(ui, rectangle, ui->game->mode == MAAGE_GAME_MODE_CREATIVE ?
-                "Game Mode: Creative" : "Game Mode: Survival", ui->selected == 4);
+                "Game Mode: Creative" : "Game Mode: Survival", ui->selected == 5);
         }
-        rectangle = maage_client_ui_menu_rectangle(ui, ui->game ? 5 : 4, screen);
-        maage_client_ui_button(ui, rectangle, "Back", ui->selected == (ui->game ? 5U : 4U));
+        rectangle = maage_client_ui_menu_rectangle(ui, ui->game ? 6 : 5, screen);
+        maage_client_ui_button(ui, rectangle, "Back", ui->selected == (ui->game ? 6U : 5U));
     }
 }
 
-maage_status maage_client_ui_create(maage_renderer *renderer,
+maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *window,
     const char *application_data, const maage_pixel_buffer *block_atlas,
     maage_client_ui **output, maage_status_trace *trace)
 {
     maage_client_ui *ui;
     maage_status result;
     if (output) *output = NULL;
-    if (!renderer || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+    if (!renderer || !window || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
         MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, renderer ? 3 : 0);
     ui = (maage_client_ui *)calloc(1, sizeof(*ui));
     if (!ui) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
         MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
     ui->width = 320; ui->height = 240; ui->gui_scale = 1;
-    ui->renderer = renderer; ui->fps_step = 26; ui->vsync = 1; ui->leaves_mode = MAAGE_LEAVES_FANCY;
+    ui->renderer = renderer; ui->window = window; ui->last_nonwindowed_mode = 1;
+    ui->fps_step = 26; ui->vsync = 1; ui->leaves_mode = MAAGE_LEAVES_FANCY;
     ui->vsync_supported = maage_status_code(maage_renderer_set_vsync(renderer, 1)) == MAAGE_STATUS_SUCCESS;
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;
@@ -260,6 +288,8 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->mouse_x = input->mouse_x * (float)framebuffer_width / (float)window_width / scale;
     ui->mouse_y = input->mouse_y * (float)framebuffer_height / (float)window_height / scale;
     if (input->f3) ui->debug = !ui->debug;
+    if (input->f11) maage_client_ui_request_window_mode(ui,
+        ui->window_mode ? 0 : ui->last_nonwindowed_mode);
     if (input->escape) { ui->dragging_fps = 0;
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
@@ -289,6 +319,28 @@ maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_wind
     else memset(&ui->safe_area, 0, sizeof(ui->safe_area));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
+
+maage_status maage_client_ui_set_window_state(maage_client_ui *ui, const maage_window_state *state)
+{
+    if (!ui || !state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
+    ui->mode_changing = state->mode_transitioning;
+    if (!ui->mode_changing) {
+        if (ui->mode_pending) {
+            ui->mode_pending = 0;
+            if (state->mode == maage_client_ui_platform_mode(ui->window_mode))
+                return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+        }
+        if (state->mode == MAAGE_WINDOW_WINDOWED) ui->window_mode = 0;
+        else if (state->mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) ui->window_mode = 2;
+        else if (state->mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN && !ui->window_mode)
+            ui->window_mode = 1;
+        if (ui->window_mode) ui->last_nonwindowed_mode = ui->window_mode;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+int maage_client_ui_window_mode_changing(const maage_client_ui *ui)
+{ return ui && (ui->mode_pending || ui->mode_changing); }
 
 int maage_client_ui_max_fps(const maage_client_ui *ui) { return ui && ui->fps_step != 26 ? (ui->fps_step + 1) * 10 : 0; }
 int maage_client_ui_vsync(const maage_client_ui *ui) { return ui ? ui->vsync : 1; }
