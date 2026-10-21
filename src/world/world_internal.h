@@ -5,25 +5,7 @@
 #include "maage/seed.h"
 #include "maage/jobs.h"
 #define MAAGE_SECTION_VOLUME 4096
-#define MAAGE_WORLD_GENERATOR_VERSION 1UL
 #define MAAGE_WORLD_BLOCKSET_VERSION 1UL
-/* Generator 1 is frozen for existing saves. Generator 2 deliberately reuses
- * its noise/biome mathematics but accepts explicit world-specific policies.
- * Unsupported versions and altered version-1 policies fail closed. */
-#define MAAGE_GENERATION_POLICY_SCHEMA 1U
-#define MAAGE_GENERATION_CONFIGURABLE_VERSION 2UL
-typedef struct maage_generation_policy {
-    unsigned int schema_version;
-    unsigned long generator_version;
-    int sea_level;
-    int spawn_search_radius;
-    int spawn_search_step;
-} maage_generation_policy;
-/* Initialize per-world and retain an immutable copy for all async jobs.
- * Persist the generator version and policy fields before opting into v2. */
-int maage_generation_policy_default(unsigned long generator_version,
-    maage_generation_policy *policy);
-int maage_generation_policy_valid(const maage_generation_policy *policy);
 
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit air above the heightmap has skylight 15. */

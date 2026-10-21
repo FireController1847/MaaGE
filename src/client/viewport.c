@@ -391,17 +391,18 @@ int maage_client_run(int argc, char *const argv[])
     maage_client_resources_destroy(&resources);
     if (!ui || !maage_client_ui_finalize(ui)) { maage_log_error("maage.client.ui", "Cannot initialize Client GUI resources or screen registry."); goto done; }
     maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
-    if (!maage_world_store_open(maage_instance_directory(instance), options.id, options.create, options.name,
-        options.seeded ? &options.seed : NULL, &store, &record, error)) {
+    if (!maage_world_store_open_with_items(maage_instance_directory(instance), options.id, options.create, options.name,
+        options.seeded ? &options.seed : NULL, items, &store, &record, error)) {
         maage_log_error("maage.client.world", "%s", error); goto done;
     }
     memset(&world_config, 0, sizeof(world_config));
     world_config.registry = registry; world_config.biomes = &biomes; world_config.seed = record.seed;
     world_config.worker_count = options.workers;
+    world_config.generation_policy = record.generation_policy;
     world_config.store = store; world_config.render_distance = options.radius; world_config.new_world = record.new_world;
     memcpy(world_config.position, record.position, sizeof(world_config.position));
     world = maage_world_create(&world_config);
-    if (!world) { maage_log_error("maage.client.world", "World worker pool initialization failed."); goto done; }
+    if (!world) { maage_log_error("maage.client.world", "World initialization failed (worker pool, generator policy, or memory)."); goto done; }
     maage_world_get_stats(world, &stats);
     maage_player_spawn(&player, world); previous = player; player_ready = 1;
     if (!maage_gameplay_restore(&game, items, &record.gameplay)) {
@@ -417,8 +418,9 @@ int maage_client_run(int argc, char *const argv[])
     maage_client_ui_set_gameplay(ui, items, &game, registry);
     yaw = record.yaw; pitch = record.pitch;
     maage_world_seed_format(record.seed, seed_text, sizeof(seed_text));
-    maage_log_info("maage.client.world", "%s world %s; seed=%s; generator=1; render distance=%d; workers=%u. Loading nearby columns asynchronously.",
-        record.new_world ? "Created" : "Restored", record.id, seed_text, options.radius, stats.worker_count);
+    maage_log_info("maage.client.world", "%s world %s; seed=%s; generator=%lu; render distance=%d; workers=%u. Loading nearby columns asynchronously.",
+        record.new_world ? "Created" : "Restored", record.id, seed_text,
+        record.generation_policy.generator_version, options.radius, stats.worker_count);
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
     if (rendered != MAAGE_RENDER_OK) goto done;
     rendered = maage_renderer_prepare_frame(renderer);

@@ -36,6 +36,7 @@ struct maage_world_task {
     const maage_block_registry *blocks;
     const maage_biome_registry *biomes;
     maage_world_seed seed;
+    maage_generation_policy generation_policy;
     maage_world_store *store;
     maage_chunk_snapshot *inputs[5]; /* center, -X,+X,-Z,+Z */
     maage_chunk *output;
@@ -243,7 +244,8 @@ static void maage_world_run(void *context, const maage_job_token *token)
             task->blocks, task->biomes, &task->output, task->error) : 0;
     } else if (task->kind == MAAGE_JOB_GENERATE) {
         task->output = maage_chunk_create(task->x, task->z);
-        if (task->output && maage_generate_chunk_job(task->output, task->seed, task->blocks, task->biomes, token))
+        if (task->output && maage_generate_chunk_job_policy(task->output, task->seed, task->blocks, task->biomes,
+            &task->generation_policy, token))
             task->result = 1;
         else strcpy(task->error, "Chunk generation failed.");
     } else if (task->kind == MAAGE_JOB_SAVE) {
@@ -363,6 +365,7 @@ static int maage_world_submit(maage_world *world, maage_world_slot *slot, int ki
     memset(task, 0, sizeof(*task)); task->used = 1; task->kind = kind; task->x = slot->x; task->z = slot->z;
     task->incarnation = slot->incarnation; task->revision = slot->revision; task->light_epoch = slot->light_epoch;
     task->blocks = world->config.registry; task->biomes = world->config.biomes; task->seed = world->config.seed; task->store = world->config.store;
+    task->generation_policy = world->config.generation_policy;
     if (kind >= MAAGE_JOB_LIGHT) {
         task->inputs[0] = slot->data; ++slot->data->references;
         if (kind != MAAGE_JOB_SAVE) {
@@ -542,7 +545,13 @@ maage_world *maage_world_create(const maage_world_config *config)
     unsigned workers, index, cache_limit, job_limit;
     size_t span, halo, footprint, extra, automatic_jobs;
     int axis;
-    if (!config || !maage_block_registry_is_finalized(config->registry) || !config->biomes ||
+    maage_generation_policy policy;
+    if (!config) return NULL;
+    policy = config->generation_policy;
+    if (!policy.schema_version && !policy.generator_version &&
+        !maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &policy)) return NULL;
+    if (!maage_generation_policy_valid(&policy)) return NULL;
+    if (!maage_block_registry_is_finalized(config->registry) || !config->biomes ||
         !config->biomes->finalized || config->render_distance < 1 ||
         config->render_distance > MAAGE_WORLD_MAX_RADIUS) return NULL;
     span = (size_t)config->render_distance * 2U + 3U;
@@ -567,9 +576,12 @@ maage_world *maage_world_create(const maage_world_config *config)
         (size_t)job_limit > (size_t)-1 / sizeof(unsigned)) return NULL;
     world = (maage_world *)calloc(1, sizeof(*world));
     if (!world) return NULL;
-    world->config = *config; world->cache_limit = cache_limit; world->task_limit = job_limit;
+    world->config = *config; world->config.generation_policy = policy;
+    world->cache_limit = cache_limit; world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
-    if (config->new_world) maage_generator_spawn(config->seed, config->biomes, world->spawn);
+    if (config->new_world &&
+        !maage_generator_spawn_policy(config->seed, config->biomes, &policy,
+            world->spawn)) { free(world); return NULL; }
     for (axis = 0; axis < 3; ++axis)
         if (!(world->spawn[axis] > -MAAGE_WORLD_LIMIT && world->spawn[axis] < MAAGE_WORLD_LIMIT)) { free(world); return NULL; }
     if (!(world->spawn[1] >= 0 && world->spawn[1] < MAAGE_WORLD_LIMIT)) { free(world); return NULL; }

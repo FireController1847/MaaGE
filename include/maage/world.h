@@ -18,6 +18,20 @@ typedef char maage_world_required_address_space[((size_t)-1 >= 262144UL) ? 1 : -
  * cache occupancy; use the runtime capacity in maage_world_stats instead. */
 #define MAAGE_WORLD_MAX_RADIUS (MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 4)
 #define MAAGE_WORLD_MAX_CHUNKS 512
+/* Version 1 is frozen; version 2 accepts persisted per-world policies. */
+#define MAAGE_WORLD_GENERATOR_VERSION 1UL
+#define MAAGE_GENERATION_CONFIGURABLE_VERSION 2UL
+#define MAAGE_GENERATION_POLICY_SCHEMA 1U
+typedef struct maage_generation_policy {
+    unsigned int schema_version;
+    unsigned long generator_version;
+    int sea_level;
+    int spawn_search_radius;
+    int spawn_search_step;
+} maage_generation_policy;
+int maage_generation_policy_default(unsigned long generator_version,
+    maage_generation_policy *policy);
+int maage_generation_policy_valid(const maage_generation_policy *policy);
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +59,8 @@ typedef struct maage_world_config {
      * Cache and accepted-job limits are independent runtime allocations. */
     unsigned int cache_capacity;
     unsigned int job_capacity;
+    /* All-zero selects frozen generator-1 defaults. */
+    maage_generation_policy generation_policy;
 } maage_world_config;
 typedef struct maage_world_stats {
     unsigned int loaded, loaded_sections, pending, ready;
