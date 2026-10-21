@@ -76,7 +76,7 @@ void maage_client_job_finish(maage_client_job **handle)
 #else
     pthread_join(job->thread,NULL); pthread_mutex_destroy(&job->mutex);
 #endif
-    maage_process_close(job->process); free(job); *handle=NULL;
+    maage_process_close(job->process); maage_clients_dispose(&job->registry); free(job); *handle=NULL;
 }
 int maage_client_job_take(maage_client_job **handle, maage_client_candidate *candidate, maage_client_registry *registry, maage_process **process, char error[256])
 {
@@ -89,7 +89,9 @@ int maage_client_job_take(maage_client_job **handle, maage_client_candidate *can
     pthread_mutex_lock(&job->mutex); done=job->done; pthread_mutex_unlock(&job->mutex);
 #endif
     if(!done) return 0;
-    ok=job->ok; if(registry && (job->mode==2 || job->mode==3) && ok) *registry=job->registry; if(candidate) *candidate=job->candidate; strcpy(error,job->error);
+    ok=job->ok; if(registry && (job->mode==2 || job->mode==3) && ok) {
+        maage_clients_dispose(registry); *registry=job->registry; job->registry.builds=NULL;
+    } if(candidate) *candidate=job->candidate; strcpy(error,job->error);
     if(process && job->mode==4) { *process=job->process; job->process=NULL; }
     maage_client_job_finish(handle); return ok ? 1 : -1;
 }

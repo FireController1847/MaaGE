@@ -362,11 +362,11 @@ failed:
     if (root) json_object_put(root);
     maage_instance_close(instance);
     maage_log_error("maage.launcher.ui", "%s", *ui->error ? ui->error : "Cannot load instance preferences.");
-    free(ui->clients); ui->clients = NULL; return 0;
+    maage_clients_dispose(ui->clients); free(ui->clients); ui->clients = NULL; return 0;
 }
 
 void maage_launcher_ui_destroy(maage_launcher_ui *ui)
-{ maage_client_job_finish(&ui->client_job); maage_process_close(ui->client_process); free(ui->clients); ui->clients = NULL; }
+{ maage_client_job_finish(&ui->client_job); maage_process_close(ui->client_process); maage_clients_dispose(ui->clients); free(ui->clients); ui->clients = NULL; }
 const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned index)
 {
     int build;

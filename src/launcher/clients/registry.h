@@ -1,7 +1,6 @@
 #ifndef MAAGE_CLIENT_REGISTRY_H
 #define MAAGE_CLIENT_REGISTRY_H
 #include "maage/storage.h"
-#define MAAGE_CLIENT_BUILDS 64
 #ifndef MAAGE_LAUNCHER_DEVELOPMENT
 #define MAAGE_LAUNCHER_DEVELOPMENT 0
 #endif
@@ -13,14 +12,15 @@ typedef struct maage_client_build {
     char status[128];
 } maage_client_build;
 typedef struct maage_client_registry {
-    maage_client_build builds[MAAGE_CLIENT_BUILDS];
-    unsigned count;
+    maage_client_build *builds;
+    unsigned count, capacity;
     char root[MAAGE_PATH_CAPACITY];
 } maage_client_registry;
 typedef struct maage_client_candidate {
     maage_client_build build;
     char source[MAAGE_PATH_CAPACITY];
 } maage_client_candidate;
+void maage_clients_dispose(maage_client_registry *registry);
 int maage_clients_load(maage_client_registry *registry, const char *root, char error[256]);
 int maage_clients_find(const maage_client_registry *registry, const char *id);
 int maage_clients_path(const maage_client_registry *registry, const char *id, char path[MAAGE_PATH_CAPACITY]);

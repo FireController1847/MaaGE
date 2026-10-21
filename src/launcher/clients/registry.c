@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <limits.h>
 #define MAAGE_CLIENT_PAYLOAD "package"
 #define MAAGE_CLIENT_DESCRIPTOR "maage-client.json"
 #ifdef _WIN32
@@ -24,16 +25,24 @@ static int maage_client_text(struct json_object *o, const char *key, char *out, 
 }
 static int maage_client_id(const char *s)
 { return strlen(s) == 64 && strspn(s, "0123456789abcdef") == 64; }
-static struct json_object *maage_client_json(const char *path)
+/* Descriptors stay small; registries can grow within a bounded JSON byte budget. */
+#define MAAGE_CLIENT_DESCRIPTOR_BYTES (256UL * 1024UL)
+#define MAAGE_CLIENT_REGISTRY_BYTES (16UL * 1024UL * 1024UL)
+static struct json_object *maage_client_json(const char *path, size_t limit)
 {
-    char *data = (char *)malloc(262145);
-    FILE *f;
+    char *data;
+    FILE *f = maage_storage_open(path, "rb");
+    long length;
     size_t n;
     struct json_object *o = NULL;
-    if (!data) return NULL;
-    f = maage_storage_open(path, "rb");
-    if (f) { n = fread(data, 1, 262145, f); if (!ferror(f) && n < 262145) o = maage_access_json(data, n); fclose(f); }
-    free(data); return o;
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) || (length = ftell(f)) < 0 ||
+        (unsigned long)length > limit || fseek(f, 0, SEEK_SET)) { fclose(f); return NULL; }
+    data = (char *)malloc((size_t)length + 1);
+    if (!data) { fclose(f); return NULL; }
+    n = fread(data, 1, (size_t)length, f);
+    if (n == (size_t)length && !ferror(f)) o = maage_access_json(data, n);
+    fclose(f); free(data); return o;
 }
 static int maage_client_instance_storage(struct json_object *o, maage_client_build *b)
 {
@@ -95,7 +104,7 @@ static int maage_client_inspect(const char *package, maage_client_build *b, char
     unsigned char magic[4];
     int ok;
     if (!maage_storage_directory_exists(package) || !maage_storage_join(path,sizeof(path),package,MAAGE_CLIENT_DESCRIPTOR)) goto failed;
-    o = maage_client_json(path);
+    o = maage_client_json(path, MAAGE_CLIENT_DESCRIPTOR_BYTES);
     ok = o && json_object_object_get_ex(o,"schema",&v) && json_object_get_int(v)==1 &&
         !strcmp(maage_access_json_string(o,"application"),"maage-client") && maage_client_fields(o,b) && !strcmp(b->executable,MAAGE_CLIENT_FILENAME);
     /* No network protocol has been implemented; do not claim compatibility. */
@@ -145,6 +154,7 @@ static int maage_client_save(maage_client_registry *r)
     struct json_object *o=json_object_new_object(), *list=json_object_new_array(), *b;
     char path[MAAGE_PATH_CAPACITY], tmp[MAAGE_PATH_CAPACITY];
     const char *text; unsigned i; FILE *f; int ok=0;
+    if (!o || !list) { if (o) json_object_put(o); if (list) json_object_put(list); return 0; }
     json_object_object_add(o,"schema",json_object_new_int(1));
     for(i=0;i<r->count;++i) {
         maage_client_build *item=&r->builds[i]; b=json_object_new_object();
@@ -158,6 +168,7 @@ static int maage_client_save(maage_client_registry *r)
         json_object_object_add(b,"imported",json_object_new_double(item->imported)); json_object_array_add(list,b);
     }
     json_object_object_add(o,"builds",list); text=json_object_to_json_string_ext(o,JSON_C_TO_STRING_PRETTY);
+    if (!text || strlen(text) > MAAGE_CLIENT_REGISTRY_BYTES) { json_object_put(o); return 0; }
     if (maage_storage_join(path,sizeof(path),r->root,"config/client-builds.json") &&
         maage_storage_join(tmp,sizeof(tmp),r->root,"config/client-builds.json.tmp") && (f=maage_storage_open(tmp,"wb"))!=NULL) {
         ok=fwrite(text,1,strlen(text),f)==strlen(text); if(fclose(f)) ok=0;
@@ -166,11 +177,23 @@ static int maage_client_save(maage_client_registry *r)
     }
     json_object_put(o); return ok;
 }
-int maage_clients_load(maage_client_registry *r, const char *root, char error[256])
+static int maage_client_sort(const void *left, const void *right)
+{
+    const maage_client_build *a = (const maage_client_build *)left;
+    const maage_client_build *b = (const maage_client_build *)right;
+    return maage_semver_compare(b->version,a->version);
+}
+void maage_clients_dispose(maage_client_registry *r)
+{
+    if (!r) return;
+    free(r->builds); r->builds = NULL; r->count = r->capacity = 0;
+}
+static int maage_clients_read(maage_client_registry *r, const char *root, char error[256])
 {
     char path[MAAGE_PATH_CAPACITY], why[256];
     struct json_object *o, *list, *b, *v;
-    unsigned i,j;
+    unsigned i;
+    size_t length;
     maage_client_build candidate;
     memset(r,0,sizeof(*r));
     if(strlen(root)>=sizeof(r->root)) return 0;
@@ -178,12 +201,17 @@ int maage_clients_load(maage_client_registry *r, const char *root, char error[25
     if(!maage_storage_join(path,sizeof(path),root,"config") || !maage_storage_directories(path) ||
         !maage_storage_join(path,sizeof(path),root,"config/client-builds.json")) return 0;
     if(!maage_client_file_kind(path)) return 1;
-    o=maage_client_json(path);
+    o=maage_client_json(path, MAAGE_CLIENT_REGISTRY_BYTES);
     if(!o || !json_object_object_get_ex(o,"schema",&v) || json_object_get_int(v)!=1 ||
-        !json_object_object_get_ex(o,"builds",&list) || !json_object_is_type(list,json_type_array) || json_object_array_length(list)>MAAGE_CLIENT_BUILDS) {
+        !json_object_object_get_ex(o,"builds",&list) || !json_object_is_type(list,json_type_array)) {
         if(o) json_object_put(o); strcpy(error,"Cannot read Client registry. Restore config/client-builds.json before managing builds."); return 0;
     }
-    for(i=0;i<json_object_array_length(list);++i) {
+    length = json_object_array_length(list);
+    if (length > INT_MAX || length >= (size_t)-1 / sizeof(*r->builds)) goto invalid;
+    r->builds = (maage_client_build *)calloc(length + 1, sizeof(*r->builds));
+    if (!r->builds) { json_object_put(o); strcpy(error,"Cannot allocate Client registry."); return 0; }
+    r->capacity = (unsigned)(length + 1);
+    for(i=0;i<(unsigned)length;++i) {
         maage_client_build *item=&r->builds[r->count];
         b=json_object_array_get_idx(list,i); memset(item,0,sizeof(*item));
         if(!maage_client_fields(b,item) || !maage_client_text(b,"id",item->id,sizeof(item->id),0) || !maage_client_id(item->id) ||
@@ -200,12 +228,19 @@ int maage_clients_load(maage_client_registry *r, const char *root, char error[25
         ++r->count;
     }
     /* Highest SemVer first; build metadata never changes SemVer precedence. */
-    for(i=0;i<r->count;++i) for(j=i+1;j<r->count;++j) if(maage_semver_compare(r->builds[i].version,r->builds[j].version)<0) {
-        candidate=r->builds[i]; r->builds[i]=r->builds[j]; r->builds[j]=candidate;
-    }
+    qsort(r->builds,r->count,sizeof(*r->builds),maage_client_sort);
     json_object_put(o); return 1;
 invalid:
     json_object_put(o); r->count=0; strcpy(error,"Invalid Client registry entry; restore the registry before managing builds."); return 0;
+}
+int maage_clients_load(maage_client_registry *r, const char *root, char error[256])
+{
+    maage_client_registry next;
+    memset(&next, 0, sizeof(next));
+    if (!maage_clients_read(&next, root, error)) { maage_clients_dispose(&next); return 0; }
+    maage_clients_dispose(r);
+    *r = next;
+    return 1;
 }
 static maage_storage_lock *maage_client_lock(maage_client_registry *r)
 {
@@ -215,7 +250,7 @@ static maage_storage_lock *maage_client_lock(maage_client_registry *r)
 int maage_clients_remove(maage_client_registry *r, const char *id, char error[256])
 {
     maage_storage_lock *lock=maage_client_lock(r);
-    maage_client_registry *current=(maage_client_registry *)malloc(sizeof(*current));
+    maage_client_registry *current=(maage_client_registry *)calloc(1,sizeof(*current));
     char directory[MAAGE_PATH_CAPACITY]; int index,ok=0;
     if(!lock || !current) goto done;
     if(!maage_clients_load(current,r->root,error)) goto done;
@@ -223,14 +258,14 @@ int maage_clients_remove(maage_client_registry *r, const char *id, char error[25
     if(index<0 || strcmp(current->builds[index].origin,"local") || !maage_client_directory(current,id,directory)) goto done;
     --current->count; memmove(&current->builds[index],&current->builds[index+1],(current->count-(unsigned)index)*sizeof(current->builds[0]));
     if(!maage_client_save(current)) goto done;
-    *r=*current; ok=1;
+    maage_clients_dispose(r); *r=*current; current->builds=NULL; ok=1;
     if(maage_client_file_kind(directory) && !maage_client_remove_tree(directory)) {
         strcpy(error,"Client unregistered; some package files could not be removed. Shared Minecraft resources are unchanged.");
         maage_log_warn("maage.launcher.clients","Client removed from registry; package cleanup incomplete.");
     }
  done:
     if(!ok && !*error) strcpy(error,"Cannot remove Client: registry busy, build absent, or storage unavailable.");
-    free(current); if(lock) maage_storage_release(lock); return ok;
+    maage_clients_dispose(current); free(current); if(lock) maage_storage_release(lock); return ok;
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
 static int maage_client_nested(const char *parent, const char *path)
@@ -263,7 +298,7 @@ int maage_clients_import(maage_client_registry *r, const maage_client_candidate 
     int ok=0, promoted=0, staging_owned=0;
     staging[0]=0; memset(&verified,0,sizeof(verified));
     if(!lock || !current || !maage_clients_load(current,r->root,error)) goto done;
-    if(current->count==MAAGE_CLIENT_BUILDS) { strcpy(error,"Client registry is full. Remove an unused build first."); goto done; }
+
     if(!maage_client_inspect(c->source,&verified,error) || strcmp(verified.id,c->build.id)) { strcpy(error,"Client changed since confirmation. Inspect and confirm it again."); goto done; }
     if(maage_clients_find(current,verified.id)>=0) { strcpy(error,"This exact Client build is already registered. Select it, or remove it before importing a replacement."); goto done; }
     if(!maage_storage_join(staging,sizeof(staging),r->root,"clients") || !maage_storage_directories(staging) ||
@@ -283,6 +318,15 @@ int maage_clients_import(maage_client_registry *r, const maage_client_candidate 
     if(!maage_client_inspect(package,&verified,error) || strcmp(verified.id,c->build.id)) goto done;
     if(!maage_storage_replace(staging,destination)) goto done;
     promoted=1; verified.imported=difftime(time(NULL),(time_t)0); strcpy(verified.origin,"local");
+    if (current->count >= current->capacity) {
+        unsigned capacity = current->capacity ? current->capacity * 2 : 8;
+        maage_client_build *grown;
+        if (capacity <= current->capacity || (size_t)capacity > (size_t)-1 / sizeof(*grown) ||
+            !(grown = (maage_client_build *)realloc(current->builds, (size_t)capacity * sizeof(*grown)))) {
+            strcpy(error,"Cannot grow Client registry; check available memory."); goto done;
+        }
+        current->builds = grown; current->capacity = capacity;
+    }
     current->builds[current->count++]=verified;
     if(!maage_client_save(current)) goto done;
     *r=*current; ok=1; maage_log_info("maage.launcher.clients","Imported Client %s (%s); developer source preserved.",verified.version,verified.build);
@@ -291,6 +335,6 @@ int maage_clients_import(maage_client_registry *r, const maage_client_candidate 
         if(staging_owned) maage_client_remove_tree(promoted ? destination : staging);
         if(!*error) strcpy(error,"Client import failed. Close other Launchers and check data-folder permissions.");
     }
-    free(current); if(lock) maage_storage_release(lock); return ok;
+    maage_clients_dispose(current); free(current); if(lock) maage_storage_release(lock); return ok;
 }
 #endif
