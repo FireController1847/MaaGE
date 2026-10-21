@@ -5,12 +5,12 @@
 static void maage_client_ui_block_uv(const maage_client_ui *ui,
     const maage_block_face_definition *face, float uv[4])
 {
-    uv[0] = face->uv[0] * ui->resources.block_atlas_width / MAAGE_CLIENT_UI_ATLAS_EDGE;
-    uv[2] = face->uv[2] * ui->resources.block_atlas_width / MAAGE_CLIENT_UI_ATLAS_EDGE;
+    uv[0] = face->uv[0] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
+    uv[2] = face->uv[2] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
     uv[1] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + face->uv[1] * ui->resources.block_atlas_height) /
-        MAAGE_CLIENT_UI_ATLAS_EDGE;
+        ui->resources.atlas_edge;
     uv[3] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + face->uv[3] * ui->resources.block_atlas_height) /
-        MAAGE_CLIENT_UI_ATLAS_EDGE;
+        ui->resources.atlas_edge;
 }
 
 static const maage_block_state_definition *maage_client_ui_item_state(
@@ -76,17 +76,17 @@ static void maage_client_ui_status(maage_client_ui *ui, float x, float y,
     float v, u;
     if (value > 20) value = 20;
     rectangle.width = rectangle.height = 9;
-    v = (float)(hunger ? 27 : 0) / MAAGE_CLIENT_UI_ATLAS_EDGE;
+    v = (float)(hunger ? 27 : 0) / ui->resources.atlas_edge;
     for (i = 0; i < 10; ++i) {
         rectangle.x = hunger ? x - (float)i * 8 : x + (float)i * 8;
         rectangle.y = y;
-        maage_client_ui_rectangle(ui, rectangle, 16.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, v,
-            25.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, v + 9.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+        maage_client_ui_rectangle(ui, rectangle, 16.0f / ui->resources.atlas_edge, v,
+            25.0f / ui->resources.atlas_edge, v + 9.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
         filled = value > i * 2 ? value - i * 2 : 0;
         if (!filled) continue;
-        u = (float)(filled >= 2 ? 52 : 61) / MAAGE_CLIENT_UI_ATLAS_EDGE;
-        maage_client_ui_rectangle(ui, rectangle, u, v, u + 9.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-            v + 9.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+        u = (float)(filled >= 2 ? 52 : 61) / ui->resources.atlas_edge;
+        maage_client_ui_rectangle(ui, rectangle, u, v, u + 9.0f / ui->resources.atlas_edge,
+            v + 9.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     }
 }
 
@@ -102,13 +102,13 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui)
     x = (float)(int)(ui->content.x + (ui->content.width - 182) * 0.5f);
     y = ui->content.y + ui->content.height - 22;
     rectangle.x = x; rectangle.y = y; rectangle.width = 182; rectangle.height = 22;
-    maage_client_ui_rectangle(ui, rectangle, 256.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 0,
-        438.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 22.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, rectangle, 256.0f / ui->resources.atlas_edge, 0,
+        438.0f / ui->resources.atlas_edge, 22.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     rectangle.x = x - 1 + (float)ui->game->inventory.selected * 20;
     rectangle.y = y - 1; rectangle.width = rectangle.height = 24;
-    maage_client_ui_rectangle(ui, rectangle, 256.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-        22.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 280.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-        46.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, rectangle, 256.0f / ui->resources.atlas_edge,
+        22.0f / ui->resources.atlas_edge, 280.0f / ui->resources.atlas_edge,
+        46.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     for (i = 0; i < MAAGE_HOTBAR_SLOTS; ++i)
         maage_client_ui_stack(ui, &ui->game->inventory.slots[i], x + 3 + (float)i * 20, y + 3);
     if (ui->game->mode == MAAGE_GAME_MODE_SURVIVAL) {
@@ -197,9 +197,9 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context)
     (void)context;
     if (!ui->game || !ui->items) return;
     frame = maage_client_ui_inventory_frame(ui);
-    maage_client_ui_rectangle(ui, frame, 256.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-        256.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 432.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-        422.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, frame, 256.0f / ui->resources.atlas_edge,
+        256.0f / ui->resources.atlas_edge, 432.0f / ui->resources.atlas_edge,
+        422.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     rectangle = frame; rectangle.x += 5; rectangle.y += 5;
     rectangle.width = 166; rectangle.height = 75;
     maage_client_ui_panel(ui, rectangle, 0.78f, 0.78f, 0.78f, 1);
@@ -213,9 +213,9 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context)
             rectangle.x = frame.x + 7 + (float)(slot % 9) * 18;
             rectangle.y = frame.y + 17 + (float)(slot / 9) * 18;
             rectangle.width = rectangle.height = 18;
-            maage_client_ui_rectangle(ui, rectangle, 263.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-                339.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 281.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
-                357.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+            maage_client_ui_rectangle(ui, rectangle, 263.0f / ui->resources.atlas_edge,
+                339.0f / ui->resources.atlas_edge, 281.0f / ui->resources.atlas_edge,
+                357.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
             if (!item) continue;
             stack.item_id = item->id; stack.count = 1; stack.metadata = stack.damage = 0;
             maage_client_ui_stack(ui, &stack, rectangle.x + 1, rectangle.y + 1);

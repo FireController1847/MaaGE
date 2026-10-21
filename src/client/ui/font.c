@@ -43,10 +43,10 @@ void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
         width = ui->resources.glyph_width[character];
         if (character != ' ' && width > 1) {
             rectangle.x = x; rectangle.width = (float)(width - 1);
-            u = (float)((character % 16) * 8) / MAAGE_CLIENT_UI_ATLAS_EDGE;
-            v = (float)(256 + (character / 16) * 8) / MAAGE_CLIENT_UI_ATLAS_EDGE;
+            u = (float)((character % 16) * 8) / ui->resources.atlas_edge;
+            v = (float)(256 + (character / 16) * 8) / ui->resources.atlas_edge;
             maage_client_ui_rectangle(ui, rectangle, u, v,
-                u + rectangle.width / MAAGE_CLIENT_UI_ATLAS_EDGE, v + 8.0f / MAAGE_CLIENT_UI_ATLAS_EDGE,
+                u + rectangle.width / ui->resources.atlas_edge, v + 8.0f / ui->resources.atlas_edge,
                 red, green, blue, 1);
         }
         x += width;

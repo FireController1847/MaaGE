@@ -3,9 +3,7 @@
 #include "ui.h"
 #include "maage/image.h"
 
-/* A frame is bounded by the supplied diagnostic text plus menu/HUD geometry. */
-#define MAAGE_CLIENT_UI_QUADS (2 * MAAGE_CLIENT_UI_DEBUG_LINES * MAAGE_CLIENT_UI_DEBUG_CHARACTERS + 512)
-#define MAAGE_CLIENT_UI_ATLAS_EDGE 1024
+/* The original GUI resources occupy the first 512 atlas rows. */
 #define MAAGE_CLIENT_UI_BLOCK_ATLAS_Y 512
 typedef struct maage_client_ui_screen {
     maage_client_ui_screen_draw draw;
@@ -21,7 +19,7 @@ typedef struct maage_client_ui_navigation {
 typedef struct maage_client_ui_resources {
     maage_render_texture *texture;
     unsigned char glyph_width[256];
-    int block_atlas_width, block_atlas_height;
+    int atlas_edge, block_atlas_width, block_atlas_height;
 } maage_client_ui_resources;
 struct maage_client_ui {
     maage_client_ui_navigation navigation;
@@ -30,8 +28,9 @@ struct maage_client_ui {
     maage_gameplay *game;
     unsigned int creative_page;
     maage_client_ui_resources resources;
-    maage_render_ui_vertex vertices[MAAGE_CLIENT_UI_QUADS * 4];
-    unsigned int indices[MAAGE_CLIENT_UI_QUADS * 6];
+    maage_render_ui_vertex *vertices;
+    unsigned int *indices;
+    size_t quad_capacity;
     maage_render_ui_data batch;
     maage_client_ui_rect clip, content;
     maage_window_insets safe_area;
