@@ -91,15 +91,22 @@ maage_registry_result maage_biome_registry_register(maage_biome_registry *regist
         if (registry->occupied[i] && !strcmp(registry->names[i], name))
             return MAAGE_REGISTRY_DUPLICATE;
     if (definition->id >= registry->capacity) {
-        old = registry->capacity;
-        if (definition->id >= (size_t)-1 / sizeof(*definitions) ||
-            definition->id >= (size_t)-1 / sizeof(*names))
+        size_t requested = (size_t)definition->id;
+        /* Check representability and the requested slot count before growth.
+         * Use size_t arithmetic, not an ID-width comparison against SIZE_MAX. */
+        if ((maage_biome_id)requested != definition->id ||
+            requested == (size_t)-1)
             return MAAGE_REGISTRY_OUT_OF_MEMORY;
+        ++requested;
+        if (requested > (size_t)-1 / sizeof(*definitions) ||
+            requested > (size_t)-1 / sizeof(*names))
+            return MAAGE_REGISTRY_OUT_OF_MEMORY;
+        old = registry->capacity;
         count = old;
-        while (count <= definition->id) {
+        while (count < requested) {
             if (count > ((size_t)-1 / sizeof(*definitions)) / 2 ||
                 count > ((size_t)-1 / sizeof(*names)) / 2) {
-                count = (size_t)definition->id + 1;
+                count = requested;
                 break;
             }
             count *= 2;
