@@ -888,8 +888,10 @@ int maage_world_store_save_player(maage_world_store *store,
     /* Recheck the live metadata before replacement, just as chunk replacement
      * rechecks its old file. Corruption never becomes a successful overwrite. */
     if (!maage_store_metadata_load(store, record.id, &existing, error)) return 0;
-    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low)
+    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low) {
+        maage_gameplay_save_clear(&existing.gameplay);
         return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
+    }
     memcpy(record.position, position, sizeof(record.position));
     record.gameplay = existing.gameplay;
     record.yaw = yaw; record.pitch = pitch; record.new_world = 0;
@@ -916,8 +918,10 @@ int maage_world_store_save_gameplay(maage_world_store *store,
         return maage_store_error(error, "Player item registry changed while the world was open.");
     record = store->record;
     if (!maage_store_metadata_load(store, record.id, &existing, error)) return 0;
-    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low)
+    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low) {
+        maage_gameplay_save_clear(&existing.gameplay);
         return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
+    }
     memcpy(record.position, position, sizeof(record.position)); record.yaw = yaw; record.pitch = pitch;
     record.new_world = 0;
     if (!maage_gameplay_snapshot(game, &record.gameplay)) {
