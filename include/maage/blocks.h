@@ -135,6 +135,8 @@ typedef struct maage_block_state_definition {
     unsigned int fluid_kind, fluid_level;
     maage_block_state_id fluid_source_state, fluid_states[16];
     maage_block_face_definition faces[MAAGE_FACE_COUNT];
+    /* Optional pre-resolved opaque leaf texture; zero uses ordinary UVs. */
+    float leaf_fast_uv[4];
 } maage_block_state_definition;
 
 typedef struct maage_block_registry maage_block_registry;

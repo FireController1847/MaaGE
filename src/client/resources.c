@@ -64,7 +64,10 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/blocks/log_birch.png",
     "minecraft/textures/blocks/log_birch_top.png",
     "minecraft/textures/blocks/leaves_birch.png",
-    "minecraft/textures/blocks/ice.png"
+    "minecraft/textures/blocks/ice.png",
+    "minecraft/textures/blocks/leaves_oak_opaque.png",
+    "minecraft/textures/blocks/leaves_spruce_opaque.png",
+    "minecraft/textures/blocks/leaves_birch_opaque.png"
 };
 
 static void maage_client_colormap(const maage_image *map,
@@ -181,10 +184,18 @@ maage_status maage_client_resources_load(const char *application_data,
         source_index = i == MAAGE_CLIENT_TEXTURE_MISSING ? -1 :
             (i >= MAAGE_CLIENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CLIENT_TEXTURE_EXTRA :
             (i >= 11 ? ((i - 11) % 2 ? 3 : 2) : atlas_sources[i]));
-        if (i == MAAGE_CLIENT_TEXTURE_EXTRA + 28) biome_id = MAAGE_BIOME_TAIGA;
-        else if (i == MAAGE_CLIENT_TEXTURE_EXTRA + 31) biome_id = MAAGE_BIOME_FOREST;
+        if (i == MAAGE_CLIENT_TEXTURE_EXTRA + 28 || i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE)
+            biome_id = MAAGE_BIOME_TAIGA;
+        else if (i == MAAGE_CLIENT_TEXTURE_EXTRA + 31 || i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH)
+            biome_id = MAAGE_BIOME_FOREST;
+        /* Missing opaque variants degrade to a solid version of the cutout
+         * source, not the magenta/black missing-texture tile. */
+        if (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK && !sources[source_index].pixels) source_index = 32;
+        else if (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE && !sources[source_index].pixels) source_index = 52;
+        else if (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH && !sources[source_index].pixels) source_index = 55;
         selected = source_index >= 0 && sources[source_index].pixels ? &sources[source_index] : &missing;
-        tint = source_index == 32 || source_index == 52 || source_index == 55 ?
+        tint = source_index == 32 || source_index == 52 || source_index == 55 ||
+            source_index == 57 || source_index == 58 || source_index == 59 ?
             biomes->definitions[biome_id].foliage_color : biomes->definitions[biome_id].grass_color;
         for (y = 0; y < tile; ++y) {
             sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
@@ -195,7 +206,9 @@ maage_status maage_client_resources_load(const char *application_data,
                     (size_t)(sx * selected->width / edge) * 4;
                 memcpy(pixel, source, 4);
                 if (selected == &missing) continue;
-                if (source_index == 2 || source_index == 32 || source_index == 34 || source_index == 52 || source_index == 55)
+                if (source_index == 2 || source_index == 32 || source_index == 34 ||
+                    source_index == 52 || source_index == 55 ||
+                    source_index == 57 || source_index == 58 || source_index == 59)
                     for (channel = 0; channel < 3; ++channel) pixel[channel] = (unsigned char)((float)pixel[channel] * tint[channel]);
                 if (source_index == 3 && sources[4].pixels) {
                     overlay = sources[4].pixels + (size_t)(sy * sources[4].width / edge) * sources[4].stride +
@@ -210,7 +223,9 @@ maage_status maage_client_resources_load(const char *application_data,
                     pixel[0] = (unsigned char)((unsigned int)pixel[0] * 63 / 255);
                     pixel[1] = (unsigned char)((unsigned int)pixel[1] * 118 / 255);
                     pixel[2] = (unsigned char)((unsigned int)pixel[2] * 228 / 255); pixel[3] = 255;
-                } else if (source_index == 26) pixel[3] = 255;
+                } else if (source_index == 26 ||
+                    (i >= MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK && i <= MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH))
+                    pixel[3] = 255;
             }
         }
         resources->uv[i][0] = (float)(tile_x + 1) / resources->image.width;
@@ -244,6 +259,9 @@ maage_status maage_client_resources_load(const char *application_data,
         source_index = i >= MAAGE_CLIENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CLIENT_TEXTURE_EXTRA :
             (i >= 11 ? ((i - 11) % 2 ? 3 : 2) : atlas_sources[i]);
         if (sources[source_index].pixels) continue;
+        if (i >= MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK &&
+            sources[i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK ? 32 :
+                (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE ? 52 : 55)].pixels) continue;
         memcpy(resources->uv[i], resources->uv[MAAGE_CLIENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
         for (stage = 0; stage < MAAGE_CLIENT_BREAK_STAGES; ++stage)
             memcpy(resources->breaking_uv[stage][i], resources->breaking_uv[stage][MAAGE_CLIENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
@@ -274,6 +292,11 @@ static maage_status maage_client_register_state(maage_block_registry *registry,
     int face, channel, selected, level;
     memset(&state, 0, sizeof(state));
     state.id = id; state.block_id = block; state.metadata = metadata;
+    if (block == MAAGE_BLOCK_LEAVES) {
+        selected = metadata == 1 ? MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE :
+            (metadata == 2 ? MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH : MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK);
+        memcpy(state.leaf_fast_uv, resources->uv[selected], sizeof(state.leaf_fast_uv));
+    }
     if (block == MAAGE_BLOCK_WATER || block == MAAGE_BLOCK_LAVA) {
         state.fluid_kind = block == MAAGE_BLOCK_WATER ? MAAGE_FLUID_WATER : MAAGE_FLUID_LAVA;
         state.fluid_level = metadata; state.fluid_source_state = block;

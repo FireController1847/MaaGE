@@ -2,6 +2,7 @@
 #define MAAGE_CLIENT_UI_H
 #include "maage/render.h"
 #include "maage/gameplay.h"
+#include "maage/world.h"
 
 typedef struct maage_client_ui maage_client_ui;
 typedef unsigned int maage_client_ui_screen_id;
@@ -72,6 +73,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
 int maage_client_ui_max_fps(const maage_client_ui *ui);
 int maage_client_ui_vsync(const maage_client_ui *ui);
 int maage_client_ui_gui_scale(const maage_client_ui *ui);
+maage_leaves_mode maage_client_ui_leaves_mode(const maage_client_ui *ui);
 float maage_client_ui_width(const maage_client_ui *ui);
 float maage_client_ui_height(const maage_client_ui *ui);
 

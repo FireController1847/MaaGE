@@ -359,6 +359,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_gameplay_intent intent;
     maage_client_interaction_visual interaction;
     maage_world *world = NULL;
+    maage_leaves_mode applied_leaves = MAAGE_LEAVES_FANCY;
     maage_world_store *store = NULL;
     maage_instance *instance = maage_client_storage_instance();
     maage_client_mesh_cache cache;
@@ -612,6 +613,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         cz = maage_world_chunk_coordinate((int)floor(player.position[2]));
         /* One owner commits worker results before the ordered fixed-step player
          * phase. Collision observes stable published columns without waiting. */
+        if (maage_client_ui_leaves_mode(ui) != applied_leaves) {
+            operation = maage_world_set_leaves_mode(world, maage_client_ui_leaves_mode(ui));
+            if (maage_status_failed(operation)) goto done;
+            applied_leaves = maage_client_ui_leaves_mode(ui);
+        }
         operation = maage_world_stream(world, player.position[0], player.position[2], yaw, trace);
         if (maage_status_failed(operation)) goto done;
         teardown = maage_world_status(world);

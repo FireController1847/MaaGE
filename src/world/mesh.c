@@ -25,7 +25,7 @@ static const int maage_face_corners[MAAGE_FACE_COUNT][4][3] = {
 
 static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices,
     size_t face_index, int x, int y, int z, unsigned int face,
-    const maage_block_face_definition *definition, unsigned char light,
+    const maage_block_face_definition *definition, const float uv[4], unsigned char light,
     const maage_block_shape *shape, int crossed)
 {
     static const unsigned int offsets[6] = {0, 1, 2, 0, 2, 3};
@@ -54,8 +54,8 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices,
         vertex->position[2] = (float)(z + shape->minimum[2] + point[2] * (shape->maximum[2] - shape->minimum[2]));
         for (component = 0; component < 3; ++component)
             vertex->normal[component] = crossed ? cross_normals[face][component] : (float)maage_face_neighbor[face][component];
-        vertex->uv[0] = definition->uv[corner == 1 || corner == 2 ? 2 : 0];
-        vertex->uv[1] = definition->uv[corner < 2 ? 3 : 1];
+        vertex->uv[0] = uv[corner == 1 || corner == 2 ? 2 : 0];
+        vertex->uv[1] = uv[corner < 2 ? 3 : 1];
         for (component = 0; component < 3; ++component)
             vertex->color[component] = definition->tint[component] * brightness;
         vertex->color[3] = definition->tint[3];
@@ -78,11 +78,12 @@ static const maage_chunk *maage_mesh_neighbor(const maage_chunk *chunk,
 
 static size_t maage_mesh_generate(const maage_block_registry *registry,
     const maage_chunk *chunk, const maage_chunk *neighbors[4],
-    maage_mesh_vertex *vertices, unsigned int *indices,
+    maage_mesh_vertex *vertices, unsigned int *indices, maage_leaves_mode mode,
     const maage_job_token *token, unsigned int *failure)
 {
     const maage_block_state_definition *state, *neighbor;
     const maage_block_definition *block, *current;
+    const float *uv;
     maage_block_shape shape, face_shape;
     double neighbor_height;
     const maage_chunk *adjacent;
@@ -128,8 +129,10 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
                         if (!block) return (size_t)-1;
                         axis = face / 2;
                         boundary = crossed ? 0 : (face & 1 ? shape.maximum[axis] == 1 : shape.minimum[axis] == 0);
-                        if (!crossed && block->opaque && boundary) continue;
-                        if (!crossed && state->block_id == MAAGE_BLOCK_LEAVES && neighbor->block_id == MAAGE_BLOCK_LEAVES) continue;
+                        if (!crossed && boundary && (block->opaque ||
+                            (mode == MAAGE_LEAVES_FAST && neighbor->block_id == MAAGE_BLOCK_LEAVES))) continue;
+                        if (!crossed && mode != MAAGE_LEAVES_FANCY &&
+                            state->block_id == MAAGE_BLOCK_LEAVES && neighbor->block_id == MAAGE_BLOCK_LEAVES) continue;
                         if (!crossed && state->fluid_kind && state->fluid_kind == neighbor->fluid_kind) {
                             if (face == MAAGE_FACE_NEGATIVE_Y || face == MAAGE_FACE_POSITIVE_Y) continue;
                             neighbor_height = neighbor->fluid_level & 8 ? 1 : (8.0 - (neighbor->fluid_level & 7)) / 9.0;
@@ -140,10 +143,14 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
                             light = adjacent && ny >= 0 && ny < MAAGE_WORLD_HEIGHT ?
                                 maage_chunk_light(adjacent, nx, ny, nz) :
                                 (ny < 0 ? 0 : 240);
+                            uv = state->faces[crossed ? MAAGE_FACE_POSITIVE_Z : face].uv;
+                            if (mode == MAAGE_LEAVES_FAST && state->block_id == MAAGE_BLOCK_LEAVES &&
+                                state->leaf_fast_uv[2] > state->leaf_fast_uv[0]) uv = state->leaf_fast_uv;
                             maage_mesh_face(vertices, indices, face_count,
                                 chunk->x * MAAGE_CHUNK_EDGE + x, y,
                                 chunk->z * MAAGE_CHUNK_EDGE + z, face,
-                                &state->faces[crossed ? MAAGE_FACE_POSITIVE_Z : face], light, &face_shape, crossed);
+                                &state->faces[crossed ? MAAGE_FACE_POSITIVE_Z : face], uv,
+                                light, &face_shape, crossed);
                         }
                         ++face_count;
                     }
@@ -162,19 +169,21 @@ static maage_status maage_mesh_failure(maage_status_trace *trace, unsigned int c
 }
 maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks,
     const maage_biome_registry *biomes, const maage_chunk *chunk,
-    const maage_chunk *neighbors[4], const maage_job_token *token,
-    maage_world_mesh **output, maage_status_trace *trace)
+    const maage_chunk *neighbors[4], maage_leaves_mode mode,
+    const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace)
 {
     maage_world_mesh *mesh;
     size_t faces, written, maximum = (size_t)-1;
     unsigned int failure = MAAGE_STATUS_INVARIANT_VIOLATION;
     if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 5);
     *output = NULL;
+    if (mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY)
+        return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
     if (!blocks || !biomes || !chunk || !neighbors) {
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD,
             MAAGE_OPERATION_MESH, !blocks ? 0 : (!biomes ? 1 : (!chunk ? 2 : 3))), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
     }
-    faces = maage_mesh_generate(blocks, chunk, neighbors, NULL, NULL, token, &failure);
+    faces = maage_mesh_generate(blocks, chunk, neighbors, NULL, NULL, mode, token, &failure);
     if (faces == maximum) return maage_mesh_failure(trace, failure);
     if (faces > UINT_MAX / 4 ||
         faces > maximum / (4 * sizeof(maage_mesh_vertex)) ||
@@ -191,7 +200,7 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
             return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
         }
         written = maage_mesh_generate(blocks, chunk, neighbors, mesh->vertices,
-            mesh->indices, token, &failure);
+            mesh->indices, mode, token, &failure);
         if (written != faces) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, failure);

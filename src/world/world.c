@@ -37,6 +37,7 @@ struct maage_world_task {
     int used, kind, x, z, cancel_requested;
     maage_job_id id;
     unsigned long incarnation, revision, light_epoch;
+    maage_leaves_mode leaves_mode;
     const maage_block_registry *blocks;
     const maage_biome_registry *biomes;
     maage_world_seed seed;
@@ -68,6 +69,7 @@ struct maage_world {
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
     int center_x, center_z, stopped, failed;
+    maage_leaves_mode leaves_mode;
     double yaw, spawn[3];
     maage_world_stats stats;
     maage_status reported_failures[5]; /* One retained identity per task kind. */
@@ -370,7 +372,7 @@ static void maage_world_run(void *context, const maage_job_token *token)
         for (side = 0; side < 4; ++side) neighbors[side] = task->inputs[side + 1] ? task->inputs[side + 1]->chunk : NULL;
         if (task->kind == MAAGE_JOB_MESH) {
             task->status = maage_world_mesh_create_chunk_job(task->blocks, task->biomes,
-                task->inputs[0]->chunk, neighbors, token, &task->mesh, trace);
+                task->inputs[0]->chunk, neighbors, task->leaves_mode, token, &task->mesh, trace);
             if (maage_status_failed(task->status)) strcpy(task->error, "Chunk CPU mesh construction failed.");
         } else if (task->kind == MAAGE_JOB_LIGHT) {
             task->status = maage_world_copy_chunk(task->inputs[0]->chunk, &task->output);
@@ -561,6 +563,7 @@ static maage_status maage_world_submit(maage_world *world, maage_world_slot *slo
     task->incarnation = slot->incarnation; task->revision = slot->revision; task->light_epoch = slot->light_epoch;
     task->blocks = world->config.registry; task->biomes = world->config.biomes; task->seed = world->config.seed; task->store = world->config.store;
     task->generation_policy = world->config.generation_policy;
+    task->leaves_mode = world->leaves_mode;
     maage_environment_snapshot(world->environment, &environment);
     task->tick_low = environment.ticks_low; task->tick_high = environment.ticks_high;
     if (kind >= MAAGE_JOB_LIGHT) {
@@ -811,6 +814,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world = (maage_world *)calloc(1, sizeof(*world));
     if (!world) goto allocation_failed;
     world->config = *config; world->config.generation_policy = policy;
+    world->leaves_mode = MAAGE_LEAVES_FANCY;
     world->cache_limit = cache_limit; world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
     if (config->new_world &&
@@ -862,6 +866,25 @@ allocation_failed:
 invalid_spawn:
     return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE,
         MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
+}
+maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode)
+{
+    maage_world_slot *slot;
+    if (!world || world->stopped || world->failed || mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    if (world->leaves_mode == mode)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
+    world->leaves_mode = mode;
+    for (slot = world->chunks; slot; slot = slot->next) {
+        if (!maage_world_complete(slot)) continue;
+        maage_world_invalidate(world, slot, 0);
+        /* Pending mesh jobs hold the old mode by value. Cancel without waiting;
+         * stale completions cannot publish across the new mesh revision. */
+        if (slot->work && slot->work->kind == MAAGE_JOB_MESH)
+            maage_world_cancel(world, slot->work);
+    }
+    world->scan_ring = 0; world->scan_step = 0;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 maage_status maage_world_stream(maage_world *world, double x, double z, double yaw, maage_status_trace *trace)
 {

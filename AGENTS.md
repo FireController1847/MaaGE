@@ -206,6 +206,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   icons/widgets/ASCII font through existing Image/Texture APIs at initialization;
   no resource acquisition, new texture manager or native widget toolkit.
   Logical GUI coordinates scale independently of framebuffer resolution.
+- The Client Leaves option is session-only: Fast uses opaque textures and hidden
+  internal leaf faces; Smart uses cutout textures and hidden internal faces; Fancy
+  (default) uses cutout textures and visible internal faces. Mode changes invalidate
+  only affected World meshes and rebuild through Jobs, preserving lighting and simulation.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
