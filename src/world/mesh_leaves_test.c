@@ -40,13 +40,15 @@ static void register_block(maage_block_registry *registry, maage_block_id id,
 
 static void verify_mesh(const maage_block_registry *blocks,
     const maage_biome_registry *biomes, const maage_chunk *center,
-    const maage_chunk *east, maage_leaves_mode mode, size_t faces,
+    const maage_chunk *west, const maage_chunk *east,
+    maage_leaves_mode mode, size_t faces,
     float first_u)
 {
     const maage_chunk *neighbors[4];
     const maage_mesh_data *data;
     maage_world_mesh *mesh = NULL;
     memset(neighbors, 0, sizeof(neighbors));
+    neighbors[0] = west;
     neighbors[1] = east;
     CHECK(maage_world_mesh_create_chunk_job(blocks, biomes, center, neighbors,
         mode, NULL, &mesh, NULL));
@@ -75,13 +77,13 @@ int main(void)
     /* A single leaf uses the alternate UV only in Fast mode. */
     CHECK(maage_chunk_create(0, 0, &center));
     CHECK(maage_chunk_set(center, 4, 8, 8, MAAGE_STATE_LEAVES));
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_FAST, 6, 0.6f);
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_SMART, 6, 0.1f);
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_FANCY, 6, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 6, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 6, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 6, 0.1f);
     CHECK(maage_chunk_set(center, 5, 8, 8, MAAGE_STATE_LEAVES));
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_FAST, 10, 0.6f);
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_SMART, 10, 0.1f);
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_FANCY, 12, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 10, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 12, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 12, 0.1f);
     CHECK(maage_chunk_destroy(center));
 
     /* Opaque stone hides the adjacent leaf face in every mode. In Fast,
@@ -89,9 +91,9 @@ int main(void)
     CHECK(maage_chunk_create(0, 0, &center));
     CHECK(maage_chunk_set(center, 4, 8, 8, MAAGE_STATE_LEAVES));
     CHECK(maage_chunk_set(center, 5, 8, 8, MAAGE_STATE_STONE));
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_SMART, 11, 0.1f);
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_FANCY, 11, 0.1f);
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_FAST, 10, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 11, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 11, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 10, 0.6f);
     CHECK(maage_chunk_destroy(center));
 
     /* Adjacent columns obey exactly the same shared-face rules; missing
@@ -100,11 +102,51 @@ int main(void)
     CHECK(maage_chunk_create(1, 0, &east));
     CHECK(maage_chunk_set(center, 15, 8, 8, MAAGE_STATE_LEAVES));
     CHECK(maage_chunk_set(east, 0, 8, 8, MAAGE_STATE_LEAVES));
-    verify_mesh(blocks, &biomes, center, NULL, MAAGE_LEAVES_SMART, 6, 0.1f);
-    verify_mesh(blocks, &biomes, center, east, MAAGE_LEAVES_FAST, 5, 0.6f);
-    verify_mesh(blocks, &biomes, center, east, MAAGE_LEAVES_SMART, 5, 0.1f);
-    verify_mesh(blocks, &biomes, center, east, MAAGE_LEAVES_FANCY, 6, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 6, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FAST, 5, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_SMART, 6, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FANCY, 6, 0.1f);
 
+    CHECK(maage_chunk_destroy(east));
+    CHECK(maage_chunk_destroy(center));
+
+    /* A 6x6x6 canopy has a 2x2x2 buried core: Smart removes only the
+     * 24 directed faces between core leaves, not the 1272 others. */
+    CHECK(maage_chunk_create(0, 0, &center));
+    {
+        int x, y, z;
+        for (y = 16; y < 22; ++y) for (z = 4; z < 10; ++z)
+            for (x = 4; x < 10; ++x)
+                CHECK(maage_chunk_set(center, x, y, z, MAAGE_STATE_LEAVES));
+    }
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 216, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1272, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1296, 0.1f);
+    /* A trunk in the center of that core must preserve nearby cutout faces.
+     * It breaks burial for every otherwise-culled internal face. */
+    CHECK(maage_chunk_set(center, 6, 18, 6, MAAGE_STATE_STONE));
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1290, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1290, 0.1f);
+    CHECK(maage_chunk_destroy(center));
+
+    /* Dense foliage spanning +X/-X preserves two surface layers across the
+     * seam. A missing neighbor never justifies burying a face. */
+    CHECK(maage_chunk_create(0, 0, &center));
+    CHECK(maage_chunk_create(1, 0, &east));
+    {
+        int x, y, z;
+        for (y = 16; y < 22; ++y) for (z = 4; z < 10; ++z)
+            for (x = 13; x < 19; ++x)
+                CHECK(maage_chunk_set(x < 16 ? center : east,
+                    x < 16 ? x : x - 16, y, z, MAAGE_STATE_LEAVES));
+    }
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 144, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 648, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FAST, 108, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_SMART, 636, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FANCY, 648, 0.1f);
+    verify_mesh(blocks, &biomes, east, center, NULL, MAAGE_LEAVES_SMART, 636, 0.1f);
+    verify_mesh(blocks, &biomes, east, center, NULL, MAAGE_LEAVES_FANCY, 648, 0.1f);
     CHECK(maage_chunk_destroy(east));
     CHECK(maage_chunk_destroy(center));
     CHECK(maage_biome_registry_destroy(&biomes));
