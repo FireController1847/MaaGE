@@ -45,14 +45,32 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset)
         [content.bottomAnchor constraintLessThanOrEqualToAnchor:cell.bottomAnchor constant:-4]]];
     return cell;
 }
+
+/* Native navigation with a gentle MaaGE-tinted, rounded selection. */
+@interface MaaGELauncherNavigationRow : NSTableRowView
+@end
+@implementation MaaGELauncherNavigationRow
+- (void)drawSelectionInRect:(NSRect)dirtyRect
+{
+    (void)dirtyRect;
+    [[NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:0.20] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 2)
+                                    xRadius:9 yRadius:9] fill];
+}
+@end
 static NSTableView *maage_ui_navigation_table(void)
 {
-    NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 140, 120)];
-    table.headerView = nil; table.rowHeight = 35; table.autoresizingMask = NSViewWidthSizable;
+    NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 160, 150)];
+    table.headerView = nil; table.rowHeight = 36;
+    table.intercellSpacing = NSMakeSize(0, 4);
+    table.autoresizingMask = NSViewWidthSizable;
     table.backgroundColor = NSColor.clearColor;
+    table.focusRingType = NSFocusRingTypeNone;
+    table.selectionHighlightStyle = NSTableViewSelectionHighlightStyleRegular;
     if (@available(macOS 11.0, *)) table.style = NSTableViewStyleSourceList;
     NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"page"];
-    column.width = 140; table.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
+    column.width = 160;
+    table.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
     [table addTableColumn:column]; return table;
 }
 @interface MaaGELauncherController : NSObject <NSWindowDelegate, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate>
@@ -135,6 +153,12 @@ static NSTableView *maage_ui_navigation_table(void)
 { (void)sender; maage_launcher_installation_select(self.state, (unsigned)self.installation.indexOfSelectedItem); [self reloadInstallations]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table
 { return table == self.sidebar ? 3 : table == self.settingsSidebar ? 2 : table == self.clients ? self.state->clients->count : self.state->count; }
+- (NSTableRowView *)tableView:(NSTableView *)table rowViewForRow:(NSInteger)row
+{
+    (void)row;
+    return table == self.sidebar || table == self.settingsSidebar
+        ? [[MaaGELauncherNavigationRow alloc] init] : nil;
+}
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row
 {
     (void)column;
@@ -142,12 +166,13 @@ static NSTableView *maage_ui_navigation_table(void)
         if (table == self.settingsSidebar) row += MAAGE_PAGE_SETTINGS;
         NSArray *names = @[@"Play", @"News", @"Installations", @"Settings", @"About"];
         NSArray *symbols = @[@"play", @"newspaper", @"square.stack", @"gearshape", @"info.circle"];
-        NSStackView *line = maage_ui_stack(YES, 10);
+        NSStackView *line = maage_ui_stack(YES, 11);
         if (@available(macOS 11.0, *)) {
             NSImageView *icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbols[row] accessibilityDescription:names[row]]];
+            icon.contentTintColor = NSColor.secondaryLabelColor;
             [icon.widthAnchor constraintEqualToConstant:18].active = YES; [line addArrangedSubview:icon];
         }
-        [line addArrangedSubview:maage_ui_row_label(names[row], 13, NO)]; return maage_ui_row(line, 5);
+        [line addArrangedSubview:maage_ui_row_label(names[row], 13, NO)]; return maage_ui_row(line, 10);
     }
     if (table == self.clients) {
         maage_client_build *build = &self.state->clients->builds[row]; char title[384];
@@ -472,27 +497,75 @@ static NSTableView *maage_ui_navigation_table(void)
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 670) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher"; self.window.minSize = NSMakeSize(940, 640); self.window.releasedWhenClosed = NO; self.window.delegate = self;
     [self applyAppearance];
-    NSSplitView *split = [[NSSplitView alloc] init]; split.vertical = YES; split.dividerStyle = NSSplitViewDividerStyleThin;
-    maage_ui_fill(split, self.window.contentView, 0);
-    NSView *sidebar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 165, 670)];
-    NSVisualEffectView *material = [[NSVisualEffectView alloc] init]; material.material = NSVisualEffectMaterialSidebar; material.blendingMode = NSVisualEffectBlendingModeWithinWindow; maage_ui_fill(material, sidebar, 0);
-    self.sidebar = maage_ui_navigation_table(); self.sidebar.dataSource = self; self.sidebar.delegate = self;
+    /* Replace the stark split-view divider with an integrated, fixed-width sidebar. */
+    NSView *shell = [[NSView alloc] init];
+    maage_ui_fill(shell, self.window.contentView, 0);
+    NSView *sidebar = [[NSView alloc] init];
+    NSView *right = [[NSView alloc] init];
+    sidebar.translatesAutoresizingMaskIntoConstraints = NO;
+    right.translatesAutoresizingMaskIntoConstraints = NO;
+    [shell addSubview:sidebar]; [shell addSubview:right];
+    [NSLayoutConstraint activateConstraints:@[
+        [sidebar.leadingAnchor constraintEqualToAnchor:shell.leadingAnchor],
+        [sidebar.topAnchor constraintEqualToAnchor:shell.topAnchor],
+        [sidebar.bottomAnchor constraintEqualToAnchor:shell.bottomAnchor],
+        [sidebar.widthAnchor constraintEqualToConstant:194],
+        [right.leadingAnchor constraintEqualToAnchor:sidebar.trailingAnchor],
+        [right.trailingAnchor constraintEqualToAnchor:shell.trailingAnchor],
+        [right.topAnchor constraintEqualToAnchor:shell.topAnchor],
+        [right.bottomAnchor constraintEqualToAnchor:shell.bottomAnchor]]];
+    NSVisualEffectView *material = [[NSVisualEffectView alloc] init];
+    material.material = NSVisualEffectMaterialSidebar;
+    material.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    maage_ui_fill(material, sidebar, 0);
+    self.sidebar = maage_ui_navigation_table();
+    self.sidebar.dataSource = self; self.sidebar.delegate = self;
     self.sidebar.accessibilityLabel = @"Launcher navigation";
-    NSTextField *brand = maage_ui_label(@"MAAGE", 12, YES); brand.textColor = NSColor.secondaryLabelColor;
-    NSStackView *nav = maage_ui_stack(NO, 16); [nav addArrangedSubview:brand];
-    NSScrollView *navigation = [[NSScrollView alloc] init]; navigation.drawsBackground = NO; navigation.documentView = self.sidebar;
-    [nav addArrangedSubview:navigation]; [navigation.widthAnchor constraintEqualToAnchor:nav.widthAnchor].active = YES;
+
+    NSView *mark = [[NSView alloc] init]; mark.wantsLayer = YES;
+    mark.layer.backgroundColor = [NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:1].CGColor;
+    mark.layer.cornerRadius = 9;
+    [mark.widthAnchor constraintEqualToConstant:34].active = YES;
+    [mark.heightAnchor constraintEqualToConstant:34].active = YES;
+    NSTextField *monogram = maage_ui_row_label(@"M", 17, YES);
+    monogram.textColor = NSColor.whiteColor;
+    monogram.translatesAutoresizingMaskIntoConstraints = NO;
+    [mark addSubview:monogram];
+    [NSLayoutConstraint activateConstraints:@[
+        [monogram.centerXAnchor constraintEqualToAnchor:mark.centerXAnchor],
+        [monogram.centerYAnchor constraintEqualToAnchor:mark.centerYAnchor]]];
+    NSStackView *brandText = maage_ui_stack(NO, 2);
+    [brandText addArrangedSubview:maage_ui_row_label(@"MaaGE", 16, YES)];
+    NSTextField *descriptor = maage_ui_row_label(@"LAUNCHER", 10, YES);
+    descriptor.textColor = NSColor.tertiaryLabelColor;
+    [brandText addArrangedSubview:descriptor];
+    NSStackView *brand = maage_ui_stack(YES, 10);
+    [brand addArrangedSubview:mark]; [brand addArrangedSubview:brandText];
+
+    NSStackView *nav = maage_ui_stack(NO, 9);
+    [nav addArrangedSubview:brand];
+    [nav setCustomSpacing:26 afterView:brand];
+    NSTextField *primaryTitle = maage_ui_row_label(@"MAIN", 10, YES);
+    primaryTitle.textColor = NSColor.tertiaryLabelColor;
+    [nav addArrangedSubview:primaryTitle];
+    NSScrollView *navigation = [[NSScrollView alloc] init];
+    navigation.drawsBackground = NO; navigation.documentView = self.sidebar;
+    navigation.hasVerticalScroller = NO; navigation.hasHorizontalScroller = NO;
+    [nav addArrangedSubview:navigation];
+    [navigation.widthAnchor constraintEqualToAnchor:nav.widthAnchor].active = YES;
     self.settingsSidebar = maage_ui_navigation_table();
     self.settingsSidebar.dataSource = self; self.settingsSidebar.delegate = self;
     self.settingsSidebar.accessibilityLabel = @"Settings navigation";
-    NSScrollView *settings = [[NSScrollView alloc] init]; settings.drawsBackground = NO; settings.documentView = self.settingsSidebar;
+    NSTextField *secondaryTitle = maage_ui_row_label(@"GENERAL", 10, YES);
+    secondaryTitle.textColor = NSColor.tertiaryLabelColor;
+    [nav addArrangedSubview:secondaryTitle];
+    NSScrollView *settings = [[NSScrollView alloc] init];
+    settings.drawsBackground = NO; settings.documentView = self.settingsSidebar;
+    settings.hasVerticalScroller = NO; settings.hasHorizontalScroller = NO;
     [nav addArrangedSubview:settings];
     [settings.widthAnchor constraintEqualToAnchor:nav.widthAnchor].active = YES;
-    [settings.heightAnchor constraintEqualToConstant:78].active = YES;
-    maage_ui_fill(nav, sidebar, 12);
-    NSView *right = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 835, 670)]; [split addSubview:sidebar]; [split addSubview:right];
-    [sidebar.widthAnchor constraintGreaterThanOrEqualToConstant:155].active = YES;
-    [sidebar.widthAnchor constraintLessThanOrEqualToConstant:210].active = YES;
+    [settings.heightAnchor constraintEqualToConstant:90].active = YES;
+    maage_ui_fill(nav, sidebar, 18);
     NSStackView *content = maage_ui_stack(NO, 14); maage_ui_fill(content, right, 26);
     self.body = [[NSView alloc] init]; [content addArrangedSubview:self.body]; [self.body.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     self.pages = @[[self playPage], [self newsPage], [self installationsPage], [self settingsPage], [self aboutPage]];
