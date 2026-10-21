@@ -22,6 +22,9 @@ typedef char maage_world_required_address_space[((size_t)-1 >= 262144UL) ? 1 : -
 #define MAAGE_WORLD_GENERATOR_VERSION 1UL
 #define MAAGE_GENERATION_CONFIGURABLE_VERSION 2UL
 #define MAAGE_GENERATION_POLICY_SCHEMA 1U
+#ifdef __cplusplus
+extern "C" {
+#endif
 typedef struct maage_generation_policy {
     unsigned int schema_version;
     unsigned long generator_version;
@@ -33,9 +36,6 @@ int maage_generation_policy_default(unsigned long generator_version,
     maage_generation_policy *policy);
 int maage_generation_policy_valid(const maage_generation_policy *policy);
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 typedef struct maage_world maage_world;
 typedef struct maage_chunk maage_chunk;
 typedef struct maage_world_mesh maage_world_mesh;
