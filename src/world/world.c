@@ -265,6 +265,8 @@ static void maage_world_task_release(maage_world *world, maage_world_task *task)
     int input;
     for (input = 0; input < 5; ++input) maage_world_release(task->inputs[input]);
     maage_chunk_destroy(task->output); maage_world_mesh_destroy(task->mesh);
+    if (task->kind == MAAGE_JOB_SAVE) --world->saves_active;
+    world->free_tasks[world->free_count++] = (unsigned)(task - world->tasks);
     memset(task, 0, sizeof(*task)); --world->active;
 }
 static int maage_world_inputs_current(const maage_world *world, const maage_world_slot *slot, const maage_world_task *task)
@@ -340,6 +342,9 @@ static void maage_world_collect(maage_world *world)
         }
         ++world->stats.completed_jobs;
         maage_world_task_release(world, task);
+        /* Newly completed load/light work should be considered near-first
+         * before continuing a previous streaming sweep. */
+        world->scan_ring = 0; world->scan_step = 0;
     }
 }
 static int maage_world_submit(maage_world *world, maage_world_slot *slot, int kind, unsigned priority)
@@ -348,9 +353,8 @@ static int maage_world_submit(maage_world *world, maage_world_slot *slot, int ki
     maage_world_slot *neighbors[4];
     unsigned index;
     int side;
-    if (world->active >= world->task_limit) return 0;
-    for (index = 0; index < world->task_limit; ++index) if (!world->tasks[index].used) { task = &world->tasks[index]; break; }
-    if (!task) return 0;
+    if (!world->free_count) { ++world->stats.queue_saturation_events; return 0; }
+    index = world->free_tasks[--world->free_count]; task = &world->tasks[index];
     memset(task, 0, sizeof(*task)); task->used = 1; task->kind = kind; task->x = slot->x; task->z = slot->z;
     task->incarnation = slot->incarnation; task->revision = slot->revision; task->light_epoch = slot->light_epoch;
     task->blocks = world->config.registry; task->biomes = world->config.biomes; task->seed = world->config.seed; task->store = world->config.store;
@@ -364,7 +368,9 @@ static int maage_world_submit(maage_world *world, maage_world_slot *slot, int ki
         }
     }
     ++world->active;
+    if (kind == MAAGE_JOB_SAVE) ++world->saves_active;
     if (!maage_jobs_submit(world->jobs, priority, maage_world_run, task, &task->id)) {
+        ++world->stats.queue_saturation_events;
         maage_world_task_release(world, task); return 0;
     }
     if (kind == MAAGE_JOB_SAVE) slot->save = task;
@@ -384,19 +390,36 @@ static void maage_world_retire(maage_world *world)
     maage_world_slot *slot, *next;
     int radius = world->config.render_distance + 2;
     for (slot = world->chunks; slot; slot = next) {
+        int x, z;
         next = slot->next;
         if (maage_world_distance(world, slot) <= radius) continue;
         maage_world_cancel(world, slot->work);
-        if (slot->work || slot->save) continue;
-        if (slot->data && slot->dirty) {
-            /* Failed saves retain dirty data. Global failure stops new loads;
-             * shutdown retries each dirty column once before reporting failure. */
-            if (!world->failed) maage_world_submit(world, slot, MAAGE_JOB_SAVE, 0);
-        } else {
-            int x = slot->x, z = slot->z;
-            maage_world_remove(world, slot); maage_world_invalidate_neighbors(world, x, z, 15U);
-        }
+        /* A cancelled worker borrows snapshots, not the membership slot.
+         * Remove clean columns immediately; old results fail incarnation
+         * validation when their completion eventually reaches the owner. */
+        if ((slot->data && slot->dirty) || slot->save) continue;
+        x = slot->x; z = slot->z;
+        maage_world_remove(world, slot);
+        maage_world_invalidate_neighbors(world, x, z, 15U);
     }
+}
+static int maage_world_make_room(maage_world *world)
+{
+    maage_world_slot *slot, *victim = NULL;
+    int distance, farthest = world->config.render_distance;
+    int x, z;
+    if (world->count < world->cache_limit) return 1;
+    for (slot = world->chunks; slot; slot = slot->next) {
+        if (slot->dirty || slot->save) continue;
+        distance = maage_world_distance(world, slot);
+        if (distance > farthest) { farthest = distance; victim = slot; }
+    }
+    if (!victim) { ++world->stats.cache_pressure_events; return 0; }
+    maage_world_cancel(world, victim->work);
+    x = victim->x; z = victim->z;
+    maage_world_remove(world, victim);
+    maage_world_invalidate_neighbors(world, x, z, 15U);
+    return 1;
 }
 /* Bounded desired grid coalesces coordinates. Only a small near-first window
  * enters the scheduler, so distant work cannot fill an unbounded backlog. */
