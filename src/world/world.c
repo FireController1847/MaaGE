@@ -476,7 +476,7 @@ static void maage_world_schedule(maage_world *world)
 {
     maage_world_slot *slot;
     int radius = world->config.render_distance + 1;
-    int dx, dz, x, z, kind, ring;
+    int dx, dz, x, z, kind, ring, no_room = 0;
     size_t span = (size_t)radius * 2U + 1U;
     unsigned limit, reserve, work_limit, budget, examined;
     unsigned priority;
@@ -512,7 +512,9 @@ static void maage_world_schedule(maage_world *world)
         if (slot && (slot->failed || slot->work)) continue;
         kind = 0;
         if (!slot) {
-            if (!maage_world_make_room(world)) break;
+            /* Cache pressure must not stop work on columns already resident. */
+            if (no_room) continue;
+            if (!maage_world_make_room(world)) { no_room = 1; continue; }
             kind = MAAGE_JOB_LOAD;
         } else if (!slot->data) kind = slot->stage;
         else if (slot->light_dirty) kind = MAAGE_JOB_LIGHT;
