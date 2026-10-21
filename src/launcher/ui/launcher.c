@@ -13,7 +13,7 @@ static int maage_launcher_client_finish_replace(maage_launcher_ui *ui);
 
 static int maage_launcher_reserve(maage_launcher_ui *ui, unsigned wanted)
 {
-    unsigned capacity;
+    unsigned capacity, previous_capacity = ui->capacity;
     maage_installation *installations;
     if (wanted <= ui->capacity) return 1;
     capacity = ui->capacity ? ui->capacity : 8;
@@ -24,6 +24,8 @@ static int maage_launcher_reserve(maage_launcher_ui *ui, unsigned wanted)
     if ((size_t)capacity > (size_t)-1 / sizeof(*installations)) return 0;
     installations = (maage_installation *)realloc(ui->installations, (size_t)capacity * sizeof(*installations));
     if (!installations) return 0;
+    memset(installations + previous_capacity, 0,
+        (size_t)(capacity - previous_capacity) * sizeof(*installations));
     ui->installations = installations;
     ui->capacity = capacity;
     return 1;
