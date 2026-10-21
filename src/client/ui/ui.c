@@ -14,7 +14,7 @@ static maage_client_ui_rect maage_client_ui_menu_rectangle(const maage_client_ui
     rectangle.x = (float)(int)(ui->content.x + (ui->content.width - rectangle.width) * 0.5f);
     rectangle.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) - 18 + (float)index * 24;
     if (screen == MAAGE_CLIENT_UI_OPTIONS)
-        rectangle.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) + (float)index * 24;
+        rectangle.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) - 42 + (float)index * 24;
     return rectangle;
 }
 
@@ -24,16 +24,38 @@ static int maage_client_ui_contains(maage_client_ui_rect rectangle, float x, flo
         y >= rectangle.y && y < rectangle.y + rectangle.height;
 }
 
+
+/* One shared integer slider: 0..26 selects 10..260, 26 means Unlimited.
+ * Dragging tracks held mouse state rather than repeated press events. */
+static void maage_client_ui_slider_move(maage_client_ui *ui, maage_client_ui_rect track)
+{
+    float ratio = (ui->mouse_x - track.x) / track.width;
+    int position = (int)(ratio * 26.0f + 0.5f);
+    if (position < 0) position = 0;
+    if (position > 26) position = 26;
+    ui->fps_step = position;
+}
+static void maage_client_ui_slider_draw(maage_client_ui *ui, maage_client_ui_rect rect)
+{
+    maage_client_ui_rect bar, handle;
+    char text[64];
+    if (ui->fps_step == 26) strcpy(text, "Max FPS: Unlimited");
+    else sprintf(text, "Max FPS: %d", (ui->fps_step + 1) * 10);
+    maage_client_ui_button(ui, rect, text, ui->selected == 0);
+    bar = rect; bar.x += 12; bar.width -= 24; bar.y += 15; bar.height = 2;
+    maage_client_ui_panel(ui, bar, 0.12f, 0.12f, 0.12f, 1);
+    handle = bar; handle.x += bar.width * ui->fps_step / 26.0f - 3;
+    handle.width = 6; handle.y -= 2; handle.height = 6;
+    maage_client_ui_panel(ui, handle, 0.9f, 0.9f, 0.9f, 1);
+}
 static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     const maage_client_ui_input *input, void *context)
 {
-    maage_client_ui_screen_id screen;
+    maage_client_ui_screen_id screen = maage_client_ui_current(ui);
     maage_client_ui_rect rectangle;
-    unsigned int count, i;
+    unsigned int count = screen == MAAGE_CLIENT_UI_PAUSE ? 3 : (ui->game ? 5 : 4), i;
     int hover = -1, activate;
     (void)context;
-    screen = maage_client_ui_current(ui);
-    count = screen == MAAGE_CLIENT_UI_PAUSE ? 3 : (ui->game ? 2 : 1);
     for (i = 0; i < count; ++i) {
         rectangle = maage_client_ui_menu_rectangle(ui, i, screen);
         if (maage_client_ui_contains(rectangle, ui->mouse_x, ui->mouse_y)) hover = (int)i;
@@ -42,36 +64,63 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     if (input->next) ui->selected = (ui->selected + 1) % count;
     if (hover >= 0 && (input->primary_pressed || ui->mouse_x != ui->previous_mouse_x ||
         ui->mouse_y != ui->previous_mouse_y)) ui->selected = (unsigned int)hover;
-    activate = input->accept || (input->primary_pressed && hover >= 0);
-    if (!activate) return 0;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
-        if (ui->game && !ui->selected)
+        unsigned int game_index = ui->game ? 3 : 99;
+        unsigned int back_index = ui->game ? 4 : 3;
+        if (input->primary_pressed && hover == 0) ui->dragging_fps = 1;
+        if (!input->primary_down) ui->dragging_fps = 0;
+        if (ui->dragging_fps && input->primary_down) {
+            rectangle = maage_client_ui_menu_rectangle(ui, 0, screen);
+            rectangle.x += 12; rectangle.width -= 24;
+            maage_client_ui_slider_move(ui, rectangle);
+        }
+        if (ui->selected == 0) {
+            if (input->left && ui->fps_step > 0) --ui->fps_step;
+            if (input->right && ui->fps_step < 26) ++ui->fps_step;
+        }
+        if (ui->selected == 2) {
+            if (input->left) ui->requested_scale = (ui->requested_scale + 4) % 5;
+            if (input->right) ui->requested_scale = (ui->requested_scale + 1) % 5;
+        }
+        activate = input->accept || (input->primary_pressed && hover >= 0);
+        if (!activate) return 0;
+        if (ui->selected == 0) return 0;
+        if (ui->selected == 1) {
+            if (ui->vsync_supported) {
+                maage_status status = maage_renderer_set_vsync(ui->renderer, !ui->vsync);
+                if (maage_status_code(status) == MAAGE_STATUS_SUCCESS) ui->vsync = !ui->vsync;
+                else { ui->vsync_supported = 0; ui->route_result = status; }
+            }
+        } else if (ui->selected == 2) ui->requested_scale = (ui->requested_scale + 1) % 5;
+        else if (ui->selected == game_index)
             ui->route_result = maage_gameplay_set_mode(ui->game, ui->game->mode == MAAGE_GAME_MODE_CREATIVE ?
                 MAAGE_GAME_MODE_SURVIVAL : MAAGE_GAME_MODE_CREATIVE);
-        else ui->route_result = maage_client_ui_back(ui);
+        else if (ui->selected == back_index) ui->route_result = maage_client_ui_back(ui);
+        return 0;
     }
-    else if (ui->selected == 0) {
+    activate = input->accept || (input->primary_pressed && hover >= 0);
+    if (!activate) return 0;
+    if (ui->selected == 0) {
         if (ui->game && !ui->game->health) return MAAGE_CLIENT_UI_RESPAWN;
         ui->route_result = maage_client_ui_back(ui);
-    }
-    else if (ui->selected == 1) ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_OPTIONS);
+    } else if (ui->selected == 1) ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_OPTIONS);
     else return MAAGE_CLIENT_UI_EXIT;
     return 0;
 }
-
 static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
 {
     static const char *const labels[3] = {"Resume Game", "Options...", "Exit Client"};
-    maage_client_ui_screen_id screen;
+    static const char *const scales[5] = {"Auto", "1x", "2x", "3x", "4x"};
+    maage_client_ui_screen_id screen = maage_client_ui_current(ui);
     maage_client_ui_rect rectangle;
     unsigned int i;
-    float center, middle;
+    float center = (float)(int)(ui->content.x + ui->content.width * 0.5f);
+    float middle = (float)(int)(ui->content.y + ui->content.height * 0.5f);
+    char text[64];
     (void)context;
-    screen = maage_client_ui_current(ui);
-    center = (float)(int)(ui->content.x + ui->content.width * 0.5f);
-    middle = (float)(int)(ui->content.y + ui->content.height * 0.5f);
     maage_client_ui_text(ui, screen == MAAGE_CLIENT_UI_PAUSE ? "Game Menu" : "Options",
-        center, middle - 54, MAAGE_CLIENT_UI_CENTER, 1, 1, 1);
+        center, middle - (screen == MAAGE_CLIENT_UI_PAUSE ? 54 : 76),
+        MAAGE_CLIENT_UI_CENTER, 1, 1, 1);
     if (screen == MAAGE_CLIENT_UI_PAUSE) {
         for (i = 0; i < 3; ++i) {
             rectangle = maage_client_ui_menu_rectangle(ui, i, screen);
@@ -79,13 +128,21 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
                 "Respawn" : labels[i], ui->selected == i);
         }
     } else {
+        rectangle = maage_client_ui_menu_rectangle(ui, 0, screen);
+        maage_client_ui_slider_draw(ui, rectangle);
+        rectangle = maage_client_ui_menu_rectangle(ui, 1, screen);
+        maage_client_ui_button(ui, rectangle, !ui->vsync_supported ? "VSync: Unavailable" :
+            (ui->vsync ? "VSync: On" : "VSync: Off"), ui->selected == 1);
+        rectangle = maage_client_ui_menu_rectangle(ui, 2, screen);
+        sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
+        maage_client_ui_button(ui, rectangle, text, ui->selected == 2);
         if (ui->game) {
-            rectangle = maage_client_ui_menu_rectangle(ui, 0, screen);
+            rectangle = maage_client_ui_menu_rectangle(ui, 3, screen);
             maage_client_ui_button(ui, rectangle, ui->game->mode == MAAGE_GAME_MODE_CREATIVE ?
-                "Game Mode: Creative" : "Game Mode: Survival", ui->selected == 0);
+                "Game Mode: Creative" : "Game Mode: Survival", ui->selected == 3);
         }
-        rectangle = maage_client_ui_menu_rectangle(ui, ui->game ? 1 : 0, screen);
-        maage_client_ui_button(ui, rectangle, "Back", ui->selected == (ui->game ? 1U : 0U));
+        rectangle = maage_client_ui_menu_rectangle(ui, ui->game ? 4 : 3, screen);
+        maage_client_ui_button(ui, rectangle, "Back", ui->selected == (ui->game ? 4U : 3U));
     }
 }
 
@@ -102,6 +159,8 @@ maage_status maage_client_ui_create(maage_renderer *renderer,
     if (!ui) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
         MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
     ui->width = 320; ui->height = 240; ui->gui_scale = 1;
+    ui->renderer = renderer; ui->fps_step = 26; ui->vsync = 1;
+    ui->vsync_supported = maage_status_code(maage_renderer_set_vsync(renderer, 1)) == MAAGE_STATUS_SUCCESS;
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;
     result = maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas, trace);
@@ -172,6 +231,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     scale = framebuffer_width / 320; vertical = framebuffer_height / 240;
     if (scale > vertical) scale = vertical;
     if (scale < 1) scale = 1;
+    if (ui->requested_scale && scale > ui->requested_scale) scale = ui->requested_scale;
     ui->gui_scale = scale;
     ui->width = (float)framebuffer_width / scale;
     ui->height = (float)framebuffer_height / scale;
@@ -191,7 +251,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->mouse_x = input->mouse_x * (float)framebuffer_width / (float)window_width / scale;
     ui->mouse_y = input->mouse_y * (float)framebuffer_height / (float)window_height / scale;
     if (input->f3) ui->debug = !ui->debug;
-    if (input->escape) {
+    if (input->escape) { ui->dragging_fps = 0;
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
@@ -221,6 +281,9 @@ maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_wind
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 
+int maage_client_ui_max_fps(const maage_client_ui *ui) { return ui && ui->fps_step != 26 ? (ui->fps_step + 1) * 10 : 0; }
+int maage_client_ui_vsync(const maage_client_ui *ui) { return ui ? ui->vsync : 1; }
+int maage_client_ui_gui_scale(const maage_client_ui *ui) { return ui ? ui->requested_scale : 0; }
 float maage_client_ui_width(const maage_client_ui *ui) { return ui ? ui->width : 0; }
 float maage_client_ui_height(const maage_client_ui *ui) { return ui ? ui->height : 0; }
 

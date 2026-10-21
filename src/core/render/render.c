@@ -184,6 +184,12 @@ maage_status maage_renderer_destroy(maage_renderer *renderer, maage_status_trace
     return MAAGE_STATUS_PROPAGATE(trace, maage_status_failed(result) ? result :
         maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_DESTROY);
 }
+maage_status maage_renderer_set_vsync(maage_renderer *renderer, int enabled)
+{
+    if (!renderer || (enabled != 0 && enabled != 1)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (!renderer->api->set_vsync) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    return renderer->api->set_vsync(renderer, enabled);
+}
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer)
 {
     return renderer ? renderer->api->kind : MAAGE_RENDER_AUTO;

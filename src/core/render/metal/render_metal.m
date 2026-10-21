@@ -438,9 +438,17 @@ static maage_status maage_metal_draw_frame(maage_renderer *renderer,
 {
     return maage_metal_frame(renderer, state, 0, meshes, count, view_projection, ui);
 }
+static maage_status maage_metal_set_vsync(maage_renderer *renderer, int enabled)
+{
+    maage_metal_renderer *native = (maage_metal_renderer *)renderer->platform;
+    if (!native || !native->layer) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    native->layer.displaySyncEnabled = enabled ? YES : NO;
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+}
 const maage_render_backend_api maage_render_metal_api = {
     MAAGE_RENDER_METAL, maage_metal_create, maage_metal_destroy, maage_metal_present,
     MAAGE_RENDER_CAPABILITIES_VERSION, maage_metal_prepare_frame, maage_metal_upload_geometry,
     maage_metal_destroy_mesh, maage_metal_draw_meshes,
-    maage_metal_create_texture, maage_metal_destroy_texture, maage_metal_draw_frame
+    maage_metal_create_texture, maage_metal_destroy_texture, maage_metal_draw_frame,
+    maage_metal_set_vsync
 };

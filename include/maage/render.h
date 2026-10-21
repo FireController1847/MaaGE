@@ -104,6 +104,8 @@ maage_status maage_renderer_create(const maage_render_desc *desc,
     maage_renderer **renderer, maage_status_trace *trace);
 maage_status maage_renderer_destroy(maage_renderer *renderer, maage_status_trace *trace);
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer);
+/* Runtime presentation synchronization. Unsupported implementations return NOT_IMPLEMENTED. */
+maage_status maage_renderer_set_vsync(maage_renderer *renderer, int enabled);
 /* Borrowed device name, valid until renderer destruction; NULL if unavailable. */
 const char *maage_renderer_device_name(const maage_renderer *renderer);
 /* Components must be finite values in [0, 1]. */

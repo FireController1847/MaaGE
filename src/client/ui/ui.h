@@ -15,7 +15,7 @@ typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_DEBUG_CHARACTERS 192
 
 typedef struct maage_client_ui_input {
-    int escape, f3, accept, previous, next, primary_pressed, secondary_pressed, inventory;
+    int escape, f3, accept, previous, next, left, right, primary_pressed, primary_down, secondary_pressed, inventory;
     float mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
 } maage_client_ui_input;
 typedef struct maage_client_ui_debug {
@@ -68,6 +68,10 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
  * no partial batch is returned. The caller treats that as a frame-build failure. */
 maage_status maage_client_ui_draw(maage_client_ui *ui,
     const maage_client_ui_debug *debug, const maage_render_ui_data **output);
+/* Session-only options; 0 FPS means Unlimited; 0 GUI scale means Auto. */
+int maage_client_ui_max_fps(const maage_client_ui *ui);
+int maage_client_ui_vsync(const maage_client_ui *ui);
+int maage_client_ui_gui_scale(const maage_client_ui *ui);
 float maage_client_ui_width(const maage_client_ui *ui);
 float maage_client_ui_height(const maage_client_ui *ui);
 

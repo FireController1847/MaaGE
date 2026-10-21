@@ -21,6 +21,7 @@ typedef struct maage_render_backend_api {
         const maage_render_mesh *const *meshes, size_t count,
         const maage_window_state *state, const float view_projection[16],
         const maage_render_ui_data *ui);
+    maage_status (*set_vsync)(maage_renderer *renderer, int enabled);
 } maage_render_backend_api;
 struct maage_render_texture {
     maage_renderer *renderer;

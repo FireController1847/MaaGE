@@ -398,6 +398,8 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
             case 48: key = MAAGE_INPUT_KEY_TAB; break;
             case 126: key = MAAGE_INPUT_KEY_UP; break;
             case 125: key = MAAGE_INPUT_KEY_DOWN; break;
+            case 123: key = MAAGE_INPUT_KEY_LEFT; break;
+            case 124: key = MAAGE_INPUT_KEY_RIGHT; break;
             case 14: key = MAAGE_INPUT_KEY_E; break;
             case 18: key = MAAGE_INPUT_KEY_1; break;
             case 19: key = MAAGE_INPUT_KEY_2; break;

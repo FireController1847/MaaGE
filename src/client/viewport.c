@@ -563,6 +563,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             ui_input.accept = input.pressed[MAAGE_INPUT_KEY_ENTER];
             ui_input.previous = input.pressed[MAAGE_INPUT_KEY_UP];
             ui_input.next = input.pressed[MAAGE_INPUT_KEY_TAB] || input.pressed[MAAGE_INPUT_KEY_DOWN];
+            ui_input.left = input.pressed[MAAGE_INPUT_KEY_LEFT];
+            ui_input.right = input.pressed[MAAGE_INPUT_KEY_RIGHT];
+            ui_input.primary_down = input.primary_down;
             ui_input.primary_pressed = input.primary_pressed;
             ui_input.secondary_pressed = input.secondary_pressed;
             ui_input.inventory = input.pressed[MAAGE_INPUT_KEY_E];
@@ -759,6 +762,15 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (maage_status_code(rendered) == MAAGE_STATUS_NOOP) {
             result = maage_window_wait_events(system, 100);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+        } else if (maage_client_ui_max_fps(ui) > 0) {
+            double remaining = 1.0 / maage_client_ui_max_fps(ui) - (frame_end - now);
+            /* Integer-millisecond event waits never spin and leave fixed-step
+             * simulation driven by measured monotonic elapsed time. */
+            int milliseconds = (int)(remaining * 1000.0);
+            if (milliseconds > 0) {
+                result = maage_window_wait_events(system, milliseconds);
+                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+            }
         }
     }
     goto done;
