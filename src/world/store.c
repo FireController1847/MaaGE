@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <limits.h>
 
 /* V2 allows per-chunk palettes of up to 65536 namespaced state identities.
  * Reads allocate only the actual validated file size, not this maximum. */
@@ -483,6 +484,10 @@ static int maage_store_metadata_write(const maage_world_store *store,
     size_t capacity, named_length;
     char path[MAAGE_PATH_CAPACITY];
     unsigned int i;
+    if (!maage_generation_policy_valid(&record->generation_policy) ||
+        (record->generation_policy.generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION &&
+         !store->items))
+        return maage_store_error(error, "World generation policy is invalid or lacks item mapping.");
     if (!maage_store_gameplay_valid(&record->gameplay, store->items))
         return maage_store_error(error, "Player gameplay identity or pickup data is invalid.");
     named_length = maage_store_named_length(&record->gameplay, store->items);
@@ -502,8 +507,10 @@ static int maage_store_metadata_write(const maage_world_store *store,
     if (!data) return maage_store_error(error, "Not enough memory to encode player metadata.");
     bytes.data = data; bytes.length = capacity; bytes.position = 0; bytes.failed = 0;
     maage_store_text_put(&bytes, "MGWORLD1", 8);
-    maage_store_put(&bytes, store->items ? MAAGE_PLAYER_FORMAT_VERSION : 3UL, 4);
-    maage_store_put(&bytes, MAAGE_WORLD_GENERATOR_VERSION, 4);
+    maage_store_put(&bytes, record->generation_policy.generator_version ==
+        MAAGE_GENERATION_CONFIGURABLE_VERSION ? MAAGE_WORLD_CONFIGURED_FORMAT_VERSION :
+        (store->items ? MAAGE_PLAYER_FORMAT_VERSION : 3UL), 4);
+    maage_store_put(&bytes, record->generation_policy.generator_version, 4);
     maage_store_put(&bytes, MAAGE_WORLD_BLOCKSET_VERSION, 4);
     maage_store_put(&bytes, record->seed.low, 4); maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1); maage_store_put(&bytes, strlen(record->name), 1);
@@ -514,6 +521,12 @@ static int maage_store_metadata_write(const maage_world_store *store,
     for (i = 0; i < 3; ++i) maage_store_double_put(&bytes, record->position[i]);
     maage_store_double_put(&bytes, record->yaw); maage_store_double_put(&bytes, record->pitch);
     maage_store_gameplay_put(&bytes, &record->gameplay, store->items);
+    if (record->generation_policy.generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION) {
+        maage_store_put(&bytes, record->generation_policy.schema_version, 4);
+        maage_store_put(&bytes, (unsigned long)record->generation_policy.sea_level, 4);
+        maage_store_put(&bytes, (unsigned long)record->generation_policy.spawn_search_radius, 4);
+        maage_store_put(&bytes, (unsigned long)record->generation_policy.spawn_search_step, 4);
+    }
     maage_store_checksum_put(&bytes);
     if (bytes.failed || !maage_storage_join(path, sizeof(path), store->directory, "world.bin")) {
         free(data); return maage_store_error(error, "Could not encode world metadata.");
@@ -529,7 +542,7 @@ static int maage_store_metadata_load(const maage_world_store *store,
 {
     char path[MAAGE_PATH_CAPACITY];
     maage_store_bytes bytes;
-    unsigned long lengths[3], format = 0;
+    unsigned long lengths[3], format = 0, generator_version = 0, blockset_version = 0, value;
     size_t i, j;
     char *texts[3];
     int ok, gameplay_read = 0;
@@ -538,11 +551,20 @@ static int maage_store_metadata_load(const maage_world_store *store,
     if (!bytes.data) return 0;
     bytes.position = 0; bytes.failed = 0;
     ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD1");
-    if (ok) format = maage_store_get(&bytes, 4);
+    if (ok) {
+        format = maage_store_get(&bytes, 4);
+        generator_version = maage_store_get(&bytes, 4);
+        blockset_version = maage_store_get(&bytes, 4);
+    }
     ok = ok && (format == 1 || format == 2 || format == 3 ||
-        (format == MAAGE_PLAYER_FORMAT_VERSION && store->items != NULL)) &&
-        maage_store_get(&bytes, 4) == MAAGE_WORLD_GENERATOR_VERSION &&
-        maage_store_get(&bytes, 4) == MAAGE_WORLD_BLOCKSET_VERSION;
+        ((format == MAAGE_PLAYER_FORMAT_VERSION ||
+          format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION) && store->items != NULL)) &&
+        ((generator_version == MAAGE_WORLD_GENERATOR_VERSION &&
+          format != MAAGE_WORLD_CONFIGURED_FORMAT_VERSION) ||
+         (generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION &&
+          format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION)) &&
+        blockset_version == MAAGE_WORLD_BLOCKSET_VERSION &&
+        maage_generation_policy_default(generator_version, &record->generation_policy);
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4); record->seed.high = maage_store_get(&bytes, 4);
         for (i = 0; i < 3; ++i) lengths[i] = maage_store_get(&bytes, 1);
@@ -562,7 +584,22 @@ static int maage_store_metadata_load(const maage_world_store *store,
         if (format == 1) maage_store_gameplay_default(&record->gameplay);
         else maage_store_gameplay_get(&bytes, &record->gameplay, format, store->items);
         gameplay_read = 1;
-        ok = ok && !bytes.failed && bytes.position == bytes.length && maage_store_id(record->id) &&
+        if (format == MAAGE_WORLD_CONFIGURED_FORMAT_VERSION) {
+            value = maage_store_get(&bytes, 4);
+            if (value > UINT_MAX) bytes.failed = 1;
+            record->generation_policy.schema_version = (unsigned int)value;
+            value = maage_store_get(&bytes, 4);
+            if (value > INT_MAX) bytes.failed = 1;
+            record->generation_policy.sea_level = (int)value;
+            value = maage_store_get(&bytes, 4);
+            if (value > INT_MAX) bytes.failed = 1;
+            record->generation_policy.spawn_search_radius = (int)value;
+            value = maage_store_get(&bytes, 4);
+            if (value > INT_MAX) bytes.failed = 1;
+            record->generation_policy.spawn_search_step = (int)value;
+        }
+        ok = ok && !bytes.failed && maage_generation_policy_valid(&record->generation_policy) &&
+            bytes.position == bytes.length && maage_store_id(record->id) &&
             !strcmp(record->id, expected_id) && maage_store_name(record->name) && maage_store_player(record);
         for (i = 0; i < 20; ++i) {
             char expected = (i == 4 || i == 7) ? '-' : (i == 10 ? 'T' : ((i == 13 || i == 16) ? ':' : (i == 19 ? 'Z' : 0)));
@@ -577,9 +614,10 @@ static int maage_store_random_id(char id[65])
 {
     return maage_storage_uuid_generate(id);
 }
-int maage_world_store_open_with_items(const char *instance_root, const char *id,
+int maage_world_store_open_configured(const char *instance_root, const char *id,
     int create, const char *name, const maage_world_seed *seed,
-    const maage_item_registry *items, maage_world_store **output,
+    const maage_generation_policy *generation_policy, const maage_item_registry *items,
+    maage_world_store **output,
     maage_world_record *record, char error[256])
 {
     char worlds[MAAGE_PATH_CAPACITY], config[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY];
@@ -593,6 +631,9 @@ int maage_world_store_open_with_items(const char *instance_root, const char *id,
     int status, ok = 0;
     *output = NULL;
     if (error) error[0] = 0;
+    if (generation_policy && (!maage_generation_policy_valid(generation_policy) ||
+        (generation_policy->generator_version == MAAGE_GENERATION_CONFIGURABLE_VERSION &&
+         !items))) return maage_store_error(error, "Invalid configured generator or missing item registry.");
     if (items && !maage_item_registry_is_finalized(items))
         return maage_store_error(error, "World storage requires finalized item definitions.");
     if ((id && (!maage_store_id(id) || (create && !maage_storage_uuid_valid(id)))) ||
@@ -633,7 +674,13 @@ int maage_world_store_open_with_items(const char *instance_root, const char *id,
     }
     store->lock = maage_storage_acquire(path);
     if (!store->lock) { maage_store_error(error, "This world is already open in another process."); goto done; }
+    if (!create && generation_policy) {
+        maage_store_error(error, "Cannot override a saved world's generation policy."); goto done;
+    }
     if (create) {
+        if (generation_policy) store->record.generation_policy = *generation_policy;
+        else if (!maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION,
+            &store->record.generation_policy)) goto done;
         strcpy(store->record.id, chosen); strcpy(store->record.name, name ? name : "New World");
         store->record.new_world = 1; store->record.position[1] = 128;
         maage_store_gameplay_default(&store->record.gameplay);
@@ -665,12 +712,20 @@ done:
     maage_world_store_close(store); maage_storage_release(selection); return ok;
 }
 
+int maage_world_store_open_with_items(const char *instance_root, const char *id,
+    int create, const char *name, const maage_world_seed *seed,
+    const maage_item_registry *items, maage_world_store **output,
+    maage_world_record *record, char error[256])
+{
+    return maage_world_store_open_configured(instance_root, id, create, name, seed,
+        NULL, items, output, record, error);
+}
 int maage_world_store_open(const char *instance_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **output,
     maage_world_record *record, char error[256])
 {
-    return maage_world_store_open_with_items(instance_root, id, create, name, seed,
-        NULL, output, record, error);
+    return maage_world_store_open_configured(instance_root, id, create, name, seed,
+        NULL, NULL, output, record, error);
 }
 
 typedef struct maage_store_migration {
@@ -888,7 +943,12 @@ int maage_world_store_save_player(maage_world_store *store,
     /* Recheck the live metadata before replacement, just as chunk replacement
      * rechecks its old file. Corruption never becomes a successful overwrite. */
     if (!maage_store_metadata_load(store, record.id, &existing, error)) return 0;
-    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low) {
+    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low ||
+        existing.generation_policy.schema_version != record.generation_policy.schema_version ||
+        existing.generation_policy.generator_version != record.generation_policy.generator_version ||
+        existing.generation_policy.sea_level != record.generation_policy.sea_level ||
+        existing.generation_policy.spawn_search_radius != record.generation_policy.spawn_search_radius ||
+        existing.generation_policy.spawn_search_step != record.generation_policy.spawn_search_step) {
         maage_gameplay_save_clear(&existing.gameplay);
         return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
     }
@@ -918,7 +978,12 @@ int maage_world_store_save_gameplay(maage_world_store *store,
         return maage_store_error(error, "Player item registry changed while the world was open.");
     record = store->record;
     if (!maage_store_metadata_load(store, record.id, &existing, error)) return 0;
-    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low) {
+    if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low ||
+        existing.generation_policy.schema_version != record.generation_policy.schema_version ||
+        existing.generation_policy.generator_version != record.generation_policy.generator_version ||
+        existing.generation_policy.sea_level != record.generation_policy.sea_level ||
+        existing.generation_policy.spawn_search_radius != record.generation_policy.spawn_search_radius ||
+        existing.generation_policy.spawn_search_step != record.generation_policy.spawn_search_step) {
         maage_gameplay_save_clear(&existing.gameplay);
         return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
     }
@@ -1041,7 +1106,8 @@ static void maage_store_identity_put(maage_store_bytes *bytes, const char *name)
     maage_store_text_put(bytes, name, length);
 }
 static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, int z,
-    const maage_block_registry *blocks, const maage_biome_registry *biomes, maage_chunk **output)
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    unsigned long generator_version, maage_chunk **output)
 {
     maage_store_bytes bytes;
     maage_chunk *chunk = NULL;
@@ -1061,7 +1127,7 @@ static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, i
         return 0;
     format = maage_store_get(&bytes, 4);
     if (format != (modern ? 2UL : 1UL) ||
-        maage_store_get(&bytes, 4) != MAAGE_WORLD_GENERATOR_VERSION ||
+        maage_store_get(&bytes, 4) != generator_version ||
         maage_store_get(&bytes, 4) != MAAGE_WORLD_BLOCKSET_VERSION) return 0;
     stored_x = maage_store_get(&bytes, 4); stored_z = maage_store_get(&bytes, 4);
     expected_x = (unsigned long)x & MAAGE_STORE_WORD;
@@ -1168,7 +1234,8 @@ int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     if (!status) return 0;
     data = maage_store_read(path, MAAGE_STORE_CHUNK_MAX, &length, error);
     if (!data) return -1;
-    ok = maage_store_chunk_decode(data, length, x, z, blocks, biomes, chunk);
+    ok = maage_store_chunk_decode(data, length, x, z, blocks, biomes,
+        store->record.generation_policy.generator_version, chunk);
     free(data);
     if (!ok) {
         maage_store_error(error, "Chunk data is corrupt, unmapped, or incompatible; the save was preserved."); return -1;
@@ -1247,7 +1314,7 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     bytes.length = capacity; bytes.position = 0; bytes.failed = 0;
     maage_store_text_put(&bytes, "MGCHNK2\0", 8);
     maage_store_put(&bytes, MAAGE_WORLD_FORMAT_VERSION, 4);
-    maage_store_put(&bytes, MAAGE_WORLD_GENERATOR_VERSION, 4);
+    maage_store_put(&bytes, store->record.generation_policy.generator_version, 4);
     maage_store_put(&bytes, MAAGE_WORLD_BLOCKSET_VERSION, 4);
     maage_store_put(&bytes, (unsigned long)chunk->x, 4);
     maage_store_put(&bytes, (unsigned long)chunk->z, 4);
