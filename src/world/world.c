@@ -27,7 +27,7 @@ typedef struct maage_world_slot {
     maage_chunk_snapshot *data;
     maage_world_task *work, *save;
     maage_world_mesh *pending_mesh;
-    struct maage_world_slot *next;
+    struct maage_world_slot *next, *previous;
 } maage_world_slot;
 struct maage_world_task {
     int used, kind, x, z, cancel_requested;
@@ -135,13 +135,15 @@ static maage_world_slot *maage_world_insert(maage_world *world, int x, int z)
     bucket = maage_world_bucket(x, z, world->bucket_count);
     while (world->buckets[bucket].slot) bucket = (bucket + 1) & (world->bucket_count - 1);
     world->buckets[bucket].slot = slot;
-    slot->next = world->chunks; world->chunks = slot; ++world->count;
+    slot->next = world->chunks;
+    if (world->chunks) world->chunks->previous = slot;
+    world->chunks = slot; ++world->count;
     return slot;
 }
 static void maage_world_remove(maage_world *world, maage_world_slot *slot)
 {
     size_t bucket = maage_world_bucket(slot->x, slot->z, world->bucket_count), destination;
-    maage_world_slot *displaced, **link = &world->chunks;
+    maage_world_slot *displaced;
     while (world->buckets[bucket].slot != slot) bucket = (bucket + 1) & (world->bucket_count - 1);
     world->buckets[bucket].slot = NULL;
     bucket = (bucket + 1) & (world->bucket_count - 1);
@@ -152,8 +154,10 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot)
         world->buckets[destination].slot = displaced;
         bucket = (bucket + 1) & (world->bucket_count - 1);
     }
-    while (*link != slot) link = &(*link)->next;
-    *link = slot->next; --world->count;
+    if (slot->previous) slot->previous->next = slot->next;
+    else world->chunks = slot->next;
+    if (slot->next) slot->next->previous = slot->previous;
+    --world->count;
     if (world->save_cursor == slot)
         world->save_cursor = slot->next ? slot->next : world->chunks;
     maage_world_release(slot->data); maage_world_mesh_destroy(slot->pending_mesh); free(slot);
@@ -424,7 +428,7 @@ static int maage_world_make_room(maage_world *world)
 }
 /* Walk concentric square rings incrementally. A single pump examines at
  * most a workload-derived budget, never rescanning the entire grid per job.
- * On movement and completions the cursor restarts at the nearest column. */
+ * On movement the cursor restarts at the nearest column. */
 static void maage_world_scan_next(maage_world *world, int *dx, int *dz)
 {
     int ring = world->scan_ring;
