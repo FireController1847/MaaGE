@@ -27,7 +27,7 @@ int maage_generation_policy_valid(const maage_generation_policy *policy)
     if (!policy || policy->schema_version != MAAGE_GENERATION_POLICY_SCHEMA ||
         (policy->generator_version != MAAGE_WORLD_GENERATOR_VERSION &&
          policy->generator_version != MAAGE_GENERATION_CONFIGURABLE_VERSION) ||
-        policy->sea_level < 1 || policy->sea_level >= MAAGE_WORLD_HEIGHT - 1 ||
+        policy->sea_level < 0 || policy->sea_level >= MAAGE_WORLD_HEIGHT ||
         policy->spawn_search_radius < 0 ||
         policy->spawn_search_radius >= MAAGE_WORLD_LIMIT ||
         policy->spawn_search_step < 1 ||
