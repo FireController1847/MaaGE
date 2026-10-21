@@ -86,6 +86,22 @@ int main(void)
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 12, 0.1f);
     CHECK(maage_chunk_destroy(center));
 
+    /* Three leaves in a line: Smart drops the two faces behind two
+     * layers, keeping the outer planes that Fancy would expose. */
+    CHECK(maage_chunk_create(0, 0, &center));
+    CHECK(maage_chunk_set(center, 4, 8, 8, MAAGE_STATE_LEAVES));
+    CHECK(maage_chunk_set(center, 5, 8, 8, MAAGE_STATE_LEAVES));
+    CHECK(maage_chunk_set(center, 6, 8, 8, MAAGE_STATE_LEAVES));
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 14, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 16, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 18, 0.1f);
+    /* An opaque trunk two cells ahead hides a face that otherwise survives. */
+    CHECK(maage_chunk_set(center, 6, 8, 8, MAAGE_STATE_STONE));
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 14, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 16, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 17, 0.1f);
+    CHECK(maage_chunk_destroy(center));
+
     /* Opaque stone hides the adjacent leaf face in every mode. In Fast,
      * solid-looking foliage also hides the reverse stone face. */
     CHECK(maage_chunk_create(0, 0, &center));
@@ -106,12 +122,20 @@ int main(void)
     verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FAST, 5, 0.6f);
     verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_SMART, 6, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FANCY, 6, 0.1f);
+    /* The second occluding leaf may be in another chunk; missing neighbors
+     * must not incorrectly cull the formerly visible face. */
+    CHECK(maage_chunk_set(center, 14, 8, 8, MAAGE_STATE_LEAVES));
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 12, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FAST, 9, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_SMART, 11, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FANCY, 12, 0.1f);
+    verify_mesh(blocks, &biomes, east, center, NULL, MAAGE_LEAVES_SMART, 5, 0.1f);
 
     CHECK(maage_chunk_destroy(east));
     CHECK(maage_chunk_destroy(center));
 
-    /* A 6x6x6 canopy has a 2x2x2 buried core: Smart removes only the
-     * 24 directed faces between core leaves, not the 1272 others. */
+    /* A solid 6x6x6 canopy keeps two cutout planes per direction.
+     * Smart draws 432 faces versus Fancy's 1296 and Fast's 216. */
     CHECK(maage_chunk_create(0, 0, &center));
     {
         int x, y, z;
@@ -120,23 +144,22 @@ int main(void)
                 CHECK(maage_chunk_set(center, x, y, z, MAAGE_STATE_LEAVES));
     }
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 216, 0.6f);
-    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1272, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 432, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1296, 0.1f);
-    /* Even a diagonally neighboring trunk breaks deep burial. The adjacent
-     * core leaf and its three internal faces remain visible in Smart. */
-    CHECK(maage_chunk_set(center, 5, 17, 5, MAAGE_STATE_STONE));
-    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1272, 0.1f);
+    /* A one-block cavity opens previously occluded inner leaf faces.
+     * An opaque trunk fills that cavity and hides the inward-facing leaves. */
+    CHECK(maage_chunk_set(center, 6, 18, 6, MAAGE_STATE_AIR));
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 222, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 444, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1290, 0.1f);
-    CHECK(maage_chunk_set(center, 5, 17, 5, MAAGE_STATE_LEAVES));
-    /* A trunk in the center of that core must preserve nearby cutout faces.
-     * It breaks burial for every otherwise-culled internal face. */
     CHECK(maage_chunk_set(center, 6, 18, 6, MAAGE_STATE_STONE));
-    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1290, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 216, 0.6f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 438, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1290, 0.1f);
     CHECK(maage_chunk_destroy(center));
 
-    /* Dense foliage spanning +X/-X preserves two surface layers across the
-     * seam. A missing neighbor never justifies burying a face. */
+    /* Dense foliage spanning +X/-X uses the same occlusion rule across the
+     * seam. A missing neighbor cannot be assumed to hide a face. */
     CHECK(maage_chunk_create(0, 0, &center));
     CHECK(maage_chunk_create(1, 0, &east));
     {
@@ -147,11 +170,11 @@ int main(void)
                     x < 16 ? x : x - 16, y, z, MAAGE_STATE_LEAVES));
     }
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 144, 0.6f);
-    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 648, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 288, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FAST, 108, 0.6f);
-    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_SMART, 636, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_SMART, 216, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, east, MAAGE_LEAVES_FANCY, 648, 0.1f);
-    verify_mesh(blocks, &biomes, east, center, NULL, MAAGE_LEAVES_SMART, 636, 0.1f);
+    verify_mesh(blocks, &biomes, east, center, NULL, MAAGE_LEAVES_SMART, 216, 0.1f);
     verify_mesh(blocks, &biomes, east, center, NULL, MAAGE_LEAVES_FANCY, 648, 0.1f);
     CHECK(maage_chunk_destroy(east));
     CHECK(maage_chunk_destroy(center));

@@ -76,40 +76,30 @@ static const maage_chunk *maage_mesh_neighbor(const maage_chunk *chunk,
     return chunk;
 }
 
-/* A face is deeply buried only when BOTH leaf blocks have two complete
- * axial layers and a fully enclosed immediate 3D neighborhood. Missing
- * columns, including diagonal columns outside the four supplied neighbors,
- * conservatively keep faces visible, avoiding unknown-neighbor assumptions. */
-static int maage_mesh_leaf_buried(const maage_block_registry *registry,
+/* Keep the exposed leaf face and one additional cutout face per viewing
+ * direction. A third plane behind two leaves (or a leaf backed by opaque
+ * stone/wood) rarely adds visible foliage, even through cutout holes.
+ * Unknown neighbor chunks are not treated as occluders. The look is
+ * deliberately between Fancy's six faces per leaf and Fast's solid shell. */
+static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry,
     const maage_chunk *chunk, const maage_chunk *neighbors[4],
-    int x, int y, int z)
+    int x, int y, int z, unsigned int face)
 {
-    static const signed char offsets[32][3] = {
-        {-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1},
-        {-2,0,0}, {2,0,0}, {0,-2,0}, {0,2,0}, {0,0,-2}, {0,0,2},
-        {-1,-1,0}, {-1,1,0}, {1,-1,0}, {1,1,0},
-        {-1,0,-1}, {-1,0,1}, {1,0,-1}, {1,0,1},
-        {0,-1,-1}, {0,-1,1}, {0,1,-1}, {0,1,1},
-        {-1,-1,-1}, {-1,-1,1}, {-1,1,-1}, {-1,1,1},
-        {1,-1,-1}, {1,-1,1}, {1,1,-1}, {1,1,1}
-    };
     const maage_chunk *sample;
     const maage_block_state_definition *state;
-    unsigned int index;
+    const maage_block_definition *block;
     int nx, ny, nz;
-    for (index = 0; index < sizeof(offsets) / sizeof(offsets[0]); ++index) {
-        nx = x + offsets[index][0];
-        ny = y + offsets[index][1];
-        nz = z + offsets[index][2];
-        if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT ||
-            ((nx < 0 || nx >= MAAGE_CHUNK_EDGE) &&
-             (nz < 0 || nz >= MAAGE_CHUNK_EDGE))) return 0;
-        sample = maage_mesh_neighbor(chunk, neighbors, &nx, &nz);
-        if (!sample) return 0;
-        state = maage_block_registry_state(registry, maage_chunk_get(sample, nx, ny, nz));
-        if (!state || state->block_id != MAAGE_BLOCK_LEAVES) return 0;
-    }
-    return 1;
+    nx = x + 2 * maage_face_neighbor[face][0];
+    ny = y + 2 * maage_face_neighbor[face][1];
+    nz = z + 2 * maage_face_neighbor[face][2];
+    if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) return 0;
+    sample = maage_mesh_neighbor(chunk, neighbors, &nx, &nz);
+    if (!sample) return 0;
+    state = maage_block_registry_state(registry, maage_chunk_get(sample, nx, ny, nz));
+    if (!state) return 0;
+    if (state->block_id == MAAGE_BLOCK_LEAVES) return 1;
+    block = maage_block_registry_block(registry, state->block_id);
+    return block && block->opaque;
 }
 
 static size_t maage_mesh_generate(const maage_block_registry *registry,
@@ -127,7 +117,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
     unsigned char light;
     int x, y, z, section, nx, ny, nz;
     unsigned int face, axis, face_limit;
-    int crossed, boundary, smart_buried;
+    int crossed, boundary;
     size_t face_count = 0;
     for (section = 0; section < 16; ++section) {
         if (token && maage_job_cancelled(token)) { *failure = MAAGE_STATUS_INTERRUPTED; return (size_t)-1; }
@@ -143,7 +133,6 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
                     current = maage_block_registry_block(registry, state->block_id);
                     if (!current) return (size_t)-1;
                     crossed = current->mesh_shape == MAAGE_BLOCK_MESH_CROSS;
-                    smart_buried = -1;
                     face_limit = crossed ? 4 : MAAGE_FACE_COUNT;
                     for (axis = 0; axis < 3; ++axis) { shape.minimum[axis] = 0; shape.maximum[axis] = 1; }
                     if (current->selectable && !crossed) shape = current->selection_shape;
@@ -171,16 +160,9 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
                         if (!crossed && state->block_id == MAAGE_BLOCK_LEAVES &&
                             neighbor->block_id == MAAGE_BLOCK_LEAVES && boundary) {
                             if (mode == MAAGE_LEAVES_FAST) continue;
-                            if (mode == MAAGE_LEAVES_SMART) {
-                                if (smart_buried < 0)
-                                    smart_buried = maage_mesh_leaf_buried(registry,
-                                        chunk, neighbors, x, y, z);
-                                if (smart_buried && maage_mesh_leaf_buried(registry,
-                                    chunk, neighbors,
-                                    x + maage_face_neighbor[face][0],
-                                    y + maage_face_neighbor[face][1],
-                                    z + maage_face_neighbor[face][2])) continue;
-                            }
+                            if (mode == MAAGE_LEAVES_SMART &&
+                                maage_mesh_smart_leaf_hidden(registry,
+                                    chunk, neighbors, x, y, z, face)) continue;
                         }
                         if (!crossed && state->fluid_kind && state->fluid_kind == neighbor->fluid_kind) {
                             if (face == MAAGE_FACE_NEGATIVE_Y || face == MAAGE_FACE_POSITIVE_Y) continue;

@@ -207,10 +207,12 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   no resource acquisition, new texture manager or native widget toolkit.
   Logical GUI coordinates scale independently of framebuffer resolution.
 - The Client Leaves option is session-only: Fast uses opaque textures and aggressive
-  internal-face culling; Smart uses cutout textures and conservatively culls only
-  faces buried beyond two leaf layers, retaining near-surface density; Fancy
-  (default) uses cutout textures and preserves all internal leaf faces. Mode
-  changes invalidate only World meshes and rebuild through Jobs, preserving
+  internal-face culling; Smart uses cutout textures and culls leaf-to-leaf faces
+  obscured behind two face-facing leaf layers or a leaf backed by an opaque block,
+  retaining the exposed and first interior cutout planes per direction; Fancy
+  (default) uses cutout textures and preserves all internal leaf faces. Smart
+  must meaningfully reduce geometry without Fast's hollow-canopy appearance.
+  Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
