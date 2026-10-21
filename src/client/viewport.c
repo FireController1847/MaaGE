@@ -18,6 +18,9 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <limits.h>
+#include <float.h>
+#include <stdio.h>
+#include "mesh_diagnostics.h"
 
 /* Phase 1 camera tuning, pending 1.7.10 feel/fidelity verification. */
 #define MAAGE_CLIENT_MOUSE_RADIANS 0.0025
@@ -30,7 +33,7 @@ typedef struct maage_client_world_options {
     maage_world_seed seed;
     unsigned int workers;
     int create, seeded, radius, mode;
-    double reach;
+    double reach, mesh_budget_ms, frame_target_ms;
 } maage_client_world_options;
 typedef struct maage_client_chunk_mesh {
     int x, z, used;
@@ -38,6 +41,16 @@ typedef struct maage_client_chunk_mesh {
     maage_render_mesh *mesh;
     size_t vertices, indices;
 } maage_client_chunk_mesh;
+typedef struct maage_client_mesh_cache {
+    maage_client_chunk_mesh *slots;
+    const maage_render_mesh **draws;
+    size_t capacity;
+} maage_client_mesh_cache;
+typedef struct maage_client_mesh_activity {
+    maage_client_mesh_diagnostics status;
+    double sample_start, previous_upload_ms, expected_upload_ms;
+    unsigned long sample_uploads, sample_vertices;
+} maage_client_mesh_activity;
 
 /* Textual options are resolved before any world/runtime work begins. */
 static int maage_client_world_options_parse(int argc, char *const argv[], maage_client_world_options *options)
@@ -48,6 +61,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     long value;
     unsigned long workers;
     memset(options, 0, sizeof(*options)); options->radius = 8; options->mode = -1;
+    options->frame_target_ms = 1000.0 / 60.0;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
         if (!strncmp(argument, "--world=", 8)) {
@@ -65,8 +79,16 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
         } else if (!strncmp(argument, "--world-name=", 13)) options->name = argument + 13;
         else if (!strncmp(argument, "--render-distance=", 18)) {
             errno = 0; value = strtol(argument + 18, &end, 10);
-            if (errno || !argument[18] || *end || value < 1 || value > MAAGE_WORLD_MAX_RADIUS) return 0;
+            if (errno || !argument[18] || *end || value < 1 || value > INT_MAX) return 0;
             options->radius = (int)value;
+        } else if (!strncmp(argument, "--mesh-upload-budget-ms=", 24)) {
+            errno = 0; options->mesh_budget_ms = strtod(argument + 24, &end);
+            if (errno || !argument[24] || *end ||
+                !(options->mesh_budget_ms >= 0.0 && options->mesh_budget_ms <= DBL_MAX)) return 0;
+        } else if (!strncmp(argument, "--mesh-frame-target-ms=", 23)) {
+            errno = 0; options->frame_target_ms = strtod(argument + 23, &end);
+            if (errno || !argument[23] || *end ||
+                !(options->frame_target_ms > 0.0 && options->frame_target_ms <= DBL_MAX)) return 0;
         } else if (!strncmp(argument, "--world-workers=", 16)) {
             if (argument[16] < '0' || argument[16] > '9') return 0;
             errno = 0; workers = strtoul(argument + 16, &end, 10);
@@ -81,7 +103,8 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             if (errno || !argument[20] || *end || !(options->reach > 0 && options->reach <= 64)) return 0;
         } else if (!strcmp(argument, "--world") || !strcmp(argument, "--create-world") ||
             !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance") ||
-            !strcmp(argument, "--world-workers") || !strcmp(argument, "--gamemode") ||
+            !strcmp(argument, "--world-workers") || !strcmp(argument, "--mesh-upload-budget-ms") ||
+            !strcmp(argument, "--mesh-frame-target-ms") || !strcmp(argument, "--gamemode") ||
             !strcmp(argument, "--interaction-range")) return 0;
     }
     if (options->seeded && options->id && !options->create) return 0;
@@ -89,52 +112,170 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     return 1;
 }
 
-/* Client owns GPU meshes only; no renderer retains pointers into World columns.
- * Poll without waiting, upload at most one changed column per frame, and retain
- * unchanged resources. CPU results carry tokens across chunk unload/reload. */
+/* Mesh resources remain Client-owned. Capacity grows with actual resident
+ * meshes, independently of the World's scheduling/cache implementation. */
+static int maage_client_mesh_cache_grow(maage_client_mesh_cache *cache)
+{
+    maage_client_chunk_mesh *slots;
+    const maage_render_mesh **draws;
+    size_t previous = cache->capacity, grown;
+    if (previous > ((size_t)-1 - 1) / 2) grown = previous + 1;
+    else grown = previous ? previous * 2 : 32;
+    if (grown <= previous || grown > (size_t)-1 / sizeof(*slots) ||
+        grown >= (size_t)-1 / sizeof(*draws)) return 0;
+    slots = (maage_client_chunk_mesh *)realloc(cache->slots, grown * sizeof(*slots));
+    if (!slots) return 0;
+    cache->slots = slots;
+    draws = (const maage_render_mesh **)realloc(cache->draws, (grown + 1) * sizeof(*draws));
+    if (!draws) return 0;
+    cache->draws = draws;
+    memset(cache->slots + previous, 0, (grown - previous) * sizeof(*slots));
+    cache->capacity = grown;
+    return 1;
+}
+static void maage_client_mesh_cache_clear(maage_client_mesh_cache *cache)
+{
+    size_t i;
+    for (i = 0; i < cache->capacity; ++i)
+        maage_render_mesh_destroy(cache->slots[i].mesh);
+    free(cache->slots); free(cache->draws);
+    memset(cache, 0, sizeof(*cache));
+}
+static double maage_client_mesh_budget(const maage_client_world_options *options,
+    const maage_client_debug *debug, const maage_client_mesh_activity *activity)
+{
+    double other_work_ms, headroom;
+    if (options->mesh_budget_ms > 0.0) return options->mesh_budget_ms;
+    other_work_ms = debug->timing_ready ? debug->frame_ms - activity->previous_upload_ms : 0.0;
+    if (other_work_ms < 0.0) other_work_ms = 0.0;
+    headroom = options->frame_target_ms - other_work_ms;
+    /* Reserve some throughput when already over target, and no more than
+     * one quarter of the frame for streaming when otherwise idle. */
+    if (headroom < options->frame_target_ms * 0.05) headroom = options->frame_target_ms * 0.05;
+    if (headroom > options->frame_target_ms * 0.25) headroom = options->frame_target_ms * 0.25;
+    return headroom * 0.75;
+}
+static void maage_client_mesh_rates(maage_client_mesh_activity *activity, double now)
+{
+    double interval = now - activity->sample_start;
+    if (!(interval >= 1.0)) return;
+    activity->status.uploads_per_second = (double)activity->sample_uploads / interval;
+    activity->status.vertices_per_second = (double)activity->sample_vertices / interval;
+    activity->sample_uploads = activity->sample_vertices = 0;
+    activity->sample_start = now;
+}
+/* Drain ready World meshes as long as measured work fits the millisecond
+ * budget. The first attempt ensures progress even after an expensive frame;
+ * later attempts predict cost to avoid repeatedly overrunning frame pacing.
+ * No CPU mesh or render handle survives a failed/stale transfer. */
 static maage_render_result maage_client_stream_meshes(maage_world *world,
-    maage_renderer *renderer, maage_render_texture *atlas, maage_client_chunk_mesh *cache,
-    int center_x, int center_z, int radius)
+    maage_renderer *renderer, maage_render_texture *atlas, maage_client_mesh_cache *cache,
+    maage_client_mesh_activity *activity, const maage_client_world_options *options,
+    const maage_client_debug *debug, int center_x, int center_z)
 {
     maage_world_mesh_update update;
     const maage_mesh_data *geometry;
-    maage_render_mesh *replacement = NULL;
-    maage_render_result result = MAAGE_RENDER_OK;
-    int i, selected = -1;
-    for (i = 0; i < MAAGE_WORLD_MAX_CHUNKS; ++i) {
-        if (cache[i].used && (abs(cache[i].x - center_x) > radius || abs(cache[i].z - center_z) > radius ||
-            !maage_world_chunk_loaded(world, cache[i].x, cache[i].z))) {
-            maage_render_mesh_destroy(cache[i].mesh); memset(&cache[i], 0, sizeof(cache[i]));
+    maage_render_mesh *replacement;
+    maage_render_result result;
+    double begin, current, upload_begin, upload_ms;
+    double budget_ms = maage_client_mesh_budget(options, debug, activity);
+    size_t i, selected, vacant;
+    unsigned int processed = 0;
+    activity->status.uploaded_this_frame = 0;
+    activity->status.frame_upload_ms = 0;
+    activity->status.budget_ms = budget_ms;
+    for (i = 0; i < cache->capacity; ++i) {
+        if (cache->slots[i].used &&
+            (abs(cache->slots[i].x - center_x) > options->radius ||
+             abs(cache->slots[i].z - center_z) > options->radius ||
+             !maage_world_chunk_loaded(world, cache->slots[i].x, cache->slots[i].z))) {
+            maage_render_mesh_destroy(cache->slots[i].mesh);
+            memset(&cache->slots[i], 0, sizeof(cache->slots[i]));
         }
     }
-    if (!maage_world_take_mesh(world, &update)) return MAAGE_RENDER_OK;
-    if (abs(update.x - center_x) > radius || abs(update.z - center_z) > radius ||
-        !maage_world_mesh_current(world, update.x, update.z, update.revision)) {
-        maage_world_mesh_destroy(update.mesh); return MAAGE_RENDER_OK;
-    }
-    for (i = 0; i < MAAGE_WORLD_MAX_CHUNKS; ++i) {
-        if (cache[i].used && cache[i].x == update.x && cache[i].z == update.z) { selected = i; break; }
-        if (!cache[i].used && selected < 0) selected = i;
-    }
-    if (selected < 0) result = MAAGE_RENDER_OUT_OF_MEMORY;
-    else if (!cache[selected].used || update.revision != cache[selected].revision) {
-        geometry = maage_world_mesh_data(update.mesh);
-        if (geometry->index_count) result = maage_renderer_upload_geometry(renderer, geometry, atlas, &replacement);
-        if (result == MAAGE_RENDER_OK) {
-            maage_render_mesh_destroy(cache[selected].mesh);
-            cache[selected].mesh = replacement; cache[selected].used = 1;
-            cache[selected].vertices = geometry->vertex_count; cache[selected].indices = geometry->index_count;
-            cache[selected].x = update.x; cache[selected].z = update.z; cache[selected].revision = update.revision;
+    begin = maage_time_monotonic_seconds();
+    if (begin < 0.0) return MAAGE_RENDER_PLATFORM_ERROR;
+    for (;;) {
+        current = maage_time_monotonic_seconds();
+        if (current < 0.0) return MAAGE_RENDER_PLATFORM_ERROR;
+        if (processed && ((current - begin) * 1000.0 >= budget_ms ||
+            (current - begin) * 1000.0 + activity->expected_upload_ms > budget_ms)) break;
+        if (!maage_world_take_mesh(world, &update)) break;
+        ++processed;
+        if (abs(update.x - center_x) > options->radius || abs(update.z - center_z) > options->radius ||
+            !maage_world_mesh_current(world, update.x, update.z, update.revision)) {
+            ++activity->status.rejected;
+            maage_world_mesh_destroy(update.mesh);
+            continue;
         }
+        selected = cache->capacity; vacant = cache->capacity;
+        for (i = 0; i < cache->capacity; ++i) {
+            if (cache->slots[i].used && cache->slots[i].x == update.x &&
+                cache->slots[i].z == update.z) { selected = i; break; }
+            if (!cache->slots[i].used && vacant == cache->capacity) vacant = i;
+        }
+        if (selected == cache->capacity) {
+            selected = vacant;
+            if (selected == cache->capacity) {
+                selected = cache->capacity;
+                if (!maage_client_mesh_cache_grow(cache)) {
+                    maage_world_mesh_destroy(update.mesh);
+                    return MAAGE_RENDER_OUT_OF_MEMORY;
+                }
+            }
+        }
+        if (!cache->slots[selected].used || update.revision != cache->slots[selected].revision) {
+            geometry = maage_world_mesh_data(update.mesh);
+            replacement = NULL; result = MAAGE_RENDER_OK;
+            if (geometry->index_count) {
+                upload_begin = maage_time_monotonic_seconds();
+                if (upload_begin < 0.0) { maage_world_mesh_destroy(update.mesh); return MAAGE_RENDER_PLATFORM_ERROR; }
+                result = maage_renderer_upload_geometry(renderer, geometry, atlas, &replacement);
+                current = maage_time_monotonic_seconds();
+                if (current < 0.0) {
+                    maage_render_mesh_destroy(replacement);
+                    maage_world_mesh_destroy(update.mesh); return MAAGE_RENDER_PLATFORM_ERROR;
+                }
+                upload_ms = (current - upload_begin) * 1000.0;
+                activity->status.frame_upload_ms += upload_ms;
+                if (result == MAAGE_RENDER_OK) {
+                    activity->expected_upload_ms = activity->status.gpu_uploads ?
+                        activity->expected_upload_ms * 0.75 + upload_ms * 0.25 : upload_ms;
+                    ++activity->status.gpu_uploads; ++activity->sample_uploads;
+                    activity->status.vertices_uploaded += (unsigned long)geometry->vertex_count;
+                    activity->sample_vertices += (unsigned long)geometry->vertex_count;
+                    ++activity->status.uploaded_this_frame;
+                }
+            }
+            if (result == MAAGE_RENDER_OK) {
+                maage_render_mesh_destroy(cache->slots[selected].mesh);
+                cache->slots[selected].mesh = replacement;
+                cache->slots[selected].used = 1;
+                cache->slots[selected].vertices = geometry->vertex_count;
+                cache->slots[selected].indices = geometry->index_count;
+                cache->slots[selected].x = update.x;
+                cache->slots[selected].z = update.z;
+                cache->slots[selected].revision = update.revision;
+            } else {
+                maage_render_mesh_destroy(replacement);
+                maage_world_mesh_destroy(update.mesh);
+                return result;
+            }
+        }
+        maage_world_mesh_destroy(update.mesh);
     }
-    maage_world_mesh_destroy(update.mesh);
-    return result;
+    current = maage_time_monotonic_seconds();
+    if (current < 0.0) return MAAGE_RENDER_PLATFORM_ERROR;
+    activity->previous_upload_ms = activity->status.frame_upload_ms;
+    activity->status.stream_ms = (current - begin) * 1000.0;
+    maage_client_mesh_rates(activity, current);
+    return MAAGE_RENDER_OK;
 }
 
-static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect)
+static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius)
 {
     double sy = sin(yaw), cy = cos(yaw), sp = sin(pitch), cp = cos(pitch);
-    double forward[3], right[3], up[3], focal;
+    double forward[3], right[3], up[3], focal, far_clip;
     float view[16], projection[16];
     int row, column, k;
     forward[0] = sy * cp; forward[1] = -sp; forward[2] = -cy * cp;
@@ -147,9 +288,13 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
     }
     view[15] = 1.0f; focal = 1.0 / tan(MAAGE_CLIENT_FOV_RADIANS * 0.5);
     projection[0] = (float)(focal / aspect); projection[5] = (float)focal;
-    /* Right-handed perspective, near=.05, far=512, clip depth [0,1]. */
-    projection[10] = (float)(512.0 / (0.05 - 512.0)); projection[11] = -1.0f;
-    projection[14] = (float)(0.05 * 512.0 / (0.05 - 512.0));
+    /* Include the furthest chunk corner and full world height, even while
+     * moving within the center chunk; keep the established minimum range. */
+    far_clip = ((double)radius + 2.0) * MAAGE_CHUNK_EDGE * 1.4142135623730951 + MAAGE_WORLD_HEIGHT;
+    if (far_clip < 512.0) far_clip = 512.0;
+    /* Right-handed perspective, near=.05, depth [0,1]. */
+    projection[10] = (float)(far_clip / (0.05 - far_clip)); projection[11] = -1.0f;
+    projection[14] = (float)(0.05 * far_clip / (0.05 - far_clip));
     for (column = 0; column < 4; ++column) for (row = 0; row < 4; ++row) {
         output[column * 4 + row] = 0;
         for (k = 0; k < 4; ++k) output[column * 4 + row] += projection[k * 4 + row] * view[column * 4 + k];
@@ -176,8 +321,8 @@ int maage_client_run(int argc, char *const argv[])
     maage_world *world = NULL;
     maage_world_store *store = NULL;
     maage_instance *instance = maage_client_storage_instance();
-    maage_client_chunk_mesh cache[MAAGE_WORLD_MAX_CHUNKS];
-    const maage_render_mesh *draws[MAAGE_WORLD_MAX_CHUNKS + 1];
+    maage_client_mesh_cache cache;
+    maage_client_mesh_activity mesh_activity;
     maage_client_world_options options;
     maage_client_resources resources;
     maage_biome_registry biomes;
@@ -196,19 +341,20 @@ int maage_client_run(int argc, char *const argv[])
     double tick_start = 0, tick_seconds, frame_end;
     double wheel = 0;
     float matrix[16];
-    size_t draw_count;
+    size_t draw_count, resident_count, slot_index;
     unsigned long frames = 0, tick_count;
     unsigned ui_actions;
     int ok = 0, initial_capture = 1, active, was_active = 0, jump_pending = 0, axis;
     int player_ready = 0, cx, cz, i, was_modal, was_focused = 0;
     int attack_pending = 0, use_pending = 0;
-    memset(&resources, 0, sizeof(resources)); memset(cache, 0, sizeof(cache)); memset(&debug, 0, sizeof(debug));
+    memset(&resources, 0, sizeof(resources)); memset(&cache, 0, sizeof(cache)); memset(&mesh_activity, 0, sizeof(mesh_activity));
+    memset(&debug, 0, sizeof(debug));
     memset(&interaction, 0, sizeof(interaction)); memset(&intent, 0, sizeof(intent));
     maage_render_desc_init(&render_config);
     rendered = maage_render_desc_parse_args(argc, argv, &render_config);
     if (rendered != MAAGE_RENDER_OK) goto done;
     if (!maage_client_world_options_parse(argc, argv, &options)) {
-        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=1..8, and --world-workers=<nonnegative count> (0 automatic)."); goto done;
+        maage_log_error("maage.client.world", "Invalid world options. Use --new-world or --create-world=<id>, optional --seed=<signed64> / --world-name=<name>, --world=<id> to load, --render-distance=<positive int>, --world-workers=<nonnegative count> (0 automatic), --mesh-upload-budget-ms=<milliseconds> (0 auto), and --mesh-frame-target-ms=<milliseconds>."); goto done;
     }
     if (!instance) { maage_log_error("maage.client.instance", "No validated instance was selected at startup."); goto done; }
     strcpy(directory, maage_client_storage_data_root());
@@ -282,6 +428,7 @@ int maage_client_run(int argc, char *const argv[])
     if (result != MAAGE_WINDOW_OK) goto window_failed;
     maage_log_info("maage.client", "WASD walks; Space jumps (double tap for Creative flight), Shift descends; mouse buttons break/place; 1-9 or wheel selects; E opens inventory; Escape returns; F3 shows diagnostics. Options selects game mode. Unavailable columns block interaction and movement.");
     last = maage_time_monotonic_seconds(); diagnostic_time = last;
+    mesh_activity.sample_start = last;
     if (last < 0) goto clock_failed;
     for (;;) {
         result = maage_window_poll_events(system, 0);
@@ -339,7 +486,7 @@ int maage_client_run(int argc, char *const argv[])
         if (maage_world_failed(world)) { maage_log_error("maage.client.world", "Streaming stopped after a world error; preserving existing save files."); goto done; }
         if (maage_client_ui_debug_visible(ui) || now - diagnostic_time >= 5.0)
             maage_world_get_stats(world, &stats);
-        rendered = maage_client_stream_meshes(world, renderer, atlas, cache, cx, cz, options.radius);
+        rendered = maage_client_stream_meshes(world, renderer, atlas, &cache, &mesh_activity, &options, &debug, cx, cz);
         if (rendered != MAAGE_RENDER_OK) goto done;
         active = !maage_client_ui_modal(ui) && input.focused && input.captured && state.visible && state.framebuffer_width > 0 && state.framebuffer_height > 0;
         if (active && !was_active) elapsed = 0;
@@ -401,19 +548,32 @@ int maage_client_run(int argc, char *const argv[])
         for (axis = 0; axis < 3; ++axis) eye[axis] = previous.position[axis] + (player.position[axis] - previous.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
         if (state.resized) maage_renderer_resize(renderer);
-        draw_count = 0; memset(&mesh_stats, 0, sizeof(mesh_stats));
-        for (i = 0; i < MAAGE_WORLD_MAX_CHUNKS; ++i) if (cache[i].used && cache[i].mesh) {
-            draws[draw_count++] = cache[i].mesh; ++mesh_stats.meshes;
-            mesh_stats.vertices += cache[i].vertices; mesh_stats.indices += cache[i].indices;
+        draw_count = resident_count = 0; memset(&mesh_stats, 0, sizeof(mesh_stats));
+        for (slot_index = 0; slot_index < cache.capacity; ++slot_index) if (cache.slots[slot_index].used) {
+            ++resident_count;
+            if (cache.slots[slot_index].mesh) {
+                cache.draws[draw_count++] = cache.slots[slot_index].mesh; ++mesh_stats.meshes;
+                mesh_stats.vertices += cache.slots[slot_index].vertices;
+                mesh_stats.indices += cache.slots[slot_index].indices;
+            }
         }
-        if (interaction.mesh) draws[draw_count++] = interaction.mesh;
+        mesh_activity.status.gpu_resident = resident_count;
+        mesh_activity.status.ready_waiting_estimate =
+            stats.ready > resident_count ? stats.ready - resident_count : 0;
+        if (interaction.mesh) {
+            if (!cache.draws && !maage_client_mesh_cache_grow(&cache)) {
+                rendered = MAAGE_RENDER_OUT_OF_MEMORY; goto done;
+            }
+            cache.draws[draw_count++] = interaction.mesh;
+        }
         debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, world, &record,
             &stats, &player, yaw, pitch, options.radius, !active, renderer, &mesh_stats, &game) : NULL;
+        if (debug_text) maage_client_debug_mesh_diagnostics(&debug.text, &mesh_activity.status);
         ui_draw = maage_client_ui_draw(ui, debug_text);
         if (!ui_draw) { maage_log_error("maage.client.ui", "Client UI batch could not be constructed."); goto done; }
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
-            maage_client_camera(matrix, eye, yaw, pitch, (double)state.framebuffer_width / state.framebuffer_height);
-            rendered = maage_renderer_draw_frame(renderer, draws, draw_count, matrix, ui_draw);
+            maage_client_camera(matrix, eye, yaw, pitch, (double)state.framebuffer_width / state.framebuffer_height, options.radius);
+            rendered = maage_renderer_draw_frame(renderer, cache.draws, draw_count, matrix, ui_draw);
             if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED) goto done;
         } else rendered = MAAGE_RENDER_SKIPPED;
         frame_end = maage_time_monotonic_seconds();
@@ -425,6 +585,12 @@ int maage_client_run(int argc, char *const argv[])
             maage_log_debug("maage.client.world", "Loaded=%u; pending=%u; ready=%u; generated=%lu; disk=%lu; meshes=%lu; frame=%.1fms.",
                 stats.loaded, stats.pending, stats.ready, stats.generated, stats.loaded_from_disk, stats.meshes,
                 (now - diagnostic_time) * 1000.0 / frames);
+            maage_log_debug("maage.client.render", "GPU uploads=%.1f/s; geometry=%.0f vertices/s; resident=%lu; ready not presented~%lu; budget=%.2fms; last uploads=%u (%.2fms GPU / %.2fms stream); rejected=%lu.",
+                mesh_activity.status.uploads_per_second, mesh_activity.status.vertices_per_second,
+                (unsigned long)mesh_activity.status.gpu_resident,
+                (unsigned long)mesh_activity.status.ready_waiting_estimate, mesh_activity.status.budget_ms,
+                mesh_activity.status.uploaded_this_frame, mesh_activity.status.frame_upload_ms,
+                mesh_activity.status.stream_ms, mesh_activity.status.rejected);
             maage_log_debug("maage.client.jobs", "Workers=%u; queued=%u; running=%u; generation=%u; lighting=%u; meshing=%u; I/O=%u; completed=%lu; cancelled=%lu; stale=%lu; scheduling=%.2fms.",
                 stats.worker_count, stats.queued_jobs, stats.running_jobs, stats.generation_jobs, stats.lighting_jobs,
                 stats.meshing_jobs, stats.io_jobs, stats.completed_jobs, stats.cancelled_jobs, stats.stale_jobs,
@@ -453,7 +619,7 @@ done:
     if (store && player_ready && !maage_world_store_save_gameplay(store, player.position, yaw, pitch, &game, items, error)) {
         maage_log_error("maage.client.world", "%s", error); ok = 0;
     }
-    for (i = 0; i < MAAGE_WORLD_MAX_CHUNKS; ++i) maage_render_mesh_destroy(cache[i].mesh);
+    maage_client_mesh_cache_clear(&cache);
     maage_render_mesh_destroy(interaction.mesh);
     maage_client_ui_destroy(ui); maage_render_texture_destroy(atlas); maage_renderer_destroy(renderer);
     if (window) maage_window_destroy(window);
