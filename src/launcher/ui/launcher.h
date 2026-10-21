@@ -5,7 +5,6 @@
 #include "maage/instance.h"
 #include "../clients/registry.h"
 #include "../clients/job.h"
-#define MAAGE_INSTALLATIONS 32
 #define MAAGE_PROJECT_URL "https://github.com/FireController1847/MaaGE"
 typedef enum maage_launcher_page {
     MAAGE_PAGE_PLAY, MAAGE_PAGE_NEWS, MAAGE_PAGE_INSTALLATIONS, MAAGE_PAGE_SETTINGS, MAAGE_PAGE_ABOUT
@@ -18,8 +17,8 @@ typedef struct maage_launcher_ui {
     maage_access *access;
     maage_assets *assets;
     maage_launcher_page page;
-    maage_installation installations[MAAGE_INSTALLATIONS];
-    unsigned count, selected, default_id, next_id;
+    maage_installation *installations;
+    unsigned count, capacity, selected, default_id, next_id;
     int appearance; /* 0 system, 1 light, 2 dark */
     char account[33], root[MAAGE_PATH_CAPACITY], resources[MAAGE_PATH_CAPACITY];
     char error[256], account_status[512];
