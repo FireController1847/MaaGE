@@ -217,10 +217,14 @@ static int maage_assets_download(maage_assets *assets, const char *url, const ch
 {
     maage_download_request request;
     maage_download_observer observer;
+    maage_download_options options;
+    if (!maage_assets_download_config(&options)) {
+        strcpy(error, "Invalid MAAGE_DOWNLOAD_* policy."); return 0;
+    }
     request.url = url; request.destination = path; request.sha1 = hash;
     request.size = size; request.limit = MAAGE_METADATA_LIMIT;
     observer.cancelled = maage_assets_cancelled; observer.bytes = NULL; observer.context = assets;
-    return maage_download_batch(&request, 1, &observer, error);
+    return maage_download_batch_with_options(&request, 1, &observer, &options, error);
 }
 static int maage_assets_compare(const void *left, const void *right)
 {
@@ -622,7 +626,8 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         strcpy(error, "Invalid MAAGE_DOWNLOAD_* policy. Check configured concurrency, attempts, and timeout values."); goto cleanup;
     }
     slots = download_options.max_concurrent;
-    if (unique && (unsigned long)slots > unique) slots = (unsigned int)unique;
+    if (!unique) slots = 1;
+    else if ((unsigned long)slots > unique) slots = (unsigned int)unique;
     if (!slots || (size_t)slots > (size_t)-1 / sizeof(*destinations) ||
         (size_t)slots > (size_t)-1 / sizeof(*urls) ||
         (size_t)slots > (size_t)-1 / sizeof(*requests) ||
