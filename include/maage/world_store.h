@@ -2,7 +2,7 @@
 #define MAAGE_WORLD_STORE_H
 #include "maage/world.h"
 #include "maage/gameplay.h"
-#define MAAGE_WORLD_FORMAT_VERSION 1UL
+#define MAAGE_WORLD_FORMAT_VERSION 2UL
 #define MAAGE_PLAYER_FORMAT_VERSION 2UL
 typedef struct maage_world_record {
     char id[65], name[128], created_utc[32];
@@ -48,9 +48,13 @@ void maage_world_store_close(maage_world_store *store);
  * store/registries alive until completion; no store-wide I/O mutex is needed.
  * Detached loaded columns transfer to caller. 1 loaded, 0 absent, -1 invalid/I/O
  * error; corruption never means air.
- * Format 1 fixes legacy numeric states 0,1,2,3,7,9,12,13,24 and grass states
- * 256..261 (type 2, metadata biome+1), plus biome IDs 0..5. Reordering or adding
- * saved identities requires a versioned migration, never reinterpretation. */
+ * Format 1 remains readable with its original fixed numeric mappings (states
+ * 0,1,2,3,7,9,12,13,24,256..261; biomes 0..5). New writes use format 2:
+ * per-chunk palettes of stable namespaced biome names and block names plus
+ * state metadata, with 8-bit biome and 16-bit palette indices. These indices
+ * are local to a chunk, not runtime IDs; a chunk contains at most 65536 cells.
+ * Unknown identities reject load/save without replacing existing data.
+ * Existing format-1 chunks migrate atomically to format 2 on save. */
 int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
     maage_chunk **chunk, char error[256]);

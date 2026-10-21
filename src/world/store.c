@@ -7,7 +7,9 @@
 #include <math.h>
 #include <time.h>
 
-#define MAAGE_STORE_CHUNK_MAX 197412UL
+/* V2 allows per-chunk palettes of up to 65536 namespaced state identities.
+ * Reads allocate only the actual validated file size, not this maximum. */
+#define MAAGE_STORE_CHUNK_MAX 18000000UL
 #define MAAGE_STORE_METADATA_MAX 4096
 #define MAAGE_STORE_WORD 4294967295UL
 struct maage_world_store {
@@ -144,16 +146,29 @@ static unsigned char *maage_store_read(const char *path, size_t maximum, size_t 
 {
     unsigned char *data;
     FILE *file;
+    long file_length;
     int failed;
-    if (maage_storage_status(path) != 1) { maage_store_error(error, "World file is missing, unsafe, or inaccessible."); return NULL; }
+    if (maage_storage_status(path) != 1) {
+        maage_store_error(error, "World file is missing, unsafe, or inaccessible."); return NULL;
+    }
     file = maage_storage_open(path, "rb");
     if (!file) { maage_store_error(error, "Could not open world file."); return NULL; }
-    data = (unsigned char *)malloc(maximum + 1);
+    if (fseek(file, 0, SEEK_END) != 0 ||
+        (file_length = ftell(file)) < 0 ||
+        (unsigned long)file_length > maximum ||
+        fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        maage_store_error(error, "World file exceeds its format bound or could not be read.");
+        return NULL;
+    }
+    *length = (size_t)file_length;
+    data = (unsigned char *)malloc(*length ? *length : 1);
     if (!data) { fclose(file); maage_store_error(error, "Not enough memory to read world file."); return NULL; }
-    *length = fread(data, 1, maximum + 1, file);
-    failed = ferror(file) || *length > maximum;
+    failed = fread(data, 1, *length, file) != *length || ferror(file);
     if (fclose(file)) failed = 1;
-    if (failed) { free(data); maage_store_error(error, "World file exceeds its format bound or could not be read."); return NULL; }
+    if (failed) {
+        free(data); maage_store_error(error, "World file could not be read."); return NULL;
+    }
     return data;
 }
 static int maage_store_write(const char *path, const unsigned char *data, size_t length, char error[256])
@@ -700,7 +715,8 @@ static int maage_store_chunk_path(maage_world_store *store, int x, int z, char p
     sprintf(relative, "%d_%d.chunk", x, z);
     return maage_storage_join(path, MAAGE_PATH_CAPACITY, store->chunks, relative);
 }
-static int maage_store_state(const maage_block_registry *blocks, unsigned long id)
+/* V1 numeric mapping must remain exact: reject any reinterpreted old ID. */
+static int maage_store_legacy_state(const maage_block_registry *blocks, unsigned long id)
 {
     const maage_block_state_definition *state = maage_block_registry_state(blocks, id);
     if (!state) return 0;
@@ -711,32 +727,139 @@ static int maage_store_state(const maage_block_registry *blocks, unsigned long i
         default: return 0;
     }
 }
+static int maage_store_state_compare(const void *left, const void *right)
+{
+    maage_block_state_id a = *(const maage_block_state_id *)left;
+    maage_block_state_id b = *(const maage_block_state_id *)right;
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+static int maage_store_biome_compare(const void *left, const void *right)
+{
+    maage_biome_id a = *(const maage_biome_id *)left;
+    maage_biome_id b = *(const maage_biome_id *)right;
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+static size_t maage_store_state_index(const maage_block_state_id *states,
+    size_t count, maage_block_state_id value)
+{
+    size_t left = 0, right = count, middle;
+    while (left < right) {
+        middle = left + (right - left) / 2;
+        if (states[middle] < value) left = middle + 1;
+        else right = middle;
+    }
+    return left < count && states[left] == value ? left : count;
+}
+static size_t maage_store_biome_index(const maage_biome_id *biomes,
+    size_t count, maage_biome_id value)
+{
+    size_t left = 0, right = count, middle;
+    while (left < right) {
+        middle = left + (right - left) / 2;
+        if (biomes[middle] < value) left = middle + 1;
+        else right = middle;
+    }
+    return left < count && biomes[left] == value ? left : count;
+}
+static int maage_store_identity_get(maage_store_bytes *bytes, char name[256])
+{
+    unsigned long length = maage_store_get(bytes, 1);
+    size_t i;
+    if (!length || bytes->failed || length > bytes->length - bytes->position) {
+        bytes->failed = 1; return 0;
+    }
+    for (i = 0; i < length; ++i) {
+        name[i] = (char)maage_store_get(bytes, 1);
+        if (!name[i]) bytes->failed = 1;
+    }
+    name[length] = 0;
+    return !bytes->failed;
+}
+static void maage_store_identity_put(maage_store_bytes *bytes, const char *name)
+{
+    size_t length;
+    if (!name) { bytes->failed = 1; return; }
+    length = strlen(name);
+    if (!length || length > 255) { bytes->failed = 1; return; }
+    maage_store_put(bytes, (unsigned long)length, 1);
+    maage_store_text_put(bytes, name, length);
+}
 static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes, maage_chunk **output)
 {
     maage_store_bytes bytes;
-    maage_chunk *chunk;
-    unsigned long mask, stored_x, stored_z, expected_x, expected_z, value;
-    size_t i, section, expected_length = 800;
+    maage_chunk *chunk = NULL;
+    maage_block_state_id *palette = NULL, state;
+    maage_biome_id biome_palette[256], biome;
+    maage_block_id block;
+    unsigned long mask, stored_x, stored_z, expected_x, expected_z, value, format;
+    unsigned long state_count = 0, biome_count = 0;
+    size_t i, section, expected_length = 800, active_cells = 0;
+    unsigned int metadata;
+    char name[256];
+    int modern;
     bytes.data = data; bytes.length = length; bytes.position = 0; bytes.failed = 0;
-    if (!maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK1\0") ||
-        maage_store_get(&bytes, 4) != MAAGE_WORLD_FORMAT_VERSION ||
+    if (length < 804 || !maage_store_checksum(&bytes)) return 0;
+    modern = memcmp(data, "MGCHNK2\0", 8) == 0;
+    if (!maage_store_magic(&bytes, modern ? "MGCHNK2\0" : "MGCHNK1\0"))
+        return 0;
+    format = maage_store_get(&bytes, 4);
+    if (format != (modern ? 2UL : 1UL) ||
         maage_store_get(&bytes, 4) != MAAGE_WORLD_GENERATOR_VERSION ||
         maage_store_get(&bytes, 4) != MAAGE_WORLD_BLOCKSET_VERSION) return 0;
     stored_x = maage_store_get(&bytes, 4); stored_z = maage_store_get(&bytes, 4);
-    expected_x = (unsigned long)x & MAAGE_STORE_WORD; expected_z = (unsigned long)z & MAAGE_STORE_WORD;
+    expected_x = (unsigned long)x & MAAGE_STORE_WORD;
+    expected_z = (unsigned long)z & MAAGE_STORE_WORD;
     if (stored_x != expected_x || stored_z != expected_z) return 0;
     mask = maage_store_get(&bytes, 2);
-    if (maage_store_get(&bytes, 2) != 0) return 0;
+    if (maage_store_get(&bytes, 2) != 0 || bytes.failed) return 0;
     for (section = 0; section < 16; ++section)
-        if (mask & (1UL << section)) expected_length += MAAGE_SECTION_VOLUME * 3;
-    if (bytes.failed || bytes.length != expected_length) return 0;
+        if (mask & (1UL << section)) {
+            active_cells += MAAGE_SECTION_VOLUME;
+            expected_length += MAAGE_SECTION_VOLUME * 3;
+        }
+    if (!modern && bytes.length != expected_length) return 0;
+    if (modern) {
+        state_count = maage_store_get(&bytes, 4);
+        biome_count = maage_store_get(&bytes, 2);
+        if (maage_store_get(&bytes, 2) != 0 || bytes.failed ||
+            state_count > active_cells || biome_count == 0 || biome_count > 256 ||
+            bytes.length < expected_length + 8UL + state_count * 5UL + biome_count)
+            return 0;
+        if (state_count) {
+            palette = (maage_block_state_id *)malloc((size_t)state_count * sizeof(*palette));
+            if (!palette) return 0;
+        }
+        for (i = 0; i < state_count; ++i) {
+            if (!maage_store_identity_get(&bytes, name)) goto failed;
+            value = maage_store_get(&bytes, 4);
+            metadata = (unsigned int)value;
+            if ((unsigned long)metadata != value ||
+                maage_block_registry_resolve_name(blocks, name, &block) != MAAGE_REGISTRY_OK ||
+                maage_block_registry_resolve_state(blocks, block, metadata, &state) != MAAGE_REGISTRY_OK)
+                goto failed;
+            palette[i] = state;
+        }
+        for (i = 0; i < biome_count; ++i) {
+            if (!maage_store_identity_get(&bytes, name) ||
+                maage_biome_registry_resolve_name(biomes, name, &biome) != MAAGE_REGISTRY_OK)
+                goto failed;
+            biome_palette[i] = biome;
+        }
+        if (bytes.failed || bytes.length - bytes.position != expected_length - 32) goto failed;
+    }
     chunk = maage_chunk_create(x, z);
-    if (!chunk) return 0;
+    if (!chunk) goto failed;
     for (i = 0; i < 256; ++i) {
         value = maage_store_get(&bytes, 1);
-        if (value >= MAAGE_BIOME_COUNT || !maage_biome_registry_get(biomes, (maage_biome_id)value)) goto failed;
-        chunk->biomes[i] = (maage_biome_id)value;
+        if (modern) {
+            if (value >= biome_count) goto failed;
+            chunk->biomes[i] = biome_palette[value];
+        } else {
+            if (value >= MAAGE_BIOME_COUNT ||
+                !maage_biome_registry_get(biomes, (maage_biome_id)value)) goto failed;
+            chunk->biomes[i] = (maage_biome_id)value;
+        }
     }
     for (i = 0; i < 256; ++i) {
         value = maage_store_get(&bytes, 2);
@@ -749,16 +872,26 @@ static int maage_store_chunk_decode(unsigned char *data, size_t length, int x, i
         if (!chunk->sections[section]) goto failed;
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
             value = maage_store_get(&bytes, 2);
-            if (!maage_store_state(blocks, value)) goto failed;
-            chunk->sections[section]->states[i] = value;
+            if (modern) {
+                if (value >= state_count) goto failed;
+                state = palette[value];
+            } else {
+                if (!maage_store_legacy_state(blocks, value)) goto failed;
+                state = (maage_block_state_id)value;
+            }
+            chunk->sections[section]->states[i] = state;
         }
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i)
             chunk->sections[section]->light[i] = (unsigned char)maage_store_get(&bytes, 1);
     }
     if (bytes.failed || bytes.position != bytes.length) goto failed;
-    *output = chunk; return 1;
+    free(palette);
+    *output = chunk;
+    return 1;
 failed:
-    maage_chunk_destroy(chunk); return 0;
+    free(palette);
+    maage_chunk_destroy(chunk);
+    return 0;
 }
 int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
@@ -768,14 +901,22 @@ int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     unsigned char *data;
     size_t length;
     int ok, status;
+    if (!chunk || !store || !blocks || !biomes) {
+        maage_store_error(error, "Missing chunk load arguments."); return -1;
+    }
     *chunk = NULL;
-    if (!maage_store_chunk_path(store, x, z, path)) { maage_store_error(error, "Chunk coordinates or path exceed the world format bounds."); return -1; }
+    if (!maage_store_chunk_path(store, x, z, path)) {
+        maage_store_error(error, "Chunk coordinates or path exceed the world format bounds."); return -1;
+    }
     status = maage_storage_status(path);
     if (!status) return 0;
     data = maage_store_read(path, MAAGE_STORE_CHUNK_MAX, &length, error);
     if (!data) return -1;
-    ok = maage_store_chunk_decode(data, length, x, z, blocks, biomes, chunk); free(data);
-    if (!ok) { maage_store_error(error, "Chunk data is corrupt, unmapped, or incompatible; the save was preserved."); return -1; }
+    ok = maage_store_chunk_decode(data, length, x, z, blocks, biomes, chunk);
+    free(data);
+    if (!ok) {
+        maage_store_error(error, "Chunk data is corrupt, unmapped, or incompatible; the save was preserved."); return -1;
+    }
     return 1;
 }
 int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *chunk,
@@ -784,26 +925,78 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     char path[MAAGE_PATH_CAPACITY];
     maage_store_bytes bytes;
     maage_chunk *existing = NULL;
+    maage_block_state_id *states = NULL;
+    unsigned char *encoded = NULL;
+    maage_biome_id biome_ids[256];
+    const maage_block_state_definition *definition;
+    const char *name;
     unsigned long mask = 0;
-    size_t i, section;
+    size_t i, section, j, count = 0, unique = 0, biome_count = 0, cells = 0;
     int result;
-    if (!maage_store_chunk_path(store, chunk->x, chunk->z, path)) return maage_store_error(error, "Chunk coordinates or path exceed the world format bounds.");
+    if (!store || !chunk || !blocks || !biomes ||
+        !maage_store_chunk_path(store, chunk->x, chunk->z, path))
+        return maage_store_error(error, "Chunk coordinates or path exceed the world format bounds.");
     result = maage_world_store_load_chunk(store, chunk->x, chunk->z, blocks, biomes, &existing, error);
     if (result < 0) return 0;
     maage_chunk_destroy(existing);
-    bytes.data = (unsigned char *)malloc(MAAGE_STORE_CHUNK_MAX);
-    if (!bytes.data) return maage_store_error(error, "Not enough memory to encode a chunk.");
+    for (section = 0; section < 16; ++section)
+        if (chunk->sections[section]) { mask |= 1UL << section; cells += MAAGE_SECTION_VOLUME; }
+    if (cells) {
+        states = (maage_block_state_id *)malloc(cells * sizeof(*states));
+        if (!states) return maage_store_error(error, "Not enough memory for the chunk identity palette.");
+    }
+    for (section = 0; section < 16; ++section) {
+        if (!chunk->sections[section]) continue;
+        for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
+            maage_block_state_id id = chunk->sections[section]->states[i];
+            if (!maage_block_registry_state(blocks, id)) goto incompatible;
+            states[count++] = id;
+        }
+    }
+    if (count) {
+        qsort(states, count, sizeof(*states), maage_store_state_compare);
+        for (i = 0; i < count; ++i)
+            if (!unique || states[i] != states[unique - 1])
+                states[unique++] = states[i];
+    }
+    for (i = 0; i < 256; ++i) {
+        if (!maage_biome_registry_get(biomes, chunk->biomes[i])) goto incompatible;
+        biome_ids[i] = chunk->biomes[i];
+    }
+    qsort(biome_ids, 256, sizeof(biome_ids[0]), maage_store_biome_compare);
+    for (i = 0; i < 256; ++i)
+        if (!biome_count || biome_ids[i] != biome_ids[biome_count - 1])
+            biome_ids[biome_count++] = biome_ids[i];
+    encoded = (unsigned char *)malloc(MAAGE_STORE_CHUNK_MAX);
+    bytes.data = encoded;
+    if (!bytes.data) {
+        free(states); return maage_store_error(error, "Not enough memory to encode a chunk.");
+    }
     bytes.length = MAAGE_STORE_CHUNK_MAX; bytes.position = 0; bytes.failed = 0;
-    maage_store_text_put(&bytes, "MGCHNK1\0", 8);
+    maage_store_text_put(&bytes, "MGCHNK2\0", 8);
     maage_store_put(&bytes, MAAGE_WORLD_FORMAT_VERSION, 4);
     maage_store_put(&bytes, MAAGE_WORLD_GENERATOR_VERSION, 4);
     maage_store_put(&bytes, MAAGE_WORLD_BLOCKSET_VERSION, 4);
-    maage_store_put(&bytes, (unsigned long)chunk->x, 4); maage_store_put(&bytes, (unsigned long)chunk->z, 4);
-    for (section = 0; section < 16; ++section) if (chunk->sections[section]) mask |= 1UL << section;
+    maage_store_put(&bytes, (unsigned long)chunk->x, 4);
+    maage_store_put(&bytes, (unsigned long)chunk->z, 4);
     maage_store_put(&bytes, mask, 2); maage_store_put(&bytes, 0, 2);
+    maage_store_put(&bytes, (unsigned long)unique, 4);
+    maage_store_put(&bytes, (unsigned long)biome_count, 2);
+    maage_store_put(&bytes, 0, 2);
+    for (i = 0; i < unique; ++i) {
+        definition = maage_block_registry_state(blocks, states[i]);
+        if (!definition) goto incompatible;
+        name = maage_block_registry_block_name(blocks, definition->block_id);
+        if (!name || (unsigned long)definition->metadata > MAAGE_STORE_WORD) goto incompatible;
+        maage_store_identity_put(&bytes, name);
+        maage_store_put(&bytes, (unsigned long)definition->metadata, 4);
+    }
+    for (i = 0; i < biome_count; ++i)
+        maage_store_identity_put(&bytes, maage_biome_registry_name(biomes, biome_ids[i]));
     for (i = 0; i < 256; ++i) {
-        if (chunk->biomes[i] >= MAAGE_BIOME_COUNT || !maage_biome_registry_get(biomes, chunk->biomes[i])) goto incompatible;
-        maage_store_put(&bytes, chunk->biomes[i], 1);
+        j = maage_store_biome_index(biome_ids, biome_count, chunk->biomes[i]);
+        if (j == biome_count) goto incompatible;
+        maage_store_put(&bytes, (unsigned long)j, 1);
     }
     for (i = 0; i < 256; ++i) {
         if (chunk->heightmap[i] > MAAGE_WORLD_HEIGHT) goto incompatible;
@@ -812,15 +1005,18 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     for (section = 0; section < 16; ++section) {
         if (!chunk->sections[section]) continue;
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
-            if (!maage_store_state(blocks, chunk->sections[section]->states[i])) goto incompatible;
-            maage_store_put(&bytes, chunk->sections[section]->states[i], 2);
+            j = maage_store_state_index(states, unique, chunk->sections[section]->states[i]);
+            if (j == unique || j > 65535UL) goto incompatible;
+            maage_store_put(&bytes, (unsigned long)j, 2);
         }
-        for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) maage_store_put(&bytes, chunk->sections[section]->light[i], 1);
+        for (i = 0; i < MAAGE_SECTION_VOLUME; ++i)
+            maage_store_put(&bytes, chunk->sections[section]->light[i], 1);
     }
     maage_store_checksum_put(&bytes);
     result = !bytes.failed && maage_store_write(path, bytes.data, bytes.position, error);
-    free(bytes.data);
+    free(encoded); free(states);
     return result ? 1 : maage_store_error(error, "Chunk save failed; the previous file was preserved.");
 incompatible:
-    free(bytes.data); return maage_store_error(error, "Chunk uses invalid heights or IDs outside the saved world's versioned mapping.");
+    free(encoded); free(states);
+    return maage_store_error(error, "Chunk has invalid heights or unresolved registered content identities.");
 }
