@@ -101,12 +101,23 @@ static NSTableView *maage_ui_navigation_table(void)
 - (void)playClient:(id)sender
 { (void)sender; maage_launcher_client_play(self.state); [self refresh:nil]; }
 - (void)openProject:(id)sender { (void)sender; [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@MAAGE_PROJECT_URL]]; }
-- (void)showSettings:(id)sender
+- (void)activatePage:(maage_launcher_page)page
 {
-    (void)sender; self.state->page = MAAGE_PAGE_SETTINGS; [self.sidebar deselectAll:nil];
-    if (self.settingsSidebar.selectedRow != 0) [self.settingsSidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
-    for (NSInteger i = 0; i < 4; ++i) self.pages[i].hidden = i != 3;
+    self.state->page = page;
+    if (page >= MAAGE_PAGE_SETTINGS) {
+        NSInteger row = page == MAAGE_PAGE_ABOUT ? 1 : 0;
+        [self.sidebar deselectAll:nil];
+        if (self.settingsSidebar.selectedRow != row)
+            [self.settingsSidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+    } else {
+        [self.settingsSidebar deselectAll:nil];
+        if (self.sidebar.selectedRow != (NSInteger)page)
+            [self.sidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:page] byExtendingSelection:NO];
+    }
+    for (NSUInteger i = 0; i < self.pages.count; ++i) self.pages[i].hidden = i != (NSUInteger)page;
 }
+- (void)showSettings:(id)sender { (void)sender; [self activatePage:MAAGE_PAGE_SETTINGS]; }
+- (void)showAbout:(id)sender { (void)sender; [self activatePage:MAAGE_PAGE_ABOUT]; }
 - (void)selectAccount:(id)sender
 {
     (void)sender;
@@ -123,14 +134,14 @@ static NSTableView *maage_ui_navigation_table(void)
 - (void)selectInstallation:(id)sender
 { (void)sender; maage_launcher_installation_select(self.state, (unsigned)self.installation.indexOfSelectedItem); [self reloadInstallations]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table
-{ return table == self.sidebar ? 3 : table == self.settingsSidebar ? 1 : table == self.clients ? self.state->clients->count : self.state->count; }
+{ return table == self.sidebar ? 3 : table == self.settingsSidebar ? 2 : table == self.clients ? self.state->clients->count : self.state->count; }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row
 {
     (void)column;
     if (table == self.sidebar || table == self.settingsSidebar) {
-        if (table == self.settingsSidebar) row = 3;
-        NSArray *names = @[@"Play", @"News", @"Installations", @"Settings"];
-        NSArray *symbols = @[@"play", @"newspaper", @"square.stack", @"gearshape"];
+        if (table == self.settingsSidebar) row += MAAGE_PAGE_SETTINGS;
+        NSArray *names = @[@"Play", @"News", @"Installations", @"Settings", @"About"];
+        NSArray *symbols = @[@"play", @"newspaper", @"square.stack", @"gearshape", @"info.circle"];
         NSStackView *line = maage_ui_stack(YES, 10);
         if (@available(macOS 11.0, *)) {
             NSImageView *icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbols[row] accessibilityDescription:names[row]]];
@@ -157,15 +168,14 @@ static NSTableView *maage_ui_navigation_table(void)
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
 {
     if (notification.object == self.settingsSidebar) {
-        if (self.settingsSidebar.selectedRow == 0) [self showSettings:nil];
+        NSInteger row = self.settingsSidebar.selectedRow;
+        if (row >= 0) [self activatePage:(maage_launcher_page)(MAAGE_PAGE_SETTINGS + row)];
         return;
     }
     if (notification.object == self.sidebar) {
-        NSInteger index = self.sidebar.selectedRow;
-        if (index < 0 || index > 3) return;
-        self.state->page = (maage_launcher_page)index;
-        [self.settingsSidebar deselectAll:nil];
-        for (NSInteger i = 0; i < 4; ++i) self.pages[i].hidden = i != index;
+        NSInteger row = self.sidebar.selectedRow;
+        if (row < 0 || row >= MAAGE_PAGE_SETTINGS) return;
+        [self activatePage:(maage_launcher_page)row];
     }
     [self refresh:nil];
 }
@@ -327,8 +337,8 @@ static NSTableView *maage_ui_navigation_table(void)
 {
     NSStackView *page = maage_ui_stack(NO, 14);
     [page addArrangedSubview:maage_ui_label(@"News", 24, YES)];
-    [page addArrangedSubview:maage_ui_label(@"No news source is configured yet.", 15, NO)];
-    [page addArrangedSubview:maage_ui_label(@"Project updates are available in the MaaGE repository.", 13, NO)];
+    [page addArrangedSubview:maage_ui_label(@"No announcements yet", 17, YES)];
+    [page addArrangedSubview:maage_ui_label(@"News will appear here when a source is configured. For now, follow development on GitHub.", 13, NO)];
     [page addArrangedSubview:[self button:@"Open MaaGE Project ↗" action:@selector(openProject:)]];
     [page addArrangedSubview:[[NSView alloc] init]]; return page;
 }
@@ -408,9 +418,48 @@ static NSTableView *maage_ui_navigation_table(void)
     [groups addArrangedSubview:maage_ui_label(@"Appearance", 15, YES)];
     NSPopUpButton *appearance = [[NSPopUpButton alloc] init]; [appearance addItemsWithTitles:@[@"System", @"Light", @"Dark"]];
     [appearance selectItemAtIndex:self.state->appearance]; appearance.target = self; appearance.action = @selector(appearanceChanged:); appearance.accessibilityLabel = @"Launcher appearance"; [groups addArrangedSubview:appearance];
-    [groups addArrangedSubview:maage_ui_label(@"About MaaGE", 15, YES)];
-    [groups addArrangedSubview:maage_ui_label(@"Minecraft as a Game Engine\nLauncher " MAAGE_LAUNCHER_VERSION "\nOriginal code: Apache License 2.0. Minecraft resources are separate.\nNot affiliated with Mojang or Microsoft.", 12, NO)];
-    [groups addArrangedSubview:[self button:@"MaaGE Project ↗" action:@selector(openProject:)]];
+    [groups addArrangedSubview:maage_ui_label(@"About", 15, YES)];
+    [groups addArrangedSubview:maage_ui_label(@"Version, project information, and license notices.", 12, NO)];
+    [groups addArrangedSubview:[self button:@"About MaaGE…" action:@selector(showAbout:)]];
+    NSScrollView *scroll = [[NSScrollView alloc] init]; scroll.hasVerticalScroller = YES; scroll.drawsBackground = NO;
+    NSView *document = [[NSView alloc] init]; scroll.documentView = document;
+    maage_ui_fill(groups, document, 2);
+    document.translatesAutoresizingMaskIntoConstraints = NO;
+    [document.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor].active = YES;
+    return scroll;
+}
+- (NSView *)aboutPage
+{
+    NSStackView *groups = maage_ui_stack(NO, 18);
+    [groups addArrangedSubview:maage_ui_label(@"About MaaGE", 24, YES)];
+    NSStackView *identity = maage_ui_stack(YES, 16);
+    NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
+    [icon.widthAnchor constraintEqualToConstant:64].active = YES;
+    [icon.heightAnchor constraintEqualToConstant:64].active = YES;
+    [identity addArrangedSubview:icon];
+    NSStackView *name = maage_ui_stack(NO, 5);
+    [name addArrangedSubview:maage_ui_label(@"MaaGE", 28, YES)];
+    NSTextField *subtitle = maage_ui_label(@"Minecraft as a Game Engine", 14, NO);
+    subtitle.textColor = NSColor.secondaryLabelColor;
+    [name addArrangedSubview:subtitle]; [identity addArrangedSubview:name];
+    [groups addArrangedSubview:identity];
+    NSBox *separator = [[NSBox alloc] init]; separator.boxType = NSBoxSeparator;
+    [groups addArrangedSubview:separator]; [separator.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
+    [groups addArrangedSubview:maage_ui_label(@"Launcher build", 16, YES)];
+    NSTextField *version = maage_ui_label(@"Version " MAAGE_LAUNCHER_SEMANTIC_VERSION, 13, NO);
+    NSTextField *revision = maage_ui_label(@"Git revision " MAAGE_LAUNCHER_GIT_HASH, 12, NO);
+    version.selectable = YES; revision.selectable = YES; revision.textColor = NSColor.secondaryLabelColor;
+    [groups addArrangedSubview:version]; [groups addArrangedSubview:revision];
+    NSBox *licenseSeparator = [[NSBox alloc] init]; licenseSeparator.boxType = NSBoxSeparator;
+    [groups addArrangedSubview:licenseSeparator]; [licenseSeparator.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
+    [groups addArrangedSubview:maage_ui_label(@"Open source & attribution", 16, YES)];
+    [groups addArrangedSubview:maage_ui_label(@"MaaGE's original source code is licensed under the Apache License, Version 2.0. Minecraft game resources have separate ownership and licensing.", 13, NO)];
+    NSTextField *notice = maage_ui_label(@"MaaGE is an independent project and is not affiliated with or endorsed by Mojang Studios or Microsoft.", 12, NO);
+    notice.textColor = NSColor.secondaryLabelColor; [groups addArrangedSubview:notice];
+    NSStackView *actions = maage_ui_stack(YES, 10);
+    [actions addArrangedSubview:[self button:@"View MaaGE on GitHub ↗" action:@selector(openProject:)]];
+    [actions addArrangedSubview:[self button:@"Back to Settings" action:@selector(showSettings:)]];
+    [groups addArrangedSubview:actions];
     NSScrollView *scroll = [[NSScrollView alloc] init]; scroll.hasVerticalScroller = YES; scroll.drawsBackground = NO;
     NSView *document = [[NSView alloc] init]; scroll.documentView = document;
     maage_ui_fill(groups, document, 2);
@@ -439,14 +488,14 @@ static NSTableView *maage_ui_navigation_table(void)
     NSScrollView *settings = [[NSScrollView alloc] init]; settings.drawsBackground = NO; settings.documentView = self.settingsSidebar;
     [nav addArrangedSubview:settings];
     [settings.widthAnchor constraintEqualToAnchor:nav.widthAnchor].active = YES;
-    [settings.heightAnchor constraintEqualToConstant:43].active = YES;
+    [settings.heightAnchor constraintEqualToConstant:78].active = YES;
     maage_ui_fill(nav, sidebar, 12);
     NSView *right = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 835, 670)]; [split addSubview:sidebar]; [split addSubview:right];
     [sidebar.widthAnchor constraintGreaterThanOrEqualToConstant:155].active = YES;
     [sidebar.widthAnchor constraintLessThanOrEqualToConstant:210].active = YES;
     NSStackView *content = maage_ui_stack(NO, 14); maage_ui_fill(content, right, 26);
     self.body = [[NSView alloc] init]; [content addArrangedSubview:self.body]; [self.body.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
-    self.pages = @[[self playPage], [self newsPage], [self installationsPage], [self settingsPage]];
+    self.pages = @[[self playPage], [self newsPage], [self installationsPage], [self settingsPage], [self aboutPage]];
     for (NSView *page in self.pages) { maage_ui_fill(page, self.body, 0); page.hidden = YES; }
     self.error = maage_ui_label(@"", 12, NO); self.error.textColor = NSColor.systemRedColor; [content addArrangedSubview:self.error];
     NSBox *separator = [[NSBox alloc] init]; separator.boxType = NSBoxSeparator; [content addArrangedSubview:separator]; [separator.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
@@ -456,8 +505,7 @@ static NSTableView *maage_ui_navigation_table(void)
     self.status = [self button:@"" action:@selector(showSettings:)]; self.status.bordered = NO; self.status.font = [NSFont systemFontOfSize:11]; [footer addArrangedSubview:self.status];
     [content addArrangedSubview:footer]; [footer.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     [self.sidebar reloadData]; [self.settingsSidebar reloadData];
-    if (self.state->page == MAAGE_PAGE_SETTINGS) [self showSettings:nil];
-    else [self.sidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:self.state->page] byExtendingSelection:NO];
+    [self activatePage:self.state->page];
     [self reloadInstallations]; [self refresh:nil];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:.25 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
     [self.window center]; [self.window makeKeyAndOrderFront:nil];
@@ -471,6 +519,8 @@ int maage_launcher_native_run(maage_launcher_ui *state)
         id previous = NSApp.delegate; NSApp.delegate = controller;
         NSMenu *menu = [[NSMenu alloc] init]; NSMenuItem *item = [[NSMenuItem alloc] init]; [menu addItem:item];
         NSMenu *application = [[NSMenu alloc] initWithTitle:@"MaaGE"];
+        NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:@"About MaaGE" action:@selector(showAbout:) keyEquivalent:@""]; about.target = controller; [application addItem:about];
+        [application addItem:NSMenuItem.separatorItem];
         NSMenuItem *settings = [[NSMenuItem alloc] initWithTitle:@"Settings…" action:@selector(showSettings:) keyEquivalent:@","]; settings.target = controller; [application addItem:settings];
         [application addItem:NSMenuItem.separatorItem];
         NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"Quit MaaGE" action:@selector(quit:) keyEquivalent:@"q"]; quit.target = controller; [application addItem:quit]; item.submenu = application;

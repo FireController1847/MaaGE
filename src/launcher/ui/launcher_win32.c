@@ -25,13 +25,15 @@
 #define MAAGE_UI_CLIENT_IMPORT 142
 #define MAAGE_UI_CLIENT_REMOVE 143
 #define MAAGE_UI_CLIENT_REPLACE 144
+#define MAAGE_UI_ABOUT 125
+#define MAAGE_UI_BACK_SETTINGS 126
 typedef struct maage_launcher_control {
     HWND handle;
     int page, x, y, width, height;
 } maage_launcher_control;
 typedef struct maage_launcher_win32 {
     maage_launcher_ui *state;
-    HWND window, navigation[4], account, installation, list, name, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
+    HWND window, navigation[5], account, installation, list, name, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
     HFONT font, heading, brand;
     HBRUSH background, sidebar, magenta;
     maage_launcher_control controls[72];
@@ -69,7 +71,7 @@ static void maage_ui_layout(maage_launcher_win32 *ui)
         MoveWindow(c->handle,x,y,w,h,TRUE);
         ShowWindow(c->handle, c->page < 0 || c->page == (int)ui->state->page ? SW_SHOW : SW_HIDE);
     }
-    for (i = 0; i < 4; ++i) SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned)ui->state->page ? BST_CHECKED : BST_UNCHECKED, 0);
+    for (i = 0; i < 5; ++i) SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned)ui->state->page ? BST_CHECKED : BST_UNCHECKED, 0);
     InvalidateRect(ui->window, NULL, TRUE);
 }
 static int maage_ui_selected(maage_launcher_win32 *ui)
@@ -220,7 +222,11 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
                     maage_launcher_client_remove(ui->state, (unsigned)selected);
             }
             if (id==150) maage_launcher_client_play(ui->state);
-            if (id>=100 && id<104) { ui->state->page=(maage_launcher_page)(id-100); maage_ui_layout(ui); return 0; }
+            if (id>=100 && id<105) { ui->state->page=(maage_launcher_page)(id-100); maage_ui_layout(ui); return 0; }
+            if (id==MAAGE_UI_ABOUT || id==MAAGE_UI_BACK_SETTINGS) {
+                ui->state->page=id==MAAGE_UI_ABOUT ? MAAGE_PAGE_ABOUT : MAAGE_PAGE_SETTINGS;
+                maage_ui_layout(ui); return 0;
+            }
             if (id==MAAGE_UI_STATUS) { ui->state->page=MAAGE_PAGE_SETTINGS; maage_ui_layout(ui); return 0; }
             if (id==MAAGE_UI_ACCOUNT && event==CBN_SELCHANGE && !ui->updating) {
                 LRESULT row=SendMessageW(ui->account,CB_GETCURSEL,0,0), index;
@@ -271,7 +277,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
 int maage_launcher_native_run(maage_launcher_ui *state)
 {
     maage_launcher_win32 ui; WNDCLASSW klass; MSG message; int received, i; HWND control; LVCOLUMNW column;
-    const wchar_t *names[]={L"\x25b6  Play",L"\x2261  News",L"\x25a4  Installations",L"\x2699\xfe0e  Settings"}; INITCOMMONCONTROLSEX common;
+    const wchar_t *names[]={L"\x25b6  Play",L"\x2261  News",L"\x25a4  Installations",L"\x2699\xfe0e  Settings",L"\x24d8  About"}; INITCOMMONCONTROLSEX common;
     memset(&ui,0,sizeof(ui)); ui.state=state;
     common.dwSize=sizeof(common); common.dwICC=ICC_LISTVIEW_CLASSES; InitCommonControlsEx(&common);
     ui.font=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
@@ -282,9 +288,9 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     RegisterClassW(&klass); ui.window=CreateWindowExW(WS_EX_CONTROLPARENT,klass.lpszClassName,L"MaaGE Launcher",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1080,780,NULL,NULL,klass.hInstance,&ui);
     if (!ui.window) { ui.result=-1; goto cleanup; }
     maage_ui_label(&ui,-1,L"MAAGE",20,24,130,24);
-    for(i=0;i<4;++i) ui.navigation[i]=maage_ui_control(&ui,-1,L"BUTTON",names[i],WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,14,i==3 ? -58 : 72+i*44,142,34,100+i);
-    { const wchar_t *headings[]={L"Play MaaGE",L"News",L"Installations",L"Settings"};
-      for(i=0;i<4;++i) { control=maage_ui_label(&ui,i,headings[i],198,25,330,38); SendMessageW(control,WM_SETFONT,(WPARAM)ui.heading,TRUE); } }
+    for(i=0;i<5;++i) ui.navigation[i]=maage_ui_control(&ui,-1,L"BUTTON",names[i],WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,14,i>=3 ? -104+(i-3)*46 : 72+i*44,142,34,100+i);
+    { const wchar_t *headings[]={L"Play MaaGE",L"News",L"Installations",L"Settings",L"About MaaGE"};
+      for(i=0;i<5;++i) { control=maage_ui_label(&ui,i,headings[i],198,25,330,38); SendMessageW(control,WM_SETFONT,(WPARAM)ui.heading,TRUE); } }
     ui.account=maage_ui_control(&ui,0,L"COMBOBOX",L"Active Minecraft account",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,-420,25,278,240,MAAGE_UI_ACCOUNT);
     maage_ui_button(&ui,0,L"Manage...",-132,25,105,MAAGE_UI_MANAGE);
     control=maage_ui_label(&ui,0,L"MaaGE",0,176,300,42); SendMessageW(control,WM_SETFONT,(WPARAM)ui.brand,TRUE); SetWindowLongPtrW(control,GWL_STYLE,GetWindowLongPtrW(control,GWL_STYLE)|SS_CENTER);
@@ -292,7 +298,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     ui.installation=maage_ui_control(&ui,0,L"COMBOBOX",L"MaaGE installation",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,0,279,280,230,MAAGE_UI_INSTALLATION);
     ui.play=control=maage_ui_control(&ui,0,L"BUTTON",L"Play",BS_OWNERDRAW,0,327,280,48,150); EnableWindow(control,FALSE);
     ui.client_status=control=maage_ui_label(&ui,0,L"",0,390,540,64); SetWindowLongPtrW(control,GWL_STYLE,GetWindowLongPtrW(control,GWL_STYLE)|SS_CENTER);
-    maage_ui_label(&ui,1,L"No news source is configured yet.\nProject updates are available in the MaaGE repository.",198,100,-230,72);
+    maage_ui_label(&ui,1,L"No announcements yet\nNews will appear here when a source is configured. For now, follow development on GitHub.",198,100,-230,72);
     maage_ui_button(&ui,1,L"Open MaaGE Project",198,188,200,MAAGE_UI_PROJECT);
     maage_ui_label(&ui,2,L"Installed Clients",198,78,-230,26);
     ui.clients=maage_ui_control(&ui,2,L"COMBOBOX",L"Installed Client builds",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,198,110,-230,240,MAAGE_UI_CLIENTS);
@@ -322,9 +328,20 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     maage_ui_label(&ui,3,L"Resources",198,256,250,26);
     control=maage_ui_control(&ui,3,L"EDIT",L"Minecraft resource location",ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP,198,288,-230,30,0); maage_ui_text(control,state->resources);
     ui.resource=maage_ui_label(&ui,3,L"",198,330,-230,55); ui.repair=maage_ui_button(&ui,3,L"Repair Assets...",198,390,245,MAAGE_UI_REPAIR);
-    maage_ui_label(&ui,3,L"About MaaGE",198,442,250,26);
-    maage_ui_label(&ui,3,L"Minecraft as a Game Engine\nLauncher " MAAGE_LAUNCHER_VERSION L"\nOriginal code: Apache License 2.0. Minecraft resources are separate.\nNot affiliated with Mojang or Microsoft.",198,478,-230,94);
-    maage_ui_button(&ui,3,L"MaaGE Project",198,584,200,MAAGE_UI_PROJECT);
+    maage_ui_label(&ui,3,L"About",198,454,250,26);
+    maage_ui_label(&ui,3,L"Version, project information, and license notices.",198,484,-230,30);
+    maage_ui_button(&ui,3,L"About MaaGE...",198,526,200,MAAGE_UI_ABOUT);
+    control=maage_ui_label(&ui,4,L"MaaGE",198,92,400,44);
+    SendMessageW(control,WM_SETFONT,(WPARAM)ui.brand,TRUE);
+    maage_ui_label(&ui,4,L"Minecraft as a Game Engine",198,145,-230,30);
+    maage_ui_label(&ui,4,L"Launcher build",198,209,420,28);
+    maage_ui_label(&ui,4,L"Version " MAAGE_LAUNCHER_SEMANTIC_VERSION,198,245,-230,27);
+    maage_ui_label(&ui,4,L"Git revision " MAAGE_LAUNCHER_GIT_HASH,198,278,-230,27);
+    maage_ui_label(&ui,4,L"Open source and attribution",198,348,440,28);
+    maage_ui_label(&ui,4,L"MaaGE's original source code is licensed under the Apache License, Version 2.0.\nMinecraft game resources have separate ownership and licensing.",198,382,-230,62);
+    maage_ui_label(&ui,4,L"MaaGE is an independent project and is not affiliated with or endorsed by Mojang Studios or Microsoft.",198,460,-230,55);
+    maage_ui_button(&ui,4,L"View MaaGE on GitHub",198,544,216,MAAGE_UI_PROJECT);
+    maage_ui_button(&ui,4,L"Back to Settings",430,544,182,MAAGE_UI_BACK_SETTINGS);
     maage_ui_label(&ui,-1,L"Development build - " MAAGE_LAUNCHER_VERSION,198,-42,410,26);
     ui.status=maage_ui_button(&ui,-1,L"",-360,-48,330,MAAGE_UI_STATUS); ui.error=maage_ui_label(&ui,-1,L"",198,-87,-230,36);
     maage_ui_installations_reload(&ui); maage_ui_refresh(&ui); maage_ui_layout(&ui); SetFocus(ui.navigation[0]);
