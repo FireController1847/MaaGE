@@ -57,7 +57,7 @@ typedef struct maage_client_mesh_activity {
 /* Textual options are resolved before any world/runtime work begins. */
 static int maage_client_world_options_parse(int argc, char *const argv[], maage_client_world_options *options)
 {
-    int i;
+    int i, generator_selected = 0;
     const char *argument;
     char *end;
     long value;
@@ -97,6 +97,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
             if (argument[20] < '0' || argument[20] > '9') return 0;
             errno = 0; options->generator_version = strtoul(argument + 20, &end, 10);
             if (errno || *end || !maage_generation_policy_default(options->generator_version, &policy)) return 0;
+            generator_selected = 1;
         } else if (!strncmp(argument, "--world-workers=", 16)) {
             if (argument[16] < '0' || argument[16] > '9') return 0;
             errno = 0; workers = strtoul(argument + 16, &end, 10);
@@ -117,6 +118,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     }
     if (options->seeded && options->id && !options->create) return 0;
     if (options->name && !options->create && !options->seeded) return 0;
+    if (generator_selected && !options->create && !options->seeded) return 0;
     return 1;
 }
 
@@ -406,7 +408,8 @@ int maage_client_run(int argc, char *const argv[])
     maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
     maage_generation_policy_default(options.generator_version, &generation_policy);
     if (!maage_world_store_open_configured(maage_instance_directory(instance), options.id, options.create, options.name,
-        options.seeded ? &options.seed : NULL, &generation_policy, items, &store, &record, error)) {
+        options.seeded ? &options.seed : NULL, options.id && !options.create ? NULL : &generation_policy,
+        items, &store, &record, error)) {
         maage_log_error("maage.client.world", "%s", error); goto done;
     }
     memset(&world_config, 0, sizeof(world_config));

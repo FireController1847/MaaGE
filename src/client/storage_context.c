@@ -73,7 +73,7 @@ int maage_application_configure_log(int argc, char *const argv[], maage_log_conf
         fprintf(stderr, "MaaGE Client cannot resolve its private instance log.\n");
         maage_instance_close(maage_client_active_instance); maage_client_active_instance = NULL; return 0;
     }
-    config->file = 1; config->file_path = maage_client_log_path;
+    config->file = 1; config->file_path = maage_client_log_path; config->capture_stdio = 1;
     return 1;
 arguments:
     fprintf(stderr, "Use --instance=<UUID> for an existing instance, optionally --data-directory=<absolute MaaGE root>. Folder changes require an explicit --instance and one --map-folder=<kind>:private|shared|custom:<absolute directory>. Open the Launcher to create/select an instance.\n");

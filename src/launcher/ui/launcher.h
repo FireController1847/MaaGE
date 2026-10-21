@@ -43,6 +43,8 @@ int maage_launcher_installation_write(maage_launcher_ui *ui, int index, const ch
 int maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned index);
 int maage_launcher_installation_select(maage_launcher_ui *ui, unsigned index);
 int maage_launcher_installation_default(maage_launcher_ui *ui, unsigned index);
+/* Copies the physical instance directory after opening its manifest read-only. */
+int maage_launcher_installation_directory(maage_launcher_ui *ui, unsigned index, char path[MAAGE_PATH_CAPACITY]);
 void maage_launcher_ui_destroy(maage_launcher_ui *ui);
 const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned index);
 int maage_launcher_client_play(maage_launcher_ui *ui);

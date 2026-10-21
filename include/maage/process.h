@@ -2,7 +2,9 @@
 #define MAAGE_PROCESS_H
 /* Direct executable invocation. argv is a NULL-terminated UTF-8 array whose
  * first element names executable. No shell; inherits the caller's environment.
- * stdout/stderr are captured to caller-selected files; stdin is disconnected.
+ * stdout/stderr append to caller-selected files; the caller owns rotation.
+ * Identical paths share one file description/handle for both streams. Capture
+ * permits live readers and file replacement; stdin is disconnected.
  * start may perform OS I/O: call on a worker. poll never waits for process exit.
  * close releases monitoring without terminating the independent child. */
 typedef struct maage_process maage_process;

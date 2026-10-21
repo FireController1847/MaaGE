@@ -1,8 +1,10 @@
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE 1
+#endif
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "maage/process.h"
-#include "maage/storage.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -12,7 +14,6 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <io.h>
 struct maage_process { HANDLE handle; maage_process_state state; int code; };
 static wchar_t *maage_process_wide(const char *text)
 {
@@ -20,6 +21,29 @@ static wchar_t *maage_process_wide(const char *text)
     wchar_t *w=n ? (wchar_t *)malloc((size_t)n*sizeof(*w)) : NULL;
     if(w && !MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text,-1,w,n)) { free(w); return NULL; }
     return w;
+}
+static HANDLE maage_process_capture(const char *path, SECURITY_ATTRIBUTES *security)
+{
+    wchar_t *wide=maage_process_wide(path);
+    HANDLE handle;
+    BY_HANDLE_FILE_INFORMATION info;
+    DWORD failure;
+    if(!wide) return INVALID_HANDLE_VALUE;
+    handle=CreateFileW(wide,FILE_APPEND_DATA | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,security,OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,NULL);
+    failure=GetLastError(); free(wide);
+    if(handle==INVALID_HANDLE_VALUE) { SetLastError(failure); return handle; }
+    if(GetFileType(handle)!=FILE_TYPE_DISK) {
+        CloseHandle(handle); SetLastError(ERROR_INVALID_DATA); return INVALID_HANDLE_VALUE;
+    }
+    if(!GetFileInformationByHandle(handle,&info)) {
+        failure=GetLastError(); CloseHandle(handle); SetLastError(failure); return INVALID_HANDLE_VALUE;
+    }
+    if(info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) {
+        CloseHandle(handle); SetLastError(ERROR_INVALID_DATA); return INVALID_HANDLE_VALUE;
+    }
+    return handle;
 }
 /* Microsoft CRT command-line quoting, including trailing backslashes. */
 static wchar_t *maage_process_arguments(const char *const argv[])
@@ -48,27 +72,29 @@ int maage_process_start(const char *exe, const char *const argv[], const char *d
     const char *stdout_path, const char *stderr_path, maage_process **process, char error[256])
 {
     STARTUPINFOEXW startup; PROCESS_INFORMATION info;
-    HANDLE handles[3]; FILE *out=NULL, *err=NULL;
+    HANDLE handles[3];
     SECURITY_ATTRIBUTES security;
     wchar_t *native=NULL, *cwd=NULL, *command=NULL;
-    SIZE_T size=0; int initialized=0, ok=0; DWORD failure=0;
+    SIZE_T size=0, handle_bytes=sizeof(handles); int initialized=0, ok=0; DWORD failure=0;
     maage_process *p=(maage_process *)calloc(1,sizeof(*p));
     *process=NULL; memset(&startup,0,sizeof(startup)); memset(&info,0,sizeof(info));
     memset(handles,0,sizeof(handles)); memset(&security,0,sizeof(security));
     security.nLength=sizeof(security); security.bInheritHandle=TRUE;
     if(!p || !argv || !argv[0]) goto done;
     native=maage_process_wide(exe); cwd=maage_process_wide(directory); command=maage_process_arguments(argv);
-    out=maage_storage_open(stdout_path,"wb"); err=maage_storage_open(stderr_path,"wb");
-    if(!native || !cwd || !command || !out || !err) goto done;
+    if(!native || !cwd || !command) goto done;
+    handles[1]=maage_process_capture(stdout_path,&security);
+    if(handles[1]==INVALID_HANDLE_VALUE) goto done;
+    handles[2]=!strcmp(stdout_path,stderr_path) ? handles[1] : maage_process_capture(stderr_path,&security);
+    if(handles[2]==INVALID_HANDLE_VALUE) goto done;
+    if(handles[1]==handles[2]) handle_bytes=2*sizeof(handles[0]);
     handles[0]=CreateFileW(L"NUL",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,&security,OPEN_EXISTING,0,NULL);
-    handles[1]=(HANDLE)_get_osfhandle(_fileno(out)); handles[2]=(HANDLE)_get_osfhandle(_fileno(err));
-    if(handles[0]==INVALID_HANDLE_VALUE || !SetHandleInformation(handles[1],HANDLE_FLAG_INHERIT,HANDLE_FLAG_INHERIT) ||
-        !SetHandleInformation(handles[2],HANDLE_FLAG_INHERIT,HANDLE_FLAG_INHERIT)) goto done;
+    if(handles[0]==INVALID_HANDLE_VALUE) goto done;
     InitializeProcThreadAttributeList(NULL,1,0,&size);
     startup.lpAttributeList=(LPPROC_THREAD_ATTRIBUTE_LIST)malloc(size); if(!startup.lpAttributeList) goto done;
     if(!InitializeProcThreadAttributeList(startup.lpAttributeList,1,0,&size)) goto done;
     initialized=1;
-    if(!UpdateProcThreadAttribute(startup.lpAttributeList,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,handles,sizeof(handles),NULL,NULL)) goto done;
+    if(!UpdateProcThreadAttribute(startup.lpAttributeList,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,handles,handle_bytes,NULL,NULL)) goto done;
     startup.StartupInfo.cb=sizeof(startup); startup.StartupInfo.dwFlags=STARTF_USESTDHANDLES;
     startup.StartupInfo.hStdInput=handles[0]; startup.StartupInfo.hStdOutput=handles[1]; startup.StartupInfo.hStdError=handles[2];
     if(!CreateProcessW(native,command,NULL,NULL,TRUE,EXTENDED_STARTUPINFO_PRESENT|CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS,
@@ -79,7 +105,8 @@ int maage_process_start(const char *exe, const char *const argv[], const char *d
     if(initialized) DeleteProcThreadAttributeList(startup.lpAttributeList);
     free(startup.lpAttributeList); free(native); free(cwd); free(command);
     if(handles[0] && handles[0]!=INVALID_HANDLE_VALUE) CloseHandle(handles[0]);
-    if(out) fclose(out); if(err) fclose(err);
+    if(handles[1] && handles[1]!=INVALID_HANDLE_VALUE) CloseHandle(handles[1]);
+    if(handles[2] && handles[2]!=INVALID_HANDLE_VALUE && handles[2]!=handles[1]) CloseHandle(handles[2]);
     if(!ok) { free(p); sprintf(error,"Cannot create Client process (Windows error %lu).",(unsigned long)failure); }
     return ok;
 }
@@ -97,6 +124,7 @@ void maage_process_close(maage_process *p) { if(p) { CloseHandle(p->handle); fre
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <pthread.h>
 #include <limits.h>
@@ -104,20 +132,34 @@ extern char **environ;
 struct maage_process { pid_t pid; int pipe, failure, code; maage_process_state state; };
 static int maage_process_cloexec(int fd)
 { int flags=fcntl(fd,F_GETFD,0); return flags>=0 && fcntl(fd,F_SETFD,flags|FD_CLOEXEC)==0; }
+static int maage_process_capture(const char *path)
+{
+    struct stat st;
+    int fd=open(path,O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK,0600);
+    int failure, moved;
+    if(fd<0) return -1;
+    if(fstat(fd,&st)) { failure=errno; close(fd); errno=failure; return -1; }
+    if(!S_ISREG(st.st_mode)) { close(fd); errno=EINVAL; return -1; }
+    if(fd<3) {
+        moved=fcntl(fd,F_DUPFD_CLOEXEC,3); failure=errno; close(fd); errno=failure; fd=moved;
+    }
+    return fd;
+}
 int maage_process_start(const char *exe, const char *const argv[], const char *directory,
     const char *stdout_path, const char *stderr_path, maage_process **process, char error[256])
 {
     int pipefd[2]={-1,-1}, input=-1, output=-1, errors=-1, flags, failure, ok=0;
     long fd, maximum=sysconf(_SC_OPEN_MAX);
-    FILE *out=NULL, *err=NULL;
     maage_process *p=(maage_process *)calloc(1,sizeof(*p));
     *process=NULL;
     if(!p || !argv || !argv[0]) goto done;
-    out=maage_storage_open(stdout_path,"wb"); err=maage_storage_open(stderr_path,"wb"); input=open("/dev/null",O_RDONLY);
-    if(!out || !err || input<0 || maximum<3 || maximum>INT_MAX || pipe(pipefd) || !maage_process_cloexec(pipefd[0]) || !maage_process_cloexec(pipefd[1]) ||
-        !maage_process_cloexec(fileno(out)) || !maage_process_cloexec(fileno(err)) || !maage_process_cloexec(input)) goto done;
-    output=fcntl(fileno(out),F_DUPFD_CLOEXEC,3); errors=fcntl(fileno(err),F_DUPFD_CLOEXEC,3);
-    if(output<0 || errors<0) goto done;
+    output=maage_process_capture(stdout_path);
+    if(output<0) goto done;
+    errors=!strcmp(stdout_path,stderr_path) ? output : maage_process_capture(stderr_path);
+    if(errors<0) goto done;
+    input=open("/dev/null",O_RDONLY);
+    if(input<0 || maximum<3 || maximum>INT_MAX || pipe(pipefd) || !maage_process_cloexec(pipefd[0]) || !maage_process_cloexec(pipefd[1]) ||
+        !maage_process_cloexec(input)) goto done;
     if(input<3) { flags=fcntl(input,F_DUPFD_CLOEXEC,3); close(input); input=flags; if(input<0) goto done; }
     if(pipefd[0]<3) { flags=fcntl(pipefd[0],F_DUPFD_CLOEXEC,3); close(pipefd[0]); pipefd[0]=flags; if(flags<0) goto done; }
     if(pipefd[1]<3) { flags=fcntl(pipefd[1],F_DUPFD_CLOEXEC,3); close(pipefd[1]); pipefd[1]=flags; if(flags<0) goto done; }
@@ -139,8 +181,7 @@ int maage_process_start(const char *exe, const char *const argv[], const char *d
  done:
     failure=errno;
     if(pipefd[0]>=0) close(pipefd[0]); if(pipefd[1]>=0) close(pipefd[1]); if(input>=0) close(input);
-    if(output>=0) close(output); if(errors>=0) close(errors);
-    if(out) fclose(out); if(err) fclose(err);
+    if(output>=0) close(output); if(errors>=0 && errors!=output) close(errors);
     if(!ok) { free(p); sprintf(error,"Cannot create process (OS error %d).",failure); }
     return ok;
 }

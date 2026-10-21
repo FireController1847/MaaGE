@@ -19,6 +19,7 @@ typedef struct maage_log_state {
     maage_log_override *overrides;
     size_t count, capacity;
     FILE *output;
+    int stdio_captured;
 } maage_log_state;
 
 /* All state operations below require the platform lock. */
@@ -34,8 +35,17 @@ int maage_log_format(char *buffer, size_t capacity, const char *format, va_list 
 void maage_log_timestamp(char *buffer, size_t capacity);
 int maage_log_console_available(int error);
 void maage_log_platform_diagnostic(const char *message);
-/* Archive the previous file without replacing an existing archive. */
-int maage_log_rotate(const char *path);
+/* Publish a dated GZip copy, retaining the plain file. closing stamps the session
+ * at close; startup recovery reuses that stamp and skips identical archives. */
+int maage_log_rotate(const char *path, int closing);
+/* Archive I/O: time returns 1 nonempty, 0 absent/empty, -1 failure. Publish returns
+ * 1 success, 0 name collision, -1 failure; create is exclusive (errno=EEXIST). */
+int maage_log_archive_time(const char *path, int closing, char timestamp[32]);
+FILE *maage_log_archive_create(const char *path);
+int maage_log_archive_publish(const char *temporary, const char *archive);
+int maage_log_archive_remove(const char *path);
+int maage_log_archive_sync(FILE *file);
 FILE *maage_log_open(const char *path, const char *mode);
+int maage_log_capture_stdio(FILE *output);
 
 #endif

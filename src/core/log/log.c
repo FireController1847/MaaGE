@@ -5,7 +5,7 @@
 /* Keep empty tables in zero-fill storage instead of embedding them in the file. */
 static char maage_log_path_storage[MAAGE_LOG_PATH_SIZE];
 maage_log_state maage_log_current = {
-    { MAAGE_LOG_INFO, 1, 0, 1, NULL, NULL }, maage_log_path_storage, NULL, 0, 0, NULL
+    { MAAGE_LOG_INFO, 1, 0, 1, NULL, NULL, 0 }, maage_log_path_storage, NULL, 0, 0, NULL, 0
 };
 
 void maage_log_config_init(maage_log_config *config)
@@ -17,14 +17,33 @@ void maage_log_config_init(maage_log_config *config)
     config->timestamp = 1;
     config->file_path = "maage.log";
     config->config_path = NULL;
+    config->capture_stdio = 0;
+}
+
+static void maage_log_close_file(void)
+{
+    int closed, console;
+    const char *problem;
+    if (!maage_log_current.output) return;
+    if (maage_log_current.stdio_captured) { fflush(stdout); fflush(stderr); }
+    closed = fclose(maage_log_current.output) == 0;
+    maage_log_current.output = NULL;
+    maage_log_current.stdio_captured = 0;
+    if (closed && maage_log_rotate(maage_log_current.path, 1)) return;
+    problem = closed ? "Cannot archive completed logging file; current file preserved." :
+        "Cannot close logging file; current file preserved.";
+    console = maage_log_current.config.console;
+    maage_log_current.config.console = 1;
+    maage_log_emit(MAAGE_LOG_ERROR, "maage.core.log", problem);
+    if (!maage_log_console_available(1)) maage_log_platform_diagnostic(problem);
+    maage_log_current.config.console = console;
 }
 
 int maage_log_init(const maage_log_config *config, int argc, char *const argv[])
 {
     int result;
     maage_log_lock();
-    if (maage_log_current.output) fclose(maage_log_current.output);
-    maage_log_current.output = NULL;
+    maage_log_close_file();
     free(maage_log_current.overrides);
     maage_log_current.overrides = NULL;
     maage_log_current.count = maage_log_current.capacity = 0;
@@ -92,12 +111,12 @@ int maage_log_enabled(const char *logger, maage_log_level level)
 }
 
 static void maage_log_sink(FILE *sink, const char *timestamp, const char *level,
-    const char *logger, const char *message, int flush)
+    const char *logger, const char *message)
 {
     if (*timestamp) fprintf(sink, "%s ", timestamp);
     /* Pad after the complete severity label, never inside its brackets. */
     fprintf(sink, "[%s]%*s [%s] %s\n", level, (int)(5 - strlen(level)), "", logger, message);
-    if (flush) fflush(sink);
+    fflush(sink);
 }
 
 void maage_log_emit(maage_log_level level, const char *logger, const char *message)
@@ -108,10 +127,10 @@ void maage_log_emit(maage_log_level level, const char *logger, const char *messa
     timestamp[0] = '\0';
     if (maage_log_current.config.timestamp) maage_log_timestamp(timestamp, sizeof(timestamp));
     if (!logger || !*logger) logger = "maage";
-    if (maage_log_current.config.console && maage_log_console_available(error))
-        maage_log_sink(error ? stderr : stdout, timestamp, names[level], logger, message, error);
+    if (maage_log_current.config.console && !maage_log_current.stdio_captured && maage_log_console_available(error))
+        maage_log_sink(error ? stderr : stdout, timestamp, names[level], logger, message);
     if (maage_log_current.output)
-        maage_log_sink(maage_log_current.output, timestamp, names[level], logger, message, error);
+        maage_log_sink(maage_log_current.output, timestamp, names[level], logger, message);
 }
 
 void maage_log_vwrite(maage_log_level level, const char *logger, const char *format, va_list args)
@@ -162,7 +181,7 @@ MAAGE_LOG_FUNCTION(maage_log_fatal, MAAGE_LOG_FATAL)
 void maage_log_flush(void)
 {
     maage_log_lock();
-    if (maage_log_current.config.console) {
+    if (maage_log_current.config.console || maage_log_current.stdio_captured) {
         if (maage_log_console_available(0)) fflush(stdout);
         if (maage_log_console_available(1)) fflush(stderr);
     }
@@ -174,8 +193,7 @@ void maage_log_shutdown(void)
 {
     maage_log_flush();
     maage_log_lock();
-    if (maage_log_current.output) fclose(maage_log_current.output);
-    maage_log_current.output = NULL;
+    maage_log_close_file();
     free(maage_log_current.overrides);
     maage_log_current.overrides = NULL;
     maage_log_current.count = maage_log_current.capacity = 0;

@@ -29,8 +29,10 @@ typedef struct maage_world_record {
 int maage_world_store_open(const char *instance_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **store,
     maage_world_record *record, char error[256]);
-/* Explicit generator-2/3 policies are accepted only for new worlds; saved
- * worlds always use their persisted policy. NULL selects frozen generator 1. */
+/* With NULL id, generation_policy supplies creation defaults only if automatic
+ * selection creates a world; resuming always uses the saved policy. An explicit
+ * existing id requires NULL policy, rejecting overrides. NULL selects frozen
+ * generator 1 for new worlds. Configured generators 2/3 require item definitions. */
 int maage_world_store_open_configured(const char *instance_root, const char *id,
     int create, const char *name, const maage_world_seed *seed,
     const maage_generation_policy *generation_policy, const maage_item_registry *items,

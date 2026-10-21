@@ -123,6 +123,12 @@ static int maage_application_run(int argc, char *const argv[])
     char *path;
 #ifdef MAAGE_APPLICATION_METADATA_QUERY
     extern int maage_application_query(int argc, char *const argv[], int *result);
+#endif
+    /* Captured diagnostics must reach their file while the process is running,
+     * including startup errors before the application configures Core logging. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#ifdef MAAGE_APPLICATION_METADATA_QUERY
     if (maage_application_query(argc, argv, &result)) return result;
 #endif
     path = NULL;

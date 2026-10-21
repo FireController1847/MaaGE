@@ -262,6 +262,16 @@ static NSTableView *maage_ui_navigation_table(void)
 }
 - (void)defaultInstallation:(id)sender
 { (void)sender; NSInteger row = self.installations.selectedRow; if (row >= 0) { maage_launcher_installation_default(self.state, (unsigned)row); [self reloadInstallations]; } }
+- (void)openInstallationFolder:(id)sender
+{
+    (void)sender; NSInteger row = self.installations.selectedRow;
+    char path[MAAGE_PATH_CAPACITY];
+    if (row < 0) return;
+    if (maage_launcher_installation_directory(self.state, (unsigned)row, path) &&
+        ![NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:@(path) isDirectory:YES]])
+        strcpy(self.state->error, "Cannot open the installation folder in Finder.");
+    [self refresh:nil];
+}
 - (void)applyAppearance
 {
     self.window.appearance = self.state->appearance ? [NSAppearance appearanceNamed:self.state->appearance == 1 ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua] : nil;
@@ -401,7 +411,10 @@ static NSTableView *maage_ui_navigation_table(void)
         SEL action = i < 3 ? @selector(editInstallation:) : i == 3 ? @selector(removeInstallation:) : @selector(defaultInstallation:);
         NSButton *button = [self button:titles[i] action:action]; button.tag = i; [actions addArrangedSubview:button]; [buttons addObject:button];
     }
-    self.installationActions = buttons; [page addArrangedSubview:actions]; return page;
+    [page addArrangedSubview:actions];
+    NSButton *openFolder = [self button:@"Open installation folder" action:@selector(openInstallationFolder:)];
+    openFolder.tag = 5; [buttons addObject:openFolder]; [page addArrangedSubview:openFolder];
+    self.installationActions = buttons; return page;
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
 - (void)importClient:(id)sender

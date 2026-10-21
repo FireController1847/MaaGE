@@ -228,6 +228,17 @@ int maage_launcher_installation_default(maage_launcher_ui *ui, unsigned index)
     ui->default_id = ui->installations[index].id;
     return maage_launcher_commit(ui, &previous);
 }
+int maage_launcher_installation_directory(maage_launcher_ui *ui, unsigned index, char path[MAAGE_PATH_CAPACITY])
+{
+    maage_instance *instance = NULL;
+    path[0] = 0;
+    if (index >= ui->count) { strcpy(ui->error, "Select a MaaGE installation first."); return 0; }
+    if (!maage_instance_open(ui->root, ui->installations[index].uuid, 0, &instance, ui->error)) return 0;
+    strcpy(path, maage_instance_directory(instance));
+    maage_instance_close(instance);
+    ui->error[0] = 0;
+    return 1;
+}
 int maage_launcher_account_select(maage_launcher_ui *ui, const char *uuid)
 {
     if (!maage_access_select(ui->access, uuid)) return 0;
@@ -270,7 +281,7 @@ void maage_launcher_ui_refresh(maage_launcher_ui *ui)
         if (process_state == MAAGE_PROCESS_EXITED || process_state == MAAGE_PROCESS_FAILED) {
             if (process_state == MAAGE_PROCESS_EXITED) {
                 maage_log_info("maage.launcher.clients", "Client process exited (code=%d).", exit_code);
-                if (exit_code) sprintf(ui->error, "Client exited with code %d. Check the instance logs folder for captured output.", exit_code);
+                if (exit_code) sprintf(ui->error, "Client exited with code %d. Check the latest Client log in the installation's logs folder.", exit_code);
             } else maage_log_error("maage.launcher.clients", "%s", ui->error);
             maage_process_close(ui->client_process); ui->client_process = NULL; ui->running_client[0] = ui->running_instance[0] = 0;
             ui->legacy_worlds_pending = maage_launcher_legacy_pending(ui);
@@ -286,7 +297,7 @@ void maage_launcher_ui_refresh(maage_launcher_ui *ui)
     }
     if (ui->client_job) strcpy(ui->client_status, "Processing Client package locally…");
     if (!ui->clients_valid) strcpy(ui->client_status, "Client registry unavailable; restore config/client-builds.json.");
-    if (ui->client_process) strcpy(ui->client_status, "Client process active. Output is captured in the instance logs folder.");
+    if (ui->client_process) strcpy(ui->client_status, "Client process active. Live output is written to the instance's logs/client.log.");
     if (ui->legacy_worlds_pending && !ui->client_job && !ui->client_process)
         strcat(ui->client_status, " | Legacy worlds await a destination; see the documented migration command.");
     maage_access_snapshot_get(ui->access, &ui->accounts);

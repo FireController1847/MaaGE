@@ -705,7 +705,7 @@ int maage_world_store_open_configured(const char *instance_root, const char *id,
     }
     store->lock = maage_storage_acquire(path);
     if (!store->lock) { maage_store_error(error, "This world is already open in another process."); goto done; }
-    if (!create && generation_policy) {
+    if (!create && id && generation_policy) {
         maage_store_error(error, "Cannot override a saved world's generation policy."); goto done;
     }
     if (create) {

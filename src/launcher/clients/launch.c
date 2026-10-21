@@ -1,21 +1,16 @@
 #include "launch.h"
-#include "files.h"
 #include "maage/log.h"
 #include "maage/instance.h"
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 int maage_client_launch(const char *root, const char *id, const char *instance_id, maage_access *access,
     maage_process **process, char error[256])
 {
     maage_client_registry *registry=(maage_client_registry *)calloc(1,sizeof(*registry));
     char executable[MAAGE_PATH_CAPACITY], directory[MAAGE_PATH_CAPACITY], logs[MAAGE_PATH_CAPACITY];
-    char output[MAAGE_PATH_CAPACITY], errors[MAAGE_PATH_CAPACITY], log[MAAGE_PATH_CAPACITY], argument[MAAGE_PATH_CAPACITY+12], data_argument[MAAGE_PATH_CAPACITY+18], instance_argument[48], name[128];
-    const char *argv[6];
+    char log[MAAGE_PATH_CAPACITY], data_argument[MAAGE_PATH_CAPACITY+18], instance_argument[48];
+    const char *argv[4];
     maage_instance *instance=NULL;
-    maage_storage_lock *lock=NULL;
-    unsigned attempt;
-    double now=difftime(time(NULL),(time_t)0);
     int ok=0;
     *process=NULL;
     if(!access || !maage_access_allowed(access)) { strcpy(error,"Verify the selected Minecraft account before starting a Client."); goto done; }
@@ -27,28 +22,19 @@ int maage_client_launch(const char *root, const char *id, const char *instance_i
         strcpy(error,"Instance Client assignment changed. Select the instance again before launching."); goto done;
     }
     strcpy(directory,maage_instance_directory(instance));
-    if(!maage_instance_resolve_path(instance,MAAGE_INSTANCE_FOLDER_LOGS,NULL,logs,sizeof(logs)) || !maage_storage_directories(logs) ||
-        !maage_storage_join(output,sizeof(output),logs,"launch.lock") || !(lock=maage_storage_acquire(output))) goto done;
-    for(attempt=0;attempt<1000;++attempt) {
-        sprintf(name,"client-%.12s-%.0f-%u.stdout.log",id,now,attempt);
-        if(!maage_storage_join(output,sizeof(output),logs,name)) goto done;
-        sprintf(name,"client-%.12s-%.0f-%u.stderr.log",id,now,attempt);
-        if(!maage_storage_join(errors,sizeof(errors),logs,name)) goto done;
-        sprintf(name,"client-%.12s-%.0f-%u.log",id,now,attempt);
-        if(!maage_storage_join(log,sizeof(log),logs,name)) goto done;
-        if(!maage_client_file_kind(output) && !maage_client_file_kind(errors) && !maage_client_file_kind(log)) break;
-    }
-    if(attempt==1000 || !maage_access_allowed(access)) goto done;
-    sprintf(argument,"--log-file=%s",log);
+    if(!maage_instance_resolve_path(instance,MAAGE_INSTANCE_FOLDER_LOGS,NULL,logs,sizeof(logs)) ||
+        !maage_storage_directories(logs) || !maage_storage_join(log,sizeof(log),logs,"client.log") ||
+        !maage_access_allowed(access)) goto done;
     sprintf(data_argument,"--data-directory=%s",root);
     sprintf(instance_argument,"--instance=%s",instance_id);
-    argv[0]=executable; argv[1]=argument; argv[2]="--log-console=on"; argv[3]=data_argument; argv[4]=instance_argument; argv[5]=NULL;
-    ok=maage_process_start(executable,argv,directory,output,errors,process,error);
-    if(ok) maage_log_info("maage.launcher.clients","Starting selected Client %.12s directly; stdout=%s; stderr=%s.",id,output,errors);
+    argv[0]=executable; argv[1]=data_argument; argv[2]=instance_argument; argv[3]=NULL;
+    /* Core logging adopts this live file and archives it at Client shutdown.
+     * Append preserves startup errors and interrupted-session output. */
+    ok=maage_process_start(executable,argv,directory,log,log,process,error);
+    if(ok) maage_log_info("maage.launcher.clients","Starting selected Client %.12s directly; combined live log=%s.",id,log);
 done:
     if(!ok && !*error) strcpy(error,"Cannot start Client. Check current Minecraft access and permissions for the Client and logs folders.");
     if(!ok) maage_log_error("maage.launcher.clients","%s",error);
-    if(lock) maage_storage_release(lock);
     maage_instance_close(instance);
     maage_clients_dispose(registry); free(registry); return ok;
 }

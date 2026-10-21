@@ -424,7 +424,9 @@ instance argument and write global worlds. No network protocol is implied.
 
 Direct CLI startup accepts the same `--instance=<uuid>` or uses the selected/default
 Launcher UUID. It never creates a random instance or falls back to global worlds.
-Default Client logs and process captures are instance-local. An explicit startup
+Client Core logs and native stdout/stderr share one instance-local `logs/client.log`,
+flushed live and retained after shutdown alongside a dated `.log.gz` copy, matching
+Launcher logging. An explicit startup
 mapping operation is available without adding a settings UI:
 
 ```sh

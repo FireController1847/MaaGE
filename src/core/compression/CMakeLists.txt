@@ -1,0 +1,6 @@
+find_package(ZLIB 1.2.3 REQUIRED)
+add_library(maage_gzip STATIC gzip.c)
+add_library(MaaGE::GZip ALIAS maage_gzip)
+maage_configure_portable_target(maage_gzip)
+target_include_directories(maage_gzip PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(maage_gzip PRIVATE ZLIB::ZLIB)

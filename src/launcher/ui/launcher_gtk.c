@@ -6,7 +6,7 @@
 typedef struct maage_launcher_gtk {
     maage_launcher_ui *state;
     GtkWidget *window, *stack, *navigation, *account, *installation, *list, *status, *resource, *account_status, *verify, *repair, *error, *clients, *client_status, *play;
-    GtkWidget *actions[5];
+    GtkWidget *actions[6];
     GtkCssProvider *css;
     unsigned revision, client_revision;
     int result, updating;
@@ -63,6 +63,17 @@ static int maage_ui_row(maage_launcher_gtk *ui)
 {
     GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(ui->list));
     return row ? gtk_list_box_row_get_index(row) : -1;
+}
+static void maage_ui_installation_open(GtkWidget *widget, gpointer context)
+{
+    maage_launcher_gtk *ui = context; int row = maage_ui_row(ui);
+    char path[MAAGE_PATH_CAPACITY]; gchar *uri; GError *error = NULL; (void)widget;
+    if (row < 0 || !maage_launcher_installation_directory(ui->state, (unsigned)row, path)) return;
+    uri = g_filename_to_uri(path, NULL, &error);
+    if (!uri || !gtk_show_uri_on_window(GTK_WINDOW(ui->window), uri, GDK_CURRENT_TIME, &error))
+        g_strlcpy(ui->state->error, error ? error->message : "Cannot open the installation folder.", sizeof(ui->state->error));
+    if (error) g_error_free(error);
+    g_free(uri);
 }
 static void maage_ui_installations_reload(maage_launcher_gtk *ui)
 {
@@ -202,7 +213,7 @@ static gboolean maage_ui_tick(gpointer context)
     gtk_button_set_label(GTK_BUTTON(ui->repair), state->accounts.allowed ? "Repair Assets…" : "Verify Minecraft Access…");
     gtk_label_set_text(GTK_LABEL(ui->resource), state->progress.stage == MAAGE_SETUP_FAILED ? state->progress.error : state->readiness);
     gtk_label_set_text(GTK_LABEL(ui->account_status), state->account_status); gtk_label_set_text(GTK_LABEL(ui->error), state->error);
-    for (i = 0; i < 5; ++i) gtk_widget_set_sensitive(ui->actions[i], i == 0 || maage_ui_row(ui) >= 0);
+    for (i = 0; i < 6; ++i) gtk_widget_set_sensitive(ui->actions[i], i == 0 || maage_ui_row(ui) >= 0);
     return G_SOURCE_CONTINUE;
 }
 static gboolean maage_ui_close(GtkWidget *widget, GdkEvent *event, gpointer context)
@@ -299,6 +310,8 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     scroll = gtk_scrolled_window_new(NULL, NULL); gtk_box_pack_start(GTK_BOX(page), scroll, TRUE, TRUE, 0); ui.list = gtk_list_box_new(); gtk_container_add(GTK_CONTAINER(scroll), ui.list);
     actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
     { const char *titles[] = {"New…", "Edit…", "Duplicate…", "Remove…", "Set as Default"}; for (i = 0; i < 5; ++i) { ui.actions[i] = maage_ui_button(actions, titles[i], G_CALLBACK(maage_ui_installation_action), &ui); g_object_set_data(G_OBJECT(ui.actions[i]), "action", GINT_TO_POINTER(i)); } }
+    ui.actions[5] = maage_ui_button(page, "Open installation folder", G_CALLBACK(maage_ui_installation_open), &ui);
+    gtk_widget_set_halign(ui.actions[5], GTK_ALIGN_START);
     scroll = gtk_scrolled_window_new(NULL, NULL); gtk_stack_add_named(GTK_STACK(ui.stack), scroll, "settings"); page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12); gtk_container_add(GTK_CONTAINER(scroll), page);
     maage_ui_label(page, "Settings", "heading"); maage_ui_label(page, "Launcher", "section"); maage_ui_label(page, "Startup opens Play after account and resource preparation.", "muted");
     ui.account_status = maage_ui_label(page, "", "muted"); gtk_label_set_max_width_chars(GTK_LABEL(ui.account_status), 70);

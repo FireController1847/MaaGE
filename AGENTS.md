@@ -730,16 +730,30 @@ unless explicitly requested.
   Launcher logs belong in `logs/` beneath the platform MaaGE application-data
   directory described above. Create directories
   as needed; never fall back to working/install directories for Launcher logs.
-  Client logs and Launcher process captures belong to the selected instance's `logs/`.
+  Client uses the same Core logger with one live `logs/client.log` beneath its
+  selected instance. Combine every severity and native stdout/stderr there, without
+  duplicate console copies or separate capture files. Launcher startup capture
+  appends to that path; Client adopts it after acquiring its instance use lease,
+  redirects both streams there and GZip-copies it at shutdown. Preserve early startup errors
+  and independent Client lifetime after Launcher exit.
   Logging overrides remain
   supported; Server keeps console output.
   Configuration precedence is defaults → optional INI → explicit `--log-*` CLI
   overrides. Initialize early and shut down cleanly; FATAL never exits by itself.
   Keep logging synchronous, thread-safe, bounded, C90-compatible, and headless-safe.
-- File logging rotates on initialization: the configured filename holds the latest
-  session; previous files receive a local `YYYY-MM-DD_HH-MM-SS` rotation timestamp
-  before the extension; add a numeric suffix only on filename collisions. Preserve archives without overwriting
-  or automatic deletion; report rotation failures rather than append across sessions.
+  Flush every record immediately and keep captured stdout/stderr unbuffered, including
+  startup output. Log files are writable by the application user, without exclusive
+  file locks; Windows handles share read, write and delete access so files can be
+  inspected, overwritten or renamed while open. Keep scheduler/storage/use locks
+  independent of log-file sharing.
+- Retain the latest plain `client.log`/`launcher.log` after close. Shutdown/reinit
+  flushes/closes it and creates a `client.YYYY-MM-DD_HH-MM-SS.log.gz` copy using
+  local close time; suffix only on collisions. Skip empty archives. Before resetting
+  the next plain session, preserve any unarchived output; reuse identical compressed
+  copies. Stage/sync before collision-safe publication, never overwrite history,
+  and retain the plain original on failure. `MaaGE::GZip` (`maage/gzip.h`) provides
+  reusable, bounded C90 stream compression through private zlib >=1.2.3; all Core
+  logging builds, including headless, require zlib without graphical dependencies.
 - Log severity labels are exactly `[TRACE]`, `[DEBUG]`, `[INFO]`, `[WARN]`,
   `[ERROR]`, or `[FATAL]`. Align logger names with padding after the closing `]`,
   never inside brackets (for example, `[INFO]  [maage.launcher]`).
@@ -793,7 +807,7 @@ bundle registry records retain their IDs/references but require standalone reimp
 Play starts only the exact selected verified build, with current Minecraft access
 and prepared resources. The reusable Core Process API invokes executables directly
 with structured arguments, an explicit working directory, inherited environment,
-nonblocking monitoring and file capture beneath the instance's `logs/`. POSIX
+nonblocking monitoring and combined append capture to the instance's `logs/client.log`. POSIX
 fork/exec and Windows CreateProcess never use shells or Launch Services. Launch
 validation/spawning runs on the Client worker; prevent duplicate launches and
 removal of the active build. Closing the Launcher releases monitoring without

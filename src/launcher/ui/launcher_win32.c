@@ -20,6 +20,7 @@
 #define MAAGE_UI_DUPLICATE 132
 #define MAAGE_UI_REMOVE 133
 #define MAAGE_UI_DEFAULT 134
+#define MAAGE_UI_OPEN_FOLDER 135
 #define MAAGE_UI_CLIENTS 140
 #define MAAGE_UI_CLIENT_CHOICE 141
 #define MAAGE_UI_CLIENT_IMPORT 142
@@ -161,7 +162,16 @@ static void maage_ui_refresh(maage_launcher_win32 *ui)
     maage_ui_text(ui->status,state->readiness); maage_ui_text(ui->resource,state->progress.stage==MAAGE_SETUP_FAILED ? state->progress.error : state->readiness);
     maage_ui_text(ui->account_status,state->account_status); maage_ui_text(ui->error,state->error);
     SetWindowTextW(ui->repair,state->accounts.allowed ? L"Repair Assets..." : L"Verify Minecraft Access...");
-    for (i=1; i<5; ++i) EnableWindow(GetDlgItem(ui->window,MAAGE_UI_NEW+(int)i),maage_ui_selected(ui)>=0);
+    for (i=1; i<6; ++i) EnableWindow(GetDlgItem(ui->window,MAAGE_UI_NEW+(int)i),maage_ui_selected(ui)>=0);
+}
+static void maage_ui_open_installation(maage_launcher_win32 *ui)
+{
+    int row = maage_ui_selected(ui);
+    char path[MAAGE_PATH_CAPACITY]; wchar_t wide[MAAGE_PATH_CAPACITY];
+    if (row < 0 || !maage_launcher_installation_directory(ui->state, (unsigned)row, path)) return;
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, MAAGE_PATH_CAPACITY) ||
+        (INT_PTR)ShellExecuteW(ui->window, L"open", wide, NULL, NULL, SW_SHOWNORMAL) <= 32)
+        strcpy(ui->state->error, "Windows could not open the installation folder in File Explorer.");
 }
 static void maage_ui_installation_action(maage_launcher_win32 *ui, int id)
 {
@@ -241,6 +251,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             }
             if (id==MAAGE_UI_INSTALLATION && event==CBN_SELCHANGE && !ui->updating) { maage_launcher_installation_select(ui->state,(unsigned)SendMessageW(ui->installation,CB_GETCURSEL,0,0)); maage_ui_installations_reload(ui); }
             if (id>=MAAGE_UI_NEW && id<=MAAGE_UI_DEFAULT) maage_ui_installation_action(ui,id);
+            if (id==MAAGE_UI_OPEN_FOLDER) maage_ui_open_installation(ui);
             if (id==MAAGE_UI_VERIFY && ui->state->account[0]) maage_access_verify_local(ui->state->access,ui->state->account);
             if (id==MAAGE_UI_PROJECT && (INT_PTR)ShellExecuteW(window,L"open",L"https://github.com/FireController1847/MaaGE",NULL,NULL,SW_SHOWNORMAL)<=32)
                 strcpy(ui->state->error,"Windows could not open the project link in your browser.");
@@ -320,6 +331,7 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     ui.name=maage_ui_control(&ui,2,L"EDIT",L"New Installation",WS_TABSTOP | ES_AUTOHSCROLL,198,-275,-230,30,MAAGE_UI_NAME); SendMessageW(ui.name,EM_SETLIMITTEXT,95,0);
     ui.client_choice=maage_ui_control(&ui,2,L"COMBOBOX",L"Client build",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,198,-230,-230,220,MAAGE_UI_CLIENT_CHOICE);
     { const wchar_t *titles[]={L"New",L"Save",L"Duplicate",L"Remove",L"Set as Default"}; for(i=0;i<5;++i) maage_ui_button(&ui,2,titles[i],198+i*128,-185,118,MAAGE_UI_NEW+i); }
+    maage_ui_button(&ui,2,L"Open installation folder",198,-140,240,MAAGE_UI_OPEN_FOLDER);
     maage_ui_label(&ui,3,L"Launcher",198,80,250,26);
     maage_ui_label(&ui,3,L"Startup opens Play after account and resource preparation.",198,110,-230,26);
     maage_ui_button(&ui,3,L"Manage Minecraft Accounts...",198,146,245,MAAGE_UI_MANAGE);

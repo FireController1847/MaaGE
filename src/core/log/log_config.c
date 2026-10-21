@@ -64,6 +64,7 @@ static int maage_log_setting(const char *key, const char *value)
     if (strcmp(key, "console") == 0) return maage_log_parse_bool(value, &config->console);
     if (strcmp(key, "file") == 0) return maage_log_parse_bool(value, &config->file);
     if (strcmp(key, "timestamp") == 0) return maage_log_parse_bool(value, &config->timestamp);
+    if (strcmp(key, "capture_stdio") == 0) return maage_log_parse_bool(value, &config->capture_stdio);
     if (strcmp(key, "file_path") == 0) return maage_log_path(value);
     return 0;
 }
@@ -126,6 +127,7 @@ int maage_log_configure(const maage_log_config *defaults, int argc, char *const 
         config->console = defaults->console != 0;
         config->file = defaults->file != 0;
         config->timestamp = defaults->timestamp != 0;
+        config->capture_stdio = defaults->capture_stdio != 0;
         if (defaults->file_path && !maage_log_path(defaults->file_path))
             maage_log_problem(&status, "Invalid default logging file path", NULL);
     }
@@ -149,18 +151,28 @@ int maage_log_configure(const maage_log_config *defaults, int argc, char *const 
         } else if (strncmp(argument, "--log-console=", 14) == 0) {
             if (!maage_log_setting("console", argument + 14))
                 maage_log_problem(&status, "Invalid --log-console: ", argument + 14);
+        } else if (strncmp(argument, "--log-capture-stdio=", 20) == 0) {
+            if (!maage_log_setting("capture_stdio", argument + 20))
+                maage_log_problem(&status, "Invalid --log-capture-stdio: ", argument + 20);
         }
     }
     config->file_path = maage_log_current.path;
     config->config_path = NULL;
     if (config->file) {
-        if (maage_log_rotate(config->file_path))
-            maage_log_current.output = maage_log_open(config->file_path, "a");
+        /* Preserve any unarchived previous session before resetting the latest
+         * plain file. Already matching GZip copies are not duplicated. */
+        if (maage_log_rotate(config->file_path, 0))
+            maage_log_current.output = maage_log_open(config->file_path, "w");
         else maage_log_problem(&status, "Cannot archive previous logging file: ", config->file_path);
         if (!maage_log_current.output) {
             config->file = 0;
-            maage_log_problem(&status, "Cannot append to logging file: ", config->file_path);
+            maage_log_problem(&status, "Cannot start logging file: ", config->file_path);
         }
+    }
+    if (maage_log_current.output && config->capture_stdio) {
+        maage_log_current.stdio_captured = maage_log_capture_stdio(maage_log_current.output);
+        if (!maage_log_current.stdio_captured)
+            maage_log_problem(&status, "Cannot capture stdout/stderr in logging file: ", config->file_path);
     }
     if (!status.ok) {
         /* Configuration failures remain visible even if console=false disabled
