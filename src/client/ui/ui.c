@@ -116,6 +116,7 @@ void maage_client_ui_destroy(maage_client_ui *ui)
 {
     if (!ui) return;
     maage_render_texture_destroy(ui->resources.texture);
+    free(ui->vertices); free(ui->indices);
     free(ui->navigation.screens); free(ui->navigation.stack); free(ui);
 }
 
@@ -251,7 +252,7 @@ const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
         rectangle.y = ui->height * 0.5f - 7.5f;
         rectangle.width = rectangle.height = 15;
         maage_client_ui_rectangle(ui, rectangle, 0, 0,
-            15.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 15.0f / MAAGE_CLIENT_UI_ATLAS_EDGE, 1, 1, 1, 1);
+            15.0f / ui->resources.atlas_edge, 15.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     }
     if (ui->debug && debug) {
         maage_client_ui_debug_column(ui, debug->left, debug->left_count, 0);

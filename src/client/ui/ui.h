@@ -57,8 +57,8 @@ unsigned int maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     int framebuffer_width, int framebuffer_height, int window_width, int window_height);
 /* Build the UI after world preparation; returned CPU data is borrowed until
  * the next draw/destroy and submitted with the world in renderer_draw_frame.
- * NULL indicates an invalid UI or a rejected overflowing batch; no partial
- * batch is returned. The caller must treat that as a frame-build failure. */
+ * NULL indicates an invalid UI or exhausted geometry allocation/index range;
+ * no partial batch is returned. The caller treats that as a frame-build failure. */
 const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
     const maage_client_ui_debug *debug);
 float maage_client_ui_width(const maage_client_ui *ui);

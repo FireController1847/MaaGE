@@ -7,6 +7,24 @@
 #define MAAGE_SECTION_VOLUME 4096
 #define MAAGE_WORLD_GENERATOR_VERSION 1UL
 #define MAAGE_WORLD_BLOCKSET_VERSION 1UL
+/* Generator 1 is frozen for existing saves. Generator 2 deliberately reuses
+ * its noise/biome mathematics but accepts explicit world-specific policies.
+ * Unsupported versions and altered version-1 policies fail closed. */
+#define MAAGE_GENERATION_POLICY_SCHEMA 1U
+#define MAAGE_GENERATION_CONFIGURABLE_VERSION 2UL
+typedef struct maage_generation_policy {
+    unsigned int schema_version;
+    unsigned long generator_version;
+    int sea_level;
+    int spawn_search_radius;
+    int spawn_search_step;
+} maage_generation_policy;
+/* Initialize per-world and retain an immutable copy for all async jobs.
+ * Persist the generator version and policy fields before opting into v2. */
+int maage_generation_policy_default(unsigned long generator_version,
+    maage_generation_policy *policy);
+int maage_generation_policy_valid(const maage_generation_policy *policy);
+
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit air above the heightmap has skylight 15. */
 typedef struct maage_section {
@@ -31,6 +49,17 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z);
 int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
     const maage_block_registry *blocks, const maage_biome_registry *biomes);
 void maage_generator_spawn(maage_world_seed seed, const maage_biome_registry *biomes, double feet[3]);
+/* Opt-in versioned APIs: an explicit, immutable policy is passed with each
+ * job instead of consulting mutable process-wide generation settings. */
+int maage_generate_chunk_policy(maage_chunk *chunk, maage_world_seed seed,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    const maage_generation_policy *policy);
+int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    const maage_generation_policy *policy, const maage_job_token *token);
+int maage_generator_spawn_policy(maage_world_seed seed,
+    const maage_biome_registry *biomes, const maage_generation_policy *policy,
+    double feet[3]);
 int maage_light_chunk(maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_chunk *neighbors[4], maage_section *added[16]);
 /* Neighbors are -X,+X,-Z,+Z, read-only. Newly needed air sections transfer via
