@@ -18,10 +18,11 @@ void maage_client_ui_font_initialize(maage_client_ui_resources *resources, const
 
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text)
 {
-    unsigned int i, character;
+    size_t i;
+    unsigned int character;
     float width = 0;
     if (!ui || !text) return 0;
-    for (i = 0; i + 1 < MAAGE_CLIENT_UI_DEBUG_CHARACTERS && text[i]; ++i) {
+    for (i = 0; text[i]; ++i) {
         character = (unsigned char)text[i];
         if (character < 32 || character > 126) character = '?';
         width += ui->resources.glyph_width[character];
@@ -33,11 +34,12 @@ void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
     float x, float y, float red, float green, float blue)
 {
     maage_client_ui_rect rectangle;
-    unsigned int i, character, width;
+    size_t i;
+    unsigned int character, width;
     float u, v;
     if (!text) return;
     rectangle.y = y; rectangle.height = 8;
-    for (i = 0; i + 1 < MAAGE_CLIENT_UI_DEBUG_CHARACTERS && text[i]; ++i) {
+    for (i = 0; text[i]; ++i) {
         character = (unsigned char)text[i];
         if (character < 32 || character > 126) character = '?';
         width = ui->resources.glyph_width[character];
