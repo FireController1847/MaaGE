@@ -50,7 +50,7 @@ struct maage_world {
     maage_jobs *jobs;
     maage_chunk_bucket *buckets;
     size_t bucket_count;
-    maage_world_slot *chunks;
+    maage_world_slot *chunks, *save_cursor;
     maage_world_task *tasks;
     maage_job_observation *observations;
     unsigned *free_tasks;
@@ -154,6 +154,8 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot)
     }
     while (*link != slot) link = &(*link)->next;
     *link = slot->next; --world->count;
+    if (world->save_cursor == slot)
+        world->save_cursor = slot->next ? slot->next : world->chunks;
     maage_world_release(slot->data); maage_world_mesh_destroy(slot->pending_mesh); free(slot);
 }
 static int maage_world_distance(const maage_world *world, const maage_world_slot *slot)
@@ -450,18 +452,21 @@ static void maage_world_scan_next(maage_world *world, int *dx, int *dz)
 }
 static void maage_world_schedule_saves(maage_world *world, unsigned reserve)
 {
-    maage_world_slot *slot, *chosen;
-    int distance, farthest;
-    while (!world->failed && world->active < world->task_limit &&
-        world->saves_active < reserve) {
-        chosen = NULL; farthest = -1;
-        for (slot = world->chunks; slot; slot = slot->next) {
-            if (!slot->dirty || !slot->data || slot->save || slot->failed) continue;
-            distance = maage_world_distance(world, slot);
-            if (distance > farthest) { chosen = slot; farthest = distance; }
-        }
-        if (!chosen || !maage_world_submit(world, chosen, MAAGE_JOB_SAVE, 0)) break;
-    }
+    maage_world_slot *slot, *first, *next;
+    if (world->failed || !world->chunks || world->active >= world->task_limit ||
+        world->saves_active >= reserve) return;
+    first = world->save_cursor ? world->save_cursor : world->chunks;
+    slot = first;
+    do {
+        next = slot->next ? slot->next : world->chunks;
+        if (slot->dirty && slot->data && !slot->save && !slot->failed &&
+            !maage_world_submit(world, slot, MAAGE_JOB_SAVE, 0)) break;
+        slot = next;
+    } while (slot != first && world->active < world->task_limit &&
+        world->saves_active < reserve);
+    /* One pass and a persistent cursor: dirty columns eventually receive a
+     * writer even during continuous nearby streaming and insertions. */
+    world->save_cursor = slot;
 }
 static void maage_world_schedule(maage_world *world)
 {
