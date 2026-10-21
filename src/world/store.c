@@ -355,9 +355,9 @@ static void maage_store_stack_get_version(maage_store_bytes *bytes,
         const char *name;
         maage_store_stack_get(bytes, stack);
         if (items && stack->count) {
+            const char *legacy = maage_store_legacy_item_name(stack->item_id);
             name = maage_item_registry_name(items, stack->item_id);
-            if (!name || strcmp(name, maage_store_legacy_item_name(stack->item_id)))
-                bytes->failed = 1;
+            if (!name || !legacy || strcmp(name, legacy)) bytes->failed = 1;
         }
     }
 }
@@ -488,8 +488,14 @@ static int maage_store_metadata_write(const maage_world_store *store,
     named_length = maage_store_named_length(&record->gameplay, store->items);
     if (named_length == (size_t)-1 || named_length > MAAGE_STORE_METADATA_MAX)
         return maage_store_error(error, "Player item identity cannot be serialized.");
+    if (record->gameplay.overflow_count >
+        ((size_t)-1 - 4096UL) / (store->items ? 34UL : 37UL))
+        return maage_store_error(error, "Player gameplay count exceeds addressable memory.");
     capacity = 4096UL + record->gameplay.overflow_count *
-        (store->items ? 34UL : 37UL) + named_length;
+        (store->items ? 34UL : 37UL);
+    if (named_length > (size_t)-1 - capacity)
+        return maage_store_error(error, "Player item identity lengths overflow.");
+    capacity += named_length;
     if (capacity > MAAGE_STORE_METADATA_MAX)
         return maage_store_error(error, "Player gameplay data exceeds the metadata file bound.");
     data = (unsigned char *)malloc(capacity);
@@ -952,13 +958,26 @@ static int maage_store_chunk_path(maage_world_store *store, int x, int z, char p
 static int maage_store_legacy_state(const maage_block_registry *blocks, unsigned long id)
 {
     const maage_block_state_definition *state = maage_block_registry_state(blocks, id);
+    const char *name, *expected = NULL;
     if (!state) return 0;
-    if (id >= 256 && id < 262) return state->block_id == 2 && state->metadata == id - 255;
+    name = maage_block_registry_block_name(blocks, state->block_id);
+    if (id >= 256 && id < 262)
+        return state->block_id == 2 && state->metadata == id - 255 &&
+            name && strcmp(name, "minecraft:grass") == 0;
     switch (id) {
-        case 0: case 1: case 2: case 3: case 7: case 9: case 12: case 13: case 24:
-            return state->block_id == id && state->metadata == 0;
+        case 0: expected = "minecraft:air"; break;
+        case 1: expected = "minecraft:stone"; break;
+        case 2: expected = "minecraft:grass"; break;
+        case 3: expected = "minecraft:dirt"; break;
+        case 7: expected = "minecraft:bedrock"; break;
+        case 9: expected = "minecraft:water"; break;
+        case 12: expected = "minecraft:sand"; break;
+        case 13: expected = "minecraft:gravel"; break;
+        case 24: expected = "minecraft:sandstone"; break;
         default: return 0;
     }
+    return state->block_id == id && state->metadata == 0 &&
+        name && strcmp(name, expected) == 0;
 }
 static int maage_store_state_compare(const void *left, const void *right)
 {
