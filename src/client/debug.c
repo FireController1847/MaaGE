@@ -1,4 +1,5 @@
 #include "debug.h"
+#include "mesh_diagnostics.h"
 #include "maage/client.h"
 #include <math.h>
 #include <stdio.h>
@@ -165,4 +166,23 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->right[right++], "Dirty columns: %u", stats->dirty_columns);
     text->left_count = left; text->right_count = right;
     return text;
+}
+
+/* Add streaming telemetry to the F3 right column without requiring World
+ * internals or allocating per frame. Ready-vs-resident is an estimate: the
+ * World API does not yet expose an exact pending GPU-presentation count. */
+void maage_client_debug_mesh_diagnostics(maage_client_ui_debug *text,
+    const maage_client_mesh_diagnostics *stats)
+{
+    unsigned right = text->right_count;
+    if (right + 4 > MAAGE_CLIENT_UI_DEBUG_LINES) return;
+    sprintf(text->right[right++], "GPU uploads: %.1f/s  (%lu total)",
+        stats->uploads_per_second, stats->gpu_uploads);
+    sprintf(text->right[right++], "GPU vertices: %.0f/s; resident: %lu",
+        stats->vertices_per_second, (unsigned long)stats->gpu_resident);
+    sprintf(text->right[right++], "Ready not presented: ~%lu  stale: %lu",
+        (unsigned long)stats->ready_waiting_estimate, stats->rejected);
+    sprintf(text->right[right++], "Upload: %u/frame, %.2f ms / %.2f ms budget (stream %.2f)",
+        stats->uploaded_this_frame, stats->frame_upload_ms, stats->budget_ms, stats->stream_ms);
+    text->right_count = right;
 }
