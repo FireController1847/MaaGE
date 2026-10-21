@@ -421,50 +421,134 @@ static int maage_world_make_room(maage_world *world)
     maage_world_invalidate_neighbors(world, x, z, 15U);
     return 1;
 }
-/* Bounded desired grid coalesces coordinates. Only a small near-first window
- * enters the scheduler, so distant work cannot fill an unbounded backlog. */
-static void maage_world_schedule(maage_world *world)
+/* Walk concentric square rings incrementally. A single pump examines at
+ * most a workload-derived budget, never rescanning the entire grid per job.
+ * On movement and completions the cursor restarts at the nearest column. */
+static void maage_world_scan_next(maage_world *world, int *dx, int *dz)
+{
+    int ring = world->scan_ring;
+    unsigned step, span;
+    if (!ring) {
+        *dx = *dz = 0;
+        world->scan_ring = 1; world->scan_step = 0;
+        return;
+    }
+    step = world->scan_step++;
+    span = (unsigned)ring * 2U + 1U;
+    if (step < span) {
+        *dx = (int)step - ring; *dz = -ring;
+    } else if (step < span + (unsigned)ring * 2U) {
+        *dx = ring; *dz = (int)(step - span) - ring + 1;
+    } else if (step < span + (unsigned)ring * 4U) {
+        *dx = ring - 1 - (int)(step - span - (unsigned)ring * 2U); *dz = ring;
+    } else {
+        *dx = -ring;
+        *dz = ring - 1 - (int)(step - span - (unsigned)ring * 4U);
+    }
+    if (world->scan_step == (unsigned)ring * 8U) {
+        ++world->scan_ring; world->scan_step = 0;
+    }
+}
+static void maage_world_schedule_saves(maage_world *world, unsigned reserve)
 {
     maage_world_slot *slot, *chosen;
-    int radius = world->config.render_distance + 1;
-    int dx, dz, x, z, kind, chosen_kind, score, best;
-    double forward_x = sin(world->yaw), forward_z = -cos(world->yaw);
-    while (!world->failed && world->active < world->task_limit) {
-        chosen = NULL; chosen_kind = 0; best = 2147483647; x = z = 0;
-        for (dz = -radius; dz <= radius; ++dz) for (dx = -radius; dx <= radius; ++dx) {
-            if (abs(world->center_x + dx) > MAAGE_WORLD_LIMIT / 16 - 1 ||
-                abs(world->center_z + dz) > MAAGE_WORLD_LIMIT / 16 - 1) continue;
-            slot = maage_world_find(world, world->center_x + dx, world->center_z + dz);
-            if (slot && (slot->failed || slot->work)) continue;
-            kind = 0; score = (dx * dx + dz * dz) * 8;
-            if (dx * forward_x + dz * forward_z < 0) score += 3;
-            if (!slot) {
-                if (world->count < MAAGE_WORLD_MAX_CHUNKS) kind = MAAGE_JOB_LOAD;
-            } else if (!slot->data) kind = slot->stage;
-            else if (slot->light_dirty) kind = MAAGE_JOB_LIGHT;
-            else if (slot->mesh_dirty && abs(dx) <= world->config.render_distance && abs(dz) <= world->config.render_distance) kind = MAAGE_JOB_MESH;
-            else if (slot->dirty && !slot->save) kind = MAAGE_JOB_SAVE;
-            if (kind == MAAGE_JOB_LOAD || kind == MAAGE_JOB_GENERATE) score += 4;
-            else if (kind == MAAGE_JOB_MESH) ++score;
-            else if (kind == MAAGE_JOB_SAVE) score += 16;
-            if (kind && score < best) { best = score; chosen = slot; chosen_kind = kind; x = world->center_x + dx; z = world->center_z + dz; }
+    int distance, farthest;
+    while (!world->failed && world->active < world->task_limit &&
+        world->saves_active < reserve) {
+        chosen = NULL; farthest = -1;
+        for (slot = world->chunks; slot; slot = slot->next) {
+            if (!slot->dirty || !slot->data || slot->save || slot->failed) continue;
+            distance = maage_world_distance(world, slot);
+            if (distance > farthest) { chosen = slot; farthest = distance; }
         }
-        if (!chosen_kind) break;
-        if (!chosen) chosen = maage_world_insert(world, x, z);
-        if (!chosen || !maage_world_submit(world, chosen, chosen_kind, (unsigned)best)) break;
+        if (!chosen || !maage_world_submit(world, chosen, MAAGE_JOB_SAVE, 0)) break;
     }
+}
+static void maage_world_schedule(maage_world *world)
+{
+    maage_world_slot *slot;
+    int radius = world->config.render_distance + 1;
+    int dx, dz, x, z, kind, ring;
+    size_t span = (size_t)radius * 2U + 1U;
+    unsigned limit, reserve, work_limit, budget, examined;
+    unsigned priority;
+    double forward_x, forward_z;
+    if (world->failed) return;
+    reserve = world->task_limit > 1 ? (world->task_limit + 7U) / 8U : 0;
+    work_limit = world->task_limit - reserve;
+    limit = (unsigned)(span * span); /* validated at creation */
+    budget = world->task_limit > UINT_MAX / 16U ? UINT_MAX : world->task_limit * 16U;
+    if (budget < 64U) budget = 64U;
+    if (budget > limit) budget = limit;
+    forward_x = sin(world->yaw); forward_z = -cos(world->yaw);
+    for (examined = 0; examined < budget &&
+        world->active - world->saves_active < work_limit &&
+        world->active < world->task_limit; ++examined) {
+        if (world->scan_ring > radius) {
+            world->scan_ring = 0; world->scan_step = 0;
+        }
+        maage_world_scan_next(world, &dx, &dz);
+        x = world->center_x + dx; z = world->center_z + dz;
+        if (abs(x) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1 ||
+            abs(z) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1) continue;
+        slot = maage_world_find(world, x, z);
+        if (slot && (slot->failed || slot->work)) continue;
+        kind = 0;
+        if (!slot) {
+            if (!maage_world_make_room(world)) continue;
+            kind = MAAGE_JOB_LOAD;
+        } else if (!slot->data) kind = slot->stage;
+        else if (slot->light_dirty) kind = MAAGE_JOB_LIGHT;
+        else if (slot->mesh_dirty && abs(dx) <= world->config.render_distance &&
+            abs(dz) <= world->config.render_distance) kind = MAAGE_JOB_MESH;
+        if (!kind) continue;
+        if (!slot) slot = maage_world_insert(world, x, z);
+        if (!slot) break;
+        ring = abs(dx) > abs(dz) ? abs(dx) : abs(dz);
+        priority = (unsigned)ring * 16U;
+        if (dx * forward_x + dz * forward_z < 0) priority += 3U;
+        if (kind == MAAGE_JOB_LOAD || kind == MAAGE_JOB_GENERATE) priority += 4U;
+        else if (kind == MAAGE_JOB_MESH) ++priority;
+        if (!maage_world_submit(world, slot, kind, priority)) break;
+    }
+    /* Saves are accepted independently of the near-first work quota. A
+     * reserved share prevents an endless stream of arrivals from starving
+     * durable dirty data or filling all contexts with low-value I/O. */
+    maage_world_schedule_saves(world, reserve ? reserve : 1U);
 }
 maage_world *maage_world_create(const maage_world_config *config)
 {
     maage_world *world;
     maage_jobs_stats stats;
-    unsigned workers;
+    unsigned workers, index, cache_limit, job_limit;
+    size_t span, halo, footprint, extra, automatic_jobs;
     int axis;
     if (!config || !maage_block_registry_is_finalized(config->registry) || !config->biomes ||
-        !config->biomes->finalized || config->render_distance < 1 || config->render_distance > MAAGE_WORLD_MAX_RADIUS) return NULL;
+        !config->biomes->finalized || config->render_distance < 1 ||
+        config->render_distance > MAAGE_WORLD_MAX_RADIUS) return NULL;
+    span = (size_t)config->render_distance * 2U + 3U;
+    if (span > (size_t)UINT_MAX / span) return NULL;
+    footprint = span * span;
+    if (config->cache_capacity) cache_limit = config->cache_capacity;
+    else {
+        halo = span + 2U;
+        if (halo > (size_t)UINT_MAX / halo) return NULL;
+        extra = halo * halo;
+        if (footprint > (size_t)UINT_MAX - extra) return NULL;
+        cache_limit = (unsigned)(footprint + extra);
+    }
+    workers = maage_jobs_resolve_workers(config->worker_count);
+    if ((size_t)workers > (size_t)-1 / 4U ||
+        (size_t)workers * 4U > (size_t)-1 - span * 2U) return NULL;
+    automatic_jobs = (size_t)workers * 4U + span * 2U;
+    if (automatic_jobs > cache_limit) automatic_jobs = cache_limit;
+    job_limit = config->job_capacity ? config->job_capacity : (unsigned)automatic_jobs;
+    if (!job_limit || (size_t)job_limit > (size_t)-1 / sizeof(maage_world_task) ||
+        (size_t)job_limit > (size_t)-1 / sizeof(maage_job_observation) ||
+        (size_t)job_limit > (size_t)-1 / sizeof(unsigned)) return NULL;
     world = (maage_world *)calloc(1, sizeof(*world));
     if (!world) return NULL;
-    world->config = *config;
+    world->config = *config; world->cache_limit = cache_limit; world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
     if (config->new_world) maage_generator_spawn(config->seed, config->biomes, world->spawn);
     for (axis = 0; axis < 3; ++axis)
@@ -472,21 +556,23 @@ maage_world *maage_world_create(const maage_world_config *config)
     if (!(world->spawn[1] >= 0 && world->spawn[1] < MAAGE_WORLD_LIMIT)) { free(world); return NULL; }
     world->center_x = maage_world_chunk_coordinate((int)floor(world->spawn[0]));
     world->center_z = maage_world_chunk_coordinate((int)floor(world->spawn[2]));
-    workers = maage_jobs_resolve_workers(config->worker_count);
-    /* Each resident column can own one CPU/load job and one snapshot save.
-     * Bound contexts by that actual workload, independently of pool size. */
-    world->task_limit = workers >= MAAGE_WORLD_MAX_CHUNKS ?
-        MAAGE_WORLD_MAX_CHUNKS * 2U : workers * 2U;
-    if ((size_t)world->task_limit > (size_t)-1 / sizeof(*world->tasks) ||
-        (size_t)world->task_limit > (size_t)-1 / sizeof(*world->observations)) { free(world); return NULL; }
-    world->tasks = (maage_world_task *)calloc(world->task_limit, sizeof(*world->tasks));
-    world->observations = (maage_job_observation *)malloc(world->task_limit * sizeof(*world->observations));
-    if (!world->tasks || !world->observations) { free(world->observations); free(world->tasks); free(world); return NULL; }
-    world->jobs = maage_jobs_create(workers, world->task_limit);
-    if (!world->jobs) { free(world->observations); free(world->tasks); free(world); return NULL; }
+    world->tasks = (maage_world_task *)calloc(job_limit, sizeof(*world->tasks));
+    world->observations = (maage_job_observation *)malloc((size_t)job_limit * sizeof(*world->observations));
+    world->free_tasks = (unsigned *)malloc((size_t)job_limit * sizeof(*world->free_tasks));
+    if (!world->tasks || !world->observations || !world->free_tasks) {
+        free(world->free_tasks); free(world->observations); free(world->tasks); free(world); return NULL;
+    }
+    for (index = 0; index < job_limit; ++index) world->free_tasks[index] = index;
+    world->free_count = job_limit;
+    world->jobs = maage_jobs_create(workers, job_limit);
+    if (!world->jobs) {
+        free(world->free_tasks); free(world->observations); free(world->tasks); free(world); return NULL;
+    }
+    world->rate_time = maage_time_monotonic_seconds();
     maage_jobs_snapshot(world->jobs, &stats);
-    maage_log_info("maage.world.jobs", "Detected logical CPUs=%u%s; World workers=%u; in-flight limit=%u; immutable snapshots, owner-thread commits.",
-        stats.logical_processors, stats.logical_processors ? "" : " (unknown)", stats.workers, world->task_limit);
+    maage_log_info("maage.world.jobs", "Logical CPUs=%u%s; workers=%u; job capacity=%u; cache capacity=%u; immutable commits.",
+        stats.logical_processors, stats.logical_processors ? "" : " (unknown)",
+        stats.workers, job_limit, cache_limit);
     maage_world_schedule(world);
     return world;
 }
