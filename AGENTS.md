@@ -59,8 +59,10 @@ before claiming functionality or successful platform validation.
 - Keep Launcher, Client, and Server independently buildable and versioned.
   The Client is a separate executable with Launcher-managed startup and lifetime
   independent of the Launcher; it is not an in-process Launcher library. The launcher must not use client/server implementation internals.
-  Client and server may share contracts and game definitions, not application
-  implementations. Shared infrastructure must not depend on applications.
+  Client and Server may share numeric contracts, game definitions and the same
+  portable authoritative simulation library, but never depend on each other's
+  executable or application-private implementations. Shared infrastructure must
+  not depend on applications.
 - Server simulation/networking and its headless executable must remain independent
   of client, windowing, and graphics implementations. An optional native GUI is a
   frontend to the same server library, never a second server implementation. Never
@@ -127,8 +129,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   decoding, name resolution, or per-block/per-face allocations in gameplay loops.
 - `MaaGE::World` owns portable registry, numeric chunk storage, CPU meshing and
   movement/collision contracts independently of Client, graphics and native UI.
-  Client coordinates input/camera/presentation; a future Server can consume the
-  same portable simulation without graphical dependencies.
+  Client currently coordinates input/camera/presentation and provisional local
+  simulation. Phase 7 moves authoritative World/player/gameplay ownership into a
+  reusable Server runtime shared by integrated and dedicated sessions, with no
+  graphical dependencies.
 
 ### World architecture and persistence
 
@@ -340,9 +344,13 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   now be started as an independent subprocess.
 - **Client (`src/client/`):** native windowing, rendering, audio, input, UI, world
   presentation, simulation interaction, and multiplayer connectivity. Consume shared
-  game definitions/protocols without depending on the server executable or private
-  server implementation. Integrated singleplayer may use an in-process or separate
-  server; that decision remains open. The Launcher distributes/selects independently
+  game definitions/protocols and the reusable Server simulation library without
+  depending on the server executable or its application-private implementation.
+  Phase 7 single-player uses an integrated Server inside the Client process; its
+  authoritative runtime is identical to the dedicated Server's, with in-process
+  messaging rather than mandatory TCP. The Client owns presentation, input,
+  camera, UI, audio and optional prediction, not authoritative simulation.
+  The Launcher distributes/selects independently
   versioned Client installations and starts them detached, so closing the Launcher
   never terminates the game. Client startup consumes an explicit versioned launch
   contract as gameplay develops; no standalone desktop entry or macOS app bundle.
@@ -360,8 +368,9 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   executable, macOS app bundle, or desktop entry. Headless builds/runs require no
   display server, graphics device, Vulkan, Metal, X11, Wayland, Cocoa, or GUI
   dependencies. Future GUI dependencies must load only when requested, never at
-  headless startup; simulation/networking remain independent. Do not implement the
-  administration interface until explicitly requested.
+  headless startup; simulation/networking remain independent. Phase 7 establishes
+  the shared authoritative runtime; Phase 12 adds remote multiplayer networking.
+  Do not implement the administration interface until explicitly requested.
 - **Core (`src/core/`):** reusable platform-independent foundations and shared
   contracts, without application implementation dependencies.
 
@@ -889,29 +898,43 @@ selection; metadata queries bypass both. Gameplay uses the portable persistent
 World and Metal mesh renderer. Dedicated Server builds/registry/process management are a separate
 future Launcher milestone; software versions do not define protocol compatibility.
 
-## Conceptual development sequence
+## Development roadmap
 
-Phases may overlap; this is a roadmap, not a schedule or authorization for later work.
-The workspace foundation exists; phase labels do not certify completion or validation.
+`docs/development-roadmap.md` is the authoritative detailed roadmap; these
+milestones summarize sequence and permanent architectural decisions, not current
+feature completeness or authorization to start a phase.
 
-0. **Workspace Foundation:** CMake, independent targets, C90, platform configuration,
-   manual GitHub Actions build validation, documentation.
-1. **Portable Core:** allocation/memory, logging, error handling, basic containers,
-   filesystem/timing abstractions, module lifecycle.
-2. **Native Platform Layer:** Win32, X11, Wayland, Cocoa/AppKit, window events, input.
-3. **Graphics Foundation:** backend-independent API, Vulkan, native Metal, Null,
-   shader pipeline, basic rendering validation.
-4. **Voxel Engine:** block registries, chunks, world storage, meshing, terrain
-   generation, persistence, streaming.
-5. **Gameplay:** simulation, entities, physics, player controls, inventory,
-   interactions, survival/creative foundations.
-6. **Client/Server Integration:** networking, dedicated-server simulation, client
-   synchronization, singleplayer integration, multiplayer compatibility.
-7. **Modpack Platform:** manifests, resource composition, native modules, game rules,
-   dependency management, optional scripting.
-8. **Launcher and Distribution:** profiles/installations, Microsoft authentication,
-   authorized asset acquisition, ownership verification, modpack management,
-   updates/distribution.
+- **Historical Phases 1–5:** Initial Voxel Client; World Generation & Chunk
+  Streaming (2); Multithreaded Architecture (2.5); Client UI Foundation (2.75);
+  Player Interaction & Core Gameplay (3); Instance Storage & Shared Folder Mapping
+  (3.5); World Simulation & Environmental Systems (4); Client Resilience &
+  Operation Status (4.5); Universal Operation Status & Execution Tracing (5).
+  Preserve the completion record and limitations documented for each milestone.
+- **Phase 6 — Audio Engine & Soundscape (next):** portable audio backend, event
+  registry, sounds/music, positional playback and volume settings.
+- **Phase 7 — Authoritative Simulation & Integrated Server:** one reusable Server
+  runtime hosts single-player in the Client process and dedicated headless play;
+  Server owns fixed 20 TPS world/player/gameplay simulation and persistence.
+- **Phase 8 — Client GUI & Menu Completion:** title/world selection and management,
+  creation/loading, Options, inventory and navigable gameplay workflows.
+- **Phase 9 — Visual Fidelity & Game Feel:** consistent 1.7.10-inspired rendering,
+  animations, feedback, movement/camera presentation and performance polish.
+- **Phase 10 — Core Gameplay Completion:** Server-authoritative entities, mobs,
+  combat, crafting, survival and progression foundations.
+- **Phase 11 — Advanced Gameplay Systems:** Server-authoritative redstone,
+  block entities, enchanting, dimensions, portals, bosses and remaining mechanics.
+- **Phase 12 — Networking & Multiplayer:** versioned remote protocol, replication,
+  synchronization, connected players and dedicated hosting administration.
+
+**Server architecture and multiplayer networking are separate milestones.**
+Build the integrated/dedicated authoritative simulation boundary in Phase 7, not
+Phase 12. All gameplay added after Phase 7 must use that same Server authority
+from the start; never implement separate single-player and multiplayer gameplay.
+Preserve independent Launcher/Client/Server applications, numeric identities,
+portable shared systems, instance ownership, Jobs, Status, and renderer abstractions.
+Completion requires observable player-facing behavior, not infrastructure alone.
+Address existing defects as defects; do not defer them solely because a later
+polish phase exists. Follow the permanent BUILD-BUT-DO-NOT-TEST policy.
 
 ## Documentation and persistent context
 

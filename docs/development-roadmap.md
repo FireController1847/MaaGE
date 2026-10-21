@@ -1,10 +1,25 @@
 # MaaGE Gameplay Roadmap
 
-Minecraft: Java Edition **1.7.10** is the reference. Client **0.1.0-alpha.6**
-implements the Phase 1 foundation, Phase 2 world milestone and Phase 2.5
-multithreaded architecture, Phase 2.75 UI, Phase 3 gameplay, Phase 3.5 instance storage
-and the Phase 4 environment foundation below. Compilation does not establish
-runtime correctness or vanilla fidelity. Phases 5–6 remain future work.
+Minecraft: Java Edition **1.7.10** is the gameplay and fidelity reference.
+Phases 1–5, including milestones 2.5, 2.75, 3.5 and 4.5, record implemented
+foundations and their limitations below; preserve their historical completion and
+validation notes. Compilation does not establish runtime correctness or vanilla
+fidelity. Phase 6 is the next planned development milestone.
+
+**Permanent boundary:** Server architecture and multiplayer networking are
+separate milestones. Phase 7 establishes a single authoritative Server runtime
+shared by integrated single-player and dedicated headless hosting; Phase 12
+extends it to remote multiplayer. All gameplay introduced after Phase 7 must be
+Server-authoritative from the outset. Never create separate single-player and
+multiplayer gameplay implementations. Preserve the independently buildable
+Client, Server and Launcher and the portable shared libraries, numeric registries,
+Operation Status, concurrency, instance ownership and rendering abstractions.
+
+**Completion standard:** Each future phase requires observable behavior, not
+merely compiling new infrastructure. Preserve existing functionality throughout
+development, and fix known defects on their merits rather than automatically
+deferring them as future polish. This document records scope and objectives; it
+does not authorize implementing a phase.
 
 ## Phase 1 — Initial Voxel Client
 
@@ -626,15 +641,143 @@ macOS ARM64 Debug/Release Client, Launcher and Server builds and the separate
 headless Release World/Server build passed. No applications, tests, benchmarks,
 runtime/visual validation or GitHub Actions were executed.
 
-## Phase 6 — Full Gameplay Systems
+## Phase 6 — Audio Engine & Soundscape
 
-Planned: entities/mobs, AI, combat, crafting/furnaces, redstone, enchanting,
-Nether/End, progression and faithful Minecraft 1.7.10 mechanics.
+**Next phase; highest immediate priority.** Add a native cross-platform audio
+foundation without coupling audio devices or playback to rendering or authoritative
+gameplay simulation.
 
-## Phase 7 — Client/Server Architecture & Multiplayer
+- Abstract audio backends and load/play sound resources, including the Minecraft
+  1.7.10 sound assets and their mappings.
+- Register sounds as numeric events, resolving resource names at setup/registration
+  boundaries rather than inside gameplay loops. A future Server must be able to
+  emit numeric sound-event notifications without an audio device or Client internals.
+- Play appropriate footsteps by block material; breaking, placement, player and
+  inventory interaction sounds; environmental and ambient sounds; and rain,
+  thunder, water and lava audio.
+- Add background music with appropriate playback scheduling, volume categories
+  and per-instance persistent settings, and positional audio where applicable.
+- Handle missing or invalid audio assets without crashing; report failures through
+  the existing Operation Status contract and retain usable playback.
 
-Planned: authoritative dedicated Server simulation, a versioned network protocol,
-compatibility rules, multiplayer, player/world synchronization and Launcher server
-hosting integration. Portable world/simulation stays independent of graphical
-Client ownership. Optional Server administration UI will be a frontend over the
-same simulation, rather than a second implementation.
+**Observable completion:** Ordinary gameplay audibly responds with the correct
+events, ambience, weather and music; users can control volumes, and unavailable
+sounds degrade gracefully. Merely linking an audio library is insufficient.
+
+## Phase 7 — Authoritative Simulation & Integrated Server
+
+**Critical architecture milestone, immediately after audio.** Establish one
+reusable authoritative Server simulation implementation before adding major
+new gameplay systems.
+
+- Run that runtime in-process as an integrated Server for Client single-player,
+  and through the independent headless dedicated Server executable. These
+  entry points must not contain divergent gameplay implementations.
+- Transfer authority for worlds, players, simulation and gameplay out of Client
+  presentation orchestration. The Server owns ordered fixed **20 TPS** simulation,
+  lifecycle and world persistence for both modes.
+- Share numeric commands, events and state contracts with explicit ownership.
+  Use an in-process local communication abstraction for integrated play; do not
+  require TCP for single-player.
+- Keep Client responsibility for input, UI, camera, rendering, audio and justified
+  local presentation/prediction; the Client must not decide authoritative world
+  or player outcomes.
+- Preserve bounded Jobs/concurrency ownership, immutable worker handoffs and
+  safe simulation scheduling. Propagate Operation Status and causal tracing
+  across simulation boundaries.
+- Prepare transport-independent contracts for later remote connectivity, but
+  **do not implement full multiplayer or its network protocol in this phase**.
+
+**Observable completion:** Single-player actions pass through the integrated
+authoritative Server, while the dedicated Server hosts the same simulation
+headlessly, without Client windowing, rendering or GUI dependencies. Launching a
+Server executable without moving actual gameplay authority does not qualify.
+
+## Phase 8 — Client GUI & Menu Completion
+
+Build upon Phase 2.75's existing numeric screen registration, GUI primitives and
+screen stack; do not introduce a parallel UI/navigation system.
+
+- Add the main/title screen, single-player world selection, world creation and
+  management, and loading/progress screens.
+- Complete Options, including sound, video and controls, and finish the pause menu.
+- Improve inventory and Creative interfaces, logical GUI scaling, focus and input
+  routing, and correct Back/Escape navigation.
+- Give screens a coherent Minecraft 1.7.10-inspired appearance and predictable
+  navigation without disrupting loading, gameplay or existing settings.
+
+**Observable completion:** From Client startup, a player can choose or create a
+world, enter gameplay, adjust options, pause, and return through the menus
+without command-line world-selection arguments. Rendered buttons alone are
+not sufficient.
+
+## Phase 9 — Visual Fidelity & Game Feel
+
+Dedicate a milestone to consistent, performant gameplay presentation, using
+Minecraft Java Edition 1.7.10 as the visual and mechanical reference while
+preserving MaaGE's replaceable rendering architecture.
+
+- Improve lighting fidelity, ambient occlusion, block rendering, foliage
+  geometry/opacity, and water/lava appearance.
+- Refine the sky, clouds, sun, moon, weather, particles and animations.
+- Correct block breaking/placement feedback, held-item presentation, UI visual
+  consistency, movement/camera feel and other presentation artifacts.
+- Fix visible rendering bugs and inconsistencies with performance-conscious
+  changes; preserve existing input and simulation semantics.
+
+**Observable completion:** Typical movement and gameplay scenes look and feel
+substantially closer to the intended 1.7.10 experience without major inconsistent
+effects or visual regressions. Correct texture sampling alone is insufficient.
+
+## Phase 10 — Core Gameplay Completion
+
+Build a coherent Survival gameplay loop through Phase 7's **authoritative Server
+runtime**, not Client-owned special cases.
+
+- Add entity foundations, passive and hostile mobs, spawning/despawning, AI
+  behavior and navigation.
+- Implement combat, damage, drops/pickups, crafting and recipes, furnaces and
+  smelting.
+- Complete survival rules, equipment, durability, experience and progression
+  foundations with the intended 1.7.10 behaviors.
+
+**Observable completion:** Players can engage with mobs, gather and process
+resources, craft equipment and experience meaningful survival progression through
+the same integrated/dedicated simulation.
+
+## Phase 11 — Advanced Gameplay Systems
+
+Expand the shared authoritative simulation to cover advanced Minecraft 1.7.10
+mechanics, using stable numeric identities and deterministic updates where required.
+
+- Add redstone propagation and update rules, pistons, repeaters, comparators and
+  related mechanisms; support advanced block entities.
+- Add enchanting, advanced equipment, Nether and End dimensions, portals and
+  dimension travel.
+- Implement advanced structures, progression, bosses/endgame systems and
+  remaining significant 1.7.10 mechanics and behavioral quirks.
+- Parallelize independent workloads only where safe for simulation ordering
+  and reproducibility.
+
+**Observable completion:** Advanced mechanisms, dimension travel and endgame
+progression work as integrated, persistent gameplay rather than isolated
+infrastructure or Client-only demonstrations.
+
+## Phase 12 — Networking & Multiplayer
+
+Extend Phase 7's existing integrated/dedicated Server implementation to support
+remote players; do not create a second gameplay engine.
+
+- Introduce a versioned Client/Server network protocol with compatibility
+  negotiation **independent of application SemVer**, plus remote transports.
+- Support multiple connected players; replicate chunks, entities and shared
+  world/player state, with input sequencing, prediction and reconciliation.
+- Handle connection lifecycle, recovery, synchronization, multiplayer performance
+  and safe concurrent Server scheduling.
+- Complete dedicated Server configuration/administration and Launcher Server
+  management/local hosting workflows while preserving a fully headless runtime.
+
+**Observable completion:** Multiple remote Clients can play together with
+consistent world and player state using the exact simulation already employed
+for single-player. Compatibility and remote transport are additions to Phase 7,
+not substitutes for its integrated authority boundary.
