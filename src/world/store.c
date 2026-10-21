@@ -1015,6 +1015,7 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     const char *name;
     unsigned long mask = 0;
     size_t i, section, j, count = 0, unique = 0, biome_count = 0, cells = 0;
+    size_t capacity = 800UL + 8UL + 4UL;
     int result;
     if (!store || !chunk || !blocks || !biomes ||
         !maage_store_chunk_path(store, chunk->x, chunk->z, path))
@@ -1050,12 +1051,27 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
     for (i = 0; i < 256; ++i)
         if (!biome_count || biome_ids[i] != biome_ids[biome_count - 1])
             biome_ids[biome_count++] = biome_ids[i];
-    encoded = (unsigned char *)malloc(MAAGE_STORE_CHUNK_MAX);
+    /* Size this save from actual palette names and occupied sections. */
+    capacity += cells * 3UL;
+    for (i = 0; i < unique; ++i) {
+        definition = maage_block_registry_state(blocks, states[i]);
+        name = definition ? maage_block_registry_block_name(blocks, definition->block_id) : NULL;
+        if (!name || !strlen(name) || strlen(name) > 255 ||
+            (unsigned long)definition->metadata > MAAGE_STORE_WORD) goto incompatible;
+        capacity += strlen(name) + 5UL;
+    }
+    for (i = 0; i < biome_count; ++i) {
+        name = maage_biome_registry_name(biomes, biome_ids[i]);
+        if (!name || !strlen(name) || strlen(name) > 255) goto incompatible;
+        capacity += strlen(name) + 1UL;
+    }
+    if (capacity > MAAGE_STORE_CHUNK_MAX) goto incompatible;
+    encoded = (unsigned char *)malloc(capacity);
     bytes.data = encoded;
     if (!bytes.data) {
         free(states); return maage_store_error(error, "Not enough memory to encode a chunk.");
     }
-    bytes.length = MAAGE_STORE_CHUNK_MAX; bytes.position = 0; bytes.failed = 0;
+    bytes.length = capacity; bytes.position = 0; bytes.failed = 0;
     maage_store_text_put(&bytes, "MGCHNK2\0", 8);
     maage_store_put(&bytes, MAAGE_WORLD_FORMAT_VERSION, 4);
     maage_store_put(&bytes, MAAGE_WORLD_GENERATOR_VERSION, 4);
@@ -1096,7 +1112,8 @@ int maage_world_store_save_chunk(maage_world_store *store, const maage_chunk *ch
             maage_store_put(&bytes, chunk->sections[section]->light[i], 1);
     }
     maage_store_checksum_put(&bytes);
-    result = !bytes.failed && maage_store_write(path, bytes.data, bytes.position, error);
+    result = !bytes.failed && bytes.position == capacity &&
+        maage_store_write(path, bytes.data, bytes.position, error);
     free(encoded); free(states);
     return result ? 1 : maage_store_error(error, "Chunk save failed; the previous file was preserved.");
 incompatible:
