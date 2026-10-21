@@ -3,9 +3,41 @@
 
 #include <math.h>
 
-#define MAAGE_GENERATION_SEA_Y 63
+#define MAAGE_GENERATION_V1_SEA_Y 63
+#define MAAGE_GENERATION_V1_SPAWN_RADIUS 4096
+#define MAAGE_GENERATION_V1_SPAWN_STEP 16
 #define MAAGE_GENERATION_WORD_MASK 4294967295UL
 #define MAAGE_GENERATION_BIOME_SCALE 128
+
+int maage_generation_policy_default(unsigned long generator_version,
+    maage_generation_policy *policy)
+{
+    if (!policy || (generator_version != MAAGE_WORLD_GENERATOR_VERSION &&
+        generator_version != MAAGE_GENERATION_CONFIGURABLE_VERSION)) return 0;
+    policy->schema_version = MAAGE_GENERATION_POLICY_SCHEMA;
+    policy->generator_version = generator_version;
+    policy->sea_level = MAAGE_GENERATION_V1_SEA_Y;
+    policy->spawn_search_radius = MAAGE_GENERATION_V1_SPAWN_RADIUS;
+    policy->spawn_search_step = MAAGE_GENERATION_V1_SPAWN_STEP;
+    return 1;
+}
+
+int maage_generation_policy_valid(const maage_generation_policy *policy)
+{
+    if (!policy || policy->schema_version != MAAGE_GENERATION_POLICY_SCHEMA ||
+        (policy->generator_version != MAAGE_WORLD_GENERATOR_VERSION &&
+         policy->generator_version != MAAGE_GENERATION_CONFIGURABLE_VERSION) ||
+        policy->sea_level < 1 || policy->sea_level >= MAAGE_WORLD_HEIGHT - 1 ||
+        policy->spawn_search_radius < 0 ||
+        policy->spawn_search_radius >= MAAGE_WORLD_LIMIT ||
+        policy->spawn_search_step < 1 ||
+        policy->spawn_search_step >= MAAGE_WORLD_LIMIT) return 0;
+    if (policy->generator_version == MAAGE_WORLD_GENERATOR_VERSION &&
+        (policy->sea_level != MAAGE_GENERATION_V1_SEA_Y ||
+         policy->spawn_search_radius != MAAGE_GENERATION_V1_SPAWN_RADIUS ||
+         policy->spawn_search_step != MAAGE_GENERATION_V1_SPAWN_STEP)) return 0;
+    return 1;
+}
 
 /* Original version-1 approximation of classic gradient-noise terrain: this is
  * neither Java Random nor vanilla's GenLayer/density generator. All randomness
@@ -170,16 +202,17 @@ static int maage_generation_column_at(maage_world_seed seed,
     return 1;
 }
 
-int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
+int maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
-    const maage_job_token *token)
+    const maage_generation_policy *policy, const maage_job_token *token)
 {
     const maage_biome_definition *biome;
     maage_generation_column column;
     maage_block_state_id state;
     unsigned long random;
     int x, z, y, wx, wz, top, depth;
-    if (chunk == NULL || !maage_block_registry_is_finalized(blocks) ||
+    if (!maage_generation_policy_valid(policy) || chunk == NULL ||
+        !maage_block_registry_is_finalized(blocks) ||
         biomes == NULL || !biomes->finalized ||
         chunk->x < -MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE ||
         chunk->x >= MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE ||
@@ -193,8 +226,8 @@ int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
             if (!maage_generation_column_at(seed, biomes, wx, wz, &column)) return 0;
             biome = maage_biome_registry_get(biomes, column.biome);
             chunk->biomes[z * MAAGE_CHUNK_EDGE + x] = column.biome;
-            top = column.height > MAAGE_GENERATION_SEA_Y ?
-                column.height : MAAGE_GENERATION_SEA_Y;
+            top = column.height > policy->sea_level ?
+                column.height : policy->sea_level;
             random = maage_generation_hash(seed, wx, wz, 700UL);
             depth = 3 + (int)((random >> 5) & 1UL);
             for (y = 0; y <= top; ++y) {
@@ -204,7 +237,7 @@ int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
                     state = MAAGE_STATE_BEDROCK;
                 else if (y == column.height) {
                     state = biome->surface;
-                    if (column.height < MAAGE_GENERATION_SEA_Y - 1 &&
+                    if (column.height < policy->sea_level - 1 &&
                         column.biome != MAAGE_BIOME_DESERT) state = MAAGE_STATE_GRAVEL;
                 } else if (y >= column.height - depth) state = biome->filler;
                 else if (column.biome == MAAGE_BIOME_DESERT &&
@@ -219,46 +252,81 @@ int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
     return 1;
 }
 
+int maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    const maage_job_token *token)
+{
+    maage_generation_policy policy;
+    maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &policy);
+    return maage_generate_chunk_job_policy(chunk, seed, blocks, biomes, &policy, token);
+}
+
+int maage_generate_chunk_policy(maage_chunk *chunk, maage_world_seed seed,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    const maage_generation_policy *policy)
+{
+    return maage_generate_chunk_job_policy(chunk, seed, blocks, biomes, policy, NULL);
+}
+
 int maage_generate_chunk(maage_chunk *chunk, maage_world_seed seed,
     const maage_block_registry *blocks, const maage_biome_registry *biomes)
 {
     return maage_generate_chunk_job(chunk, seed, blocks, biomes, NULL);
 }
 
-void maage_generator_spawn(maage_world_seed seed,
-    const maage_biome_registry *biomes, double feet[3])
+int maage_generator_spawn_policy(maage_world_seed seed,
+    const maage_biome_registry *biomes, const maage_generation_policy *policy,
+    double feet[3])
 {
     maage_generation_column column;
     int radius, side, offset, x, z, best_height, best_x, best_z;
-    if (feet == NULL) return;
+    if (!feet || !biomes || !biomes->finalized ||
+        !maage_generation_policy_valid(policy)) return 0;
     best_height = -1;
     best_x = best_z = 0;
-    /* Deterministic surface sampling, not column generation. Prefer dry land
-     * in a bounded spiral; no state is shared with asynchronous chunk workers. */
-    for (radius = 0; radius <= 4096; radius += 16) {
+    /* Deterministic bounded spiral of surface samples. A finite fallback
+     * selects the highest sampled position, or sea level at the origin. */
+    radius = 0;
+    for (;;) {
         for (side = 0; side < (radius == 0 ? 1 : 4); ++side) {
-            for (offset = -radius; offset <= radius; offset += 16) {
+            offset = -radius;
+            for (;;) {
                 x = side < 2 ? offset : (side == 2 ? -radius : radius);
                 z = side < 2 ? (side == 0 ? -radius : radius) : offset;
-                if (!maage_generation_column_at(seed, biomes, x, z, &column))
-                    continue;
-                if (column.height > best_height) {
-                    best_height = column.height;
-                    best_x = x;
-                    best_z = z;
+                if (maage_generation_column_at(seed, biomes, x, z, &column)) {
+                    if (column.height > best_height) {
+                        best_height = column.height;
+                        best_x = x;
+                        best_z = z;
+                    }
+                    if (column.height > policy->sea_level &&
+                        column.biome != MAAGE_BIOME_OCEAN) {
+                        feet[0] = x + 0.5;
+                        feet[1] = column.height + 1.0;
+                        feet[2] = z + 0.5;
+                        return 1;
+                    }
                 }
-                if (column.height > MAAGE_GENERATION_SEA_Y &&
-                    column.biome != MAAGE_BIOME_OCEAN) {
-                    feet[0] = x + 0.5;
-                    feet[1] = column.height + 1.0;
-                    feet[2] = z + 0.5;
-                    return;
-                }
+                if (offset > radius - policy->spawn_search_step) break;
+                offset += policy->spawn_search_step;
             }
         }
+        if (radius >= policy->spawn_search_radius) break;
+        if (radius > policy->spawn_search_radius - policy->spawn_search_step)
+            radius = policy->spawn_search_radius;
+        else radius += policy->spawn_search_step;
     }
     feet[0] = best_x + 0.5;
-    feet[1] = (best_height > MAAGE_GENERATION_SEA_Y ?
-        best_height : MAAGE_GENERATION_SEA_Y) + 1.0;
+    feet[1] = (best_height > policy->sea_level ?
+        best_height : policy->sea_level) + 1.0;
     feet[2] = best_z + 0.5;
+    return 1;
+}
+
+void maage_generator_spawn(maage_world_seed seed,
+    const maage_biome_registry *biomes, double feet[3])
+{
+    maage_generation_policy policy;
+    maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &policy);
+    maage_generator_spawn_policy(seed, biomes, &policy, feet);
 }
