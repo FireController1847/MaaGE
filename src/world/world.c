@@ -1,11 +1,12 @@
 #include "world_internal.h"
 #include "maage/world_store.h"
 #include "maage/log.h"
+#include "maage/time.h"
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MAAGE_CHUNK_BUCKETS 2048
 #define MAAGE_JOB_LOAD 1
 #define MAAGE_JOB_GENERATE 2
 #define MAAGE_JOB_LIGHT 3
@@ -47,12 +48,17 @@ typedef struct maage_chunk_bucket { maage_world_slot *slot; } maage_chunk_bucket
 struct maage_world {
     maage_world_config config;
     maage_jobs *jobs;
-    maage_chunk_bucket buckets[MAAGE_CHUNK_BUCKETS];
+    maage_chunk_bucket *buckets;
+    size_t bucket_count;
     maage_world_slot *chunks;
     maage_world_task *tasks;
     maage_job_observation *observations;
-    unsigned count, active, task_limit;
-    unsigned long clock;
+    unsigned *free_tasks;
+    unsigned count, cache_limit, active, saves_active, free_count, task_limit;
+    unsigned scan_step;
+    int scan_ring;
+    unsigned long clock, rate_generated;
+    double rate_time, generation_rate;
     int center_x, center_z, stopped, failed;
     double yaw, spawn[3];
     maage_world_stats stats;
@@ -73,52 +79,78 @@ static void maage_world_release(maage_chunk_snapshot *snapshot)
 {
     if (snapshot && !--snapshot->references) { maage_chunk_destroy(snapshot->chunk); free(snapshot); }
 }
-static size_t maage_world_bucket(int x, int z)
+static size_t maage_world_bucket(int x, int z, size_t count)
 {
     unsigned long hash = (unsigned long)x * 0x8da6b343UL ^ (unsigned long)z * 0xd8163841UL;
     hash ^= hash >> 16;
-    return (size_t)(hash & (MAAGE_CHUNK_BUCKETS - 1));
+    return (size_t)hash & (count - 1);
 }
-/* Integer-keyed open addressing: expected O(1), owner thread only. */
+/* Open-addressed owner-only map. Rehash before occupancy reaches one half;
+ * both allocation and bucket count grow with actual resident membership. */
+static int maage_world_grow_buckets(maage_world *world)
+{
+    maage_chunk_bucket *buckets;
+    maage_world_slot *slot;
+    size_t count, bucket;
+    if (world->bucket_count && (size_t)world->count < world->bucket_count / 2) return 1;
+    if (world->bucket_count > (size_t)-1 / 2) return 0;
+    count = world->bucket_count ? world->bucket_count * 2 : 16;
+    if (count > (size_t)-1 / sizeof(*buckets)) return 0;
+    buckets = (maage_chunk_bucket *)calloc(count, sizeof(*buckets));
+    if (!buckets) return 0;
+    for (slot = world->chunks; slot; slot = slot->next) {
+        bucket = maage_world_bucket(slot->x, slot->z, count);
+        while (buckets[bucket].slot) bucket = (bucket + 1) & (count - 1);
+        buckets[bucket].slot = slot;
+    }
+    free(world->buckets);
+    world->buckets = buckets; world->bucket_count = count;
+    return 1;
+}
 static maage_world_slot *maage_world_find(const maage_world *world, int x, int z)
 {
-    size_t bucket = maage_world_bucket(x, z), probes;
+    size_t bucket, probes;
     maage_world_slot *slot;
-    for (probes = 0; probes < MAAGE_CHUNK_BUCKETS; ++probes) {
+    if (!world->bucket_count) return NULL;
+    bucket = maage_world_bucket(x, z, world->bucket_count);
+    for (probes = 0; probes < world->bucket_count; ++probes) {
         slot = world->buckets[bucket].slot;
         if (!slot || (slot->x == x && slot->z == z)) return slot;
-        bucket = (bucket + 1) & (MAAGE_CHUNK_BUCKETS - 1);
+        bucket = (bucket + 1) & (world->bucket_count - 1);
     }
     return NULL;
 }
 static maage_world_slot *maage_world_insert(maage_world *world, int x, int z)
 {
     maage_world_slot *slot;
-    size_t bucket = maage_world_bucket(x, z);
-    if (world->count >= MAAGE_WORLD_MAX_CHUNKS) return NULL;
+    size_t bucket;
+    if (world->count >= world->cache_limit) return NULL;
+    if (!maage_world_grow_buckets(world)) {
+        world->failed = 1; return NULL;
+    }
     slot = (maage_world_slot *)calloc(1, sizeof(*slot));
     if (!slot) { world->failed = 1; return NULL; }
     slot->x = x; slot->z = z; slot->stage = MAAGE_JOB_LOAD;
     slot->incarnation = slot->revision = maage_world_revision(world);
-    while (world->buckets[bucket].slot) bucket = (bucket + 1) & (MAAGE_CHUNK_BUCKETS - 1);
+    bucket = maage_world_bucket(x, z, world->bucket_count);
+    while (world->buckets[bucket].slot) bucket = (bucket + 1) & (world->bucket_count - 1);
     world->buckets[bucket].slot = slot;
     slot->next = world->chunks; world->chunks = slot; ++world->count;
     return slot;
 }
 static void maage_world_remove(maage_world *world, maage_world_slot *slot)
 {
-    size_t bucket = maage_world_bucket(slot->x, slot->z), destination;
+    size_t bucket = maage_world_bucket(slot->x, slot->z, world->bucket_count), destination;
     maage_world_slot *displaced, **link = &world->chunks;
-    while (world->buckets[bucket].slot != slot) bucket = (bucket + 1) & (MAAGE_CHUNK_BUCKETS - 1);
+    while (world->buckets[bucket].slot != slot) bucket = (bucket + 1) & (world->bucket_count - 1);
     world->buckets[bucket].slot = NULL;
-    bucket = (bucket + 1) & (MAAGE_CHUNK_BUCKETS - 1);
-    /* Repair probe clusters instead of accumulating tombstones on long trips. */
+    bucket = (bucket + 1) & (world->bucket_count - 1);
     while (world->buckets[bucket].slot) {
         displaced = world->buckets[bucket].slot; world->buckets[bucket].slot = NULL;
-        destination = maage_world_bucket(displaced->x, displaced->z);
-        while (world->buckets[destination].slot) destination = (destination + 1) & (MAAGE_CHUNK_BUCKETS - 1);
+        destination = maage_world_bucket(displaced->x, displaced->z, world->bucket_count);
+        while (world->buckets[destination].slot) destination = (destination + 1) & (world->bucket_count - 1);
         world->buckets[destination].slot = displaced;
-        bucket = (bucket + 1) & (MAAGE_CHUNK_BUCKETS - 1);
+        bucket = (bucket + 1) & (world->bucket_count - 1);
     }
     while (*link != slot) link = &(*link)->next;
     *link = slot->next; --world->count;
