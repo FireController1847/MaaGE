@@ -4,6 +4,7 @@
 #include "maage/geometry.h"
 #include "maage/seed.h"
 #include "maage/biome.h"
+#include "maage/status.h"
 #include <limits.h>
 /* The column/save domain needs 8-bit bytes, signed coordinates through 30M,
  * and allocations larger than 64 KiB. Narrower targets can still build Core. */
@@ -102,6 +103,9 @@ typedef struct maage_world_stats {
     double generated_columns_per_second;
     double scheduling_latency_ms;
     int failed;
+    maage_status last_result;
+    maage_status last_job_result; /* Includes expected NOT_FOUND, cancellation and stale results. */
+    unsigned long failure_reports; /* Owner failures; cancellation/staleness excluded. */
 } maage_world_stats;
 typedef struct maage_world_observation {
     maage_biome_id biome_id;
@@ -148,6 +152,9 @@ void maage_world_stream(maage_world *world, double x, double z, double yaw);
 void maage_world_tick(maage_world *world);
 /* Cheap owner status; full diagnostic snapshots may be sampled less often. */
 int maage_world_failed(const maage_world *world);
+/* Latest important owner-observed failure, retained across successful jobs.
+ * SUCCESS before any failure; no global last-error state. */
+maage_status maage_world_status(const maage_world *world);
 void maage_world_get_stats(maage_world *world, maage_world_stats *stats);
 /* Owner-thread read-only diagnostics of published numeric column data. Returns
  * zero for an unavailable column or out-of-world coordinates. Biome zero is a

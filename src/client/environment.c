@@ -24,6 +24,9 @@ struct maage_client_environment {
     maage_render_ui_vertex sky_vertices[8], weather_vertices[MAAGE_ENVIRONMENT_QUADS * 4];
     unsigned int sky_indices[12], weather_indices[MAAGE_ENVIRONMENT_QUADS * 6];
     maage_render_ui_data sky, weather;
+    maage_status load_status;
+    unsigned int failed_resources;
+    unsigned char available[4];
 };
 static void maage_client_environment_quad(maage_render_ui_data *batch, float x, float y,
     float width, float height, float u, float v, float uv_width, float uv_height, float alpha)
@@ -43,17 +46,24 @@ static void maage_client_environment_quad(maage_render_ui_data *batch, float x, 
     for (corner = 0; corner < 6; ++corner) indices[batch->index_count + corner] = (unsigned int)first + order[corner];
     batch->vertex_count += 4; batch->index_count += 6;
 }
-maage_client_environment *maage_client_environment_create(maage_renderer *renderer,
-    const char *application_data)
+maage_client_environment *maage_client_environment_create_status(maage_renderer *renderer,
+    const char *application_data, maage_status *result)
 {
     const maage_client_environment_resource *resource;
     maage_client_environment *view;
     maage_image atlas, source;
     maage_pixel_buffer pixels;
     char name[128], path[MAAGE_PATH_CAPACITY];
+    maage_status status;
+    maage_render_result uploaded;
     int i, y, ok = 0;
+    if (!result) return NULL;
+    *result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!renderer) return NULL;
+    *result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     view = (maage_client_environment *)calloc(1, sizeof(*view));
     if (!view) return NULL;
+    view->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     memset(&atlas, 0, sizeof(atlas)); memset(&source, 0, sizeof(source));
     atlas.width = atlas.height = 256; atlas.stride = 1024;
     atlas.pixels = (unsigned char *)calloc(256, atlas.stride);
@@ -61,16 +71,18 @@ maage_client_environment *maage_client_environment_create(maage_renderer *render
     for (i = 0; i < 4; ++i) {
         resource = &maage_client_environment_resources[i];
         strcpy(name, "minecraft/textures/environment/"); strcat(name, resource->name); strcat(name, ".png");
-        if (!maage_minecraft_asset_path(application_data, name, path, sizeof(path))) {
-            maage_log_error("maage.client.environment", "Cannot resolve environmental resource path: %s.", name); goto done;
+        status = maage_minecraft_asset_path_status(application_data, name, path, sizeof(path));
+        if (!maage_status_failed(status)) status = maage_image_load_png_status(path, &source);
+        if (!maage_status_failed(status) && (source.width != resource->width || source.height != resource->height))
+            status = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
+        if (maage_status_failed(status)) {
+            if (!view->failed_resources) view->load_status = status;
+            ++view->failed_resources;
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.environment", status, "%s; omitting this optional visual.", name);
+            maage_image_destroy(&source);
+            continue;
         }
-        if (!maage_image_load_png(path, &source)) {
-            maage_log_error("maage.client.environment", "Missing or unreadable environmental PNG: %s.", path); goto done;
-        }
-        if (source.width != resource->width || source.height != resource->height) {
-            maage_log_error("maage.client.environment", "Unexpected dimensions for %s: %dx%d; expected %dx%d.",
-                name, source.width, source.height, resource->width, resource->height); goto done;
-        }
+        view->available[i] = 1;
         for (y = 0; y < source.height; ++y)
             memcpy(atlas.pixels + (size_t)(resource->y + y) * atlas.stride + (size_t)resource->x * 4,
                 source.pixels + (size_t)y * source.stride, (size_t)source.width * 4);
@@ -78,7 +90,9 @@ maage_client_environment *maage_client_environment_create(maage_renderer *render
     }
     memset(atlas.pixels + 255 * atlas.stride + 127 * 4, 255, 4);
     pixels.width = atlas.width; pixels.height = atlas.height; pixels.stride = atlas.stride; pixels.pixels = atlas.pixels;
-    if (maage_renderer_create_texture(renderer, &pixels, &view->texture) != MAAGE_RENDER_OK) goto done;
+    uploaded = maage_renderer_create_texture(renderer, &pixels, &view->texture);
+    *result = maage_render_operation_status(uploaded, MAAGE_OPERATION_UPLOAD);
+    if (uploaded != MAAGE_RENDER_OK) goto done;
     view->renderer = renderer;
     view->sky.texture = view->weather.texture = view->texture;
     view->sky.vertices = view->sky_vertices; view->sky.indices = view->sky_indices;
@@ -88,6 +102,19 @@ done:
     maage_image_destroy(&source); maage_image_destroy(&atlas);
     if (!ok) { maage_client_environment_destroy(view); return NULL; }
     return view;
+}
+maage_client_environment *maage_client_environment_create(maage_renderer *renderer,
+    const char *application_data)
+{
+    maage_status result;
+    return maage_client_environment_create_status(renderer, application_data, &result);
+}
+maage_status maage_client_environment_resource_status(const maage_client_environment *view,
+    unsigned int *failed_resources)
+{
+    if (failed_resources) *failed_resources = view ? view->failed_resources : 0;
+    return view ? view->load_status : maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
 }
 void maage_client_environment_destroy(maage_client_environment *view)
 {
@@ -141,9 +168,9 @@ maage_render_result maage_client_environment_update(maage_client_environment *vi
     angle = (double)state->day_tick / MAAGE_WORLD_DAY_TICKS * 6.283185307179586;
     sun[0] = cos(angle); sun[1] = sin(angle); sun[2] = 0;
     focal = height * 0.5f / (float)tan(vertical_fov * 0.5);
-    maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 0, 0, (float)(1 - rain));
+    if (view->available[0]) maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 0, 0, (float)(1 - rain));
     for (i = 0; i < 3; ++i) sun[i] = -sun[i];
-    maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 1,
+    if (view->available[1]) maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 1,
         (unsigned int)(state->day_low & 7), (float)(1 - rain));
     if (maage_world_observe(world, (int)floor(player->position[0]),
         (int)floor(player->position[1] + MAAGE_PLAYER_EYE_HEIGHT), (int)floor(player->position[2]), &observation)) {
@@ -151,7 +178,7 @@ maage_render_result maage_client_environment_update(maage_client_environment *vi
     }
     phase = (double)(state->ticks_low % 120000UL) * 0.05;
     resource = &maage_client_environment_resources[cold ? 3 : 2];
-    if (precipitation && rain > 0) for (i = 0; i < 48; ++i) {
+    if (precipitation && rain > 0 && view->available[cold ? 3 : 2]) for (i = 0; i < 48; ++i) {
         hash = (i * 1664525U + 1013904223U) ^ (i * 7919U);
         x = (float)(hash % 1009U) / 1009 * width;
         y = (float)fmod((double)(hash % 997U) / 997 * (height + 24) + phase * (cold ? 12 : 220), height + 24) - 24;

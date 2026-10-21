@@ -69,6 +69,28 @@ before claiming functionality or successful platform validation.
 - Extend established module boundaries instead of adding speculative abstraction
   layers. Do not create artificial APIs for trivial, localized behavior.
 
+### Operation outcomes and resource resilience
+
+- Core `MaaGE::Status` (`maage/status.h`) is the standard machine-readable outcome:
+  verified unsigned 32-bit `0xSSCCOODD` (Status, Context, Operation, Detail).
+  The public header is the authoritative stable numeric registry; unassigned bytes
+  remain unknown. Severity derives from the top two status bits; success context
+  is zero. Serialize explicitly as SS, CC, OO, DD bytes, independently of host layout.
+- Preserve original failures across compatibility adapters and worker completion;
+  recovery has its own result. Log hex results with paths/IDs/native errors as
+  separate occurrence context, once at the handling boundary. No global last-error
+  state, extra World lock or worker wait. Callback outcome survives cancellation;
+  cancelled and stale dispositions remain distinguishable.
+- Optional visual failures use a generated magenta/black nearest-sampled atlas tile,
+  minimal font/default tints or omitted decorations, retaining useful visuals.
+  Cache failures per immutable resource generation; explicit destroy/reload retries.
+  Resolve numeric UVs before gameplay. Never download resources from the Client or
+  replace authoritative corrupt/unmapped saves with air. Brief deduplicated notices
+  link important recoverable outcomes to their exact result in `logs/client.log`.
+- Reserve FATAL reporting for unsafe continuation: required registries, critical
+  allocation/invariants, corrupt authoritative data or no usable rendering backend.
+  Preserve files and clean up normally; never conceal programming corruption.
+
 ### Numeric runtime identity
 
 MaaGE uses numeric IDs internally. External namespaced identifiers are resolved
@@ -175,9 +197,14 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
-- Visible UI, input and F3 telemetry update every rendered frame without
-  artificial menu delays. Rolling timing statistics may smooth measurements;
-  never throttle live state. Read-only telemetry uses no per-frame allocation,
+- Visible UI, input and F3 gameplay state update every rendered frame without
+  artificial menu delays. Keep F3 compact: one version/hash, FPS/TPS, chunks,
+  live position/facing/target/biome/light, memory, OS/GPU and compact workers.
+  Performance uses a 0.75-second exponential history displayed at 250 ms intervals;
+  memory uses the same observation interval. Format static identity only on change.
+  Reuse unchanged right-column geometry with text/viewport/font/texture invalidation.
+  Never delay or smooth player coordinates, targeting, biome or light.
+  Read-only telemetry uses no per-frame allocation,
   World lock, job wait or disk I/O. One brief scheduler snapshot lock
   may copy bounded numeric job states; never read worker-owned output fields.
   Diagnostic text/names are presentation only, never gameplay identifier lookup.
@@ -488,7 +515,7 @@ Xbox sign-in alone never grant access. Confirm current access without inventing 
 permanent-purchase guarantee. All network work runs on the existing access worker.
 Never log credentials, callback URLs, payloads, or raw responses; wipe transient
 secrets. Authorization diagnostics use `maage.launcher.access` and child loggers:
-INFO for milestones, WARN/ERROR for failures, DEBUG for request timing and routine
+INFO for milestones, WARNING/ERROR for failures, VERBOSE for request timing and routine
 polling. Log only static/allowlisted routes, bound loopback ports, error names and numeric
 service/OS codes; exclude query strings, OAuth state/PKCE/device codes, account identities,
 credential paths, untrusted error descriptions and response bodies at every level.
@@ -576,7 +603,7 @@ reconstruction progress, and outstanding missing/corrupt files separately.
 Log actual file operations through Core logging: indexed names/hashes, download
 URLs/destinations/attempts/retries, verified installation, migration, reconstruction
 source/destination and hard-link/copy results, cancellation, failures, and summaries.
-Use INFO for performed work and DEBUG for per-file verification and unchanged cache
+Use INFO for performed work and VERBOSE for per-file verification and unchanged cache
 reuse. Derive resource names and mappings from the downloaded index; keep static
 resources minimal rather than embedding asset lists or duplicate resource tables.
 
@@ -726,7 +753,9 @@ unless explicitly requested.
   must use actual installation paths, including install-prefix overrides.
 - Core `MaaGE::Log` (`maage/log.h`) is the standard diagnostic API; use named
   `maage.*` loggers instead of ad hoc printf/file logging. Levels inherit through
-  dot-separated names. Defaults are INFO, console on, file off, local timestamps;
+  dot-separated names. Defaults are VERBOSE for Debug and INFO otherwise, selected
+  from the actual build configuration; thresholds include the configured level
+  and all higher levels. Console is on, file off, local timestamps enabled;
   Launcher logs belong in `logs/` beneath the platform MaaGE application-data
   directory described above. Create directories
   as needed; never fall back to working/install directories for Launcher logs.
@@ -754,8 +783,10 @@ unless explicitly requested.
   and retain the plain original on failure. `MaaGE::GZip` (`maage/gzip.h`) provides
   reusable, bounded C90 stream compression through private zlib >=1.2.3; all Core
   logging builds, including headless, require zlib without graphical dependencies.
-- Log severity labels are exactly `[TRACE]`, `[DEBUG]`, `[INFO]`, `[WARN]`,
-  `[ERROR]`, or `[FATAL]`. Align logger names with padding after the closing `]`,
+- Log levels/labels are exactly `[VERBOSE]`, `[INFO]`, `[WARNING]`, `[ERROR]`,
+  `[FATAL]`, in increasing severity. Old TRACE/DEBUG/WARN APIs and configuration
+  spellings are compatibility aliases. Routine detail uses VERBOSE; lifecycle
+  uses INFO. Align logger names with padding after the closing `]`,
   never inside brackets (for example, `[INFO]  [maage.launcher]`).
 
 ## Independent application versions

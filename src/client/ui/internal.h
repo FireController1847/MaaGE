@@ -20,7 +20,22 @@ typedef struct maage_client_ui_resources {
     maage_render_texture *texture;
     unsigned char glyph_width[256];
     int atlas_edge, block_atlas_width, block_atlas_height;
+    maage_status load_status, recovery_status;
+    maage_status source_results[4];
+    unsigned int failed_resources;
 } maage_client_ui_resources;
+/* One optional retained F3 column; the left gameplay column stays immediate. */
+typedef struct maage_client_ui_debug_cache {
+    maage_render_ui_vertex *vertices;
+    size_t quads, capacity;
+    char lines[MAAGE_CLIENT_UI_DEBUG_LINES][MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    unsigned char glyph_width[256];
+    maage_client_ui_rect content;
+    maage_render_texture *texture;
+    float width, height;
+    unsigned int count;
+    int atlas_edge, scale, valid, disabled;
+} maage_client_ui_debug_cache;
 struct maage_client_ui {
     maage_client_ui_navigation navigation;
     const maage_item_registry *items;
@@ -28,6 +43,7 @@ struct maage_client_ui {
     maage_gameplay *game;
     unsigned int creative_page;
     maage_client_ui_resources resources;
+    maage_client_ui_debug_cache debug_cache;
     maage_render_ui_vertex *vertices;
     unsigned int *indices;
     size_t quad_capacity;
@@ -36,11 +52,15 @@ struct maage_client_ui {
     maage_window_insets safe_area;
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
-    int debug, overflow, overflow_reported;
+    int debug, overflow, overflow_reported, gui_scale;
+    maage_status notice_result;
+    double notice_until, notice_now;
+    char notice_text[64];
 };
 int maage_client_ui_resources_load(maage_client_ui_resources *resources,
     maage_renderer *renderer, const char *application_data, const maage_pixel_buffer *block_atlas);
 void maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
+maage_status maage_client_ui_font_fallback(maage_image *font);
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
@@ -50,5 +70,8 @@ int maage_client_ui_inventory_register(maage_client_ui *ui);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
 void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
     const float uv[4], float shade);
+/* Appends already-clipped quads, rebasing indices into the current frame. */
+int maage_client_ui_append_quads(maage_client_ui *ui,
+    const maage_render_ui_vertex *vertices, size_t count);
 maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui);
 #endif

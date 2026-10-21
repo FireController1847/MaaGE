@@ -1,7 +1,5 @@
 #include "debug.h"
-#include "mesh_diagnostics.h"
 #include "maage/client.h"
-#include "maage/environment.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,15 +61,16 @@ void maage_client_debug_frame(maage_client_debug *debug, double now,
     debug->sample_start = now;
     if (!(duration > 0)) return;
     /* Update every frame. Integrating the interval's weight keeps a long stall
-     * from dominating this one-second history after normal frames resume. */
-    retained = exp(-duration);
+     * from dominating this 0.75-second history after normal frames resume. */
+    retained = exp(-duration / 0.75);
     weight = retained < 1.0 ? (1.0 - retained) / duration : 1.0;
     debug->sample_seconds = debug->sample_seconds * retained + duration * weight;
     debug->frames = debug->frames * retained + (presented ? weight : 0);
     debug->ticks = debug->ticks * retained + (double)ticks * weight;
     debug->tick_seconds = debug->tick_seconds * retained + tick_seconds * weight;
     debug->fps = debug->frames / debug->sample_seconds;
-    if (presented) debug->frame_ms = duration * 1000.0;
+    if (presented) debug->latest_frame_ms = duration * 1000.0;
+    debug->frame_ms = debug->frames ? debug->sample_seconds * 1000.0 / debug->frames : 0;
     debug->tps = debug->ticks / debug->sample_seconds;
     debug->tick_sample = debug->ticks != 0;
     debug->tick_ms = debug->ticks ? debug->tick_seconds * 1000.0 / debug->ticks : 0;
@@ -85,121 +84,65 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
 {
     maage_client_ui_debug *text = &debug->text;
     const maage_client_metadata *identity = maage_client_identity();
-    const char *gpu = maage_renderer_device_name(renderer);
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
     maage_world_observation observation;
-    maage_environment_state environment;
-    static const char *const weather_names[3] = {"Clear", "Rain", "Thunder"};
-    char seed[32];
-    double degrees, resident, peak;
+    const char *gpu;
+    double degrees, resident, peak, retained;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
-    (void)now;
+    (void)record;
+    if (debug->identity_renderer != renderer) {
+        debug->identity_renderer = renderer;
+        gpu = maage_renderer_device_name(renderer);
+        sprintf(debug->version, "MaaGE %.96s+%.32s", identity->version, identity->build);
+        sprintf(debug->system, "%.48s / %.48s", identity->platform, identity->architecture);
+        sprintf(debug->renderer, "Renderer: %s", maage_render_backend_name(maage_renderer_get_backend(renderer)));
+        if (gpu && *gpu) sprintf(debug->gpu, "GPU: %.144s", gpu);
+        else debug->gpu[0] = 0;
+    }
+    retained = debug->observation_time > 0 ? exp(-(now - debug->observation_time) / 0.75) : 0;
+    debug->busy_workers = debug->busy_workers * retained + stats->running_jobs * (1.0 - retained);
+    debug->observation_time = now;
+    if (now >= debug->measurement_after) {
+        if (debug->timing_ready)
+            sprintf(debug->performance, "%.0f FPS | %.1f TPS | %.1f ms", debug->fps, debug->tps, debug->frame_ms);
+        else strcpy(debug->performance, "Collecting timing...");
+        maage_client_debug_memory(&resident, &peak);
+        debug->memory[0] = 0;
+        if (resident >= 0) sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
+        else if (peak >= 0) sprintf(debug->memory, "Peak memory: %.0f MiB", peak / 1048576.0);
+        sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u",
+            debug->busy_workers, stats->worker_count,
+            stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);
+        debug->measurement_after = now + 0.25;
+    }
     x = (int)floor(player->position[0]); y = (int)floor(player->position[1]); z = (int)floor(player->position[2]);
     degrees = fmod(yaw * 57.29577951308232, 360.0);
     if (degrees < 0) degrees += 360.0;
     direction = ((int)floor((degrees + 45.0) / 90.0)) % 4;
-    maage_world_seed_format(record->seed, seed, sizeof(seed));
-    sprintf(text->left[left++], "MaaGE %.96s+%.32s", identity->version, identity->build);
-    if (debug->timing_ready) sprintf(text->left[left++], "FPS: %.1f  frame: %.2f ms", debug->fps, debug->frame_ms);
-    else strcpy(text->left[left++], "FPS / frame: N/A (collecting)");
-    if (debug->timing_ready) sprintf(text->left[left++], "TPS: %.1f / 20%s", debug->tps, paused ? " (paused)" : "");
-    else strcpy(text->left[left++], "TPS: N/A (collecting)");
-    if (debug->tick_sample) sprintf(text->left[left++], "Tick time: %.3f ms", debug->tick_ms);
-    else strcpy(text->left[left++], "Tick time: N/A (no ticks)");
-    sprintf(text->left[left++], "World: %.64s", record->id);
-    sprintf(text->left[left++], "Seed: %s", seed);
+    strcpy(text->left[left++], debug->version);
+    sprintf(text->left[left++], "%.160s%s", debug->performance, paused ? " (paused)" : "");
+    sprintf(text->left[left++], "C: %u rendered / %u loaded | %u pending | D: %d",
+        meshes->meshes, stats->loaded, stats->pending, radius);
     sprintf(text->left[left++], "XYZ: %.3f / %.3f / %.3f", player->position[0], player->position[1], player->position[2]);
     sprintf(text->left[left++], "Block: %d %d %d", x, y, z);
-    sprintf(text->left[left++], "Chunk: %d %d  local: %d %d", maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z),
+    sprintf(text->left[left++], "Chunk: %d %d | local: %d %d", maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z),
         maage_world_local_coordinate(x), maage_world_local_coordinate(z));
-    sprintf(text->left[left++], "Facing: %s", facing[direction]);
-    sprintf(text->left[left++], "Yaw: %.1f  pitch: %.1f", degrees, pitch * 57.29577951308232);
+    sprintf(text->left[left++], "Facing: %s (%.1f / %.1f)", facing[direction], degrees, pitch * 57.29577951308232);
     if (maage_world_observe(world, x, y, z, &observation)) {
-        sprintf(text->left[left++], "Biome: %u (%s)  temp: %.2f", observation.biome_id, maage_client_debug_biome(observation.biome_id), observation.temperature);
+        sprintf(text->left[left++], "Biome: %s", maage_client_debug_biome(observation.biome_id));
         if (observation.light_available)
             sprintf(text->left[left++], "Light: %u sky / %u block", (unsigned)observation.light >> 4, (unsigned)observation.light & 15);
-        else strcpy(text->left[left++], "Light: N/A (pending)");
-    } else {
-        strcpy(text->left[left++], "Biome: N/A (loading)"); strcpy(text->left[left++], "Light: N/A (loading)");
     }
-    sprintf(text->left[left++], "Chunks: %u loaded / %u ready", stats->loaded, stats->ready);
-    sprintf(text->left[left++], "Rendered: %u  distance: %d", meshes->meshes, radius);
-    sprintf(text->left[left++], "Sections: %u resident", stats->loaded_sections);
-    sprintf(text->left[left++], "Vertices: %lu  triangles: %lu", (unsigned long)meshes->vertices, (unsigned long)(meshes->indices / 3));
-    sprintf(text->left[left++], "Pending columns: %u", stats->pending);
-    if (game) {
-        if (game->has_target) {
-            sprintf(text->left[left++], "Target: %d %d %d  face: %u", game->target.x,
-                game->target.y, game->target.z, (unsigned int)game->target.face);
-            sprintf(text->left[left++], "Target ID: %lu  state: %lu", game->target.block_id, game->target.state_id);
-        } else strcpy(text->left[left++], "Target: N/A (none / unavailable)");
-        sprintf(text->left[left++], "Selected item: %lu  slot: %u",
-            game->inventory.slots[game->inventory.selected].item_id, game->inventory.selected + 1);
-        sprintf(text->left[left++], "Mode: %s%s", game->mode == MAAGE_GAME_MODE_CREATIVE ?
-            "Creative" : "Survival", game->flying ? " (flying)" : "");
-        sprintf(text->left[left++], "Health: %u / 20  hunger: %u / 20", game->health, game->hunger);
-        sprintf(text->left[left++], "Break: %.1f%%  reach: %.1f", game->break_progress * 100.0,
-            game->reach > 0 ? game->reach : (game->mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5));
-        sprintf(text->left[left++], "Mutations: %lu broken / %lu placed", game->blocks_broken, game->blocks_placed);
-    }
-    maage_world_environment(world, &environment);
-    sprintf(text->left[left++], "Generator: %lu", record->generation_policy.generator_version);
-    if (environment.day_high) sprintf(text->left[left++], "Time: %lu  day: %lu:%lu", environment.day_tick, environment.day_high, environment.day_low);
-    else sprintf(text->left[left++], "Time: %lu / 24000  day: %lu", environment.day_tick, environment.day_low);
-    sprintf(text->left[left++], "Weather: %s  rain: %.2f  thunder: %.2f",
-        weather_names[maage_environment_weather(&environment)], environment.rain_intensity, environment.thunder_intensity);
-    sprintf(text->right[right++], "OS: %.48s / %.48s", identity->platform, identity->architecture);
-    sprintf(text->right[right++], "Renderer: %s", maage_render_backend_name(maage_renderer_get_backend(renderer)));
-    sprintf(text->right[right++], "GPU: %.144s", gpu ? gpu : "N/A");
-    sprintf(text->right[right++], "Client: %.96s", identity->version);
-    sprintf(text->right[right++], "Build: %.48s + %.32s", identity->build_type, identity->build);
-    maage_client_debug_memory(&resident, &peak);
-    if (resident >= 0) sprintf(text->right[right++], "Resident: %.1f MiB", resident / 1048576.0);
-    else strcpy(text->right[right++], "Resident memory: N/A");
-    if (peak >= 0) sprintf(text->right[right++], "Peak RSS: %.1f MiB", peak / 1048576.0);
-    else strcpy(text->right[right++], "Peak RSS: N/A");
-    if (stats->logical_processors) sprintf(text->right[right++], "Logical CPUs: %u", stats->logical_processors);
-    else strcpy(text->right[right++], "Logical CPUs: N/A (undetected)");
-    sprintf(text->right[right++], "Pool workers: %u", stats->worker_count);
-    sprintf(text->right[right++], "Active generation workers: %u", stats->generation_running);
-    sprintf(text->right[right++], "Generation: %u queued / %u running (%.1f cols/s)",
-        stats->generation_queued, stats->generation_running, stats->generated_columns_per_second);
-    sprintf(text->right[right++], "Meshing: %u queued / %u running", stats->meshing_queued, stats->meshing_running);
-    sprintf(text->right[right++], "Lighting: %u queued / %u running", stats->lighting_queued, stats->lighting_running);
-    sprintf(text->right[right++], "I/O: %u queued / %u running", stats->io_queued, stats->io_running);
-    sprintf(text->right[right++], "All jobs: %u queued / %u running", stats->queued_jobs, stats->running_jobs);
-    sprintf(text->right[right++], "Completed: %lu", stats->completed_jobs);
-    sprintf(text->right[right++], "Cancelled: %lu  stale: %lu", stats->cancelled_jobs, stats->stale_jobs);
-    sprintf(text->right[right++], "Queue latency: %.2f ms", stats->scheduling_latency_ms);
-    sprintf(text->right[right++], "Mutations: %lu  rejected: %lu", stats->mutations, stats->rejected_mutations);
-    sprintf(text->right[right++], "Dirty columns: %u", stats->dirty_columns);
-    sprintf(text->right[right++], "Stages base/terrain: %u / %u", stats->generation_stage_jobs[0], stats->generation_stage_jobs[1]);
-    sprintf(text->right[right++], "Stages caves/ores: %u / %u", stats->generation_stage_jobs[2], stats->generation_stage_jobs[3]);
-    sprintf(text->right[right++], "Stages surface/trees: %u / %u", stats->generation_stage_jobs[4], stats->generation_stage_jobs[5]);
-    sprintf(text->right[right++], "Stages structure/final: %u / %u", stats->generation_stage_jobs[6], stats->generation_stage_jobs[7]);
-    sprintf(text->right[right++], "Decorated: %lu  structure fragments: %lu", stats->decorated_columns, stats->structure_fragments);
-    sprintf(text->right[right++], "Updates: %lu pending / %lu fluid", (unsigned long)stats->pending_block_updates, (unsigned long)stats->pending_fluid_updates);
-    sprintf(text->right[right++], "Block entities: %lu  updates done: %lu", (unsigned long)stats->block_entities, stats->block_updates_processed);
+    if (game && game->has_target)
+        sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu", game->target.x, game->target.y,
+            game->target.z, game->target.block_id, game->target.state_id);
+    if (debug->memory[0]) strcpy(text->right[right++], debug->memory);
+    strcpy(text->right[right++], debug->system);
+    strcpy(text->right[right++], debug->renderer);
+    if (debug->gpu[0]) strcpy(text->right[right++], debug->gpu);
+    if (stats->logical_processors) sprintf(text->right[right++], "CPU: %u logical cores", stats->logical_processors);
+    strcpy(text->right[right++], debug->workers);
     text->left_count = left; text->right_count = right;
     return text;
-}
-
-/* Add streaming telemetry to the F3 right column without requiring World
- * internals or allocating per frame. Ready-vs-resident is an estimate: the
- * World API does not yet expose an exact pending GPU-presentation count. */
-void maage_client_debug_mesh_diagnostics(maage_client_ui_debug *text,
-    const maage_client_mesh_diagnostics *stats)
-{
-    unsigned right = text->right_count;
-    if (right + 4 > MAAGE_CLIENT_UI_DEBUG_LINES) return;
-    sprintf(text->right[right++], "GPU uploads: %.1f/s  (%lu total)",
-        stats->uploads_per_second, stats->gpu_uploads);
-    sprintf(text->right[right++], "GPU vertices: %.0f/s; resident: %lu",
-        stats->vertices_per_second, (unsigned long)stats->gpu_resident);
-    sprintf(text->right[right++], "Ready not presented: ~%lu  stale: %lu",
-        (unsigned long)stats->ready_waiting_estimate, stats->rejected);
-    sprintf(text->right[right++], "Upload: %u/frame, %.2f ms / %.2f ms budget (stream %.2f)",
-        stats->uploaded_this_frame, stats->frame_upload_ms, stats->budget_ms, stats->stream_ms);
-    text->right_count = right;
 }

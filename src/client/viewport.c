@@ -50,6 +50,7 @@ typedef struct maage_client_mesh_cache {
 } maage_client_mesh_cache;
 typedef struct maage_client_mesh_activity {
     maage_client_mesh_diagnostics status;
+    maage_status last_result;
     double sample_start, previous_upload_ms, expected_upload_ms;
     unsigned long sample_uploads, sample_vertices;
 } maage_client_mesh_activity;
@@ -156,7 +157,7 @@ static double maage_client_mesh_budget(const maage_client_world_options *options
 {
     double other_work_ms, headroom;
     if (options->mesh_budget_ms > 0.0) return options->mesh_budget_ms;
-    other_work_ms = debug->timing_ready ? debug->frame_ms - activity->previous_upload_ms : 0.0;
+    other_work_ms = debug->timing_ready ? debug->latest_frame_ms - activity->previous_upload_ms : 0.0;
     if (other_work_ms < 0.0) other_work_ms = 0.0;
     headroom = options->frame_target_ms - other_work_ms;
     /* Reserve some throughput when already over target, and no more than
@@ -269,6 +270,17 @@ static maage_render_result maage_client_stream_meshes(maage_world *world,
             } else {
                 maage_render_mesh_destroy(replacement);
                 maage_world_mesh_destroy(update.mesh);
+                if (result == MAAGE_RENDER_OUT_OF_MEMORY) {
+                    /* The consumed revision is not retried every frame. Keep
+                     * the previous valid GPU mesh until a later World update. */
+                    if (activity->last_result != maage_render_operation_status(result, MAAGE_OPERATION_UPLOAD)) {
+                        activity->last_result = maage_render_operation_status(result, MAAGE_OPERATION_UPLOAD);
+                        maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", activity->last_result,
+                            "Chunk %d,%d revision %lu: retaining the previous visual or omitting this mesh.",
+                            update.x, update.z, update.revision);
+                    }
+                    continue;
+                }
                 return result;
             }
         }
@@ -349,6 +361,7 @@ int maage_client_run(int argc, char *const argv[])
     maage_render_desc render_config;
     maage_window_result result = MAAGE_WINDOW_OK;
     maage_render_result rendered = MAAGE_RENDER_OK;
+    maage_status operation, resource_notice = 0, world_notice = 0, mesh_notice = 0, interaction_notice = 0;
     char directory[MAAGE_PATH_CAPACITY], error[256], seed_text[32];
     double last, now, elapsed, raw_elapsed, accumulator = 0, alpha, eye[3], yaw = 0, pitch = 0, diagnostic_time;
     double tick_start = 0, tick_seconds, frame_end;
@@ -383,11 +396,25 @@ int maage_client_run(int argc, char *const argv[])
     }
     maage_biome_registry_init(&biomes);
     maage_log_info("maage.client.resources", "Resource directory: %s/minecraft/assets/reconst", directory);
-    if (!maage_client_resources_load(directory, &resources, &biomes) || !maage_biome_registry_finalize(&biomes)) goto done;
+    if (!maage_client_resources_load(directory, &resources, &biomes)) goto done;
+    resource_notice = resources.load_status;
+    if (!maage_biome_registry_finalize(&biomes)) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.world",
+            maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0),
+            "Required biome registry could not be finalized."); goto done;
+    }
     registry = maage_client_register_blocks(&resources, &biomes);
-    if (!registry) { maage_log_error("maage.client.world", "Block registration failed."); goto done; }
+    if (!registry) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.world",
+            maage_status_make(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0),
+            "Required block registry could not be initialized."); goto done;
+    }
     items = maage_item_registry_create_builtin(registry);
-    if (!items) { maage_log_error("maage.client.gameplay", "Item registration failed."); goto done; }
+    if (!items) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.gameplay",
+            maage_status_make(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0),
+            "Required item registry could not be initialized."); goto done;
+    }
     maage_gameplay_init(&game, items);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system);
     if (result != MAAGE_WINDOW_OK) goto window_failed;
@@ -400,17 +427,31 @@ int maage_client_run(int argc, char *const argv[])
     rendered = maage_renderer_create_texture(renderer, &resources.atlas, &atlas);
     if (rendered != MAAGE_RENDER_OK) goto done;
     maage_client_interaction_init(&interaction, &resources);
-    ui = maage_client_ui_create(renderer, directory, &resources.atlas);
+    operation = maage_client_ui_create_status(renderer, directory, &resources.atlas, &ui);
     maage_client_resources_destroy(&resources);
-    if (!ui || !maage_client_ui_finalize(ui)) { maage_log_error("maage.client.ui", "Cannot initialize Client GUI resources or screen registry."); goto done; }
-    environment_view = maage_client_environment_create(renderer, directory);
-    if (!environment_view) { maage_log_error("maage.client.environment", "Cannot initialize environmental presentation resources."); goto done; }
+    if (maage_status_failed(operation)) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.ui", operation, "Cannot initialize the required Client GUI."); goto done;
+    }
+    if (!maage_client_ui_finalize(ui)) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.ui",
+            maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0),
+            "Cannot finalize the Client screen registry."); goto done;
+    }
+    if (maage_status_is_success(resource_notice)) resource_notice = maage_client_ui_resource_status(ui);
+    environment_view = maage_client_environment_create_status(renderer, directory, &operation);
+    if (!environment_view) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.environment", operation,
+            "Cannot initialize environmental presentation resources."); goto done;
+    }
+    if (maage_status_is_success(resource_notice))
+        resource_notice = maage_client_environment_resource_status(environment_view, NULL);
     maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
     maage_generation_policy_default(options.generator_version, &generation_policy);
-    if (!maage_world_store_open_configured(maage_instance_directory(instance), options.id, options.create, options.name,
+    operation = maage_world_store_open_configured_status(maage_instance_directory(instance), options.id, options.create, options.name,
         options.seeded ? &options.seed : NULL, options.id && !options.create ? NULL : &generation_policy,
-        items, &store, &record, error)) {
-        maage_log_error("maage.client.world", "%s", error); goto done;
+        items, &store, &record, error);
+    if (maage_status_failed(operation)) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.world", operation, "%s", error); goto done;
     }
     memset(&world_config, 0, sizeof(world_config));
     world_config.registry = registry; world_config.biomes = &biomes; world_config.seed = record.seed;
@@ -420,11 +461,17 @@ int maage_client_run(int argc, char *const argv[])
     world_config.store = store; world_config.render_distance = options.radius; world_config.new_world = record.new_world;
     memcpy(world_config.position, record.position, sizeof(world_config.position));
     world = maage_world_create(&world_config);
-    if (!world) { maage_log_error("maage.client.world", "World initialization failed (worker pool, generator policy, or memory)."); goto done; }
+    if (!world) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.world",
+            maage_status_make(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0),
+            "World initialization failed (worker pool, generator policy, or memory)."); goto done;
+    }
     maage_world_get_stats(world, &stats);
     maage_player_spawn(&player, world); previous = player; player_ready = 1;
     if (!maage_gameplay_restore(&game, items, &record.gameplay)) {
-        maage_log_error("maage.client.gameplay", "Saved player gameplay data does not match registered items."); player_ready = 0; goto done;
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.gameplay",
+            maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, 0),
+            "Saved player gameplay data does not match registered items."); player_ready = 0; goto done;
     }
     if (record.new_world) maage_gameplay_init(&game, items);
     if (options.mode >= 0) {
@@ -450,6 +497,7 @@ int maage_client_run(int argc, char *const argv[])
     last = maage_time_monotonic_seconds(); diagnostic_time = last;
     mesh_activity.sample_start = last;
     if (last < 0) goto clock_failed;
+    maage_client_ui_notify(ui, resource_notice, last);
     for (;;) {
         result = maage_window_poll_events(system, 0);
         if (result != MAAGE_WINDOW_OK) goto window_failed;
@@ -503,11 +551,18 @@ int maage_client_run(int argc, char *const argv[])
         /* One owner commits worker results before the ordered fixed-step player
          * phase. Collision observes stable published columns without waiting. */
         maage_world_stream(world, player.position[0], player.position[2], yaw);
-        if (maage_world_failed(world)) { maage_log_error("maage.client.world", "Streaming stopped after a world error; preserving existing save files."); goto done; }
+        if (maage_world_failed(world)) goto done;
+        operation = maage_world_status(world);
+        if (operation != world_notice) {
+            world_notice = operation; maage_client_ui_notify(ui, operation, now);
+        }
         if (maage_client_ui_debug_visible(ui) || now - diagnostic_time >= 5.0)
             maage_world_get_stats(world, &stats);
         rendered = maage_client_stream_meshes(world, renderer, atlas, &cache, &mesh_activity, &options, &debug, cx, cz);
         if (rendered != MAAGE_RENDER_OK) goto done;
+        if (mesh_notice != mesh_activity.last_result) {
+            mesh_notice = mesh_activity.last_result; maage_client_ui_notify(ui, mesh_notice, now);
+        }
         active = !maage_client_ui_modal(ui) && input.focused && input.captured && state.visible && state.framebuffer_width > 0 && state.framebuffer_height > 0;
         if (active && !was_active) elapsed = 0;
         was_active = active;
@@ -566,6 +621,9 @@ int maage_client_run(int argc, char *const argv[])
         maage_gameplay_target(&game, &player, world, yaw, pitch);
         rendered = maage_client_interaction_update(&interaction, renderer, atlas, world, &game);
         if (rendered != MAAGE_RENDER_OK) goto done;
+        if (interaction_notice != interaction.last_result) {
+            interaction_notice = interaction.last_result; maage_client_ui_notify(ui, interaction_notice, now);
+        }
         for (axis = 0; axis < 3; ++axis) eye[axis] = previous.position[axis] + (player.position[axis] - previous.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
         maage_world_environment(world, &environment_state);
@@ -593,9 +651,9 @@ int maage_client_run(int argc, char *const argv[])
         }
         debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, world, &record,
             &stats, &player, yaw, pitch, options.radius, !active, renderer, &mesh_stats, &game) : NULL;
-        if (debug_text) maage_client_debug_mesh_diagnostics(&debug.text, &mesh_activity.status);
+        maage_client_ui_notice_time(ui, now);
         ui_draw = maage_client_ui_draw(ui, debug_text);
-        if (!ui_draw) { maage_log_error("maage.client.ui", "Client UI batch could not be constructed."); goto done; }
+        if (!ui_draw) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
             maage_client_camera(matrix, eye, yaw, pitch, (double)state.framebuffer_width / state.framebuffer_height, options.radius);
             rendered = maage_renderer_draw_frame(renderer, cache.draws, draw_count, matrix, ui_draw);
@@ -629,22 +687,30 @@ int maage_client_run(int argc, char *const argv[])
     }
     goto done;
 clock_failed:
-    maage_log_error("maage.client", "Monotonic clock unavailable."); goto done;
+    maage_log_status(MAAGE_LOG_FATAL, "maage.client",
+        maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0),
+        "Monotonic clock unavailable; fixed-step simulation cannot continue."); goto done;
 window_failed:
-    maage_log_error("maage.client", "Native window/input failed: %s.", maage_window_result_string(result));
+    maage_log_status(MAAGE_LOG_FATAL, "maage.client",
+        maage_status_make(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0),
+        "Native window/input cannot continue: %s.", maage_window_result_string(result));
 done:
     if (rendered != MAAGE_RENDER_OK && rendered != MAAGE_RENDER_SKIPPED)
-        maage_log_error("maage.client", "Renderer failed: %s. Gameplay requires textured mesh support in the selected family.", maage_render_result_string(rendered));
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client", maage_render_operation_status(rendered,
+            renderer ? MAAGE_OPERATION_UPLOAD : MAAGE_OPERATION_INITIALIZE),
+            "Renderer cannot continue: %s. Gameplay requires textured meshes, UI and scene support.", maage_render_result_string(rendered));
     if (window) maage_window_capture_mouse(window, 0);
     /* Waiting and final player metadata I/O occur only after rendering stops. */
     if (world && !maage_world_flush(world)) {
-        maage_log_error("maage.client.world", "World shutdown reported a generation, loading or save failure; existing player metadata is preserved.");
+        maage_log_info("maage.client.world", "Existing player metadata preserved after the reported World failure.");
         ok = 0; player_ready = 0;
     }
     if (store && player_ready) {
         maage_world_environment(world, &environment_state);
-        if (!maage_world_store_save_environment_gameplay(store, player.position, yaw, pitch, &game, items, &environment_state, error)) {
-            maage_log_error("maage.client.world", "%s", error); ok = 0;
+        operation = maage_world_store_save_environment_gameplay_status(store, player.position,
+            yaw, pitch, &game, items, &environment_state, error);
+        if (maage_status_failed(operation)) {
+            maage_log_status(MAAGE_LOG_ERROR, "maage.client.world", operation, "%s", error); ok = 0;
         }
     }
     maage_client_mesh_cache_clear(&cache);

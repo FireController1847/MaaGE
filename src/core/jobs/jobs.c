@@ -17,6 +17,7 @@ typedef struct maage_job_record {
     double submitted;
     maage_job_run run;
     void *context;
+    maage_status result;
 } maage_job_record;
 
 struct maage_job_token {
@@ -111,6 +112,7 @@ static void maage_jobs_worker(void *context)
         slot = jobs->heap[0]; record = &jobs->records[slot];
         maage_jobs_heap_remove(jobs, 0);
         record->state = MAAGE_JOB_RUNNING; ++jobs->running;
+        record->result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_JOB, 0);
         now = maage_time_monotonic_seconds();
         if (record->submitted >= 0.0 && now >= record->submitted) {
             latency = now - record->submitted; ++jobs->started;
@@ -193,6 +195,7 @@ int maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run,
     ++jobs->order_low; if (!jobs->order_low) ++jobs->order_high;
     record->order_high = jobs->order_high; record->order_low = jobs->order_low;
     record->state = MAAGE_JOB_QUEUED; record->cancelled = 0; record->stage = 0;
+    record->result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_JOB, 0);
     record->run = run; record->context = context; record->submitted = maage_time_monotonic_seconds();
     maage_jobs_heap_up(jobs, jobs->queued++, slot);
     *id = record->id;
@@ -238,6 +241,13 @@ void maage_job_set_stage(const maage_job_token *token, unsigned stage)
     maage_mutex_unlock(token->jobs->mutex);
 }
 
+void maage_job_set_result(const maage_job_token *token, maage_status result)
+{
+    /* Only the callback writes this field; poll cannot read it before the
+     * worker's existing locked READY publication. No extra lock is needed. */
+    if (token) token->record->result = result;
+}
+
 int maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion)
 {
     maage_job_record *record;
@@ -249,6 +259,9 @@ int maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion)
     jobs->ready_head = (jobs->ready_head + 1) % jobs->capacity; --jobs->ready;
     record = &jobs->records[slot];
     completion->id = record->id; completion->context = record->context; completion->cancelled = record->cancelled;
+    completion->result = record->cancelled ? maage_status_make(MAAGE_STATUS_INTERRUPTED,
+        MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_JOB, MAAGE_DETAIL_CANCELLED) : record->result;
+    completion->operation_result = record->result;
     record->state = MAAGE_JOB_FREE; record->context = NULL;
     jobs->free_slots[jobs->free_count++] = slot;
     maage_mutex_unlock(jobs->mutex); return 1;

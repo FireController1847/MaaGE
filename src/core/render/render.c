@@ -6,6 +6,25 @@
 #include <float.h>
 #include <limits.h>
 
+maage_status maage_render_operation_status(maage_render_result result,
+    unsigned char operation)
+{
+    unsigned int code;
+    switch (result) {
+    case MAAGE_RENDER_OK: code = MAAGE_STATUS_SUCCESS; break;
+    case MAAGE_RENDER_SKIPPED: code = MAAGE_STATUS_NOOP; break;
+    case MAAGE_RENDER_INVALID_ARGUMENT: code = MAAGE_STATUS_INVALID_ARGUMENT; break;
+    case MAAGE_RENDER_OUT_OF_MEMORY: code = MAAGE_STATUS_ALLOCATION_FAILED; break;
+    case MAAGE_RENDER_UNSUPPORTED: code = MAAGE_STATUS_NOT_IMPLEMENTED; break;
+    case MAAGE_RENDER_UNAVAILABLE: code = MAAGE_STATUS_SYSTEM_NOT_SUPPORTED; break;
+    case MAAGE_RENDER_DEVICE_LOST: code = MAAGE_STATUS_FATAL; break;
+    case MAAGE_RENDER_SURFACE_LOST:
+    case MAAGE_RENDER_WINDOW_ERROR: code = MAAGE_STATUS_INVALID_STATE; break;
+    default: code = MAAGE_STATUS_ERROR; break;
+    }
+    return maage_status_make(code, MAAGE_CONTEXT_RENDER, operation, 0);
+}
+
 void maage_render_desc_init(maage_render_desc *desc)
 {
     if (!desc) return;

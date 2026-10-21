@@ -33,20 +33,31 @@ static int maage_minecraft_name_valid(const char *name)
     }
     return 0;
 }
-int maage_minecraft_asset_path(const char *application_data, const char *name, char *path, size_t capacity)
+maage_status maage_minecraft_asset_path_status(const char *application_data, const char *name, char *path, size_t capacity)
 {
     char root[MAAGE_PATH_CAPACITY], reconst[MAAGE_PATH_CAPACITY];
-    if (!maage_minecraft_name_valid(name)) return 0;
+    if (!maage_minecraft_name_valid(name) || !path || !capacity)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOOKUP,
+            (unsigned char)(!maage_minecraft_name_valid(name) ? 1 : (!path ? 2 : 3)));
     if (!application_data) {
-        if (!maage_storage_data_path(root, sizeof(root))) return 0;
+        if (!maage_storage_data_path(root, sizeof(root)))
+            return maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOOKUP, 0);
         application_data = root;
     }
 #ifdef _WIN32
     if (strlen(application_data) < 3 || application_data[1] != ':' ||
-        (application_data[2] != '/' && application_data[2] != '\\')) return 0;
+        (application_data[2] != '/' && application_data[2] != '\\'))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOOKUP, 0);
 #else
-    if (application_data[0] != '/') return 0;
+    if (application_data[0] != '/')
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOOKUP, 0);
 #endif
-    return maage_storage_join(reconst, sizeof(reconst), application_data, "minecraft/assets/reconst") &&
-        maage_storage_join(path, capacity, reconst, name);
+    if (!maage_storage_join(reconst, sizeof(reconst), application_data, "minecraft/assets/reconst") ||
+        !maage_storage_join(path, capacity, reconst, name))
+        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOOKUP, 0);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOOKUP, 0);
+}
+int maage_minecraft_asset_path(const char *application_data, const char *name, char *path, size_t capacity)
+{
+    return !maage_status_failed(maage_minecraft_asset_path_status(application_data, name, path, capacity));
 }

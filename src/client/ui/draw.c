@@ -2,6 +2,7 @@
 #include "maage/log.h"
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Retain geometry between frames; index offsets are limited by unsigned int. */
 static int maage_client_ui_reserve_quad(maage_client_ui *ui)
@@ -9,6 +10,7 @@ static int maage_client_ui_reserve_quad(maage_client_ui *ui)
     size_t maximum, required, capacity;
     maage_render_ui_vertex *vertices;
     unsigned int *indices;
+    unsigned char failure = MAAGE_STATUS_ALLOCATION_FAILED;
     if (ui->overflow) return 0;
     maximum = ((size_t)-1) / sizeof(*ui->vertices) / 4;
     if (maximum > ((size_t)-1) / sizeof(*ui->indices) / 6)
@@ -16,7 +18,7 @@ static int maage_client_ui_reserve_quad(maage_client_ui *ui)
     if (maximum > (size_t)(UINT_MAX / 4U)) maximum = (size_t)(UINT_MAX / 4U);
     required = ui->batch.vertex_count / 4 + 1;
     if (required <= ui->quad_capacity) return 1;
-    if (required > maximum) goto failed;
+    if (required > maximum) { failure = MAAGE_STATUS_BUFFER_OVERFLOW; goto failed; }
     capacity = ui->quad_capacity ? ui->quad_capacity : 256;
     while (capacity < required) {
         if (capacity > maximum / 2) { capacity = maximum; break; }
@@ -36,10 +38,28 @@ static int maage_client_ui_reserve_quad(maage_client_ui *ui)
 failed:
     ui->overflow = 1;
     if (!ui->overflow_reported) {
-        maage_log_error("maage.client.ui", "GUI geometry allocation or index range exhausted; frame rejected.");
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.ui",
+            maage_status_make(failure, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0),
+            "GUI geometry cannot be constructed; frame rejected.");
         ui->overflow_reported = 1;
     }
     return 0;
+}
+
+int maage_client_ui_append_quads(maage_client_ui *ui,
+    const maage_render_ui_vertex *vertices, size_t count)
+{
+    static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
+    size_t quad, first, i;
+    for (quad = 0; quad < count; ++quad) {
+        if (!maage_client_ui_reserve_quad(ui)) return 0;
+        first = ui->batch.vertex_count;
+        memcpy(ui->vertices + first, vertices + quad * 4, 4 * sizeof(*vertices));
+        for (i = 0; i < 6; ++i)
+            ui->indices[ui->batch.index_count + i] = (unsigned int)first + order[i];
+        ui->batch.vertex_count += 4; ui->batch.index_count += 6;
+    }
+    return 1;
 }
 
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,

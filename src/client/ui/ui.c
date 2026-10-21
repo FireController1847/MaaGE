@@ -1,6 +1,7 @@
 #include "internal.h"
 #include "maage/log.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 static maage_client_ui_rect maage_client_ui_menu_rectangle(const maage_client_ui *ui,
@@ -91,31 +92,71 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
 maage_client_ui *maage_client_ui_create(maage_renderer *renderer, const char *application_data,
     const maage_pixel_buffer *block_atlas)
 {
+    maage_client_ui *ui = NULL;
+    maage_client_ui_create_status(renderer, application_data, block_atlas, &ui);
+    return ui;
+}
+
+maage_status maage_client_ui_create_status(maage_renderer *renderer,
+    const char *application_data, const maage_pixel_buffer *block_atlas,
+    maage_client_ui **output)
+{
     maage_client_ui *ui;
-    if (!renderer) return NULL;
+    maage_status result;
+    if (output) *output = NULL;
+    if (!renderer || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, renderer ? 3 : 0);
     ui = (maage_client_ui *)calloc(1, sizeof(*ui));
-    if (!ui) return NULL;
-    ui->width = 320; ui->height = 240;
+    if (!ui) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
+    ui->width = 320; ui->height = 240; ui->gui_scale = 1;
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;
-    if (!maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas) ||
-        !maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_PAUSE,
+    if (!maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas)) {
+        result = maage_status_failed(ui->resources.recovery_status) ? ui->resources.recovery_status :
+            maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
+        maage_client_ui_destroy(ui);
+        return result;
+    }
+    if (!maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_PAUSE,
             maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL) ||
         !maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_OPTIONS,
             maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL) ||
         !maage_client_ui_inventory_register(ui)) {
         maage_client_ui_destroy(ui);
-        return NULL;
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
     }
     ui->batch.vertices = ui->vertices; ui->batch.indices = ui->indices;
     ui->batch.texture = ui->resources.texture;
-    return ui;
+    *output = ui;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
+}
+
+maage_status maage_client_ui_resource_status(const maage_client_ui *ui)
+{
+    return ui ? ui->resources.load_status : maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
+}
+
+void maage_client_ui_notify(maage_client_ui *ui, maage_status result, double now)
+{
+    if (!ui || maage_status_is_success(result) || ui->notice_result == result) return;
+    ui->notice_result = result;
+    ui->notice_until = now + 6.0;
+    sprintf(ui->notice_text, "Operation 0x%08lX", (unsigned long)result);
+}
+
+void maage_client_ui_notice_time(maage_client_ui *ui, double now)
+{
+    if (ui) ui->notice_now = now;
 }
 
 void maage_client_ui_destroy(maage_client_ui *ui)
 {
     if (!ui) return;
     maage_render_texture_destroy(ui->resources.texture);
+    free(ui->debug_cache.vertices);
     free(ui->vertices); free(ui->indices);
     free(ui->navigation.screens); free(ui->navigation.stack); free(ui);
 }
@@ -133,6 +174,7 @@ unsigned int maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     scale = framebuffer_width / 320; vertical = framebuffer_height / 240;
     if (scale > vertical) scale = vertical;
     if (scale < 1) scale = 1;
+    ui->gui_scale = scale;
     ui->width = (float)framebuffer_width / scale;
     ui->height = (float)framebuffer_height / scale;
     x_scale = (float)framebuffer_width / (float)window_width / scale;
@@ -235,6 +277,57 @@ static void maage_client_ui_debug_column(maage_client_ui *ui,
     }
 }
 
+static void maage_client_ui_debug_right(maage_client_ui *ui,
+    const maage_client_ui_debug *debug)
+{
+    maage_client_ui_debug_cache *cache = &ui->debug_cache;
+    maage_render_ui_vertex *vertices;
+    size_t first, quads;
+    unsigned int i, count = debug->right_count;
+    int same;
+    if (count > MAAGE_CLIENT_UI_DEBUG_LINES) count = MAAGE_CLIENT_UI_DEBUG_LINES;
+    same = cache->valid && !cache->disabled && cache->count == count &&
+        cache->width == ui->width && cache->height == ui->height &&
+        cache->scale == ui->gui_scale && cache->texture == ui->resources.texture &&
+        cache->atlas_edge == ui->resources.atlas_edge &&
+        cache->content.x == ui->content.x && cache->content.y == ui->content.y &&
+        cache->content.width == ui->content.width && cache->content.height == ui->content.height &&
+        !memcmp(cache->glyph_width, ui->resources.glyph_width, sizeof(cache->glyph_width));
+    for (i = 0; same && i < count; ++i)
+        same = !strncmp(cache->lines[i], debug->right[i], MAAGE_CLIENT_UI_DEBUG_CHARACTERS);
+    if (same) {
+        maage_client_ui_append_quads(ui, cache->vertices, cache->quads);
+        return;
+    }
+    first = ui->batch.vertex_count;
+    maage_client_ui_debug_column(ui, debug->right, count, 1);
+    cache->valid = 0;
+    if (ui->overflow || cache->disabled) return;
+    quads = (ui->batch.vertex_count - first) / 4;
+    /* At most one background and one quad per bounded character per line. */
+    if (quads > MAAGE_CLIENT_UI_DEBUG_LINES * (MAAGE_CLIENT_UI_DEBUG_CHARACTERS + 1) ||
+        quads > (size_t)-1 / sizeof(*vertices) / 4) return;
+    if (quads > cache->capacity) {
+        vertices = (maage_render_ui_vertex *)realloc(cache->vertices, quads * 4 * sizeof(*vertices));
+        if (!vertices) {
+            cache->disabled = 1;
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.ui",
+                maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0),
+                "Optional F3 geometry cache unavailable; retaining immediate drawing for this session.");
+            return;
+        }
+        cache->vertices = vertices; cache->capacity = quads;
+    }
+    if (quads) memcpy(cache->vertices, ui->vertices + first, quads * 4 * sizeof(*vertices));
+    for (i = 0; i < count; ++i)
+        memcpy(cache->lines[i], debug->right[i], MAAGE_CLIENT_UI_DEBUG_CHARACTERS);
+    memcpy(cache->glyph_width, ui->resources.glyph_width, sizeof(cache->glyph_width));
+    cache->quads = quads; cache->count = count; cache->content = ui->content;
+    cache->width = ui->width; cache->height = ui->height; cache->scale = ui->gui_scale;
+    cache->texture = ui->resources.texture; cache->atlas_edge = ui->resources.atlas_edge;
+    cache->valid = 1;
+}
+
 const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
     const maage_client_ui_debug *debug)
 {
@@ -256,7 +349,7 @@ const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
     }
     if (ui->debug && debug) {
         maage_client_ui_debug_column(ui, debug->left, debug->left_count, 0);
-        maage_client_ui_debug_column(ui, debug->right, debug->right_count, 1);
+        maage_client_ui_debug_right(ui, debug);
     }
     ui->clip.x = ui->clip.y = 0; ui->clip.width = ui->width; ui->clip.height = ui->height;
     id = maage_client_ui_current(ui);
@@ -266,6 +359,19 @@ const maage_render_ui_data *maage_client_ui_draw(maage_client_ui *ui,
         ui->clip = ui->content;
         screen = &ui->navigation.screens[id];
         screen->draw(ui, screen->context);
+    }
+    if (ui->notice_until > ui->notice_now) {
+        ui->clip = ui->content;
+        rectangle.width = ui->content.width < 164 ? ui->content.width : 164;
+        rectangle.height = 24;
+        rectangle.x = ui->content.x + ui->content.width - rectangle.width;
+        rectangle.y = ui->content.y + ui->content.height - 60;
+        if (rectangle.y < ui->content.y) rectangle.y = ui->content.y;
+        maage_client_ui_panel(ui, rectangle, 0.06f, 0.06f, 0.06f, 0.86f);
+        maage_client_ui_text(ui, ui->notice_text, rectangle.x + 4, rectangle.y + 3,
+            MAAGE_CLIENT_UI_LEFT, 1, 0.8f, 0.4f);
+        maage_client_ui_text(ui, "See logs/client.log", rectangle.x + 4, rectangle.y + 13,
+            MAAGE_CLIENT_UI_LEFT, 0.88f, 0.88f, 0.88f);
     }
     return ui->overflow ? NULL : &ui->batch;
 }

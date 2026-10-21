@@ -11,14 +11,24 @@ typedef struct maage_client_mesh_stats {
 typedef struct maage_client_debug {
     maage_client_ui_debug text;
     double sample_start, sample_seconds, tick_seconds;
-    double fps, frame_ms, tps, tick_ms;
+    double fps, frame_ms, latest_frame_ms, tps, tick_ms;
     double frames, ticks; /* exponentially weighted event counts */
     int initialized, timing_ready, tick_sample;
+    double measurement_after, observation_time, busy_workers;
+    const maage_renderer *identity_renderer;
+    char version[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char system[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char renderer[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char gpu[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char performance[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char memory[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char workers[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
 } maage_client_debug;
-/* Frame time is the latest completed interval; FPS/TPS/tick averages update
- * every frame with a one-second exponential history.
- * Formatting and native memory observations update every visible F3 frame.
- * All observations belong to the Client owner; no update-frequency throttle. */
+/* Player/target observations remain live each visible frame. Performance uses
+ * a 0.75-second exponential history, displayed at 250 ms intervals; native memory
+ * is sampled at that interval. Static identity is formatted on renderer changes.
+ * latest_frame_ms remains unsmoothed for upload scheduling. Owner-thread only:
+ * no heap allocation, disk I/O, World lock or worker wait. */
 void maage_client_debug_frame(maage_client_debug *debug, double now,
     double elapsed, int presented, unsigned long ticks, double tick_seconds);
 const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug,

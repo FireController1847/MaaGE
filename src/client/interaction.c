@@ -1,4 +1,5 @@
 #include "interaction.h"
+#include "maage/log.h"
 #include <string.h>
 
 static const int maage_interaction_corners[6][4][3] = {
@@ -110,7 +111,19 @@ maage_render_result maage_client_interaction_update(maage_client_interaction_vis
     data.vertices = vertices; data.vertex_count = faces * 4;
     data.indices = indices; data.index_count = faces * 6;
     result = maage_renderer_upload_geometry(renderer, &data, atlas, &replacement);
-    if (result != MAAGE_RENDER_OK) return result;
+    if (result != MAAGE_RENDER_OK) {
+        maage_render_mesh_destroy(replacement);
+        if (result != MAAGE_RENDER_OUT_OF_MEMORY) return result;
+        if (visual->last_result != maage_render_operation_status(result, MAAGE_OPERATION_UPLOAD)) {
+            visual->last_result = maage_render_operation_status(result, MAAGE_OPERATION_UPLOAD);
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.interaction", visual->last_result,
+                "Target %d,%d,%d: omitting the optional selection visual.",
+                game->target.x, game->target.y, game->target.z);
+        }
+        maage_render_mesh_destroy(visual->mesh); visual->mesh = NULL;
+        visual->visible = 1; visual->target = game->target; visual->stage = stage;
+        return MAAGE_RENDER_OK;
+    }
     maage_render_mesh_destroy(visual->mesh); visual->mesh = replacement;
     visual->visible = 1; visual->target = game->target; visual->stage = stage;
     return MAAGE_RENDER_OK;

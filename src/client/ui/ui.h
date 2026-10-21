@@ -35,6 +35,15 @@ typedef unsigned int (*maage_client_ui_screen_input)(maage_client_ui *ui,
  * Resources resolve only here, from the existing reconstructed installation. */
 maage_client_ui *maage_client_ui_create(maage_renderer *renderer, const char *application_data,
     const maage_pixel_buffer *block_atlas);
+maage_status maage_client_ui_create_status(maage_renderer *renderer,
+    const char *application_data, const maage_pixel_buffer *block_atlas,
+    maage_client_ui **output);
+/* Returns the first original resource failure, even after successful recovery. */
+maage_status maage_client_ui_resource_status(const maage_client_ui *ui);
+/* Owner-only, bounded, nonmodal and deduplicated by result. Callers log the
+ * occurrence once; the brief notice cross-references its exact result code. */
+void maage_client_ui_notify(maage_client_ui *ui, maage_status result, double now);
+void maage_client_ui_notice_time(maage_client_ui *ui, double now);
 void maage_client_ui_destroy(maage_client_ui *ui);
 /* Borrow finalized registries and owner-thread gameplay for HUD and inventory. */
 void maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,

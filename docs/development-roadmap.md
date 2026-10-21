@@ -87,7 +87,7 @@ Implemented in the existing portable `MaaGE::World` library:
   light levels with temporary directional face shading. Lighting-only sections
   are published through controlled owner commits with stale-neighbor rejection.
 - **Diagnostics:** startup logs world ID, signed seed, generator and radius.
-  Periodic DEBUG diagnostics report loaded/pending/ready columns, generated versus
+  Periodic VERBOSE diagnostics report loaded/pending/ready columns, generated versus
   disk-loaded counts, mesh rebuilds and approximate frame time.
 
 ### Creation and Selection
@@ -218,7 +218,7 @@ Implemented as an extension of the existing World and Client:
   Resource/world metadata opens during hidden startup; blocking flush,
   join and final player metadata happen after the render loop stops.
 - **Diagnostics:** `--world-workers=<count>` configures the pool (0 is automatic). Startup reports its
-  actual count. Five-second DEBUG logs report queued/running jobs, accepted
+  actual count. Five-second VERBOSE logs report queued/running jobs, accepted
   generation, lighting, meshing and I/O work, lifetime completed/cancelled/stale
   counts, and approximate mean scheduling latency. No per-task production logging
   or runtime benchmark is required.
@@ -265,26 +265,11 @@ AppKit/Win32/GTK controls:
   followed by one presentation. **Metal currently implements UI and textured
   gameplay.** Vulkan/OpenGL/Software retain existing clear/presentation behavior
   and explicitly reject unsupported UI/gameplay commands; parity is deferred.
-- **F3 gameplay data:** the header uses the generated Client version and Git
-  metadata. Measured FPS/frame time and simulation TPS/tick cost accompany world
-  ID/seed, player XYZ, block/chunk coordinates, facing/yaw/pitch, numeric biome
-  and diagnostic name, current available sky/block light, render distance,
-  loaded/pending columns, resident sections and rendered mesh/vertex/triangle
-  counts. Resident sections are not a frustum-visibility estimate. Targeted-block
-  information is N/A because raycasting has not been implemented.
-- **F3 system data:** OS/architecture, renderer/backend and available GPU name,
-  Client build type, available process resident/peak memory, logical processors,
-  worker pool size, genuinely running generation workers, queued/running
-  generation, meshing, lighting and I/O, and completed/cancelled/stale counters.
-  Unavailable values are omitted or marked N/A rather than inferred.
-- **Read-only telemetry:** visible F3 World/job, text and memory snapshots refresh
-  every rendered frame. Rolling frame/tick timing statistics may smooth
-  measurements without throttling live state. A single brief scheduler
-  lock copies bounded context identities and numeric states, then World groups
-  immutable task kinds outside that lock. No worker output fields are read.
-  World observation reads owner-published biome/light/section data, with light
-  unavailable until current lighting completes. No World lock, job wait, GUI
-  dependency or diagnostic file I/O is introduced into the render loop.
+- **F3:** Phase 4.5 refines this overlay into compact left/right columns with live
+  gameplay observations and separately averaged performance measurements; see below.
+- **Read-only telemetry:** World observations use owner-published snapshots. One
+  brief scheduler snapshot copies bounded numeric states; no worker output reads,
+  World lock, job wait, heap allocation or diagnostic disk I/O occurs per frame.
 
 The ASCII font, compact layout, scaling, capture/navigation, pause behavior and
 Metal presentation require programmer runtime/visual verification. Non-macOS
@@ -527,10 +512,9 @@ Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
 - **Block entities:** chunk-owned numeric type/version/cell records with copied,
   bounded payloads and owner set/get/remove APIs. Block-type replacement removes
   the record. Container/furnace/sign identities are reserved; gameplay is deferred.
-- **F3:** clock/day, weather/intensities, temperature/static light, generator, eight
-  job stages, decoration-stage completions/structure fragments, pending fluid/block
-  updates and entities join existing worker, lighting, memory, mesh/upload diagnostics.
-  Snapshots never read worker-owned output or wait for jobs, graphics or I/O.
+- **Diagnostics:** clock/weather and generation/update counters remain available
+  through owner observations and logs; Phase 4.5 keeps them outside normal F3.
+
 
 This remains original approximate generation without Java Random/GenLayer,
 vanilla three-dimensional density or seed parity. Built-in feature tables are
@@ -546,6 +530,58 @@ Clock/player checkpoints occur on clean shutdown; chunks save independently.
 macOS ARM64 Debug/Release Client and headless World/Server builds passed. No applications, tests,
 benchmarks, runtime/visual validation or GitHub Actions ran. Windows/Linux and
 runtime shader compilation remain unverified; only Metal implements gameplay drawing.
+
+## Phase 4.5 — Client Resilience, Operation Status and Debug Refinement
+
+- **Operation Status:** independent C90 `MaaGE::Status` provides an explicitly
+  verified unsigned 32-bit `0xSSCCOODD`, field extraction, numeric severity,
+  immutable definitions, bounded allocation-free diagnostics, explicit SS/CC/OO/DD
+  serialization and failure propagation. `include/maage/status.h` is the sole
+  authoritative numeric registry for status, context, operation and detail codes.
+  Contexts cover resource, rendering, World I/O, GUI, scheduling and World work.
+- **Integration:** detailed image/asset lookup, renderer compatibility, chunk
+  load/save and GUI creation results retain source failures independently of
+  successful fallback. Jobs publish callback results through the existing queue
+  handoff, retain the original operation result when cancelled and distinguish
+  cancellation from stale snapshot rejection. Failed optional CPU/GPU meshes keep
+  existing visuals or omit the affected mesh; retry follows revision invalidation.
+  Authoritative load/registry/invariant failures stop safely and preserve saves.
+- **Logging:** inclusive VERBOSE/INFO/WARNING/ERROR/FATAL thresholds; actual Debug
+  builds default VERBOSE, other builds INFO. Existing `--log-level=`, INI overrides,
+  logger inheritance, synchronized output, stream capture and shutdown archives
+  remain. TRACE/DEBUG/WARN spellings remain compatibility aliases. Structured
+  records include the hex outcome and separate path/column/job context; failure
+  caches and owner handling boundaries prevent repeated reports every frame.
+- **Visual recovery:** an original generated magenta/black checkerboard occupies a
+  canonical shared nearest-sampled atlas tile before source registration. Failed
+  block/item sources resolve numeric UVs to it; unrelated tiles remain available.
+  Optional colormaps use documented green tints; absent GUI decorations use original
+  simple controls/checkers and an original minimal ASCII font. Missing sun/moon/
+  precipitation images omit only that visual. Sources resolve once per immutable
+  resource generation; explicit destroy/recreate retries, without Client downloads.
+- **F3:** one version/hash, integer FPS and measured TPS/frame time, compact chunk
+  counts/distance, live XYZ/block/chunk/facing/yaw/pitch, biome/light and targeted
+  block. The right column keeps available memory, OS/architecture, renderer/GPU,
+  logical cores and one worker/queued-chunk line. Removed duplicate version/build,
+  seed/world UUID, resident-section/vertex totals, gameplay counters, weather/time,
+  generator stages and detailed scheduler/upload counters. Columns clip separately.
+  Position/target/biome/light update each frame; FPS/TPS/frame time and worker use a
+  0.75-second exponential history displayed every 250 ms. Native memory is sampled
+  on that interval, and static identity is formatted only when the renderer changes.
+  Unchanged right-column geometry is cached with text/viewport/font/texture keys;
+  an optional cache allocation failure preserves immediate drawing. Adaptive upload
+  budgeting continues to use the latest frame interval rather than F3 averages.
+  The Window API has no reliable refresh-rate observation, so Hz is omitted.
+- **Error visibility:** a nonmodal six-second notice shows the exact Operation
+  Status hex and `logs/client.log`; recurring identical results are deduplicated.
+  F3 does not acquire an error table. Required allocation, registry, device and
+  authoritative-data failures remain controlled shutdown conditions.
+
+macOS ARM64 Debug/Release Client, Launcher and Server builds and the separate
+headless Release World/Server build passed. Runtime fallback, font/layout,
+concurrency and shader behavior require programmer verification. Windows/Linux
+and other gameplay-renderer capabilities remain unverified. No applications,
+tests, benchmarks, graphical validation or GitHub Actions are run for this phase.
 
 ## Phase 5 — Full Classic Gameplay
 

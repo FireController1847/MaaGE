@@ -1,5 +1,6 @@
 #ifndef MAAGE_JOBS_H
 #define MAAGE_JOBS_H
+#include "maage/status.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,8 @@ typedef struct maage_job_completion {
     maage_job_id id;
     void *context;
     int cancelled;
+    maage_status result; /* Published callback outcome, or scheduler interruption. */
+    maage_status operation_result; /* Original callback outcome; NOOP if never invoked. */
 } maage_job_completion;
 
 typedef struct maage_jobs_stats {
@@ -62,6 +65,10 @@ int maage_job_cancelled(const maage_job_token *token);
 /* Optional coarse stage transition. Uses the existing brief scheduler lock;
  * publish only at stage boundaries, never from an inner workload loop. */
 void maage_job_set_stage(const maage_job_token *token, unsigned stage);
+/* Callback-owned result, handed off by existing completion synchronization.
+ * Invoked legacy callbacks default to SUCCESS; uninvoked callbacks retain NOOP.
+ * Cancellation wins at poll without erasing completion.operation_result. */
+void maage_job_set_result(const maage_job_token *token, maage_status result);
 
 /* Poll transfers one context to the caller; callbacks never run here. Wait is
  * optional owner-thread notification, returning 0 once stopped and drained.

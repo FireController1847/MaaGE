@@ -37,6 +37,13 @@ int maage_world_store_open_configured(const char *instance_root, const char *id,
     int create, const char *name, const maage_world_seed *seed,
     const maage_generation_policy *generation_policy, const maage_item_registry *items,
     maage_world_store **store, maage_world_record *record, char error[256]);
+/* Metadata compatibility adapters retain the existing parser's exact error text.
+ * Pointer preconditions are INVALID_ARGUMENT; other legacy failures are ERROR
+ * rather than guessing a cause from text. No diagnostics are emitted here. */
+maage_status maage_world_store_open_configured_status(const char *instance_root, const char *id,
+    int create, const char *name, const maage_world_seed *seed,
+    const maage_generation_policy *generation_policy, const maage_item_registry *items,
+    maage_world_store **store, maage_world_record *record, char error[256]);
 /* Modded worlds must use this variant before reading player metadata. It
  * borrows finalized item definitions until close so schemas 4-6 resolve stable
  * namespaced names to runtime IDs. The original open remains an adapter for
@@ -72,6 +79,10 @@ int maage_world_store_save_environment_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
     const maage_gameplay *game, const maage_item_registry *items,
     const maage_environment_state *environment, char error[256]);
+maage_status maage_world_store_save_environment_gameplay_status(maage_world_store *store,
+    const double position[3], double yaw, double pitch,
+    const maage_gameplay *game, const maage_item_registry *items,
+    const maage_environment_state *environment, char error[256]);
 /* All jobs borrowing this store must finish before close releases its lock. */
 void maage_world_store_close(maage_world_store *store);
 /* Distinct coordinates may load/save concurrently: each job owns its buffers,
@@ -94,6 +105,12 @@ void maage_world_store_close(maage_world_store *store);
 int maage_world_store_load_chunk(maage_world_store *store, int x, int z,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
     maage_chunk **chunk, char error[256]);
+/* Primary outcome API: NOT_FOUND alone permits generation. Malformed/unmapped
+ * saves and inaccessible files remain failures and preserve the original data.
+ * Caller-owned outputs keep concurrent column I/O independent. */
+maage_status maage_world_store_load_chunk_status(maage_world_store *store, int x, int z,
+    const maage_block_registry *blocks, const maage_biome_registry *biomes,
+    maage_chunk **chunk, char error[256]);
 int maage_world_store_save_chunk(maage_world_store *store,
     const maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_biome_registry *biomes, char error[256]);
@@ -101,6 +118,10 @@ int maage_world_store_save_chunk(maage_world_store *store,
  * serialize remaining delays, so an older clock checkpoint after a crash cannot
  * postpone them by an entire previous session. Import rebases on column load. */
 int maage_world_store_save_chunk_at(maage_world_store *store,
+    const maage_chunk *chunk, const maage_block_registry *blocks,
+    const maage_biome_registry *biomes, unsigned long tick_low,
+    unsigned long tick_high, char error[256]);
+maage_status maage_world_store_save_chunk_at_status(maage_world_store *store,
     const maage_chunk *chunk, const maage_block_registry *blocks,
     const maage_biome_registry *biomes, unsigned long tick_low,
     unsigned long tick_high, char error[256]);

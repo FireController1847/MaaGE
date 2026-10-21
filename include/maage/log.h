@@ -2,15 +2,20 @@
 #define MAAGE_LOG_H
 
 #include <stdarg.h>
+#include "maage/status.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef enum maage_log_level {
-    MAAGE_LOG_TRACE, MAAGE_LOG_DEBUG, MAAGE_LOG_INFO, MAAGE_LOG_WARN,
+    MAAGE_LOG_VERBOSE, MAAGE_LOG_INFO, MAAGE_LOG_WARNING,
     MAAGE_LOG_ERROR, MAAGE_LOG_FATAL, MAAGE_LOG_OFF
 } maage_log_level;
+/* Source/configuration compatibility: all routine diagnostics are VERBOSE. */
+#define MAAGE_LOG_TRACE MAAGE_LOG_VERBOSE
+#define MAAGE_LOG_DEBUG MAAGE_LOG_VERBOSE
+#define MAAGE_LOG_WARN MAAGE_LOG_WARNING
 
 typedef struct maage_log_config {
     maage_log_level level;
@@ -22,7 +27,9 @@ typedef struct maage_log_config {
     int capture_stdio;
 } maage_log_config;
 
-/* Defaults: INFO, console enabled, file disabled, local timestamps enabled.
+/* Defaults: Debug VERBOSE, other build configurations INFO; console enabled,
+ * file disabled, local timestamps enabled. Thresholds include the selected
+ * level and every more severe level. Build classification is compiled into Log.
  * init copies strings; caller storage need only survive the call. Precedence:
  * supplied defaults, optional INI, then recognized --log-* arguments. Missing
  * INI files are optional; other errors return zero with usable settings retained.
@@ -55,6 +62,15 @@ void maage_log_flush(void);
 void maage_log_shutdown(void);
 void maage_log_write(maage_log_level level, const char *logger, const char *format, ...);
 void maage_log_vwrite(maage_log_level level, const char *logger, const char *format, va_list args);
+/* Structured occurrence: includes stable Operation Status identity and caller
+ * context (path, numeric ID, OS error, job ID). Severity is the caller's logging
+ * decision, independent of result severity. Success never logs automatically.
+ * Formatting is skipped when filtered. Report once at the handling boundary;
+ * callers own occurrence/failure caches rather than global last-error state. */
+void maage_log_status(maage_log_level level, const char *logger,
+    maage_status result, const char *format, ...);
+void maage_log_verbose(const char *logger, const char *format, ...);
+void maage_log_warning(const char *logger, const char *format, ...);
 void maage_log_trace(const char *logger, const char *format, ...);
 void maage_log_debug(const char *logger, const char *format, ...);
 void maage_log_info(const char *logger, const char *format, ...);

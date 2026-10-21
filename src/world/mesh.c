@@ -79,7 +79,7 @@ static const maage_chunk *maage_mesh_neighbor(const maage_chunk *chunk,
 static size_t maage_mesh_generate(const maage_block_registry *registry,
     const maage_chunk *chunk, const maage_chunk *neighbors[4],
     maage_mesh_vertex *vertices, unsigned int *indices,
-    const maage_job_token *token)
+    const maage_job_token *token, unsigned int *failure)
 {
     const maage_block_state_definition *state, *neighbor;
     const maage_block_definition *block, *current;
@@ -93,10 +93,10 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
     int crossed, boundary;
     size_t face_count = 0;
     for (section = 0; section < 16; ++section) {
-        if (token && maage_job_cancelled(token)) return (size_t)-1;
+        if (token && maage_job_cancelled(token)) { *failure = MAAGE_STATUS_INTERRUPTED; return (size_t)-1; }
         if (!chunk->sections[section]) continue;
         for (y = section * MAAGE_CHUNK_EDGE; y < (section + 1) * MAAGE_CHUNK_EDGE; ++y) {
-            if (token && maage_job_cancelled(token)) return (size_t)-1;
+            if (token && maage_job_cancelled(token)) { *failure = MAAGE_STATUS_INTERRUPTED; return (size_t)-1; }
             for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
                 for (x = 0; x < MAAGE_CHUNK_EDGE; ++x) {
                     id = maage_chunk_get(chunk, x, y, z);
@@ -154,35 +154,61 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
     return face_count;
 }
 
-maage_world_mesh *maage_world_mesh_create_chunk_job(const maage_block_registry *blocks,
+static maage_world_mesh *maage_mesh_failure(maage_status *result, unsigned int code)
+{
+    *result = maage_status_make(code, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH,
+        code == MAAGE_STATUS_INTERRUPTED ? MAAGE_DETAIL_CANCELLED : 0);
+    return NULL;
+}
+maage_world_mesh *maage_world_mesh_create_chunk_job_status(const maage_block_registry *blocks,
     const maage_biome_registry *biomes, const maage_chunk *chunk,
-    const maage_chunk *neighbors[4], const maage_job_token *token)
+    const maage_chunk *neighbors[4], const maage_job_token *token, maage_status *result)
 {
     maage_world_mesh *mesh;
-    size_t faces, maximum = (size_t)-1;
-    if (!blocks || !biomes || !chunk || !neighbors) return NULL;
-    faces = maage_mesh_generate(blocks, chunk, neighbors, NULL, NULL, token);
-    if (faces == maximum || faces > UINT_MAX / 4 ||
+    size_t faces, written, maximum = (size_t)-1;
+    unsigned int failure = MAAGE_STATUS_INVARIANT_VIOLATION;
+    if (!blocks || !biomes || !chunk || !neighbors) {
+        *result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD,
+            MAAGE_OPERATION_MESH, !blocks ? 0 : (!biomes ? 1 : (!chunk ? 2 : 3)));
+        return NULL;
+    }
+    faces = maage_mesh_generate(blocks, chunk, neighbors, NULL, NULL, token, &failure);
+    if (faces == maximum) return maage_mesh_failure(result, failure);
+    if (faces > UINT_MAX / 4 ||
         faces > maximum / (4 * sizeof(maage_mesh_vertex)) ||
-        faces > maximum / (6 * sizeof(unsigned int))) return NULL;
-    if (token && maage_job_cancelled(token)) return NULL;
+        faces > maximum / (6 * sizeof(unsigned int)))
+        return maage_mesh_failure(result, MAAGE_STATUS_BUFFER_OVERFLOW);
+    if (token && maage_job_cancelled(token)) return maage_mesh_failure(result, MAAGE_STATUS_INTERRUPTED);
     mesh = (maage_world_mesh *)calloc(1, sizeof(*mesh));
-    if (!mesh) return NULL;
+    if (!mesh) return maage_mesh_failure(result, MAAGE_STATUS_ALLOCATION_FAILED);
     if (faces) {
         mesh->vertices = (maage_mesh_vertex *)malloc(faces * 4 * sizeof(*mesh->vertices));
         mesh->indices = (unsigned int *)malloc(faces * 6 * sizeof(*mesh->indices));
-        if (!mesh->vertices || !mesh->indices ||
-            maage_mesh_generate(blocks, chunk, neighbors, mesh->vertices,
-                mesh->indices, token) != faces) {
+        if (!mesh->vertices || !mesh->indices) {
             maage_world_mesh_destroy(mesh);
-            return NULL;
+            return maage_mesh_failure(result, MAAGE_STATUS_ALLOCATION_FAILED);
+        }
+        written = maage_mesh_generate(blocks, chunk, neighbors, mesh->vertices,
+            mesh->indices, token, &failure);
+        if (written != faces) {
+            maage_world_mesh_destroy(mesh);
+            return maage_mesh_failure(result, failure);
         }
     }
     mesh->data.vertices = mesh->vertices;
     mesh->data.indices = mesh->indices;
     mesh->data.vertex_count = faces * 4;
     mesh->data.index_count = faces * 6;
+    *result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
     return mesh;
+}
+
+maage_world_mesh *maage_world_mesh_create_chunk_job(const maage_block_registry *blocks,
+    const maage_biome_registry *biomes, const maage_chunk *chunk,
+    const maage_chunk *neighbors[4], const maage_job_token *token)
+{
+    maage_status result;
+    return maage_world_mesh_create_chunk_job_status(blocks, biomes, chunk, neighbors, token, &result);
 }
 
 maage_world_mesh *maage_world_mesh_create_chunk(const maage_block_registry *blocks,

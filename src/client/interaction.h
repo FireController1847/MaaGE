@@ -7,6 +7,7 @@ typedef struct maage_client_interaction_visual {
     maage_render_mesh *mesh;
     maage_world_target target;
     int visible, stage;
+    maage_status last_result;
     float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CLIENT_TEXTURE_COUNT][4];
 } maage_client_interaction_visual;
 /* Copies pre-resolved crack UVs. The frame path uses bounded stack geometry and

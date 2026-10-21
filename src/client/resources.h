@@ -18,13 +18,22 @@
 #define MAAGE_CLIENT_TEXTURE_BIOME_TOP(id) (11 + 2 * (id))
 #define MAAGE_CLIENT_TEXTURE_BIOME_SIDE(id) (12 + 2 * (id))
 #define MAAGE_CLIENT_TEXTURE_EXTRA (11 + 2 * MAAGE_BIOME_COUNT)
-#define MAAGE_CLIENT_TEXTURE_COUNT (MAAGE_CLIENT_TEXTURE_EXTRA + 33)
+#define MAAGE_CLIENT_TEXTURE_MISSING (MAAGE_CLIENT_TEXTURE_EXTRA + 33)
+#define MAAGE_CLIENT_TEXTURE_COUNT (MAAGE_CLIENT_TEXTURE_MISSING + 1)
+#define MAAGE_CLIENT_SOURCE_COUNT 57
 #define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
     maage_image image;
     maage_pixel_buffer atlas;
     float uv[MAAGE_CLIENT_TEXTURE_COUNT][4];
     float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CLIENT_TEXTURE_COUNT][4];
+    /* Initialization-only numeric failure cache. Gameplay never retries loads.
+     * Destroy/reload explicitly retries all sources on the renderer owner.
+     * load_status retains the first original error; recovery_status reports
+     * atlas/fallback construction independently. */
+    maage_status load_status, recovery_status;
+    maage_status source_results[MAAGE_CLIENT_SOURCE_COUNT];
+    unsigned int failed_resources;
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
 int maage_client_resources_load(const char *application_data,

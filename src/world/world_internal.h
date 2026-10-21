@@ -126,4 +126,7 @@ int maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks
 maage_world_mesh *maage_world_mesh_create_chunk_job(const maage_block_registry *blocks,
     const maage_biome_registry *biomes, const maage_chunk *chunk,
     const maage_chunk *neighbors[4], const maage_job_token *token);
+maage_world_mesh *maage_world_mesh_create_chunk_job_status(const maage_block_registry *blocks,
+    const maage_biome_registry *biomes, const maage_chunk *chunk,
+    const maage_chunk *neighbors[4], const maage_job_token *token, maage_status *result);
 #endif

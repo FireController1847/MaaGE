@@ -2,6 +2,7 @@
 #define MAAGE_RENDER_H
 #include "maage/window.h"
 #include "maage/geometry.h"
+#include "maage/status.h"
 
 typedef struct maage_renderer maage_renderer;
 typedef struct maage_render_mesh maage_render_mesh;
@@ -34,6 +35,10 @@ typedef enum maage_render_result {
     MAAGE_RENDER_SURFACE_LOST,
     MAAGE_RENDER_PLATFORM_ERROR
 } maage_render_result;
+/* Compatibility adapter; preserves backend-neutral results without truncating
+ * native diagnostics into the detail byte. Pass a registered operation code. */
+maage_status maage_render_operation_status(maage_render_result result,
+    unsigned char operation);
 typedef struct maage_render_desc {
     maage_window *window;
     maage_render_family family;
