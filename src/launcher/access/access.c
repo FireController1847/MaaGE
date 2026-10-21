@@ -242,6 +242,12 @@ static void maage_access_load(maage_access *a)
     }
     ++a->view.revision; maage_access_unlock(a); json_object_put(root);
 }
+static int maage_access_json_set(struct json_object *object, const char *name, struct json_object *value)
+{
+    if (!value) return 0;
+    if (json_object_object_add(object,name,value)) { json_object_put(value); return 0; }
+    return 1;
+}
 static int maage_access_save(maage_access *a)
 {
     struct json_object *root, *list, *item;
@@ -252,24 +258,38 @@ static int maage_access_save(maage_access *a)
     unsigned i;
     FILE *file;
     int ok = 0, entries_ok = 1;
-    if (!maage_access_path(a, path, "minecraft-profiles.json") || !maage_access_path(a, temporary, "minecraft-profiles.part") || !maage_access_path(a, lockpath, "minecraft-profiles.lock")) return 0;
+    if (!maage_access_path(a, path, "minecraft-profiles.json") ||
+        !maage_access_path(a, temporary, "minecraft-profiles.part") ||
+        !maage_access_path(a, lockpath, "minecraft-profiles.lock")) return 0;
     lock = maage_storage_acquire(lockpath); if (!lock) return 0;
-    root = json_object_new_object(); list = json_object_new_array();
-    if (!root || !list) { if (root) json_object_put(root); if (list) json_object_put(list); maage_storage_release(lock); return 0; }
-    json_object_object_add(root, "version", json_object_new_int(3)); json_object_object_add(root, "profiles", list);
+    root = json_object_new_object();
+    list = json_object_new_array();
+    if (!root || !list) {
+        if (root) json_object_put(root);
+        if (list) json_object_put(list);
+        maage_storage_release(lock);
+        return 0;
+    }
+    if (!maage_access_json_set(root,"version",json_object_new_int(3)) ||
+        json_object_object_add(root,"profiles",list)) {
+        json_object_put(list); json_object_put(root); maage_storage_release(lock); return 0;
+    }
     maage_access_lock(a);
     for (i = 0; i < a->view.count; ++i) {
         maage_access_profile *p = &a->view.profiles[i];
-        item = json_object_new_object(); if (!item) { entries_ok = 0; break; }
-        json_object_object_add(item, "name", json_object_new_string(p->name));
-        json_object_object_add(item, "uuid", json_object_new_string(p->uuid));
-        json_object_object_add(item, "credentialProvider", json_object_new_string(p->session_saved ? "microsoft-oauth" : "none"));
-        json_object_object_add(item, "lastVerified", json_object_new_double(p->last_verified));
-        json_object_array_add(list, item);
+        item = json_object_new_object();
+        if (!item) { entries_ok = 0; break; }
+        if (!maage_access_json_set(item,"name",json_object_new_string(p->name)) ||
+            !maage_access_json_set(item,"uuid",json_object_new_string(p->uuid)) ||
+            !maage_access_json_set(item,"credentialProvider",json_object_new_string(p->session_saved ? "microsoft-oauth" : "none")) ||
+            !maage_access_json_set(item,"lastVerified",json_object_new_double(p->last_verified))) {
+            json_object_put(item); entries_ok = 0; break;
+        }
+        if (json_object_array_add(list,item)) { json_object_put(item); entries_ok = 0; break; }
     }
     maage_access_unlock(a);
-    data = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY);
-    if (entries_ok && data && strlen(data) <= 8UL * 1024UL * 1024UL && maage_storage_remove(temporary)) {
+    data = entries_ok ? json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY) : NULL;
+    if (data && strlen(data) <= 8UL * 1024UL * 1024UL && maage_storage_remove(temporary)) {
         length = strlen(data); file = maage_storage_open(temporary, "wb");
         if (file) { ok = fwrite(data, 1, length, file) == length; if (fclose(file)) ok = 0; }
         if (ok) ok = maage_storage_replace(temporary, path);
