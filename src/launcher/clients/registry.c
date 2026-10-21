@@ -324,7 +324,7 @@ int maage_clients_probe(const char *source, maage_client_candidate *c, char erro
 int maage_clients_import(maage_client_registry *r, const maage_client_candidate *c, char error[256])
 {
     maage_storage_lock *lock=maage_client_lock(r);
-    maage_client_registry *current=(maage_client_registry *)malloc(sizeof(*current));
+    maage_client_registry *current=(maage_client_registry *)calloc(1,sizeof(*current));
     maage_client_build verified;
     char staging[MAAGE_PATH_CAPACITY], destination[MAAGE_PATH_CAPACITY], package[MAAGE_PATH_CAPACITY], managed[MAAGE_PATH_CAPACITY];
     int ok=0, promoted=0, staging_owned=0;
@@ -361,7 +361,12 @@ int maage_clients_import(maage_client_registry *r, const maage_client_candidate 
     }
     current->builds[current->count++]=verified;
     if(!maage_client_save(current)) goto done;
-    *r=*current; ok=1; maage_log_info("maage.launcher.clients","Imported Client %s (%s); developer source preserved.",verified.version,verified.build);
+    /* Registry ownership transfers to the caller. The worker hands this array
+     * to the Launcher UI; disposing current must not free that live storage. */
+    maage_clients_dispose(r);
+    *r=*current;
+    current->builds=NULL;
+    ok=1; maage_log_info("maage.launcher.clients","Imported Client %s (%s); developer source preserved.",verified.version,verified.build);
  done:
     if(!ok) {
         if(staging_owned) maage_client_remove_tree(promoted ? destination : staging);
