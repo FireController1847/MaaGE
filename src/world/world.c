@@ -56,7 +56,7 @@ struct maage_world {
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
     unsigned scan_step;
-    int scan_ring;
+    int scan_ring, save_turn;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
     int center_x, center_z, stopped, failed;
@@ -293,18 +293,19 @@ static void maage_world_collect(maage_world *world)
     maage_job_completion completion;
     maage_world_task *task;
     maage_world_slot *slot;
-    int stale, obsolete;
+    int stale, obsolete, owns;
     while (maage_jobs_poll(world->jobs, &completion)) {
         task = (maage_world_task *)completion.context;
         slot = maage_world_find(world, task->x, task->z);
         stale = !slot || slot->incarnation != task->incarnation;
         obsolete = slot && maage_world_distance(world, slot) > world->config.render_distance + 2;
-        if (!stale) {
-            if (task->kind == MAAGE_JOB_SAVE && slot->save == task) slot->save = NULL;
-            else if (task->kind != MAAGE_JOB_SAVE && slot->work == task) slot->work = NULL;
+        owns = !stale && (task->kind == MAAGE_JOB_SAVE ?
+            slot->save == task : slot->work == task);
+        if (owns) {
+            if (task->kind == MAAGE_JOB_SAVE) slot->save = NULL;
+            else slot->work = NULL;
         }
-        if (!stale && (completion.cancelled || obsolete) &&
-            (task->kind == MAAGE_JOB_SAVE || !slot->work)) {
+        if (owns && (completion.cancelled || obsolete)) {
             if (task->kind == MAAGE_JOB_LIGHT) slot->light_dirty = 1;
             if (task->kind == MAAGE_JOB_MESH) slot->mesh_dirty = 1;
         }
@@ -343,9 +344,6 @@ static void maage_world_collect(maage_world *world)
         }
         ++world->stats.completed_jobs;
         maage_world_task_release(world, task);
-        /* Newly completed load/light work should be considered near-first
-         * before continuing a previous streaming sweep. */
-        world->scan_ring = 0; world->scan_step = 0;
     }
 }
 static int maage_world_submit(maage_world *world, maage_world_slot *slot, int kind, unsigned priority)
@@ -477,6 +475,15 @@ static void maage_world_schedule(maage_world *world)
     if (world->failed) return;
     reserve = world->task_limit > 1 ? world->task_limit / 8U + (world->task_limit % 8U != 0) : 0;
     work_limit = world->task_limit - reserve;
+    if (world->active >= world->task_limit ||
+        world->active - world->saves_active >= work_limit)
+        ++world->stats.queue_saturation_events;
+    /* A single context cannot reserve a separate save slot. Alternate which
+     * class is admitted first when constrained to that explicit capacity. */
+    if (world->task_limit == 1 && !world->active) {
+        world->save_turn = !world->save_turn;
+        if (world->save_turn) maage_world_schedule_saves(world, 1);
+    }
     limit = (unsigned)(span * span); /* validated at creation */
     budget = world->task_limit > UINT_MAX / 16U ? UINT_MAX : world->task_limit * 16U;
     if (budget < 64U) budget = 64U;
