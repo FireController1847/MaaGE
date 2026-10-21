@@ -14,6 +14,7 @@
 #include "interaction.h"
 #include "environment.h"
 #include "storage_context.h"
+#include "options.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -155,6 +156,21 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
 }
 /* Cleanup continues after a reported failure while retaining the first failed
  * outcome. Each independent cleanup occurrence gets its own bounded trace. */
+/* Save only at explicit option boundaries, never from the rendering path.
+ * A snapshot uses the last confirmed window mode during AppKit transitions. */
+static maage_status maage_client_options_store(const maage_instance *instance,
+    const maage_client_ui *ui, maage_client_options *saved, int force)
+{
+    maage_client_options current;
+    maage_status result;
+    maage_client_ui_get_options(ui, &current);
+    if (!force && maage_client_options_equal(&current, saved))
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SAVE, 0);
+    result = maage_client_options_save(instance, &current);
+    if (!maage_status_failed(result)) *saved = current;
+    return result;
+}
+
 static void maage_client_cleanup_result(maage_status result, maage_status *outcome,
     maage_status_trace *trace, maage_status_trace *failure_trace)
 {
@@ -365,6 +381,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_mesh_cache cache;
     maage_client_mesh_activity mesh_activity;
     maage_client_world_options options;
+    maage_client_options video_options, saved_video_options;
     maage_client_resources resources;
     maage_biome_registry *biomes = NULL;
     maage_world_config world_config;
@@ -394,6 +411,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int ok = 0, initial_capture = 1, active, was_active = 0, jump_pending = 0, axis;
     int player_ready = 0, cx, cz, i, was_modal, was_focused = 0;
     int attack_pending = 0, use_pending = 0, changing_mode = 0, was_changing_mode = 0;
+    int options_ready = 0, options_save_needed = 0, was_options_visible = 0;
     memset(&resources, 0, sizeof(resources)); memset(&cache, 0, sizeof(cache)); memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&debug, 0, sizeof(debug));
     memset(&interaction, 0, sizeof(interaction)); memset(&intent, 0, sizeof(intent));
@@ -409,6 +427,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         operation = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_INSTANCE, MAAGE_OPERATION_SELECT, 0);
         failure_message = "No validated instance was selected at startup."; goto done;
     }
+    operation = maage_client_options_load(instance, &video_options);
+    if (maage_status_failed(operation))
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
+            "Unable to read instance config/options.ini; using video defaults.");
+    saved_video_options = video_options;
     strcpy(directory, maage_client_storage_data_root());
     maage_log_info("maage.client.instance", "Instance: %s (%s).", maage_instance_get_info(instance)->name,
         maage_instance_get_info(instance)->id);
@@ -542,6 +565,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS && maage_status_code(rendered) != MAAGE_STATUS_NOOP) goto done;
     result = maage_window_set_visible(window, 1);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+    operation = maage_client_ui_apply_options(ui, &video_options);
+    if (maage_status_failed(operation))
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
+            "Some saved video settings could not be applied; retaining available defaults.");
+    options_ready = 1;
     maage_log_info("maage.client", "WASD walks; Space jumps (double tap for Creative flight), Shift descends; mouse buttons break/place; 1-9 or wheel selects; E opens inventory; Escape returns; F3 shows diagnostics; F11 toggles window mode. Options selects game mode. Unavailable columns block interaction and movement.");
     last = maage_time_monotonic_seconds(); diagnostic_time = last;
     mesh_activity.sample_start = last;
@@ -558,6 +586,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         result = maage_window_get_input(window, &input);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
         was_modal = maage_client_ui_modal(ui);
+        was_options_visible = maage_client_ui_options_visible(ui);
         memset(&ui_input, 0, sizeof(ui_input));
         if (input.focused) {
             ui_input.escape = input.pressed[MAAGE_INPUT_KEY_ESCAPE];
@@ -585,7 +614,21 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
         }
         changing_mode = maage_client_ui_window_mode_changing(ui);
-        if (was_changing_mode && !changing_mode) initial_capture = 1;
+        if (was_options_visible && !maage_client_ui_options_visible(ui))
+            options_save_needed = 1;
+        if (was_changing_mode && !changing_mode) {
+            initial_capture = 1;
+            options_save_needed = 1;
+        }
+        if (options_save_needed && !changing_mode) {
+            operation = maage_client_options_store(instance, ui, &saved_video_options, 0);
+            options_save_needed = 0;
+            if (maage_status_failed(operation)) {
+                maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
+                    "Unable to atomically save instance config/options.ini.");
+                maage_client_ui_notify(ui, operation, maage_time_monotonic_seconds());
+            }
+        }
         if (!changing_mode && !was_changing_mode &&
             ((was_focused && !input.focused) || (was_active && !input.captured))) {
             if (!maage_client_ui_modal(ui)) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
@@ -794,6 +837,14 @@ window_failed:
     outcome = MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     failure_message = "Native window/input cannot continue.";
 done:
+    if (options_ready) {
+        /* Also persist non-menu changes on ordinary shutdown. If AppKit is
+         * still transitioning, the UI exposes its last confirmed mode. */
+        operation = maage_client_options_store(instance, ui, &saved_video_options, 1);
+        if (maage_status_failed(operation))
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
+                "Unable to save instance config/options.ini during shutdown.");
+    }
     if (ok) outcome = maage_status_make(maage_status_is_success(resource_notice) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL,
         MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
     else if (!maage_status_failed(outcome)) {

@@ -3,6 +3,7 @@
 #include "maage/render.h"
 #include "maage/gameplay.h"
 #include "maage/world.h"
+#include "../options.h"
 
 typedef struct maage_client_ui maage_client_ui;
 typedef unsigned int maage_client_ui_screen_id;
@@ -61,6 +62,10 @@ int maage_client_ui_debug_visible(const maage_client_ui *ui);
 maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets);
 /* Synchronize observed mode/completion before the frame's GUI input is routed. */
 maage_status maage_client_ui_set_window_state(maage_client_ui *ui, const maage_window_state *state);
+/* Client-owned persistence reads/writes these numeric option snapshots. */
+maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_client_options *options);
+void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options *options);
+int maage_client_ui_options_visible(const maage_client_ui *ui);
 int maage_client_ui_window_mode_changing(const maage_client_ui *ui);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.
  * Integer GUI scale uses framebuffer pixels, with a 320x240 logical minimum. */
@@ -72,7 +77,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
  * no partial batch is returned. The caller treats that as a frame-build failure. */
 maage_status maage_client_ui_draw(maage_client_ui *ui,
     const maage_client_ui_debug *debug, const maage_render_ui_data **output);
-/* Session-only options; 0 FPS means Unlimited; 0 GUI scale means Auto. */
+/* Current option values; 0 FPS means Unlimited; 0 GUI scale means Auto. */
 int maage_client_ui_max_fps(const maage_client_ui *ui);
 int maage_client_ui_vsync(const maage_client_ui *ui);
 int maage_client_ui_gui_scale(const maage_client_ui *ui);

@@ -148,7 +148,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
  * Call regularly, including while simulation is paused; no frame-wide waits. */
 maage_status maage_world_stream(maage_world *world, double x, double z, double yaw,
     maage_status_trace *trace);
-/* Session-only visual change: invalidate meshes, preserve columns and lighting.
+/* Runtime visual change: invalidate meshes, preserve columns and lighting.
  * The next nonblocking World stream schedules replacement CPU mesh jobs. */
 maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode);
 /* One ordered 20 TPS environment phase, with bounded scheduled block work.

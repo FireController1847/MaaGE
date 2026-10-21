@@ -56,6 +56,8 @@ struct maage_client_ui {
     unsigned int selected;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, dragging_fps, leaves_mode;
     int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;
+    int confirmed_window_mode, confirmed_fullscreen_style;
+    double mode_requested_at;
     maage_status draw_result;
     maage_status notice_result, route_result;
     double notice_until, notice_now;

@@ -206,7 +206,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   icons/widgets/ASCII font through existing Image/Texture APIs at initialization;
   no resource acquisition, new texture manager or native widget toolkit.
   Logical GUI coordinates scale independently of framebuffer resolution.
-- The Client Leaves option is session-only: Fast uses opaque textures and aggressive
+- The Client Leaves option is persistent: Fast uses opaque textures and aggressive
   internal-face culling; Smart uses cutout textures and culls leaf-to-leaf faces
   obscured behind two face-facing leaf layers or a leaf backed by an opaque block,
   retaining the exposed and first interior cutout planes per direction; Fancy
@@ -214,7 +214,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   must meaningfully reduce geometry without Fast's hollow-canopy appearance.
   Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
-- Client Window Mode cycles Windowed, Borderless and Fullscreen in one session-only Options button.
+- Client persists FPS, VSync, GUI Scale, Leaves and Window Mode in per-instance
+  `config/options.ini`, using numeric settings in memory and atomic Core Storage replacement.
+  Game Mode remains world data. Save on Options exit, completed F11/window transitions,
+  and normal shutdown, never per FPS-slider frame or during native transitions.
+  Client Window Mode cycles Windowed, Borderless and Fullscreen in one Options button.
   F11 toggles Windowed and the last non-windowed choice (default Borderless).
   Non-macOS Fullscreen uses supported borderless fullscreen, never fabricated exclusive mode.
   macOS Borderless stays in its desktop Space and covers the display, while Fullscreen
