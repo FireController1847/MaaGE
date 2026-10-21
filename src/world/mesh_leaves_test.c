@@ -122,6 +122,12 @@ int main(void)
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FAST, 216, 0.6f);
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1272, 0.1f);
     verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1296, 0.1f);
+    /* Even a diagonally neighboring trunk breaks deep burial. The adjacent
+     * core leaf and its three internal faces remain visible in Smart. */
+    CHECK(maage_chunk_set(center, 5, 17, 5, MAAGE_STATE_STONE));
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_SMART, 1272, 0.1f);
+    verify_mesh(blocks, &biomes, center, NULL, NULL, MAAGE_LEAVES_FANCY, 1290, 0.1f);
+    CHECK(maage_chunk_set(center, 5, 17, 5, MAAGE_STATE_LEAVES));
     /* A trunk in the center of that core must preserve nearby cutout faces.
      * It breaks burial for every otherwise-culled internal face. */
     CHECK(maage_chunk_set(center, 6, 18, 6, MAAGE_STATE_STONE));

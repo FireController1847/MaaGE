@@ -77,19 +77,21 @@ static const maage_chunk *maage_mesh_neighbor(const maage_chunk *chunk,
 }
 
 /* A face is deeply buried only when BOTH leaf blocks have two complete
- * Manhattan-distance layers of leaves around them. Missing columns and
- * diagonal columns outside the four supplied neighbors conservatively keep
- * faces visible, avoiding hollow canopies and unknown-neighbor assumptions. */
+ * axial layers and a fully enclosed immediate 3D neighborhood. Missing
+ * columns, including diagonal columns outside the four supplied neighbors,
+ * conservatively keep faces visible, avoiding unknown-neighbor assumptions. */
 static int maage_mesh_leaf_buried(const maage_block_registry *registry,
     const maage_chunk *chunk, const maage_chunk *neighbors[4],
     int x, int y, int z)
 {
-    static const signed char offsets[24][3] = {
+    static const signed char offsets[32][3] = {
         {-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1},
         {-2,0,0}, {2,0,0}, {0,-2,0}, {0,2,0}, {0,0,-2}, {0,0,2},
         {-1,-1,0}, {-1,1,0}, {1,-1,0}, {1,1,0},
         {-1,0,-1}, {-1,0,1}, {1,0,-1}, {1,0,1},
-        {0,-1,-1}, {0,-1,1}, {0,1,-1}, {0,1,1}
+        {0,-1,-1}, {0,-1,1}, {0,1,-1}, {0,1,1},
+        {-1,-1,-1}, {-1,-1,1}, {-1,1,-1}, {-1,1,1},
+        {1,-1,-1}, {1,-1,1}, {1,1,-1}, {1,1,1}
     };
     const maage_chunk *sample;
     const maage_block_state_definition *state;
