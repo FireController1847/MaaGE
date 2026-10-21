@@ -174,5 +174,6 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
     while ((received = GetMessageW(&message,NULL,0,0)) > 0) if (!IsDialogMessageW(ui.window,&message)) { TranslateMessage(&message); DispatchMessageW(&message); }
     if (received < 0) { DestroyWindow(ui.window); ui.result = -1; }
 cleanup:
+    maage_access_snapshot_release(&ui.snapshot);
     DeleteObject(ui.font); DeleteObject(ui.heading); DeleteObject(ui.background); DeleteObject(ui.panel); UnregisterClassW(klass.lpszClassName,klass.hInstance); return ui.result;
 }

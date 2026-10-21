@@ -144,5 +144,5 @@ int maage_access_native_run(maage_access *access, int manage_accounts)
     ui.next = maage_access_gtk_button(row, "Continue", G_CALLBACK(maage_access_gtk_next), &ui); ui.cancel = maage_access_gtk_button(row, "Cancel", G_CALLBACK(maage_access_gtk_cancel), &ui); gtk_style_context_add_class(gtk_widget_get_style_context(ui.next), "accent");
     g_signal_connect(ui.profiles, "changed", G_CALLBACK(maage_access_gtk_select), &ui); g_signal_connect(ui.window, "delete-event", G_CALLBACK(maage_access_gtk_close), &ui);
     gtk_widget_set_sensitive(ui.next, FALSE); timer = g_timeout_add(100, maage_access_gtk_tick, &ui); gtk_widget_show_all(outer); maage_access_gtk_tick(&ui); gtk_main();
-    g_source_remove(timer); gtk_widget_destroy(ui.window); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css)); g_object_unref(css); return ui.result;
+    g_source_remove(timer); gtk_widget_destroy(ui.window); maage_access_snapshot_release(&ui.snapshot); gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css)); g_object_unref(css); return ui.result;
 }
