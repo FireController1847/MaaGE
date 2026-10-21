@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <errno.h>
+#include <limits.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -23,6 +25,40 @@
 #define MAAGE_OBJECT_LIMIT (512.0 * 1024.0 * 1024.0)
 #define MAAGE_MANIFEST "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 
+/* Environment policy is opt-in; defaults preserve historical network behavior. */
+static int maage_assets_download_config(maage_download_options *options)
+{
+    const char *names[] = { "MAAGE_DOWNLOAD_CONCURRENCY", "MAAGE_DOWNLOAD_ATTEMPTS",
+        "MAAGE_DOWNLOAD_CONNECT_TIMEOUT", "MAAGE_DOWNLOAD_TIMEOUT",
+        "MAAGE_DOWNLOAD_LOW_SPEED_LIMIT", "MAAGE_DOWNLOAD_LOW_SPEED_TIME" };
+    long *settings[4], parsed;
+    unsigned long value;
+    const char *text;
+    char *end;
+    unsigned i;
+    maage_download_options_init(options);
+    settings[0] = &options->connect_timeout_seconds;
+    settings[1] = &options->timeout_seconds;
+    settings[2] = &options->low_speed_bytes_per_second;
+    settings[3] = &options->low_speed_seconds;
+    for (i = 0; i < 6; ++i) {
+        text = getenv(names[i]);
+        if (!text || !*text) continue;
+        errno = 0; end = NULL;
+        if (i < 2) {
+            if (*text == '-' || *text == '+') return 0;
+            value = strtoul(text, &end, 10);
+            if (errno || !end || *end || !value || value > UINT_MAX) return 0;
+            if (i == 0) options->max_concurrent = (unsigned int)value;
+            else options->max_attempts = (unsigned int)value;
+        } else {
+            parsed = strtol(text, &end, 10);
+            if (errno || !end || *end || parsed < (i == 3 ? 0L : 1L)) return 0;
+            *settings[i - 2] = parsed;
+        }
+    }
+    return 1;
+}
 typedef struct maage_asset_object {
     const char *name; /* One indexed name for download diagnostics; aliases remain logical entries. */
     char hash[41], fingerprint[128];
@@ -372,7 +408,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
 {
     char metadata_path[MAAGE_PATH_CAPACITY], index_path[MAAGE_PATH_CAPACITY], state_path[MAAGE_PATH_CAPACITY];
     char path[MAAGE_PATH_CAPACITY], manifest_path[MAAGE_PATH_CAPACITY], metadata_hash[41], index_hash[41];
-    char destinations[4][MAAGE_PATH_CAPACITY], urls[4][160], fingerprint[128];
+    char (*destinations)[MAAGE_PATH_CAPACITY] = NULL, (*urls)[160] = NULL, fingerprint[128];
     char legacy_state_path[MAAGE_PATH_CAPACITY], staging[MAAGE_PATH_CAPACITY] = "";
     char destination[MAAGE_PATH_CAPACITY], relative[128], client_path[MAAGE_PATH_CAPACITY], client_hash[41];
     const char *directories[] = { "minecraft/assets/indexes", "minecraft/assets/objects", "minecraft/assets/reconst", "minecraft/assets/.staging", "minecraft/metadata", "minecraft/cache", "config", "logs" };
@@ -387,11 +423,12 @@ static int maage_assets_install(maage_assets *assets, char error[512])
     maage_storage_lock *lock = NULL;
     maage_asset_object *list = NULL, key;
     maage_logical_asset *logical = NULL;
-    maage_download_request requests[4];
+    maage_download_request *requests = NULL;
+    maage_download_options download_options;
     maage_download_observer observer;
     maage_setup_progress progress;
-    unsigned long count = 0, unique = 0, i, j, completed = 0, reconstructed = 0, batch_indices[4];
-    unsigned int batch;
+    unsigned long count = 0, unique = 0, i, j, completed = 0, reconstructed = 0, *batch_indices = NULL;
+    unsigned int batch, slots;
     double size, index_size = -1, total = 0, client_size;
     int ok = 0, trusted = 0, same, cloned, completed_installation = 0, legacy_objects;
     maage_assets_stage(assets, MAAGE_SETUP_PREPARING, "Preparing application directories");
@@ -581,11 +618,25 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         maage_assets_count(assets, completed, 0);
     }
     if (!maage_assets_write_json(state_path, receipt)) goto storage_error;
+    if (!maage_assets_download_config(&download_options)) {
+        strcpy(error, "Invalid MAAGE_DOWNLOAD_* policy. Check configured concurrency, attempts, and timeout values."); goto cleanup;
+    }
+    slots = download_options.max_concurrent;
+    if (unique && (unsigned long)slots > unique) slots = (unsigned int)unique;
+    if (!slots || (size_t)slots > (size_t)-1 / sizeof(*destinations) ||
+        (size_t)slots > (size_t)-1 / sizeof(*urls) ||
+        (size_t)slots > (size_t)-1 / sizeof(*requests) ||
+        (size_t)slots > (size_t)-1 / sizeof(*batch_indices)) goto memory_error;
+    destinations = (char (*)[MAAGE_PATH_CAPACITY])calloc(slots, sizeof(*destinations));
+    urls = (char (*)[160])calloc(slots, sizeof(*urls));
+    requests = (maage_download_request *)calloc(slots, sizeof(*requests));
+    batch_indices = (unsigned long *)calloc(slots, sizeof(*batch_indices));
+    if (!destinations || !urls || !requests || !batch_indices) goto memory_error;
     observer.cancelled = maage_assets_cancelled; observer.bytes = maage_assets_bytes; observer.context = assets;
     if (completed < unique) maage_assets_stage(assets, MAAGE_SETUP_DOWNLOADING, "Downloading and verifying resources");
     for (i = 0; i < unique; ) {
         batch = 0;
-        while (i < unique && batch < 4) {
+        while (i < unique && batch < slots) {
             j = i++;
             if (list[j].verified) continue;
             if (!maage_assets_object_path(assets, list[j].hash, destinations[batch])) goto storage_error;
@@ -597,7 +648,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         }
         if (maage_assets_cancelled(assets)) goto cleanup;
         if (!batch) continue;
-        if (!maage_download_batch(requests, batch, &observer, error)) goto cleanup;
+        if (!maage_download_batch_with_options(requests, batch, &observer, &download_options, error)) goto cleanup;
         for (j = 0; j < batch; ++j) {
             if (!maage_storage_stat(destinations[j], &size, fingerprint) || size != list[batch_indices[j]].size) goto storage_error;
             list[batch_indices[j]].verified = 1; list[batch_indices[j]].repaired = 1; strcpy(list[batch_indices[j]].fingerprint, fingerprint);
@@ -618,7 +669,7 @@ static int maage_assets_install(maage_assets *assets, char error[512])
         requests[0].sha1 = client_hash; requests[0].size = client_size; requests[0].limit = client_size;
         observer.bytes = maage_assets_client_bytes;
         maage_assets_stage(assets, MAAGE_SETUP_CLIENT_ARCHIVE, "Downloading and verifying Minecraft client resources");
-        if (!maage_download_batch(requests, 1, &observer, error)) goto cleanup;
+        if (!maage_download_batch_with_options(requests, 1, &observer, &download_options, error)) goto cleanup;
         if (!maage_assets_file(assets, client_path, client_hash, client_size)) {
             strcpy(error, "The downloaded client JAR failed SHA-1 or size verification. Retry to reacquire it."); goto cleanup;
         }
@@ -747,6 +798,7 @@ cleanup:
     else if (new_saved) json_object_put(new_saved);
     if (staging[0] && !maage_storage_remove(staging))
         maage_log_warn("maage.launcher.assets", "Cannot remove reconstruction staging file: %s", staging);
+    free(batch_indices); free(requests); free(urls); free(destinations);
     free(logical); free(list); maage_storage_release(lock);
     return ok;
 }
