@@ -3,7 +3,7 @@
 #include "maage/world.h"
 #include "maage/gameplay.h"
 #define MAAGE_WORLD_FORMAT_VERSION 2UL
-#define MAAGE_PLAYER_FORMAT_VERSION 2UL
+#define MAAGE_PLAYER_FORMAT_VERSION 3UL
 typedef struct maage_world_record {
     char id[65], name[128], created_utc[32];
     maage_world_seed seed;
@@ -33,10 +33,11 @@ int maage_world_store_migrate_legacy(const char *data_root,
  * Serialize metadata saves with each other; chunk files are independent. */
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256]);
-/* Atomic schema-2 metadata snapshot, used after rendering stops. Schema-1 worlds
- * migrate to Creative with empty inventory and full vitals; chunk format stays 1.
- * Numeric item mapping 1 fixes 1,2,3,7,12,13,24, metadata/damage zero. Unknown
- * mappings fail without overwriting originals. Cursor and overflow pickups persist. */
+/* Atomic schema-3 metadata snapshot; schema 1 and 2 remain readable. Schema 1
+ * migrates to Creative/empty inventory/full vitals. Schema 3 uses a checked
+ * 32-bit pickup count instead of schema 2's 8-bit count. Item mapping 1 remains
+ * the seven original numeric IDs; expanding item persistence identities requires
+ * an explicit modpack mapping integration, never silent reinterpretation. */
 int maage_world_store_save_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
     const maage_gameplay *game, const maage_item_registry *items, char error[256]);

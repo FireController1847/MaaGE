@@ -10,7 +10,9 @@
 /* V2 allows per-chunk palettes of up to 65536 namespaced state identities.
  * Reads allocate only the actual validated file size, not this maximum. */
 #define MAAGE_STORE_CHUNK_MAX 18000000UL
-#define MAAGE_STORE_METADATA_MAX 4096
+/* Prevent save-data-driven allocations from growing without a file bound.
+ * 16 MiB supports hundreds of thousands of overflow pickups. */
+#define MAAGE_STORE_METADATA_MAX 16777216UL
 #define MAAGE_STORE_WORD 4294967295UL
 struct maage_world_store {
     char directory[MAAGE_PATH_CAPACITY], chunks[MAAGE_PATH_CAPACITY];
@@ -254,12 +256,35 @@ static int maage_store_gameplay_valid(const maage_gameplay_save *save)
         if (save->pickups[i].stack.count && !(save->pickups[i].position[1] >= 0 &&
             save->pickups[i].position[1] <= MAAGE_WORLD_HEIGHT)) return 0;
     }
+    if (save->overflow_count > (MAAGE_STORE_METADATA_MAX - 4096UL) / 37UL ||
+        (save->overflow_count && !save->overflow_pickups)) return 0;
+    {
+        size_t j;
+        for (j = 0; j < save->overflow_count; ++j) {
+            const maage_gameplay_pickup *pickup = &save->overflow_pickups[j];
+            if (!maage_store_stack_valid(&pickup->stack)) return 0;
+            for (axis = 0; axis < 3; ++axis)
+                if (!(pickup->position[axis] > -MAAGE_WORLD_LIMIT &&
+                    pickup->position[axis] < MAAGE_WORLD_LIMIT)) return 0;
+            if (pickup->stack.count && !(pickup->position[1] >= 0 &&
+                pickup->position[1] <= MAAGE_WORLD_HEIGHT)) return 0;
+        }
+    }
     return 1;
+}
+static void maage_store_pickup_put(maage_store_bytes *bytes,
+    const maage_gameplay_pickup *pickup)
+{
+    unsigned int axis;
+    maage_store_stack_put(bytes, &pickup->stack);
+    for (axis = 0; axis < 3; ++axis)
+        maage_store_double_put(bytes, pickup->position[axis]);
 }
 static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gameplay_save *save)
 {
-    unsigned int i, axis, pickups = 0;
-    maage_store_put(bytes, 1, 4); /* Stable item mapping version. */
+    unsigned int i;
+    size_t j, pickups = 0;
+    maage_store_put(bytes, 1, 4); /* Legacy item identity mapping version. */
     maage_store_put(bytes, save->mode, 1); maage_store_put(bytes, save->health, 1);
     maage_store_put(bytes, save->hunger, 1); maage_store_put(bytes, save->flying ? 1 : 0, 1);
     maage_store_put(bytes, save->inventory.selected, 1);
@@ -267,17 +292,24 @@ static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gamep
     maage_store_double_put(bytes, save->fall_distance);
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i) maage_store_stack_put(bytes, &save->inventory.slots[i]);
     maage_store_stack_put(bytes, &save->inventory.cursor);
-    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) if (save->pickups[i].stack.count) ++pickups;
-    maage_store_put(bytes, pickups, 1);
-    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) {
-        if (!save->pickups[i].stack.count) continue;
-        maage_store_stack_put(bytes, &save->pickups[i].stack);
-        for (axis = 0; axis < 3; ++axis) maage_store_double_put(bytes, save->pickups[i].position[axis]);
-    }
+    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i)
+        if (save->pickups[i].stack.count) ++pickups;
+    for (j = 0; j < save->overflow_count; ++j)
+        if (save->overflow_pickups[j].stack.count) ++pickups;
+    if (pickups > MAAGE_STORE_WORD) { bytes->failed = 1; return; }
+    maage_store_put(bytes, (unsigned long)pickups, 4);
+    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i)
+        if (save->pickups[i].stack.count) maage_store_pickup_put(bytes, &save->pickups[i]);
+    for (j = 0; j < save->overflow_count; ++j)
+        if (save->overflow_pickups[j].stack.count) maage_store_pickup_put(bytes, &save->overflow_pickups[j]);
 }
-static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_save *save)
+static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_save *save,
+    unsigned long schema)
 {
-    unsigned int i, axis, pickups;
+    unsigned int i, axis;
+    unsigned long pickups;
+    size_t overflow;
+    maage_gameplay_pickup *pickup;
     memset(save, 0, sizeof(*save));
     if (maage_store_get(bytes, 4) != 1) { bytes->failed = 1; return; }
     save->mode = (unsigned int)maage_store_get(bytes, 1); save->health = (unsigned int)maage_store_get(bytes, 1);
@@ -287,23 +319,47 @@ static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_sa
     save->fall_distance = maage_store_double_get(bytes);
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i) maage_store_stack_get(bytes, &save->inventory.slots[i]);
     maage_store_stack_get(bytes, &save->inventory.cursor);
-    pickups = (unsigned int)maage_store_get(bytes, 1);
-    if (pickups > MAAGE_GAMEPLAY_PICKUPS) { bytes->failed = 1; return; }
+    pickups = maage_store_get(bytes, schema >= 3 ? 4 : 1);
+    if (bytes->failed || (schema == 2 && pickups > MAAGE_GAMEPLAY_PICKUPS) ||
+        pickups > (MAAGE_STORE_METADATA_MAX - 4096UL) / 37UL + MAAGE_GAMEPLAY_PICKUPS ||
+        pickups > (bytes->length - bytes->position) / 37UL) {
+        bytes->failed = 1; return;
+    }
+    overflow = pickups > MAAGE_GAMEPLAY_PICKUPS ? (size_t)(pickups - MAAGE_GAMEPLAY_PICKUPS) : 0;
+    if (overflow) {
+        if (overflow > (size_t)-1 / sizeof(*save->overflow_pickups)) {
+            bytes->failed = 1; return;
+        }
+        save->overflow_pickups = (maage_gameplay_pickup *)calloc(overflow,
+            sizeof(*save->overflow_pickups));
+        if (!save->overflow_pickups) { bytes->failed = 1; return; }
+        save->overflow_count = overflow;
+    }
     for (i = 0; i < pickups; ++i) {
-        maage_store_stack_get(bytes, &save->pickups[i].stack);
-        if (!save->pickups[i].stack.count) bytes->failed = 1;
-        for (axis = 0; axis < 3; ++axis) save->pickups[i].position[axis] = maage_store_double_get(bytes);
+        pickup = i < MAAGE_GAMEPLAY_PICKUPS ? &save->pickups[i] :
+            &save->overflow_pickups[i - MAAGE_GAMEPLAY_PICKUPS];
+        maage_store_stack_get(bytes, &pickup->stack);
+        if (!pickup->stack.count) bytes->failed = 1;
+        for (axis = 0; axis < 3; ++axis) pickup->position[axis] = maage_store_double_get(bytes);
     }
     if (!maage_store_gameplay_valid(save)) bytes->failed = 1;
 }
 static int maage_store_metadata_write(const maage_world_store *store,
     const maage_world_record *record, char error[256])
 {
-    unsigned char data[MAAGE_STORE_METADATA_MAX];
+    unsigned char *data;
     maage_store_bytes bytes;
+    size_t capacity;
     char path[MAAGE_PATH_CAPACITY];
     unsigned int i;
-    bytes.data = data; bytes.length = sizeof(data); bytes.position = 0; bytes.failed = 0;
+    if (!maage_store_gameplay_valid(&record->gameplay))
+        return maage_store_error(error, "Player gameplay identity or pickup data is invalid.");
+    capacity = 4096UL + record->gameplay.overflow_count * 37UL;
+    if (capacity > MAAGE_STORE_METADATA_MAX)
+        return maage_store_error(error, "Player gameplay data exceeds the metadata file bound.");
+    data = (unsigned char *)malloc(capacity);
+    if (!data) return maage_store_error(error, "Not enough memory to encode player metadata.");
+    bytes.data = data; bytes.length = capacity; bytes.position = 0; bytes.failed = 0;
     maage_store_text_put(&bytes, "MGWORLD1", 8);
     maage_store_put(&bytes, MAAGE_PLAYER_FORMAT_VERSION, 4);
     maage_store_put(&bytes, MAAGE_WORLD_GENERATOR_VERSION, 4);
@@ -318,9 +374,14 @@ static int maage_store_metadata_write(const maage_world_store *store,
     maage_store_double_put(&bytes, record->yaw); maage_store_double_put(&bytes, record->pitch);
     maage_store_gameplay_put(&bytes, &record->gameplay);
     maage_store_checksum_put(&bytes);
-    if (bytes.failed || !maage_storage_join(path, sizeof(path), store->directory, "world.bin"))
-        return maage_store_error(error, "Could not encode world metadata.");
-    return maage_store_write(path, data, bytes.position, error);
+    if (bytes.failed || !maage_storage_join(path, sizeof(path), store->directory, "world.bin")) {
+        free(data); return maage_store_error(error, "Could not encode world metadata.");
+    }
+    {
+        int ok = maage_store_write(path, data, bytes.position, error);
+        free(data);
+        return ok;
+    }
 }
 static int maage_store_metadata_load(const maage_world_store *store,
     const char *expected_id, maage_world_record *record, char error[256])
@@ -330,14 +391,14 @@ static int maage_store_metadata_load(const maage_world_store *store,
     unsigned long lengths[3], format = 0;
     size_t i, j;
     char *texts[3];
-    int ok;
+    int ok, gameplay_read = 0;
     if (!maage_storage_join(path, sizeof(path), store->directory, "world.bin")) return maage_store_error(error, "World metadata path is too long.");
     bytes.data = maage_store_read(path, MAAGE_STORE_METADATA_MAX, &bytes.length, error);
     if (!bytes.data) return 0;
     bytes.position = 0; bytes.failed = 0;
     ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD1");
     if (ok) format = maage_store_get(&bytes, 4);
-    ok = ok && (format == 1 || format == MAAGE_PLAYER_FORMAT_VERSION) &&
+    ok = ok && (format == 1 || format == 2 || format == MAAGE_PLAYER_FORMAT_VERSION) &&
         maage_store_get(&bytes, 4) == MAAGE_WORLD_GENERATOR_VERSION &&
         maage_store_get(&bytes, 4) == MAAGE_WORLD_BLOCKSET_VERSION;
     if (ok) {
@@ -357,7 +418,8 @@ static int maage_store_metadata_load(const maage_world_store *store,
         for (i = 0; i < 3; ++i) record->position[i] = maage_store_double_get(&bytes);
         record->yaw = maage_store_double_get(&bytes); record->pitch = maage_store_double_get(&bytes);
         if (format == 1) maage_store_gameplay_default(&record->gameplay);
-        else maage_store_gameplay_get(&bytes, &record->gameplay);
+        else maage_store_gameplay_get(&bytes, &record->gameplay, format);
+        gameplay_read = 1;
         ok = ok && !bytes.failed && bytes.position == bytes.length && maage_store_id(record->id) &&
             !strcmp(record->id, expected_id) && maage_store_name(record->name) && maage_store_player(record);
         for (i = 0; i < 20; ++i) {
@@ -366,6 +428,7 @@ static int maage_store_metadata_load(const maage_world_store *store,
         }
     }
     free(bytes.data);
+    if (!ok && gameplay_read) maage_gameplay_save_clear(&record->gameplay);
     return ok ? 1 : maage_store_error(error, "World metadata is corrupt or uses an unsupported format, generator, or block mapping.");
 }
 static int maage_store_random_id(char id[65])
@@ -676,9 +739,16 @@ int maage_world_store_save_player(maage_world_store *store,
     memcpy(record.position, position, sizeof(record.position));
     record.gameplay = existing.gameplay;
     record.yaw = yaw; record.pitch = pitch; record.new_world = 0;
-    if (!maage_store_player(&record)) return maage_store_error(error, "Player state is outside the world format's supported bounds.");
+    if (!maage_store_player(&record)) {
+        maage_gameplay_save_clear(&existing.gameplay);
+        return maage_store_error(error, "Player state is outside the world format's supported bounds.");
+    }
     /* Store identity stays immutable while independent chunk jobs borrow it. */
-    return maage_store_metadata_write(store, &record, error);
+    {
+        int saved = maage_store_metadata_write(store, &record, error);
+        maage_gameplay_save_clear(&existing.gameplay);
+        return saved;
+    }
 }
 int maage_world_store_save_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
@@ -686,21 +756,34 @@ int maage_world_store_save_gameplay(maage_world_store *store,
 {
     maage_world_record record, existing;
     maage_gameplay restored;
+    int valid, saved;
     if (!store || !position || !game || !items) return maage_store_error(error, "Missing player gameplay snapshot.");
     record = store->record;
     if (!maage_store_metadata_load(store, record.id, &existing, error)) return 0;
     if (existing.seed.high != record.seed.high || existing.seed.low != record.seed.low)
         return maage_store_error(error, "World metadata changed its seed while open; the save was preserved.");
     memcpy(record.position, position, sizeof(record.position)); record.yaw = yaw; record.pitch = pitch;
-    record.new_world = 0; maage_gameplay_snapshot(game, &record.gameplay);
-    if (!maage_store_player(&record) || !maage_store_gameplay_valid(&record.gameplay) ||
-        !maage_gameplay_restore(&restored, items, &record.gameplay))
+    record.new_world = 0;
+    if (!maage_gameplay_snapshot(game, &record.gameplay)) {
+        maage_gameplay_save_clear(&existing.gameplay);
+        return maage_store_error(error, "Not enough memory to snapshot player gameplay.");
+    }
+    memset(&restored, 0, sizeof(restored));
+    valid = maage_store_player(&record) &&
+        maage_store_gameplay_valid(&record.gameplay) &&
+        maage_gameplay_restore(&restored, items, &record.gameplay);
+    saved = valid && maage_store_metadata_write(store, &record, error);
+    maage_gameplay_destroy(&restored);
+    maage_gameplay_save_clear(&record.gameplay);
+    maage_gameplay_save_clear(&existing.gameplay);
+    if (!valid)
         return maage_store_error(error, "Player gameplay snapshot is invalid or uses an unmapped item identity.");
-    return maage_store_metadata_write(store, &record, error);
+    return saved;
 }
 void maage_world_store_close(maage_world_store *store)
 {
     if (!store) return;
+    maage_gameplay_save_clear(&store->record.gameplay);
     maage_storage_release(store->lock); free(store);
 }
 static int maage_store_coordinates(int x, int z)
