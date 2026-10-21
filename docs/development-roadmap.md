@@ -50,16 +50,18 @@ Implemented in the existing portable `MaaGE::World` library:
   words in C90. Generator **1** hashes seed bits, stable coordinates and numeric
   stages into gradient Perlin/fractal noise. Climate sampling selects numeric
   ocean/plains/desert/extreme-hills/forest/taiga biomes; blended heights produce
-  stone, surface/filler layers, bedrock and static ocean water at Y=63. Heightmaps
-  and initial lighting precede meshing. A bounded deterministic surface search
-  selects the initial spawn. Generation has no mutable global PRNG and does not
+  stone, surface/filler layers, bedrock and static ocean water at Y=63. Generator
+  **2** uses the same terrain mathematics with persisted per-world sea-level and
+  spawn-search policies; generator 1's rules never change. Heightmaps and initial
+  lighting precede meshing. Generation has no mutable global PRNG and does not
   depend on request order, worker scheduling or render radius.
 - **Streaming:** bounded asynchronous jobs handle loading/generation, lighting,
   CPU meshing and saving; the owner commits results and evicts columns. The
   bounded desired grid prioritizes nearby and
-  view-facing columns. Render radius defaults to **8**, configurable from 1–8;
-  one extra column provides a lighting/meshing halo. The cache is capped at 512
-  columns. Fully constructed immutable columns are published by the owner. Missing/loading
+  view-facing columns. Render radius defaults to **8** without a fixed 8-chunk
+  ceiling; the World cache, coordinate hash and accepted-job pool grow according
+  to runtime capacities. A halo protects neighbor lighting and meshing.
+  Fully constructed immutable columns are published by the owner. Missing/loading
   columns block collision, and simulation waits for the player's column. Dirty
   columns are saved before eviction; shutdown joins the pool and flushes saves.
 - **Lifecycle and meshes:** requested → loading/generating → generated → lighting
@@ -71,8 +73,9 @@ Implemented in the existing portable `MaaGE::World` library:
   meshes survive unrelated movement. Missing neighbors expose exterior faces
   until an updated culled mesh arrives. Water interiors are culled numerically.
 - **Presentation:** one shared nearest-filtered atlas serves all chunk meshes.
-  The graphics thread uploads at most one changed column per frame and batches
-  draws into one clear/depth/presentation pass. Actual reconstructed 1.7.10 grass,
+  The graphics thread drains multiple changed meshes within a configurable or
+  adaptive millisecond budget and batches draws into one clear/depth/presentation
+  pass. GPU mesh storage grows with the actual resident demand. Actual reconstructed 1.7.10 grass,
   dirt, stone, bedrock, water, sand, gravel and sandstone PNGs are loaded once.
   Real grass/foliage colormaps populate biome definitions; grass atlas variants
   and sandstone top/bottom/side references are resolved before gameplay.
@@ -118,13 +121,15 @@ Player state saves after the pool's clean-shutdown flush. An interrupted first
 launch retains a pending-spawn flag; later interrupted launches resume the last
 successfully saved player state.
 
-Format **1**, generator **1**, blockset **1** use explicit little-endian encoding
-and CRC32. Sparse chunk files store a section mask, numeric 16-bit state IDs,
-packed light, numeric biomes and heightmaps. Runtime IDs remain independent of
-this storage width. The exact state/type/metadata mapping above is frozen by the
-blockset version; changing IDs requires an explicit migration. Unsupported versions,
-coordinates, lengths, mappings, heightmaps or checksums fail clearly. Corrupt
-existing files are preserved, never silently regenerated or overwritten.
+Legacy chunk format **1**, generator **1**, blockset **1** remain readable with
+frozen numeric identities. New chunk format **2** uses namespaced block/state and
+biome palettes local to each chunk, preserving expanded runtime ID registries.
+Metadata schemas 1–4 retain generator-1 behavior; configured generator 2 uses
+metadata schema **5** with sea-level and spawn-search parameters. Headers carry
+matching generator/blockset versions. All files use explicit little-endian encoding
+and CRC32. Unsupported versions, lengths, coordinates, identities or checksums
+fail without replacing corrupt originals. Explicit migrations remain necessary
+for incompatible mappings or generation changes.
 
 Writes sync complete temporary files before atomic promotion. Abandoned `.tmp`
 files are ignored on read and removed before another write. Failed writes retain
@@ -172,8 +177,9 @@ Implemented as an extension of the existing World and Client:
   of **one**. Failed detection selects **eight workers** directly. Positive
   explicit counts have no arbitrary ceiling. Allocation
   and operating-system resources determine availability. Queue/snapshot bounds
-  are independent of worker count: World task capacity scales with the pool
-  within its finite column-cache bound. Threads and scheduler arrays are created
+  are independently configurable at runtime, with default cache sizing derived
+  from the footprint and accepted-job sizing derived from pool/streaming demand.
+  Threads and scheduler arrays are created
   once, not per chunk or frame. A brief scheduler mutex protects queue ownership and cancellation;
   it is never held while a task performs generation, meshing, lighting or I/O.
 - **World ownership:** the caller thread owns membership, published immutable
@@ -205,8 +211,9 @@ Implemented as an extension of the existing World and Client:
   20 TPS player movement, rendering orchestration and GPU operations stay on the
   owning thread. No other meaningful independent gameplay system exists yet;
   entity frameworks or mechanics have not been added to demonstrate parallelism.
-  GPU uploads remain capped at one changed column per frame and retain unchanged
-  resources. Resource/world metadata opens during hidden startup; blocking flush,
+  GPU uploads are budgeted by elapsed milliseconds per frame (adaptive by default
+  or explicitly configured), and unchanged resources remain resident.
+  Resource/world metadata opens during hidden startup; blocking flush,
   join and final player metadata happen after the render loop stops.
 - **Diagnostics:** `--world-workers=<count>` configures the pool (0 is automatic). Startup reports its
   actual count. Five-second DEBUG logs report queued/running jobs, accepted
@@ -327,13 +334,12 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   uses at most 64 numeric position/stack records and is collected within two
   blocks; a full pickup pool prevents another overflowing break. These records
   persist but have no rendered item entities, movement or despawn yet.
-- **Persistence:** CRC-protected atomic player metadata schema 2 stores inventory,
-  cursor, selected slot, mode, vitals, flight, fall distance, pickup records and
-  position/rotation. Schema-1 worlds load with empty Creative inventory and full
-  vitals, retaining seed/chunks. Numeric item mapping 1 fixes the seven current
-  IDs with metadata/damage zero; unknown mappings fail explicitly. Chunk format
-  and block/biome mappings remain 1. Final player metadata writes after rendering
-  stops and World flush succeeds; no player-file I/O runs in the frame loop.
+- **Persistence:** CRC-protected player metadata schemas 1–3 remain readable.
+  Schema 4 writes namespaced stable item identities and expandable pickup
+  records; configured generator 2 uses schema 5. Existing numeric item mapping
+  1 retains its legacy seven-item interpretation. Chunk format 2 persists
+  namespaced block/state/biome palettes while reading old format-1 chunks.
+  Final player metadata writes only after rendering stops and World flush succeeds.
 - **F3:** target IDs/face/position, selected item/slot, mode/flight, health/hunger,
   reach/break progress, mutation totals and dirty columns join existing scheduler
   diagnostics through bounded owner snapshots.

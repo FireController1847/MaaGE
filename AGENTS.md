@@ -102,8 +102,12 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Y=0..255. Negative coordinates use floor division and positive modulo.
   Coordinate-keyed hashing is expected O(1), not deterministic worst-case O(1).
 - Seeded generation is versioned and independent of load order/scheduling.
-  Signed 64-bit seeds use C90-compatible word pairs. Generator 1 approximates
-  classic terrain; never claim Java Random/GenLayer or seed-for-seed parity.
+  Signed 64-bit seeds use C90-compatible word pairs. Generator 1 retains
+  its frozen Y=63 and spawn-search behavior. Generator 2 permits explicit,
+  immutable per-world sea level and spawn-search policy, saved in metadata
+  schema 5 and propagated into asynchronous World jobs. Existing worlds
+  retain their recorded version/policy; never change one on load. Neither
+  generator claims Java Random/GenLayer or seed-for-seed parity.
 - Parallelize independent CPU-intensive world work by default through reusable
   `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
@@ -111,8 +115,9 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   abstraction. If detection fails, use eight workers directly. Positive explicit
   counts have no arbitrary ceiling; allocation
   and OS resource failures remain explicit. Bound accepted contexts, retained
-  snapshots and queued/running work separately from the worker count. World
-  task capacity scales with the pool within its finite column-cache bound.
+  snapshots and queued/running work independently of worker count. World
+  cache and accepted-job capacity are runtime-configurable; defaults derive
+  from footprint and pool size rather than fixed hard ceilings.
 - One owner thread controls World membership, published immutable columns,
   simulation and deferred result commits. Workers own their output buffers and
   borrow immutable inputs/registries until completion. Independent column load,
@@ -180,12 +185,13 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   immutable columns, invalidate lighting/neighbor mesh revisions and reject stale
   jobs/uploads. Retain asynchronous saves and dirty-eviction protection; never
   mutate worker-borrowed storage or introduce a global World lock.
-- Player metadata schema 2 preserves numeric inventory/cursor, selected slot, mode,
-  vitals, flight, pickups and position/rotation; schema 1 migrates without changing
-  chunk mapping 1. Mapping changes require explicit migration. Save final player
-  metadata only after rendering and successful World flush. Respawn currently
-  retains inventory at session-start position; full death/entity/food rules remain
-  provisional against Java Edition 1.7.10.
+- Player metadata schemas 1-3 remain readable with their legacy numeric item
+  mapping; schema 4 preserves namespaced item identities and extensible pickup
+  counts. Schema 5 additionally persists generator-2 parameters. New chunk writes
+  use local stable-name palettes (chunk format 2); format-1 mappings stay readable.
+  Save final player metadata only after rendering and successful World flush.
+  Respawn retains inventory at session-start position; full death/entity/food
+  rules remain provisional against Java Edition 1.7.10.
 
 ### Physical instances and shared folders
 
@@ -525,8 +531,12 @@ tuning remain provisional until programmer fidelity verification.
 one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
 creates a unique UUID world; default startup resumes the instance's `config/last-world` or creates a
 unique world if none exists. Never overwrite an existing ID during creation or
-change its generator/seed implicitly. `--render-distance=1..8` defaults to 8;
-`--world-workers=<count>` selects a positive pool size (0 uses the automatic policy).
+change its generator/seed implicitly. `--render-distance=<positive integer>`
+defaults to 8, subject to World-coordinate, allocation and resource constraints;
+`--world-workers=<count>` selects a positive pool size (0 uses automatic policy).
+`--mesh-upload-budget-ms=<milliseconds>` optionally fixes the GPU upload
+budget; 0 uses an adaptive fraction of `--mesh-frame-target-ms` (60 FPS default).
+Dynamic Client GPU mesh storage follows resident presentation demand.
 World metadata opens while the viewport is hidden; final player metadata and
 blocking flush/join occur after rendering stops, never inside the frame loop.
 Generic `MaaGE::Storage`, `MaaGE::Thread` and `MaaGE::Jobs` have no Launcher acquisition
@@ -543,9 +553,10 @@ manifest also live in `minecraft/metadata/`; MaaGE configuration/logs remain out
 Reuse/migrate verified files from the previous `assets/` and `versions/1.7.10/`
 layout without redownloading them. Never create new Minecraft `versions/` trees.
 Previous `.maage` logs remain untouched.
-Downloads are content-addressed, SHA-1/size-verified, bounded to four concurrent
-requests with three attempts and backoff, and atomically promoted from temporary
-files. Resume preserves completed objects; interrupted individual files restart.
+Downloads are content-addressed, SHA-1/size-verified, use configurable
+concurrency, retry count and network timeout/low-speed policies
+(`MAAGE_DOWNLOAD_*` environment settings), and atomically promote temporary
+files. Defaults are conservative rather than immutable capacity limits. Resume preserves completed objects; interrupted individual files restart.
 An installation lock serializes writers. Initial setup and repair share one
 verification/download/reconstruction implementation: cover every indexed entry,
 deduplicate hashes, and reconstruct every logical path, without resource-type
