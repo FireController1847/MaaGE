@@ -57,7 +57,7 @@ Implemented in the existing portable `MaaGE::World` library:
 - **Streaming:** bounded asynchronous jobs handle loading/generation, lighting,
   CPU meshing and saving; the owner commits results and evicts columns. The
   bounded desired grid prioritizes nearby and
-  view-facing columns. Render radius defaults to **3**, configurable from 1–8;
+  view-facing columns. Render radius defaults to **8**, configurable from 1–8;
   one extra column provides a lighting/meshing halo. The cache is capped at 512
   columns. Fully constructed immutable columns are published by the owner. Missing/loading
   columns block collision, and simulation waits for the player's column. Dirty

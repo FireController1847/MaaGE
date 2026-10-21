@@ -47,7 +47,7 @@ static int maage_client_world_options_parse(int argc, char *const argv[], maage_
     char *end;
     long value;
     unsigned long workers;
-    memset(options, 0, sizeof(*options)); options->radius = 3; options->mode = -1;
+    memset(options, 0, sizeof(*options)); options->radius = 8; options->mode = -1;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
         if (!strncmp(argument, "--world=", 8)) {

@@ -272,10 +272,11 @@ static NSTableView *maage_ui_navigation_table(void)
     if (state->client_confirmation) {
         state->client_confirmation = 0;
         maage_client_build *build = &state->client_candidate.build;
-        NSAlert *confirmation = [[NSAlert alloc] init]; confirmation.messageText = @"Import Local Client?";
-        confirmation.informativeText = [NSString stringWithFormat:@"Client %s + %s\n%s · %s · %s\n\n%@\n\nImport copies the entire package. Only import code you trust. The original remains unchanged.", build->version, build->build, build->build_type, build->platform, build->architecture, @(state->client_candidate.source)];
-        [confirmation addButtonWithTitle:@"Import"]; [confirmation addButtonWithTitle:@"Cancel"];
+        NSAlert *confirmation = [[NSAlert alloc] init]; confirmation.messageText = *state->replacing_client ? @"Replace Client?" : @"Import Local Client?";
+        confirmation.informativeText = [NSString stringWithFormat:@"Client %s + %s\n%s · %s · %s\n\n%@\n\nImport copies the entire package. Only import code you trust. The original remains unchanged.%@", build->version, build->build, build->build_type, build->platform, build->architecture, @(state->client_candidate.source), *state->replacing_client ? @"\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : @""];
+        [confirmation addButtonWithTitle:*state->replacing_client ? @"Replace" : @"Import"]; [confirmation addButtonWithTitle:@"Cancel"];
         if ([confirmation runModal] == NSAlertFirstButtonReturn) maage_launcher_client_import(state);
+        else maage_launcher_client_cancel_import(state);
     }
 #endif
     self.clientStatus.stringValue = @(state->client_status);
@@ -346,6 +347,7 @@ static NSTableView *maage_ui_navigation_table(void)
     NSStackView *clientActions = maage_ui_stack(YES, 8);
 #if MAAGE_LAUNCHER_DEVELOPMENT
     [clientActions addArrangedSubview:[self button:@"Import Local Client…" action:@selector(importClient:)]];
+    NSButton *replace = [self button:@"Replace Client…" action:@selector(importClient:)]; replace.tag = 1; [clientActions addArrangedSubview:replace];
 #endif
     [clientActions addArrangedSubview:[self button:@"Remove Client…" action:@selector(removeClient:)]];
     [page addArrangedSubview:clientActions];
@@ -369,11 +371,15 @@ static NSTableView *maage_ui_navigation_table(void)
 #if MAAGE_LAUNCHER_DEVELOPMENT
 - (void)importClient:(id)sender
 {
-    (void)sender; if (self.state->client_job) return;
-    NSOpenPanel *panel = [NSOpenPanel openPanel]; panel.title = @"Import Local Client";
+    BOOL replacing = [sender tag] == 1; NSInteger row = self.clients.selectedRow;
+    if (self.state->client_job || (replacing && row < 0)) return;
+    NSOpenPanel *panel = [NSOpenPanel openPanel]; panel.title = replacing ? @"Replace Client" : @"Import Local Client";
     panel.message = @"Choose maage-client with its adjacent maage-client.json manifest. Import copies its package and runtime dependencies without running it.";
     panel.canChooseFiles = YES; panel.canChooseDirectories = NO; panel.treatsFilePackagesAsDirectories = NO; panel.allowsMultipleSelection = NO;
-    if ([panel runModal] == NSModalResponseOK) maage_launcher_client_probe(self.state, panel.URL.path.UTF8String);
+    if ([panel runModal] == NSModalResponseOK) {
+        if (replacing) maage_launcher_client_replace(self.state, (unsigned)row, panel.URL.path.UTF8String);
+        else maage_launcher_client_probe(self.state, panel.URL.path.UTF8String);
+    }
 }
 #endif
 - (void)removeClient:(id)sender

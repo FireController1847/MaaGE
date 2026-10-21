@@ -174,9 +174,10 @@ static gboolean maage_ui_tick(gpointer context)
     if (state->client_confirmation) {
         GtkWidget *dialog; maage_client_build *build = &state->client_candidate.build;
         state->client_confirmation = 0;
-        dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "Import Local Client?");
-        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s + %s\n%s · %s · %s\n%s\n\nOnly import code you trust. The whole package is copied and the original is preserved.", build->version, build->build, build->build_type, build->platform, build->architecture, state->client_candidate.source);
+        dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "%s", *state->replacing_client ? "Replace Client?" : "Import Local Client?");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s + %s\n%s · %s · %s\n%s\n\nOnly import code you trust. The whole package is copied and the original is preserved.%s", build->version, build->build, build->build_type, build->platform, build->architecture, state->client_candidate.source, *state->replacing_client ? "\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : "");
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_client_import(state);
+        else maage_launcher_client_cancel_import(state);
         gtk_widget_destroy(dialog);
     }
 #endif
@@ -197,14 +198,21 @@ static gboolean maage_ui_close(GtkWidget *widget, GdkEvent *event, gpointer cont
 #if MAAGE_LAUNCHER_DEVELOPMENT
 static void maage_ui_client_import(GtkWidget *widget, gpointer context)
 {
-    maage_launcher_gtk *ui = context; GtkWidget *dialog; (void)widget;
-    if (ui->state->client_job) return;
-    dialog = gtk_file_chooser_dialog_new("Import Local Client Executable", GTK_WINDOW(ui->window), GTK_FILE_CHOOSER_ACTION_OPEN, "Cancel", GTK_RESPONSE_CANCEL, "Inspect", GTK_RESPONSE_ACCEPT, NULL);
+    maage_launcher_gtk *ui = context; GtkWidget *dialog;
+    int replacing = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "replace")), index = -1;
+    const char *id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(ui->clients));
+    if (id) index = maage_clients_find(ui->state->clients, id);
+    if (ui->state->client_job || (replacing && index < 0)) return;
+    dialog = gtk_file_chooser_dialog_new(replacing ? "Replace Client Executable" : "Import Local Client Executable", GTK_WINDOW(ui->window), GTK_FILE_CHOOSER_ACTION_OPEN, "Cancel", GTK_RESPONSE_CANCEL, "Inspect", GTK_RESPONSE_ACCEPT, NULL);
     { GtkFileFilter *filter = gtk_file_filter_new(); gtk_file_filter_set_name(filter, "MaaGE Client (maage-client)");
       gtk_file_filter_add_pattern(filter, "maage-client"); gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter); }
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
         char *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
-        if (path) { maage_launcher_client_probe(ui->state, path); g_free(path); }
+        if (path) {
+            if (replacing) maage_launcher_client_replace(ui->state, (unsigned)index, path);
+            else maage_launcher_client_probe(ui->state, path);
+            g_free(path);
+        }
     }
     gtk_widget_destroy(dialog);
 }
@@ -264,6 +272,8 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8); gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
 #if MAAGE_LAUNCHER_DEVELOPMENT
     maage_ui_button(actions, "Import Local Client…", G_CALLBACK(maage_ui_client_import), &ui);
+    button = maage_ui_button(actions, "Replace Client…", G_CALLBACK(maage_ui_client_import), &ui);
+    g_object_set_data(G_OBJECT(button), "replace", GINT_TO_POINTER(1));
 #endif
     maage_ui_button(actions, "Remove Client…", G_CALLBACK(maage_ui_client_remove), &ui);
     maage_ui_label(page, "MaaGE Installations · shared Minecraft 1.7.10 resources", "muted");

@@ -24,6 +24,7 @@
 #define MAAGE_UI_CLIENT_CHOICE 141
 #define MAAGE_UI_CLIENT_IMPORT 142
 #define MAAGE_UI_CLIENT_REMOVE 143
+#define MAAGE_UI_CLIENT_REPLACE 144
 typedef struct maage_launcher_control {
     HWND handle;
     int page, x, y, width, height;
@@ -146,9 +147,10 @@ static void maage_ui_refresh(maage_launcher_win32 *ui)
     if (state->client_confirmation) {
         char message[MAAGE_PATH_CAPACITY + 1024]; wchar_t wide[MAAGE_PATH_CAPACITY + 1024];
         maage_client_build *b = &state->client_candidate.build; state->client_confirmation = 0;
-        sprintf(message, "Client %s + %s\n%s | %s | %s\n%s\n\nImport copies the whole package. Only import code you trust. The original is preserved.", b->version, b->build, b->build_type, b->platform, b->architecture, state->client_candidate.source);
+        sprintf(message, "Client %s + %s\n%s | %s | %s\n%s\n\nImport copies the whole package. Only import code you trust. The original is preserved.%s", b->version, b->build, b->build_type, b->platform, b->architecture, state->client_candidate.source, *state->replacing_client ? "\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : "");
         if (MultiByteToWideChar(CP_UTF8, 0, message, -1, wide, MAAGE_PATH_CAPACITY + 1024) &&
-            MessageBoxW(ui->window, wide, L"Import Local Client?", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_client_import(state);
+            MessageBoxW(ui->window, wide, *state->replacing_client ? L"Replace Client?" : L"Import Local Client?", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_client_import(state);
+        else maage_launcher_client_cancel_import(state);
     }
 #endif
     maage_ui_text(ui->client_status, state->client_status);
@@ -179,16 +181,20 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id)
     maage_ui_installations_reload(ui); maage_ui_refresh(ui);
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
-static void maage_ui_client_import(maage_launcher_win32 *ui)
+static void maage_ui_client_import(maage_launcher_win32 *ui, int replacing)
 {
     OPENFILENAMEW picker; wchar_t wide[MAAGE_PATH_CAPACITY]; char path[MAAGE_PATH_CAPACITY];
-    if (ui->state->client_job) return;
+    LRESULT row = SendMessageW(ui->clients, CB_GETCURSEL, 0, 0);
+    if (ui->state->client_job || (replacing && row < 0)) return;
     memset(&picker, 0, sizeof(picker)); wide[0]=0; picker.lStructSize=sizeof(picker); picker.hwndOwner=ui->window;
-    picker.lpstrTitle=L"Import Local Client"; picker.lpstrFilter=L"MaaGE Client executable\0maage-client.exe\0\0";
+    picker.lpstrTitle=replacing ? L"Replace Client" : L"Import Local Client"; picker.lpstrFilter=L"MaaGE Client executable\0maage-client.exe\0\0";
     picker.lpstrFile=wide; picker.nMaxFile=MAAGE_PATH_CAPACITY;
     picker.Flags=OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&picker)) {
-        if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, sizeof(path), NULL, NULL)) maage_launcher_client_probe(ui->state, path);
+        if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, sizeof(path), NULL, NULL)) {
+            if (replacing) maage_launcher_client_replace(ui->state, (unsigned)row, path);
+            else maage_launcher_client_probe(ui->state, path);
+        }
     } else if (CommDlgExtendedError()) strcpy(ui->state->error,"Windows could not open the Client executable picker.");
 }
 #endif
@@ -205,7 +211,8 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         {
             int id=LOWORD(wparam), event=HIWORD(wparam);
 #if MAAGE_LAUNCHER_DEVELOPMENT
-            if (id == MAAGE_UI_CLIENT_IMPORT) maage_ui_client_import(ui);
+            if (id == MAAGE_UI_CLIENT_IMPORT) maage_ui_client_import(ui, 0);
+            if (id == MAAGE_UI_CLIENT_REPLACE) maage_ui_client_import(ui, 1);
 #endif
             if (id == MAAGE_UI_CLIENT_REMOVE && !ui->state->client_job) {
                 LRESULT selected = SendMessageW(ui->clients, CB_GETCURSEL, 0, 0);
@@ -291,8 +298,11 @@ int maage_launcher_native_run(maage_launcher_ui *state)
     ui.clients=maage_ui_control(&ui,2,L"COMBOBOX",L"Installed Client builds",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,198,110,-230,240,MAAGE_UI_CLIENTS);
 #if MAAGE_LAUNCHER_DEVELOPMENT
     maage_ui_button(&ui,2,L"Import Local Client...",198,150,200,MAAGE_UI_CLIENT_IMPORT);
-#endif
+    maage_ui_button(&ui,2,L"Replace Client...",410,150,170,MAAGE_UI_CLIENT_REPLACE);
+    maage_ui_button(&ui,2,L"Remove Client...",592,150,170,MAAGE_UI_CLIENT_REMOVE);
+#else
     maage_ui_button(&ui,2,L"Remove Client...",410,150,170,MAAGE_UI_CLIENT_REMOVE);
+#endif
     maage_ui_label(&ui,2,L"MaaGE Installations - shared Minecraft 1.7.10 resources",198,198,-230,26);
     ui.list=maage_ui_control(&ui,2,WC_LISTVIEWW,L"MaaGE installations",WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,198,230,-230,-570,MAAGE_UI_LIST);
     ListView_SetExtendedListViewStyle(ui.list,LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);

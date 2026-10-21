@@ -525,7 +525,7 @@ tuning remain provisional until programmer fidelity verification.
 one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
 creates a unique UUID world; default startup resumes the instance's `config/last-world` or creates a
 unique world if none exists. Never overwrite an existing ID during creation or
-change its generator/seed implicitly. `--render-distance=1..8` defaults to 3;
+change its generator/seed implicitly. `--render-distance=1..8` defaults to 8;
 `--world-workers=<count>` selects a positive pool size (0 uses the automatic policy).
 World metadata opens while the viewport is hidden; final player metadata and
 blocking flush/join occur after rendering stops, never inside the frame loop.
@@ -754,6 +754,9 @@ substitute another Client. Migrate old configurations only when one available bu
 is unambiguous. Strict SemVer ordering ignores build metadata; identity also includes
 build/platform/type and executable SHA-256. Exact duplicate imports are rejected;
 changed builds coexist, and referenced builds must be unassigned before removal.
+Development-only Replace Client copies/verifies a new build, saves all affected
+installation assignments, then removes the old local package on the worker.
+Keep the old build assigned if copying or saving fails; never replace running files.
 Native Installations distinguishes Installed Clients from MaaGE Installations.
 Debug Launchers (or explicit `MAAGE_LAUNCHER_DEVELOPER_IMPORT`) can inspect, confirm
 and copy trusted local executable packages with the existing native UI. Pick the

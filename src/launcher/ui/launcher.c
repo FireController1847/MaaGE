@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#if MAAGE_LAUNCHER_DEVELOPMENT
+static int maage_launcher_client_finish_replace(maage_launcher_ui *ui);
+#endif
+
 static unsigned maage_launcher_number(struct json_object *object, const char *key)
 {
     struct json_object *value;
@@ -190,15 +194,21 @@ void maage_launcher_account_restore(maage_launcher_ui *ui)
 void maage_launcher_ui_refresh(maage_launcher_ui *ui)
 {
     unsigned i;
-    int job_result, exit_code, selected_build=-1;
+    int job_result, operation, exit_code, selected_build=-1;
     maage_process_state process_state;
     if (ui->client_job) {
         job_result = maage_client_job_take(&ui->client_job, &ui->client_candidate, ui->clients, &ui->client_process, ui->error);
         if (job_result) {
-            if (job_result > 0 && ui->client_operation == 1) ui->client_confirmation = 1;
-            else if (ui->client_operation != 4) { ++ui->client_revision; }
-            if (job_result < 0 && ui->client_operation == 4) ui->running_client[0] = ui->running_instance[0] = 0;
+            operation = ui->client_operation;
             ui->client_operation = 0;
+            if (job_result > 0 && operation == 1) ui->client_confirmation = 1;
+            else if (operation != 4) { ++ui->client_revision; }
+            if (job_result < 0 && operation == 4) ui->running_client[0] = ui->running_instance[0] = 0;
+#if MAAGE_LAUNCHER_DEVELOPMENT
+            if (job_result > 0 && operation == 2 && *ui->replacing_client)
+                maage_launcher_client_finish_replace(ui);
+            else if (job_result < 0 || operation == 3) ui->replacing_client[0] = 0;
+#endif
         }
     }
     if (ui->client_process) {
@@ -391,6 +401,17 @@ static int maage_launcher_installation_reload(maage_launcher_ui *ui, unsigned in
     maage_launcher_installation_info(&ui->installations[index], instance);
     maage_instance_close(instance); return 1;
 }
+#if MAAGE_LAUNCHER_DEVELOPMENT
+static int maage_launcher_installation_reassign(maage_launcher_ui *ui, unsigned index, const char *client)
+{
+    maage_instance *instance = NULL;
+    int ok;
+    if (!maage_instance_open(ui->root, ui->installations[index].uuid, 0, &instance, ui->error)) return 0;
+    ok = maage_instance_update(instance, maage_instance_get_info(instance)->name, client, ui->error);
+    if (ok) maage_launcher_installation_info(&ui->installations[index], instance);
+    maage_instance_close(instance); return ok;
+}
+#endif
 int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index)
 {
     unsigned i;
@@ -408,9 +429,72 @@ int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index)
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
 int maage_launcher_client_probe(maage_launcher_ui *ui, const char *path)
-{ ui->client_confirmation = 0; return maage_launcher_client_start(ui, 1, path, NULL); }
+{
+    if (ui->client_job) return 0;
+    ui->replacing_client[0] = 0; ui->client_confirmation = 0;
+    return maage_launcher_client_start(ui, 1, path, NULL);
+}
+int maage_launcher_client_replace(maage_launcher_ui *ui, unsigned index, const char *path)
+{
+    char id[65];
+    if (index >= ui->clients->count || ui->client_job) return 0;
+    if (strcmp(ui->clients->builds[index].origin, "local")) {
+        strcpy(ui->error, "Only locally imported Clients can be replaced with a local package."); return 0;
+    }
+    strcpy(id, ui->clients->builds[index].id);
+    if (!strcmp(ui->running_client, id)) {
+        strcpy(ui->error, "Close the running Client before replacing it."); return 0;
+    }
+    if (!maage_launcher_client_probe(ui, path)) return 0;
+    strcpy(ui->replacing_client, id); return 1;
+}
+void maage_launcher_client_cancel_import(maage_launcher_ui *ui)
+{ ui->client_confirmation = 0; ui->replacing_client[0] = 0; }
+static int maage_launcher_client_finish_replace(maage_launcher_ui *ui)
+{
+    char error[256];
+    unsigned i, j;
+    int changed[MAAGE_INSTALLATIONS];
+    int old = maage_clients_find(ui->clients, ui->replacing_client);
+    int replacement = maage_clients_find(ui->clients, ui->client_candidate.build.id);
+    memset(changed, 0, sizeof(changed));
+    if (old < 0 || replacement < 0 || !ui->clients->builds[replacement].available ||
+        !strcmp(ui->running_client, ui->replacing_client)) {
+        strcpy(ui->error, "Replacement stopped: the old Client is running or a required build is unavailable.");
+        ui->replacing_client[0] = 0; return 0;
+    }
+    if (old == replacement) {
+        strcpy(ui->error, "This exact Client build is already installed."); ui->replacing_client[0] = 0; return 0;
+    }
+    for (i = 0; i < ui->count; ++i) {
+        if (!maage_launcher_installation_reload(ui, i)) break;
+        if (strcmp(ui->installations[i].client, ui->replacing_client)) continue;
+        if (!maage_launcher_installation_reassign(ui, i, ui->client_candidate.build.id)) break;
+        changed[i] = 1;
+    }
+    if (i < ui->count) {
+        strcpy(error, ui->error);
+        for (j = 0; j < i; ++j) if (changed[j])
+            maage_launcher_installation_reassign(ui, j, ui->replacing_client);
+        sprintf(ui->error, "Both Client builds were kept; instance assignments could not all be saved. %.144s", error);
+        ui->replacing_client[0] = 0; return 0;
+    }
+    /* Every manifest is durable before removing the old package. Interrupted
+     * reassignment leaves valid references because both builds still exist. */
+    if (!maage_launcher_client_remove(ui, (unsigned)old)) { ui->replacing_client[0] = 0; return 0; }
+    return 1;
+}
+
 int maage_launcher_client_import(maage_launcher_ui *ui)
-{ ui->client_confirmation = 0; return maage_launcher_client_start(ui, 2, NULL, NULL); }
+{
+    if (ui->client_job) return 0;
+    ui->client_confirmation = 0;
+    /* Also permits retrying a replacement after copying succeeded but saving
+     * assignments failed, or choosing a build that is already installed. */
+    if (*ui->replacing_client && maage_clients_find(ui->clients, ui->client_candidate.build.id) >= 0)
+        return maage_launcher_client_finish_replace(ui);
+    return maage_launcher_client_start(ui, 2, NULL, NULL);
+}
 #endif
 
 int maage_launcher_client_play(maage_launcher_ui *ui)

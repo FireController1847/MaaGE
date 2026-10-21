@@ -32,6 +32,7 @@ typedef struct maage_launcher_ui {
     int can_play, legacy_worlds_pending;
     char running_client[65], running_instance[37];
     maage_client_candidate client_candidate;
+    char replacing_client[65];
     unsigned client_revision;
     int client_operation, client_confirmation, clients_valid;
     char client_status[512];
@@ -50,6 +51,8 @@ int maage_launcher_client_remove(maage_launcher_ui *ui, unsigned index);
 #if MAAGE_LAUNCHER_DEVELOPMENT
 int maage_launcher_client_probe(maage_launcher_ui *ui, const char *path);
 int maage_launcher_client_import(maage_launcher_ui *ui);
+int maage_launcher_client_replace(maage_launcher_ui *ui, unsigned index, const char *path);
+void maage_launcher_client_cancel_import(maage_launcher_ui *ui);
 #endif
 int maage_launcher_account_select(maage_launcher_ui *ui, const char *uuid);
 void maage_launcher_account_restore(maage_launcher_ui *ui);
