@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <limits.h>
 
+#define MAAGE_LAUNCHER_PREFERENCES_BYTES (8UL * 1024UL * 1024UL)
 #if MAAGE_LAUNCHER_DEVELOPMENT
 static int maage_launcher_client_finish_replace(maage_launcher_ui *ui);
 #endif
@@ -66,48 +67,68 @@ static int maage_launcher_path(maage_launcher_ui *ui, char *path, const char *fi
     return maage_storage_join(directory, sizeof(directory), ui->root, "config") &&
         maage_storage_directories(directory) && maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, file);
 }
+static int maage_launcher_json_set(struct json_object *object, const char *key, struct json_object *value)
+{
+    if (!value) return 0;
+    if (json_object_object_add(object,key,value)) { json_object_put(value); return 0; }
+    return 1;
+}
 int maage_launcher_ui_save(maage_launcher_ui *ui)
 {
     char path[MAAGE_PATH_CAPACITY], temporary[MAAGE_PATH_CAPACITY], lock_path[MAAGE_PATH_CAPACITY];
-    struct json_object *root, *list, *item;
+    struct json_object *root = NULL, *list = NULL, *item;
     const char *text;
     maage_storage_lock *lock;
     FILE *file;
     size_t length;
     unsigned i;
     int ok = 0;
-    if (!maage_launcher_path(ui, path, "launcher.json") || !maage_launcher_path(ui, temporary, "launcher.json.tmp") ||
+    if (!maage_launcher_path(ui, path, "launcher.json") ||
+        !maage_launcher_path(ui, temporary, "launcher.json.tmp") ||
         !maage_launcher_path(ui, lock_path, "launcher.lock")) goto failed;
     lock = maage_storage_acquire(lock_path);
     if (!lock) goto failed;
-    root = json_object_new_object(); list = json_object_new_array();
-    json_object_object_add(root, "schema", json_object_new_int(3));
+    root = json_object_new_object();
+    list = json_object_new_array();
+    if (!root || !list || !maage_launcher_json_set(root, "schema", json_object_new_int(3)))
+        goto release;
     for (i = 0; i < ui->count; ++i) {
-        if (ui->installations[i].id == ui->selected)
-            json_object_object_add(root, "selected", json_object_new_string(ui->installations[i].uuid));
-        if (ui->installations[i].id == ui->default_id)
-            json_object_object_add(root, "default", json_object_new_string(ui->installations[i].uuid));
+        if (ui->installations[i].id == ui->selected &&
+            !maage_launcher_json_set(root, "selected", json_object_new_string(ui->installations[i].uuid)))
+            goto release;
+        if (ui->installations[i].id == ui->default_id &&
+            !maage_launcher_json_set(root, "default", json_object_new_string(ui->installations[i].uuid)))
+            goto release;
     }
-    json_object_object_add(root, "appearance", json_object_new_int(ui->appearance));
-    json_object_object_add(root, "activeAccount", json_object_new_string(ui->account));
+    if (!maage_launcher_json_set(root, "appearance", json_object_new_int(ui->appearance)) ||
+        !maage_launcher_json_set(root, "activeAccount", json_object_new_string(ui->account)))
+        goto release;
     for (i = 0; i < ui->count; ++i) {
         item = json_object_new_object();
-        json_object_object_add(item, "uuid", json_object_new_string(ui->installations[i].uuid));
-        json_object_array_add(list, item);
+        if (!item) goto release;
+        if (!maage_launcher_json_set(item, "uuid", json_object_new_string(ui->installations[i].uuid)) ||
+            json_object_array_add(list, item)) {
+            json_object_put(item); goto release;
+        }
     }
-    json_object_object_add(root, "installations", list);
-    text = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY); length = strlen(text);
+    if (json_object_object_add(root, "installations", list)) goto release;
+    list = NULL;
+    text = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY);
+    if (!text || (length = strlen(text)) > MAAGE_LAUNCHER_PREFERENCES_BYTES) goto release;
     file = maage_storage_open(temporary, "wb");
     if (file) {
-        ok = fwrite(text, 1, length, file) == length && maage_storage_sync(file);
+        ok = fwrite(text, 1, length) == length && maage_storage_sync(file);
         if (fclose(file)) ok = 0;
         if (ok) ok = maage_storage_replace(temporary, path);
     }
     if (!ok) maage_storage_remove(temporary);
-    json_object_put(root); maage_storage_release(lock);
+release:
+    if (list) json_object_put(list);
+    if (root) json_object_put(root);
+    maage_storage_release(lock);
     if (ok) { ui->error[0] = 0; return 1; }
 failed:
-    strcpy(ui->error, "Cannot save Launcher preferences. Check data-folder permissions or close another Launcher.");
+    strcpy(ui->error, "Cannot save Launcher preferences. Check data-folder permissions, free memory, or close another Launcher.");
     maage_log_error("maage.launcher.ui", "%s", ui->error); return 0;
 }
 static int maage_launcher_commit(maage_launcher_ui *ui, const maage_launcher_ui *previous)
@@ -311,7 +332,7 @@ int maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_as
     file = maage_storage_open(path, "rb");
     if (file) {
         if (!fseek(file, 0, SEEK_END) && (file_size = ftell(file)) >= 0 &&
-            file_size <= 8L * 1024L * 1024L && !fseek(file, 0, SEEK_SET)) {
+            (unsigned long)file_size <= MAAGE_LAUNCHER_PREFERENCES_BYTES && !fseek(file, 0, SEEK_SET)) {
             data = (char *)malloc((size_t)file_size + 1);
             if (data) {
                 size = fread(data, 1, (size_t)file_size, file);
