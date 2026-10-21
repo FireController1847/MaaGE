@@ -5,6 +5,7 @@
 #include <curl/curl.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 typedef struct maage_transfer {
     CURL *easy;
@@ -16,6 +17,16 @@ typedef struct maage_transfer {
     unsigned int attempts;
     int done, active, result;
 } maage_transfer;
+void maage_download_options_init(maage_download_options *options)
+{
+    if (!options) return;
+    options->max_concurrent = 4;
+    options->max_attempts = 3;
+    options->connect_timeout_seconds = 15;
+    options->timeout_seconds = 180;
+    options->low_speed_bytes_per_second = 256;
+    options->low_speed_seconds = 30;
+}
 int maage_download_initialize(void) { return curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK; }
 void maage_download_shutdown(void) { curl_global_cleanup(); }
 static int maage_transfer_cancel(void *context)
@@ -41,7 +52,7 @@ static int maage_transfer_progress(void *context, curl_off_t total, curl_off_t n
     (void)total; (void)now; (void)upload_total; (void)upload_now;
     return maage_transfer_cancel((void *)transfer->observer);
 }
-static int maage_transfer_start(maage_transfer *transfer, CURLM *multi)
+static int maage_transfer_start(maage_transfer *transfer, CURLM *multi, const maage_download_options *options)
 {
     CURL *easy;
     if (strncmp(transfer->request->url, "https://", 8)) return 0;
@@ -55,10 +66,10 @@ static int maage_transfer_start(maage_transfer *transfer, CURLM *multi)
     MAAGE_CURL(CURLOPT_FOLLOWLOCATION, 0L);
     MAAGE_CURL(CURLOPT_SSL_VERIFYPEER, 1L);
     MAAGE_CURL(CURLOPT_SSL_VERIFYHOST, 2L);
-    MAAGE_CURL(CURLOPT_CONNECTTIMEOUT, 15L);
-    MAAGE_CURL(CURLOPT_TIMEOUT, 180L);
-    MAAGE_CURL(CURLOPT_LOW_SPEED_LIMIT, 256L);
-    MAAGE_CURL(CURLOPT_LOW_SPEED_TIME, 30L);
+    MAAGE_CURL(CURLOPT_CONNECTTIMEOUT, options->connect_timeout_seconds);
+    MAAGE_CURL(CURLOPT_TIMEOUT, options->timeout_seconds);
+    MAAGE_CURL(CURLOPT_LOW_SPEED_LIMIT, options->low_speed_bytes_per_second);
+    MAAGE_CURL(CURLOPT_LOW_SPEED_TIME, options->low_speed_seconds);
     MAAGE_CURL(CURLOPT_NOSIGNAL, 1L);
     MAAGE_CURL(CURLOPT_FAILONERROR, 1L);
     MAAGE_CURL(CURLOPT_USERAGENT, "MaaGE-Launcher/1.0 (asset setup)");
@@ -72,7 +83,7 @@ static int maage_transfer_start(maage_transfer *transfer, CURLM *multi)
 #undef MAAGE_CURL
     if (curl_multi_add_handle(multi, easy) != CURLM_OK) return 0;
     transfer->active = 1; ++transfer->attempts;
-    maage_log_info("maage.core.download", "Downloading (attempt %u/3): %s -> %s", transfer->attempts, transfer->request->url, transfer->request->destination);
+    maage_log_info("maage.core.download", "Downloading (attempt %u/%u): %s -> %s", transfer->attempts, options->max_attempts, transfer->request->url, transfer->request->destination);
     maage_log_debug("maage.core.download", "Temporary file: %s; expected bytes: %.0f; SHA-1: %s", transfer->temporary, transfer->request->size, transfer->request->sha1 ? transfer->request->sha1 : "not supplied");
     return 1;
 }
@@ -85,23 +96,33 @@ static void maage_transfer_close(maage_transfer *transfer, CURLM *multi)
     if (transfer->file) fclose(transfer->file);
     transfer->file = NULL;
 }
-int maage_download_batch(const maage_download_request *requests, unsigned int count,
-    const maage_download_observer *observer, char error[512])
+int maage_download_batch_with_options(const maage_download_request *requests, unsigned int count,
+    const maage_download_observer *observer, const maage_download_options *settings, char error[512])
 {
-    maage_transfer transfers[4], *transfer;
+    maage_download_options defaults;
+    const maage_download_options *options = settings;
+    maage_transfer *transfers, *transfer;
     CURLM *multi;
     CURLMsg *message;
-    unsigned int i, finished = 0;
+    unsigned int i, finished = 0, active = 0, delay;
     int running, messages, ok = 0;
     double now;
     char hash[41], fingerprint[128];
     double size;
     const char *reason;
+    if (!error) return 0;
     error[0] = 0;
-    if (!count || count > 4) { strcpy(error, "Invalid download batch."); return 0; }
-    memset(transfers, 0, sizeof(transfers));
+    if (!options) { maage_download_options_init(&defaults); options = &defaults; }
+    if (!requests || !count || !options->max_concurrent || !options->max_attempts ||
+        options->connect_timeout_seconds <= 0 || options->timeout_seconds < 0 ||
+        options->low_speed_bytes_per_second <= 0 || options->low_speed_seconds <= 0 ||
+        (size_t)count > (size_t)-1 / sizeof(*transfers)) {
+        strcpy(error, "Invalid download requests or policy."); return 0;
+    }
+    transfers = (maage_transfer *)calloc((size_t)count, sizeof(*transfers));
+    if (!transfers) { strcpy(error, "Cannot allocate download transfers."); return 0; }
     multi = curl_multi_init();
-    if (!multi) { strcpy(error, "Cannot allocate HTTPS download scheduler."); return 0; }
+    if (!multi) { free(transfers); strcpy(error, "Cannot allocate HTTPS download scheduler."); return 0; }
     for (i = 0; i < count; ++i) {
         transfer = &transfers[i];
         transfer->request = &requests[i]; transfer->observer = observer;
@@ -114,7 +135,8 @@ int maage_download_batch(const maage_download_request *requests, unsigned int co
         if (now < 0) { strcpy(error, "Monotonic clock unavailable."); goto cleanup; }
         for (i = 0; i < count; ++i) {
             transfer = &transfers[i];
-            if (!transfer->active && !transfer->done && now >= transfer->ready && !maage_transfer_start(transfer, multi)) {
+            if (!transfer->active && !transfer->done && active < options->max_concurrent && now >= transfer->ready) {
+                if (maage_transfer_start(transfer, multi, options)) { ++active; continue; }
                 maage_log_error("maage.core.download", "Cannot start %s -> %s (temporary %s)", transfer->request->url, transfer->request->destination, transfer->temporary);
                 strcpy(error, "Cannot start HTTPS request or open temporary file. Check storage permissions."); goto cleanup;
             }
@@ -129,6 +151,7 @@ int maage_download_batch(const maage_download_request *requests, unsigned int co
             if (transfer->file && fclose(transfer->file) != 0) transfer->result = CURLE_WRITE_ERROR;
             transfer->file = NULL;
             maage_transfer_close(transfer, multi);
+            if (active) --active;
             if (maage_transfer_cancel((void *)observer)) goto cleanup;
             maage_log_debug("maage.core.download", "Verifying transfer: %s (%.0f bytes received)", transfer->temporary, transfer->received);
             if (transfer->result == CURLE_OK && maage_storage_stat(transfer->temporary, &size, fingerprint) &&
@@ -140,17 +163,18 @@ int maage_download_batch(const maage_download_request *requests, unsigned int co
                 }
                 maage_log_info("maage.core.download", "%s: %s (%.0f bytes; SHA-1: %s)", transfer->request->sha1 ? "Verified and installed" : "Downloaded and installed", transfer->request->destination, size, transfer->request->sha1 ? transfer->request->sha1 : "not supplied");
                 transfer->done = 1; ++finished;
-            } else if (transfer->attempts >= 3) {
+            } else if (transfer->attempts >= options->max_attempts) {
                 maage_log_error("maage.core.download", "Download failed: %s -> %s after %u attempts, %.0f bytes received: %s", transfer->request->url, transfer->request->destination, transfer->attempts, transfer->received,
                     transfer->result == CURLE_OK ? "size or SHA-1 mismatch" : transfer->detail[0] ? transfer->detail : curl_easy_strerror((CURLcode)transfer->result));
-                sprintf(error, "Download failed after 3 attempts: %.120s (%s). Check your connection and free disk space, then Retry.", transfer->request->url,
+                sprintf(error, "Download failed after %u attempts: %.120s (%s). Check your connection and free disk space, then Retry.", options->max_attempts, transfer->request->url,
                     transfer->result == CURLE_OK ? "size or SHA-1 mismatch" : curl_easy_strerror((CURLcode)transfer->result));
                 goto cleanup;
             } else {
-                transfer->ready = now + (double)(1U << (transfer->attempts - 1));
+                delay = transfer->attempts >= 7 ? 60U : (1U << (transfer->attempts - 1));
+                transfer->ready = now + (double)delay;
                 reason = transfer->result == CURLE_OK ? "size or SHA-1 mismatch" :
                     transfer->detail[0] ? transfer->detail : curl_easy_strerror((CURLcode)transfer->result);
-                maage_log_warn("maage.core.download", "Retrying %s -> %s in %u seconds after attempt %u: %s", transfer->request->url, transfer->request->destination, 1U << (transfer->attempts - 1), transfer->attempts, reason);
+                maage_log_warn("maage.core.download", "Retrying %s -> %s in %u seconds after attempt %u: %s", transfer->request->url, transfer->request->destination, delay, transfer->attempts, reason);
             }
         }
         if (finished < count && curl_multi_poll(multi, NULL, 0, 100, NULL) != CURLM_OK) goto cleanup;
@@ -163,6 +187,7 @@ cleanup:
             maage_log_warn("maage.core.download", "Cannot remove temporary download: %s", transfers[i].temporary);
     }
     curl_multi_cleanup(multi);
+    free(transfers);
     if (!ok && !error[0]) strcpy(error, maage_transfer_cancel((void *)observer) ? "Download cancelled." : "HTTPS download scheduler failed.");
     if (!ok) {
         if (maage_transfer_cancel((void *)observer))
@@ -170,4 +195,10 @@ cleanup:
         else maage_log_error("maage.core.download", "%s", error);
     }
     return ok;
+}
+
+int maage_download_batch(const maage_download_request *requests, unsigned int count,
+    const maage_download_observer *observer, char error[512])
+{
+    return maage_download_batch_with_options(requests, count, observer, NULL, error);
 }

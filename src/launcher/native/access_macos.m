@@ -128,6 +128,10 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
     self.next.enabled = NO; [self.window center];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:.1 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
 }
+- (void)dealloc
+{
+    maage_access_snapshot_release(&_snapshot);
+}
 @end
 int maage_access_native_run(maage_access *access, int manage_accounts)
 {

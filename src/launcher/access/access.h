@@ -1,7 +1,6 @@
 #ifndef MAAGE_LAUNCHER_ACCESS_H
 #define MAAGE_LAUNCHER_ACCESS_H
 #include <stddef.h>
-#define MAAGE_ACCESS_PROFILES 64
 typedef enum maage_access_state {
     MAAGE_ACCESS_DETECTED, MAAGE_ACCESS_CONNECTED, MAAGE_ACCESS_VERIFYING,
     MAAGE_ACCESS_VERIFIED, MAAGE_ACCESS_EXPIRED, MAAGE_ACCESS_UNSUPPORTED,
@@ -14,8 +13,8 @@ typedef struct maage_access_profile {
     double last_verified;
 } maage_access_profile;
 typedef struct maage_access_snapshot {
-    maage_access_profile profiles[MAAGE_ACCESS_PROFILES];
-    unsigned count, revision;
+    maage_access_profile *profiles;
+    unsigned count, capacity, revision;
     int busy, allowed, auto_continue;
     char status[512], device_url[256], device_code[33];
     double device_deadline;
@@ -30,7 +29,9 @@ int maage_access_sign_in(maage_access *access, int device_code);
 int maage_access_verify_local(maage_access *access, const char *uuid);
 int maage_access_sign_out(maage_access *access, const char *uuid);
 int maage_access_disconnect(maage_access *access, const char *uuid);
-void maage_access_snapshot_get(maage_access *access, maage_access_snapshot *snapshot);
+/* Each caller owns its deep-copied snapshot; zero-initialize, then release. */
+int maage_access_snapshot_get(maage_access *access, maage_access_snapshot *snapshot);
+void maage_access_snapshot_release(maage_access_snapshot *snapshot);
 int maage_access_allowed(maage_access *access);
 /* NULL accepts any verified account for setup; selection restricts services. */
 int maage_access_select(maage_access *access, const char *uuid);

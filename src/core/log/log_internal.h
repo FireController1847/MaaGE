@@ -7,7 +7,6 @@
 
 #define MAAGE_LOG_PATH_SIZE 1024
 #define MAAGE_LOG_NAME_SIZE 128
-#define MAAGE_LOG_OVERRIDE_COUNT 64
 
 typedef struct maage_log_override {
     char name[MAAGE_LOG_NAME_SIZE];
@@ -18,7 +17,7 @@ typedef struct maage_log_state {
     maage_log_config config;
     char *path;
     maage_log_override *overrides;
-    size_t count;
+    size_t count, capacity;
     FILE *output;
 } maage_log_state;
 

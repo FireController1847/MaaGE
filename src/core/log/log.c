@@ -1,11 +1,11 @@
 #include "log_internal.h"
 #include <string.h>
+#include <stdlib.h>
 
 /* Keep empty tables in zero-fill storage instead of embedding them in the file. */
 static char maage_log_path_storage[MAAGE_LOG_PATH_SIZE];
-static maage_log_override maage_log_overrides[MAAGE_LOG_OVERRIDE_COUNT];
 maage_log_state maage_log_current = {
-    { MAAGE_LOG_INFO, 1, 0, 1, NULL, NULL }, maage_log_path_storage, maage_log_overrides, 0, NULL
+    { MAAGE_LOG_INFO, 1, 0, 1, NULL, NULL }, maage_log_path_storage, NULL, 0, 0, NULL
 };
 
 void maage_log_config_init(maage_log_config *config)
@@ -25,7 +25,9 @@ int maage_log_init(const maage_log_config *config, int argc, char *const argv[])
     maage_log_lock();
     if (maage_log_current.output) fclose(maage_log_current.output);
     maage_log_current.output = NULL;
-    maage_log_current.count = 0;
+    free(maage_log_current.overrides);
+    maage_log_current.overrides = NULL;
+    maage_log_current.count = maage_log_current.capacity = 0;
     result = maage_log_configure(config, argc, argv);
     maage_log_unlock();
     return result;
@@ -39,7 +41,15 @@ int maage_log_override_set(const char *name, maage_log_level level)
     if (strlen(name) >= MAAGE_LOG_NAME_SIZE) return 0;
     for (index = 0; index < maage_log_current.count; ++index)
         if (strcmp(name, maage_log_current.overrides[index].name) == 0) break;
-    if (index == MAAGE_LOG_OVERRIDE_COUNT) return 0;
+    if (index == maage_log_current.count && index == maage_log_current.capacity) {
+        size_t capacity = maage_log_current.capacity ? maage_log_current.capacity * 2 : 8;
+        maage_log_override *grown;
+        if (capacity < maage_log_current.capacity || capacity > (size_t)-1 / sizeof(*grown)) return 0;
+        grown = (maage_log_override *)realloc(maage_log_current.overrides, capacity * sizeof(*grown));
+        if (!grown) return 0;
+        maage_log_current.overrides = grown;
+        maage_log_current.capacity = capacity;
+    }
     strcpy(maage_log_current.overrides[index].name, name);
     maage_log_current.overrides[index].level = level;
     if (index == maage_log_current.count) ++maage_log_current.count;
@@ -166,7 +176,9 @@ void maage_log_shutdown(void)
     maage_log_lock();
     if (maage_log_current.output) fclose(maage_log_current.output);
     maage_log_current.output = NULL;
-    maage_log_current.count = 0;
+    free(maage_log_current.overrides);
+    maage_log_current.overrides = NULL;
+    maage_log_current.count = maage_log_current.capacity = 0;
     maage_log_config_init(&maage_log_current.config);
     maage_log_unlock();
 }

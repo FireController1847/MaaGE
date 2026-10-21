@@ -10,12 +10,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
 #include <pthread.h>
 #endif
+typedef struct maage_access_timing {
+    double deadlines, starts, retry;
+} maage_access_timing;
 struct maage_access {
 #ifdef _WIN32
     CRITICAL_SECTION mutex;
@@ -27,8 +31,34 @@ struct maage_access {
     int has_thread, cancelled, revoked, operation, loaded;
     char selected[33], active[33], root[MAAGE_PATH_CAPACITY];
     maage_access_snapshot view;
-    double deadlines[MAAGE_ACCESS_PROFILES], starts[MAAGE_ACCESS_PROFILES], retry[MAAGE_ACCESS_PROFILES];
+    maage_access_timing *timing;
 };
+/* Requires access mutex: allocate both aligned arrays before changing either. */
+static int maage_access_reserve(maage_access *a, unsigned wanted)
+{
+    unsigned capacity = a->view.capacity;
+    maage_access_profile *profiles;
+    maage_access_timing *timing;
+    if (wanted <= capacity) return 1;
+    capacity = capacity ? capacity : 8;
+    while (capacity < wanted) {
+        if (capacity > UINT_MAX / 2) { capacity = wanted; break; }
+        capacity *= 2;
+    }
+    if ((size_t)capacity > (size_t)-1 / sizeof(*profiles) ||
+        (size_t)capacity > (size_t)-1 / sizeof(*timing)) return 0;
+    profiles = (maage_access_profile *)calloc(capacity, sizeof(*profiles));
+    timing = (maage_access_timing *)calloc(capacity, sizeof(*timing));
+    if (!profiles || !timing) { free(profiles); free(timing); return 0; }
+    if (a->view.count) {
+        memcpy(profiles, a->view.profiles, a->view.count * sizeof(*profiles));
+        memcpy(timing, a->timing, a->view.count * sizeof(*timing));
+    }
+    free(a->view.profiles); free(a->timing);
+    a->view.profiles = profiles; a->timing = timing;
+    a->view.capacity = capacity;
+    return 1;
+}
 static int maage_access_begin(maage_access *a, int operation, const char *uuid);
 static void maage_access_lock(maage_access *a)
 {
@@ -73,9 +103,9 @@ static int maage_access_policy(maage_access *a)
     for (i = 0; i < a->view.count; ++i) {
         maage_access_profile *p = &a->view.profiles[i];
         if (p->state != MAAGE_ACCESS_VERIFIED) continue;
-        if (a->revoked || !p->connected || now < a->starts[i] || now >= a->deadlines[i] || wall < p->last_verified || wall >= p->last_verified + 3600) {
-            maage_log_debug("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected ? "account disconnected" : now < a->starts[i] || wall < p->last_verified ? "clock changed or unavailable" : "lease expired");
-            p->state = MAAGE_ACCESS_EXPIRED; a->deadlines[i] = 0;
+        if (a->revoked || !p->connected || now < a->timing[i].starts || now >= a->timing[i].deadlines || wall < p->last_verified || wall >= p->last_verified + 3600) {
+            maage_log_debug("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected ? "account disconnected" : now < a->timing[i].starts || wall < p->last_verified ? "clock changed or unavailable" : "lease expired");
+            p->state = MAAGE_ACCESS_EXPIRED; a->timing[i].deadlines = 0;
             strcpy(p->detail, "Verification lease expired. MaaGE will refresh this session securely."); ++a->view.revision;
         } else if (!*a->active || !strcmp(a->active, p->uuid)) allowed = 1;
     }
@@ -91,8 +121,8 @@ static void maage_access_renewal(maage_access *a, char renew[33])
     if (a->view.busy || a->revoked || now < 0) return;
     for (i = 0; i < a->view.count; ++i) {
         maage_access_profile *p = &a->view.profiles[i];
-        if (p->session_saved && (!*a->active || !strcmp(a->active, p->uuid)) && now >= a->retry[i] &&
-            (p->state == MAAGE_ACCESS_EXPIRED || (p->state == MAAGE_ACCESS_VERIFIED && a->deadlines[i] - now < 90))) {
+        if (p->session_saved && (!*a->active || !strcmp(a->active, p->uuid)) && now >= a->timing[i].retry &&
+            (p->state == MAAGE_ACCESS_EXPIRED || (p->state == MAAGE_ACCESS_VERIFIED && a->timing[i].deadlines - now < 90))) {
             strcpy(renew, p->uuid); return;
         }
     }
@@ -119,12 +149,33 @@ int maage_access_select(maage_access *a, const char *uuid)
     }
     maage_access_policy(a); ++a->view.revision; maage_access_unlock(a); return ok;
 }
-void maage_access_snapshot_get(maage_access *a, maage_access_snapshot *snapshot)
+int maage_access_snapshot_get(maage_access *a, maage_access_snapshot *snapshot)
 {
     char renew[33];
+    maage_access_profile *buffer;
+    unsigned capacity;
+    if (!a || !snapshot) return 0;
     maage_access_lock(a); maage_access_policy(a); maage_access_renewal(a, renew);
-    *snapshot = a->view; maage_access_unlock(a);
+    if (snapshot->capacity < a->view.count) {
+        if ((size_t)a->view.count > (size_t)-1 / sizeof(*buffer)) {
+            maage_access_unlock(a); return 0;
+        }
+        buffer = (maage_access_profile *)realloc(snapshot->profiles,
+            (size_t)a->view.count * sizeof(*buffer));
+        if (!buffer) { maage_access_unlock(a); return 0; }
+        snapshot->profiles = buffer; snapshot->capacity = a->view.count;
+    }
+    buffer = snapshot->profiles; capacity = snapshot->capacity;
+    if (a->view.count) memcpy(buffer, a->view.profiles, a->view.count * sizeof(*buffer));
+    *snapshot = a->view; snapshot->profiles = buffer; snapshot->capacity = capacity;
+    maage_access_unlock(a);
     if (*renew) maage_access_begin(a, 4, renew);
+    return 1;
+}
+void maage_access_snapshot_release(maage_access_snapshot *snapshot)
+{
+    if (!snapshot) return;
+    free(snapshot->profiles); memset(snapshot, 0, sizeof(*snapshot));
 }
 static int maage_access_cancelled(void *context)
 {
@@ -161,18 +212,37 @@ static void maage_access_load(maage_access *a)
     const char *name;
     a->loaded = 1;
     if (!maage_access_path(a, path, "minecraft-profiles.json")) return;
-    file = maage_storage_open(path, "rb"); if (!file) return;
-    data = (char *)malloc(131073); if (!data) { fclose(file); return; }
-    size = fread(data, 1, 131073, file); fclose(file);
-    root = size <= 131072 ? maage_access_json(data, size) : NULL; free(data);
-    if (!root) { maage_log_warn("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return; }
+    file = maage_storage_open(path, "rb");
+    if (!file) {
+        if (maage_storage_status(path)) a->loaded = -1;
+        return;
+    }
+    /* File-size limit protects untrusted metadata; no entry-count ceiling. */
+    if (fseek(file, 0, SEEK_END) || (size = (size_t)ftell(file)) > 8UL * 1024UL * 1024UL ||
+        fseek(file, 0, SEEK_SET)) { fclose(file); a->loaded = -1; maage_log_warn("maage.launcher.access", "Profile registry exceeds safe metadata size or cannot be read."); return; }
+    data = (char *)malloc(size + 1);
+    if (!data) { fclose(file); a->loaded = -1; maage_log_error("maage.launcher.access", "Cannot allocate profile metadata."); return; }
+    count = fread(data, 1, size, file);
+    root = count == size && !ferror(file) ? maage_access_json(data, size) : NULL;
+    fclose(file); free(data);
+    if (!root) { a->loaded = -1; maage_log_warn("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return; }
+    if (!json_object_object_get_ex(root, "profiles", &list) || !json_object_is_type(list, json_type_array)) {
+        a->loaded = -1;
+        maage_log_warn("maage.launcher.access", "Profile registry has no valid profiles array; refusing to overwrite it.");
+        json_object_put(root); return;
+    }
     maage_access_lock(a);
-    if (json_object_object_get_ex(root, "profiles", &list) && json_object_is_type(list, json_type_array)) {
-        count = json_object_array_length(list); if (count > MAAGE_ACCESS_PROFILES) count = MAAGE_ACCESS_PROFILES;
+    {
+        count = json_object_array_length(list);
         for (i = 0; i < count; ++i) {
             maage_access_profile *p;
             item = json_object_array_get_idx(list, i); name = maage_access_json_string(item, "name");
             if (!maage_access_username(name) || !maage_access_uuid(maage_access_json_string(item, "uuid"), uuid) || maage_access_find(a, uuid) < a->view.count) continue;
+            if (a->view.count == UINT_MAX || !maage_access_reserve(a,a->view.count + 1)) {
+                maage_log_error("maage.launcher.access", "Cannot allocate additional profile metadata; remaining entries not loaded.");
+                strcpy(a->view.status,"Cannot load all saved accounts: insufficient memory.");
+                a->loaded = -1; break;
+            }
             p = &a->view.profiles[a->view.count++]; strcpy(p->uuid, uuid); strcpy(p->name, name);
             p->connected = 1; p->state = MAAGE_ACCESS_DETECTED; strcpy(p->sources, "Microsoft");
             p->last_verified = maage_auth_number(item, "lastVerified"); if (p->last_verified < 0) p->last_verified = 0;
@@ -180,6 +250,12 @@ static void maage_access_load(maage_access *a)
         }
     }
     ++a->view.revision; maage_access_unlock(a); json_object_put(root);
+}
+static int maage_access_json_set(struct json_object *object, const char *name, struct json_object *value)
+{
+    if (!value) return 0;
+    if (json_object_object_add(object,name,value)) { json_object_put(value); return 0; }
+    return 1;
 }
 static int maage_access_save(maage_access *a)
 {
@@ -190,25 +266,43 @@ static int maage_access_save(maage_access *a)
     size_t length;
     unsigned i;
     FILE *file;
-    int ok = 0;
-    if (!maage_access_path(a, path, "minecraft-profiles.json") || !maage_access_path(a, temporary, "minecraft-profiles.part") || !maage_access_path(a, lockpath, "minecraft-profiles.lock")) return 0;
+    int ok = 0, entries_ok = 1;
+    if (a->loaded < 0) {
+        maage_log_error("maage.launcher.access", "Profile registry could not be loaded completely; refusing to overwrite saved account metadata.");
+        return 0;
+    }
+    if (!maage_access_path(a, path, "minecraft-profiles.json") ||
+        !maage_access_path(a, temporary, "minecraft-profiles.part") ||
+        !maage_access_path(a, lockpath, "minecraft-profiles.lock")) return 0;
     lock = maage_storage_acquire(lockpath); if (!lock) return 0;
-    root = json_object_new_object(); list = json_object_new_array();
-    if (!root || !list) { if (root) json_object_put(root); if (list) json_object_put(list); maage_storage_release(lock); return 0; }
-    json_object_object_add(root, "version", json_object_new_int(3)); json_object_object_add(root, "profiles", list);
+    root = json_object_new_object();
+    list = json_object_new_array();
+    if (!root || !list) {
+        if (root) json_object_put(root);
+        if (list) json_object_put(list);
+        maage_storage_release(lock);
+        return 0;
+    }
+    if (!maage_access_json_set(root,"version",json_object_new_int(3)) ||
+        json_object_object_add(root,"profiles",list)) {
+        json_object_put(list); json_object_put(root); maage_storage_release(lock); return 0;
+    }
     maage_access_lock(a);
     for (i = 0; i < a->view.count; ++i) {
         maage_access_profile *p = &a->view.profiles[i];
-        item = json_object_new_object(); if (!item) continue;
-        json_object_object_add(item, "name", json_object_new_string(p->name));
-        json_object_object_add(item, "uuid", json_object_new_string(p->uuid));
-        json_object_object_add(item, "credentialProvider", json_object_new_string(p->session_saved ? "microsoft-oauth" : "none"));
-        json_object_object_add(item, "lastVerified", json_object_new_double(p->last_verified));
-        json_object_array_add(list, item);
+        item = json_object_new_object();
+        if (!item) { entries_ok = 0; break; }
+        if (!maage_access_json_set(item,"name",json_object_new_string(p->name)) ||
+            !maage_access_json_set(item,"uuid",json_object_new_string(p->uuid)) ||
+            !maage_access_json_set(item,"credentialProvider",json_object_new_string(p->session_saved ? "microsoft-oauth" : "none")) ||
+            !maage_access_json_set(item,"lastVerified",json_object_new_double(p->last_verified))) {
+            json_object_put(item); entries_ok = 0; break;
+        }
+        if (json_object_array_add(list,item)) { json_object_put(item); entries_ok = 0; break; }
     }
     maage_access_unlock(a);
-    data = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY);
-    if (data && maage_storage_remove(temporary)) {
+    data = entries_ok ? json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY) : NULL;
+    if (data && strlen(data) <= 8UL * 1024UL * 1024UL && maage_storage_remove(temporary)) {
         length = strlen(data); file = maage_storage_open(temporary, "wb");
         if (file) { ok = fwrite(data, 1, length, file) == length; if (fclose(file)) ok = 0; }
         if (ok) ok = maage_storage_replace(temporary, path);
@@ -223,9 +317,9 @@ static void maage_access_apply(maage_access *a, unsigned i, maage_profile_sessio
     strcpy(p->name, s->name); strcpy(p->uuid, s->uuid); strcpy(p->sources, "Microsoft");
     p->connected = p->session_saved = 1; p->refreshing = 0; p->last_verified = s->verified_at;
     if (s->verified_at > 0 && wall >= s->verified_at && wall < s->verified_until && wall < s->expires_at && now >= 0 && !a->revoked) {
-        p->state = MAAGE_ACCESS_VERIFIED; a->starts[i] = now; a->deadlines[i] = now + s->verified_until - wall;
+        p->state = MAAGE_ACCESS_VERIFIED; a->timing[i].starts = now; a->timing[i].deadlines = now + s->verified_until - wall;
         strcpy(p->detail, "Minecraft Java Edition access verified. Permanent purchase versus subscription is not conclusively established.");
-    } else { p->state = MAAGE_ACCESS_EXPIRED; a->deadlines[i] = 0; }
+    } else { p->state = MAAGE_ACCESS_EXPIRED; a->timing[i].deadlines = 0; }
     ++a->view.revision;
 }
 static maage_storage_lock *maage_access_credential_lock(maage_access *a, const char *uuid)
@@ -259,9 +353,9 @@ static void maage_access_authenticate(maage_access *a, int operation)
     if (ok && !maage_access_cancelled(a)) {
         maage_access_lock(a);
         i = maage_access_find(a, s->uuid);
-        if (i == a->view.count && i == MAAGE_ACCESS_PROFILES) {
-            maage_log_warn("maage.launcher.access", "Cannot add authenticated profile: registry capacity reached.");
-            ok = 0; strcpy(detail, "Account limit reached. Remove an account before adding another.");
+        if (i == a->view.count && (i == UINT_MAX || !maage_access_reserve(a, i + 1))) {
+            maage_log_error("maage.launcher.access", "Cannot allocate authenticated profile metadata.");
+            ok = 0; strcpy(detail, "Cannot allocate another account profile. Check available memory.");
         }
         maage_access_unlock(a);
     }
@@ -278,14 +372,14 @@ done:
     maage_access_lock(a);
     i = s && *s->uuid ? maage_access_find(a, s->uuid) : maage_access_find(a, a->selected);
     if (a->cancelled) { ok = 0; strcpy(detail, "Sign-in cancelled. Retry or choose device-code sign-in."); }
-    if (saved && i == a->view.count && i < MAAGE_ACCESS_PROFILES) {
+    if (saved && i == a->view.count && i < a->view.capacity) {
         ++a->view.count; strcpy(a->view.profiles[i].uuid, s->uuid); strcpy(a->view.profiles[i].name, s->name);
         strcpy(a->view.profiles[i].sources, "Microsoft"); a->view.profiles[i].connected = a->view.profiles[i].session_saved = 1;
     }
     if (i < a->view.count) {
         if (ok) maage_access_apply(a, i, s);
-        else { a->view.profiles[i].state = (strstr(detail, "Cannot reach") || strstr(detail, "HTTP 5") || strstr(detail, "HTTP 429")) ? MAAGE_ACCESS_EXPIRED : MAAGE_ACCESS_FAILED; a->deadlines[i] = 0; a->view.profiles[i].refreshing = 0; }
-        strcpy(a->view.profiles[i].detail, detail); a->retry[i] = maage_time_monotonic_seconds() + (ok ? 60 : 300);
+        else { a->view.profiles[i].state = (strstr(detail, "Cannot reach") || strstr(detail, "HTTP 5") || strstr(detail, "HTTP 429")) ? MAAGE_ACCESS_EXPIRED : MAAGE_ACCESS_FAILED; a->timing[i].deadlines = 0; a->view.profiles[i].refreshing = 0; }
+        strcpy(a->view.profiles[i].detail, detail); a->timing[i].retry = maage_time_monotonic_seconds() + (ok ? 60 : 300);
     }
     strcpy(a->view.status, ok ? "Minecraft Java Edition access successfully verified. Continue to Preparing MaaGE." : detail);
     a->view.auto_continue = 0; ++a->view.revision; maage_access_unlock(a);
@@ -296,7 +390,7 @@ done:
     if (!maage_access_save(a)) {
         maage_log_error("maage.launcher.access", "Profile registry persistence failed; new access lease revoked.");
         maage_access_lock(a); i = s && *s->uuid ? maage_access_find(a, s->uuid) : maage_access_find(a, a->selected);
-        if (i < a->view.count) { a->deadlines[i] = 0; a->view.profiles[i].state = MAAGE_ACCESS_FAILED; }
+        if (i < a->view.count) { a->timing[i].deadlines = 0; a->view.profiles[i].state = MAAGE_ACCESS_FAILED; }
         maage_access_unlock(a); ok = 0;
         if (saved && s) { s->verified_at = s->verified_until = 0; if (!maage_profile_store_save(a->root, s)) maage_log_error("maage.launcher.access", "Cannot persist revoked lease after registry failure."); }
         maage_access_status(a, "Cannot save profile registry. Check MaaGE data-folder permissions before continuing.");
@@ -354,15 +448,13 @@ static void *maage_access_worker(void *context)
         else maage_log_error("maage.launcher.access", "%s failed: %s; current access revoked.", a->operation == 3 ? "Account removal" : "Sign-out", lock ? "credential deletion failed" : "account update lock unavailable");
         maage_access_lock(a); i = maage_access_find(a, a->selected);
         if (i < a->view.count) {
-            a->deadlines[i] = 0; a->view.profiles[i].session_saved = 0;
+            a->timing[i].deadlines = 0; a->view.profiles[i].session_saved = 0;
             a->view.profiles[i].state = removed ? MAAGE_ACCESS_DETECTED : MAAGE_ACCESS_FAILED;
             strcpy(a->view.profiles[i].detail, removed ? "Signed out. Sign in with Microsoft to reconnect." : "Credential removal failed. Access revoked; check data-folder permissions and retry.");
             if (removed && a->operation == 3) {
                 --a->view.count;
                 memmove(&a->view.profiles[i], &a->view.profiles[i + 1], (a->view.count - i) * sizeof(a->view.profiles[0]));
-                memmove(&a->deadlines[i], &a->deadlines[i + 1], (a->view.count - i) * sizeof(double));
-                memmove(&a->starts[i], &a->starts[i + 1], (a->view.count - i) * sizeof(double));
-                memmove(&a->retry[i], &a->retry[i + 1], (a->view.count - i) * sizeof(double));
+                memmove(&a->timing[i], &a->timing[i + 1], (a->view.count - i) * sizeof(a->timing[0]));
                 if (!strcmp(a->active, a->selected)) a->active[0] = 0;
             }
             ++a->view.revision;
@@ -404,7 +496,7 @@ static int maage_access_begin(maage_access *a, int operation, const char *uuid)
     if (*normalized) {
         i = maage_access_find(a, normalized);
         if (operation != 4 || a->view.profiles[i].state != MAAGE_ACCESS_VERIFIED) {
-            a->deadlines[i] = 0; a->view.profiles[i].state = MAAGE_ACCESS_VERIFYING;
+            a->timing[i].deadlines = 0; a->view.profiles[i].state = MAAGE_ACCESS_VERIFYING;
         } a->view.profiles[i].refreshing = operation == 4;
     }
     strcpy(a->view.status, operation == 1 ? "Restoring MaaGE Microsoft accounts..." : operation == 3 || operation == 5 ? "Removing MaaGE credentials..." : "Starting Microsoft authentication...");
@@ -442,5 +534,6 @@ void maage_access_destroy(maage_access *a)
 #else
     pthread_mutex_destroy(&a->mutex);
 #endif
+    free(a->view.profiles); free(a->timing);
     OPENSSL_cleanse(a, sizeof(*a)); free(a);
 }

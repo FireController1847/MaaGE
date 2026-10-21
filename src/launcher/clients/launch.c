@@ -8,7 +8,7 @@
 int maage_client_launch(const char *root, const char *id, const char *instance_id, maage_access *access,
     maage_process **process, char error[256])
 {
-    maage_client_registry *registry=(maage_client_registry *)malloc(sizeof(*registry));
+    maage_client_registry *registry=(maage_client_registry *)calloc(1,sizeof(*registry));
     char executable[MAAGE_PATH_CAPACITY], directory[MAAGE_PATH_CAPACITY], logs[MAAGE_PATH_CAPACITY];
     char output[MAAGE_PATH_CAPACITY], errors[MAAGE_PATH_CAPACITY], log[MAAGE_PATH_CAPACITY], argument[MAAGE_PATH_CAPACITY+12], data_argument[MAAGE_PATH_CAPACITY+18], instance_argument[48], name[128];
     const char *argv[6];
@@ -50,5 +50,5 @@ done:
     if(!ok) maage_log_error("maage.launcher.clients","%s",error);
     if(lock) maage_storage_release(lock);
     maage_instance_close(instance);
-    free(registry); return ok;
+    maage_clients_dispose(registry); free(registry); return ok;
 }
