@@ -206,7 +206,7 @@ maage_block_registry *maage_client_register_blocks(
     maage_block_definition block;
     int i;
     if (!resources || !biomes) return NULL;
-    registry = maage_block_registry_create(32, 512);
+    registry = maage_block_registry_create(0, 0);
     if (!registry) return NULL;
     for (i = 0; i < 9; ++i) {
         memset(&block, 0, sizeof(block));

@@ -44,6 +44,10 @@ const maage_item_definition *maage_item_registry_get(const maage_item_registry *
 size_t maage_item_registry_count(const maage_item_registry *registry);
 const maage_item_definition *maage_item_registry_at(const maage_item_registry *registry,
     size_t index);
+/* For persistence/import only, never the fixed-step simulation. */
+const char *maage_item_registry_name(const maage_item_registry *registry, maage_item_id id);
+maage_registry_result maage_item_registry_resolve_name(
+    const maage_item_registry *registry, const char *name, maage_item_id *id);
 maage_item_registry *maage_item_registry_create_builtin(const maage_block_registry *blocks);
 int maage_item_stack_valid(const maage_item_registry *registry, const maage_item_stack *stack);
 const maage_item_stack *maage_inventory_selected(const maage_inventory *inventory);

@@ -90,7 +90,9 @@ typedef enum maage_registry_result {
 
 typedef struct maage_block_registry maage_block_registry;
 
-/* Capacities bound direct-indexed ID domains, not the number of occupied slots.
+/* Capacities are initial hints (zero selects a small default). Both direct-indexed
+ * domains grow on registration; allocation failure is reported without wrapping.
+ *
  * The caller owns the registry. Definitions are borrowed until its destruction;
  * after finalize they are immutable. Registration copies names and definitions. */
 maage_block_registry *maage_block_registry_create(size_t block_capacity,
@@ -120,6 +122,14 @@ const maage_block_definition *maage_block_registry_block(
     const maage_block_registry *registry, maage_block_id id);
 const maage_block_state_definition *maage_block_registry_state(
     const maage_block_registry *registry, maage_block_state_id id);
+/* Stable names and (block name, metadata) are persistence/import identities.
+ * These functions are for registration and file I/O, never gameplay loops.
+ * Within one block, state metadata must be unique. */
+const char *maage_block_registry_block_name(
+    const maage_block_registry *registry, maage_block_id id);
+maage_registry_result maage_block_registry_resolve_state(
+    const maage_block_registry *registry, maage_block_id block,
+    unsigned int metadata, maage_block_state_id *id);
 
 #ifdef __cplusplus
 }
