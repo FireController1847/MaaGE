@@ -4,6 +4,8 @@
 #include "maage/player.h"
 
 enum { MAAGE_GAME_MODE_SURVIVAL = 0, MAAGE_GAME_MODE_CREATIVE = 1 };
+/* Small inline storage avoids heap traffic in the common case.
+ * Additional drops use a growable, owned overflow array: 64 is not a limit. */
 #define MAAGE_GAMEPLAY_PICKUPS 64U
 typedef struct maage_gameplay_pickup {
     maage_item_stack stack;
@@ -17,6 +19,8 @@ typedef struct maage_gameplay_save {
     double saturation, exhaustion, fall_distance;
     int flying;
     maage_gameplay_pickup pickups[MAAGE_GAMEPLAY_PICKUPS];
+    maage_gameplay_pickup *overflow_pickups;
+    size_t overflow_count;
 } maage_gameplay_save;
 typedef struct maage_gameplay {
     maage_inventory inventory;
@@ -24,6 +28,8 @@ typedef struct maage_gameplay {
     double saturation, exhaustion, fall_distance;
     int flying;
     maage_gameplay_pickup pickups[MAAGE_GAMEPLAY_PICKUPS];
+    maage_gameplay_pickup *overflow_pickups;
+    size_t overflow_count, overflow_capacity;
     maage_world_target target, breaking;
     int has_target, breaking_active;
     double break_progress, swing, reach;
@@ -42,7 +48,12 @@ int maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
  * persistent spawn points and full death-drop rules are deferred. */
 void maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
     const maage_world *world);
-void maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
+/* Call destroy/clear when an initialized game/save is no longer used. An
+ * open world_store owns its record's save; returned record copies borrow it.
+ * Snapshot allocates a deep copy and reports allocation failure. */
+void maage_gameplay_destroy(maage_gameplay *game);
+void maage_gameplay_save_clear(maage_gameplay_save *save);
+int maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
 int maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
     const maage_gameplay_save *save);
 /* Owner-thread targeting may run every frame. Reach zero uses classic 5/4.5

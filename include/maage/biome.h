@@ -4,7 +4,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define MAAGE_BIOME_CAPACITY 256
 #define MAAGE_BIOME_OCEAN 0
 #define MAAGE_BIOME_PLAINS 1
 #define MAAGE_BIOME_DESERT 2
@@ -17,21 +16,35 @@ extern "C" {
 typedef unsigned int maage_biome_id;
 typedef struct maage_biome_definition {
     maage_biome_id id;
-    /* Version-1 generator height parameters are in blocks above Y=0. */
     double base_height, variation, temperature, rainfall;
     maage_block_state_id surface, filler;
     float grass_color[3], foliage_color[3];
 } maage_biome_definition;
 typedef struct maage_biome_registry {
-    maage_biome_definition definitions[MAAGE_BIOME_CAPACITY];
-    unsigned char occupied[MAAGE_BIOME_CAPACITY];
+    /* Inline defaults allocate nothing. Additional registrations grow owned
+     * direct-indexed arrays; call destroy if extension registrations are used. */
+    maage_biome_definition *definitions;
+    unsigned char *occupied;
+    const char **names;
+    size_t capacity;
+    maage_biome_definition builtin_definitions[MAAGE_BIOME_COUNT];
+    unsigned char builtin_occupied[MAAGE_BIOME_COUNT];
+    const char *builtin_names[MAAGE_BIOME_COUNT];
     int finalized;
 } maage_biome_registry;
-/* Initialize classic-biome approximations, amend during resource registration,
- * then finalize. Numeric lookups are direct O(1); no names in runtime records. */
+/* Initialize classic biomes, register additional stable names before finalizing.
+ * Every registered biome has a unique namespaced persistence identity. */
 void maage_biome_registry_init(maage_biome_registry *registry);
+void maage_biome_registry_destroy(maage_biome_registry *registry);
+maage_registry_result maage_biome_registry_register(maage_biome_registry *registry,
+    const char *external_name, const maage_biome_definition *definition);
 int maage_biome_registry_finalize(maage_biome_registry *registry);
-const maage_biome_definition *maage_biome_registry_get(const maage_biome_registry *registry, maage_biome_id id);
+const maage_biome_definition *maage_biome_registry_get(
+    const maage_biome_registry *registry, maage_biome_id id);
+const char *maage_biome_registry_name(const maage_biome_registry *registry,
+    maage_biome_id id);
+maage_registry_result maage_biome_registry_resolve_name(
+    const maage_biome_registry *registry, const char *name, maage_biome_id *id);
 #ifdef __cplusplus
 }
 #endif

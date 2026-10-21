@@ -1,5 +1,6 @@
 #include "maage/gameplay.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 void maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items)
@@ -36,26 +37,57 @@ void maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
     game->breaking_active = game->has_target = 0; game->break_progress = 0;
     game->hunger_ticks = game->jump_window = 0;
 }
-void maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save)
+void maage_gameplay_destroy(maage_gameplay *game)
 {
+    if (!game) return;
+    free(game->overflow_pickups);
+    game->overflow_pickups = NULL;
+    game->overflow_count = game->overflow_capacity = 0;
+}
+void maage_gameplay_save_clear(maage_gameplay_save *save)
+{
+    if (!save) return;
+    free(save->overflow_pickups);
+    save->overflow_pickups = NULL;
+    save->overflow_count = 0;
+}
+int maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save)
+{
+    if (!game || !save) return 0;
     memset(save, 0, sizeof(*save));
     save->inventory = game->inventory; save->mode = game->mode;
     save->health = game->health; save->hunger = game->hunger;
     save->saturation = game->saturation; save->exhaustion = game->exhaustion;
     save->fall_distance = game->fall_distance; save->flying = game->flying;
     memcpy(save->pickups, game->pickups, sizeof(save->pickups));
+    if (game->overflow_count) {
+        if (!game->overflow_pickups ||
+            game->overflow_count > (size_t)-1 / sizeof(*save->overflow_pickups))
+            return 0;
+        save->overflow_pickups = (maage_gameplay_pickup *)malloc(
+            game->overflow_count * sizeof(*save->overflow_pickups));
+        if (!save->overflow_pickups) return 0;
+        memcpy(save->overflow_pickups, game->overflow_pickups,
+            game->overflow_count * sizeof(*save->overflow_pickups));
+        save->overflow_count = game->overflow_count;
+    }
+    return 1;
 }
 int maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
     const maage_gameplay_save *save)
 {
     unsigned int i, axis;
+    size_t j;
+    maage_gameplay_pickup *overflow = NULL;
     if (!game || !maage_item_registry_is_finalized(items) || !save || save->mode > MAAGE_GAME_MODE_CREATIVE ||
         save->health > 20 || save->hunger > 20 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
         !(save->exhaustion >= 0 && save->exhaustion <= 4) ||
         !(save->fall_distance >= 0 && save->fall_distance < MAAGE_WORLD_LIMIT) ||
         (save->flying != 0 && save->flying != 1) ||
-        (save->mode == MAAGE_GAME_MODE_SURVIVAL && save->flying)) return 0;
+        (save->mode == MAAGE_GAME_MODE_SURVIVAL && save->flying) ||
+        (save->overflow_count && (!save->overflow_pickups ||
+         save->overflow_count > (size_t)-1 / sizeof(*overflow)))) return 0;
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
         if (!maage_item_stack_valid(items, &save->inventory.slots[i])) return 0;
     if (!maage_item_stack_valid(items, &save->inventory.cursor)) return 0;
@@ -67,13 +99,73 @@ int maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *item
         if (save->pickups[i].stack.count && !(save->pickups[i].position[1] >= 0 &&
             save->pickups[i].position[1] <= MAAGE_WORLD_HEIGHT)) return 0;
     }
+    for (j = 0; j < save->overflow_count; ++j) {
+        const maage_gameplay_pickup *pickup = &save->overflow_pickups[j];
+        if (!maage_item_stack_valid(items, &pickup->stack)) return 0;
+        for (axis = 0; axis < 3; ++axis)
+            if (!(pickup->position[axis] > -MAAGE_WORLD_LIMIT &&
+                pickup->position[axis] < MAAGE_WORLD_LIMIT)) return 0;
+        if (pickup->stack.count && !(pickup->position[1] >= 0 &&
+            pickup->position[1] <= MAAGE_WORLD_HEIGHT)) return 0;
+    }
+    if (save->overflow_count) {
+        overflow = (maage_gameplay_pickup *)malloc(
+            save->overflow_count * sizeof(*overflow));
+        if (!overflow) return 0;
+        memcpy(overflow, save->overflow_pickups, save->overflow_count * sizeof(*overflow));
+    }
+    /* Caller initializes game before restore; this also supports repeated
+     * restores without leaking an earlier overflow allocation. */
+    maage_gameplay_destroy(game);
     memset(game, 0, sizeof(*game));
     game->inventory = save->inventory; game->mode = save->mode;
     game->health = save->health; game->hunger = save->hunger;
     game->saturation = save->saturation; game->exhaustion = save->exhaustion;
     game->fall_distance = save->fall_distance; game->flying = save->flying;
     memcpy(game->pickups, save->pickups, sizeof(game->pickups));
+    game->overflow_pickups = overflow;
+    game->overflow_count = game->overflow_capacity = save->overflow_count;
     return 1;
+}
+static maage_gameplay_pickup *maage_gameplay_drop_slot(maage_gameplay *game)
+{
+    size_t i, count;
+    maage_gameplay_pickup *buffer;
+    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i)
+        if (!game->pickups[i].stack.count) return &game->pickups[i];
+    for (i = 0; i < game->overflow_count; ++i)
+        if (!game->overflow_pickups[i].stack.count) return &game->overflow_pickups[i];
+    if (game->overflow_count == game->overflow_capacity) {
+        count = game->overflow_capacity ? game->overflow_capacity : 16;
+        if (count <= game->overflow_count) {
+            if (count > ((size_t)-1 / sizeof(*buffer)) / 2) return NULL;
+            count *= 2;
+        }
+        if (count > (size_t)-1 / sizeof(*buffer)) return NULL;
+        buffer = (maage_gameplay_pickup *)realloc(game->overflow_pickups,
+            count * sizeof(*buffer));
+        if (!buffer) return NULL;
+        game->overflow_pickups = buffer;
+        game->overflow_capacity = count;
+    }
+    buffer = &game->overflow_pickups[game->overflow_count++];
+    memset(buffer, 0, sizeof(*buffer));
+    return buffer;
+}
+static void maage_gameplay_collect_drop(maage_gameplay *game,
+    const maage_player *player, const maage_item_registry *items,
+    maage_gameplay_pickup *pickup)
+{
+    double dx, dy, dz;
+    unsigned int remaining;
+    if (!pickup->stack.count) return;
+    dx = player->position[0] - pickup->position[0];
+    dy = player->position[1] + 0.8 - pickup->position[1];
+    dz = player->position[2] - pickup->position[2];
+    if (dx*dx + dy*dy + dz*dz > 4) return;
+    remaining = maage_inventory_add(&game->inventory, items, &pickup->stack);
+    pickup->stack.count = remaining;
+    if (!remaining) memset(pickup, 0, sizeof(*pickup));
 }
 void maage_gameplay_target(maage_gameplay *game, const maage_player *player,
     const maage_world *world, double yaw, double pitch)
@@ -103,7 +195,8 @@ static void maage_gameplay_break(maage_gameplay *game, maage_player *player,
     const maage_item_definition *tool;
     maage_item_stack *held, drop;
     maage_inventory inventory;
-    unsigned int remaining = 0, pickup = MAAGE_GAMEPLAY_PICKUPS, i;
+    unsigned int remaining = 0;
+    maage_gameplay_pickup *pickup = NULL;
     double speed = 1;
     int harvest;
     if (!game->has_target || game->break_delay) return;
@@ -132,10 +225,9 @@ static void maage_gameplay_break(maage_gameplay *game, maage_player *player,
         if (!maage_item_stack_valid(items, &drop)) return;
         remaining = maage_inventory_add(&inventory, items, &drop);
         if (remaining) {
-            for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i)
-                if (!game->pickups[i].stack.count) { pickup = i; break; }
-            /* Bounded overflow storage is explicit backpressure, never item loss. */
-            if (pickup == MAAGE_GAMEPLAY_PICKUPS) return;
+            /* Allocation failure is explicit backpressure; never lose a drop. */
+            pickup = maage_gameplay_drop_slot(game);
+            if (!pickup) return;
         }
     }
     if (maage_world_set(world, game->target.x, game->target.y, game->target.z,
@@ -143,10 +235,10 @@ static void maage_gameplay_break(maage_gameplay *game, maage_player *player,
     game->inventory = inventory;
     held = &game->inventory.slots[game->inventory.selected];
     if (remaining) {
-        game->pickups[pickup].stack = drop; game->pickups[pickup].stack.count = remaining;
-        game->pickups[pickup].position[0] = game->target.x + 0.5;
-        game->pickups[pickup].position[1] = game->target.y + 0.5;
-        game->pickups[pickup].position[2] = game->target.z + 0.5;
+        pickup->stack = drop; pickup->stack.count = remaining;
+        pickup->position[0] = game->target.x + 0.5;
+        pickup->position[1] = game->target.y + 0.5;
+        pickup->position[2] = game->target.z + 0.5;
     }
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->exhaustion += 0.025;
@@ -247,8 +339,9 @@ void maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     const maage_gameplay_intent *intent)
 {
     maage_player_input movement;
-    double previous[3], dx, dy, dz;
-    unsigned int i, remaining;
+    double previous[3];
+    unsigned int i;
+    size_t j;
     int grounded;
     if (!game || !player || !world || !maage_item_registry_is_finalized(items) || !intent ||
         game->inventory.selected >= MAAGE_HOTBAR_SLOTS) return;
@@ -272,16 +365,10 @@ void maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->breaking_active = 0; game->break_progress = 0; return;
     }
-    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) {
-        if (!game->pickups[i].stack.count) continue;
-        dx = player->position[0] - game->pickups[i].position[0];
-        dy = player->position[1] + 0.8 - game->pickups[i].position[1];
-        dz = player->position[2] - game->pickups[i].position[2];
-        if (dx*dx + dy*dy + dz*dz > 4) continue;
-        remaining = maage_inventory_add(&game->inventory,items,&game->pickups[i].stack);
-        game->pickups[i].stack.count = remaining;
-        if (!remaining) memset(&game->pickups[i],0,sizeof(game->pickups[i]));
-    }
+    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i)
+        maage_gameplay_collect_drop(game, player, items, &game->pickups[i]);
+    for (j = 0; j < game->overflow_count; ++j)
+        maage_gameplay_collect_drop(game, player, items, &game->overflow_pickups[j]);
     maage_gameplay_target(game,player,world,intent->movement.yaw,intent->pitch);
     if (intent->attack) {
         if (game->swing <= 0) game->swing = 1;
