@@ -14,7 +14,9 @@ typedef char maage_world_required_address_space[((size_t)-1 >= 262144UL) ? 1 : -
 #define MAAGE_CHUNK_EDGE 16
 #define MAAGE_WORLD_HEIGHT 256
 #define MAAGE_WORLD_LIMIT 30000000
-#define MAAGE_WORLD_MAX_RADIUS 8
+/* Legacy Client compile-time compatibility only. Neither constant bounds World
+ * cache occupancy; use the runtime capacity in maage_world_stats instead. */
+#define MAAGE_WORLD_MAX_RADIUS (MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 4)
 #define MAAGE_WORLD_MAX_CHUNKS 512
 
 #ifdef __cplusplus
@@ -39,6 +41,10 @@ typedef struct maage_world_config {
     int render_distance;
     int new_world;
     double position[3];
+    /* 0 derives a bounded default from the streaming footprint and workers.
+     * Cache and accepted-job limits are independent runtime allocations. */
+    unsigned int cache_capacity;
+    unsigned int job_capacity;
 } maage_world_config;
 typedef struct maage_world_stats {
     unsigned int loaded, loaded_sections, pending, ready;
@@ -53,6 +59,10 @@ typedef struct maage_world_stats {
     unsigned long completed_jobs, cancelled_jobs, stale_jobs;
     unsigned long mutations, rejected_mutations;
     unsigned int dirty_columns;
+    unsigned int resident_columns, cache_capacity, job_capacity;
+    unsigned int completed_uncommitted_jobs;
+    unsigned long queue_saturation_events, cache_pressure_events;
+    double generated_columns_per_second;
     double scheduling_latency_ms;
     int failed;
 } maage_world_stats;
