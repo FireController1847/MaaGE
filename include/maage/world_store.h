@@ -3,7 +3,7 @@
 #include "maage/world.h"
 #include "maage/gameplay.h"
 #define MAAGE_WORLD_FORMAT_VERSION 2UL
-#define MAAGE_PLAYER_FORMAT_VERSION 3UL
+#define MAAGE_PLAYER_FORMAT_VERSION 4UL
 typedef struct maage_world_record {
     char id[65], name[128], created_utc[32];
     maage_world_seed seed;
@@ -21,6 +21,14 @@ typedef struct maage_world_record {
 int maage_world_store_open(const char *instance_root, const char *id, int create,
     const char *name, const maage_world_seed *seed, maage_world_store **store,
     maage_world_record *record, char error[256]);
+/* Modded worlds must use this variant before reading player metadata. It
+ * borrows finalized item definitions until close so schema 4 resolves stable
+ * namespaced names to runtime IDs. The original open remains an adapter for
+ * legacy numeric item mapping 1; it refuses schema 4 rather than guessing. */
+int maage_world_store_open_with_items(const char *instance_root, const char *id,
+    int create, const char *name, const maage_world_seed *seed,
+    const maage_item_registry *items, maage_world_store **store,
+    maage_world_record *record, char error[256]);
 /* Startup/import only, before opening an instance world. The caller owns the
  * destination instance lease and must establish unambiguous/explicit ownership.
  * Legacy selection and every world lock exclude active writers. Atomic moves
@@ -33,11 +41,12 @@ int maage_world_store_migrate_legacy(const char *data_root,
  * Serialize metadata saves with each other; chunk files are independent. */
 int maage_world_store_save_player(maage_world_store *store,
     const double position[3], double yaw, double pitch, char error[256]);
-/* Atomic schema-3 metadata snapshot; schema 1 and 2 remain readable. Schema 1
- * migrates to Creative/empty inventory/full vitals. Schema 3 uses a checked
- * 32-bit pickup count instead of schema 2's 8-bit count. Item mapping 1 remains
- * the seven original numeric IDs; expanding item persistence identities requires
- * an explicit modpack mapping integration, never silent reinterpretation. */
+/* Schema 1-4 remain readable; schema 1 starts with Creative and empty
+ * inventory, schema 2 has at most 64 pickups, schema 3 has a checked 32-bit
+ * count and legacy numeric item mapping 1. Schema 4 writes stable namespaced
+ * item names in each inventory/cursor/pickup stack and a checked pickup count.
+ * Schema 4 requires open_with_items; missing names fail without overwriting.
+ * The legacy open adapter writes schema 3 and rejects unmapped modded items. */
 int maage_world_store_save_gameplay(maage_world_store *store,
     const double position[3], double yaw, double pitch,
     const maage_gameplay *game, const maage_item_registry *items, char error[256]);
