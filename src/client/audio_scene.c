@@ -238,7 +238,7 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
     selected = sc_select(scene, SC_MUSIC_BEGIN, SC_MUSIC_END, scene->last_music_index);
     if (selected < 0) { scene->next_music = now + 600.0; return; }
     r = scene->ports.music_prepare(scene->context, scene->catalog,
-        scene->sounds[selected], &pcm, &bytes);
+        scene->sounds[selected], MAAGE_AUDIO_SCENE_MAX_PCM_BYTES, &pcm, &bytes);
     if (!maage_status_failed(r) && (!pcm || !bytes || bytes > MAAGE_AUDIO_SCENE_MAX_PCM_BYTES))
         r = sc_result(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_DECODE);
     if (!maage_status_failed(r))
@@ -417,7 +417,7 @@ maage_status maage_client_audio_scene_pause(maage_client_audio_scene *scene, int
         shift = now >= scene->paused_since ? now - scene->paused_since : 0.0;
         scene->next_music += shift; scene->next_thunder += shift; scene->next_cave += shift;
         for (i = 0; i < SC_CHANNEL_COUNT; ++i) scene->channels[i].next_at += shift;
-        scene->last_now = now >= 0.0 ? now : scene->last_now;
+        scene->last_now += shift; /* Avoid a newer pause-clock value than this frame's timestamp. */
     }
     scene->paused = paused;
     if (scene->bound) {
