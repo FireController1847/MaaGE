@@ -5,7 +5,7 @@ endif()
 maage_client_target_architecture(MAAGE_CLIENT_ARCH)
 set(MAAGE_CLIENT_ARTIFACT "MaaGE-Client-${MAAGE_CLIENT_RELEASE}")
 add_executable(maage_client main.c metadata.c viewport.c storage_context.c options.c resources.c debug.c interaction.c environment.c
-    audio_service.c audio_scene.c
+    audio_service.c audio_scene.c audio_native.c
     ui/ui.c ui/gameplay.c ui/navigation.c ui/resources.c ui/font.c ui/draw.c)
 add_dependencies(maage_client maage_versions)
 maage_configure_portable_target(maage_client)
