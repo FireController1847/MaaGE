@@ -556,8 +556,9 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         maage_mutex_unlock(native->present_mutex);
         if (maage_status_failed(result)) { [pool drain]; return result; }
     }
+    acquired = CACurrentMediaTime();
     result = maage_metal_complete(renderer, slot);
-    native->wait_seconds += CACurrentMediaTime() - started;
+    native->wait_seconds += CACurrentMediaTime() - acquired;
     if (maage_status_failed(result)) { [pool drain]; return result; }
     for (layer = 0; layer < 3; ++layer) {
         batch = layers[layer];
@@ -717,7 +718,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         native->drawable_seconds = 0; native->presented = 0;
         native->deferred_frames = native->drawable_misses = native->size_misses = 0;
         maage_mutex_unlock(native->present_mutex);
-        maage_log_verbose("maage.render.metal", "GPU submissions=%.1f/s; presentation copies scheduled=%.1f/s (not scanout); display sync=%s; path=%s; drawable wait=%.3fms/schedule; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame; backpressure skips=%lu; drawable unavailable=%lu; size mismatches=%lu.",
+        maage_log_verbose("maage.render.metal", "GPU submissions=%.1f/s; presentation submissions=%.1f/s (not scanout); display sync=%s; path=%s; drawable wait=%.3fms/presentation; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame; backpressure skips=%lu; drawable unavailable=%lu; size mismatches=%lu.",
             native->sample_frames / (acquired - native->sample_start),
             presented / (acquired - native->sample_start),
             native->layer.displaySyncEnabled ? "on" : "off", asynchronous ? "mailbox" : "direct",
