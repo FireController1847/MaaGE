@@ -236,6 +236,13 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 ### Client game UI
 
+- Client graphical screens and per-screen layout/interaction state belong under
+  `src/client/ui/`, not in application controller `frontend.c`. The controller
+  retains catalog Jobs, Client/Server lifecycle, and Options persistence; the
+  UI consumes catalog data and emits numeric actions. Do not add a second
+  widget, navigation or rendering system. Load title artwork exclusively from
+  the programmer's verified original Minecraft resource installation.
+
 - Client-owned `src/client/ui/` remains separate from native Launcher widgets.
   Register screens before finalization through numeric IDs and direct O(1)
   indexing; gameplay/HUD is ID 0, Pause 1, Options 2, Inventory 3, Title 4, Worlds 5,

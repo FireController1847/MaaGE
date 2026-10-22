@@ -74,6 +74,10 @@ maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_u
 maage_status maage_client_ui_finalize(maage_client_ui *ui);
 maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id id);
 maage_status maage_client_ui_back(maage_client_ui *ui);
+maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui);
+maage_status maage_client_ui_open_root(maage_client_ui *ui,maage_client_ui_screen_id id);
+maage_renderer *maage_client_ui_renderer(const maage_client_ui *ui);
+maage_window *maage_client_ui_window(const maage_client_ui *ui);
 int maage_client_ui_modal(const maage_client_ui *ui);
 int maage_client_ui_debug_visible(const maage_client_ui *ui);
 /* Insets are window logical units. Only GUI content avoids these obstructions;

@@ -625,7 +625,8 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     id = maage_client_ui_current(ui);
     if (id) {
         rectangle = ui->clip;
-        maage_client_ui_panel(ui, rectangle, 0.03f, 0.03f, 0.04f, 0.68f);
+        if(id!=MAAGE_CLIENT_UI_TITLE && id!=MAAGE_CLIENT_UI_LOADING)
+            maage_client_ui_panel(ui, rectangle, 0.03f, 0.03f, 0.04f, 0.68f);
         ui->clip = ui->content;
         screen = maage_client_ui_screen_get(ui, id);
         screen->draw(ui, screen->context);
@@ -656,3 +657,18 @@ void maage_client_ui_set_click_callback(maage_client_ui *ui,
     ui->click = callback;
     ui->click_context = context;
 }
+
+maage_status maage_client_ui_open_root(maage_client_ui *ui,maage_client_ui_screen_id id)
+{
+    if(!ui)return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,MAAGE_CONTEXT_GUI,MAAGE_OPERATION_NAVIGATE,0);
+    ui->navigation.depth=0;ui->selected=0;
+    if(id==MAAGE_CLIENT_UI_TITLE) {
+        ui->has_snapshot=0;
+        ui->command_read=ui->command_write=ui->command_count=0;
+    }
+    return maage_client_ui_open(ui,id);
+}
+maage_renderer *maage_client_ui_renderer(const maage_client_ui *ui)
+{ return ui?ui->renderer:NULL; }
+maage_window *maage_client_ui_window(const maage_client_ui *ui)
+{ return ui?ui->window:NULL; }
