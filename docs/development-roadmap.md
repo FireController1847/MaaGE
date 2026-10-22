@@ -4,7 +4,10 @@ Minecraft: Java Edition **1.7.10** is the gameplay and fidelity reference.
 Phases 1–5, including milestones 2.5, 2.75, 3.5 and 4.5, record implemented
 foundations and their limitations below; preserve their historical completion and
 validation notes. Compilation does not establish runtime correctness or vanilla
-fidelity. Phase 6 is the next planned development milestone.
+fidelity. Phases 6 and 7 have source implementations combined on the
+integration branch; cross-platform builds and runtime/visual/audio behavior
+remain unverified. Do not mark their observable completion criteria satisfied
+until those checks are performed.
 
 **Permanent boundary:** Server architecture and multiplayer networking are
 separate milestones. Phase 7 establishes a single authoritative Server runtime
@@ -643,9 +646,9 @@ runtime/visual validation or GitHub Actions were executed.
 
 ## Phase 6 — Audio Engine & Soundscape
 
-**Next phase; highest immediate priority.** Add a native cross-platform audio
-foundation without coupling audio devices or playback to rendering or authoritative
-gameplay simulation.
+**Source-integrated; build and observable completion unverified.** A native
+cross-platform audio foundation and Client-owned integration layer have been
+combined. The following requirements remain the acceptance criteria:
 
 - Abstract audio backends and load/play sound resources, including the Minecraft
   1.7.10 sound assets and their mappings.
@@ -666,9 +669,9 @@ sounds degrade gracefully. Merely linking an audio library is insufficient.
 
 ## Phase 7 — Authoritative Simulation & Integrated Server
 
-**Critical architecture milestone, immediately after audio.** Establish one
-reusable authoritative Server simulation implementation before adding major
-new gameplay systems.
+**Source-integrated; build and observable completion unverified.** A reusable
+authoritative Server and Client/local-session path have been combined, with
+remaining runtime/lifecycle verification required. The acceptance criteria are:
 
 - Run that runtime in-process as an integrated Server for Client single-player,
   and through the independent headless dedicated Server executable. These

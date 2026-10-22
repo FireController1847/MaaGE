@@ -16,6 +16,12 @@ void maage_mutex_unlock(maage_mutex *mutex);
 maage_status maage_condition_create(maage_condition **output);
 maage_status maage_condition_destroy(maage_condition *condition);
 void maage_condition_wait(maage_condition *condition, maage_mutex *mutex);
+/* Wait for a signal or broadcast, releasing the mutex while blocked.  The
+ * timeout is a relative duration in milliseconds (zero polls the condition).
+ * SUCCESS means woken, TIMEOUT means the deadline elapsed, other results
+ * indicate a native wait error. As with wait, callers recheck their predicate. */
+maage_status maage_condition_timed_wait(maage_condition *condition,
+    maage_mutex *mutex, unsigned long timeout_ms);
 void maage_condition_signal(maage_condition *condition);
 void maage_condition_broadcast(maage_condition *condition);
 maage_status maage_thread_start(void (*function)(void *), void *context, maage_thread **output);

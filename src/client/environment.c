@@ -149,21 +149,25 @@ static void maage_client_environment_body(maage_client_environment *view, const 
         u, v, uv_width, uv_height, alpha);
 }
 maage_status maage_client_environment_update(maage_client_environment *view,
-    maage_renderer *renderer, const maage_environment_state *state, const maage_world *world,
-    const maage_player *player, double yaw, double pitch, float width, float height,
-    double vertical_fov)
+    maage_renderer *renderer, const maage_session_snapshot *snapshot,
+    float width, float height, double vertical_fov)
 {
     const maage_client_environment_resource *resource;
-    maage_world_observation observation;
+    const maage_environment_state *state;
+    double yaw, pitch;
     double forward[3], right[3], up[3], sun[3], angle, phase, sunlight, rain;
     float focal, x, y, size, alpha;
     unsigned int i, hash;
     int cold = 0, precipitation = 0;
     maage_status result;
-    if (!view || !renderer || !state || !world || !player ||
+    if (!view || !renderer || !snapshot ||
+        snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         !(vertical_fov > 0 && vertical_fov < 3.14)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
     if (width <= 0 || height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     if (!(width > 0 && height > 0)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
+    state = &snapshot->environment;
+    yaw = snapshot->player.yaw;
+    pitch = snapshot->player.pitch;
     view->sky.vertex_count = view->sky.index_count = view->weather.vertex_count = view->weather.index_count = 0;
     view->sky.logical_width = view->weather.logical_width = width;
     view->sky.logical_height = view->weather.logical_height = height;
@@ -181,9 +185,10 @@ maage_status maage_client_environment_update(maage_client_environment *view,
     for (i = 0; i < 3; ++i) sun[i] = -sun[i];
     if (view->available[1]) maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 1,
         (unsigned int)(state->day_low & 7), (float)(1 - rain));
-    if (maage_world_observe(world, (int)floor(player->position[0]),
-        (int)floor(player->position[1] + MAAGE_PLAYER_EYE_HEIGHT), (int)floor(player->position[2]), &observation)) {
-        cold = observation.temperature < 0.15; precipitation = observation.sky_exposed && observation.rainfall > 0;
+    /* Server sampled the player's sky/climate. No client World access. */
+    if (snapshot->has_observation) {
+        cold = snapshot->observation.temperature < 0.15;
+        precipitation = snapshot->observation.sky_exposed && snapshot->observation.rainfall > 0;
     }
     phase = (double)(state->ticks_low % 120000UL) * 0.05;
     resource = &maage_client_environment_resources[cold ? 3 : 2];

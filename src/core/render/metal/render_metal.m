@@ -32,7 +32,12 @@ typedef struct maage_metal_renderer {
     maage_mutex *present_mutex;
     maage_condition *present_condition;
     maage_thread *present_thread;
-    unsigned long sequence[MAAGE_METAL_FRAME_SLOTS], submitted, presented;
+    /* All publication, lease and pacing fields are protected by present_mutex.
+     * A 64-bit serial avoids the 32-bit unsigned-long rollover during long runs. */
+    unsigned long long sequence[MAAGE_METAL_FRAME_SLOTS], submitted;
+    unsigned long presented, deferred_frames, drawable_misses, size_misses;
+    unsigned int submissions_since_present;
+    double drawable_retry_after;
     int asynchronous, stopping, presenting;
     maage_status present_result;
     maage_status_trace frame_traces[MAAGE_METAL_FRAME_SLOTS], present_trace;
@@ -58,7 +63,7 @@ static void maage_metal_present_loop(void *context)
         id<MTLTexture> color, previous_color = nil;
         id<MTLBlitCommandEncoder> copy;
         unsigned int slot, newest = 0;
-        unsigned long sequence = 0, pending = 0;
+        unsigned long long sequence = 0, pending = 0;
         unsigned int pending_slot = 0;
         maage_status_trace trace;
         double acquired, waited;
@@ -154,7 +159,24 @@ static void maage_metal_present_loop(void *context)
         [color release];
         maage_mutex_lock(native->present_mutex);
         native->drawable_seconds += waited;
-        if (command && !maage_status_failed(result)) ++native->presented;
+        if (command && !maage_status_failed(result)) {
+            /* A successful GPU copy allows another bounded burst of renders.
+             * This is presentation-resource backpressure, not an FPS ceiling. */
+            ++native->presented;
+            native->submissions_since_present = 0;
+            native->drawable_retry_after = 0;
+        } else if (!cancelled && !maage_status_failed(result)) {
+            /* Retry unavailable drawables without flooding the GPU. A resize
+             * mismatch is retried immediately with newly sized render slots. */
+            native->submissions_since_present = 0;
+            if (!drawable) {
+                ++native->drawable_misses;
+                native->drawable_retry_after = CACurrentMediaTime() + 0.05;
+            } else {
+                ++native->size_misses;
+                native->drawable_retry_after = 0;
+            }
+        }
         native->presenting = -1;
         if (maage_status_failed(result)) {
             native->present_result = maage_status_trace_record(&trace, result,
@@ -326,8 +348,15 @@ static maage_status maage_metal_create(maage_renderer *renderer)
 static maage_status maage_metal_complete(maage_renderer *renderer, unsigned int slot)
 {
     maage_metal_renderer *native = renderer->platform;
-    id<MTLCommandBuffer> command = native->frames[slot];
+    id<MTLCommandBuffer> command;
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+    /* Atomically detach the slot's owned command reference. The presenter may
+     * inspect or retain it only while holding this same lock. Never wait for
+     * GPU execution while holding the lock. */
+    maage_mutex_lock(native->present_mutex);
+    command = native->frames[slot];
+    native->frames[slot] = nil;
+    maage_mutex_unlock(native->present_mutex);
     if (!command) return result;
     [command waitUntilCompleted];
     if ([command status] == MTLCommandBufferStatusError) {
@@ -343,7 +372,6 @@ static maage_status maage_metal_complete(maage_renderer *renderer, unsigned int 
         }
     }
     [command release];
-    native->frames[slot] = nil;
     return result;
 }
 static maage_status maage_metal_destroy(maage_renderer *renderer)
@@ -450,27 +478,87 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, MAAGE_STATUS_INVALID_STATE);
     result = maage_metal_present_result(renderer);
     if (maage_status_failed(result)) return result;
-    if (!preparing && ([window isMiniaturized] || !([window occlusionState] & NSWindowOcclusionStateVisible)))
+    if (!preparing && (state->mode_transitioning || state->framebuffer_width < 1 ||
+        state->framebuffer_height < 1 || [window isMiniaturized] ||
+        !([window occlusionState] & NSWindowOcclusionStateVisible)))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+    /* Initial hidden-window priming is a one-off synchronous transaction. */
+    if (preparing && native->asynchronous)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     pool = [[NSAutoreleasePool alloc] init];
     started = CACurrentMediaTime();
+    /* Use the entire content view, including permitted notch-adjacent regions.
+     * Safe-area insets are for UI placement, not drawable cropping. */
+    frame = NSRectToCGRect([native->view bounds]);
+    scale = state->width > 0 ?
+        (double)state->framebuffer_width / state->width : [window backingScaleFactor];
+    drawable_size = CGSizeMake(state->framebuffer_width, state->framebuffer_height);
+    transaction = preparing != 0;
+    /* Publish only actual layer geometry changes on the AppKit thread. The
+     * presenter leases its drawable independently; dimension mismatches are
+     * recoverable. Never join it from the main thread during live resize or
+     * native-fullscreen Space transitions. */
+    if (preparing || native->layer.presentsWithTransaction != transaction ||
+        !CGRectEqualToRect(native->layer.frame, frame) || native->layer.contentsScale != scale ||
+        !CGSizeEqualToSize(native->layer.drawableSize, drawable_size)) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        native->layer.presentsWithTransaction = transaction;
+        if (preparing) {
+            NSColor *color = [NSColor colorWithSRGBRed:renderer->clear[0] green:renderer->clear[1]
+                blue:renderer->clear[2] alpha:renderer->clear[3]];
+            [window setBackgroundColor:color];
+            native->layer.backgroundColor = [color CGColor];
+        }
+        if (!CGRectEqualToRect(native->layer.frame, frame)) native->layer.frame = frame;
+        if (native->layer.contentsScale != scale) native->layer.contentsScale = scale;
+        if (!CGSizeEqualToSize(native->layer.drawableSize, drawable_size)) native->layer.drawableSize = drawable_size;
+        [CATransaction commit];
+        [CATransaction flush];
+    }
+    renderer->refresh = 0;
     if (asynchronous) {
         maage_mutex_lock(native->present_mutex);
         result = native->present_result;
+        if (!maage_status_failed(result) &&
+            (native->submissions_since_present >= MAAGE_METAL_FRAME_SLOTS ||
+             started < native->drawable_retry_after)) {
+            /* The display has not consumed the previous bounded burst yet.
+             * Keep processing input/events instead of submitting busy GPU work. */
+            ++native->deferred_frames;
+            maage_mutex_unlock(native->present_mutex);
+            [pool drain];
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+        }
         if (!maage_status_failed(result)) {
-            /* One presenter leases at most one slot. Other slots can be
-             * recycled after rendering completes, regardless of display pace. */
+            /* The presenter leases one slot at a time. Reservation hides a
+             * stale publication before its command buffer can be retired. */
             for (candidate = 0; candidate < MAAGE_METAL_FRAME_SLOTS; ++candidate) {
+                id<MTLCommandBuffer> old;
+                MTLCommandBufferStatus status;
                 slot = (native->frame_slot + candidate) % MAAGE_METAL_FRAME_SLOTS;
-                if ((int)slot != native->presenting) break;
+                if ((int)slot == native->presenting) continue;
+                old = native->frames[slot];
+                status = old ? [old status] : MTLCommandBufferStatusCompleted;
+                if (status == MTLCommandBufferStatusCompleted ||
+                    status == MTLCommandBufferStatusError) break;
+            }
+            if (candidate == MAAGE_METAL_FRAME_SLOTS) {
+                /* No completed free slot: yield instead of blocking AppKit on
+                 * GPU completion. A subsequent frame rechecks availability. */
+                ++native->deferred_frames;
+                maage_mutex_unlock(native->present_mutex);
+                [pool drain];
+                return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
             }
             native->sequence[slot] = 0;
         } else if (renderer->operation_trace) *renderer->operation_trace = native->present_trace;
         maage_mutex_unlock(native->present_mutex);
         if (maage_status_failed(result)) { [pool drain]; return result; }
     }
+    acquired = CACurrentMediaTime();
     result = maage_metal_complete(renderer, slot);
-    native->wait_seconds += CACurrentMediaTime() - started;
+    native->wait_seconds += CACurrentMediaTime() - acquired;
     if (maage_status_failed(result)) { [pool drain]; return result; }
     for (layer = 0; layer < 3; ++layer) {
         batch = layers[layer];
@@ -492,47 +580,6 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         memcpy([native->ui_vertices[slot][layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
         memcpy([native->ui_indices[slot][layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
     }
-    /* Use the entire content view, including permitted notch-adjacent regions.
-     * Safe-area insets are for UI placement, not drawable cropping. */
-    frame = NSRectToCGRect([native->view bounds]);
-    scale = state->width > 0 ?
-        (double)state->framebuffer_width / state->width : [window backingScaleFactor];
-    drawable_size = CGSizeMake(state->framebuffer_width, state->framebuffer_height);
-    transaction = preparing != 0;
-    /* Reconfiguring the drawable pool every frame can stall acquisition even
-     * with display sync disabled. Publish actual changes before acquisition. */
-    if (preparing || native->layer.presentsWithTransaction != transaction ||
-        !CGRectEqualToRect(native->layer.frame, frame) || native->layer.contentsScale != scale ||
-        !CGSizeEqualToSize(native->layer.drawableSize, drawable_size)) {
-        /* Geometry transitions retire the old drawable acquisition before
-         * changing its pool. This wait is absent from steady-state frames. */
-        if (asynchronous) {
-            result = maage_metal_stop_presenter(native);
-            if (!maage_status_failed(result)) result = maage_metal_present_result(renderer);
-            if (maage_status_failed(result)) { [pool drain]; return result; }
-        }
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        native->layer.presentsWithTransaction = transaction;
-        if (preparing) {
-            NSColor *color = [NSColor colorWithSRGBRed:renderer->clear[0] green:renderer->clear[1]
-                blue:renderer->clear[2] alpha:renderer->clear[3]];
-            [window setBackgroundColor:color];
-            native->layer.backgroundColor = [color CGColor];
-        }
-        if (!CGRectEqualToRect(native->layer.frame, frame)) native->layer.frame = frame;
-        if (native->layer.contentsScale != scale) native->layer.contentsScale = scale;
-        if (!CGSizeEqualToSize(native->layer.drawableSize, drawable_size)) native->layer.drawableSize = drawable_size;
-        [CATransaction commit];
-        [CATransaction flush];
-        if (asynchronous) {
-            native->stopping = 0;
-            result = maage_thread_start(maage_metal_present_loop, native, &native->present_thread);
-            if (maage_status_failed(result)) { [pool drain]; return result; }
-            native->asynchronous = 1;
-        }
-    }
-    renderer->refresh = 0;
     drawable = nil;
     if (asynchronous) {
         if (!native->colors[slot] || native->colors[slot].width != (NSUInteger)state->framebuffer_width ||
@@ -633,18 +680,21 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [encoder endEncoding];
     }
     if (!preparing && !asynchronous) [command presentDrawable:drawable];
+    [command commit];
+    /* Publish the owned buffer, trace and sequence as a single transaction.
+     * The worker never observes a sequence with a nil/dangling command. */
+    maage_mutex_lock(native->present_mutex);
     if (renderer->operation_trace) native->frame_traces[slot] = *renderer->operation_trace;
     else maage_status_trace_init(&native->frame_traces[slot]);
     MAAGE_STATUS_TRACE(&native->frame_traces[slot], 0, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
     native->frames[slot] = [command retain];
-    [command commit];
-    native->frame_slot = (slot + 1) % MAAGE_METAL_FRAME_SLOTS;
     if (asynchronous) {
-        maage_mutex_lock(native->present_mutex);
         native->sequence[slot] = ++native->submitted;
+        ++native->submissions_since_present;
         maage_condition_signal(native->present_condition);
-        maage_mutex_unlock(native->present_mutex);
     } else ++native->presented;
+    maage_mutex_unlock(native->present_mutex);
+    native->frame_slot = (slot + 1) % MAAGE_METAL_FRAME_SLOTS;
     result = preparing ? maage_metal_complete(renderer, slot) :
         maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     if (preparing && maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
@@ -660,18 +710,22 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     acquired = CACurrentMediaTime();
     if (acquired - native->sample_start >= 5.0) {
         double drawable_seconds;
-        unsigned long presented;
+        unsigned long presented, deferred, unavailable, mismatched;
         maage_mutex_lock(native->present_mutex);
         drawable_seconds = native->drawable_seconds; presented = native->presented;
+        deferred = native->deferred_frames; unavailable = native->drawable_misses;
+        mismatched = native->size_misses;
         native->drawable_seconds = 0; native->presented = 0;
+        native->deferred_frames = native->drawable_misses = native->size_misses = 0;
         maage_mutex_unlock(native->present_mutex);
-        maage_log_verbose("maage.render.metal", "Rendered=%.1f FPS; presented=%.1f FPS; display sync=%s; path=%s; drawable wait=%.3fms/present; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame.",
+        maage_log_verbose("maage.render.metal", "GPU submissions=%.1f/s; presentation submissions=%.1f/s (not scanout); display sync=%s; path=%s; drawable wait=%.3fms/presentation; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame; backpressure skips=%lu; drawable unavailable=%lu; size mismatches=%lu.",
             native->sample_frames / (acquired - native->sample_start),
             presented / (acquired - native->sample_start),
             native->layer.displaySyncEnabled ? "on" : "off", asynchronous ? "mailbox" : "direct",
             presented ? drawable_seconds * 1000.0 / presented : 0,
             native->wait_seconds * 1000.0 / native->sample_frames,
-            native->gpu_samples ? native->gpu_seconds * 1000.0 / native->gpu_samples : 0);
+            native->gpu_samples ? native->gpu_seconds * 1000.0 / native->gpu_samples : 0,
+            deferred, unavailable, mismatched);
         native->sample_start = acquired; native->sample_frames = 0;
         native->wait_seconds = native->gpu_seconds = 0; native->gpu_samples = 0;
     }
@@ -769,32 +823,31 @@ static maage_status maage_metal_set_vsync(maage_renderer *renderer, int enabled)
 {
     maage_metal_renderer *native = (maage_metal_renderer *)renderer->platform;
     maage_status result;
-    unsigned int slot;
+    int start_presenter;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
     if (!native || !native->layer) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     result = maage_metal_present_result(renderer);
     if (maage_status_failed(result)) return result;
-    if ((enabled && native->asynchronous) || (!enabled && !native->asynchronous)) {
-        result = maage_metal_stop_presenter(native);
-        if (!maage_status_failed(result)) result = maage_metal_present_result(renderer);
-        if (maage_status_failed(result)) return result;
-        for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot) {
-            result = maage_metal_complete(renderer, slot);
-            if (maage_status_failed(result)) return result;
-        }
-    }
+    /* Once started, the mailbox presenter remains alive through VSync changes.
+     * Joining it from AppKit's main thread can deadlock during a Space/resize
+     * transition while nextDrawable waits for the layer or compositor. */
+    start_presenter = !enabled && !native->asynchronous;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     native->layer.displaySyncEnabled = enabled ? YES : NO;
-    native->layer.framebufferOnly = enabled ? YES : NO;
+    native->layer.framebufferOnly = (native->asynchronous || start_presenter) ? NO : YES;
     [CATransaction commit];
-    /* The polling loop need not idle long enough to flush implicit changes. */
     [CATransaction flush];
-    if (!enabled && !native->asynchronous) {
+    if (start_presenter) {
+        maage_mutex_lock(native->present_mutex);
         native->stopping = 0;
+        maage_mutex_unlock(native->present_mutex);
         result = maage_thread_start(maage_metal_present_loop, native, &native->present_thread);
         if (maage_status_failed(result)) {
-            native->layer.displaySyncEnabled = YES; native->layer.framebufferOnly = YES;
+            [CATransaction begin];
+            native->layer.displaySyncEnabled = YES;
+            native->layer.framebufferOnly = YES;
+            [CATransaction commit];
             [CATransaction flush];
             return result;
         }

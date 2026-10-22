@@ -4,6 +4,7 @@
 #include "maage/image.h"
 
 /* The original GUI resources occupy the first 512 atlas rows. */
+#define MAAGE_CLIENT_UI_COMMAND_CAPACITY 64U
 #define MAAGE_CLIENT_UI_BLOCK_ATLAS_Y 512
 typedef struct maage_client_ui_screen {
     maage_client_ui_screen_draw draw;
@@ -42,7 +43,12 @@ struct maage_client_ui {
     maage_window *window;
     const maage_item_registry *items;
     const maage_block_registry *blocks;
-    maage_gameplay *game;
+    maage_session_snapshot snapshot; /* Value-only, no World pointers. */
+    int has_snapshot;
+    maage_session_command commands[MAAGE_CLIENT_UI_COMMAND_CAPACITY];
+    unsigned int command_read, command_write, command_count;
+    maage_client_ui_click_callback click;
+    void *click_context;
     unsigned int creative_page;
     maage_client_ui_resources resources;
     maage_client_ui_debug_cache debug_cache;
@@ -55,6 +61,7 @@ struct maage_client_ui {
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, dragging_fps, leaves_mode;
+    int audio_volume[7], dragging_volume;
     int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;
     int confirmed_window_mode, confirmed_fullscreen_style;
     double mode_requested_at;
@@ -73,6 +80,11 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
     float x, float y, float red, float green, float blue);
 maage_status maage_client_ui_inventory_register(maage_client_ui *ui);
+/* These helpers queue exact numeric commands, never mutate a gameplay object. */
+maage_status maage_client_ui_queue_command(maage_client_ui *ui,
+    const maage_session_command *command);
+void maage_client_ui_queue_game_mode(maage_client_ui *ui);
+void maage_client_ui_queue_respawn(maage_client_ui *ui);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
 void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
     const float uv[4], float shade);

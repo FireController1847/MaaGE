@@ -224,18 +224,18 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   and normal shutdown, never per FPS-slider frame or during native transitions.
   Client Window Mode cycles Windowed, Borderless and Fullscreen in one Options button.
   F11 toggles Windowed and the last non-windowed choice (default Borderless).
-  Exactly three modes exist: Windowed, Borderless, and Fullscreen (exclusive).
-  Unsupported exclusive ownership returns an explicit unsupported result; never
-  relabel borderless or native fullscreen Spaces as exclusive.
-  macOS Borderless stays in its desktop Space; Fullscreen captures the selected
-  display exclusively at its current resolution and covers the entire display,
-  including notch-adjacent pixels. Full coverage takes priority over native AppKit
-  Spaces. Release display ownership on mode exit, deactivation and destruction;
-  report capture failures explicitly. GUI respects the safe
-  area without cropping the world. Embed a Client-specific Info.plist in its standalone
-  Mach-O executable (not the Launcher bundle) to disable notch compatibility mode;
-  native AppKit fullscreen Spaces are not an additional mode. Restore
-  windowed geometry and input capture correctly.
+  Exactly three user-facing modes exist: Windowed, Borderless and Fullscreen.
+  macOS Borderless remains in the current desktop Space; Fullscreen enters a
+  genuine native AppKit fullscreen Space via MAAGE_WINDOW_NATIVE_FULLSCREEN,
+  not CoreGraphics exclusive display capture. These choices are not synonyms.
+  Native fullscreen reserves the camera-notch safe area for UI/application
+  content, while world rendering may cover available drawable pixels. Embed a
+  Client-specific Info.plist in its standalone Mach-O executable (not the
+  Launcher bundle) to disable notch compatibility mode. Keep the legacy
+  MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN enum as an internal compatibility mode,
+  not as the user-facing Fullscreen choice. Unsupported platform operations
+  return explicit status instead of silently relabeling modes. Reconcile native
+  transition callbacks, saved mode, F11, windowed geometry and input capture.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
@@ -408,22 +408,24 @@ behind C90-compatible public interfaces. Do not require SDL or GLFW as foundatio
 
 Windowing is a reusable Core library, independent of applications and renderers;
 use native implementations without general-purpose third-party windowing frameworks.
-Its C90 public API uses opaque owned windows, explicit results, exactly three modes
-(Windowed, Borderless fullscreen, Exclusive fullscreen), and typed native-handle
-interoperability. Report unsupported operations explicitly. Linux
+Its C90 public API uses opaque owned windows, explicit results, four
+internal window-mode values (Windowed, Borderless, Native fullscreen and legacy
+Exclusive fullscreen), and typed native-handle interoperability. Report unsupported operations explicitly. Linux
 backends are independently selectable; automatic selection prefers an available
 Wayland session with X11 fallback. Keep OS/protocol language exceptions backend-local.
 Wayland generated inline helpers require C99 only in its adapter target; the public
 API and common implementation remain C90. Linux builds require the selected native
 development libraries and protocol tools. Disable the optional windowing target for
 headless-only workspaces; never link it into Server core or the headless executable.
-A future optional GUI frontend inside the Server process may consume it. Exclusive
-fullscreen currently uses macOS display capture; other adapters report unsupported.
-Wayland client-requested resize returns unsupported.
-macOS calls belong on the main thread. Full-display content is configurable:
-borderless and exclusive fullscreen use the screen frame. Expose safe-area insets for UI; never
-unnecessarily crop drawable content to the safe area. The physical camera cutout
-cannot display pixels, and macOS retains control over Spaces/menu-bar/Dock policy.
+A future optional GUI frontend inside the Server process may consume it.
+Legacy exclusive display capture remains internal and is not selected by the
+Client. Other adapters currently support Windowed/Borderless but may report
+NOT_IMPLEMENTED for native fullscreen. Wayland client-requested resize returns
+unsupported. macOS AppKit calls belong on the main thread; native fullscreen
+enters an AppKit Space and reports the notch-safe content region. Borderless
+covers the current display without entering a new Space. Preserve world drawable
+coverage where practical, while keeping controls clear of the physical camera
+cutout and respecting macOS Spaces/menu-bar/Dock policy.
 
 ## First-class rendering backends
 
@@ -910,11 +912,14 @@ feature completeness or authorization to start a phase.
   (3.5); World Simulation & Environmental Systems (4); Client Resilience &
   Operation Status (4.5); Universal Operation Status & Execution Tracing (5).
   Preserve the completion record and limitations documented for each milestone.
-- **Phase 6 — Audio Engine & Soundscape (next):** portable audio backend, event
-  registry, sounds/music, positional playback and volume settings.
-- **Phase 7 — Authoritative Simulation & Integrated Server:** one reusable Server
-  runtime hosts single-player in the Client process and dedicated headless play;
-  Server owns fixed 20 TPS world/player/gameplay simulation and persistence.
+- **Phase 6 — Audio Engine & Soundscape (source-integrated; verification pending):**
+  native audio backends, reconstructed 1.7.10 sound mappings, Client audio scene,
+  semantic gameplay sounds/music and seven persisted volume settings.
+- **Phase 7 — Authoritative Simulation & Integrated Server (source-integrated;
+  verification pending):** integrated Client and headless dedicated executable
+  use one reusable Server runtime owning the 20 TPS simulation and persistence,
+  with bounded local commands, copied snapshots/events and owned mesh handoff.
+  This status records source integration, not compiled or runtime validation.
 - **Phase 8 — Client GUI & Menu Completion:** title/world selection and management,
   creation/loading, Options, inventory and navigable gameplay workflows.
 - **Phase 9 — Visual Fidelity & Game Feel:** consistent 1.7.10-inspired rendering,
