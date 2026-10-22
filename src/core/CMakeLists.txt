@@ -44,12 +44,6 @@ if(MAAGE_BUILD_WORLD AND NOT MAAGE_BUILD_JOBS)
     message(FATAL_ERROR "MAAGE_BUILD_WORLD requires MAAGE_BUILD_JOBS=ON.")
 endif()
 
-# Audio is Client presentation infrastructure, not a Server dependency.
-# Its portable backend may reuse Thread but never introduces a window or
-# renderer requirement into dedicated/headless builds.
-if(MAAGE_BUILD_AUDIO)
-    add_subdirectory(audio)
-endif()
 if(MAAGE_BUILD_LAUNCHER)
     add_subdirectory(net)
     add_subdirectory(process)
