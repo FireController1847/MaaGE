@@ -230,7 +230,9 @@ void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect r,
     maage_client_ui_button_state(ui,r,"",highlighted?
         MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL);
     atlas=(float)ui->resources.atlas_edge;
-    y=highlighted?86.0f:66.0f;
+    /* GuiOptionSlider keeps the handle on the vanilla enabled row even
+     * when its containing button background is hovered. */
+    y=66.0f;
     knob.x=r.x+(float)(int)((r.width-8.0f)*value);
     knob.y=r.y;knob.width=4.0f;knob.height=r.height;
     maage_client_ui_rectangle(ui,knob,256.0f/atlas,y/atlas,
