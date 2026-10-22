@@ -154,5 +154,8 @@ if(MAAGE_BUILD_LAUNCHER)
     add_subdirectory(src/launcher)
 endif()
 if(MAAGE_BUILD_CLIENT)
+    # The numeric catalog is Client-only; the headless Server emits events but
+    # does not load, decode, or play sound assets.
+    add_subdirectory(src/audio/catalog)
     add_subdirectory(src/client)
 endif()
