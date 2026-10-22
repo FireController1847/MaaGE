@@ -227,8 +227,10 @@ void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect r,
     if(!ui||!label||r.width<8.0f||r.height<=0.0f)return;
     if(value<0.0f)value=0.0f;
     if(value>1.0f)value=1.0f;
-    maage_client_ui_button_state(ui,r,"",highlighted?
-        MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL);
+    /* Minecraft 1.7.10 GuiOptionSlider.getHoverState() returns 0:
+     * the track always uses widgets.png's dark (disabled-state) row,
+     * including during hover and drag. This does NOT disable the control. */
+    maage_client_ui_button_state(ui,r,"",MAAGE_CLIENT_UI_BUTTON_DISABLED);
     atlas=(float)ui->resources.atlas_edge;
     /* GuiOptionSlider keeps the handle on the vanilla enabled row even
      * when its containing button background is hovered. */
