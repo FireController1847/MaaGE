@@ -926,7 +926,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
     float matrix[16];
     size_t draw_count, resident_count, slot_index;
-    int valid_snapshot = 0, ok = 0, options_ready = 0, i, axis;
+    int valid_snapshot = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0;
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
@@ -1059,6 +1059,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) goto done;
     operation = maage_server_runtime_start(server, trace);
     if (maage_status_failed(operation)) goto done;
+    server_started = 1;
     /* Startup is bounded to individual 16-ms event waits, never one blocking
      * World-generation wait. The Server independently advances 20 TPS. */
     for (;;) {
@@ -1561,17 +1562,32 @@ done:
     maage_client_cleanup_result(maage_window_system_destroy(system),
         &outcome, &cleanup_trace, trace);
     if (server) {
-        operation = maage_server_runtime_join(server, &cleanup_trace);
+        if (server_started) {
+            /* join returns the authoritative outcome, which may be a save or
+             * simulation failure even when its thread joined successfully.
+             * Do not confuse that with an unsafe native join failure. */
+            operation = maage_server_runtime_join(server, &cleanup_trace);
+            if (maage_status_failed(operation)) {
+                if (!maage_status_failed(outcome)) {
+                    outcome = operation;
+                    if (trace) *trace = cleanup_trace;
+                }
+                maage_log_trace_status(MAAGE_LOG_ERROR, "maage.client.server",
+                    operation, &cleanup_trace,
+                    "Authoritative Server reported a shutdown or persistence failure.");
+            }
+        }
+        /* Destroy retries an actual failed thread join and refuses to release
+         * a World whose workers still borrow content/storage. */
+        operation = maage_server_runtime_destroy(server);
         if (maage_status_failed(operation)) {
             maage_client_storage_retain();
             maage_log_trace_status(MAAGE_LOG_FATAL, "maage.client.server",
                 operation, &cleanup_trace,
-                "Integrated Server join failed; retaining borrowed content and instance storage.");
+                "Integrated Server did not fully release its World; retaining borrowed content and instance storage.");
             return MAAGE_STATUS_PROPAGATE(trace, operation,
                 MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);
         }
-        maage_client_cleanup_result(maage_server_runtime_destroy(server),
-            &outcome, &cleanup_trace, trace);
     }
     if (session) {
         maage_client_cleanup_result(maage_local_session_close(session),
