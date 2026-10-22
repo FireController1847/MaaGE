@@ -132,6 +132,12 @@ if(MAAGE_BUILD_TESTS)
 endif()
 
 add_subdirectory(src/core)
+# Reusable Audio core is built only when explicitly selected (Client default).
+# It has no asset, UI, or renderer requirements and does not pollute headless
+# Server-only builds.
+if(MAAGE_BUILD_AUDIO)
+    add_subdirectory(src/audio/core)
+endif()
 if(MAAGE_BUILD_INSTANCE)
     add_subdirectory(src/instance)
 endif()
