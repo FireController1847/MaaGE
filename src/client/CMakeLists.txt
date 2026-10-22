@@ -5,6 +5,7 @@ endif()
 maage_client_target_architecture(MAAGE_CLIENT_ARCH)
 set(MAAGE_CLIENT_ARTIFACT "MaaGE-Client-${MAAGE_CLIENT_RELEASE}")
 add_executable(maage_client main.c metadata.c viewport.c storage_context.c options.c resources.c debug.c interaction.c environment.c
+    audio_service.c audio_scene.c
     ui/ui.c ui/gameplay.c ui/navigation.c ui/resources.c ui/font.c ui/draw.c)
 add_dependencies(maage_client maage_versions)
 maage_configure_portable_target(maage_client)
@@ -22,8 +23,15 @@ endif()
 if(NOT MAAGE_BUILD_INSTANCE)
     message(FATAL_ERROR "Client requires MAAGE_BUILD_INSTANCE=ON.")
 endif()
-# World supplies the Jobs/Core dependency after the libraries that use it.
-target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::World MaaGE::Instance)
+if(NOT MAAGE_BUILD_AUDIO)
+    message(FATAL_ERROR "Client requires MAAGE_BUILD_AUDIO=ON.")
+endif()
+# Single-player uses the same Server runtime as the dedicated executable.
+# The local Session transport has no dependency on a loopback TCP stack.
+# Audio remains Client-only; Server depends solely on portable libraries.
+target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image
+    MaaGE::World MaaGE::Instance MaaGE::Session MaaGE::Server MaaGE::Audio
+    MaaGE::SoundBank MaaGE::AudioCatalog)
 if(WIN32)
     target_link_libraries(maage_client PRIVATE psapi)
 endif()

@@ -21,7 +21,14 @@ if(MAAGE_BUILD_LAUNCHER OR MAAGE_BUILD_CLIENT)
 endif()
 option(MAAGE_BUILD_MINECRAFT_ASSETS "Build the shared Minecraft logical resource path library" ${MAAGE_RESOURCE_DEFAULT})
 option(MAAGE_BUILD_IMAGE "Build the PNG resource decoder" ${MAAGE_BUILD_CLIENT})
-option(MAAGE_BUILD_WORLD "Build portable block, world, meshing and player modules" ${MAAGE_BUILD_CLIENT})
+# The dedicated Server and the integrated Client both require the authoritative
+# portable World, even when no Client/window/renderer is configured.
+set(MAAGE_WORLD_DEFAULT OFF)
+if(MAAGE_BUILD_CLIENT OR MAAGE_BUILD_SERVER)
+    set(MAAGE_WORLD_DEFAULT ON)
+endif()
+option(MAAGE_BUILD_WORLD "Build portable block, world, meshing and player modules" ${MAAGE_WORLD_DEFAULT})
+option(MAAGE_BUILD_AUDIO "Build the native Client audio service" ${MAAGE_BUILD_CLIENT})
 option(MAAGE_BUILD_INSTANCE "Build reusable instance storage and manifests" ${MAAGE_RESOURCE_DEFAULT})
 option(MAAGE_BUILD_TESTS "Register application smoke tests" OFF)
 
@@ -125,6 +132,12 @@ if(MAAGE_BUILD_TESTS)
 endif()
 
 add_subdirectory(src/core)
+# Reusable Audio core is built only when explicitly selected (Client default).
+# It has no asset, UI, or renderer requirements and does not pollute headless
+# Server-only builds.
+if(MAAGE_BUILD_AUDIO)
+    add_subdirectory(src/audio/core)
+endif()
 if(MAAGE_BUILD_INSTANCE)
     add_subdirectory(src/instance)
 endif()
@@ -134,9 +147,21 @@ endif()
 if(MAAGE_BUILD_WORLD)
     add_subdirectory(src/world)
 endif()
-foreach(application launcher client server)
-    string(TOUPPER "${application}" application_option)
-    if(MAAGE_BUILD_${application_option})
-        add_subdirectory(src/${application})
+# Session contracts and Server runtime are reusable in both single-player and
+# dedicated hosting. Build them for a Client-only configuration as well.
+if(MAAGE_BUILD_CLIENT OR MAAGE_BUILD_SERVER)
+    if(NOT MAAGE_BUILD_WORLD)
+        message(FATAL_ERROR "Client/Server requires MAAGE_BUILD_WORLD=ON.")
     endif()
-endforeach()
+    add_subdirectory(src/session)
+    add_subdirectory(src/server)
+endif()
+if(MAAGE_BUILD_LAUNCHER)
+    add_subdirectory(src/launcher)
+endif()
+if(MAAGE_BUILD_CLIENT)
+    # The numeric catalog is Client-only; the headless Server emits events but
+    # does not load, decode, or play sound assets.
+    add_subdirectory(src/audio/catalog)
+    add_subdirectory(src/client)
+endif()

@@ -7,6 +7,14 @@
 #include "maage/player.h"
 #include "maage/gameplay.h"
 #include "maage/world_store.h"
+#include "maage/session_protocol.h"
+#include "maage/local_session.h"
+#include "maage/server_runtime.h"
+#include "maage/content.h"
+#include "audio_service.h"
+#include "maage/audio.h"
+#include "maage/sound_bank.h"
+#include "sound_catalog.h"
 #include "maage/log.h"
 #include "resources.h"
 #include "ui/ui.h"
@@ -211,12 +219,29 @@ static void maage_client_mesh_rates(maage_client_mesh_activity *activity, double
  * budget. The first attempt ensures progress even after an expensive frame;
  * later attempts predict cost to avoid repeatedly overrunning frame pacing.
  * No CPU mesh or render handle survives a failed/stale transfer. */
-static maage_status maage_client_stream_meshes(maage_world *world,
-    maage_renderer *renderer, maage_render_texture *atlas, maage_client_mesh_cache *cache,
-    maage_client_mesh_activity *activity, const maage_client_world_options *options,
-    const maage_client_debug *debug, int center_x, int center_z)
+/* Only the Server takes World meshes. The bounded session mailbox transfers
+ * detached CPU ownership; GPU objects and revision keys remain Client-owned. */
+static void maage_client_mesh_cache_remove(maage_client_mesh_cache *cache,
+    int x, int z, unsigned long revision)
 {
-    maage_world_mesh_update update;
+    size_t i;
+    for (i = 0; i < cache->capacity; ++i) {
+        maage_client_chunk_mesh *slot = &cache->slots[i];
+        if (slot->used && slot->x == x && slot->z == z &&
+            slot->revision <= revision) {
+            maage_render_mesh_destroy(slot->mesh);
+            memset(slot, 0, sizeof(*slot));
+        }
+    }
+}
+
+static maage_status maage_client_stream_meshes(maage_local_session *session,
+    maage_renderer *renderer, maage_render_texture *atlas,
+    maage_client_mesh_cache *cache, maage_client_mesh_activity *activity,
+    const maage_client_world_options *options, const maage_client_debug *debug,
+    unsigned long world_epoch, int center_x, int center_z)
+{
+    maage_local_mesh_update update;
     const maage_mesh_data *geometry;
     maage_render_mesh *replacement;
     maage_status result;
@@ -230,102 +255,127 @@ static maage_status maage_client_stream_meshes(maage_world *world,
     for (i = 0; i < cache->capacity; ++i) {
         if (cache->slots[i].used &&
             (abs(cache->slots[i].x - center_x) > options->radius ||
-             abs(cache->slots[i].z - center_z) > options->radius ||
-             !maage_world_chunk_loaded(world, cache->slots[i].x, cache->slots[i].z))) {
+             abs(cache->slots[i].z - center_z) > options->radius)) {
             maage_render_mesh_destroy(cache->slots[i].mesh);
             memset(&cache->slots[i], 0, sizeof(cache->slots[i]));
         }
     }
     begin = maage_time_monotonic_seconds();
-    if (begin < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    if (begin < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+        MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
     for (;;) {
         current = maage_time_monotonic_seconds();
-        if (current < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+        if (current < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
         if (processed && ((current - begin) * 1000.0 >= budget_ms ||
             (current - begin) * 1000.0 + activity->expected_upload_ms > budget_ms)) break;
-        result = maage_world_take_mesh(world, &update);
+        memset(&update, 0, sizeof(update));
+        result = maage_local_session_take_mesh(session, &update);
+        if (maage_status_code(result) == MAAGE_STATUS_NOOP ||
+            maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) break;
         if (maage_status_failed(result)) return result;
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP) break;
         ++processed;
-        if (abs(update.x - center_x) > options->radius || abs(update.z - center_z) > options->radius ||
-            !maage_world_mesh_current(world, update.x, update.z, update.revision)) {
+        if (update.removed) {
+            if (update.world_epoch == world_epoch)
+                maage_client_mesh_cache_remove(cache, update.x, update.z, update.revision);
+            if (update.mesh) maage_world_mesh_destroy(update.mesh);
+            continue;
+        }
+        if (!update.mesh || update.world_epoch != world_epoch ||
+            abs(update.x - center_x) > options->radius ||
+            abs(update.z - center_z) > options->radius) {
             ++activity->status.rejected;
             maage_world_mesh_destroy(update.mesh);
             continue;
         }
-        selected = cache->capacity; vacant = cache->capacity;
+        selected = vacant = cache->capacity;
         for (i = 0; i < cache->capacity; ++i) {
             if (cache->slots[i].used && cache->slots[i].x == update.x &&
                 cache->slots[i].z == update.z) { selected = i; break; }
             if (!cache->slots[i].used && vacant == cache->capacity) vacant = i;
         }
+        if (selected != cache->capacity &&
+            cache->slots[selected].revision >= update.revision) {
+            ++activity->status.rejected;
+            maage_world_mesh_destroy(update.mesh);
+            continue;
+        }
         if (selected == cache->capacity) {
             selected = vacant;
             if (selected == cache->capacity) {
                 selected = cache->capacity;
-                if (maage_status_failed(maage_client_mesh_cache_grow(cache))) {
+                result = maage_client_mesh_cache_grow(cache);
+                if (maage_status_failed(result)) {
                     maage_world_mesh_destroy(update.mesh);
-                    return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+                    return result;
                 }
             }
         }
-        if (!cache->slots[selected].used || update.revision != cache->slots[selected].revision) {
-            geometry = maage_world_mesh_data(update.mesh);
-            replacement = NULL; result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-            if (geometry->index_count) {
-                upload_begin = maage_time_monotonic_seconds();
-                if (upload_begin < 0.0) { maage_world_mesh_destroy(update.mesh); return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0); }
-                result = maage_renderer_upload_geometry(renderer, geometry, atlas, &replacement, NULL);
-                current = maage_time_monotonic_seconds();
-                if (current < 0.0) {
-                    maage_render_mesh_destroy(replacement);
-                    maage_world_mesh_destroy(update.mesh); return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-                }
-                upload_ms = (current - upload_begin) * 1000.0;
-                activity->status.frame_upload_ms += upload_ms;
-                if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-                    activity->expected_upload_ms = activity->status.gpu_uploads ?
-                        activity->expected_upload_ms * 0.75 + upload_ms * 0.25 : upload_ms;
-                    ++activity->status.gpu_uploads; ++activity->sample_uploads;
-                    activity->status.vertices_uploaded += (unsigned long)geometry->vertex_count;
-                    activity->sample_vertices += (unsigned long)geometry->vertex_count;
-                    ++activity->status.uploaded_this_frame;
-                }
+        geometry = maage_world_mesh_data(update.mesh);
+        replacement = NULL;
+        result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SUBMIT, 0);
+        if (geometry && geometry->index_count) {
+            upload_begin = maage_time_monotonic_seconds();
+            if (upload_begin < 0.0) {
+                maage_world_mesh_destroy(update.mesh);
+                return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+                    MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
             }
-            if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-                maage_render_mesh_destroy(cache->slots[selected].mesh);
-                cache->slots[selected].mesh = replacement;
-                cache->slots[selected].used = 1;
-                cache->slots[selected].vertices = geometry->vertex_count;
-                cache->slots[selected].indices = geometry->index_count;
-                cache->slots[selected].x = update.x;
-                cache->slots[selected].z = update.z;
-                cache->slots[selected].revision = update.revision;
-            } else {
+            result = maage_renderer_upload_geometry(renderer, geometry,
+                atlas, &replacement, NULL);
+            current = maage_time_monotonic_seconds();
+            if (current < 0.0) {
                 maage_render_mesh_destroy(replacement);
                 maage_world_mesh_destroy(update.mesh);
-                if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED) {
-                    /* The consumed revision is not retried every frame. Keep
-                     * the previous valid GPU mesh until a later World update. */
-                    if (activity->last_result != result) {
-                        activity->last_result = result;
-                        maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", activity->last_result,
-                            "Chunk %d,%d revision %lu: retaining the previous visual or omitting this mesh.",
-                            update.x, update.z, update.revision);
-                    }
-                    continue;
-                }
-                return result;
+                return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+                    MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
             }
+            upload_ms = (current - upload_begin) * 1000.0;
+            activity->status.frame_upload_ms += upload_ms;
+            if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+                activity->expected_upload_ms = activity->status.gpu_uploads ?
+                    activity->expected_upload_ms * 0.75 + upload_ms * 0.25 : upload_ms;
+                ++activity->status.gpu_uploads; ++activity->sample_uploads;
+                activity->status.vertices_uploaded += (unsigned long)geometry->vertex_count;
+                activity->sample_vertices += (unsigned long)geometry->vertex_count;
+                ++activity->status.uploaded_this_frame;
+            }
+        }
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+            maage_render_mesh_destroy(cache->slots[selected].mesh);
+            cache->slots[selected].mesh = replacement;
+            cache->slots[selected].used = 1;
+            cache->slots[selected].x = update.x;
+            cache->slots[selected].z = update.z;
+            cache->slots[selected].revision = update.revision;
+            cache->slots[selected].vertices = geometry ? geometry->vertex_count : 0;
+            cache->slots[selected].indices = geometry ? geometry->index_count : 0;
+        } else {
+            maage_render_mesh_destroy(replacement);
+            if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED) {
+                if (activity->last_result != result) {
+                    activity->last_result = result;
+                    maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result,
+                        "GPU upload failed for column %d,%d; retaining old visual.",
+                        update.x, update.z);
+                }
+                maage_world_mesh_destroy(update.mesh);
+                continue;
+            }
+            maage_world_mesh_destroy(update.mesh);
+            return result;
         }
         maage_world_mesh_destroy(update.mesh);
     }
     current = maage_time_monotonic_seconds();
-    if (current < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    if (current < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+        MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
     activity->previous_upload_ms = activity->status.frame_upload_ms;
     activity->status.stream_ms = (current - begin) * 1000.0;
     maage_client_mesh_rates(activity, current);
-    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS,
+        MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
 }
 
 static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius)
@@ -357,6 +407,480 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
     }
 }
 
+/* Session outbound commands are ordered and never silently discarded when
+ * the transport backpressures. Unobserved held-only INPUT samples may be
+ * replaced by a newer held-only sample; discrete actions and the ordering of
+ * PAUSE, inventory, respawn and disconnect are preserved. This queue belongs
+ * exclusively to the presentation thread. */
+#define MAAGE_CLIENT_OUTBOX_CAPACITY 128U
+typedef struct maage_client_outbox {
+    maage_session_command commands[MAAGE_CLIENT_OUTBOX_CAPACITY];
+    unsigned int head, count;
+    unsigned long next_sequence;
+} maage_client_outbox;
+
+static int maage_client_input_coalescible(const maage_session_command *command)
+{
+    /* Held actions are levels, but a freshly pressed jump is a one-shot.
+     * Coalesce only when held action levels have not changed, so rapid
+     * click/release transitions cannot be swallowed by frame-rate sampling. */
+    return command->kind == MAAGE_CMD_INPUT && !command->intent.jump_pressed;
+}
+
+static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
+    const maage_session_command *input)
+{
+    maage_session_command command;
+    unsigned int tail, previous;
+    if (!outbox || !input) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+    command = *input;
+    command.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
+    if (outbox->count && maage_client_input_coalescible(&command)) {
+        previous = (outbox->head + outbox->count - 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
+        if (maage_client_input_coalescible(&outbox->commands[previous]) &&
+            outbox->commands[previous].intent.attack == command.intent.attack &&
+            outbox->commands[previous].intent.use == command.intent.use &&
+            outbox->commands[previous].intent.movement.jump == command.intent.movement.jump) {
+            /* Keep the original FIFO sequence; the last held-only input wins.
+             * No edge-triggered or authoritative command is overwritten. */
+            command.sequence = outbox->commands[previous].sequence;
+            outbox->commands[previous] = command;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+        }
+    }
+    if (outbox->count == MAAGE_CLIENT_OUTBOX_CAPACITY)
+        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+    if (outbox->next_sequence == ULONG_MAX)
+        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 1);
+    command.sequence = ++outbox->next_sequence;
+    tail = (outbox->head + outbox->count) % MAAGE_CLIENT_OUTBOX_CAPACITY;
+    outbox->commands[tail] = command;
+    ++outbox->count;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+}
+
+/* A full local mailbox is not a lost command. Leave the FIFO head intact,
+ * pump native events/presentation, and retry before sampling another input. */
+static maage_status maage_client_outbox_flush(maage_client_outbox *outbox,
+    maage_local_session *session)
+{
+    maage_status result;
+    if (!outbox || !session)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+    while (outbox->count) {
+        result = maage_local_session_send(session, &outbox->commands[outbox->head]);
+        if (maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW)
+            return result;
+        if (maage_status_failed(result)) return result;
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS)
+            return maage_status_make(MAAGE_STATUS_INVALID_STATE,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+        outbox->head = (outbox->head + 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
+        --outbox->count;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+}
+
+/* Phase 6 component ports bridge the independently owned Audio, SoundBank
+ * and numeric SoundCatalog APIs. Asset-string registration is initialization-
+ * only; playback and authoritative gameplay use numeric IDs exclusively.
+ * All adapters run on the Client's presentation/audio owner thread. */
+typedef struct maage_client_audio_bank_bridge {
+    maage_sound_bank *bank;
+    char **paths;
+    unsigned int count, capacity;
+} maage_client_audio_bank_bridge;
+typedef struct maage_client_audio_engine_bridge {
+    maage_audio *engine;
+    maage_audio_buffer **buffers;
+    unsigned long buffer_count, buffer_capacity;
+    maage_audio_voice_id voices[256];
+    unsigned int voice_next;
+} maage_client_audio_engine_bridge;
+
+static maage_status maage_client_audio_bridge_result(unsigned char code,
+    unsigned char operation)
+{
+    return maage_status_make(code, MAAGE_CONTEXT_CLIENT, operation, 0);
+}
+static maage_status maage_client_audio_bridge_bank_create(const char *root,
+    void **output, maage_status_trace *trace)
+{
+    maage_client_audio_bank_bridge *bridge;
+    maage_status result;
+    if (!output) return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_OPERATION_CREATE);
+    *output = NULL;
+    bridge = (maage_client_audio_bank_bridge *)calloc(1, sizeof(*bridge));
+    if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_OPERATION_CREATE);
+    result = maage_sound_bank_create(root, 16UL * 1024UL * 1024UL,
+        &bridge->bank, trace);
+    if (maage_status_failed(result)) { free(bridge); return result; }
+    *output = bridge;
+    return result;
+}
+static maage_status maage_client_audio_bridge_bank_destroy(void *handle,
+    maage_status_trace *trace)
+{
+    maage_client_audio_bank_bridge *bridge = (maage_client_audio_bank_bridge *)handle;
+    maage_status result;
+    unsigned int i;
+    (void)trace;
+    if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_NOOP,
+        MAAGE_OPERATION_DESTROY);
+    result = maage_sound_bank_destroy(bridge->bank);
+    for (i = 0; i < bridge->count; ++i) free(bridge->paths[i]);
+    free(bridge->paths);
+    free(bridge);
+    return result;
+}
+static maage_status maage_client_audio_bridge_register(
+    maage_client_audio_bank_bridge *bridge, const char *name, unsigned int *id)
+{
+    unsigned int i, grown;
+    char *copy;
+    char **paths;
+    size_t length;
+    maage_status result;
+    if (!bridge || !name || !*name || !id)
+        return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_OPERATION_REGISTER);
+    for (i = 0; i < bridge->count; ++i)
+        if (!strcmp(bridge->paths[i], name)) {
+            *id = i + 1U;
+            return maage_client_audio_bridge_result(MAAGE_STATUS_SUCCESS,
+                MAAGE_OPERATION_RESOLVE);
+        }
+    if (bridge->count >= MAAGE_SOUND_MAX_CLIP_ID)
+        return maage_client_audio_bridge_result(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_OPERATION_REGISTER);
+    if (bridge->count == bridge->capacity) {
+        grown = bridge->capacity ? bridge->capacity * 2U : 64U;
+        if (grown > MAAGE_SOUND_MAX_CLIP_ID) grown = MAAGE_SOUND_MAX_CLIP_ID;
+        paths = (char **)realloc(bridge->paths, (size_t)grown * sizeof(*paths));
+        if (!paths) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_OPERATION_REGISTER);
+        bridge->paths = paths;
+        bridge->capacity = grown;
+    }
+    length = strlen(name);
+    copy = (char *)malloc(length + 1U);
+    if (!copy) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_OPERATION_REGISTER);
+    memcpy(copy, name, length + 1U);
+    result = maage_sound_bank_register(bridge->bank, bridge->count + 1U,
+        name, NULL);
+    if (maage_status_failed(result)) { free(copy); return result; }
+    bridge->paths[bridge->count++] = copy;
+    *id = bridge->count;
+    return result;
+}
+static maage_status maage_client_audio_bridge_decode(void *handle,
+    const char *name, void **output, maage_status_trace *trace)
+{
+    maage_client_audio_bank_bridge *bridge = (maage_client_audio_bank_bridge *)handle;
+    maage_sound_pcm *pcm;
+    unsigned int id;
+    maage_status result;
+    if (!output) return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_OPERATION_LOAD);
+    *output = NULL;
+    result = maage_client_audio_bridge_register(bridge, name, &id);
+    if (maage_status_failed(result)) return result;
+    pcm = (maage_sound_pcm *)calloc(1, sizeof(*pcm));
+    if (!pcm) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_OPERATION_LOAD);
+    result = maage_sound_bank_decode(bridge->bank, id, pcm, trace);
+    if (maage_status_failed(result)) { free(pcm); return result; }
+    *output = pcm;
+    return result;
+}
+static void maage_client_audio_bridge_release_pcm(void *handle, void *pcm)
+{
+    (void)handle;
+    if (pcm) {
+        (void)maage_sound_pcm_destroy((maage_sound_pcm *)pcm);
+        free(pcm);
+    }
+}
+static maage_status maage_client_audio_bridge_engine_create(void **output,
+    maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge;
+    maage_status result;
+    if (!output) return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_OPERATION_CREATE);
+    *output = NULL;
+    bridge = (maage_client_audio_engine_bridge *)calloc(1, sizeof(*bridge));
+    if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_OPERATION_CREATE);
+    result = maage_audio_create(NULL, &bridge->engine, trace);
+    if (maage_status_failed(result) || !bridge->engine) {
+        free(bridge);
+        return result;
+    }
+    *output = bridge;
+    return result;
+}
+static maage_status maage_client_audio_bridge_engine_destroy(void *handle,
+    maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
+    maage_status result;
+    unsigned long i;
+    if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_NOOP,
+        MAAGE_OPERATION_DESTROY);
+    for (i = 0; i < bridge->buffer_count; ++i)
+        if (bridge->buffers[i]) (void)maage_audio_buffer_destroy(bridge->buffers[i]);
+    result = maage_audio_destroy(bridge->engine, trace);
+    free(bridge->buffers); free(bridge);
+    return result;
+}
+static maage_status maage_client_audio_bridge_upload(void *handle,
+    const void *input, unsigned long *output, maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
+    const maage_sound_pcm *pcm = (const maage_sound_pcm *)input;
+    maage_audio_buffer *buffer = NULL;
+    signed short *samples;
+    unsigned long id, grown;
+    size_t n, count;
+    float f;
+    maage_audio_buffer **storage;
+    maage_status result;
+    if (!bridge || !pcm || !pcm->samples || !output || !pcm->frame_count ||
+        pcm->channels < 1U || pcm->channels > 2U ||
+        pcm->frame_count > (size_t)-1 / pcm->channels)
+        return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_OPERATION_CREATE);
+    *output = 0;
+    count = pcm->frame_count * pcm->channels;
+    if (count > (size_t)-1 / sizeof(*samples))
+        return maage_client_audio_bridge_result(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_OPERATION_CREATE);
+    samples = (signed short *)malloc(count * sizeof(*samples));
+    if (!samples) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_OPERATION_CREATE);
+    for (n = 0; n < count; ++n) {
+        f = pcm->samples[n];
+        if (!(f >= -1.0f)) f = -1.0f;
+        if (f > 1.0f) f = 1.0f;
+        samples[n] = (signed short)(f * 32767.0f);
+    }
+    result = maage_audio_buffer_create(bridge->engine, samples, pcm->frame_count,
+        pcm->channels, pcm->sample_rate, &buffer, trace);
+    free(samples);
+    if (maage_status_failed(result)) return result;
+    if (bridge->buffer_count == bridge->buffer_capacity) {
+        grown = bridge->buffer_capacity ? bridge->buffer_capacity * 2UL : 64UL;
+        if (grown <= bridge->buffer_capacity || grown > (unsigned long)-1 / sizeof(*storage)) {
+            maage_audio_buffer_destroy(buffer);
+            return maage_client_audio_bridge_result(MAAGE_STATUS_BUFFER_OVERFLOW,
+                MAAGE_OPERATION_CREATE);
+        }
+        storage = (maage_audio_buffer **)realloc(bridge->buffers,
+            (size_t)grown * sizeof(*storage));
+        if (!storage) {
+            maage_audio_buffer_destroy(buffer);
+            return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
+                MAAGE_OPERATION_CREATE);
+        }
+        bridge->buffers = storage; bridge->buffer_capacity = grown;
+    }
+    id = ++bridge->buffer_count;
+    bridge->buffers[id - 1UL] = buffer;
+    *output = id;
+    return result;
+}
+static maage_status maage_client_audio_bridge_release_buffer(void *handle,
+    unsigned long id, maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
+    maage_status result;
+    (void)trace;
+    if (!bridge || !id || id > bridge->buffer_count || !bridge->buffers[id - 1UL])
+        return maage_client_audio_bridge_result(MAAGE_STATUS_NOOP,
+            MAAGE_OPERATION_DESTROY);
+    result = maage_audio_buffer_destroy(bridge->buffers[id - 1UL]);
+    bridge->buffers[id - 1UL] = NULL;
+    return result;
+}
+static maage_status maage_client_audio_bridge_play(void *handle,
+    unsigned long id, unsigned int category, int positional,
+    const double location[3], float gain, float pitch, float distance,
+    maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
+    maage_audio_play_desc desc;
+    maage_audio_voice_id voice = 0;
+    unsigned int slot;
+    maage_status result;
+    (void)distance;
+    if (!bridge || !id || id > bridge->buffer_count ||
+        !bridge->buffers[id - 1UL])
+        return maage_client_audio_bridge_result(MAAGE_STATUS_NOT_FOUND,
+            MAAGE_OPERATION_SUBMIT);
+    memset(&desc, 0, sizeof(desc));
+    desc.buffer = bridge->buffers[id - 1UL];
+    desc.category = category == MAAGE_SOUND_CATALOG_BLOCKS ? MAAGE_AUDIO_BLOCKS :
+        (category == MAAGE_SOUND_CATALOG_PLAYERS ? MAAGE_AUDIO_PLAYER :
+        (category == MAAGE_SOUND_CATALOG_UI ? MAAGE_AUDIO_UI :
+        (category == MAAGE_SOUND_CATALOG_WEATHER ? MAAGE_AUDIO_WEATHER : MAAGE_AUDIO_AMBIENT)));
+    desc.gain = gain < 0.0f ? 0.0f : (gain > 4.0f ? 4.0f : gain);
+    desc.pitch = pitch < 0.25f ? 0.25f : (pitch > 4.0f ? 4.0f : pitch);
+    desc.positional = positional;
+    if (location) {
+        desc.position.x = (float)location[0];
+        desc.position.y = (float)location[1];
+        desc.position.z = (float)location[2];
+    }
+    result = maage_audio_play(bridge->engine, &desc, &voice, trace);
+    if (!maage_status_failed(result) && voice) {
+        /* Stop and recycle the oldest recorded voice ID: bounded memory even
+         * after hours of footsteps, and no untracked active sound at shutdown. */
+        slot = bridge->voice_next++ % 256U;
+        if (bridge->voices[slot])
+            (void)maage_audio_stop(bridge->engine, bridge->voices[slot]);
+        bridge->voices[slot] = voice;
+    }
+    return result;
+}
+static maage_status maage_client_audio_bridge_catalog_create(void *bank,
+    void *engine, void **output, maage_status_trace *trace)
+{
+    maage_sound_catalog *catalog = NULL;
+    maage_sound_catalog_port port;
+    maage_status result;
+    if (!output) return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_OPERATION_CREATE);
+    *output = NULL;
+    result = maage_sound_catalog_create(bank, engine, &catalog, trace);
+    if (maage_status_failed(result)) return result;
+    memset(&port, 0, sizeof(port));
+    port.decode = maage_client_audio_bridge_decode;
+    port.upload = maage_client_audio_bridge_upload;
+    port.release_pcm = maage_client_audio_bridge_release_pcm;
+    port.release_buffer = maage_client_audio_bridge_release_buffer;
+    port.play = maage_client_audio_bridge_play;
+    result = maage_sound_catalog_set_port(catalog, &port, trace);
+    if (maage_status_failed(result)) {
+        (void)maage_sound_catalog_destroy(catalog);
+        return result;
+    }
+    result = maage_sound_catalog_preload(catalog, trace);
+    *output = catalog;
+    return result;
+}
+static maage_status maage_client_audio_bridge_catalog_destroy(void *catalog,
+    maage_status_trace *trace)
+{
+    (void)trace;
+    return maage_sound_catalog_destroy((maage_sound_catalog *)catalog);
+}
+static maage_status maage_client_audio_bridge_volume(void *handle, unsigned int bus,
+    int percent, maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *engine = (maage_client_audio_engine_bridge *)handle;
+    (void)trace;
+    if (!engine || bus >= MAAGE_AUDIO_BUS_COUNT || percent < 0 || percent > 100)
+        return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_OPERATION_SET);
+    return maage_audio_set_volume(engine->engine, (maage_audio_bus)bus,
+        (float)percent / 100.0f);
+}
+static maage_status maage_client_audio_bridge_listener(void *handle,
+    const double position[3], const double direction[3],
+    maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *engine = (maage_client_audio_engine_bridge *)handle;
+    maage_audio_vec3 eye, forward, up;
+    maage_status result;
+    if (!engine || !position || !direction)
+        return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_OPERATION_SET);
+    eye.x = (float)position[0]; eye.y = (float)position[1];
+    eye.z = (float)position[2];
+    forward.x = (float)direction[0]; forward.y = (float)direction[1];
+    forward.z = (float)direction[2];
+    up.x = 0.0f; up.y = 1.0f; up.z = 0.0f;
+    result = maage_audio_set_listener(engine->engine, eye, forward, up);
+    if (maage_status_failed(result)) return result;
+    /* Poll is an allocation-free/device-recovery-free maintenance boundary;
+     * drive it from presentation updates, independent of drawable submission. */
+    return maage_audio_poll(engine->engine, trace);
+}
+static maage_status maage_client_audio_bridge_event(void *catalog, void *engine,
+    const maage_sound_event *event, maage_status_trace *trace)
+{
+    (void)engine;
+    return maage_sound_catalog_play((maage_sound_catalog *)catalog, event, trace);
+}
+static maage_status maage_client_audio_bridge_stop_voices(void *handle,
+    maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
+    unsigned int i;
+    maage_status result, first;
+    (void)trace;
+    if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_NOOP,
+        MAAGE_OPERATION_STOP);
+    first = maage_client_audio_bridge_result(MAAGE_STATUS_SUCCESS,
+        MAAGE_OPERATION_STOP);
+    for (i = 0; i < 256U; ++i) if (bridge->voices[i]) {
+        result = maage_audio_stop(bridge->engine, bridge->voices[i]);
+        /* Already-finished generational voices are normal, not a new shutdown
+         * failure; active ones still receive their stop request. */
+        if (maage_status_failed(result) && !maage_status_failed(first) &&
+            maage_status_code(result) != MAAGE_STATUS_NOT_FOUND)
+            first = result;
+        bridge->voices[i] = 0;
+    }
+    return first;
+}
+static maage_status maage_client_audio_bridge_engine_stop(void *handle,
+    maage_status_trace *trace)
+{
+    maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
+    if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_NOOP,
+        MAAGE_OPERATION_STOP);
+    return maage_audio_poll(bridge->engine, trace);
+}
+static maage_status maage_client_audio_bridge_install(void)
+{
+    maage_client_audio_components parts;
+    memset(&parts, 0, sizeof(parts));
+    parts.version = MAAGE_CLIENT_AUDIO_COMPONENTS_VERSION;
+    parts.bank_create = maage_client_audio_bridge_bank_create;
+    parts.engine_create = maage_client_audio_bridge_engine_create;
+    parts.catalog_create = maage_client_audio_bridge_catalog_create;
+    parts.set_volume = maage_client_audio_bridge_volume;
+    parts.set_listener = maage_client_audio_bridge_listener;
+    parts.play_event = maage_client_audio_bridge_event;
+    parts.stop_voices = maage_client_audio_bridge_stop_voices;
+    parts.engine_stop = maage_client_audio_bridge_engine_stop;
+    parts.catalog_destroy = maage_client_audio_bridge_catalog_destroy;
+    parts.engine_destroy = maage_client_audio_bridge_engine_destroy;
+    parts.bank_destroy = maage_client_audio_bridge_bank_destroy;
+    /* Scene requires running/gain/pause voice controls not exposed by the
+     * current portable Audio ABI; defer scene bindings instead of fabricating
+     * engine behavior or mutating Agent 1's API across worktrees. */
+    return maage_client_audio_service_components_install(&parts);
+}
+
+static void maage_client_audio_click(void *context)
+{
+    maage_client_audio_service *audio = (maage_client_audio_service *)context;
+    if (audio) (void)maage_client_audio_service_ui_click(audio, NULL);
+}
+
+/* The presentation thread never owns a World or a mutable gameplay instance.
+ * It sends commands to the same reusable Server runtime as dedicated hosting,
+ * consumes copied snapshots, and owns only GUI/audio/GPU presentation state. */
 maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *trace)
 {
     maage_window_system *system = NULL;
@@ -364,218 +888,247 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_renderer *renderer = NULL;
     maage_render_texture *atlas = NULL;
     maage_client_ui *ui = NULL;
-    const maage_render_ui_data *ui_draw;
-    const maage_client_ui_debug *debug_text;
-    maage_client_ui_input ui_input;
-    maage_client_debug debug;
-    maage_client_mesh_stats mesh_stats;
-    maage_block_registry *registry = NULL;
-    maage_item_registry *items = NULL;
-    maage_gameplay game;
-    maage_gameplay_intent intent;
-    maage_client_interaction_visual interaction;
-    maage_world *world = NULL;
-    maage_leaves_mode applied_leaves = MAAGE_LEAVES_FANCY;
-    maage_world_store *store = NULL;
+    maage_client_environment *environment_view = NULL;
+    maage_client_audio_service *audio = NULL;
+    maage_local_session *session = NULL;
+    maage_server_runtime *server = NULL;
+    maage_content *content = NULL;
+    maage_biome_registry *biomes = NULL;
+    const maage_block_registry *blocks = NULL;
+    const maage_item_registry *items = NULL;
     maage_instance *instance = maage_client_storage_instance();
+    maage_client_resources resources;
     maage_client_mesh_cache cache;
     maage_client_mesh_activity mesh_activity;
     maage_client_world_options options;
-    maage_client_options video_options, saved_video_options;
-    maage_client_resources resources;
-    maage_biome_registry *biomes = NULL;
-    maage_world_config world_config;
-    maage_world_record record;
-    maage_generation_policy generation_policy;
-    maage_environment_state environment_state;
-    maage_client_environment *environment_view = NULL;
-    maage_world_stats stats;
+    maage_client_options video_options, saved_video_options, current_options;
+    maage_client_interaction_visual interaction;
+    maage_client_debug debug;
+    maage_client_mesh_stats mesh_stats;
+    maage_client_ui_input ui_input;
+    const maage_render_ui_data *ui_draw;
+    const maage_client_ui_debug *debug_text;
+    maage_render_desc render_config;
     maage_window_config window_config;
     maage_window_state state;
     maage_input_snapshot input;
-    maage_player player, previous;
-    maage_render_desc render_config;
-    maage_status result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
-    maage_status rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-    maage_status operation = 0, outcome = 0, teardown, resource_notice = 0, world_notice = 0, mesh_notice = 0, interaction_notice = 0, gameplay_notice = 0;
+    maage_generation_policy policy;
+    maage_server_config server_config;
+    maage_session_snapshot latest, previous, incoming;
+    maage_session_event event;
+    maage_session_command command;
+    maage_client_outbox outbox;
+    maage_status result = 0, operation = 0, rendered = 0, outcome = 0;
+    maage_status resource_notice = 0, mesh_notice = 0, audio_notice = 0;
     maage_status_trace cleanup_trace;
-    const char *failure_message = "Client operation cannot continue.";
-    char directory[MAAGE_PATH_CAPACITY], error[256], seed_text[32];
-    double last, now, elapsed, raw_elapsed, accumulator = 0, alpha, eye[3], yaw = 0, pitch = 0, diagnostic_time;
-    double tick_start = 0, tick_seconds, frame_end;
-    double wheel = 0;
+    const char *failure_message = "Client presentation cannot continue.";
+    char directory[MAAGE_PATH_CAPACITY];
+    double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
+    double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
+    double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
+    double render_yaw = 0.0, render_pitch = 0.0, yaw_arc = 0.0;
+    unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
+    unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
     float matrix[16];
     size_t draw_count, resident_count, slot_index;
-    unsigned long frames = 0, tick_count;
-    unsigned ui_actions;
-    int ok = 0, initial_capture = 1, active, was_active = 0, jump_pending = 0, axis;
-    int player_ready = 0, cx, cz, i, was_modal, was_focused = 0;
-    int attack_pending = 0, use_pending = 0, changing_mode = 0, was_changing_mode = 0;
-    int options_ready = 0, options_save_needed = 0, was_options_visible = 0;
-    int resize_pending = 0, logged_max_fps = -1, logged_vsync = -1;
-    memset(&resources, 0, sizeof(resources)); memset(&cache, 0, sizeof(cache)); memset(&mesh_activity, 0, sizeof(mesh_activity));
+    int valid_snapshot = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
+    int initial_capture = 1, active = 0, was_active = 0;
+    int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
+    int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
+    int logged_max_fps = -1, logged_vsync = -1, paused_command = -1;
+    int selected_hotbar = 0, queued_hotbar = -1, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
+    int jump_latched = 0, attack_latched = 0, use_latched = 0, respawn_latched = 0;
+    unsigned int ui_actions = 0, event_budget;
+    memset(&resources, 0, sizeof(resources));
+    memset(&cache, 0, sizeof(cache));
+    memset(&mesh_activity, 0, sizeof(mesh_activity));
+    memset(&interaction, 0, sizeof(interaction));
     memset(&debug, 0, sizeof(debug));
-    memset(&interaction, 0, sizeof(interaction)); memset(&intent, 0, sizeof(intent));
-    error[0] = 0;
+    memset(&outbox, 0, sizeof(outbox));
+    memset(&latest, 0, sizeof(latest));
+    memset(&previous, 0, sizeof(previous));
+    memset(&server_config, 0, sizeof(server_config));
     maage_render_desc_init(&render_config);
     rendered = maage_render_desc_parse_args(argc, argv, &render_config);
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_world_options_parse(argc, argv, &options);
     if (maage_status_failed(operation)) {
-        failure_message = "Invalid world options. Use --new-world or --world=<id>, with valid seed, generator, render-distance, worker and mesh-budget options."; goto done;
+        failure_message = "Invalid world, seed, generator, worker, radius, or gameplay options.";
+        goto done;
     }
     if (!instance) {
-        operation = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_INSTANCE, MAAGE_OPERATION_SELECT, 0);
-        failure_message = "No validated instance was selected at startup."; goto done;
+        operation = maage_status_make(MAAGE_STATUS_INVALID_STATE,
+            MAAGE_CONTEXT_INSTANCE, MAAGE_OPERATION_SELECT, 0);
+        failure_message = "No validated instance was selected at startup.";
+        goto done;
     }
     operation = maage_client_options_load(instance, &video_options);
     if (maage_status_failed(operation))
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
-            "Unable to read instance config/options.ini; using video defaults.");
+            "Unable to read config/options.ini; using defaults.");
     saved_video_options = video_options;
     strcpy(directory, maage_client_storage_data_root());
-    maage_log_info("maage.client.instance", "Instance: %s (%s).", maage_instance_get_info(instance)->name,
+    maage_log_info("maage.client.instance", "Instance: %s (%s).",
+        maage_instance_get_info(instance)->name,
         maage_instance_get_info(instance)->id);
-    if (maage_world_store_legacy_pending(directory)) {
-        if (maage_client_storage_migrate_requested() || maage_instance_only_configured(instance)) {
-            operation = maage_world_store_migrate_legacy(directory, maage_instance_directory(instance), error, trace);
-            if (maage_status_failed(operation)) {
-                failure_message = error; goto done;
-            }
-            maage_log_info("maage.client.instance", "Legacy world migration completed for the selected instance.");
-        } else maage_log_warn("maage.client.instance", "Legacy global worlds are preserved pending an explicit destination. Close Clients, then launch --instance=<UUID> --migrate-legacy-worlds to choose this instance. Its private worlds remain independent.");
-    }
+    if (maage_world_store_legacy_pending(directory))
+        maage_log_warn("maage.client.instance",
+            "Legacy world migration requires Server-owned storage migration. No Client-owned World stores are opened.");
     biomes = (maage_biome_registry *)calloc(1, sizeof(*biomes));
-    if (!biomes) { operation = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE, 0); goto done; }
+    if (!biomes) {
+        operation = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+        goto done;
+    }
     operation = maage_biome_registry_init(biomes);
     if (maage_status_failed(operation)) goto done;
-    maage_log_info("maage.client.resources", "Resource directory: %s/minecraft/assets/reconst", directory);
     operation = maage_client_resources_load(directory, &resources, biomes, trace);
     if (maage_status_failed(operation)) goto done;
     resource_notice = resources.load_status;
     maage_status_trace_init(trace);
-    MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     operation = maage_biome_registry_finalize(biomes);
-    if (maage_status_failed(operation)) {
-        failure_message = "Required biome registry could not be finalized."; goto done;
-    }
-    operation = maage_client_register_blocks(&resources, biomes, &registry, trace);
-    if (maage_status_failed(operation)) {
-        failure_message = "Required block registry could not be initialized."; goto done;
-    }
-    operation = maage_item_registry_create_builtin(registry, &items);
-    if (maage_status_failed(operation)) {
-        failure_message = "Required item registry could not be initialized."; goto done;
-    }
-    operation = maage_gameplay_init(&game, items);
     if (maage_status_failed(operation)) goto done;
+    operation = maage_client_content_create(&resources, biomes, &content, trace);
+    if (maage_status_failed(operation)) {
+        failure_message = "Shared immutable content registration failed.";
+        goto done;
+    }
+    blocks = maage_content_blocks(content);
+    items = maage_content_items(content);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system, trace);
     if (maage_status_failed(result)) goto window_failed;
-    if (maage_status_is_warning(result)) {
-        maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.window", result, trace, "Recovered with an available native window backend.");
-        maage_status_trace_init(trace);
-    }
-    maage_window_config_init(&window_config); window_config.title = "MaaGE Client";
-    window_config.visible = 0; window_config.full_display_content = 1;
+    maage_window_config_init(&window_config);
+    window_config.title = "MaaGE Client";
+    window_config.visible = 0;
+    window_config.full_display_content = 1;
     result = maage_window_create(system, &window_config, &window, trace);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-    render_config.window = window; render_config.required_features |= MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
+    render_config.window = window;
+    render_config.required_features |= MAAGE_RENDER_CAP_TEXTURED_MESH |
+        MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
     rendered = maage_renderer_create(&render_config, &renderer, trace);
     if (maage_status_failed(rendered)) goto done;
-    if (maage_status_is_warning(rendered)) {
-        maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.render", rendered, trace, "Recovered with an available renderer.");
-        maage_status_trace_init(trace);
-    }
     rendered = maage_renderer_create_texture(renderer, &resources.atlas, &atlas, trace);
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_interaction_init(&interaction, &resources);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_create(renderer, window, directory, &resources.atlas, &ui, trace);
-    maage_client_resources_destroy(&resources);
-    if (maage_status_failed(operation)) {
-        failure_message = "Cannot initialize the required Client GUI."; goto done;
-    }
-    maage_status_trace_init(trace);
-    MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
+    (void)maage_client_resources_destroy(&resources);
+    if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_finalize(ui);
-    if (maage_status_failed(operation)) {
-        failure_message = "Cannot finalize the Client screen registry."; goto done;
-    }
-    if (maage_status_is_success(resource_notice)) resource_notice = maage_client_ui_resource_status(ui);
-    maage_status_trace_init(trace);
-    MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_ui_set_content(ui, items, blocks);
+    if (maage_status_failed(operation)) goto done;
+    if (maage_status_is_success(resource_notice))
+        resource_notice = maage_client_ui_resource_status(ui);
     operation = maage_client_environment_create(renderer, directory, &environment_view, trace);
-    if (maage_status_failed(operation)) {
-        failure_message = "Cannot initialize environmental presentation resources."; goto done;
-    }
+    if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice))
         resource_notice = maage_client_environment_resource_status(environment_view, NULL);
-    maage_log_info("maage.client", "Renderer initialized: %s.", maage_render_backend_name(maage_renderer_get_backend(renderer)));
-    maage_status_trace_init(trace);
-    MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
-    operation = maage_generation_policy_default(options.generator_version, &generation_policy);
-    if (maage_status_failed(operation)) goto done;
-    operation = maage_world_store_open_configured(maage_instance_directory(instance), options.id, options.create, options.name,
-        options.seeded ? &options.seed : NULL, options.id && !options.create ? NULL : &generation_policy,
-        items, &store, &record, error, trace);
+    /* The service remains valid in silent-device recovery. Rendering and the
+     * authoritative Server must not depend on sound playback succeeding. */
+    operation = maage_client_audio_bridge_install();
     if (maage_status_failed(operation)) {
-        failure_message = error; goto done;
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio", operation,
+            "Audio component registration failed; falling back to silent service.");
     }
-    memset(&world_config, 0, sizeof(world_config));
-    world_config.registry = registry; world_config.biomes = biomes; world_config.seed = record.seed;
-    world_config.worker_count = options.workers;
-    world_config.generation_policy = record.generation_policy;
-    world_config.initial_environment = &record.environment;
-    world_config.store = store; world_config.render_distance = options.radius; world_config.new_world = record.new_world;
-    memcpy(world_config.position, record.position, sizeof(world_config.position));
-    operation = maage_world_create(&world_config, &world, trace);
-    if (maage_status_failed(operation)) {
-        failure_message = "World initialization failed (worker pool, generator policy, or memory)."; goto done;
+    operation = maage_client_audio_service_create(directory, &video_options, &audio, trace);
+    if (maage_status_failed(operation) && !audio) {
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio", operation,
+            "Audio setup failed; gameplay presentation continues.");
+        maage_status_trace_init(trace);
+    } else if (maage_status_is_warning(operation)) {
+        audio_notice = operation;
+        maage_status_trace_init(trace);
     }
-    maage_world_get_stats(world, &stats);
-    operation = maage_player_spawn(&player, world);
+    if (audio) maage_client_ui_set_click_callback(ui, maage_client_audio_click, audio);
+    operation = maage_generation_policy_default(options.generator_version, &policy);
     if (maage_status_failed(operation)) goto done;
-    previous = player; player_ready = 1;
-    operation = maage_gameplay_restore(&game, items, &record.gameplay);
-    if (maage_status_failed(operation)) {
-        failure_message = "Saved player gameplay data does not match registered items."; player_ready = 0; goto done;
-    }
-    if (record.new_world) {
-        operation = maage_gameplay_init(&game, items);
-        if (maage_status_failed(operation)) goto done;
-    }
-    if (options.mode >= 0) {
-        operation = maage_gameplay_set_mode(&game, (unsigned int)options.mode);
-        if (maage_status_failed(operation)) goto done;
-        if (record.new_world && options.mode == MAAGE_GAME_MODE_SURVIVAL)
-            memset(&game.inventory, 0, sizeof(game.inventory));
-    }
-    game.reach = options.reach;
-    operation = maage_client_ui_set_gameplay(ui, items, &game, registry);
+    operation = maage_local_session_create(256U, 256U, 512U, &session);
     if (maage_status_failed(operation)) goto done;
-    yaw = record.yaw; pitch = record.pitch;
-    operation = maage_world_seed_format(record.seed, seed_text, sizeof(seed_text));
+    server_config.instance_root = maage_instance_directory(instance);
+    server_config.world_id = options.id;
+    server_config.world_name = options.name;
+    server_config.create_world = options.create;
+    server_config.has_seed = options.seeded;
+    server_config.seed = options.seed;
+    server_config.generation_policy = options.create || options.seeded ? &policy : NULL;
+    server_config.world_workers = options.workers;
+    server_config.render_distance = options.radius;
+    server_config.initial_game_mode = options.mode;
+    server_config.interaction_range = options.reach;
+    server_config.execution_mode = MAAGE_SERVER_INTEGRATED;
+    server_config.content = content;
+    server_config.session = session;
+    operation = maage_server_runtime_create(&server_config, &server, trace);
     if (maage_status_failed(operation)) goto done;
-    maage_log_info("maage.client.world", "%s world %s; seed=%s; generator=%lu; render distance=%d; workers=%u. Loading nearby columns asynchronously.",
-        record.new_world ? "Created" : "Restored", record.id, seed_text,
-        record.generation_policy.generator_version, options.radius, stats.worker_count);
+    operation = maage_server_runtime_start(server, trace);
+    if (maage_status_failed(operation)) goto done;
+    server_started = 1;
+    /* Poll AppKit in bounded slices while the authoritative thread begins.
+     * An explicit overall timeout detects a stalled bootstrap instead of
+     * trapping a hidden window indefinitely. */
+    startup_began = maage_time_monotonic_seconds();
+    if (startup_began < 0.0) goto clock_failed;
+    for (;;) {
+        result = maage_window_poll_events(system, 0);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+        result = maage_window_get_state(window, &state);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+        if (state.close_requested) { ok = 1; goto done; }
+        operation = maage_local_session_read_snapshot(session, &incoming);
+        if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS &&
+            incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION &&
+            incoming.sequence) {
+            latest = previous = incoming;
+            world_epoch = latest.world_epoch;
+            last_seen_tick = latest.tick;
+            selected_hotbar = queued_hotbar = (int)latest.player.inventory.selected;
+            valid_snapshot = 1;
+            break;
+        }
+        if (maage_status_failed(operation) &&
+            maage_status_code(operation) != MAAGE_STATUS_NOOP) goto done;
+        if (maage_server_runtime_finished(server)) {
+            operation = maage_status_make(MAAGE_STATUS_INVALID_STATE,
+                MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_START, 0);
+            failure_message = "The authoritative Server exited before producing an initial snapshot.";
+            goto done;
+        }
+        now = maage_time_monotonic_seconds();
+        if (now < 0.0) goto clock_failed;
+        if (now - startup_began >= 120.0) {
+            operation = maage_status_make(MAAGE_STATUS_INVALID_STATE,
+                MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_START, 0);
+            failure_message = "Integrated Server bootstrap timed out without a copied snapshot.";
+            goto done;
+        }
+        result = maage_window_wait_events(system, 16);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+    }
+    operation = maage_client_ui_set_snapshot(ui, &latest);
+    if (maage_status_failed(operation)) goto done;
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     rendered = maage_renderer_prepare_frame(renderer, trace);
-    if (maage_status_code(rendered) == MAAGE_STATUS_NOT_IMPLEMENTED) rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-    if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS && maage_status_code(rendered) != MAAGE_STATUS_NOOP) goto done;
+    if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS &&
+        maage_status_code(rendered) != MAAGE_STATUS_NOT_IMPLEMENTED &&
+        maage_status_code(rendered) != MAAGE_STATUS_NOOP) goto done;
     result = maage_window_set_visible(window, 1);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
     operation = maage_client_ui_apply_options(ui, &video_options);
     if (maage_status_failed(operation))
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
-            "Some saved video settings could not be applied; retaining available defaults.");
+            "Some saved video choices could not be applied.");
     options_ready = 1;
-    maage_log_info("maage.client", "WASD walks; Space jumps (double tap for Creative flight), Shift descends; mouse buttons break/place; 1-9 or wheel selects; E opens inventory; Escape returns; F3 shows diagnostics; F11 toggles window mode. Options selects game mode. Unavailable columns block interaction and movement.");
-    last = maage_time_monotonic_seconds(); diagnostic_time = last;
-    mesh_activity.sample_start = last;
-    if (last < 0) goto clock_failed;
+    yaw = latest.player.yaw; pitch = latest.player.pitch;
+    last = maage_time_monotonic_seconds();
+    if (last < 0.0) goto clock_failed;
+    received_time = diagnostic_time = mesh_activity.sample_start = last;
     maage_client_ui_notify(ui, resource_notice, last);
+    if (audio_notice) maage_client_ui_notify(ui, audio_notice, last);
+    maage_log_info("maage.client",
+        "Integrated authoritative Server active. Input/UI use numeric commands; GPU streaming and audio consume copied Server publications.");
     for (;;) {
         maage_status_trace_init(trace);
         MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
@@ -588,6 +1141,10 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (state.close_requested) { ok = 1; break; }
         result = maage_window_get_input(window, &input);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+        now = maage_time_monotonic_seconds();
+        if (now < 0.0) goto clock_failed;
+        raw_elapsed = now - last; last = now;
+        if (raw_elapsed < 0.0) raw_elapsed = 0.0;
         was_modal = maage_client_ui_modal(ui);
         was_options_visible = maage_client_ui_options_visible(ui);
         memset(&ui_input, 0, sizeof(ui_input));
@@ -605,225 +1162,364 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             ui_input.secondary_pressed = input.secondary_pressed;
             ui_input.inventory = input.pressed[MAAGE_INPUT_KEY_E];
         }
-        ui_input.mouse_x = (float)input.mouse_x; ui_input.mouse_y = (float)input.mouse_y;
-        maage_client_ui_set_safe_area(ui, &state.safe_area);
-        maage_client_ui_set_window_state(ui, &state);
-        operation = maage_client_ui_update(ui, &ui_input, state.framebuffer_width, state.framebuffer_height, state.width, state.height, &ui_actions);
+        ui_input.mouse_x = (float)input.mouse_x;
+        ui_input.mouse_y = (float)input.mouse_y;
+        operation = maage_client_ui_set_safe_area(ui, &state.safe_area);
+        if (maage_status_failed(operation)) goto done;
+        operation = maage_client_ui_set_window_state(ui, &state);
+        if (maage_status_failed(operation)) goto done;
+        ui_actions = 0;
+        operation = maage_client_ui_update(ui, &ui_input,
+            state.framebuffer_width, state.framebuffer_height,
+            state.width, state.height, &ui_actions);
         if (maage_status_failed(operation)) {
-            MAAGE_STATUS_TRACE(trace, operation, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE);
-            maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.ui", operation, trace, "GUI action rejected.");
-            maage_client_ui_notify(ui, operation, maage_time_monotonic_seconds());
-            maage_status_trace_init(trace);
-            MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
-        }
-        if (logged_max_fps != maage_client_ui_max_fps(ui) || logged_vsync != maage_client_ui_vsync(ui)) {
-            logged_max_fps = maage_client_ui_max_fps(ui);
-            logged_vsync = maage_client_ui_vsync(ui);
-            maage_log_status(MAAGE_LOG_INFO, "maage.client.options",
-                maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0),
-                "Frame pacing: max_fps=%d (0 is unlimited); VSync=%s.",
-                logged_max_fps, logged_vsync ? "on" : "off");
+            maage_client_ui_notify(ui, operation, now);
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.ui", operation,
+                "Presentation UI rejected an action.");
         }
         changing_mode = maage_client_ui_window_mode_changing(ui);
         if (was_options_visible && !maage_client_ui_options_visible(ui))
             options_save_needed = 1;
         if (was_changing_mode && !changing_mode) {
-            initial_capture = 1;
-            options_save_needed = 1;
+            initial_capture = 1; options_save_needed = 1;
         }
         if (options_save_needed && !changing_mode) {
             operation = maage_client_options_store(instance, ui, &saved_video_options, 0);
             options_save_needed = 0;
             if (maage_status_failed(operation)) {
-                maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
-                    "Unable to atomically save instance config/options.ini.");
-                maage_client_ui_notify(ui, operation, maage_time_monotonic_seconds());
+                maage_client_ui_notify(ui, operation, now);
+                maage_log_status(MAAGE_LOG_WARNING, "maage.client.options",
+                    operation, "Unable to save config/options.ini.");
             }
         }
         if (!changing_mode && !was_changing_mode &&
             ((was_focused && !input.focused) || (was_active && !input.captured))) {
-            if (!maage_client_ui_modal(ui)) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
+            if (!maage_client_ui_modal(ui))
+                (void)maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
         }
         was_changing_mode = changing_mode;
         was_focused = input.focused;
         if (ui_actions & MAAGE_CLIENT_UI_EXIT) { ok = 1; break; }
-        if (ui_actions & MAAGE_CLIENT_UI_RESPAWN) {
-            operation = maage_gameplay_respawn(&game, &player, world);
-            if (maage_status_failed(operation)) goto done;
-            previous = player;
-            operation = maage_client_ui_back(ui);
-            if (maage_status_failed(operation)) goto done;
-        }
         if (maage_client_ui_modal(ui)) {
             initial_capture = 0;
             if (input.captured) result = maage_window_capture_mouse(window, 0);
             input.captured = 0;
-        } else if (!changing_mode && input.focused && !input.captured && (initial_capture || was_modal || input.primary_pressed)) {
-            result = maage_window_capture_mouse(window, 1); initial_capture = 0;
+        } else if (!changing_mode && input.focused && !input.captured &&
+            (initial_capture || was_modal || input.primary_pressed)) {
+            result = maage_window_capture_mouse(window, 1);
+            initial_capture = 0;
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-                input.captured = 1; input.mouse_delta_x = input.mouse_delta_y = 0;
+                input.captured = 1;
+                input.mouse_delta_x = input.mouse_delta_y = 0;
             }
         }
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-        now = maage_time_monotonic_seconds();
-        if (now < 0) goto clock_failed;
-        raw_elapsed = now - last; last = now; elapsed = raw_elapsed;
-        if (elapsed < 0) elapsed = 0;
-        if (elapsed > MAAGE_CLIENT_MAX_FRAME_SECONDS) elapsed = MAAGE_CLIENT_MAX_FRAME_SECONDS;
-        cx = maage_world_chunk_coordinate((int)floor(player.position[0]));
-        cz = maage_world_chunk_coordinate((int)floor(player.position[2]));
-        /* One owner commits worker results before the ordered fixed-step player
-         * phase. Collision observes stable published columns without waiting. */
-        if (maage_client_ui_leaves_mode(ui) != applied_leaves) {
-            operation = maage_world_set_leaves_mode(world, maage_client_ui_leaves_mode(ui));
-            if (maage_status_failed(operation)) goto done;
-            applied_leaves = maage_client_ui_leaves_mode(ui);
-        }
-        operation = maage_world_stream(world, player.position[0], player.position[2], yaw, trace);
-        if (maage_status_failed(operation)) goto done;
-        teardown = maage_world_status(world);
-        if (teardown != world_notice) {
-            world_notice = teardown; maage_client_ui_notify(ui, teardown, now);
-        }
-        if (maage_client_ui_debug_visible(ui) || now - diagnostic_time >= 5.0)
-            maage_world_get_stats(world, &stats);
-        rendered = maage_client_stream_meshes(world, renderer, atlas, &cache, &mesh_activity, &options, &debug, cx, cz);
-        if (maage_status_failed(rendered)) goto done;
-        if (mesh_notice != mesh_activity.last_result) {
-            mesh_notice = mesh_activity.last_result; maage_client_ui_notify(ui, mesh_notice, now);
-        }
-        active = !maage_client_ui_modal(ui) && !changing_mode && input.focused && input.captured && state.visible && state.framebuffer_width > 0 && state.framebuffer_height > 0;
-        if (active && !was_active) elapsed = 0;
+        active = !maage_client_ui_modal(ui) && !changing_mode &&
+            input.focused && input.captured && state.visible &&
+            state.framebuffer_width > 0 && state.framebuffer_height > 0;
         was_active = active;
-        tick_count = 0; tick_seconds = 0;
+        if (logged_max_fps != maage_client_ui_max_fps(ui) ||
+            logged_vsync != maage_client_ui_vsync(ui)) {
+            logged_max_fps = maage_client_ui_max_fps(ui);
+            logged_vsync = maage_client_ui_vsync(ui);
+            maage_log_info("maage.client.options", "FPS=%d (zero unlimited); VSync=%s.",
+                logged_max_fps, logged_vsync ? "on" : "off");
+        }
+        /* First advance queued reliable commands; transport queue-full is
+         * retained as backpressure and never treated as successful delivery. */
+        operation = maage_client_outbox_flush(&outbox, session);
+        if (maage_status_failed(operation) &&
+            maage_status_code(operation) != MAAGE_STATUS_BUFFER_OVERFLOW) goto done;
+        if (ui_actions & MAAGE_CLIENT_UI_RESPAWN) respawn_latched = 1;
+        if (respawn_latched) {
+            memset(&command, 0, sizeof(command));
+            command.kind = MAAGE_CMD_RESPAWN;
+            operation = maage_client_outbox_queue(&outbox, &command);
+            if (!maage_status_failed(operation)) {
+                respawn_latched = 0;
+                (void)maage_client_ui_back(ui);
+            } else maage_client_ui_notify(ui, operation, now);
+        }
+        for (i = 0; i < 64 && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY; ++i) {
+            operation = maage_client_ui_take_command(ui, &command);
+            if (maage_status_code(operation) == MAAGE_STATUS_NOOP) break;
+            if (maage_status_failed(operation)) {
+                maage_client_ui_notify(ui, operation, now); break;
+            }
+            operation = maage_client_outbox_queue(&outbox, &command);
+            if (maage_status_failed(operation)) {
+                /* The GUI request was taken but never submitted. Return it to
+                 * Agent 10's FIFO head so retries retain causal ordering. */
+                (void)maage_client_ui_retry_command(ui, &command);
+                maage_client_ui_notify(ui, operation, now);
+                break;
+            }
+        }
+        if (paused_command != (maage_client_ui_modal(ui) ? 1 : 0) &&
+            outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
+            memset(&command, 0, sizeof(command));
+            command.kind = MAAGE_CMD_PAUSE;
+            command.paused = maage_client_ui_modal(ui) ? 1 : 0;
+            operation = maage_client_outbox_queue(&outbox, &command);
+            if (!maage_status_failed(operation)) paused_command = command.paused;
+        }
+        if (!view_sent || maage_client_ui_leaves_mode(ui) != video_options.leaves) {
+            if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
+                memset(&command, 0, sizeof(command));
+                command.kind = MAAGE_CMD_VIEW;
+                command.render_radius = options.radius;
+                command.leaves_mode = maage_client_ui_leaves_mode(ui);
+                command.view_yaw = yaw;
+                operation = maage_client_outbox_queue(&outbox, &command);
+                if (!maage_status_failed(operation)) {
+                    video_options.leaves = maage_client_ui_leaves_mode(ui);
+                    view_sent = 1;
+                }
+            }
+        }
         if (active) {
             yaw = fmod(yaw + input.mouse_delta_x * MAAGE_CLIENT_MOUSE_RADIANS, 6.283185307179586);
             pitch += input.mouse_delta_y * MAAGE_CLIENT_MOUSE_RADIANS;
             if (pitch > MAAGE_CLIENT_PITCH_LIMIT) pitch = MAAGE_CLIENT_PITCH_LIMIT;
             if (pitch < -MAAGE_CLIENT_PITCH_LIMIT) pitch = -MAAGE_CLIENT_PITCH_LIMIT;
-            intent.movement.forward = (double)(input.keys[MAAGE_INPUT_KEY_W] - input.keys[MAAGE_INPUT_KEY_S]);
-            intent.movement.strafe = (double)(input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
-            if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_pending = 1;
-            if (!was_modal) {
-                if (input.primary_pressed) attack_pending = 1;
-                if (input.secondary_pressed) use_pending = 1;
+        }
+        if (active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
+            for (i = 0; i < (int)MAAGE_HOTBAR_SLOTS; ++i) {
+                if (input.pressed[MAAGE_INPUT_KEY_1 + i]) selected_hotbar = i;
             }
-            for (i = 0; i < (int)MAAGE_HOTBAR_SLOTS; ++i)
-                if (input.pressed[MAAGE_INPUT_KEY_1 + i]) game.inventory.selected = (unsigned int)i;
             wheel += input.scroll_y;
-            if (wheel >= 1 || wheel <= -1) {
-                wheel = fmod(wheel, (double)MAAGE_HOTBAR_SLOTS);
+            if (wheel >= 1.0 || wheel <= -1.0) {
                 i = (int)wheel;
-                game.inventory.selected = (unsigned int)(((int)game.inventory.selected - i + 9) % 9);
-                wheel -= i;
+                selected_hotbar = (selected_hotbar - i + 900) % (int)MAAGE_HOTBAR_SLOTS;
+                wheel -= (double)i;
             }
-            intent.movement.yaw = yaw; intent.pitch = pitch;
-            intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
-            if (maage_world_chunk_loaded(world, cx, cz)) accumulator += elapsed;
-            else { accumulator = 0; previous = player; }
-            if (accumulator >= MAAGE_PLAYER_TICK_SECONDS) tick_start = maage_time_monotonic_seconds();
-            while (accumulator >= MAAGE_PLAYER_TICK_SECONDS) {
-                intent.movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE] || jump_pending;
-                intent.jump_pressed = jump_pending;
-                intent.attack = !was_modal && (input.primary_down || attack_pending);
-                intent.use = !was_modal && (input.secondary_down || use_pending);
-                previous = player; operation = maage_gameplay_tick(&game, &player, world, items, &intent, trace);
-                if (maage_status_failed(operation)) goto done;
-                if (maage_status_is_warning(operation)) {
-                    if (trace && trace->origin != gameplay_notice) {
-                        gameplay_notice = trace->origin;
-                        maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.gameplay", operation, trace,
-                            "Gameplay action deferred; retaining current simulation state.");
-                        maage_client_ui_notify(ui, gameplay_notice, now);
-                    }
-                    maage_status_trace_init(trace);
-                    MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
-                }
-                operation = maage_world_tick(world);
-                if (maage_status_failed(operation)) goto done;
-                accumulator -= MAAGE_PLAYER_TICK_SECONDS; ++tick_count;
-                jump_pending = attack_pending = use_pending = 0;
-                if (!game.health && game.mode == MAAGE_GAME_MODE_SURVIVAL) {
-                    maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
-                    accumulator = 0; break;
-                }
+            if (selected_hotbar != queued_hotbar) {
+                memset(&command, 0, sizeof(command));
+                command.kind = MAAGE_CMD_HOTBAR;
+                command.hotbar_slot = (unsigned int)selected_hotbar;
+                operation = maage_client_outbox_queue(&outbox, &command);
+                if (maage_status_failed(operation))
+                    maage_client_ui_notify(ui, operation, now);
+                else queued_hotbar = selected_hotbar;
             }
-            if (tick_count) {
-                tick_seconds = maage_time_monotonic_seconds() - tick_start;
-                if (tick_start < 0 || tick_seconds < 0) goto clock_failed;
-            }
-            alpha = accumulator / MAAGE_PLAYER_TICK_SECONDS;
+        } else wheel = 0.0;
+        if (active) {
+            if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_latched = 1;
+            if (input.primary_pressed) attack_latched = 1;
+            if (input.secondary_pressed) use_latched = 1;
         } else {
-            accumulator = 0; previous = player; alpha = 1; jump_pending = attack_pending = use_pending = 0;
-            game.breaking_active = 0; game.break_progress = 0; wheel = 0;
+            jump_latched = attack_latched = use_latched = 0;
         }
-        if (!game.health && game.mode == MAAGE_GAME_MODE_SURVIVAL && !maage_client_ui_modal(ui))
-            maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
-        operation = maage_gameplay_target(&game, &player, world, yaw, pitch);
-        if (maage_status_failed(operation) && maage_status_code(operation) != MAAGE_STATUS_NOT_FOUND) goto done;
-        rendered = maage_client_interaction_update(&interaction, renderer, atlas, world, &game, trace);
+        if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
+            memset(&command, 0, sizeof(command));
+            command.kind = MAAGE_CMD_INPUT;
+            command.intent.movement.yaw = yaw;
+            command.intent.pitch = pitch;
+            if (active) {
+                command.intent.movement.forward =
+                    (double)(input.keys[MAAGE_INPUT_KEY_W] - input.keys[MAAGE_INPUT_KEY_S]);
+                command.intent.movement.strafe =
+                    (double)(input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
+                command.intent.movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE];
+                command.intent.jump_pressed = jump_latched;
+                command.intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
+                command.intent.attack = input.primary_down || attack_latched;
+                command.intent.use = input.secondary_down || use_latched;
+            }
+            operation = maage_client_outbox_queue(&outbox, &command);
+            if (maage_status_failed(operation))
+                maage_client_ui_notify(ui, operation, now);
+            else jump_latched = attack_latched = use_latched = 0;
+        } else {
+            /* The input edge latches above are retained until an ordered
+             * command can be queued; never acknowledge an unsent click. */
+            maage_client_ui_notify(ui, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0), now);
+        }
+        operation = maage_client_outbox_flush(&outbox, session);
+        if (maage_status_failed(operation) &&
+            maage_status_code(operation) != MAAGE_STATUS_BUFFER_OVERFLOW) goto done;
+        operation = maage_local_session_read_snapshot(session, &incoming);
+        if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS &&
+            incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION &&
+            (incoming.session_epoch != latest.session_epoch ||
+             incoming.world_epoch != latest.world_epoch ||
+             incoming.sequence > latest.sequence)) {
+            if (incoming.session_epoch != latest.session_epoch ||
+                incoming.world_epoch != latest.world_epoch) {
+                (void)maage_client_mesh_cache_clear(&cache);
+                previous = incoming;
+                world_epoch = incoming.world_epoch;
+                view_sent = 0;
+                sound_epoch = sound_world_epoch = last_sound_sequence = 0;
+                yaw = incoming.player.yaw; pitch = incoming.player.pitch;
+                selected_hotbar = queued_hotbar = (int)incoming.player.inventory.selected;
+                jump_latched = attack_latched = use_latched = respawn_latched = 0;
+            } else previous = latest;
+            latest = incoming;
+            received_time = now;
+            operation = maage_client_ui_set_snapshot(ui, &latest);
+            if (maage_status_failed(operation)) goto done;
+            if (!latest.player.health &&
+                latest.player.game_mode == MAAGE_GAME_MODE_SURVIVAL &&
+                !maage_client_ui_modal(ui))
+                (void)maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
+        } else if (maage_status_failed(operation) &&
+            maage_status_code(operation) != MAAGE_STATUS_NOOP &&
+            maage_status_code(operation) != MAAGE_STATUS_INVALID_STATE) goto done;
+        for (event_budget = 0; event_budget < 256U; ++event_budget) {
+            operation = maage_local_session_take_event(session, &event);
+            if (maage_status_code(operation) == MAAGE_STATUS_NOOP ||
+                maage_status_code(operation) == MAAGE_STATUS_INVALID_STATE) break;
+            if (maage_status_failed(operation)) goto done;
+            if (event.protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) continue;
+            if (event.kind == MAAGE_EVENT_DISCONNECTED) {
+                disconnected = 1;
+                if (maage_status_failed(event.status)) {
+                    outcome = event.status;
+                    if (event.has_trace && trace) *trace = event.trace;
+                } else ok = 1;
+                break;
+            }
+            if (event.session_epoch != latest.session_epoch ||
+                event.world_epoch != latest.world_epoch) continue;
+            if (event.kind == MAAGE_EVENT_SOUND) {
+                if (sound_epoch != event.session_epoch ||
+                    sound_world_epoch != event.world_epoch) {
+                    last_sound_sequence = 0;
+                    sound_epoch = event.session_epoch;
+                    sound_world_epoch = event.world_epoch;
+                }
+                if (event.sequence > last_sound_sequence) {
+                    last_sound_sequence = event.sequence;
+                    if (audio) (void)maage_client_audio_service_event(audio, &event.sound, trace);
+                }
+            } else if (event.kind == MAAGE_EVENT_STATUS) {
+                maage_client_ui_notify(ui, event.status, now);
+                if (maage_status_failed(event.status))
+                    maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.server",
+                        event.status, event.has_trace ? &event.trace : NULL,
+                        "Authoritative Server reported an operation failure.");
+            } else if (event.kind == MAAGE_EVENT_MESH_REMOVE) {
+                maage_client_mesh_cache_remove(&cache,
+                    event.column_x, event.column_z, event.mesh_revision);
+            }
+        }
+        if (disconnected) break;
+        if (maage_server_runtime_finished(server)) {
+            /* Drain any terminal STATUS/DISCONNECT next frame; a closed
+             * Server without a terminal event is not successful gameplay. */
+            operation = maage_status_make(MAAGE_STATUS_INVALID_STATE,
+                MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_STOP, 0);
+            failure_message = "The authoritative Server stopped unexpectedly.";
+            goto done;
+        }
+        cx = maage_world_chunk_coordinate((int)floor(latest.player.player.position[0]));
+        cz = maage_world_chunk_coordinate((int)floor(latest.player.player.position[2]));
+        rendered = maage_client_stream_meshes(session, renderer, atlas, &cache,
+            &mesh_activity, &options, &debug, world_epoch, cx, cz);
         if (maage_status_failed(rendered)) goto done;
-        if (maage_status_is_warning(rendered)) maage_status_trace_init(trace);
-        if (interaction_notice != interaction.last_result) {
-            interaction_notice = interaction.last_result; maage_client_ui_notify(ui, interaction_notice, now);
+        if (mesh_notice != mesh_activity.last_result) {
+            mesh_notice = mesh_activity.last_result;
+            maage_client_ui_notify(ui, mesh_notice, now);
         }
-        for (axis = 0; axis < 3; ++axis) eye[axis] = previous.position[axis] + (player.position[axis] - previous.position[axis]) * alpha;
+        alpha = (now - received_time) / MAAGE_PLAYER_TICK_SECONDS;
+        if (alpha < 0.0) alpha = 0.0;
+        if (alpha > 1.0 || previous.tick == latest.tick) alpha = 1.0;
+        if (previous.world_epoch != latest.world_epoch ||
+            previous.session_epoch != latest.session_epoch) alpha = 1.0;
+        /* Shortest-arc angular interpolation uses only copied authoritative
+         * snapshots. Local mouse-look is an independent presentation override
+         * while captured; it never changes the Server state in a snapshot. */
+        yaw_arc = atan2(sin(latest.player.yaw - previous.player.yaw),
+            cos(latest.player.yaw - previous.player.yaw));
+        render_yaw = previous.player.yaw + yaw_arc * alpha;
+        render_pitch = previous.player.pitch +
+            (latest.player.pitch - previous.player.pitch) * alpha;
+        if (active) {
+            render_yaw = yaw; render_pitch = pitch;
+        } else {
+            yaw = render_yaw; pitch = render_pitch;
+        }
+        for (axis = 0; axis < 3; ++axis)
+            eye[axis] = previous.player.player.position[axis] +
+                (latest.player.player.position[axis] -
+                previous.player.player.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
-        maage_world_environment(world, &environment_state);
-        rendered = maage_client_environment_update(environment_view, renderer, &environment_state,
-            world, &player, yaw, pitch, maage_client_ui_width(ui), maage_client_ui_height(ui), MAAGE_CLIENT_FOV_RADIANS);
+        forward[0] = sin(render_yaw) * cos(render_pitch);
+        forward[1] = -sin(render_pitch);
+        forward[2] = -cos(render_yaw) * cos(render_pitch);
+        if (audio) {
+            maage_client_ui_get_options(ui, &current_options);
+            (void)maage_client_audio_service_apply_options(audio, &current_options);
+            (void)maage_client_audio_service_update(audio, &latest,
+                eye, forward, now, trace);
+        }
+        rendered = maage_client_interaction_update(&interaction, renderer,
+            atlas, blocks, &latest, trace);
+        if (maage_status_failed(rendered)) goto done;
+        rendered = maage_client_environment_update(environment_view,
+            renderer, &latest, maage_client_ui_width(ui),
+            maage_client_ui_height(ui), MAAGE_CLIENT_FOV_RADIANS);
         if (maage_status_failed(rendered)) goto done;
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;
         }
-        draw_count = resident_count = 0; memset(&mesh_stats, 0, sizeof(mesh_stats));
-        for (slot_index = 0; slot_index < cache.capacity; ++slot_index) if (cache.slots[slot_index].used) {
-            ++resident_count;
-            if (cache.slots[slot_index].mesh) {
-                cache.draws[draw_count++] = cache.slots[slot_index].mesh; ++mesh_stats.meshes;
-                mesh_stats.vertices += cache.slots[slot_index].vertices;
-                mesh_stats.indices += cache.slots[slot_index].indices;
+        draw_count = resident_count = 0;
+        memset(&mesh_stats, 0, sizeof(mesh_stats));
+        for (slot_index = 0; slot_index < cache.capacity; ++slot_index)
+            if (cache.slots[slot_index].used) {
+                ++resident_count;
+                if (cache.slots[slot_index].mesh) {
+                    cache.draws[draw_count++] = cache.slots[slot_index].mesh;
+                    ++mesh_stats.meshes;
+                    mesh_stats.vertices += cache.slots[slot_index].vertices;
+                    mesh_stats.indices += cache.slots[slot_index].indices;
+                }
             }
-        }
         mesh_activity.status.gpu_resident = resident_count;
         mesh_activity.status.ready_waiting_estimate =
-            stats.ready > resident_count ? stats.ready - resident_count : 0;
+            latest.world_stats.ready > resident_count ?
+                latest.world_stats.ready - resident_count : 0;
         if (interaction.mesh) {
             if (!cache.draws && maage_status_failed(maage_client_mesh_cache_grow(&cache))) {
-                rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0); goto done;
+                rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED,
+                    MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_CREATE, 0);
+                goto done;
             }
             cache.draws[draw_count++] = interaction.mesh;
         }
-        debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, world, &record,
-            &stats, &player, yaw, pitch, options.radius, !active, renderer, &mesh_stats, &game) : NULL;
+        debug_text = maage_client_ui_debug_visible(ui) ?
+            maage_client_debug_collect(&debug, now, &latest, options.radius,
+                !active, renderer, &mesh_stats) : NULL;
         maage_client_ui_notice_time(ui, now);
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
-            maage_client_camera(matrix, eye, yaw, pitch, (double)state.framebuffer_width / state.framebuffer_height, options.radius);
-            rendered = maage_renderer_draw_frame(renderer, cache.draws, draw_count, matrix, ui_draw, trace);
+            maage_client_camera(matrix, eye, render_yaw, render_pitch,
+                (double)state.framebuffer_width / state.framebuffer_height, options.radius);
+            rendered = maage_renderer_draw_frame(renderer, cache.draws,
+                draw_count, matrix, ui_draw, trace);
             if (maage_status_failed(rendered)) goto done;
-        } else rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+        } else rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
         frame_end = maage_time_monotonic_seconds();
-        if (frame_end < 0) goto clock_failed;
-        maage_client_debug_frame(&debug, frame_end, raw_elapsed > 0 ? raw_elapsed : 0,
-            maage_status_code(rendered) == MAAGE_STATUS_SUCCESS, tick_count, tick_seconds);
+        if (frame_end < 0.0) goto clock_failed;
+        tick_count = latest.tick >= last_seen_tick ?
+            latest.tick - last_seen_tick : 0;
+        last_seen_tick = latest.tick;
+        maage_client_debug_frame(&debug, frame_end, raw_elapsed,
+            maage_status_code(rendered) == MAAGE_STATUS_SUCCESS,
+            tick_count, 0.0);
         ++frames;
         if (now - diagnostic_time >= 5.0) {
-            maage_log_debug("maage.client.world", "Loaded=%u; pending=%u; ready=%u; generated=%lu; disk=%lu; meshes=%lu; frame=%.1fms.",
-                stats.loaded, stats.pending, stats.ready, stats.generated, stats.loaded_from_disk, stats.meshes,
-                (now - diagnostic_time) * 1000.0 / frames);
-            maage_log_debug("maage.client.render", "GPU uploads=%.1f/s; geometry=%.0f vertices/s; resident=%lu; ready not presented~%lu; budget=%.2fms; last uploads=%u (%.2fms GPU / %.2fms stream); rejected=%lu.",
-                mesh_activity.status.uploads_per_second, mesh_activity.status.vertices_per_second,
-                (unsigned long)mesh_activity.status.gpu_resident,
-                (unsigned long)mesh_activity.status.ready_waiting_estimate, mesh_activity.status.budget_ms,
-                mesh_activity.status.uploaded_this_frame, mesh_activity.status.frame_upload_ms,
-                mesh_activity.status.stream_ms, mesh_activity.status.rejected);
-            maage_log_debug("maage.client.jobs", "Workers=%u; queued=%u; running=%u; generation=%u; lighting=%u; meshing=%u; I/O=%u; completed=%lu; cancelled=%lu; stale=%lu; scheduling=%.2fms.",
-                stats.worker_count, stats.queued_jobs, stats.running_jobs, stats.generation_jobs, stats.lighting_jobs,
-                stats.meshing_jobs, stats.io_jobs, stats.completed_jobs, stats.cancelled_jobs, stats.stale_jobs,
-                stats.scheduling_latency_ms);
+            maage_log_debug("maage.client.server",
+                "Tick=%lu; loaded=%u; pending=%u; ready=%u; gpu=%lu; uploads=%.1f/s; frame=%.1fms.",
+                latest.tick, latest.world_stats.loaded, latest.world_stats.pending,
+                latest.world_stats.ready, (unsigned long)resident_count,
+                mesh_activity.status.uploads_per_second,
+                frames ? (now - diagnostic_time) * 1000.0 / frames : 0.0);
             diagnostic_time = now; frames = 0;
         }
         if (maage_status_code(rendered) == MAAGE_STATUS_NOOP) {
@@ -834,93 +1530,121 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             double deadline = now + 1.0 / maage_client_ui_max_fps(ui);
             double remaining = deadline - frame_end;
             int milliseconds;
-            /* Events may wake a wait early. Keep pumping until the deadline;
-             * round upward so a sub-millisecond remainder still yields. */
-            while (remaining > 0) {
+            while (remaining > 0.0) {
                 milliseconds = (int)ceil(remaining * 1000.0);
                 if (milliseconds > 100) milliseconds = 100;
                 result = maage_window_wait_events(system, milliseconds);
                 if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-                /* Consume resize notifications to let event backends wait
-                 * again, retaining the renderer's resize for the next frame. */
                 result = maage_window_get_state(window, &waited_state);
                 if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
                 resize_pending = resize_pending || waited_state.resized;
                 if (waited_state.close_requested) break;
                 frame_end = maage_time_monotonic_seconds();
-                if (frame_end < 0) goto clock_failed;
+                if (frame_end < 0.0) goto clock_failed;
                 remaining = deadline - frame_end;
             }
         }
     }
     goto done;
 clock_failed:
-    outcome = maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_QUERY, 0);
-    failure_message = "Monotonic clock unavailable; fixed-step simulation cannot continue."; goto done;
+    outcome = maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED,
+        MAAGE_CONTEXT_CORE, MAAGE_OPERATION_QUERY, 0);
+    failure_message = "Monotonic presentation clock unavailable.";
+    goto done;
 window_failed:
     outcome = MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     failure_message = "Native window/input cannot continue.";
 done:
-    if (options_ready) {
-        /* Also persist non-menu changes on ordinary shutdown. If AppKit is
-         * still transitioning, the UI exposes its last confirmed mode. */
+    if (options_ready && ui) {
         operation = maage_client_options_store(instance, ui, &saved_video_options, 1);
         if (maage_status_failed(operation))
-            maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
-                "Unable to save instance config/options.ini during shutdown.");
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.options",
+                operation, "Unable to persist config/options.ini during shutdown.");
     }
-    if (ok) outcome = maage_status_make(maage_status_is_success(resource_notice) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL,
+    if (ok) outcome = maage_status_make(maage_status_is_success(resource_notice) ?
+        MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL,
         MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
     else if (!maage_status_failed(outcome)) {
-        outcome = maage_status_failed(rendered) ? rendered : (maage_status_failed(result) ? result : operation);
-        if (!maage_status_failed(outcome)) outcome = maage_status_make(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE, 0);
+        outcome = maage_status_failed(rendered) ? rendered :
+            (maage_status_failed(result) ? result : operation);
+        if (!maage_status_failed(outcome))
+            outcome = maage_status_make(MAAGE_STATUS_FATAL,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
     }
     if (!ok) {
-        MAAGE_STATUS_PROPAGATE(trace, outcome, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_START);
-        if (!world || outcome != maage_world_status(world))
-            maage_log_trace_status(MAAGE_LOG_FATAL, "maage.client", outcome, trace, "%s", failure_message);
+        MAAGE_STATUS_PROPAGATE(trace, outcome, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);
+        maage_log_trace_status(MAAGE_LOG_FATAL, "maage.client", outcome, trace,
+            "%s", failure_message);
     }
     maage_status_trace_init(&cleanup_trace);
-    if (window) {
-        maage_status_trace_init(&cleanup_trace);
-        maage_client_cleanup_result(maage_window_capture_mouse(window, 0), &outcome, &cleanup_trace, trace);
-    }
-    /* Waiting and final player metadata I/O occur only after rendering stops. */
-    teardown = world ? maage_world_flush(world, &cleanup_trace) : 0;
-    if (maage_status_failed(teardown)) {
-        maage_log_info("maage.client.world", "Existing player metadata preserved after the reported World failure.");
-        if (!maage_status_failed(outcome)) { outcome = teardown; if (trace) *trace = cleanup_trace; }
-        player_ready = 0;
-    }
-    if (store && player_ready) {
-        maage_world_environment(world, &environment_state);
-        operation = maage_world_store_save_environment_gameplay(store, player.position,
-            yaw, pitch, &game, items, &environment_state, error, &cleanup_trace);
+    if (window) maage_client_cleanup_result(maage_window_capture_mouse(window, 0),
+        &outcome, &cleanup_trace, trace);
+    /* Stop command production first. The Server controls all authoritative
+     * World flush/persistence; no Client World store/save API is ever invoked. */
+    if (server) maage_server_runtime_request_stop(server);
+    if (ui) maage_client_ui_set_click_callback(ui, NULL, NULL);
+    maage_client_cleanup_result(maage_client_audio_service_destroy(audio, &cleanup_trace),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_environment_destroy(environment_view),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_render_mesh_destroy(interaction.mesh),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_ui_destroy(ui),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_render_texture_destroy(atlas),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_renderer_destroy(renderer, &cleanup_trace),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_window_destroy(window),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_window_system_destroy(system),
+        &outcome, &cleanup_trace, trace);
+    if (server) {
+        if (server_started) {
+            /* join returns the authoritative outcome, which may be a save or
+             * simulation failure even when its thread joined successfully.
+             * Do not confuse that with an unsafe native join failure. */
+            operation = maage_server_runtime_join(server, &cleanup_trace);
+            if (maage_status_failed(operation)) {
+                if (!maage_status_failed(outcome)) {
+                    outcome = operation;
+                    if (trace) *trace = cleanup_trace;
+                }
+                maage_log_trace_status(MAAGE_LOG_ERROR, "maage.client.server",
+                    operation, &cleanup_trace,
+                    "Authoritative Server reported a shutdown or persistence failure.");
+            }
+        }
+        /* Destroy retries an actual failed thread join and refuses to release
+         * a World whose workers still borrow content/storage. */
+        operation = maage_server_runtime_destroy(server);
         if (maage_status_failed(operation)) {
-            maage_log_trace_status(MAAGE_LOG_ERROR, "maage.client.world", operation, &cleanup_trace, "%s", error);
-            if (!maage_status_failed(outcome)) { outcome = operation; if (trace) *trace = cleanup_trace; }
+            maage_client_storage_retain();
+            maage_log_trace_status(MAAGE_LOG_FATAL, "maage.client.server",
+                operation, &cleanup_trace,
+                "Integrated Server did not fully release its World; retaining borrowed content and instance storage.");
+            return MAAGE_STATUS_PROPAGATE(trace, operation,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);
         }
     }
-    maage_status_trace_init(&cleanup_trace);
-    maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_client_environment_destroy(environment_view), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_render_mesh_destroy(interaction.mesh), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_client_ui_destroy(ui), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_render_texture_destroy(atlas), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_renderer_destroy(renderer, &cleanup_trace), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_window_destroy(window), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_window_system_destroy(system), &outcome, &cleanup_trace, trace);
-    teardown = maage_world_destroy(world);
-    if (maage_status_failed(teardown)) {
-        maage_client_storage_retain();
-        maage_log_trace_status(MAAGE_LOG_FATAL, "maage.client", teardown, trace,
-            "Worker shutdown incomplete; retaining borrowed World storage until process exit.");
-        return MAAGE_STATUS_PROPAGATE(trace, teardown, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_DESTROY);
+    if (session) {
+        maage_client_cleanup_result(maage_local_session_close(session),
+            &outcome, &cleanup_trace, trace);
+        maage_client_cleanup_result(maage_local_session_destroy(session),
+            &outcome, &cleanup_trace, trace);
     }
-    maage_client_cleanup_result(maage_world_store_close(store), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_block_registry_destroy(registry), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_item_registry_destroy(items), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_biome_registry_destroy(biomes), &outcome, &cleanup_trace, trace); free(biomes);
-    maage_client_cleanup_result(maage_client_resources_destroy(&resources), &outcome, &cleanup_trace, trace);
-    return MAAGE_STATUS_PROPAGATE(trace, outcome, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);
+    maage_client_cleanup_result(maage_content_destroy(content),
+        &outcome, &cleanup_trace, trace);
+    if (biomes) {
+        maage_client_cleanup_result(maage_biome_registry_destroy(biomes),
+            &outcome, &cleanup_trace, trace);
+        free(biomes);
+    }
+    maage_client_cleanup_result(maage_client_resources_destroy(&resources),
+        &outcome, &cleanup_trace, trace);
+    (void)valid_snapshot;
+    return MAAGE_STATUS_PROPAGATE(trace, outcome,
+        MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);
 }
