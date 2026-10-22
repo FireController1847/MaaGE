@@ -1,0 +1,75 @@
+#ifndef MAAGE_SOUND_BANK_H
+#define MAAGE_SOUND_BANK_H
+
+#include <stddef.h>
+#include "maage/status.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* One owner thread registers and decodes bank resources; do not concurrently
+ * mutate/decode/destroy the same bank. No API runs on an audio callback.
+ * Resource generation is immutable after registration; destroy and recreate a
+ * bank to retry cached failures after Launcher-driven asset repair.
+ *
+ * Clip IDs are caller-assigned deterministic integers in [0, 65535]. A direct
+ * table provides O(1) lookup, including sparse IDs. Paths are resolved only at
+ * registration; indexed Java 1.7.10 paths are minecraft/sounds/.../*.ogg,
+ * relative to minecraft/assets/reconst/ (never pass objects/<hash>).
+ *
+ * Decoding is lazy. Cache retention is LRU and bounded by memory_budget,
+ * not counting caller-owned output or decoder scratch. A zero budget disables
+ * retained PCM. A single clip may consume up to MAAGE_SOUND_MAX_PCM_BYTES
+ * independently of the retention budget (needed for long music tracks).
+ */
+#define MAAGE_SOUND_MAX_CLIP_ID 65535U
+#define MAAGE_SOUND_MAX_PCM_BYTES (128UL * 1024UL * 1024UL)
+#define MAAGE_SOUND_MAX_OGG_BYTES (64UL * 1024UL * 1024UL)
+
+typedef struct maage_sound_bank maage_sound_bank;
+
+/* Value type: initialize to all-zero before the first decode. On success,
+ * samples is a NEW caller-owned allocation, even on cache hits. It remains
+ * immutable by contract while shared with a mixer and is never borrowed from
+ * the bank. Destroy it after the final consumer releases it; do not shallow
+ * copy this owning value or destroy it while a consumer retains its pointer.
+ * On failure decode leaves the all-zero output intact.
+ * frame_count counts frames, not floats; samples has frame_count*channels
+ * interleaved float values. Channels are 1 or 2.
+ */
+typedef struct maage_sound_pcm {
+    float *samples;
+    size_t frame_count;
+    unsigned int channels;
+    unsigned int sample_rate;
+} maage_sound_pcm;
+
+/* data_root is a MaaGE application data directory (NULL = platform default).
+ * Copying the root makes caller string lifetime irrelevant. output must be
+ * non-NULL and *output must be NULL. memory_budget bounds cached PCM only. */
+maage_status maage_sound_bank_create(const char *data_root, size_t memory_budget,
+    maage_sound_bank **output, maage_status_trace *trace);
+
+/* Exactly one registration per numeric ID. Asset names use existing
+ * maage_minecraft_asset_path validation; only .ogg is accepted. Registration
+ * never opens, downloads, or decodes the file. */
+maage_status maage_sound_bank_register(maage_sound_bank *bank,
+    unsigned int numeric_clip_id, const char *logical_asset_path,
+    maage_status_trace *trace);
+
+/* Copy out a caller-owned PCM. No string lookup, filesystem access on cache
+ * hits, or negative-resource reopen after the first failed attempt.
+ * NOT_FOUND is recoverable and scoped to the failing clip. Transient memory
+ * allocation failures are not negatively cached. */
+maage_status maage_sound_bank_decode(maage_sound_bank *bank,
+    unsigned int numeric_clip_id, maage_sound_pcm *pcm,
+    maage_status_trace *trace);
+
+maage_status maage_sound_pcm_destroy(maage_sound_pcm *pcm);
+maage_status maage_sound_bank_destroy(maage_sound_bank *bank);
+
+#ifdef __cplusplus
+}
+#endif
+#endif
