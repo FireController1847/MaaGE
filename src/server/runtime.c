@@ -712,7 +712,7 @@ maage_status maage_server_runtime_create(const maage_server_config *config,
     if (output) *output = NULL;
     if (!config || !output || !config->instance_root ||
         !*config->instance_root || config->render_distance < 1 ||
-        config->render_distance > MAAGE_SERVER_MAX_RADIUS ||
+        config->render_distance > MAAGE_WORLD_MAX_RADIUS ||
         (config->initial_game_mode != -1 &&
          config->initial_game_mode != MAAGE_GAME_MODE_SURVIVAL &&
          config->initial_game_mode != MAAGE_GAME_MODE_CREATIVE) ||
