@@ -826,13 +826,33 @@ static maage_status maage_metal_set_vsync(maage_renderer *renderer, int enabled)
     maage_metal_renderer *native = (maage_metal_renderer *)renderer->platform;
     maage_status result;
     int start_presenter;
+    maage_window_state state;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
     if (!native || !native->layer) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     result = maage_metal_present_result(renderer);
     if (maage_status_failed(result)) return result;
-    /* Once started, the mailbox presenter remains alive through VSync changes.
-     * Joining it from AppKit's main thread can deadlock during a Space/resize
-     * transition while nextDrawable waits for the layer or compositor. */
+    /* Switching back on must leave mailbox mode. Simply setting
+     * displaySyncEnabled=YES leaves the asynchronous presenter active and the
+     * Client FPS counter no longer reflects display-paced frames. Avoid
+     * joining the presenter while AppKit is changing fullscreen Spaces. */
+    result = maage_window_get_state(renderer->window, &state);
+    if (maage_status_failed(result)) return result;
+    if (state.mode_transitioning || [(NSWindow *)renderer->native.handles.cocoa.window inLiveResize])
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (enabled && native->asynchronous) {
+        result = maage_metal_stop_presenter(native);
+        if (maage_status_failed(result)) return result;
+        { unsigned int slot;
+          for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot) {
+              result = maage_metal_complete(renderer, slot);
+              if (maage_status_failed(result)) return result;
+          }
+        }
+        native->frame_slot = 0;
+        native->submissions_since_present = 0;
+        native->drawable_retry_after = 0;
+        native->presenting = -1;
+    }
     start_presenter = !enabled && !native->asynchronous;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];

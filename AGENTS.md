@@ -219,6 +219,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
 - New Client configurations default to 240 FPS; 0 remains Unlimited, with GPU/display backpressure rather than an artificial FPS ceiling. Preserve explicit saved preferences.
+- Register all 1.7.10 music tracks by numeric asset ID; decode and upload only a
+  selected track when music playback begins, and release its Audio buffer after
+  playback stops. Memory bounds constrain decoded clips, not the number of
+  registered tracks; never report a policy limit as NOT_FOUND on disk.
 - Client persists FPS, VSync, GUI Scale, Leaves and Window Mode in per-instance
   `config/options.ini`, using numeric settings in memory and atomic Core Storage replacement.
   Game Mode remains world data. Save on Options exit, completed F11/window transitions,
@@ -474,6 +478,9 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   ownership through its GPU copy; never borrow caller batches or traces across threads.
   Mailbox backpressure must not produce 100 ms Client event sleeps or flood the GPU;
   keep main-thread event pumping responsive while presentation catches up.
+  Re-enabling VSync must restore the synchronous direct-drawable presentation
+  path, not leave the mailbox worker active with only displaySyncEnabled flipped.
+  Avoid joining that worker during native fullscreen/resize transitions.
   Use Apple's Metal API, with Cocoa/AppKit and `CAMetalLayer` where
   appropriate. MoltenVK must not be the required implementation. Isolate necessary
   Objective-C/Objective-C++ translation units in macOS implementation directories;

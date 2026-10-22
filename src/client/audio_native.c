@@ -12,7 +12,6 @@
 #define MAAGE_NATIVE_BUFFERS 512U
 #define MAAGE_NATIVE_VOICES 128U
 #define MAAGE_NATIVE_SCENE_SOUNDS 32U
-#define MAAGE_NATIVE_MUSIC_TRACKS 3U
 #define MAAGE_NATIVE_MAX_VOLUME 4.0f
 
 typedef struct maage_native_bank {
@@ -42,13 +41,14 @@ typedef struct maage_native_scene_sound {
     double duration;
     size_t bytes;
     int music, loop;
+    unsigned int clip_id; /* Registered at bind; music is decoded only when selected. */
 } maage_native_scene_sound;
 typedef struct maage_native_scene {
     maage_client_audio_scene *scene;
     maage_native_bank *bank;
     maage_native_engine *engine;
     maage_native_scene_sound sounds[MAAGE_NATIVE_SCENE_SOUNDS];
-    unsigned int sound_count, music_count;
+    unsigned int sound_count;
 } maage_native_scene;
 
 static maage_status mn_status(unsigned char code, unsigned char operation)
@@ -420,10 +420,18 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     id = ++scene->sound_count;
     sound = &scene->sounds[id];
     music = strstr(path, "/music/") != NULL;
-    /* Long tracks are expensive. This explicit bound is fixed at initialization;
-     * the other tracks remain optional without causing an update-time decode. */
-    if (music && scene->music_count >= MAAGE_NATIVE_MUSIC_TRACKS)
-        return mn_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
+    if (music) {
+        /* Register every track without decoding it. Only the selected track
+         * owns a decoded Audio buffer while it is playing. */
+        if (scene->bank->next_id >= MAAGE_SOUND_MAX_CLIP_ID)
+            return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
+        sound->clip_id = ++scene->bank->next_id;
+        result = maage_sound_bank_register(scene->bank->bank, sound->clip_id, path, NULL);
+        if (maage_status_failed(result)) return result;
+        sound->music = 1;
+        *numeric = (maage_client_audio_scene_sound_id)id;
+        return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
+    }
     result = mn_decode_file(scene->bank, path, &pcm, NULL);
     if (maage_status_failed(result)) return result;
     if (pcm->pcm.frame_count > ((size_t)-1) / pcm->pcm.channels / sizeof(float)) {
@@ -448,7 +456,6 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     sound->loop = strstr(path, "/weather/rain") != NULL ||
         strstr(path, "/liquid/water") != NULL ||
         strstr(path, "/liquid/lava.") != NULL;
-    if (music) ++scene->music_count;
     *numeric = (maage_client_audio_scene_sound_id)id;
     return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
 }
@@ -457,7 +464,8 @@ static maage_native_scene_sound *mn_scene_get(maage_native_scene *scene,
 {
     if (!scene || !numeric || numeric > scene->sound_count || numeric >= MAAGE_NATIVE_SCENE_SOUNDS)
         return NULL;
-    return scene->sounds[numeric].buffer ? &scene->sounds[numeric] : NULL;
+    return scene->sounds[numeric].buffer || scene->sounds[numeric].music ?
+        &scene->sounds[numeric] : NULL;
 }
 static int mn_scene_can_loop(void *context, const void *catalog,
     maage_client_audio_scene_sound_id numeric)
@@ -477,7 +485,7 @@ static maage_status mn_scene_play_sound(void *context, void *audio,
     unsigned int bus;
     (void)audio;
     if (voice) *voice = 0;
-    if (!sound || !voice || (loop && !sound->loop))
+    if (!sound || !sound->buffer || !voice || (loop && !sound->loop))
         return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
     bus = category == MAAGE_AUDIO_SCENE_WEATHER ? MAAGE_AUDIO_WEATHER :
         (category == MAAGE_AUDIO_SCENE_MUSIC ? MAAGE_AUDIO_MUSIC : MAAGE_AUDIO_AMBIENT);
@@ -489,17 +497,51 @@ static maage_status mn_scene_music_prepare(void *context, const void *catalog,
     maage_client_audio_scene_sound_id numeric, size_t max_bytes,
     void **pcm, size_t *bytes)
 {
-    maage_native_scene_sound *sound = mn_scene_get((maage_native_scene *)context, numeric);
+    maage_native_scene *scene = (maage_native_scene *)context;
+    maage_native_scene_sound *sound = mn_scene_get(scene, numeric);
+    maage_sound_pcm decoded;
+    maage_native_pcm source;
+    maage_audio_buffer *buffer = NULL;
+    maage_status result;
+    size_t samples, decoded_bytes;
     (void)catalog;
     if (pcm) *pcm = NULL;
     if (bytes) *bytes = 0;
-    if (!pcm || !bytes || !sound || !sound->music)
+    if (!pcm || !bytes || !sound || !sound->music || !sound->clip_id)
         return mn_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP);
-    if (sound->bytes > max_bytes)
-        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_LOOKUP);
+    if (sound->buffer)
+        return mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_DECODE);
+    memset(&decoded, 0, sizeof(decoded));
+    result = maage_sound_bank_decode(scene->bank->bank, sound->clip_id, &decoded, NULL);
+    if (maage_status_failed(result)) return result;
+    if (!decoded.sample_rate || !decoded.channels ||
+        decoded.frame_count > (size_t)-1 / decoded.channels) {
+        maage_sound_pcm_destroy(&decoded);
+        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_DECODE);
+    }
+    samples = decoded.frame_count * decoded.channels;
+    if (samples > (size_t)-1 / sizeof(float)) {
+        maage_sound_pcm_destroy(&decoded);
+        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_DECODE);
+    }
+    decoded_bytes = samples * sizeof(float);
+    if (decoded_bytes > max_bytes) {
+        maage_sound_pcm_destroy(&decoded);
+        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_DECODE);
+    }
+    source.pcm = decoded;
+    result = mn_upload_pcm(scene->engine, &source, &buffer, NULL);
+    if (!maage_status_failed(result) && buffer) {
+        sound->duration = (double)decoded.frame_count / decoded.sample_rate;
+        sound->bytes = decoded_bytes;
+        sound->buffer = buffer;
+    }
+    maage_sound_pcm_destroy(&decoded);
+    if (maage_status_failed(result)) return result;
+    if (!buffer) return mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_UPLOAD);
     *pcm = sound;
     *bytes = sound->bytes;
-    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOOKUP);
+    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DECODE);
 }
 static maage_status mn_scene_music_play(void *context, void *audio, void *pcm,
     double gain, maage_client_audio_scene_voice *voice)
@@ -516,8 +558,16 @@ static maage_status mn_scene_music_play(void *context, void *audio, void *pcm,
 }
 static void mn_scene_music_release(void *context, void *pcm)
 {
-    /* Borrowed immutable Audio-owned buffer retained until scene_destroy. */
-    (void)context; (void)pcm;
+    maage_native_scene_sound *sound = (maage_native_scene_sound *)pcm;
+    (void)context;
+    /* Scene calls release only after its music voice has stopped. Free the
+     * Audio buffer, not the registered SoundBank asset, so the next selection
+     * can decode this or any other track on demand. */
+    if (!sound || !sound->buffer) return;
+    (void)maage_audio_buffer_destroy(sound->buffer);
+    sound->buffer = NULL;
+    sound->bytes = 0;
+    sound->duration = 0.0;
 }
 static int mn_scene_voice_running(void *context, void *audio,
     maage_client_audio_scene_voice token)

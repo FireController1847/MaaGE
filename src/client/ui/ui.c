@@ -145,7 +145,15 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
             if (ui->vsync_supported) {
                 maage_status status = maage_renderer_set_vsync(ui->renderer, !ui->vsync);
                 if (maage_status_code(status) == MAAGE_STATUS_SUCCESS) ui->vsync = !ui->vsync;
-                else { ui->vsync_supported = 0; ui->route_result = status; }
+                else {
+                    /* Temporary resize/Space-transition errors must not
+                     * permanently disable the VSync control. */
+                    unsigned int code = maage_status_code(status);
+                    if (code == MAAGE_STATUS_NOT_IMPLEMENTED ||
+                        code == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)
+                        ui->vsync_supported = 0;
+                    ui->route_result = status;
+                }
             }
         } else if (ui->selected == 2) ui->requested_scale = (ui->requested_scale + 1) % 5;
         else if (ui->selected == 3) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
@@ -445,7 +453,9 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     if (ui->vsync_supported && ui->vsync != options->vsync) {
         result = maage_renderer_set_vsync(ui->renderer, options->vsync);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
-            ui->vsync_supported = 0;
+            if (maage_status_code(result) == MAAGE_STATUS_NOT_IMPLEMENTED ||
+                maage_status_code(result) == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)
+                ui->vsync_supported = 0;
             ui->route_result = result;
         } else ui->vsync = options->vsync;
     }
