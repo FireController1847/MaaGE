@@ -796,7 +796,7 @@ maage_status maage_world_store_open_configured(const char *instance_root, const 
     }
     if (create) {
         if (generation_policy) store->record.generation_policy = *generation_policy;
-        else MAAGE_STORE_STEP(maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &store->record.generation_policy), "Cannot initialize world generation policy.");
+        else MAAGE_STORE_STEP(maage_generation_policy_default(MAAGE_GENERATION_FEATURES_VERSION, &store->record.generation_policy), "Cannot initialize world generation policy.");
         strcpy(store->record.id, chosen); strcpy(store->record.name, name ? name : "New World");
         store->record.new_world = 1; store->record.position[1] = 128;
         maage_store_gameplay_default(&store->record.gameplay);
@@ -1457,6 +1457,10 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
             chunk->sections[section]->light[i] = (unsigned char)maage_store_get(&bytes, 1);
     }
     if (simulation && !maage_store_chunk_simulation_get(&bytes,chunk,blocks)) goto failed;
+    /* A version-3 chunk may never be persisted as completed before all eight
+     * stages have run. Older chunk formats have no stage journal. */
+    if (simulation && generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
+        chunk->generation_stages != 255U) goto failed;
     if (bytes.failed || bytes.position != bytes.length) goto failed;
     free(palette);
     *output = chunk;
