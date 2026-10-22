@@ -16,14 +16,13 @@
 MaaGE (Minecraft as a Game Engine): **A modular, cross-platform reimagining of
 Minecraft in C, built for performance, extensibility, and limitless modding.**
 
-This independently developed native voxel platform takes **Minecraft: Java Edition
-1.7.10** as its canonical gameplay and compatibility reference, not later releases.
-Recreate its familiar mechanics and modpack experience while retaining freedom to
-redesign, optimize, extend, or replace systems. Version 1.7.10 is the starting
-point, not an architectural limitation. Support many independently configurable
-modpacks rather than one predefined game. Do not reproduce the Java engine,
-preserve Forge compatibility, or execute existing Java mods; develop independent
-native or data-driven systems and content instead.
+This independently developed native voxel platform uses Minecraft: Java Edition
+1.7.10 as a loose gameplay, content and visual baseline, not as an interoperability,
+implementation, binary-format, seed-parity or architectural contract. Recreate
+recognizable mechanics and the traditional modpack feel where useful, but
+freely redesign, optimize, multithread, extend or replace systems. The Java
+engine's limitations must not constrain MaaGE. Develop independent native
+or data-driven systems, not Java/Forge compatibility or Java mod execution.
 
 The repository has a CMake workspace, a minimal shared core, and a reusable native
 windowing and rendering subsystems consumed by the Launcher. The architecture and roadmap describe
@@ -32,6 +31,38 @@ not implemented capabilities or authorization to build them. Inspect current cod
 before claiming functionality or successful platform validation.
 
 ## Non-negotiable engineering principles
+
+### Predevelopment: breaking changes are expected
+
+- **MaaGE is in predevelopment, not a released product. Backward compatibility
+  is NOT a requirement.** Older MaaGE world saves, seeds, generators, schemas,
+  settings, assets, instance directories, executable builds, command lines,
+  internal/public APIs and data formats may be broken or discarded at any time.
+  Do not preserve them unless the programmer explicitly requests it.
+- Prefer ONE clean implementation of each current feature. Do not build or retain
+  historical generator variants, old save decoders, migration systems, aliases,
+  deprecated wrappers or version-specific fallback branches to accommodate
+  earlier MaaGE development builds. Existing compatibility code is cleanup debt.
+- **All local MaaGE development data is disposable.** Worlds, installations,
+  caches, configuration files, or the entire MaaGE directory may simply be
+  deleted and recreated after an architectural change. No backwards migrations,
+  conversion, archives, backup/recovery procedures or preserved settings are
+  required for prior-build data. Reject incompatible formats rather than
+  silently interpreting old bytes as the current format.
+- Keep engineering correctness for the CURRENT design: memory and thread safety,
+  ownership, concurrency, input validation and credential security. These are
+  not compatibility commitments and do not justify legacy data scaffolding.
+- Keep independent Launcher, Client and Server SemVer alpha.* progression
+  and Git build hashes. They track development, not compatibility guarantees.
+  Format, API and protocol version fields may aid validation/rejection of
+  incompatible data; their existence does not require older readers or migration.
+- Minecraft Java Edition 1.7.10 is a loose gameplay/content reference only:
+  no Java seed parity, binary interoperability, fixed numeric ID mappings,
+  Java mod compatibility or imitation of its single-threaded architecture.
+- When undertaking an architectural breaking change, revise contradictory
+  project instructions and remove superseded code instead of layering new
+  compatibility machinery over it. Note when local development data must be
+  recreated.
 
 ### C90-first portability
 
@@ -116,8 +147,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Block types and states have distinct numeric domains; states reference types
   and resolved numeric metadata/properties. Biome definitions also use direct
   numeric indexing; generation, streaming and lighting never compare names.
-  Preserve 1.7.10 IDs/metadata where
-  practical without permanently limiting ID capacity to the legacy format.
+  MaaGE chooses current numeric ID/property mappings freely; Minecraft
+  1.7.10 values are optional reference material, not compatibility constraints.
 - Item types have their own immutable numeric registry, independent of block/state
   IDs. Portable fixed-size stacks carry count, metadata and damage; inventory and
   simulation never resolve names. Display names remain presentation data.
@@ -139,16 +170,14 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Use 1.7.10 geometry: 16x16 columns, up to sixteen sparse 16x16x16 sections,
   Y=0..255. Negative coordinates use floor division and positive modulo.
   Coordinate-keyed hashing is expected O(1), not deterministic worst-case O(1).
-- Seeded generation is versioned and independent of load order/scheduling.
-  Signed 64-bit seeds use C90-compatible word pairs. Generator 1 retains
-  its frozen Y=63 and spawn-search behavior. Generator 2 permits explicit,
-  immutable per-world sea level and spawn-search policy, saved in metadata
-  schema 5 and propagated into asynchronous World jobs. Existing worlds
-  retain their recorded version/policy; never change one on load. Generator 3
-  adds ordered feature stages, bounded regional cave/ore/tree/structure plans
-  clipped independently to worker-owned columns, without neighbor waits. New
-  Clients select version 3 only for new worlds. No generator claims Java
-  Random/GenLayer or seed-for-seed parity.
+- Seeded generation must remain deterministic for the CURRENT algorithm,
+  independent of generation order and job scheduling. Signed 64-bit seeds use
+  C90-compatible word pairs. Maintain one active generator with configurable
+  sea-level/spawn policy and independent ordered terrain, cave, ore, surface,
+  vegetation and structure stages using worker-owned columns without neighbor
+  waits. Existing generators 1/2/3 are predevelopment implementations to
+  consolidate, NOT frozen behaviors to retain. Future changes may invalidate
+  all previous worlds. Java Random/GenLayer and seed parity are not goals.
 - Parallelize independent CPU-intensive world work by default through reusable
   `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
@@ -187,16 +216,16 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   owner at 20 TPS, respecting pause. Deduplicate column-owned fluid queues and
   batch copied publications; auxiliary-only edits preserve geometry epochs, and
   lighting commits retain current auxiliary state. Persist remaining update delays,
-  numeric block-entity payloads and clock/weather (chunk 3, metadata 6), reading
-  older formats without changing generators. Static sky/block light remains 0..15;
+  numeric block-entity payloads and clock/weather in the current format.
+  Old formats do not require readers or migration. Static sky/block light remains 0..15;
   frame daylight scales sky only, without tick-driven global relighting.
-- Store new worlds beneath `instances/<instance-uuid>/worlds/<world-uuid>/`,
-  separate from shared Minecraft resources. Preserve imported legacy IDs.
-  Format/generator/blockset versions bind stable numeric state mappings; changes
-  require explicit migrations. Validate save lengths, coordinates, IDs and CRCs,
-  sync temporary files before atomic promotion, preserve corrupt originals,
-  serialize writers with locks and flush on clean shutdown. World/biome/storage
-  services remain reusable by headless Server without graphical dependencies.
+- Store worlds under instances/<instance-uuid>/worlds/<world-uuid>/,
+  separate from shared Minecraft resources. Maintain one current save format;
+  generator/format/blockset identifiers may detect and reject stale development
+  data, not require conversion. Validate current-format lengths, coordinates,
+  IDs and CRCs; maintain correct concurrent writer ownership and cleanup.
+  No historical-format recovery or backups are required for disposable worlds.
+  World/biome/storage services remain reusable by the headless Server.
 
 ### Client game UI
 
@@ -236,11 +265,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Native fullscreen reserves the camera-notch safe area for UI/application
   content, while world rendering may cover available drawable pixels. Embed a
   Client-specific Info.plist in its standalone Mach-O executable (not the
-  Launcher bundle) to disable notch compatibility mode. Keep the legacy
-  MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN enum as an internal compatibility mode,
-  not as the user-facing Fullscreen choice. Unsupported platform operations
-  return explicit status instead of silently relabeling modes. Reconcile native
-  transition callbacks, saved mode, F11, windowed geometry and input capture.
+  Launcher bundle) to disable notch compatibility mode. Obsolete exclusive
+  fullscreen support is not a compatibility obligation; remove it if unused.
+  Unsupported platform operations return explicit status instead of silently
+  relabeling modes. Reconcile native transitions, saved mode, F11, geometry
+  and input capture.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
@@ -269,10 +298,9 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   immutable columns, invalidate lighting/neighbor mesh revisions and reject stale
   jobs/uploads. Retain asynchronous saves and dirty-eviction protection; never
   mutate worker-borrowed storage or introduce a global World lock.
-- Player metadata schemas 1-3 remain readable with their legacy numeric item
-  mapping; schema 4 preserves namespaced item identities and extensible pickup
-  counts. Schema 5 additionally persists generator-2 parameters. New chunk writes
-  use local stable-name palettes (chunk format 2); format-1 mappings stay readable.
+- Maintain one current player/chunk metadata representation with named item
+  identities, extensible pickups, simulation state and generation configuration.
+  Prior schemas, numeric mappings and chunk decoders require no preservation.
   Save final player metadata only after rendering and successful World flush.
   Respawn retains inventory at session-start position; full death/entity/food
   rules remain provisional against Java Edition 1.7.10.
@@ -296,13 +324,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Resolve `--instance=<uuid>` (or the Launcher selection) before Client logging and
   world startup. The global data root locates shared resources only; gameplay never
   falls back to global worlds. Resolve paths only at initialization/I/O boundaries.
-  Client descriptors declare numeric `instance_storage: 1`; retain but refuse to
-  launch legacy builds that could ignore instance selection and use global worlds.
-- Legacy migration requires the sole configured instance or explicit destination.
-  Lock all source worlds, journal before atomic relocation, verify copy fallbacks,
-  retain copy originals/recovery data and refuse occupied destinations. Ambiguity,
-  active writers and invalid data defer migration without resetting saves. Instance
-  deletion archives its physical directory, preserving worlds and shared targets.
+  Client descriptors identify the current instance-storage contract; reject
+  incompatible builds instead of preserving support for older executables.
+- Global-world-to-instance migration, journals and legacy manifest conversion are
+  not required; obsolete development data may be recreated. Instance deletion
+  must not accidentally delete explicitly shared external folder targets.
 
 ### Mandatory token-efficient development
 
@@ -330,7 +356,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Prefer focused builds of directly affected targets, shared components, and
   relevant primary backends. Build fallback backends only when modified or
   affected by shared API/build changes; do not repeatedly rebuild every platform
-  or renderer after unrelated edits. Do not fix unrelated legacy problems during
+  or renderer after unrelated edits. Do not refactor unrelated code during
   primary development or trigger GitHub Actions without explicit authorization.
   Keep exploration focused and report unsupported/uncompiled backends honestly.
   Runtime testing and visual validation belong to the programmer.
@@ -413,25 +439,23 @@ behind C90-compatible public interfaces. Do not require SDL or GLFW as foundatio
 
 Windowing is a reusable Core library, independent of applications and renderers;
 use native implementations without general-purpose third-party windowing frameworks.
-Its C90 public API uses opaque owned windows, explicit results, four
-internal window-mode values (Windowed, Borderless, Native fullscreen and legacy
-Exclusive fullscreen), and typed native-handle interoperability. Report unsupported operations explicitly. Linux
-backends are independently selectable; automatic selection prefers an available
-Wayland session with X11 fallback. Keep OS/protocol language exceptions backend-local.
+Its C90 public API uses opaque owned windows, explicit results, the window
+modes required by current platforms and typed native-handle interoperability.
+Obsolete modes need no compatibility support. Unsupported operations return
+explicit results. Linux adapters are independently selectable; automatic
+selection prefers Wayland when available with X11 fallback. Keep OS/protocol
+language exceptions backend-local.
 Wayland generated inline helpers require C99 only in its adapter target; the public
 API and common implementation remain C90. Linux builds require the selected native
 development libraries and protocol tools. Disable the optional windowing target for
 headless-only workspaces; never link it into Server core or the headless executable.
 A future optional GUI frontend inside the Server process may consume it.
-Legacy exclusive display capture remains internal and is not selected by the
-Client. Other adapters currently support Windowed/Borderless but may report
-NOT_IMPLEMENTED for native fullscreen. Wayland client-requested resize returns
-unsupported. macOS AppKit calls belong on the main thread; native fullscreen
-enters an AppKit Space and reports the notch-safe content region. Borderless
-covers the current display without entering a new Space. Preserve world drawable
-coverage where practical, while keeping controls clear of the physical camera
-cutout and respecting macOS Spaces/menu-bar/Dock policy.
-
+Obsolete exclusive display capture may be removed, rather than maintained
+for earlier MaaGE versions. Other adapters currently support Windowed and
+Borderless and may reject native fullscreen. Wayland client-requested resize
+is unsupported. macOS AppKit calls belong on the main thread; native fullscreen
+uses a Space and reports the notch-safe region, while Borderless covers the
+current display in the same Space. Keep controls clear of the camera cutout.
 ## First-class rendering backends
 
 Rendering is a reusable Core subsystem consumed through a C90, opaque,
@@ -646,15 +670,12 @@ dependencies; optional `MaaGE::StorageHash` owns OpenSSL SHA-1 for asset acquisi
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
-configuration, and Launcher logs. Minecraft-specific data belongs beneath
-`minecraft/`: `assets/indexes/1.7.10.json`, `assets/objects/<prefix>/<hash>`,
-`assets/reconst/<logical-name>`, and `metadata/1.7.10.json`. Rename the previous
-`assets/reconstructed/` directory when `reconst/` is absent; if both exist, preserve
-the old directory and prepare the active `reconst/` from verified caches. Receipts and the
-manifest also live in `minecraft/metadata/`; MaaGE configuration/logs remain outside.
-Reuse/migrate verified files from the previous `assets/` and `versions/1.7.10/`
-layout without redownloading them. Never create new Minecraft `versions/` trees.
-Previous `.maage` logs remain untouched.
+configuration, and Launcher logs. Minecraft-specific data belongs beneath minecraft/: assets/indexes/1.7.10.json,
+assets/objects/<prefix>/<hash>, assets/reconst/<logical-name> and
+metadata/1.7.10.json. Receipts and manifests live in minecraft/metadata/.
+Only the current MaaGE resource layout requires support; do not migrate old
+assets/, assets/reconstructed/ or versions/1.7.10/ data. Re-download or
+reconstruct resources as necessary. Never create old Minecraft versions/ trees.
 Downloads are content-addressed, SHA-1/size-verified, use configurable
 concurrency, retry count and network timeout/low-speed policies
 (`MAAGE_DOWNLOAD_*` environment settings), and atomically promote temporary
@@ -692,12 +713,13 @@ and unrelated package/signature metadata. Strip only the leading `assets/` from
 JAR resources: `assets/minecraft/textures/...` maps to
 `assets/reconst/minecraft/textures/...`. Preserve every namespace, root pack
 paths, and resource bytes; record original archive paths alongside logical names.
-Reuse verified files from either previous nested or flattened layouts, then remove
-only verified obsolete originals and empty directories after
-reconstruction succeeds; preserve indexed/unknown files. Never invent categories. Bound entry count/size/expansion and verify CRC,
-size, and derived SHA-1 before atomic promotion. Equal-content JAR entries can share
-hard links; indexed/JAR collisions share a path only for identical spelling and
-content, otherwise fail before reconstruction. Receipt sections `reconstructed`
+Use only the current asset reconstruction layout. Remove obsolete-layout
+reuse/cleanup code when simplifying the asset manager; there is no obligation
+to preserve resources from old MaaGE installs. Never invent categories.
+Bound entry count/size/expansion and verify CRC, size, and derived SHA-1 before
+atomic promotion. Equal-content JAR entries can share hard links; collisions
+must match both spelling and contents, otherwise fail before reconstruction.
+Receipt sections `reconstructed`
 (index) and `client_resources` (JAR, per-file SHA-1/size/fingerprint), plus source
 hashes, identify provenance. Completion requires both sources and their logical
 files; always hash-check the cached JAR and selected extracted resources. Repair
@@ -730,17 +752,16 @@ or interfaces now. Establish contracts incrementally as systems become necessary
 | Content | Block/item registries, recipes, machines, materials, game rules, modpack-defined behavior. |
 | Supporting services | Audio, input, UI, job scheduling, memory allocation, logging/diagnostics, optional scripting where appropriate. |
 
-## Minecraft 1.7.10 compatibility and intellectual property
+## Minecraft 1.7.10 inspiration and intellectual property
 
-- Use Java Edition **1.7.10** for block/item behavior, chunk-based worlds,
-  entities/physics, survival/creative foundations, crafting/inventories, redstone,
-  scheduled updates, terrain generation, and traditional modded gameplay. Do not
-  silently adopt later Minecraft versions as the baseline.
-- Selected 1.7.10 world/resource formats or network protocols may eventually be
-  supported. Exact binary compatibility, Java execution, and Forge compatibility
-  are not requirements; existing Java mods will not be loaded or executed.
-  Optimizations and improvements may intentionally diverge from vanilla. Make
-  compatibility decisions explicit and document them here when durable.
+- Use Minecraft Java Edition 1.7.10 as loose inspiration for blocks, terrain,
+  crafting, survival, physics and traditional modded gameplay, not a hard
+  specification. MaaGE can intentionally depart from Java architecture and
+  algorithms, including parallel generation and simulation. Later Minecraft
+  versions do not become the reference automatically.
+- No vanilla save/network interoperability, exact numeric mappings, Java
+  seed parity, Java/Forge execution or existing Java mods are required.
+  Pursue external interoperability only when explicitly requested.
 - Independently implement project code. Do not copy or translate proprietary
   Minecraft or third-party mod source without appropriate authorization. Keep
   Mojang/Microsoft and third-party mod assets separate from original MaaGE code
@@ -758,10 +779,10 @@ versioned manifest, content definitions, resources, game rules, dependencies,
 optional executable modules, and optional scripts. Prefer data-driven content
 where appropriate; never hardcode individual modpacks into the core.
 
-Native extensions should use stable, versioned C-compatible interfaces with explicit
-ownership and lifecycle rules. Treat them as trusted executable code unless genuine
-security isolation exists. Do not implement third-party mod compatibility layers
-unless explicitly requested.
+Native extensions should use C-compatible interfaces with explicit ownership
+and lifecycle; version fields do not imply cross-build compatibility during
+predevelopment. Treat executable extensions as trusted unless genuinely isolated.
+Do not implement third-party mod compatibility layers unless explicitly requested.
 
 ## Workspace and build conventions
 
@@ -849,15 +870,16 @@ unless explicitly requested.
   reusable, bounded C90 stream compression through private zlib >=1.2.3; all Core
   logging builds, including headless, require zlib without graphical dependencies.
 - Log levels/labels are exactly `[VERBOSE]`, `[INFO]`, `[WARNING]`, `[ERROR]`,
-  `[FATAL]`, in increasing severity. Old TRACE/DEBUG/WARN APIs and configuration
-  spellings are compatibility aliases. Routine detail uses VERBOSE; lifecycle
+  `[FATAL]`, in increasing severity. Old TRACE/DEBUG/WARN aliases and spellings may be deleted with their callers;
+  no historical API or configuration compatibility is required. Routine detail uses VERBOSE; lifecycle
   uses INFO. Align logger names with padding after the closing `]`,
   never inside brackets (for example, `[INFO]  [maage.launcher]`).
 
 ## Independent application versions
 
 - Launcher, Client, and Server independently follow SemVer 2.0.0. The Client
-  starts at `0.1.0-alpha.1`; its explicit release version is independent of Git,
+  starts at `0.1.0-alpha.1`; continue the alpha.* prerelease sequence without
+  backward compatibility guarantees. Its explicit release version is independent of Git,
   Minecraft 1.7.10, and the future network protocol. Maintain release fields centrally
   in root `CMakeVersions.cmake`,
   independently of `PROJECT_VERSION`; never duplicate constants in source.
@@ -881,8 +903,8 @@ do not bump it automatically for builds or commits.
 The Launcher owns `config/client-builds.json` and side-by-side `clients/<build-id>/`
 packages, separate from installation configurations and shared `minecraft/` resources.
 UUID-referenced instance manifests select stable build IDs; never silently
-substitute another Client. Migrate old configurations only when one available build
-is unambiguous. Strict SemVer ordering ignores build metadata; identity also includes
+substitute another Client. No migrations of older Launcher configs are required.
+Strict SemVer ordering ignores build metadata; identity also includes
 build/platform/type and executable SHA-256. Exact duplicate imports are rejected;
 changed builds coexist, and referenced builds must be unassigned before removal.
 Development-only Replace Client copies/verifies a new build, saves all affected
@@ -898,8 +920,8 @@ never move originals or link to developer source trees. Preserve only relative
 POSIX package links whose resolved targets stay inside the package; reject escaping
 links, Windows reparse points, special files, unsafe paths and bounded-tree
 violations. Future verified remote distribution uses
-the same registry origin distinction; no download service is implemented. Legacy
-bundle registry records retain their IDs/references but require standalone reimport.
+the same registry origin distinction; no download service is implemented. Obsolete
+bundle registries and conversion paths do not require support.
 Play starts only the exact selected verified build, with current Minecraft access
 and prepared resources. The reusable Core Process API invokes executables directly
 with structured arguments, an explicit working directory, inherited environment,
@@ -923,7 +945,7 @@ feature completeness or authorization to start a phase.
   Player Interaction & Core Gameplay (3); Instance Storage & Shared Folder Mapping
   (3.5); World Simulation & Environmental Systems (4); Client Resilience &
   Operation Status (4.5); Universal Operation Status & Execution Tracing (5).
-  Preserve the completion record and limitations documented for each milestone.
+  These milestones are history, not implementation or compatibility obligations.
 - **Phase 6 — Audio Engine & Soundscape (source-integrated; verification pending):**
   native audio backends, reconstructed 1.7.10 sound mappings, Client audio scene,
   semantic gameplay sounds/music and seven persisted volume settings.
