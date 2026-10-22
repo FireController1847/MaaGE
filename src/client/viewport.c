@@ -753,12 +753,12 @@ choose_world:
     if (maage_status_failed(operation)) goto done;
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
-    rendered = maage_renderer_prepare_frame(renderer, trace);
-    if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS &&
-        maage_status_code(rendered) != MAAGE_STATUS_NOT_IMPLEMENTED &&
-        maage_status_code(rendered) != MAAGE_STATUS_NOOP) goto done;
-    result = maage_window_set_visible(window, 1);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+    /* The Client already presented its title/loading screens in this same
+     * visible window. prepare_frame is strictly for priming a hidden window;
+     * calling it after world startup rejects the visible window and aborts
+     * the Client with RENDER/PRESENT INVALID_ARGUMENT. The existing renderer
+     * and drawable are reused; the next normal world frame picks up the new
+     * sky clear color without a second visibility transition. */
     operation = maage_client_ui_apply_options(ui, &video_options);
     if (maage_status_failed(operation))
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation,
