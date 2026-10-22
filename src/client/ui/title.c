@@ -140,7 +140,7 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
     maage_client_ui_rect r;
     title_panorama(ui);title_logo(ui);title_splash(ui);
     r=title_button(ui,0);maage_client_ui_button(ui,r,"Singleplayer",
-        title_hit(ui,r)||(f->focus_keyboard&&f->focus==0));
+        (f->focus_keyboard?f->focus==0:title_hit(ui,r)));
     r=title_button(ui,1);
     maage_client_ui_button_state(ui,r,"Multiplayer",MAAGE_CLIENT_UI_BUTTON_DISABLED);
     r=title_button(ui,2);
@@ -153,9 +153,9 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
         276.0f/ui->resources.atlas_edge,
         (title_hit(ui,r)?146.0f:126.0f)/ui->resources.atlas_edge,1,1,1,1);
     r=title_button(ui,4);maage_client_ui_button(ui,r,"Options...",
-        title_hit(ui,r)||(f->focus_keyboard&&f->focus==4));
+        (f->focus_keyboard?f->focus==4:title_hit(ui,r)));
     r=title_button(ui,5);maage_client_ui_button(ui,r,"Quit Game",
-        title_hit(ui,r)||(f->focus_keyboard&&f->focus==5));
+        (f->focus_keyboard?f->focus==5:title_hit(ui,r)));
     maage_client_ui_text(ui,"Minecraft 1.7.10",3,ui->height-9,MAAGE_CLIENT_UI_LEFT,0.14f,0.14f,0.14f);
     maage_client_ui_text(ui,"Minecraft 1.7.10",2,ui->height-10,MAAGE_CLIENT_UI_LEFT,1,1,1);
     maage_client_ui_text(ui,"Copyright Mojang AB. Do not distribute!",

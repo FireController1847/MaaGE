@@ -117,18 +117,16 @@ void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rect
     const char *label, maage_client_ui_button_visual state)
 {
     maage_client_ui_rect part;
-    float v, center, tint, cap, mid_width, source_mid;
+    float v, center, tint, cap;
     float tx[4], uv[4], y0[3], ty[3];
     int col, row;
     if (!ui || !label || state < MAAGE_CLIENT_UI_BUTTON_DISABLED ||
         state > MAAGE_CLIENT_UI_BUTTON_HOVER ||
         rectangle.width <= 0.0f || rectangle.height <= 0.0f) return;
-    /* Six-slice the vanilla 200x20 widgets.png button (3 columns x 2 rows).
-     * Pixel-sized endcaps remain native size for half-width buttons; the
-     * center source span is cropped instead of compressing both 100px halves. */
+    /* Six-slice the 200x20 widgets.png button (3 columns x 2 rows).
+     * Native-size endcaps preserve borders and corners on half-width buttons.
+     * Only the long middle section is stretched. */
     cap = rectangle.width < 4.0f ? rectangle.width * 0.25f : 2.0f;
-    mid_width = rectangle.width - cap * 2.0f;
-    source_mid = mid_width < 196.0f ? mid_width : 196.0f;
     v = 46.0f + (float)state * 20.0f;
     tx[0] = rectangle.x;
     tx[1] = tx[0] + cap;

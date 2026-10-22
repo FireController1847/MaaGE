@@ -28,7 +28,7 @@ static void front_button(maage_client_ui_frontend *f, unsigned int n, const char
     maage_client_ui_rect r = front_button_rect(f,n);
     maage_client_ui_button_state(f->ui,r,text,
         !enabled?MAAGE_CLIENT_UI_BUTTON_DISABLED:
-        ((front_hit(f,r)||(f->focus_keyboard&&f->focus==n))?
+        ((f->focus_keyboard?f->focus==n:front_hit(f,r))?
             MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL));
 }
 static size_t front_rows(maage_client_ui_frontend *f)

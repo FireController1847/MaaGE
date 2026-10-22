@@ -32,8 +32,8 @@ static int maage_client_ui_contains(maage_client_ui_rect rectangle, float x, flo
 static int maage_client_ui_highlight(const maage_client_ui *ui,
     maage_client_ui_rect rectangle,unsigned int index)
 {
-    return maage_client_ui_contains(rectangle,ui->mouse_x,ui->mouse_y) ||
-        (ui->selected_keyboard && ui->selected == index);
+    return ui->selected_keyboard ? ui->selected == index :
+        maage_client_ui_contains(rectangle,ui->mouse_x,ui->mouse_y);
 }
 
 
