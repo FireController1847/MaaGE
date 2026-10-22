@@ -377,7 +377,7 @@ maage_status maage_client_audio_service_update(maage_client_audio_service *servi
     }
     if (service->api.poll) {
         result = service->api.poll(service->engine, trace);
-        if (maage_status_failed(result)) {
+        if (maage_status_failed(result) || maage_status_code(result) == MAAGE_STATUS_PARTIAL) {
             if (!maage_status_failed(first_failure)) first_failure = result;
             service->playable = 0; /* Device loss: stop enqueuing inaudible events. */
             service->count = service->first = 0;
@@ -385,7 +385,7 @@ maage_status maage_client_audio_service_update(maage_client_audio_service *servi
                 "Audio output device stopped; gameplay will continue silently.");
         }
     }
-    if (maage_status_failed(first_failure))
+    if (maage_status_failed(first_failure) || !service->playable)
         return maage_client_audio_recover(first_failure, MAAGE_OPERATION_UPDATE, trace);
     return maage_client_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
