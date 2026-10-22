@@ -47,23 +47,6 @@ static int maage_launcher_name(const char *name)
     while (*p) { if (*p < 32 || *p == 127) return 0; if (*p != ' ') nonblank = 1; ++p; }
     return nonblank;
 }
-/* Sample only at startup/Client exit, never during native redraws. The UI
- * receipt hides retained copy backups; migration itself validates its journal. */
-static int maage_launcher_legacy_pending(const maage_launcher_ui *ui)
-{
-    char path[MAAGE_PATH_CAPACITY], receipt[38];
-    size_t size;
-    FILE *file;
-    if (maage_status_failed(maage_storage_join(path, sizeof(path), ui->root, "worlds")) || !maage_storage_status(path)) return 0;
-    if (maage_status_failed(maage_storage_join(path, sizeof(path), ui->root, "config/legacy-worlds-migrated")) ||
-        maage_storage_status(path) != 1 || !(file = maage_storage_open(path, "rb"))) return 1;
-    size = fread(receipt, 1, 37, file);
-    if (ferror(file)) size = 0;
-    if (fclose(file)) size = 0;
-    if (size != 36) return 1;
-    receipt[36] = 0;
-    return !maage_storage_uuid_valid(receipt);
-}
 static maage_status maage_launcher_path(maage_launcher_ui *ui, char *path, const char *file)
 {
     char directory[MAAGE_PATH_CAPACITY];
@@ -314,7 +297,6 @@ maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui)
                 if (exit_code) sprintf(ui->error, "Client exited with code %d. Check the latest Client log in the installation's logs folder.", exit_code);
             } else maage_log_trace_status(MAAGE_LOG_ERROR, "maage.launcher.clients", process_result, &ui->trace, "%s", ui->error);
             maage_process_close(ui->client_process); ui->client_process = NULL; ui->running_client[0] = ui->running_instance[0] = 0;
-            ui->legacy_worlds_pending = maage_launcher_legacy_pending(ui);
         }
     }
     ui->can_play = 0;
@@ -328,8 +310,6 @@ maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui)
     if (ui->client_job) strcpy(ui->client_status, "Processing Client package locally…");
     if (!ui->clients_valid) strcpy(ui->client_status, "Client registry unavailable; restore config/client-builds.json.");
     if (ui->client_process) strcpy(ui->client_status, "Client process active. Live output is written to the instance's logs/client.log.");
-    if (ui->legacy_worlds_pending && !ui->client_job && !ui->client_process)
-        strcat(ui->client_status, " | Legacy worlds await a destination; see the documented migration command.");
     maage_access_snapshot_get(ui->access, &ui->accounts);
     maage_assets_snapshot(ui->assets, &ui->progress);
     for (i = 0; i < ui->accounts.count; ++i) if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) break;
@@ -361,13 +341,12 @@ maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access,
     long file_size;
     struct json_object *root = NULL, *list, *item;
     maage_instance *instance = NULL;
-    unsigned i, j, id, max_id = 0, schema = 0;
-    const char *name, *account, *client, *uuid;
-    int legacy = 1, file_present = 0;
+    unsigned i, j, id;
+    const char *account, *uuid;
+    int file_present = 0;
     memset(ui, 0, sizeof(*ui)); ui->access = access; ui->assets = assets;
     if (maage_status_failed(child_result = maage_storage_data_path(ui->root, sizeof(ui->root))) ||
         maage_status_failed(child_result = maage_storage_join(ui->resources, sizeof(ui->resources), ui->root, "minecraft/assets/reconst"))) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
-    ui->legacy_worlds_pending = maage_launcher_legacy_pending(ui);
     ui->clients = (maage_client_registry *)calloc(1, sizeof(*ui->clients));
     if (!ui->clients) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
     ui->clients_valid = !maage_status_failed(child_result = maage_clients_load(ui->clients, ui->root, ui->error, &ui->trace));
@@ -392,18 +371,13 @@ maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access,
         strcpy(ui->error, "Launcher preferences are unreadable or invalid; existing instance references were preserved."); goto failed;
     }
     if (root) {
-        schema = maage_launcher_number(root, "schema");
-        if (schema < 1 || schema > 3) { strcpy(ui->error, "Unsupported Launcher preference schema."); goto failed; }
-        legacy = schema < 3;
-        if (schema == 3) {
-            uuid = maage_access_json_string(root, "selected");
-            if (maage_storage_uuid_valid(uuid)) strcpy(selected_uuid, uuid);
-            uuid = maage_access_json_string(root, "default");
-            if (maage_storage_uuid_valid(uuid)) strcpy(default_uuid, uuid);
-        } else {
-            ui->selected = maage_launcher_number(root, "selected"); ui->default_id = maage_launcher_number(root, "default");
-            ui->next_id = maage_launcher_number(root, "nextId");
+        if (maage_launcher_number(root, "schema") != 3) {
+            strcpy(ui->error, "Unsupported Launcher preferences; recreate config/launcher.json."); goto failed;
         }
+        uuid = maage_access_json_string(root, "selected");
+        if (maage_storage_uuid_valid(uuid)) strcpy(selected_uuid, uuid);
+        uuid = maage_access_json_string(root, "default");
+        if (maage_storage_uuid_valid(uuid)) strcpy(default_uuid, uuid);
         ui->appearance = (int)maage_launcher_number(root, "appearance");
         if (ui->appearance > 2) ui->appearance = 0;
         account = maage_access_json_string(root, "activeAccount");
@@ -418,57 +392,34 @@ maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access,
         }
         for (i = 0; i < json_object_array_length(list); ++i) {
             item = json_object_array_get_idx(list, i);
-            if (schema == 3) {
-                uuid = maage_access_json_string(item, "uuid");
-                for (j = 0; j < ui->count; ++j) if (!strcmp(ui->installations[j].uuid, uuid)) break;
-                if (j < ui->count) { strcpy(ui->error, "Duplicate instance UUID reference."); goto failed; }
-                if (maage_status_failed(child_result = maage_instance_open(ui->root, uuid, 0, &instance, ui->error, &ui->trace))) goto failed;
-                id = i + 1;
-                maage_launcher_installation_info(&ui->installations[ui->count], instance);
-                maage_instance_close(instance); instance = NULL;
-                if (!strcmp(uuid, selected_uuid)) ui->selected = id;
-                if (!strcmp(uuid, default_uuid)) ui->default_id = id;
-            } else {
-                id = maage_launcher_number(item, "id"); name = maage_access_json_string(item, "name");
-                if (!id || id >= 2147483647U || !maage_launcher_name(name)) {
-                    strcpy(ui->error, "Invalid legacy installation; preferences were preserved."); goto failed;
-                }
-                for (j = 0; j < ui->count; ++j) if (ui->installations[j].id == id) break;
-                if (j < ui->count) { strcpy(ui->error, "Duplicate legacy installation identity."); goto failed; }
-                client = maage_access_json_string(item, "client");
-                if (strlen(client) == 64 && strspn(client, "0123456789abcdef") == 64) strcpy(ui->installations[ui->count].client, client);
-                strcpy(ui->installations[ui->count].name, name);
-            }
+            uuid = maage_access_json_string(item, "uuid");
+            for (j = 0; j < ui->count; ++j) if (!strcmp(ui->installations[j].uuid, uuid)) break;
+            if (j < ui->count) { strcpy(ui->error, "Duplicate instance UUID reference."); goto failed; }
+            if (maage_status_failed(child_result = maage_instance_open(ui->root, uuid, 0, &instance, ui->error, &ui->trace))) goto failed;
+            id = i + 1;
+            maage_launcher_installation_info(&ui->installations[ui->count], instance);
+            maage_instance_close(instance); instance = NULL;
+            if (!strcmp(uuid, selected_uuid)) ui->selected = id;
+            if (!strcmp(uuid, default_uuid)) ui->default_id = id;
             ui->installations[ui->count++].id = id;
-            if (id > max_id) max_id = id;
         }
         json_object_put(root); root = NULL;
     }
     if (!ui->count) {
-        if (schema == 3) { strcpy(ui->error, "No instance references remain; restore Launcher preferences."); goto failed; }
+        if (file_present) { strcpy(ui->error, "No instance references remain; recreate Launcher preferences."); goto failed; }
         if (maage_status_failed(child_result = maage_launcher_reserve(ui, 1))) { strcpy(ui->error, "Cannot allocate initial Launcher installation."); goto failed; }
-        ui->count = 1; ui->installations[0].id = 1; strcpy(ui->installations[0].name, "Default Installation"); max_id = 1;
+        if (maage_status_failed(child_result = maage_instance_create(ui->root, "Default Installation",
+                "", &instance, ui->error, &ui->trace))) goto failed;
+        ui->count = 1; ui->installations[0].id = 1;
+        maage_launcher_installation_info(&ui->installations[0], instance);
+        maage_instance_close(instance); instance = NULL;
     }
     for (i = 0; i < ui->count; ++i) if (ui->installations[i].id == ui->default_id) break;
     if (i == ui->count) ui->default_id = ui->installations[0].id;
     for (i = 0; i < ui->count; ++i) if (ui->installations[i].id == ui->selected) break;
     if (i == ui->count) ui->selected = ui->default_id;
-    if (ui->next_id <= max_id) ui->next_id = max_id + 1;
-    if (legacy) {
-        unsigned available = 0, chosen = 0;
-        if (ui->clients_valid && schema != 2) {
-            for (i = 0; i < ui->clients->count; ++i) if (ui->clients->builds[i].available) { ++available; chosen = i; }
-            if (available == 1) for (i = 0; i < ui->count; ++i) if (!*ui->installations[i].client)
-                strcpy(ui->installations[i].client, ui->clients->builds[chosen].id);
-        }
-        for (i = 0; i < ui->count; ++i) {
-            if (maage_status_failed(child_result = maage_instance_create(ui->root, ui->installations[i].name,
-                    ui->installations[i].client, &instance, ui->error, &ui->trace))) goto failed;
-            maage_launcher_installation_info(&ui->installations[i], instance);
-            maage_instance_close(instance); instance = NULL;
-        }
-        if (maage_status_failed(child_result = maage_launcher_ui_save(ui))) goto failed;
-    }
+    ui->next_id = ui->count + 1;
+    if (!file_present && maage_status_failed(child_result = maage_launcher_ui_save(ui))) goto failed;
     maage_launcher_account_restore(ui); maage_launcher_ui_refresh(ui); return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
 failed:
     if (root) json_object_put(root);

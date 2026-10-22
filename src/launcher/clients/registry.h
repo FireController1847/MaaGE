@@ -8,7 +8,7 @@ typedef struct maage_client_build {
     char id[65], version[96], build[96], build_type[32], platform[32], architecture[96];
     char executable[256], sha256[65], origin[16], channel[32];
     double imported;
-    int available, instance_storage; /* 0 legacy; 1 UUID-owned storage launch contract. */
+    int available;
     char status[128];
 } maage_client_build;
 typedef struct maage_client_registry {

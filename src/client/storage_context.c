@@ -7,7 +7,6 @@
 static maage_instance *maage_client_active_instance;
 static char maage_client_data_root[MAAGE_PATH_CAPACITY];
 static char maage_client_log_path[MAAGE_PATH_CAPACITY];
-static int maage_client_migrate_requested;
 static int maage_client_storage_retained;
 void maage_client_storage_retain(void) { maage_client_storage_retained = 1; }
 
@@ -34,7 +33,6 @@ static maage_status maage_client_storage_map(maage_instance *instance, const cha
 
 maage_instance *maage_client_storage_instance(void) { return maage_client_active_instance; }
 const char *maage_client_storage_data_root(void) { return maage_client_data_root; }
-int maage_client_storage_migrate_requested(void) { return maage_client_migrate_requested; }
 
 maage_status maage_application_configure_log(int argc, char *const argv[], maage_log_config *config)
 {
@@ -56,8 +54,7 @@ maage_status maage_application_configure_log(int argc, char *const argv[], maage
         } else if (!strncmp(argv[i], "--map-folder=", 13)) {
             if (mapping) goto arguments;
             mapping = argv[i] + 13;
-        } else if (!strcmp(argv[i], "--migrate-legacy-worlds")) maage_client_migrate_requested = 1;
-        else if (!strcmp(argv[i], "--instance") || !strcmp(argv[i], "--data-directory") ||
+        } else if (!strcmp(argv[i], "--instance") || !strcmp(argv[i], "--data-directory") ||
             !strcmp(argv[i], "--map-folder")) goto arguments;
     }
     if (root) {

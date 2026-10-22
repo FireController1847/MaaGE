@@ -58,7 +58,7 @@ static maage_status maage_oauth_tokens(struct json_object *json, maage_microsoft
     const char *scope = maage_access_json_string(json, "scope");
     if ((strcmp(maage_access_json_string(json, "token_type"), "Bearer") && strcmp(maage_access_json_string(json, "token_type"), "bearer")) || expires < 1 || expires > 86400 ||
         !maage_oauth_scope(scope) || maage_status_failed(maage_auth_token(ms->access, sizeof(ms->access), json, "access_token"))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
-    if (*refresh) maage_log_debug("maage.launcher.access.oauth", "Microsoft supplied a replacement refresh credential; value withheld.");
+    if (*refresh) maage_log_verbose("maage.launcher.access.oauth", "Microsoft supplied a replacement refresh credential; value withheld.");
     if (*refresh && maage_status_failed(maage_auth_token(s->microsoft_refresh, sizeof(s->microsoft_refresh), json, "refresh_token"))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
     if (!*s->microsoft_refresh) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
     ms->expires_at = maage_auth_wall() + expires; return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
@@ -201,7 +201,7 @@ static maage_status maage_oauth_browser_login(maage_microsoft_session *ms, maage
         if (!callback) {
             OPENSSL_cleanse(code, 16385);
             ++rejected;
-            maage_log_write(rejected == 1 ? MAAGE_LOG_VERBOSE : MAAGE_LOG_DEBUG, "maage.launcher.access.oauth", "Ignoring callback: %s. Attempt remains pending.", reason);
+            maage_log_write(rejected == 1 ? MAAGE_LOG_VERBOSE : MAAGE_LOG_VERBOSE, "maage.launcher.access.oauth", "Ignoring callback: %s. Attempt remains pending.", reason);
         }
         OPENSSL_cleanse(query, 32769);
         maage_auth_reply(listener, !callback ? 0 : maage_status_failed(callback_result) ? -1 : 1);

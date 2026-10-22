@@ -30,7 +30,7 @@ typedef struct maage_launcher_ui {
     maage_client_registry *clients;
     maage_client_job *client_job;
     maage_process *client_process;
-    int can_play, legacy_worlds_pending;
+    int can_play;
     char running_client[65], running_instance[37];
     maage_client_candidate client_candidate;
     char replacing_client[65];

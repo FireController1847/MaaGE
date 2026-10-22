@@ -777,7 +777,7 @@ static maage_status maage_instance_launcher(const char *root, struct json_object
         json_object_get_int(schema) != 3) {
         json_object_put(object);
         return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_SELECT, error,
-            "Open the Launcher to choose or migrate a physical instance.", trace);
+            "Open the Launcher to choose a physical instance.", trace);
     }
     *output = object;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SELECT, 0);
@@ -813,17 +813,4 @@ maage_status maage_instance_select(const char *root, const char *requested, int 
         "Select an instance in the Launcher or provide --instance=<uuid>.", trace);
     result = maage_instance_open(root, selected, acquire_use, output, error, trace);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_INSTANCE, MAAGE_OPERATION_SELECT);
-}
-int maage_instance_only_configured(const maage_instance *instance)
-{
-    struct json_object *launcher, *installations, *entry;
-    char id[37], error[256];
-    int only = 0;
-    if (!instance || maage_status_failed(maage_instance_launcher(instance->root, &launcher, error, NULL))) return 0;
-    if (json_object_object_get_ex(launcher, "installations", &installations) &&
-        json_object_is_type(installations, json_type_array) && json_object_array_length(installations) == 1) {
-        entry = json_object_array_get_idx(installations, 0);
-        only = maage_instance_string(entry, "uuid", id, sizeof(id)) && !strcmp(id, instance->info.id);
-    }
-    json_object_put(launcher); return only;
 }

@@ -61,28 +61,25 @@ static maage_status maage_client_json(const char *path, size_t limit,
     free(data);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
 }
-static maage_status maage_client_instance_storage(struct json_object *o, maage_client_build *b, maage_status_trace *trace)
+static maage_status maage_client_storage_contract(struct json_object *o, maage_status_trace *trace)
 {
     struct json_object *value;
-    int version;
-    b->instance_storage = 0;
-    if (!json_object_object_get_ex(o, "instance_storage", &value)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
-    if (!json_object_is_type(value, json_type_int)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
-    version = json_object_get_int(value);
-    if (version < 0 || json_object_get_double(value) != (double)version) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
-    b->instance_storage = version; return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    if (!json_object_object_get_ex(o, "instance_storage", &value) ||
+        !json_object_is_type(value, json_type_int) || json_object_get_int(value) != 1)
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
+            MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VALIDATE, 0);
 }
 static maage_status maage_client_fields(struct json_object *o, maage_client_build *b, maage_status_trace *trace)
 {
     maage_status child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
-    { maage_status result = maage_status_make((((!maage_status_failed(child_result = maage_client_instance_storage(o,b, trace))) && (!maage_status_failed(child_result = maage_client_text(o,"version",b->version,sizeof(b->version),0, trace))) && maage_semver_valid(b->version) &&
+    { maage_status result = maage_status_make((((!maage_status_failed(child_result = maage_client_storage_contract(o, trace))) && (!maage_status_failed(child_result = maage_client_text(o,"version",b->version,sizeof(b->version),0, trace))) && maage_semver_valid(b->version) &&
         (!maage_status_failed(child_result = maage_client_text(o,"build",b->build,sizeof(b->build),1, trace))) &&
         (!maage_status_failed(child_result = maage_client_text(o,"build_type",b->build_type,sizeof(b->build_type),0, trace))) &&
         (!maage_status_failed(child_result = maage_client_text(o,"platform",b->platform,sizeof(b->platform),0, trace))) &&
         (!maage_status_failed(child_result = maage_client_text(o,"architecture",b->architecture,sizeof(b->architecture),0, trace))) &&
         (!maage_status_failed(child_result = maage_client_text(o,"executable",b->executable,sizeof(b->executable),0, trace))) &&
-        strspn(b->executable,"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == strlen(b->executable) &&
-        strcmp(b->executable,".") && strcmp(b->executable,"..") &&
+        !strcmp(b->executable,MAAGE_CLIENT_FILENAME) &&
         (!maage_status_failed(child_result = maage_client_text(o,"sha256",b->sha256,sizeof(b->sha256),0, trace))) && maage_client_id(b->sha256) &&
         (!maage_status_failed(child_result = maage_client_text(o,"channel",b->channel,sizeof(b->channel),1, trace)))) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ERROR), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0); return MAAGE_STATUS_PROPAGATE(trace, maage_status_failed(result) && maage_status_failed(child_result) ? child_result : result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE); }
 }
@@ -127,15 +124,12 @@ static maage_status maage_client_inspect(const char *package, maage_client_build
     if (!maage_storage_directory_exists(package) || maage_status_failed(child_result = maage_storage_join(path,sizeof(path),package,MAAGE_CLIENT_DESCRIPTOR))) goto failed;
     child_result = maage_client_json(path, MAAGE_CLIENT_DESCRIPTOR_BYTES, &o, trace);
     if (maage_status_failed(child_result)) goto failed;
-    ok = o && json_object_object_get_ex(o,"schema",&v) && json_object_get_int(v)==1 &&
-        !strcmp(maage_access_json_string(o,"application"),"maage-client") && (!maage_status_failed(child_result = maage_client_fields(o,b, trace))) && !strcmp(b->executable,MAAGE_CLIENT_FILENAME);
+    ok = o && json_object_object_get_ex(o,"schema",&v) && json_object_is_type(v,json_type_int) && json_object_get_int(v)==1 &&
+        !strcmp(maage_access_json_string(o,"application"),"maage-client") && (!maage_status_failed(child_result = maage_client_fields(o,b, trace)));
     /* No network protocol has been implemented; do not claim compatibility. */
     if (ok && json_object_object_get_ex(o,"protocol",&v) && v) ok = json_object_is_type(v,json_type_null);
     if (o) json_object_put(o);
-    if (!ok || !maage_client_compatible(b)) { strcpy(error,"Select a MaaGE Client package for this platform and architecture with a valid schema-1 manifest. Network protocol must be undefined."); return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE); }
-    if (b->instance_storage != 1) {
-        strcpy(error,"Reimport an instance-capable Client declaring instance_storage version 1. Legacy Clients use global worlds and cannot launch inside an instance."); return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
-    }
+    if (!ok || !maage_client_compatible(b)) { strcpy(error,"Select a MaaGE Client package for this platform and architecture with a valid schema-1 manifest and instance_storage 1. Network protocol must be undefined."); return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE); }
     if (maage_status_failed(child_result = maage_client_executable(package,b,path, trace)) || !maage_client_executable_file(path) || !(f=maage_storage_open(path,"rb"))) goto failed;
     ok = fread(magic,1,4,f)==4; fclose(f);
 #ifdef __APPLE__
@@ -179,7 +173,7 @@ maage_status maage_clients_path(const maage_client_registry *r, const char *id, 
     index = maage_clients_find(r, id);
     if (index < 0) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_FOUND,
         MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
-    if (!r->builds[index].available || r->builds[index].instance_storage != 1)
+    if (!r->builds[index].available)
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE,
             MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
     result = maage_client_package(r, id, package, trace);
@@ -220,12 +214,10 @@ static maage_status maage_client_save(maage_client_registry *r, maage_status_tra
         MAAGE_CLIENT_FIELD(platform); MAAGE_CLIENT_FIELD(architecture); MAAGE_CLIENT_FIELD(executable);
         MAAGE_CLIENT_FIELD(sha256); MAAGE_CLIENT_FIELD(origin); MAAGE_CLIENT_FIELD(channel);
 #undef MAAGE_CLIENT_FIELD
-        if (item->instance_storage) {
-            number = json_object_new_int(item->instance_storage);
-            if (!number) { json_object_put(b); goto failed; }
-            if (json_object_object_add(b,"instance_storage",number)) {
-                json_object_put(number); json_object_put(b); goto failed;
-            }
+        number = json_object_new_int(1);
+        if (!number) { json_object_put(b); goto failed; }
+        if (json_object_object_add(b,"instance_storage",number)) {
+            json_object_put(number); json_object_put(b); goto failed;
         }
         number = json_object_new_double(item->imported);
         if (!number) { json_object_put(b); goto failed; }
@@ -280,7 +272,7 @@ static maage_status maage_clients_read(maage_client_registry *r, const char *roo
     if(!maage_client_file_kind(path)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     child_result = maage_client_json(path, MAAGE_CLIENT_REGISTRY_BYTES, &o, trace);
     if (maage_status_failed(child_result)) { strcpy(error,"Cannot read Client registry. Restore config/client-builds.json before managing builds."); return MAAGE_STATUS_PROPAGATE(trace, child_result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD); }
-    if(!o || !json_object_object_get_ex(o,"schema",&v) || json_object_get_int(v)!=1 ||
+    if(!o || !json_object_object_get_ex(o,"schema",&v) || !json_object_is_type(v,json_type_int) || json_object_get_int(v)!=1 ||
         !json_object_object_get_ex(o,"builds",&list) || !json_object_is_type(list,json_type_array)) {
         if(o) json_object_put(o); strcpy(error,"Cannot read Client registry. Restore config/client-builds.json before managing builds."); return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
     }
@@ -299,10 +291,8 @@ static maage_status maage_clients_read(maage_client_registry *r, const char *roo
         if(json_object_object_get_ex(b,"imported",&v)) item->imported=json_object_get_double(v);
         memset(&candidate,0,sizeof(candidate));
         if((!maage_status_failed(child_result = maage_client_package(r,item->id,path, trace))) && (!maage_status_failed(child_result = maage_client_inspect(path,&candidate,why, trace))) && !strcmp(item->id,candidate.id)) {
-            item->available=1; item->instance_storage=candidate.instance_storage; strcpy(item->status,"Available");
-        } else if (item->instance_storage != 1)
-            strcpy(item->status,"Legacy storage; reimport an instance-capable Client");
-        else strcpy(item->status,maage_client_compatible(item) ? "Missing/legacy package; import standalone Client" : "Incompatible platform or architecture");
+            item->available=1; strcpy(item->status,"Available");
+        } else strcpy(item->status,maage_client_compatible(item) ? "Missing or invalid Client package" : "Incompatible platform or architecture");
         ++r->count;
     }
     /* Highest SemVer first; build metadata never changes SemVer precedence. */

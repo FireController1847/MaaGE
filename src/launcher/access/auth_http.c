@@ -164,7 +164,7 @@ maage_status maage_auth_request(const char *endpoint, const char *bearer,
     if (body) { MAAGE_AUTH_CURL(CURLOPT_POSTFIELDS, body); }
 #undef MAAGE_AUTH_CURL
     if (observer->cancelled(observer->context)) goto done;
-    maage_log_debug("maage.launcher.access.http", "%s %s started.", body ? "POST" : "GET", route);
+    maage_log_verbose("maage.launcher.access.http", "%s %s started.", body ? "POST" : "GET", route);
     performed = 1; result = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status); curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &elapsed);
     if (result == CURLE_OK) maage_access_json(http->data, http->used, &json);
@@ -206,14 +206,14 @@ done:
     else if (*status != 200) {
         error = maage_auth_error_name(maage_access_json_string(json, "error"));
         if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down"))
-            maage_log_debug("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
+            maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
         else {
             maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed);
             xerr = maage_auth_number(json, "XErr");
             if (xerr >= 0) maage_log_verbose("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr);
         }
     } else if (!json) maage_log_verbose("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else maage_log_debug("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
+    else maage_log_verbose("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
     if (curl) curl_easy_cleanup(curl);
     if (authorization) { OPENSSL_cleanse(authorization, strlen(authorization)); free(authorization); }
     for (entry = headers; entry; entry = entry->next) OPENSSL_cleanse(entry->data, strlen(entry->data));

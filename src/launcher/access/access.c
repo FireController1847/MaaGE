@@ -106,7 +106,7 @@ static int maage_access_policy(maage_access *a)
         maage_access_profile *p = &a->view.profiles[i];
         if (p->state != MAAGE_ACCESS_VERIFIED) continue;
         if (a->revoked || !p->connected || now < a->timing[i].starts || now >= a->timing[i].deadlines || wall < p->last_verified || wall >= p->last_verified + 3600) {
-            maage_log_debug("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected ? "account disconnected" : now < a->timing[i].starts || wall < p->last_verified ? "clock changed or unavailable" : "lease expired");
+            maage_log_verbose("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected ? "account disconnected" : now < a->timing[i].starts || wall < p->last_verified ? "clock changed or unavailable" : "lease expired");
             p->state = MAAGE_ACCESS_EXPIRED; a->timing[i].deadlines = 0;
             strcpy(p->detail, "Verification lease expired. MaaGE will refresh this session securely."); ++a->view.revision;
         } else if (!*a->active || !strcmp(a->active, p->uuid)) allowed = 1;
@@ -224,7 +224,7 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
     char path[MAAGE_PATH_CAPACITY], *data, uuid[33];
     FILE *file;
     size_t size, i, count;
-    struct json_object *root, *list, *item;
+    struct json_object *root, *list, *item, *version;
     const char *name;
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
     a->loaded = 1;
@@ -245,9 +245,11 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
     if (count == size && !ferror(file)) maage_access_json(data, size, &root);
     fclose(file); free(data);
     if (!root) { a->loaded = -1; maage_log_verbose("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."); return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD); }
-    if (!json_object_object_get_ex(root, "profiles", &list) || !json_object_is_type(list, json_type_array)) {
+    if (!json_object_object_get_ex(root, "version", &version) ||
+        !json_object_is_type(version, json_type_int) || json_object_get_int(version) != 3 ||
+        !json_object_object_get_ex(root, "profiles", &list) || !json_object_is_type(list, json_type_array)) {
         a->loaded = -1;
-        maage_log_verbose("maage.launcher.access", "Profile registry has no valid profiles array; refusing to overwrite it.");
+        maage_log_verbose("maage.launcher.access", "Profile registry has an unsupported version or invalid profiles array; recreate config/minecraft-profiles.json.");
         json_object_put(root); return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     maage_access_lock(a);
@@ -265,7 +267,7 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
             p = &a->view.profiles[a->view.count++]; strcpy(p->uuid, uuid); strcpy(p->name, name);
             p->connected = 1; p->state = MAAGE_ACCESS_DETECTED; strcpy(p->sources, "Microsoft");
             p->last_verified = maage_auth_number(item, "lastVerified"); if (p->last_verified < 0) p->last_verified = 0;
-            strcpy(p->detail, "Sign in with Microsoft to connect this profile to MaaGE. Imported launcher sessions are no longer used.");
+            strcpy(p->detail, "Sign in with Microsoft to connect this profile to MaaGE.");
         }
     }
     ++a->view.revision; maage_access_unlock(a); json_object_put(root);
@@ -315,7 +317,6 @@ static maage_status maage_access_save(maage_access *a, maage_status_trace *trace
         if (!item) { entries_ok = 0; break; }
         if (maage_status_failed(maage_access_json_set(item,"name",json_object_new_string(p->name))) ||
             maage_status_failed(maage_access_json_set(item,"uuid",json_object_new_string(p->uuid))) ||
-            maage_status_failed(maage_access_json_set(item,"credentialProvider",json_object_new_string(p->session_saved ? "microsoft-oauth" : "none"))) ||
             maage_status_failed(maage_access_json_set(item,"lastVerified",json_object_new_double(p->last_verified)))) {
             json_object_put(item); entries_ok = 0; break;
         }

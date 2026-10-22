@@ -92,7 +92,7 @@ maage_status maage_access_verify(const char *token, char uuid[33],
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && entitlements) game = maage_access_java_items(entitlements, 0);
-    maage_log_debug("maage.launcher.access.verify", "Store entitlement check: explicit Java entitlement %s.", game ? "present" : "not confirmed");
+    maage_log_verbose("maage.launcher.access.verify", "Store entitlement check: explicit Java entitlement %s.", game ? "present" : "not confirmed");
     strcpy(store_error, detail);
     /* The license endpoint includes non-store access (e.g. subscriptions).
      * Its signed aggregate has item name/source, not per-item signatures.
@@ -106,7 +106,7 @@ maage_status maage_access_verify(const char *token, char uuid[33],
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && license) licensed = maage_access_java_items(license, 1);
-    maage_log_debug("maage.launcher.access.verify", "License entitlement check: explicit Java entitlement %s.", licensed ? "present" : "not confirmed");
+    maage_log_verbose("maage.launcher.access.verify", "License entitlement check: explicit Java entitlement %s.", licensed ? "present" : "not confirmed");
     if (game || licensed) {
         strcpy(uuid, normalized); state = MAAGE_ACCESS_VERIFIED;
         strcpy(detail, "Minecraft Java Edition access verified. These services do not conclusively establish permanent purchase versus subscription access.");

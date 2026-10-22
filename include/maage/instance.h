@@ -34,12 +34,9 @@ maage_status maage_instance_create(const char *data_root, const char *name,
 maage_status maage_instance_open(const char *data_root, const char *id, int acquire_use,
     maage_instance **instance, char error[256], maage_status_trace *trace);
 /* NULL requested_id reads selected/default UUID from schema-3 launcher.json.
- * Missing/legacy/ambiguous selection fails; it never invents a random default. */
+ * Missing/invalid selection fails; it never invents a random default. */
 maage_status maage_instance_select(const char *data_root, const char *requested_id,
     int acquire_use, maage_instance **instance, char error[256], maage_status_trace *trace);
-/* Startup migration eligibility: exactly one schema-3 installation reference,
- * equal to this UUID. This is not called from gameplay or periodic I/O. */
-int maage_instance_only_configured(const maage_instance *instance);
 maage_status maage_instance_close(maage_instance *instance);
 const maage_instance_info *maage_instance_get_info(const maage_instance *instance);
 const char *maage_instance_directory(const maage_instance *instance);

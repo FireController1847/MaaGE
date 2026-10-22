@@ -167,7 +167,7 @@ maage_status maage_client_resources_open(const char *archive_path,
         if (maage_status_failed(result)) goto failed;
         result = observer->collision(observer->context, entry->name, entry->hash, entry->size, error);
         if (maage_status_failed(result)) goto failed;
-        maage_log_debug("maage.launcher.assets", "Client resource '%s' -> '%s': SHA-1 %s, %.0f bytes", entry->archive_name, entry->name, entry->hash, entry->size);
+        maage_log_verbose("maage.launcher.assets", "Client resource '%s' -> '%s': SHA-1 %s, %.0f bytes", entry->archive_name, entry->name, entry->hash, entry->size);
         observer->progress(observer->context, MAAGE_CLIENT_INSPECT, (unsigned long)i + 1, resources->count, entry->name, 0);
     }
     maage_log_info("maage.launcher.assets", "Verified client archive: %lu applicable resources, %.0f expanded bytes", resources->count, expanded);
@@ -208,20 +208,6 @@ maage_status maage_client_resources_reconstruct(maage_client_resources *resource
         if (changed) {
             if (maage_status_failed(maage_storage_remove(staging))) goto failed;
             cloned = 0;
-            for (j = 0; !cloned && j < 2; ++j) {
-                const char *legacy = entry->archive_name;
-                if (j) {
-                    if (strncmp(legacy, "assets/minecraft/", sizeof("assets/minecraft/") - 1)) continue;
-                    legacy += sizeof("assets/minecraft/") - 1;
-                }
-                if (strcmp(legacy, entry->name) && (!maage_status_failed(maage_minecraft_asset_path(application_data, legacy, source_path, sizeof(source_path), observer->trace)))) {
-                    strcpy(parent, source_path); separator = strrchr(parent, '/'); if (!separator) goto failed; *separator = 0;
-                    if (maage_storage_directory_exists(parent) && maage_client_file_valid(source_path, entry, observer, entry->fingerprint)) {
-                        result = maage_storage_clone(source_path, staging, observer->cancelled, observer->context, &cloned, observer->trace);
-                        if (cloned) maage_log_info("maage.launcher.assets", "Migrating client resource: %s -> %s", source_path, path);
-                    }
-                }
-            }
             for (j = 0; !cloned && j < i; ++j) if (resources->entries[j].size == entry->size && !strcmp(resources->entries[j].hash, entry->hash)) {
                 if ((!maage_status_failed(maage_minecraft_asset_path(application_data, resources->entries[j].name, source_path, sizeof(source_path), observer->trace))) &&
                     maage_client_file_valid(source_path, entry, observer, entry->fingerprint))
@@ -240,7 +226,7 @@ maage_status maage_client_resources_reconstruct(maage_client_resources *resource
                 observer->cancelled(observer->context) || maage_status_failed(maage_storage_replace(staging, path)) ||
                 !maage_client_file_valid(path, entry, observer, entry->fingerprint)) goto failed;
             maage_log_info("maage.launcher.assets", "Reconstructed client resource '%s' via %s: %s (SHA-1 %s, %.0f bytes)", entry->name, cloned == 1 ? "hard link" : cloned ? "copy" : "ZIP extraction", path, entry->hash, entry->size);
-        } else maage_log_debug("maage.launcher.assets", "Using verified client resource '%s': %s", entry->name, path);
+        } else maage_log_verbose("maage.launcher.assets", "Using verified client resource '%s': %s", entry->name, path);
         result = observer->record(observer->context, entry->name, entry->archive_name, entry->hash, entry->size, entry->fingerprint);
         if (maage_status_failed(result)) goto failed;
         observer->progress(observer->context, MAAGE_CLIENT_RECONSTRUCT, i + 1, resources->count, entry->name, changed);
