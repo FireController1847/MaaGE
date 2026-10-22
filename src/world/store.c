@@ -1460,7 +1460,7 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
     /* A version-3 chunk may never be persisted as completed before all eight
      * stages have run. Older chunk formats have no stage journal. */
     if (simulation && generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
-        chunk->generation_stages != 255U) goto failed;
+        chunk->generation_stages != (1U << MAAGE_GENERATION_STAGE_COUNT) - 1U) goto failed;
     if (bytes.failed || bytes.position != bytes.length) goto failed;
     free(palette);
     *output = chunk;
