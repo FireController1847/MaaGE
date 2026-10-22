@@ -9,7 +9,38 @@ typedef enum maage_client_window_choice {
     MAAGE_CLIENT_BORDERLESS = 1,
     MAAGE_CLIENT_FULLSCREEN = 2
 } maage_client_window_choice;
+/* These stable IDs are shared by the Options UI and Client audio service.
+ * Names are only used when reading/writing config/options.ini.
+ * Percentage values are integers in [0, 100], inclusive. */
+typedef enum maage_client_audio_bus {
+    MAAGE_CLIENT_AUDIO_BUS_MASTER = 0,
+    MAAGE_CLIENT_AUDIO_BUS_BLOCKS = 1,
+    MAAGE_CLIENT_AUDIO_BUS_PLAYER = 2,
+    MAAGE_CLIENT_AUDIO_BUS_AMBIENT = 3,
+    MAAGE_CLIENT_AUDIO_BUS_WEATHER = 4,
+    MAAGE_CLIENT_AUDIO_BUS_MUSIC = 5,
+    MAAGE_CLIENT_AUDIO_BUS_UI = 6,
+    MAAGE_CLIENT_AUDIO_BUS_COUNT = 7
+} maage_client_audio_bus;
+#define MAAGE_CLIENT_AUDIO_VOLUME_MIN 0
+#define MAAGE_CLIENT_AUDIO_VOLUME_MAX 100
+#define MAAGE_CLIENT_AUDIO_DEFAULT_MASTER 100
+#define MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS 100
+#define MAAGE_CLIENT_AUDIO_DEFAULT_PLAYER 100
+#define MAAGE_CLIENT_AUDIO_DEFAULT_AMBIENT 75
+#define MAAGE_CLIENT_AUDIO_DEFAULT_WEATHER 75
+#define MAAGE_CLIENT_AUDIO_DEFAULT_MUSIC 50
+#define MAAGE_CLIENT_AUDIO_DEFAULT_UI 100
+/* INI boundary only: exact names in [audio]. */
+#define MAAGE_CLIENT_AUDIO_KEY_MASTER "master"
+#define MAAGE_CLIENT_AUDIO_KEY_BLOCKS "blocks"
+#define MAAGE_CLIENT_AUDIO_KEY_PLAYER "player"
+#define MAAGE_CLIENT_AUDIO_KEY_AMBIENT "ambient"
+#define MAAGE_CLIENT_AUDIO_KEY_WEATHER "weather"
+#define MAAGE_CLIENT_AUDIO_KEY_MUSIC "music"
+#define MAAGE_CLIENT_AUDIO_KEY_UI "ui"
 typedef struct maage_client_options {
+    int audio_volume[MAAGE_CLIENT_AUDIO_BUS_COUNT]; /* Fixed numeric bus order; 0..100. */
     int max_fps; /* 0 unlimited, otherwise 10..260 in increments of 10. */
     int vsync;
     int gui_scale; /* 0 auto; 1..4 explicit. */

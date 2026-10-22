@@ -77,20 +77,26 @@ void maage_client_debug_frame(maage_client_debug *debug, double now,
     debug->timing_ready = 1;
 }
 const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug,
-    double now, const maage_world *world, const maage_world_record *record,
-    const maage_world_stats *stats, const maage_player *player, double yaw,
-    double pitch, int radius, int paused, maage_renderer *renderer,
-    const maage_client_mesh_stats *meshes, const maage_gameplay *game)
+    double now, const maage_session_snapshot *snapshot, int radius, int paused,
+    maage_renderer *renderer, const maage_client_mesh_stats *meshes)
 {
-    maage_client_ui_debug *text = &debug->text;
+    maage_client_ui_debug *text;
     const maage_client_metadata *identity = maage_client_identity();
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
-    maage_world_observation observation;
+    const maage_world_stats *stats;
+    const maage_player *player;
+    double yaw, pitch;
     const char *gpu;
     double degrees, resident, peak, retained;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
-    (void)record;
+    if (!debug || !snapshot || !renderer || !meshes ||
+        snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
+    text = &debug->text;
+    stats = &snapshot->world_stats;
+    player = &snapshot->player.player;
+    yaw = snapshot->player.yaw;
+    pitch = snapshot->player.pitch;
     if (debug->identity_renderer != renderer) {
         debug->identity_renderer = renderer;
         gpu = maage_renderer_device_name(renderer);
@@ -129,14 +135,17 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->left[left++], "Chunk: %d %d | local: %d %d", maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z),
         maage_world_local_coordinate(x), maage_world_local_coordinate(z));
     sprintf(text->left[left++], "Facing: %s (%.1f / %.1f)", facing[direction], degrees, pitch * 57.29577951308232);
-    if (maage_world_observe(world, x, y, z, &observation)) {
-        sprintf(text->left[left++], "Biome: %s", maage_client_debug_biome(observation.biome_id));
-        if (observation.light_available)
-            sprintf(text->left[left++], "Light: %u sky / %u block", (unsigned)observation.light >> 4, (unsigned)observation.light & 15);
+    if (snapshot->has_observation) {
+        const maage_world_observation *observation = &snapshot->observation;
+        sprintf(text->left[left++], "Biome: %s", maage_client_debug_biome(observation->biome_id));
+        if (observation->light_available)
+            sprintf(text->left[left++], "Light: %u sky / %u block",
+                (unsigned)observation->light >> 4, (unsigned)observation->light & 15);
     }
-    if (game && game->has_target)
-        sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu", game->target.x, game->target.y,
-            game->target.z, game->target.block_id, game->target.state_id);
+    if (snapshot->player.has_target)
+        sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu",
+            snapshot->player.target.x, snapshot->player.target.y, snapshot->player.target.z,
+            snapshot->player.target.block_id, snapshot->player.target.state_id);
     if (debug->memory[0]) strcpy(text->right[right++], debug->memory);
     strcpy(text->right[right++], debug->system);
     strcpy(text->right[right++], debug->renderer);

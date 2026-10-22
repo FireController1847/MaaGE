@@ -1,11 +1,11 @@
 #ifndef MAAGE_CLIENT_UI_H
 #define MAAGE_CLIENT_UI_H
 #include "maage/render.h"
-#include "maage/gameplay.h"
-#include "maage/world.h"
+#include "maage/session_protocol.h"
 #include "../options.h"
 
 typedef struct maage_client_ui maage_client_ui;
+typedef void (*maage_client_ui_click_callback)(void *context);
 typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_GAMEPLAY 0U
 #define MAAGE_CLIENT_UI_PAUSE 1U
@@ -45,9 +45,19 @@ maage_status maage_client_ui_resource_status(const maage_client_ui *ui);
 void maage_client_ui_notify(maage_client_ui *ui, maage_status result, double now);
 void maage_client_ui_notice_time(maage_client_ui *ui, double now);
 maage_status maage_client_ui_destroy(maage_client_ui *ui);
-/* Borrow finalized registries and owner-thread gameplay for HUD and inventory. */
-maage_status maage_client_ui_set_gameplay(maage_client_ui *ui, const maage_item_registry *items,
-    maage_gameplay *game, const maage_block_registry *blocks);
+/* Immutable numeric content borrowed for icons; Server snapshots copied by value. */
+maage_status maage_client_ui_set_content(maage_client_ui *ui,
+    const maage_item_registry *items, const maage_block_registry *blocks);
+maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,
+    const maage_session_snapshot *snapshot);
+/* NOOP when empty. FIFO of authoritative commands; a full queue returns
+ * BUFFER_OVERFLOW and retains the unconsumed request for caller feedback. */
+maage_status maage_client_ui_take_command(maage_client_ui *ui,
+    maage_session_command *command);
+/* On local transport BUFFER_OVERFLOW, restore the just-taken command at the
+ * front without reordering later GUI requests. Main-thread caller retries. */
+maage_status maage_client_ui_retry_command(maage_client_ui *ui,
+    const maage_session_command *command);
 /* Registration grows direct numeric indexing before finalization. ID zero is
  * gameplay (no modal). Unknown IDs and navigation cycles fail explicitly. */
 maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,
@@ -67,6 +77,9 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
 void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options *options);
 int maage_client_ui_options_visible(const maage_client_ui *ui);
 int maage_client_ui_window_mode_changing(const maage_client_ui *ui);
+/* Presentation-only click intent for the local audio service. */
+void maage_client_ui_set_click_callback(maage_client_ui *ui,
+    maage_client_ui_click_callback callback, void *context);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.
  * Integer GUI scale uses framebuffer pixels, with a 320x240 logical minimum. */
 maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,

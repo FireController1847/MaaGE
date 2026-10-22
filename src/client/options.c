@@ -8,6 +8,13 @@
 void maage_client_options_defaults(maage_client_options *options)
 {
     if (!options) return;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MASTER] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_BLOCKS] = MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_PLAYER] = MAAGE_CLIENT_AUDIO_DEFAULT_PLAYER;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_AMBIENT] = MAAGE_CLIENT_AUDIO_DEFAULT_AMBIENT;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_WEATHER] = MAAGE_CLIENT_AUDIO_DEFAULT_WEATHER;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MUSIC] = MAAGE_CLIENT_AUDIO_DEFAULT_MUSIC;
+    options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_UI] = MAAGE_CLIENT_AUDIO_DEFAULT_UI;
     options->max_fps = 0;
     options->vsync = 1;
     options->gui_scale = 0;
@@ -18,9 +25,14 @@ void maage_client_options_defaults(maage_client_options *options)
 
 int maage_client_options_equal(const maage_client_options *a, const maage_client_options *b)
 {
-    return a && b && a->max_fps == b->max_fps && a->vsync == b->vsync &&
-        a->gui_scale == b->gui_scale && a->leaves == b->leaves &&
-        a->window_mode == b->window_mode && a->fullscreen_style == b->fullscreen_style;
+    int i;
+    if (!a || !b || a->max_fps != b->max_fps || a->vsync != b->vsync ||
+        a->gui_scale != b->gui_scale || a->leaves != b->leaves ||
+        a->window_mode != b->window_mode || a->fullscreen_style != b->fullscreen_style)
+        return 0;
+    for (i = 0; i < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++i)
+        if (a->audio_volume[i] != b->audio_volume[i]) return 0;
+    return 1;
 }
 
 static char *maage_client_options_trim(char *text)
@@ -48,22 +60,40 @@ static int maage_client_options_integer(const char *text, int minimum, int maxim
     return 1;
 }
 
-static void maage_client_options_parse(maage_client_options *options, char *line, int *video)
+static void maage_client_options_parse(maage_client_options *options, char *line, int *section)
 {
     char *key, *value, *equals;
-    int number;
+    static const char *const audio_keys[MAAGE_CLIENT_AUDIO_BUS_COUNT] = {
+        MAAGE_CLIENT_AUDIO_KEY_MASTER, MAAGE_CLIENT_AUDIO_KEY_BLOCKS,
+        MAAGE_CLIENT_AUDIO_KEY_PLAYER, MAAGE_CLIENT_AUDIO_KEY_AMBIENT,
+        MAAGE_CLIENT_AUDIO_KEY_WEATHER, MAAGE_CLIENT_AUDIO_KEY_MUSIC,
+        MAAGE_CLIENT_AUDIO_KEY_UI
+    };
+    int number, bus;
     key = maage_client_options_trim(line);
     if (!*key || *key == '#' || *key == ';') return;
     if (*key == '[') {
-        *video = !strcmp(key, "[video]");
+        *section = !strcmp(key, "[video]") ? 1 : (!strcmp(key, "[audio]") ? 2 : 0);
         return;
     }
-    if (!*video) return;
+    if (!*section) return;
     equals = strchr(key, '=');
     if (!equals) return;
     *equals = 0;
     value = maage_client_options_trim(equals + 1);
     key = maage_client_options_trim(key);
+    if (*section == 2) {
+        for (bus = 0; bus < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++bus) {
+            if (!strcmp(key, audio_keys[bus])) {
+                /* An invalid single value cannot invalidate the whole settings file. */
+                if (maage_client_options_integer(value, MAAGE_CLIENT_AUDIO_VOLUME_MIN,
+                    MAAGE_CLIENT_AUDIO_VOLUME_MAX, 1, &number))
+                    options->audio_volume[bus] = number;
+                break;
+            }
+        }
+        return;
+    }
     if (!strcmp(key, "max_fps")) {
         options->max_fps = maage_client_options_integer(value, 0, 260, 10, &number) ? number : 0;
     } else if (!strcmp(key, "vsync")) {
@@ -91,7 +121,7 @@ maage_status maage_client_options_load(const maage_instance *instance, maage_cli
     char path[MAAGE_PATH_CAPACITY], line[256];
     FILE *file;
     maage_status result;
-    int status, video = 0;
+    int status, section = 0;
     if (!instance || !options)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
     maage_client_options_defaults(options);
@@ -111,7 +141,7 @@ maage_status maage_client_options_load(const maage_instance *instance, maage_cli
             while ((character = fgetc(file)) != '\n' && character != EOF) {}
             continue; /* Never interpret truncated lines as options. */
         }
-        maage_client_options_parse(options, line, &video);
+        maage_client_options_parse(options, line, &section);
     }
     result = ferror(file) ? maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_READ, 0) :
         maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
@@ -128,7 +158,7 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
     char destination[MAAGE_PATH_CAPACITY], temporary[MAAGE_PATH_CAPACITY];
     FILE *file;
     maage_status result;
-    int status;
+    int status, bus;
     if (!instance || !options || (options->max_fps != 0 &&
         (options->max_fps < 10 || options->max_fps > 260 || options->max_fps % 10)) ||
         (options->vsync != 0 && options->vsync != 1) ||
@@ -138,6 +168,12 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
         options->fullscreen_style < MAAGE_CLIENT_BORDERLESS ||
         options->fullscreen_style > MAAGE_CLIENT_FULLSCREEN)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
+    for (bus = 0; bus < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++bus) {
+        if (options->audio_volume[bus] < MAAGE_CLIENT_AUDIO_VOLUME_MIN ||
+            options->audio_volume[bus] > MAAGE_CLIENT_AUDIO_VOLUME_MAX)
+            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
+    }
     result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG,
         "options.ini", destination, sizeof(destination));
     if (maage_status_failed(result)) return result;
@@ -150,9 +186,18 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
     file = maage_storage_open(temporary, "wb");
     if (!file) return maage_status_from_errno(errno, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE);
     if (fprintf(file, "[video]\nmax_fps=%d\nvsync=%s\ngui_scale=%d\nleaves=%s\n"
-        "window_mode=%s\nfullscreen_style=%s\n", options->max_fps,
+        "window_mode=%s\nfullscreen_style=%s\n\n"
+        "[audio]\nmaster=%d\nblocks=%d\nplayer=%d\nambient=%d\nweather=%d\nmusic=%d\nui=%d\n",
+        options->max_fps,
         options->vsync ? "true" : "false", options->gui_scale, leaves[options->leaves],
-        modes[options->window_mode], modes[options->fullscreen_style]) < 0)
+        modes[options->window_mode], modes[options->fullscreen_style],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MASTER],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_BLOCKS],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_PLAYER],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_AMBIENT],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_WEATHER],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MUSIC],
+        options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_UI]) < 0)
         result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_WRITE, 0);
     else result = maage_storage_sync(file);
     if (fclose(file) && !maage_status_failed(result))

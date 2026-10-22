@@ -1,8 +1,12 @@
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
 #endif
 #include "maage/thread.h"
 #include <stdlib.h>
+#include <errno.h>
 #ifdef _WIN32
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600
@@ -21,11 +25,12 @@ static DWORD WINAPI maage_thread_entry(LPVOID context)
 #include <pthread.h>
 #include <unistd.h>
 #include <limits.h>
+#include <time.h>
 #ifdef __linux__
 #include <sched.h>
 #endif
 struct maage_mutex { pthread_mutex_t handle; };
-struct maage_condition { pthread_cond_t handle; };
+struct maage_condition { pthread_cond_t handle; int monotonic; };
 struct maage_thread { pthread_t handle; void (*function)(void *); void *context; };
 static void *maage_thread_entry(void *context)
 {
@@ -90,7 +95,22 @@ maage_status maage_condition_create(maage_condition **output)
 #ifdef _WIN32
     InitializeConditionVariable(&condition->handle);
 #else
+    condition->monotonic = 0;
+#if defined(__linux__) && defined(CLOCK_MONOTONIC)
+    {
+        pthread_condattr_t attributes;
+        int attr_status = pthread_condattr_init(&attributes);
+        if (!attr_status) {
+            if (!pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC)) {
+                condition->monotonic = 1;
+                native = pthread_cond_init(&condition->handle, &attributes);
+            } else native = pthread_cond_init(&condition->handle, NULL);
+            pthread_condattr_destroy(&attributes);
+        } else native = pthread_cond_init(&condition->handle, NULL);
+    }
+#else
     native = pthread_cond_init(&condition->handle, NULL);
+#endif
 #endif
     if (native) { free(condition); return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CREATE); }
     *output = condition;
@@ -113,6 +133,56 @@ void maage_condition_wait(maage_condition *condition, maage_mutex *mutex)
     SleepConditionVariableCS(&condition->handle, &mutex->handle, INFINITE);
 #else
     pthread_cond_wait(&condition->handle, &mutex->handle);
+#endif
+}
+maage_status maage_condition_timed_wait(maage_condition *condition,
+    maage_mutex *mutex, unsigned long timeout_ms)
+{
+    int native;
+    if (!condition || !mutex)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, !condition ? 0 : 1);
+#ifdef _WIN32
+    if (timeout_ms > 0xffffffffUL)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 2);
+    if (SleepConditionVariableCS(&condition->handle, &mutex->handle,
+            (DWORD)timeout_ms))
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WAIT, 0);
+    native = (int)GetLastError();
+    if (native == ERROR_TIMEOUT)
+        return maage_status_make(MAAGE_STATUS_TIMEOUT,
+            MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 0);
+    return maage_status_from_win32((unsigned long)native,
+        MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
+#else
+    {
+        struct timespec deadline;
+#if defined(__linux__) && defined(CLOCK_MONOTONIC)
+        clockid_t clock_id = condition->monotonic ? CLOCK_MONOTONIC : CLOCK_REALTIME;
+#else
+        clockid_t clock_id = CLOCK_REALTIME;
+#endif
+        if (clock_gettime(clock_id, &deadline))
+            return maage_status_from_errno(errno, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
+        /* Detect conversion overflow rather than passing an already elapsed or
+         * wrapped deadline to the native condition variable. */
+        if (timeout_ms / 1000UL > (unsigned long)LONG_MAX -
+                (unsigned long)deadline.tv_sec)
+            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+                MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 2);
+        deadline.tv_sec += (time_t)(timeout_ms / 1000UL);
+        deadline.tv_nsec += (long)((timeout_ms % 1000UL) * 1000000UL);
+        if (deadline.tv_nsec >= 1000000000L) {
+            ++deadline.tv_sec;
+            deadline.tv_nsec -= 1000000000L;
+        }
+        native = pthread_cond_timedwait(&condition->handle, &mutex->handle, &deadline);
+        if (native == ETIMEDOUT)
+            return maage_status_make(MAAGE_STATUS_TIMEOUT,
+                MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 0);
+        return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
+    }
 #endif
 }
 void maage_condition_signal(maage_condition *condition)
