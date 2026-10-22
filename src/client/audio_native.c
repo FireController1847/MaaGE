@@ -51,7 +51,6 @@ typedef struct maage_native_music {
 typedef struct maage_native_scene_sound {
     maage_audio_buffer *buffer;
     maage_native_music *stream;
-    double duration;
     size_t bytes;
     int music, loop;
     unsigned long clip_id;
@@ -573,9 +572,9 @@ static maage_status mn_scene_read_snapshot(void *context,
     return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
 }
 
-/* Ambient assets are decoded/uploaded once at bind; all music tracks are
- * registered by ID and lazily decoded when selected. No resource I/O or
- * decoding occurs on the audio callback thread. */
+/* Ambient assets use preloaded PCM; all music is registered by numeric ID
+ * and decoded incrementally by a worker only when selected. The audio
+ * callback performs neither file I/O nor decoding. */
 static maage_status mn_scene_resolve(void *context, const void *catalog,
     const char *path, maage_client_audio_scene_sound_id *numeric)
 {
@@ -597,8 +596,8 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     sound = &scene->sounds[id];
     music = strstr(path, "/music/") != NULL;
     if (music) {
-        /* Register every track without decoding it. Only the selected track
-         * owns a decoded Audio buffer while it is playing. */
+        /* Register every track without decoding. Only a selected track
+         * owns a bounded streaming ring and decoder worker. */
         if (scene->bank->next_id >= MAAGE_SOUND_MAX_CLIP_ID)
             return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
         sound->clip_id = ++scene->bank->next_id;
@@ -617,8 +616,6 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     samples = pcm->pcm.frame_count * (size_t)pcm->pcm.channels;
     sound->bytes = samples * sizeof(float);
     result = mn_upload_pcm(scene->engine, pcm, &buffer, NULL);
-    if (pcm->pcm.sample_rate)
-        sound->duration = (double)pcm->pcm.frame_count / (double)pcm->pcm.sample_rate;
     mn_catalog_release_pcm(scene->bank, pcm);
     if (maage_status_failed(result) || !buffer)
         return maage_status_failed(result) ? result :
