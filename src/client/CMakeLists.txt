@@ -30,15 +30,8 @@ endif()
 # The local Session transport has no dependency on a loopback TCP stack.
 # Audio remains Client-only; Server depends solely on portable libraries.
 target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image
-    MaaGE::World MaaGE::Instance MaaGE::Session MaaGE::Server MaaGE::Audio)
-# Sound catalog/decoder targets are owned by their defining child CMake files.
-# Link them when published under their canonical aliases.
-if(TARGET MaaGE::SoundBank)
-    target_link_libraries(maage_client PRIVATE MaaGE::SoundBank)
-endif()
-if(TARGET MaaGE::SoundCatalog)
-    target_link_libraries(maage_client PRIVATE MaaGE::SoundCatalog)
-endif()
+    MaaGE::World MaaGE::Instance MaaGE::Session MaaGE::Server MaaGE::Audio
+    MaaGE::SoundBank MaaGE::AudioCatalog)
 if(WIN32)
     target_link_libraries(maage_client PRIVATE psapi)
 endif()
