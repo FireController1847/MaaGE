@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include "maage/status.h"
+#include "maage/session_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,8 +15,6 @@ extern "C" {
  * This Client-private adapter isolates Agent 1/3/6 ABI changes while their
  * independent workstreams are in progress. Agent 5 installs it once at setup.
  */
-struct maage_session_snapshot;
-typedef struct maage_session_snapshot maage_session_snapshot;
 typedef struct maage_client_audio_scene maage_client_audio_scene;
 
 /* Numeric categories; adapter maps them to Audio's category volumes. */
