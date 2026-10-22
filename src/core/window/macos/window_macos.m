@@ -556,8 +556,10 @@ static maage_status maage_cocoa_mode(maage_window *window, maage_window_mode mod
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
     if (native->transitioning)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    /* Creation expects SUCCESS even when the requested initial mode is already
+     * Windowed. Preserve the existing synchronous no-change contract. */
     if (mode == previous)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if ((mode == MAAGE_WINDOW_NATIVE_FULLSCREEN || mode == MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN) && ![handle isVisible])
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (previous == MAAGE_WINDOW_NATIVE_FULLSCREEN) {
