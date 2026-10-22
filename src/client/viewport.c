@@ -799,7 +799,7 @@ static maage_status maage_client_audio_bridge_listener(void *handle,
 {
     maage_client_audio_engine_bridge *engine = (maage_client_audio_engine_bridge *)handle;
     maage_audio_vec3 eye, forward, up;
-    (void)trace;
+    maage_status result;
     if (!engine || !position || !direction)
         return maage_client_audio_bridge_result(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_OPERATION_SET);
@@ -808,7 +808,11 @@ static maage_status maage_client_audio_bridge_listener(void *handle,
     forward.x = (float)direction[0]; forward.y = (float)direction[1];
     forward.z = (float)direction[2];
     up.x = 0.0f; up.y = 1.0f; up.z = 0.0f;
-    return maage_audio_set_listener(engine->engine, eye, forward, up);
+    result = maage_audio_set_listener(engine->engine, eye, forward, up);
+    if (maage_status_failed(result)) return result;
+    /* Poll is an allocation-free/device-recovery-free maintenance boundary;
+     * drive it from presentation updates, independent of drawable submission. */
+    return maage_audio_poll(engine->engine, trace);
 }
 static maage_status maage_client_audio_bridge_event(void *catalog, void *engine,
     const maage_sound_event *event, maage_status_trace *trace)
