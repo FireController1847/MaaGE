@@ -120,6 +120,13 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
 void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float y,
     maage_client_ui_alignment alignment, float red, float green, float blue);
+typedef enum maage_client_ui_button_visual {
+    MAAGE_CLIENT_UI_BUTTON_DISABLED = 0,
+    MAAGE_CLIENT_UI_BUTTON_NORMAL = 1,
+    MAAGE_CLIENT_UI_BUTTON_HOVER = 2
+} maage_client_ui_button_visual;
+void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle,
+    const char *label, maage_client_ui_button_visual state);
 void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle,
     const char *label, int highlighted);
 #endif

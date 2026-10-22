@@ -3,62 +3,95 @@
 #include <stddef.h>
 /* Six verified cubemap faces packed into the existing atlas. View-space
  * tessellation provides panorama rotation without a second renderer. */
-static void title_sample(const maage_client_ui *ui,float x,float y,double now,
-    float *u,float *v,int *face)
+/* The panorama must project each quad into ONE cubemap face. The old
+ * per-corner face choice interpolated across unrelated atlas tiles whenever
+ * a cube boundary passed beneath the camera, creating rotating glitches. */
+typedef struct title_camera {
+    double cy,sy,cp,sp;
+    float width,height;
+} title_camera;
+static void title_ray(const title_camera *camera,float x,float y,double ray[3])
 {
-    double yaw=now*0.004,pitch=0.16+sin(now*0.012)*0.06;
-    double dx=(x-ui->width*0.5)*2.0/ui->height,dy=(y-ui->height*0.5)*2.0/ui->height;
-    double xx=dx*cos(yaw)+sin(yaw),zz=cos(yaw)-dx*sin(yaw),yy,t,ax,ay,az,uu,vv;
-    yy=dy*cos(pitch)-zz*sin(pitch);t=dy*sin(pitch)+zz*cos(pitch);zz=t;
-    ax=fabs(xx);ay=fabs(yy);az=fabs(zz);
-    if(az>=ax&&az>=ay) {
-        if(zz>=0){*face=0;uu=xx/az;vv=yy/az;}
-        else {*face=2;uu=-xx/az;vv=yy/az;}
-    } else if(ax>=ay) {
-        if(xx>=0){*face=1;uu=-zz/ax;vv=yy/ax;}
-        else {*face=3;uu=zz/ax;vv=yy/ax;}
+    double dx=(x-camera->width*0.5f)*2.0/camera->height;
+    double dy=(y-camera->height*0.5f)*2.0/camera->height;
+    double z=camera->cy-dx*camera->sy;
+    ray[0]=dx*camera->cy+camera->sy;
+    ray[1]=dy*camera->cp-z*camera->sp;
+    ray[2]=dy*camera->sp+z*camera->cp;
+}
+static int title_face(const double ray[3])
+{
+    double ax=fabs(ray[0]),ay=fabs(ray[1]),az=fabs(ray[2]);
+    if(az>=ax&&az>=ay)return ray[2]>=0.0?0:2;
+    if(ax>=ay)return ray[0]>=0.0?1:3;
+    return ray[1]>=0.0?5:4;
+}
+static void title_uv(const maage_client_ui *ui,const double ray[3],int face,
+    float *u,float *v)
+{
+    double a,uu,vv;
+    if(face==0||face==2) {
+        a=fabs(ray[2]);uu=(face==0?ray[0]:-ray[0])/a;vv=ray[1]/a;
+    } else if(face==1||face==3) {
+        a=fabs(ray[0]);uu=(face==1?-ray[2]:ray[2])/a;vv=ray[1]/a;
     } else {
-        if(yy>=0){*face=5;uu=xx/ay;vv=-zz/ay;}
-        else {*face=4;uu=xx/ay;vv=zz/ay;}
+        a=fabs(ray[1]);uu=ray[0]/a;vv=(face==5?-ray[2]:ray[2])/a;
     }
-    *u=(float)(512+((*face+1)%4)*256+2+(uu+1)*126)/ui->resources.atlas_edge;
-    *v=(float)(((*face+1)/4)*256+2+(vv+1)*126)/ui->resources.atlas_edge;
+    /* Clamp cube-edge straddling cells to their center-selected face. */
+    if(uu < -1.0)uu=-1.0;
+    if(uu > 1.0)uu=1.0;
+    if(vv < -1.0)vv=-1.0;
+    if(vv > 1.0)vv=1.0;
+    *u=(float)(512+((face+1)%4)*256+2+(uu+1.0)*126.0)/ui->resources.atlas_edge;
+    *v=(float)(((face+1)/4)*256+2+(vv+1.0)*126.0)/ui->resources.atlas_edge;
 }
 static void title_panorama(maage_client_ui *ui)
 {
+    static const float jitter[5][2]={
+        {0.0f,0.0f},{-1.75f,0.0f},{1.75f,0.0f},
+        {0.0f,-1.75f},{0.0f,1.75f}
+    };
+    title_camera camera;
     maage_render_ui_vertex vertices[4];
-    float u[4],v[4],left,top,right,bottom;
-    int face[4],pass,i,x,y;
-    size_t j;
-    const int step=12;
-    double now=ui->notice_now;
     maage_client_ui_rect full;
-    for(i=1;i<=6;++i)if(!ui->resources.title_available[i])return;
+    double ray[3],yaw,pitch;
+    float left,top,right,bottom,sx,sy;
+    unsigned int j;
+    int face,i,pass,x,y;
+    const int step=8;
+    for(i=1;i<=6;++i)
+        if(!ui->resources.title_available[i])return;
+    yaw=ui->notice_now*0.004;
+    pitch=0.16+sin(ui->notice_now*0.012)*0.06;
+    camera.cy=cos(yaw);camera.sy=sin(yaw);
+    camera.cp=cos(pitch);camera.sp=sin(pitch);
+    camera.width=ui->width;camera.height=ui->height;
     full.x=full.y=0;full.width=ui->width;full.height=ui->height;
-    maage_client_ui_panel(ui,full,0.48f,0.55f,0.61f,1);
-    for(pass=0;pass<3;++pass) {
-        float offset=(float)(pass-1)*1.3f,alpha=pass==0?1.0f:0.38f;
-        for(y=0;y<(int)ui->height;y+=step)for(x=0;x<(int)ui->width;x+=step) {
-            left=(float)x;top=(float)y;right=left+step;bottom=top+step;
-            if(right>ui->width)right=ui->width;
-            if(bottom>ui->height)bottom=ui->height;
-            title_sample(ui,left+offset,top,now,&u[0],&v[0],&face[0]);
-            title_sample(ui,right+offset,top,now,&u[1],&v[1],&face[1]);
-            title_sample(ui,right+offset,bottom,now,&u[2],&v[2],&face[2]);
-            title_sample(ui,left+offset,bottom,now,&u[3],&v[3],&face[3]);
-            if(face[0]!=face[1]||face[1]!=face[2]||face[2]!=face[3]) {
-                float cu,cv;int cf;
-                title_sample(ui,(left+right)*0.5f+offset,(top+bottom)*0.5f,now,&cu,&cv,&cf);
-                for(i=0;i<4;++i)if(face[i]!=cf){u[i]=cu;v[i]=cv;}
+    maage_client_ui_panel(ui,full,0.48f,0.55f,0.61f,1.0f);
+    /* Five nearby evenly weighted samples approximate the soft original
+     * panorama blur. The same immutable GUI atlas backs all passes. */
+    for(pass=0;pass<5;++pass) {
+        for(y=0;y<(int)ui->height;y+=step) {
+            for(x=0;x<(int)ui->width;x+=step) {
+                left=(float)x;top=(float)y;
+                right=left+step;bottom=top+step;
+                if(right>ui->width)right=ui->width;
+                if(bottom>ui->height)bottom=ui->height;
+                title_ray(&camera,(left+right)*0.5f+jitter[pass][0],
+                    (top+bottom)*0.5f+jitter[pass][1],ray);
+                face=title_face(ray);
+                for(j=0;j<4U;++j) {
+                    sx=(j==0U||j==3U)?left:right;
+                    sy=j<2U?top:bottom;
+                    vertices[j].position[0]=sx;
+                    vertices[j].position[1]=sy;
+                    title_ray(&camera,sx+jitter[pass][0],sy+jitter[pass][1],ray);
+                    title_uv(ui,ray,face,&vertices[j].uv[0],&vertices[j].uv[1]);
+                    vertices[j].color[0]=vertices[j].color[1]=vertices[j].color[2]=1.0f;
+                    vertices[j].color[3]=1.0f/(float)(pass+1);
+                }
+                if(!maage_client_ui_append_quads(ui,vertices,1))return;
             }
-            for(j=0;j<4;++j) {
-                vertices[j].position[0]=j==0||j==3?left:right;
-                vertices[j].position[1]=j<2?top:bottom;
-                vertices[j].uv[0]=u[j];vertices[j].uv[1]=v[j];
-                vertices[j].color[0]=vertices[j].color[1]=vertices[j].color[2]=1;
-                vertices[j].color[3]=alpha;
-            }
-            if(!maage_client_ui_append_quads(ui,vertices,1))return;
         }
     }
     maage_client_ui_panel(ui,full,0.38f,0.36f,0.43f,0.28f);
@@ -112,15 +145,17 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
     maage_client_ui_rect r;
     title_panorama(ui);title_logo(ui);title_splash(ui);
     r=title_button(ui,0);maage_client_ui_button(ui,r,"Singleplayer",f->focus==0);
-    r=title_button(ui,1);maage_client_ui_button(ui,r,"Multiplayer",0);
-    r=title_button(ui,2);maage_client_ui_button(ui,r,"Minecraft Realms",0);
-    r=title_button(ui,3);maage_client_ui_button(ui,r,"",0);
-    if(ui->resources.title_available[7]) {
-        maage_client_ui_rect icon=r;icon.x+=2;icon.y+=2;icon.width=icon.height=16;
-        maage_client_ui_rectangle(ui,icon,1280.0f/ui->resources.atlas_edge,
-            256.0f/ui->resources.atlas_edge,1296.0f/ui->resources.atlas_edge,
-            272.0f/ui->resources.atlas_edge,1,1,1,1);
-    }
+    r=title_button(ui,1);
+    maage_client_ui_button_state(ui,r,"Multiplayer",MAAGE_CLIENT_UI_BUTTON_DISABLED);
+    r=title_button(ui,2);
+    maage_client_ui_button_state(ui,r,"Minecraft Realms",MAAGE_CLIENT_UI_BUTTON_DISABLED);
+    /* The 1.7.10 language globe is in widgets.png at (0,106/126),
+     * not a separate language.png resource. */
+    r=title_button(ui,3);
+    maage_client_ui_rectangle(ui,r,256.0f/ui->resources.atlas_edge,
+        (title_hit(ui,r)?126.0f:106.0f)/ui->resources.atlas_edge,
+        276.0f/ui->resources.atlas_edge,
+        (title_hit(ui,r)?146.0f:126.0f)/ui->resources.atlas_edge,1,1,1,1);
     r=title_button(ui,4);maage_client_ui_button(ui,r,"Options...",f->focus==4);
     r=title_button(ui,5);maage_client_ui_button(ui,r,"Quit Game",f->focus==5);
     maage_client_ui_text(ui,"Minecraft 1.7.10",3,ui->height-9,MAAGE_CLIENT_UI_LEFT,0.14f,0.14f,0.14f);
@@ -147,8 +182,17 @@ unsigned int maage_client_ui_title_input(maage_client_ui *ui,
         ui->mouse_y!=ui->previous_mouse_y))f->focus=(unsigned int)hover;
     if(!(input->accept||(input->primary_pressed&&hover>=0)))return 0;
     if(input->primary_pressed)f->focus=(unsigned int)hover;
-    if(f->focus==0){f->action=1;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_WORLDS);}
-    else if(f->focus==4)ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_OPTIONS);
-    else if(f->focus==5)f->quit=1;
+    /* Inactive buttons are neither selectable nor audible. The UI callback
+     * is invoked only when a real title action is accepted. */
+    if(f->focus==0) {
+        if(ui->click)ui->click(ui->click_context);
+        f->action=1;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_WORLDS);
+    } else if(f->focus==4) {
+        if(ui->click)ui->click(ui->click_context);
+        ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_OPTIONS);
+    } else if(f->focus==5) {
+        if(ui->click)ui->click(ui->click_context);
+        f->quit=1;
+    }
     return 0;
 }

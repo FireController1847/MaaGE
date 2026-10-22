@@ -25,7 +25,7 @@ typedef struct maage_client_ui_resources {
     maage_status load_status, recovery_status;
     maage_status source_results[4];
     unsigned int failed_resources;
-    unsigned char title_available[8];
+    unsigned char title_available[7];
 } maage_client_ui_resources;
 /* One optional retained F3 column; the left gameplay column stays immediate. */
 typedef struct maage_client_ui_debug_cache {

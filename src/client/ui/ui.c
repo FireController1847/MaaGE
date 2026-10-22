@@ -355,7 +355,8 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->mouse_x = input->mouse_x * (float)framebuffer_width / (float)window_width / scale;
     ui->mouse_y = input->mouse_y * (float)framebuffer_height / (float)window_height / scale;
     if (input->f3) ui->debug = !ui->debug;
-    if (maage_client_ui_current(ui) && ui->click &&
+    if (maage_client_ui_current(ui) != MAAGE_CLIENT_UI_TITLE &&
+        maage_client_ui_current(ui) && ui->click &&
         (input->primary_pressed || input->accept)) ui->click(ui->click_context);
     if (input->f11) maage_client_ui_request_window_mode(ui,
         (maage_client_window_choice)(ui->window_mode ? MAAGE_CLIENT_WINDOWED : ui->last_nonwindowed_mode));

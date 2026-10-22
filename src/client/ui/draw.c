@@ -113,24 +113,35 @@ void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float 
     maage_client_ui_font_draw(ui, text, x, y, red, green, blue);
 }
 
+void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle,
+    const char *label, maage_client_ui_button_visual state)
+{
+    maage_client_ui_rect half;
+    float v,center,tint;
+    if(!ui||!label||state<MAAGE_CLIENT_UI_BUTTON_DISABLED||
+        state>MAAGE_CLIENT_UI_BUTTON_HOVER)return;
+    /* Original widgets.png rows: disabled 46, enabled 66, hover 86. */
+    v=(46.0f+(float)state*20.0f)/ui->resources.atlas_edge;
+    half=rectangle;half.width*=0.5f;
+    maage_client_ui_rectangle(ui,half,256.0f/ui->resources.atlas_edge,v,
+        356.0f/ui->resources.atlas_edge,v+20.0f/ui->resources.atlas_edge,1,1,1,1);
+    half.x+=half.width;
+    maage_client_ui_rectangle(ui,half,356.0f/ui->resources.atlas_edge,v,
+        456.0f/ui->resources.atlas_edge,v+20.0f/ui->resources.atlas_edge,1,1,1,1);
+    center=rectangle.x+rectangle.width*0.5f;
+    maage_client_ui_text(ui,label,center+1,rectangle.y+7,
+        MAAGE_CLIENT_UI_CENTER,0.22f,0.22f,0.22f);
+    tint=state==MAAGE_CLIENT_UI_BUTTON_DISABLED?0.63f:
+        (state==MAAGE_CLIENT_UI_BUTTON_HOVER?1.0f:0.88f);
+    maage_client_ui_text(ui,label,center,rectangle.y+6,
+        MAAGE_CLIENT_UI_CENTER,tint,tint,
+        state==MAAGE_CLIENT_UI_BUTTON_HOVER?0.63f:tint);
+}
 void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle,
     const char *label, int highlighted)
 {
-    maage_client_ui_rect half;
-    float v, center;
-    if (!ui) return;
-    v = (float)(highlighted ? 86 : 66) / ui->resources.atlas_edge;
-    half = rectangle; half.width *= 0.5f;
-    maage_client_ui_rectangle(ui, half, 256.0f / ui->resources.atlas_edge, v,
-        356.0f / ui->resources.atlas_edge, v + 20.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
-    half.x += half.width;
-    maage_client_ui_rectangle(ui, half, 356.0f / ui->resources.atlas_edge, v,
-        456.0f / ui->resources.atlas_edge, v + 20.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
-    center = rectangle.x + rectangle.width * 0.5f;
-    maage_client_ui_text(ui, label, center + 1, rectangle.y + 7,
-        MAAGE_CLIENT_UI_CENTER, 0.22f, 0.22f, 0.22f);
-    maage_client_ui_text(ui, label, center, rectangle.y + 6,
-        MAAGE_CLIENT_UI_CENTER, highlighted ? 1 : 0.88f, highlighted ? 1 : 0.88f, highlighted ? 0.63f : 0.88f);
+    maage_client_ui_button_state(ui,rectangle,label,
+        highlighted?MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL);
 }
 
 /* The GPU clips held-item faces; no world or texture work. */

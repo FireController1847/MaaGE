@@ -26,8 +26,9 @@ static maage_client_ui_rect front_button_rect(maage_client_ui_frontend *f, unsig
 static void front_button(maage_client_ui_frontend *f, unsigned int n, const char *text, int enabled)
 {
     maage_client_ui_rect r = front_button_rect(f,n);
-    maage_client_ui_button(f->ui, r, text, enabled && f->focus == n);
-    if (!enabled) maage_client_ui_panel(f->ui, r, 0,0,0,0.55f);
+    maage_client_ui_button_state(f->ui,r,text,
+        !enabled?MAAGE_CLIENT_UI_BUTTON_DISABLED:
+        (f->focus==n?MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL));
 }
 static size_t front_rows(maage_client_ui_frontend *f)
 {

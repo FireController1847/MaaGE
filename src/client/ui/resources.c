@@ -42,7 +42,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
         "minecraft/textures/font/ascii.png", "minecraft/textures/gui/container/inventory.png"
     };
     static const int origins[4][2] = {{0, 0}, {256, 0}, {0, 256}, {256, 256}};
-    maage_image sources[4], title_images[8], atlas;
+    maage_image sources[4], title_images[7], atlas;
     maage_pixel_buffer pixels;
     maage_status result;
     maage_status status;
@@ -120,17 +120,16 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     }
     /* Only the programmer's verified installation supplies title resources. */
     {
-        static const char *const names_title[8] = {
+        static const char *const names_title[7] = {
             "minecraft/textures/gui/title/minecraft.png",
             "minecraft/textures/gui/title/background/panorama_0.png",
             "minecraft/textures/gui/title/background/panorama_1.png",
             "minecraft/textures/gui/title/background/panorama_2.png",
             "minecraft/textures/gui/title/background/panorama_3.png",
             "minecraft/textures/gui/title/background/panorama_4.png",
-            "minecraft/textures/gui/title/background/panorama_5.png",
-            "minecraft/textures/gui/language.png"
+            "minecraft/textures/gui/title/background/panorama_5.png"
         };
-        for(i=0;i<8;++i) {
+        for(i=0;i<7;++i) {
             maage_status_trace_init(&source_trace);
             status=maage_minecraft_asset_path(application_data,names_title[i],path,sizeof(path),&source_trace);
             if(!maage_status_failed(status))status=maage_image_load_png(path,&title_images[i],&source_trace);
@@ -157,7 +156,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     for (y = 0; y < block_atlas->height; ++y)
         memcpy(atlas.pixels + (size_t)(MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + y) * atlas.stride,
             block_atlas->pixels + (size_t)y * block_atlas->stride, (size_t)block_atlas->width * 4);
-    for(i=0;i<8;++i)if(resources->title_available[i])for(y=0;y<title_images[i].height;++y)
+    for(i=0;i<7;++i)if(resources->title_available[i])for(y=0;y<title_images[i].height;++y)
         memcpy(atlas.pixels+(size_t)(((i/4)*256)+y)*atlas.stride+
             (size_t)(512+(i%4)*256)*4,
             title_images[i].pixels+(size_t)y*title_images[i].stride,
@@ -177,7 +176,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     ok = 1;
 done:
     for (i = 0; i < 4; ++i) maage_image_destroy(&sources[i]);
-    for(i=0;i<8;++i)maage_image_destroy(&title_images[i]);
+    for(i=0;i<7;++i)maage_image_destroy(&title_images[i]);
     maage_image_destroy(&atlas);
     if (!ok) return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
     if (trace && resources->failed_resources) *trace = recovered_trace;
