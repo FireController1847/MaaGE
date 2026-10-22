@@ -1,16 +1,19 @@
 <!-- AI AGENTS: DO NOT MODIFY README.md unless explicitly instructed by the user. This file is intended for human readers only. Read AGENTS.md for all AI development instructions, architectural requirements, and repository conventions. -->
 
-# MaaGE
+<h1 align="center">MaaGE</h1>
+<p align="center"><strong>Minecraft as a Game Engine</strong></p>
+<p align="center">
+  <em>A modular, cross-platform reimagining of Minecraft in C, built for performance, extensibility, and modding.</em>
+</p>
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/language-ISO%20C90-555555?style=flat-square" alt="Language: ISO C90">
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-526b80?style=flat-square" alt="Platforms: Windows, Linux, macOS">
+  <a href="https://github.com/FireController1847/MaaGE/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/FireController1847/MaaGE/build.yml?branch=main&amp;event=workflow_dispatch&amp;style=flat-square&amp;label=Latest%20Build" alt="Latest Build"></a>
+  <img src="https://img.shields.io/badge/status-Early%20Development-orange?style=flat-square" alt="Status: Early Development">
+</p>
 
-**Minecraft as a Game Engine**
-
-*A modular, cross-platform reimagining of Minecraft in C, built for performance, extensibility, and limitless modding.*
-
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-![Language: ISO C90](https://img.shields.io/badge/Language-ISO%20C90-555555.svg)
-![Platforms: Windows, Linux, macOS](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-526b80.svg)
-[![Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml/badge.svg)](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml)
-![Status: Early Development](https://img.shields.io/badge/Status-Early%20Development-orange.svg)
+> **MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.**
 
 ## About MaaGE
 
@@ -46,27 +49,64 @@ See the [Development Roadmap](docs/development-roadmap.md) for implemented miles
 
 ## Building From Source
 
-MaaGE uses **CMake 3.21+** and requires a supported C compiler.
+MaaGE uses **CMake 3.21+** and a supported C compiler. Build requirements vary depending on the operating system and selected components.
 
-Dependencies vary by platform and selected build targets:
+### Platform Prerequisites
 
-- **Core:** zlib.
-- **Launcher:** libcurl, json-c, OpenSSL, and libzip; GTK 3 on Linux.
-- **Client:** libpng and the corresponding native graphics and windowing development libraries.
-- **macOS:** Xcode Command Line Tools and the Apple SDK.
-- **Windows:** Visual Studio 2022 and the relevant dependencies, optionally managed through vcpkg.
-- **Linux:** GCC or Clang, Ninja, and applicable X11, Wayland, and Vulkan development packages.
+**macOS**
 
-### macOS and Linux
+- Xcode Command Line Tools, including Apple Clang.
+- Ninja for the default CMake presets.
+- Apple SDK frameworks for AppKit, Metal, and QuartzCore.
+- Homebrew or another package manager for third-party libraries.
+
+**Windows**
+
+- Visual Studio 2022 with the MSVC C toolchain.
+- CMake 3.21 or later.
+- Vulkan SDK headers and loader for Vulkan-enabled builds.
+- vcpkg or equivalent dependency management for third-party libraries.
+
+**Linux**
+
+- GCC or Clang and Ninja.
+- pkg-config.
+- X11 and Wayland development libraries.
+- `wayland-protocols` and `wayland-scanner`.
+- Vulkan development headers and loader for Vulkan-enabled builds.
+
+### Module Dependencies
+
+Different MaaGE components require different libraries. Only dependencies associated with enabled build targets are required.
+
+| Module | Dependencies |
+|---|---|
+| **Core** | zlib 1.2.3+ |
+| **Launcher** | libcurl 7.85+, json-c 0.15+, OpenSSL Crypto 1.1.0+, libzip 1.7+ |
+| **Client** | libpng 1.6+, platform-specific rendering and windowing dependencies |
+| **Server** | Core dependencies; no graphics or windowing dependencies for headless builds |
+
+The Launcher additionally requires **GTK 3.22+ on Linux**.
+
+Third-party libraries are installed separately and remain subject to their respective licensing terms. See [NOTICE.md](NOTICE.md) for project acknowledgments and license references.
+
+### Building on macOS and Linux
+
+From the repository root:
 
 ```powershell
 cmake --preset release
 cmake --build --preset release
 ```
 
-For a Debug build, replace `release` with `debug`.
+For a Debug build:
 
-### Windows
+```powershell
+cmake --preset debug
+cmake --build --preset debug
+```
+
+### Building on Windows
 
 Using the Visual Studio 2022 toolchain:
 
@@ -75,18 +115,26 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc-release
 ```
 
-The Windows configuration requires the appropriate dependency libraries and may require a CMake toolchain file for vcpkg.
+For a Debug build:
 
-### Headless Builds
+```powershell
+cmake --build --preset windows-msvc-debug
+```
 
-MaaGE supports building its portable libraries and Server without Launcher or graphical dependencies.
+When using vcpkg, configure CMake with the appropriate `CMAKE_TOOLCHAIN_FILE` path.
+
+### Headless Server Builds
+
+MaaGE supports building its Server and portable libraries independently of the Launcher and graphical systems.
 
 ```powershell
 cmake --preset release -DMAAGE_BUILD_LAUNCHER=OFF -DMAAGE_BUILD_CLIENT=OFF -DMAAGE_BUILD_WINDOW=OFF -DMAAGE_BUILD_RENDER=OFF -DMAAGE_BUILD_WORLD=ON
 cmake --build --preset release
 ```
 
-Build artifacts are generated beneath `build/`, with CMake configuration files beneath `cmake/`.
+Headless builds do not require a graphical environment or graphics SDK.
+
+CMake configuration files are generated beneath `cmake/`, while compiled artifacts are written beneath `build/`.
 
 ## Minecraft Assets and Ownership
 
@@ -98,7 +146,7 @@ Supported resources are obtained from Minecraft's official distribution infrastr
 
 A legitimate Minecraft Java Edition account is required for the supported asset preparation workflow. All third-party content remains subject to its original licensing and usage restrictions.
 
-## Development and Contributions
+## AI Assisted Development
 
 MaaGE is developed collaboratively by **human contributors and AI coding agents**, with human direction, engineering oversight, and review.
 
@@ -110,6 +158,8 @@ Both human-written and AI-assisted contributions are welcome. Contributors remai
 
 MaaGE's original source code and documentation are licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) for the complete license terms.
 
+Third-party technologies and their developers are acknowledged in [NOTICE.md](NOTICE.md).
+
 This license does not extend to third-party software, Minecraft assets, trademarks, or other intellectual property owned by Mojang, Microsoft, or their respective rights holders.
 
-**MaaGE is an independent project and is not affiliated with, endorsed by, approved by, or sponsored by Mojang Studios or Microsoft.**
+MaaGE is an independent project and is not affiliated with, endorsed by, approved by, or sponsored by Mojang Studios or Microsoft.
