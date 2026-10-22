@@ -2,6 +2,7 @@
 #define MAAGE_CLIENT_UI_INTERNAL_H
 #include "ui.h"
 #include "maage/image.h"
+#include "maage/internal/registry_pages.h"
 
 /* The original GUI resources occupy the first 512 atlas rows. */
 #define MAAGE_CLIENT_UI_COMMAND_CAPACITY 64U
@@ -12,9 +13,9 @@ typedef struct maage_client_ui_screen {
     void *context;
 } maage_client_ui_screen;
 typedef struct maage_client_ui_navigation {
-    maage_client_ui_screen *screens;
+    maage_registry_pages screens;
     maage_client_ui_screen_id *stack;
-    size_t capacity, registered, depth;
+    size_t registered, depth;
     int finalized;
 } maage_client_ui_navigation;
 typedef struct maage_client_ui_resources {
@@ -91,5 +92,7 @@ void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
 /* Appends already-clipped quads, rebasing indices into the current frame. */
 int maage_client_ui_append_quads(maage_client_ui *ui,
     const maage_render_ui_vertex *vertices, size_t count);
+maage_client_ui_screen *maage_client_ui_screen_get(const maage_client_ui *ui,
+    maage_client_ui_screen_id id);
 maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui);
 #endif

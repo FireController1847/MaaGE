@@ -313,7 +313,8 @@ maage_status maage_client_ui_destroy(maage_client_ui *ui)
     maage_render_texture_destroy(ui->resources.texture);
     free(ui->debug_cache.vertices);
     free(ui->vertices); free(ui->indices);
-    free(ui->navigation.screens); free(ui->navigation.stack); free(ui);
+    maage_registry_pages_destroy(&ui->navigation.screens, free);
+    free(ui->navigation.stack); free(ui);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
@@ -368,7 +369,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     }
     if (id) {
-        screen = &ui->navigation.screens[id];
+        screen = maage_client_ui_screen_get(ui, id);
         if (screen->input) action = screen->input(ui, input, screen->context);
     }
     *actions = action;
@@ -626,7 +627,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
         rectangle = ui->clip;
         maage_client_ui_panel(ui, rectangle, 0.03f, 0.03f, 0.04f, 0.68f);
         ui->clip = ui->content;
-        screen = &ui->navigation.screens[id];
+        screen = maage_client_ui_screen_get(ui, id);
         screen->draw(ui, screen->context);
     }
     if (ui->notice_until > ui->notice_now) {

@@ -297,18 +297,19 @@ maage_status maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_see
     if (policy->generator_version == MAAGE_GENERATION_FEATURES_VERSION) {
         if (!maage_generation_features_valid(blocks))
             return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_GENERATE);
-        if (maage_status_failed(maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_BASE)))
-            return maage_generation_outcome(&context, MAAGE_STATUS_INTERRUPTED, MAAGE_OPERATION_GENERATE);
+        result = maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_BASE);
+        if (maage_status_failed(result)) return result;
         for (z = 0; z < 16; ++z) for (x = 0; x < 16; ++x) {
             if (!maage_generation_column_at(seed, biomes, chunk->x * 16 + x, chunk->z * 16 + z, &column)) return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_GENERATE);
             context.surface[z * 16 + x] = column.height;
             chunk->biomes[z * 16 + x] = column.biome;
         }
         chunk->generation_stages |= 1U << MAAGE_GENERATION_STAGE_BASE;
-        if (maage_status_failed(maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_TERRAIN))) return maage_generation_outcome(&context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_GENERATE);
+        result = maage_generation_stage_begin(&context, MAAGE_GENERATION_STAGE_TERRAIN);
+        if (maage_status_failed(result)) return result;
     }
     for (z = 0; z < MAAGE_CHUNK_EDGE; ++z) {
-        if (token && maage_job_cancelled(token)) return maage_generation_outcome(&context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_GENERATE);
+        if (token && maage_job_cancelled(token)) return maage_generation_outcome(&context, MAAGE_STATUS_INTERRUPTED, MAAGE_OPERATION_GENERATE);
         for (x = 0; x < MAAGE_CHUNK_EDGE; ++x) {
             wx = chunk->x * MAAGE_CHUNK_EDGE + x;
             wz = chunk->z * MAAGE_CHUNK_EDGE + z;

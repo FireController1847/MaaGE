@@ -152,11 +152,11 @@ maage_status maage_client_resources_load(const char *application_data,
             maage_client_texture_names[i], sources[i].width, sources[i].height);
     }
     for (i = 0; i < MAAGE_BIOME_COUNT; ++i) {
-        if (!biomes->occupied[i]) {
+        if (!biomes->builtin_names[i]) {
             resources->recovery_status = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION,
                 MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0); goto done;
         }
-        biome = &biomes->definitions[i];
+        biome = &biomes->builtin_definitions[i];
         /* Absent optional colormaps use fixed, bounded green presentation tints. */
         if (sources[5].pixels) maage_client_colormap(&sources[5], biome->temperature, biome->rainfall, biome->grass_color);
         else memcpy(biome->grass_color, default_grass, sizeof(default_grass));
@@ -195,7 +195,7 @@ maage_status maage_client_resources_load(const char *application_data,
         selected = source_index >= 0 && sources[source_index].pixels ? &sources[source_index] : &missing;
         tint = source_index == 32 || source_index == 52 || source_index == 55 ||
             source_index == 57 || source_index == 58 || source_index == 59 ?
-            biomes->definitions[biome_id].foliage_color : biomes->definitions[biome_id].grass_color;
+            biomes->builtin_definitions[biome_id].foliage_color : biomes->builtin_definitions[biome_id].grass_color;
         for (y = 0; y < tile; ++y) {
             sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
             for (x = 0; x < tile; ++x) {

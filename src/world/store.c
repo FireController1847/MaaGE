@@ -796,7 +796,7 @@ maage_status maage_world_store_open_configured(const char *instance_root, const 
     }
     if (create) {
         if (generation_policy) store->record.generation_policy = *generation_policy;
-        else MAAGE_STORE_STEP(maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &store->record.generation_policy), "Cannot initialize world generation policy.");
+        else MAAGE_STORE_STEP(maage_generation_policy_default(MAAGE_GENERATION_FEATURES_VERSION, &store->record.generation_policy), "Cannot initialize world generation policy.");
         strcpy(store->record.id, chosen); strcpy(store->record.name, name ? name : "New World");
         store->record.new_world = 1; store->record.position[1] = 128;
         maage_store_gameplay_default(&store->record.gameplay);
@@ -1457,6 +1457,10 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
             chunk->sections[section]->light[i] = (unsigned char)maage_store_get(&bytes, 1);
     }
     if (simulation && !maage_store_chunk_simulation_get(&bytes,chunk,blocks)) goto failed;
+    /* A version-3 chunk may never be persisted as completed before all eight
+     * stages have run. Older chunk formats have no stage journal. */
+    if (simulation && generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
+        chunk->generation_stages != (1U << MAAGE_GENERATION_STAGE_COUNT) - 1U) goto failed;
     if (bytes.failed || bytes.position != bytes.length) goto failed;
     free(palette);
     *output = chunk;
@@ -1516,6 +1520,15 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
         maage_store_error(error, "Chunk coordinates or path exceed the world format bounds.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE,
             !store ? 0 : (!chunk ? 1 : (!blocks ? 2 : (!biomes ? 3 : 1)))), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
+    }
+    /* Persist only fully finalized feature-capable columns. A failed or
+     * cancelled generation stage must never become a durable partial world. */
+    if (store->record.generation_policy.generator_version == MAAGE_GENERATION_FEATURES_VERSION &&
+        chunk->generation_stages != (1U << MAAGE_GENERATION_STAGE_COUNT) - 1U) {
+        maage_store_error(error, "Refusing to persist a version-3 column with incomplete generation stages.");
+        return MAAGE_STATUS_TRACE(trace,
+            maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD_IO,
+                MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
     }
     if (maage_storage_status(path) != 0) {
         load_result = maage_world_store_load_chunk(store, chunk->x, chunk->z, blocks, biomes, &existing, error, trace);

@@ -31,8 +31,9 @@ typedef struct maage_inventory {
 } maage_inventory;
 typedef struct maage_item_registry maage_item_registry;
 
-/* Definitions and both names are copied. Finalization makes direct numeric
- * lookup immutable; strings are used only at registration/UI boundaries. */
+/* Definitions and both names are copied. Finalization makes sparse-paged,
+ * 32-bit numeric lookup immutable and O(1), independent of highest ID;
+ * strings are used only at registration/UI boundaries. */
 maage_status maage_item_registry_create(size_t capacity, maage_item_registry **output);
 maage_status maage_item_registry_destroy(maage_item_registry *registry);
 maage_status maage_item_registry_register(maage_item_registry *registry,
