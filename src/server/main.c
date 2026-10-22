@@ -58,7 +58,7 @@ static maage_status maage_server_parse(int argc, char **argv,
             if (errno || !argument[8] || *end || config->interaction_range <= 0 ||
                 config->interaction_range > 64) goto invalid;
         } else if (!strcmp(argument, "--help")) {
-            puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--generator=<version>] [--render-distance=1..32] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
+            puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--generator=<version>] [--render-distance=<within-world-bounds>] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
             return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PARSE, 0);
         } else goto invalid;
     }
