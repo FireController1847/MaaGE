@@ -22,15 +22,20 @@ static int pause_hit(const maage_client_ui *ui,maage_client_ui_rect r)
     return ui->mouse_x>=r.x&&ui->mouse_x<r.x+r.width&&
         ui->mouse_y>=r.y&&ui->mouse_y<r.y+r.height;
 }
+/* The same Client-to-platform mapping is used for requests and for
+ * confirming their completion. Keep it typed so strict C90 never falls back
+ * to an implicit int declaration and mismatched enum comparisons. */
+static maage_window_mode maage_client_ui_platform_mode(maage_client_window_choice choice)
+{
+    if(choice==MAAGE_CLIENT_WINDOWED)return MAAGE_WINDOW_WINDOWED;
+    if(choice==MAAGE_CLIENT_FULLSCREEN)return MAAGE_WINDOW_NATIVE_FULLSCREEN;
+    return MAAGE_WINDOW_BORDERLESS_FULLSCREEN;
+}
 void maage_client_ui_request_window_mode(maage_client_ui *ui,maage_client_window_choice choice)
 {
-    maage_window_mode mode;
     maage_status result;
     if(!ui||ui->mode_pending||ui->mode_changing)return;
-    mode=choice==MAAGE_CLIENT_WINDOWED?MAAGE_WINDOW_WINDOWED:
-        choice==MAAGE_CLIENT_FULLSCREEN?MAAGE_WINDOW_NATIVE_FULLSCREEN:
-        MAAGE_WINDOW_BORDERLESS_FULLSCREEN;
-    result=maage_window_set_mode(ui->window,mode);
+    result=maage_window_set_mode(ui->window,maage_client_ui_platform_mode(choice));
     if(maage_status_code(result)==MAAGE_STATUS_SUCCESS) {
         ui->window_mode=choice;
         if(choice)ui->last_nonwindowed_mode=choice;
