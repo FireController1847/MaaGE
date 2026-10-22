@@ -43,7 +43,6 @@ endif()
 if(MAAGE_BUILD_WORLD AND NOT MAAGE_BUILD_JOBS)
     message(FATAL_ERROR "MAAGE_BUILD_WORLD requires MAAGE_BUILD_JOBS=ON.")
 endif()
-
 if(MAAGE_BUILD_LAUNCHER)
     add_subdirectory(net)
     add_subdirectory(process)
