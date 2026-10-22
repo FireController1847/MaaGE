@@ -163,8 +163,12 @@ maage_status maage_renderer_draw_meshes(maage_renderer *renderer,
  * batches afterward. Empty UI is permitted; unsupported UI returns UNSUPPORTED.
  * Meshes retain the same matrix/depth contract as draw_meshes. SUCCESS accepts
  * the frame; GPU completion/presentation may be asynchronous. With VSync off,
- * presentation may coalesce completed frames. Backend-owned copies/resources
- * outlive submitted work; deferred failures surface on a later call or destroy. */
+ * presentation may coalesce completed frames. A visible Metal window may return
+ * NOOP for temporary mailbox/GPU backpressure; this is not a rendered frame.
+ * Continue polling events and retry with a brief event wait rather than using
+ * the long idle wait appropriate for hidden/minimized windows. Backend-owned
+ * copies/resources outlive submitted work; deferred failures surface on a later
+ * call or destroy. */
 maage_status maage_renderer_draw_frame(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const float view_projection[16], const maage_render_ui_data *ui,
