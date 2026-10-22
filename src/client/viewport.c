@@ -920,7 +920,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     const char *failure_message = "Client presentation cannot continue.";
     char directory[MAAGE_PATH_CAPACITY];
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
-    double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0;
+    double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
     unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
@@ -1060,8 +1060,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_server_runtime_start(server, trace);
     if (maage_status_failed(operation)) goto done;
     server_started = 1;
-    /* Startup is bounded to individual 16-ms event waits, never one blocking
-     * World-generation wait. The Server independently advances 20 TPS. */
+    /* Poll AppKit in bounded slices while the authoritative thread begins.
+     * An explicit overall timeout detects a stalled bootstrap instead of
+     * trapping a hidden window indefinitely. */
+    startup_began = maage_time_monotonic_seconds();
+    if (startup_began < 0.0) goto clock_failed;
     for (;;) {
         result = maage_window_poll_events(system, 0);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
@@ -1085,6 +1088,14 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             operation = maage_status_make(MAAGE_STATUS_INVALID_STATE,
                 MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_START, 0);
             failure_message = "The authoritative Server exited before producing an initial snapshot.";
+            goto done;
+        }
+        now = maage_time_monotonic_seconds();
+        if (now < 0.0) goto clock_failed;
+        if (now - startup_began >= 120.0) {
+            operation = maage_status_make(MAAGE_STATUS_INVALID_STATE,
+                MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_START, 0);
+            failure_message = "Integrated Server bootstrap timed out without a copied snapshot.";
             goto done;
         }
         result = maage_window_wait_events(system, 16);
@@ -1152,6 +1163,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (maage_status_failed(operation)) goto done;
         operation = maage_client_ui_set_window_state(ui, &state);
         if (maage_status_failed(operation)) goto done;
+        ui_actions = 0;
         operation = maage_client_ui_update(ui, &ui_input,
             state.framebuffer_width, state.framebuffer_height,
             state.width, state.height, &ui_actions);
