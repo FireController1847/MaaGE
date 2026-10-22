@@ -14,7 +14,7 @@ extern "C" {
  * bank to retry cached failures after Launcher-driven asset repair.
  *
  * Nonzero clip IDs are caller-assigned 32-bit values (0 is reserved). The
- * four-level sparse radix table provides deterministic O(1) lookup without
+ * eight-level sparse radix table provides deterministic O(1) lookup without
  * allocating storage proportional to the largest registered ID. Paths are
  * resolved during registration, not lookup.
  *
