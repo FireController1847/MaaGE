@@ -1,0 +1,24 @@
+#include "sound_catalog_manifest.h"
+
+/* Minecraft Java 1.7.10 reconstructed asset-index paths. All names are
+ * resolved only during catalog creation/preload. Unavailable assets are not
+ * synthesized and do not prevent other family members from registering. */
+const maage_catalog_manifest_entry maage_catalog_manifest[MAAGE_CAT_FAMILY_COUNT] = {
+    {0, 0, 0},
+    {"step/stone", 1, 6}, {"step/grass", 1, 6},
+    {"step/gravel", 1, 4}, {"step/wood", 1, 6},
+    {"step/sand", 1, 4}, {"step/snow", 1, 4},
+    {"step/cloth", 1, 4},
+    {"dig/stone", 1, 4}, {"dig/grass", 1, 4},
+    {"dig/gravel", 1, 4}, {"dig/wood", 1, 4},
+    {"dig/sand", 1, 4}, {"dig/snow", 1, 4},
+    {"dig/cloth", 1, 4}, {"random/glass", 1, 3},
+    {"damage/fallsmall", 0, 1}, {"damage/fallbig", 0, 1},
+    {"damage/hit", 1, 3}, {"liquid/swim", 1, 4},
+    {"liquid/splash", 0, 1}, {"random/click", 0, 1},
+    {"ambient/cave/cave", 1, 13},
+    {"ambient/weather/rain", 1, 4},
+    {"ambient/weather/thunder", 1, 3},
+    {"liquid/water", 0, 1}, {"liquid/lava", 0, 1},
+    {"liquid/lavapop", 0, 1}
+};
