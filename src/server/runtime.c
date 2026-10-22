@@ -18,7 +18,6 @@
 #define MAAGE_SERVER_COMMAND_BUDGET 64U
 #define MAAGE_SERVER_MESH_BUDGET 16U
 #define MAAGE_SERVER_WAIT_MS 25UL
-#define MAAGE_SERVER_MAX_RADIUS 32
 
 struct maage_server_runtime {
     maage_server_config config;
