@@ -42,8 +42,10 @@ static void title_uv(const maage_client_ui *ui,const double ray[3],int face,
     if(uu > 1.0)uu=1.0;
     if(vv < -1.0)vv=-1.0;
     if(vv > 1.0)vv=1.0;
-    *u=(float)(512+((face+1)%4)*256+2+(uu+1.0)*126.0)/ui->resources.atlas_edge;
-    *v=(float)(((face+1)/4)*256+2+(vv+1.0)*126.0)/ui->resources.atlas_edge;
+    /* Use full 256x256 face bounds at texel centers. The previous two-pixel
+     * inset cut away scenery at every face boundary and made seams visible. */
+    *u=(float)(512+((face+1)%4)*256+0.5+(uu+1.0)*127.5)/ui->resources.atlas_edge;
+    *v=(float)(((face+1)/4)*256+0.5+(vv+1.0)*127.5)/ui->resources.atlas_edge;
 }
 /* The original panorama remains animated, but each face is Gaussian filtered
  * ONCE during asset loading. Render one continuous projection per frame:
