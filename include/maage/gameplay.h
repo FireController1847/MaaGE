@@ -4,7 +4,7 @@
 #include "maage/player.h"
 
 /* Forward declaration avoids a cycle: session_protocol.h includes gameplay.h. */
-typedef struct maage_sound_event maage_sound_event;
+struct maage_sound_event;
 
 enum { MAAGE_GAME_MODE_SURVIVAL = 0, MAAGE_GAME_MODE_CREATIVE = 1 };
 /* Small inline storage avoids heap traffic in the common case.
@@ -70,7 +70,7 @@ maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *pla
  * No graphics, filesystem I/O, worker waits, or string identity operations. */
 /* Numeric event construction for Server-owned successful inventory commands.
  * No audio device, transport, allocation, or string identity is involved. */
-maage_status maage_gameplay_build_sound(maage_gameplay *game, maage_sound_event *event,
+maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound_event *event,
     unsigned int kind, unsigned int material, const double position[3],
     double intensity, double pitch);
 
@@ -81,7 +81,7 @@ maage_status maage_gameplay_build_sound(maage_gameplay *game, maage_sound_event 
  * gameplay failures take precedence over this publication warning. */
 maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
-    const maage_gameplay_intent *intent, maage_sound_event *events,
+    const maage_gameplay_intent *intent, struct struct maage_sound_event *events,
     size_t capacity, size_t *written, maage_status_trace *trace);
 maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
