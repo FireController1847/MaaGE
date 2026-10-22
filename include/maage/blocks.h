@@ -9,7 +9,8 @@ extern "C" {
 #endif
 
 /* Separate numeric domains: a state selects a type plus its resolved properties.
- * unsigned long provides at least 32 bits in ISO C90; persistence defines a versioned stable mapping. */
+ * unsigned long provides at least 32 bits in ISO C90; registries accept
+ * the portable 32-bit ID domain. Persistence defines a versioned stable mapping. */
 typedef unsigned long maage_block_id;
 typedef unsigned long maage_block_state_id;
 typedef unsigned long maage_texture_id;
@@ -141,8 +142,9 @@ typedef struct maage_block_state_definition {
 
 typedef struct maage_block_registry maage_block_registry;
 
-/* Capacities are initial hints (zero selects a small default). Both direct-indexed
- * domains grow on registration; allocation failure is reported without wrapping.
+/* Capacities are initial expected-registration-count hints (zero selects a small
+ * default). Sparse paged numeric indexing allocates only occupied ID paths;
+ * a high numeric ID never forces allocations up to that ID.
  *
  * The caller owns the registry. Definitions are borrowed until its destruction;
  * after finalize they are immutable. Registration copies names and definitions. */
