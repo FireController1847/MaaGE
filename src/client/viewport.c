@@ -373,11 +373,10 @@ typedef struct maage_client_outbox {
 
 static int maage_client_input_coalescible(const maage_session_command *command)
 {
-    return command->kind == MAAGE_CMD_INPUT &&
-        !command->intent.jump_pressed &&
-        !command->intent.attack &&
-        !command->intent.use &&
-        !command->intent.movement.jump;
+    /* Held actions are levels, but a freshly pressed jump is a one-shot.
+     * Coalesce only when held action levels have not changed, so rapid
+     * click/release transitions cannot be swallowed by frame-rate sampling. */
+    return command->kind == MAAGE_CMD_INPUT && !command->intent.jump_pressed;
 }
 
 static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
@@ -391,7 +390,10 @@ static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
     command.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     if (outbox->count && maage_client_input_coalescible(&command)) {
         previous = (outbox->head + outbox->count - 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
-        if (maage_client_input_coalescible(&outbox->commands[previous])) {
+        if (maage_client_input_coalescible(&outbox->commands[previous]) &&
+            outbox->commands[previous].intent.attack == command.intent.attack &&
+            outbox->commands[previous].intent.use == command.intent.use &&
+            outbox->commands[previous].intent.movement.jump == command.intent.movement.jump) {
             /* Keep the original FIFO sequence; the last held-only input wins.
              * No edge-triggered or authoritative command is overwritten. */
             command.sequence = outbox->commands[previous].sequence;
