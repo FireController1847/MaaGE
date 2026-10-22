@@ -5,254 +5,78 @@
 #include <stdio.h>
 #include <string.h>
 
-static maage_client_ui_rect maage_client_ui_menu_rectangle(const maage_client_ui *ui,
-    unsigned int index, maage_client_ui_screen_id screen)
+/* Pause retains the translucent world overlay; Settings has its own
+ * Vanilla 1.7.10-inspired numeric screens in options.c. */
+static maage_client_ui_rect pause_rect(const maage_client_ui *ui,unsigned int n)
 {
-    maage_client_ui_rect rect;
-    rect.width = ui->content.width > 224 ? 200 : ui->content.width - 24;
-    if (rect.width < 20) rect.width = 20;
-    rect.height = 20;
-    rect.x = (float)(int)(ui->content.x + (ui->content.width - rect.width) * 0.5f);
-    rect.y = (float)(int)(ui->content.y + ui->content.height * 0.5f) - 18 + (float)index * 24;
-    if (screen == MAAGE_CLIENT_UI_OPTIONS) {
-        unsigned int row = index < 7 ? index : index - 7;
-        rect.width = (ui->content.width - 12) * 0.5f;
-        if (rect.width < 20) rect.width = 20;
-        rect.x = ui->content.x + 4 + (index >= 7 ? rect.width + 4 : 0);
-        rect.y = (float)(int)(ui->content.y + (ui->content.height - 168) * 0.5f) + (float)row * 24;
-    }
-    return rect;
+    maage_client_ui_rect r;
+    r.width=ui->content.width>224.0f?200.0f:ui->content.width-24.0f;
+    if(r.width<20.0f)r.width=20.0f;
+    r.height=20.0f;
+    r.x=(float)(int)(ui->content.x+(ui->content.width-r.width)*0.5f);
+    r.y=(float)(int)(ui->content.y+ui->content.height*0.5f)-18.0f+n*24.0f;
+    return r;
 }
-
-static int maage_client_ui_contains(maage_client_ui_rect rectangle, float x, float y)
+static int pause_hit(const maage_client_ui *ui,maage_client_ui_rect r)
 {
-    return x >= rectangle.x && x < rectangle.x + rectangle.width &&
-        y >= rectangle.y && y < rectangle.y + rectangle.height;
+    return ui->mouse_x>=r.x&&ui->mouse_x<r.x+r.width&&
+        ui->mouse_y>=r.y&&ui->mouse_y<r.y+r.height;
 }
-static int maage_client_ui_highlight(const maage_client_ui *ui,
-    maage_client_ui_rect rectangle,unsigned int index)
+void maage_client_ui_request_window_mode(maage_client_ui *ui,maage_client_window_choice choice)
 {
-    return ui->selected_keyboard ? ui->selected == index :
-        maage_client_ui_contains(rectangle,ui->mouse_x,ui->mouse_y);
-}
-
-
-/* One shared integer slider: 0..26 selects 10..260, 26 means Unlimited.
- * Dragging tracks held mouse state rather than repeated press events. */
-static void maage_client_ui_slider_move(maage_client_ui *ui, maage_client_ui_rect track)
-{
-    float ratio = (ui->mouse_x - track.x) / track.width;
-    int position = (int)(ratio * 26.0f + 0.5f);
-    if (position < 0) position = 0;
-    if (position > 26) position = 26;
-    ui->fps_step = position;
-}
-static void maage_client_ui_slider_draw(maage_client_ui *ui, maage_client_ui_rect rect)
-{
-    maage_client_ui_rect bar, handle;
-    char text[64];
-    if (ui->fps_step == 26) strcpy(text, "Max FPS: Unlimited");
-    else sprintf(text, "Max FPS: %d", (ui->fps_step + 1) * 10);
-    maage_client_ui_button(ui, rect, text, maage_client_ui_highlight(ui,rect,0));
-    bar = rect; bar.x += 12; bar.width -= 24; bar.y += 15; bar.height = 2;
-    maage_client_ui_panel(ui, bar, 0.12f, 0.12f, 0.12f, 1);
-    handle = bar; handle.x += bar.width * ui->fps_step / 26.0f - 3;
-    handle.width = 6; handle.y -= 2; handle.height = 6;
-    maage_client_ui_panel(ui, handle, 0.9f, 0.9f, 0.9f, 1);
-}
-/* Fullscreen requests a native AppKit Space, not CoreGraphics exclusive capture. */
-static maage_window_mode maage_client_ui_platform_mode(maage_client_window_choice choice)
-{
-    if (choice == MAAGE_CLIENT_WINDOWED) return MAAGE_WINDOW_WINDOWED;
-    if (choice == MAAGE_CLIENT_FULLSCREEN) return MAAGE_WINDOW_NATIVE_FULLSCREEN;
-    return MAAGE_WINDOW_BORDERLESS_FULLSCREEN;
-}
-static void maage_client_ui_request_window_mode(maage_client_ui *ui, maage_client_window_choice choice)
-{
+    maage_window_mode mode;
     maage_status result;
-    if (ui->mode_pending || ui->mode_changing) return;
-    result = maage_window_set_mode(ui->window, maage_client_ui_platform_mode(choice));
-    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-        ui->window_mode = choice;
-        if (choice) ui->last_nonwindowed_mode = choice;
-        ui->mode_pending = 1;
-        ui->mode_requested_at = maage_time_monotonic_seconds();
-    } else ui->route_result = result;
+    if(!ui||ui->mode_pending||ui->mode_changing)return;
+    mode=choice==MAAGE_CLIENT_WINDOWED?MAAGE_WINDOW_WINDOWED:
+        choice==MAAGE_CLIENT_FULLSCREEN?MAAGE_WINDOW_NATIVE_FULLSCREEN:
+        MAAGE_WINDOW_BORDERLESS_FULLSCREEN;
+    result=maage_window_set_mode(ui->window,mode);
+    if(maage_status_code(result)==MAAGE_STATUS_SUCCESS) {
+        ui->window_mode=choice;
+        if(choice)ui->last_nonwindowed_mode=choice;
+        ui->mode_pending=1;
+        ui->mode_requested_at=maage_time_monotonic_seconds();
+    } else ui->route_result=result;
 }
-static void maage_client_ui_change_volume(maage_client_ui *ui, unsigned int bus,
-    maage_client_ui_rect rectangle)
+static unsigned int pause_input(maage_client_ui *ui,const maage_client_ui_input *input,void *context)
 {
-    float ratio;
-    int percent;
-    if (bus >= 7) return;
-    ratio = (ui->mouse_x - rectangle.x - 12) / (rectangle.width - 24);
-    percent = (int)(ratio * 100.0f + 0.5f);
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
-    ui->audio_volume[bus] = percent;
-}
-static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
-    const maage_client_ui_input *input, void *context)
-{
-    maage_client_ui_screen_id screen = maage_client_ui_current(ui);
-    maage_client_ui_rect rectangle;
-    unsigned int count = screen == MAAGE_CLIENT_UI_PAUSE ? 3U : 14U, n;
-    int hover = -1, activate;
+    int hover=-1,activate;
+    unsigned int n,selected;
     (void)context;
-    for (n = 0; n < count; ++n) {
-        rectangle = maage_client_ui_menu_rectangle(ui, n, screen);
-        if (maage_client_ui_contains(rectangle, ui->mouse_x, ui->mouse_y)) hover = (int)n;
-    }
-    if (ui->mouse_x != ui->previous_mouse_x ||
-        ui->mouse_y != ui->previous_mouse_y || input->primary_pressed)
-        ui->selected_keyboard = 0;
-    if (input->previous) {
-        ui->selected = (ui->selected + count - 1) % count;
-        ui->selected_keyboard = 1;
-    }
-    if (input->next) {
-        ui->selected = (ui->selected + 1) % count;
-        ui->selected_keyboard = 1;
-    }
-    if (hover >= 0 && (input->primary_pressed || ui->mouse_x != ui->previous_mouse_x ||
-        ui->mouse_y != ui->previous_mouse_y)) ui->selected = (unsigned int)hover;
-    if (screen == MAAGE_CLIENT_UI_OPTIONS) {
-        if (!ui->has_snapshot && ui->selected == 5U) {
-            if (hover == 5 && input->primary_pressed) return 0;
-            ui->selected = input->previous ? 4U : 6U;
-        }
-        if ((input->primary_pressed && hover == 0) ||
-            (ui->dragging_fps && input->primary_down)) {
-            rectangle = maage_client_ui_menu_rectangle(ui, 0, screen);
-            rectangle.x += 12; rectangle.width -= 24;
-            maage_client_ui_slider_move(ui, rectangle);
-        }
-        if (input->primary_pressed && hover == 0) ui->dragging_fps = 1;
-        if (input->primary_pressed && hover >= 7 && hover < 14)
-            ui->dragging_volume = hover - 6;
-        if (ui->dragging_volume && input->primary_down) {
-            n = (unsigned int)ui->dragging_volume - 1U;
-            rectangle = maage_client_ui_menu_rectangle(ui, n + 7U, screen);
-            maage_client_ui_change_volume(ui, n, rectangle);
-        }
-        if (!input->primary_down) {
-            ui->dragging_fps = 0;
-            ui->dragging_volume = 0;
-        }
-        if (ui->selected == 0) {
-            if (input->left && ui->fps_step > 0) --ui->fps_step;
-            if (input->right && ui->fps_step < 26) ++ui->fps_step;
-        } else if (ui->selected == 2) {
-            if (input->left) ui->requested_scale = (ui->requested_scale + 4) % 5;
-            if (input->right) ui->requested_scale = (ui->requested_scale + 1) % 5;
-        } else if (ui->selected == 3) {
-            if (input->left) ui->leaves_mode = (ui->leaves_mode + 2) % 3;
-            if (input->right) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
-        } else if (ui->selected >= 7U) {
-            int *volume = &ui->audio_volume[ui->selected - 7U];
-            if (input->left) *volume = *volume < 5 ? 0 : *volume - 5;
-            if (input->right) *volume = *volume > 95 ? 100 : *volume + 5;
-        }
-        activate = input->accept || (input->primary_pressed && hover >= 0);
-        if (!activate) return 0;
-        if (ui->selected == 0) return 0;
-        if (ui->selected == 1) {
-            if (ui->vsync_supported) {
-                maage_status status = maage_renderer_set_vsync(ui->renderer, !ui->vsync);
-                if (maage_status_code(status) == MAAGE_STATUS_SUCCESS) ui->vsync = !ui->vsync;
-                else {
-                    /* Temporary resize/Space-transition errors must not
-                     * permanently disable the VSync control. */
-                    unsigned int code = maage_status_code(status);
-                    if (code == MAAGE_STATUS_NOT_IMPLEMENTED ||
-                        code == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)
-                        ui->vsync_supported = 0;
-                    ui->route_result = status;
-                }
-            }
-        } else if (ui->selected == 2) ui->requested_scale = (ui->requested_scale + 1) % 5;
-        else if (ui->selected == 3) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
-        else if (ui->selected == 4) maage_client_ui_request_window_mode(ui,
-            (maage_client_window_choice)((ui->window_mode + 1) % 3));
-        else if (ui->selected == 5 && ui->has_snapshot)
-            maage_client_ui_queue_game_mode(ui);
-        else if (ui->selected == 6) ui->route_result = maage_client_ui_back(ui);
-        else if (ui->selected >= 7U && input->accept) {
-            int *volume = &ui->audio_volume[ui->selected - 7U];
-            *volume = *volume > 95 ? 0 : *volume + 5;
-        }
-        return 0;
-    }
-    activate = input->accept || (input->primary_pressed && hover >= 0);
-    if (!activate) return 0;
-    if (ui->selected == 0) {
-        if (ui->has_snapshot && !ui->snapshot.player.health) {
+    for(n=0;n<3U;++n)if(pause_hit(ui,pause_rect(ui,n)))hover=(int)n;
+    if(ui->mouse_x!=ui->previous_mouse_x||ui->mouse_y!=ui->previous_mouse_y||
+        input->primary_pressed)ui->selected_keyboard=0;
+    if(input->previous){ui->selected=(ui->selected+2U)%3U;ui->selected_keyboard=1;}
+    if(input->next){ui->selected=(ui->selected+1U)%3U;ui->selected_keyboard=1;}
+    if(hover>=0&&!ui->selected_keyboard)ui->selected=(unsigned int)hover;
+    activate=(input->primary_pressed&&hover>=0)||(input->accept&&
+        ui->selected_keyboard);
+    if(!activate)return 0;
+    selected=input->primary_pressed?(unsigned int)hover:ui->selected;
+    if(ui->click)ui->click(ui->click_context);
+    if(selected==0U) {
+        if(ui->has_snapshot&&!ui->snapshot.player.health)
             maage_client_ui_queue_respawn(ui);
-            return 0;
-        }
-        ui->route_result = maage_client_ui_back(ui);
-    } else if (ui->selected == 1)
-        ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_OPTIONS);
+        else ui->route_result=maage_client_ui_back(ui);
+    }else if(selected==1U)
+        ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_OPTIONS);
     else return MAAGE_CLIENT_UI_EXIT;
     return 0;
 }
-static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
+static void pause_draw(maage_client_ui *ui,void *context)
 {
-    static const char *const labels[3] = {"Resume Game", "Options...", "Save and Quit to Title"};
-    static const char *const scales[5] = {"Auto", "1x", "2x", "3x", "4x"};
-    static const char *const leaves[3] = {"Fast", "Smart", "Fancy"};
-    static const char *const modes[3] = {"Windowed", "Borderless", "Fullscreen"};
-    static const char *const buses[7] = {"Master", "Blocks", "Player", "Ambient",
-        "Weather", "Music", "UI"};
-    maage_client_ui_screen_id screen = maage_client_ui_current(ui);
-    maage_client_ui_rect rect, bar, handle;
+    static const char *const labels[3]={"Resume Game","Options...","Save and Quit to Title"};
     unsigned int n;
-    float center = (float)(int)(ui->content.x + ui->content.width * 0.5f);
-    float middle = (float)(int)(ui->content.y + ui->content.height * 0.5f);
-    char label[64];
+    maage_client_ui_rect r;
+    float cx=ui->content.x+ui->content.width*0.5f;
+    float cy=ui->content.y+ui->content.height*0.5f;
     (void)context;
-    maage_client_ui_text(ui, screen == MAAGE_CLIENT_UI_PAUSE ? "Game Menu" : "Options",
-        center, middle - (screen == MAAGE_CLIENT_UI_PAUSE ? 54 : 101),
-        MAAGE_CLIENT_UI_CENTER, 1, 1, 1);
-    if (screen == MAAGE_CLIENT_UI_PAUSE) {
-        for (n = 0; n < 3; ++n) {
-            rect = maage_client_ui_menu_rectangle(ui, n, screen);
-            maage_client_ui_button(ui, rect, n == 0 && ui->has_snapshot &&
-                !ui->snapshot.player.health ? "Respawn" : labels[n],
-                maage_client_ui_highlight(ui,rect,n));
-        }
-        return;
-    }
-    rect = maage_client_ui_menu_rectangle(ui, 0, screen);
-    maage_client_ui_slider_draw(ui, rect);
-    rect = maage_client_ui_menu_rectangle(ui, 1, screen);
-    maage_client_ui_button(ui, rect, !ui->vsync_supported ? "VSync: Unavailable" :
-        (ui->vsync ? "VSync: On" : "VSync: Off"), maage_client_ui_highlight(ui,rect,1));
-    rect = maage_client_ui_menu_rectangle(ui, 2, screen);
-    sprintf(label, "GUI Scale: %s", scales[ui->requested_scale]);
-    maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,2));
-    rect = maage_client_ui_menu_rectangle(ui, 3, screen);
-    sprintf(label, "Leaves: %s", leaves[ui->leaves_mode]);
-    maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,3));
-    rect = maage_client_ui_menu_rectangle(ui, 4, screen);
-    sprintf(label, "Window: %s", ui->mode_pending || ui->mode_changing ?
-        "Switching..." : modes[ui->window_mode]);
-    maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,4));
-    rect = maage_client_ui_menu_rectangle(ui, 5, screen);
-    maage_client_ui_button(ui, rect, !ui->has_snapshot ? "Game: N/A" :
-        (ui->snapshot.player.game_mode == MAAGE_GAME_MODE_CREATIVE ?
-        "Game: Creative" : "Game: Survival"), maage_client_ui_highlight(ui,rect,5));
-    rect = maage_client_ui_menu_rectangle(ui, 6, screen);
-    maage_client_ui_button(ui, rect, "Back", maage_client_ui_highlight(ui,rect,6));
-    for (n = 0; n < 7U; ++n) {
-        rect = maage_client_ui_menu_rectangle(ui, n + 7U, screen);
-        sprintf(label, "%s: %d%%", buses[n], ui->audio_volume[n]);
-        maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,n+7U));
-        bar = rect; bar.x += 12; bar.width -= 24; bar.y += 15; bar.height = 2;
-        maage_client_ui_panel(ui, bar, 0.12f, 0.12f, 0.12f, 1);
-        handle = bar; handle.x += bar.width * ui->audio_volume[n] / 100.0f - 3;
-        handle.width = 6; handle.y -= 2; handle.height = 6;
-        maage_client_ui_panel(ui, handle, 0.9f, 0.9f, 0.9f, 1);
+    maage_client_ui_text(ui,"Game Menu",cx,cy-54.0f,MAAGE_CLIENT_UI_CENTER,1,1,1);
+    for(n=0;n<3U;++n) {
+        r=pause_rect(ui,n);
+        maage_client_ui_button(ui,r,n==0&&ui->has_snapshot&&
+            !ui->snapshot.player.health?"Respawn":labels[n],
+            ui->selected_keyboard?ui->selected==n:pause_hit(ui,r));
     }
 }
 
@@ -272,6 +96,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->renderer = renderer; ui->window = window;
     ui->last_nonwindowed_mode = ui->confirmed_fullscreen_style = MAAGE_CLIENT_BORDERLESS;
     ui->fps_step = 26; ui->vsync = 1; ui->leaves_mode = MAAGE_LEAVES_FANCY;
+    ui->fov_degrees=70;
     ui->audio_volume[0] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
     ui->audio_volume[1] = MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS;
     ui->audio_volume[2] = MAAGE_CLIENT_AUDIO_DEFAULT_PLAYER;
@@ -289,10 +114,8 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
         maage_client_ui_destroy(ui);
         return result;
     }
-    result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_PAUSE,
-        maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL);
-    if (!maage_status_failed(result)) result = maage_client_ui_register_screen(ui,
-        MAAGE_CLIENT_UI_OPTIONS, maage_client_ui_menu_draw, maage_client_ui_menu_input, NULL);
+    result=maage_client_ui_register_screen(ui,MAAGE_CLIENT_UI_PAUSE,pause_draw,pause_input,NULL);
+    if(!maage_status_failed(result))result=maage_client_ui_options_register(ui);
     if (!maage_status_failed(result)) result = maage_client_ui_inventory_register(ui);
     if (maage_status_failed(result)) {
         maage_client_ui_destroy(ui);
@@ -371,12 +194,12 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->mouse_x = input->mouse_x * (float)framebuffer_width / (float)window_width / scale;
     ui->mouse_y = input->mouse_y * (float)framebuffer_height / (float)window_height / scale;
     if (input->f3) ui->debug = !ui->debug;
-    if (maage_client_ui_current(ui) != MAAGE_CLIENT_UI_TITLE &&
-        maage_client_ui_current(ui) && ui->click &&
-        (input->primary_pressed || input->accept)) ui->click(ui->click_context);
     if (input->f11) maage_client_ui_request_window_mode(ui,
         (maage_client_window_choice)(ui->window_mode ? MAAGE_CLIENT_WINDOWED : ui->last_nonwindowed_mode));
-    if (input->escape && maage_client_ui_current(ui) < MAAGE_CLIENT_UI_TITLE) { ui->dragging_fps = 0; ui->dragging_volume = 0;
+    if(input->escape && (maage_client_ui_current(ui)<MAAGE_CLIENT_UI_TITLE ||
+        maage_client_ui_current(ui)==MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
+        maage_client_ui_current(ui)==MAAGE_CLIENT_UI_SOUND_SETTINGS)) {
+        ui->dragging_fps=0;ui->dragging_volume=0;ui->dragging_fov=0;
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
@@ -499,7 +322,12 @@ void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options
 }
 
 int maage_client_ui_options_visible(const maage_client_ui *ui)
-{ return maage_client_ui_current(ui) == MAAGE_CLIENT_UI_OPTIONS; }
+{
+    maage_client_ui_screen_id id=maage_client_ui_current(ui);
+    return id==MAAGE_CLIENT_UI_OPTIONS ||
+        id==MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
+        id==MAAGE_CLIENT_UI_SOUND_SETTINGS;
+}
 int maage_client_ui_window_mode_changing(const maage_client_ui *ui)
 { return ui && (ui->mode_pending || ui->mode_changing); }
 
@@ -643,7 +471,8 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     id = maage_client_ui_current(ui);
     if (id) {
         rectangle = ui->clip;
-        if (id == MAAGE_CLIENT_UI_OPTIONS)
+        if (id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
+            id == MAAGE_CLIENT_UI_SOUND_SETTINGS)
             maage_client_ui_menu_background(ui);
         else if (id < MAAGE_CLIENT_UI_TITLE)
             maage_client_ui_panel(ui, rectangle, 0.03f, 0.03f, 0.04f, 0.68f);

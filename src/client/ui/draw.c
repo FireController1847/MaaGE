@@ -216,6 +216,36 @@ void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle,
         highlighted?MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL);
 }
 
+/* The vanilla 1.7.10 slider handle is the two 4x20 end strips of
+ * widgets.png at u=0 and u=196. It travels across a normal button.
+ * No separately generated slider rectangles or invented graphics. */
+void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect r,
+    const char *label,float value,int highlighted)
+{
+    maage_client_ui_rect knob;
+    float atlas,y,center,tint;
+    if(!ui||!label||r.width<8.0f||r.height<=0.0f)return;
+    if(value<0.0f)value=0.0f;
+    if(value>1.0f)value=1.0f;
+    maage_client_ui_button_state(ui,r,"",highlighted?
+        MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL);
+    atlas=(float)ui->resources.atlas_edge;
+    y=highlighted?86.0f:66.0f;
+    knob.x=r.x+(float)(int)((r.width-8.0f)*value);
+    knob.y=r.y;knob.width=4.0f;knob.height=r.height;
+    maage_client_ui_rectangle(ui,knob,256.0f/atlas,y/atlas,
+        260.0f/atlas,(y+20.0f)/atlas,1,1,1,1);
+    knob.x+=4.0f;
+    maage_client_ui_rectangle(ui,knob,452.0f/atlas,y/atlas,
+        456.0f/atlas,(y+20.0f)/atlas,1,1,1,1);
+    center=r.x+r.width*0.5f;
+    maage_client_ui_text(ui,label,center+1.0f,r.y+7.0f,
+        MAAGE_CLIENT_UI_CENTER,0.22f,0.22f,0.22f);
+    tint=highlighted?1.0f:0.88f;
+    maage_client_ui_text(ui,label,center,r.y+6.0f,
+        MAAGE_CLIENT_UI_CENTER,tint,tint,highlighted?0.63f:tint);
+}
+
 /* The GPU clips held-item faces; no world or texture work. */
 void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
     const float uv[4], float shade)

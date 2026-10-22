@@ -67,6 +67,7 @@ struct maage_client_ui {
     int selected_keyboard;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, dragging_fps, leaves_mode;
     int audio_volume[7], dragging_volume;
+    int dragging_fov, fov_degrees, video_first_row;
     int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;
     int confirmed_window_mode, confirmed_fullscreen_style;
     double mode_requested_at;
@@ -83,6 +84,10 @@ float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 /* Vanilla 1.7.10 tiled options background over the entire drawable,
  * restoring the previous clipping region before returning. */
 void maage_client_ui_menu_background(maage_client_ui *ui);
+void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect rectangle,
+    const char *label,float value,int highlighted);
+maage_status maage_client_ui_options_register(maage_client_ui *ui);
+void maage_client_ui_request_window_mode(maage_client_ui *ui,maage_client_window_choice choice);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
