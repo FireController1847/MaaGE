@@ -115,6 +115,14 @@ maage_status maage_client_frontend_run(maage_client_frontend *f,maage_window_sys
                 else f->saved_options=options;
             }
         }
+        /* Both queued button clicks and the original menu music need the
+         * same audio service tick used during gameplay. */
+        if(audio) {
+            maage_client_ui_get_options(ui,&options);
+            (void)maage_client_audio_service_apply_options(audio,&options);
+            (void)maage_client_audio_service_update(audio,NULL,
+                menu_listener,menu_forward,start,NULL);
+        }
         if(f->busy&&maage_status_code(maage_jobs_poll(f->jobs,&completion))==MAAGE_STATUS_SUCCESS) {
             f->busy=0;
             if(maage_status_failed(completion.result)) {
@@ -156,14 +164,6 @@ maage_status maage_client_frontend_run(maage_client_frontend *f,maage_window_sys
                 if(maage_status_failed(result))return result;
                 f->busy=1;maage_client_ui_front_busy(f->view,1);
             }
-        }
-        /* Both queued button clicks and the original menu music need the
-         * same audio service tick used during gameplay. */
-        if(audio) {
-            maage_client_ui_get_options(ui,&options);
-            (void)maage_client_audio_service_apply_options(audio,&options);
-            (void)maage_client_audio_service_update(audio,NULL,
-                menu_listener,menu_forward,start,NULL);
         }
         result=maage_client_ui_draw(ui,NULL,&draw);if(maage_status_failed(result))return result;
         result=maage_renderer_draw_frame(maage_client_ui_renderer(ui),NULL,0,matrix,draw,trace);if(maage_status_failed(result))return result;

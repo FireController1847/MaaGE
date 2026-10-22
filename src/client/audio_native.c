@@ -830,7 +830,9 @@ static maage_status mn_scene_update(void *handle, const maage_session_snapshot *
 {
     maage_native_scene *scene = (maage_native_scene *)handle;
     (void)forward;
-    if (!scene || !snapshot) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    /* A NULL snapshot intentionally denotes the title/frontend. The scene
+     * schedules menu music without reading gameplay observations. */
+    if (!scene || !position) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     return maage_client_audio_scene_update(scene->scene, snapshot, position, now, trace);
 }
 static maage_status mn_scene_stop(void *handle, maage_status_trace *trace)
