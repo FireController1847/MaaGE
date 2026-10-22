@@ -689,6 +689,9 @@ shutdown:
         disconnected.has_trace = maage_status_failed(runtime->result);
         if (disconnected.has_trace) disconnected.trace = runtime->trace;
         (void)maage_local_session_publish_event(runtime->config.session, &disconnected);
+        /* Terminal status remains drainable; new commands and publications
+         * are now rejected by the transport's native shutdown barrier. */
+        (void)maage_local_session_close(runtime->config.session);
     }
     maage_mutex_lock(runtime->mutex);
     runtime->finished = 1;
