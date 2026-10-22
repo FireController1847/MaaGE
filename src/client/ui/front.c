@@ -28,7 +28,8 @@ static void front_button(maage_client_ui_frontend *f, unsigned int n, const char
     maage_client_ui_rect r = front_button_rect(f,n);
     maage_client_ui_button_state(f->ui,r,text,
         !enabled?MAAGE_CLIENT_UI_BUTTON_DISABLED:
-        (f->focus==n?MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL));
+        ((front_hit(f,r)||(f->focus_keyboard&&f->focus==n))?
+            MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL));
 }
 static size_t front_rows(maage_client_ui_frontend *f)
 {
@@ -132,8 +133,10 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
     size_t row;
     if(screen==MAAGE_CLIENT_UI_LOADING)return 0;
     if(input->escape) { if(!f->busy&&screen!=MAAGE_CLIENT_UI_TITLE)ui->route_result=maage_client_ui_back(ui);return 0; }
-    if(input->previous)f->focus=(f->focus+count-1)%count;
-    if(input->next)f->focus=(f->focus+1)%count;
+    if(ui->mouse_x!=ui->previous_mouse_x||ui->mouse_y!=ui->previous_mouse_y||
+        input->primary_pressed)f->focus_keyboard=0;
+    if(input->previous){f->focus=(f->focus+count-1)%count;f->focus_keyboard=1;}
+    if(input->next){f->focus=(f->focus+1)%count;f->focus_keyboard=1;}
     if(screen==MAAGE_CLIENT_UI_RENAME_WORLD&&f->focus==2)f->focus=input->previous?1:3;
     for(n=0;n<(screen==MAAGE_CLIENT_UI_CREATE_WORLD?3:screen==MAAGE_CLIENT_UI_RENAME_WORLD?2:count);++n)
         if(front_hit(f,front_button_rect(f,n)))hover=(int)n;
@@ -214,7 +217,8 @@ void maage_client_ui_front_destroy(maage_client_ui_frontend *f){free(f);}
 void maage_client_ui_front_begin(maage_client_ui_frontend *f)
 {
     if(!f)return;
-    f->quit=f->play=0;f->action=f->focus=0;f->busy=0;f->message[0]=0;
+    f->quit=f->play=0;f->action=f->focus=0;f->busy=0;
+    f->focus_keyboard=0;f->message[0]=0;
 }
 void maage_client_ui_front_busy(maage_client_ui_frontend *f,int busy){if(f)f->busy=busy;}
 void maage_client_ui_front_complete(maage_client_ui_frontend *f,

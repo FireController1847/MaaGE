@@ -7,6 +7,7 @@ struct maage_client_ui_frontend {
     const maage_world_summary *entries;
     size_t count, selected, first, last_row;
     unsigned int action, focus;
+    int focus_keyboard;
     int busy, quit, play, mode;
     char name[128], seed[64], message[256];
     float dirt_uv[4];

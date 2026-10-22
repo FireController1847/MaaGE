@@ -45,56 +45,51 @@ static void title_uv(const maage_client_ui *ui,const double ray[3],int face,
     *u=(float)(512+((face+1)%4)*256+2+(uu+1.0)*126.0)/ui->resources.atlas_edge;
     *v=(float)(((face+1)/4)*256+2+(vv+1.0)*126.0)/ui->resources.atlas_edge;
 }
+/* The original panorama remains animated, but each face is Gaussian filtered
+ * ONCE during asset loading. Render one continuous projection per frame:
+ * an 8-pixel mosaic with five offset passes is not a Gaussian blur. */
 static void title_panorama(maage_client_ui *ui)
 {
-    static const float jitter[5][2]={
-        {0.0f,0.0f},{-1.75f,0.0f},{1.75f,0.0f},
-        {0.0f,-1.75f},{0.0f,1.75f}
-    };
     title_camera camera;
     maage_render_ui_vertex vertices[4];
     maage_client_ui_rect full;
-    double ray[3],yaw,pitch;
-    float left,top,right,bottom,sx,sy;
+    double ray[3], yaw, pitch;
+    float left, top, right, bottom, sx, sy;
     unsigned int j;
-    int face,i,pass,x,y;
-    const int step=8;
-    for(i=1;i<=6;++i)
-        if(!ui->resources.title_available[i])return;
-    yaw=ui->notice_now*0.004;
-    pitch=0.16+sin(ui->notice_now*0.012)*0.06;
-    camera.cy=cos(yaw);camera.sy=sin(yaw);
-    camera.cp=cos(pitch);camera.sp=sin(pitch);
-    camera.width=ui->width;camera.height=ui->height;
-    full.x=full.y=0;full.width=ui->width;full.height=ui->height;
-    maage_client_ui_panel(ui,full,0.48f,0.55f,0.61f,1.0f);
-    /* Five nearby evenly weighted samples approximate the soft original
-     * panorama blur. The same immutable GUI atlas backs all passes. */
-    for(pass=0;pass<5;++pass) {
-        for(y=0;y<(int)ui->height;y+=step) {
-            for(x=0;x<(int)ui->width;x+=step) {
-                left=(float)x;top=(float)y;
-                right=left+step;bottom=top+step;
-                if(right>ui->width)right=ui->width;
-                if(bottom>ui->height)bottom=ui->height;
-                title_ray(&camera,(left+right)*0.5f+jitter[pass][0],
-                    (top+bottom)*0.5f+jitter[pass][1],ray);
-                face=title_face(ray);
-                for(j=0;j<4U;++j) {
-                    sx=(j==0U||j==3U)?left:right;
-                    sy=j<2U?top:bottom;
-                    vertices[j].position[0]=sx;
-                    vertices[j].position[1]=sy;
-                    title_ray(&camera,sx+jitter[pass][0],sy+jitter[pass][1],ray);
-                    title_uv(ui,ray,face,&vertices[j].uv[0],&vertices[j].uv[1]);
-                    vertices[j].color[0]=vertices[j].color[1]=vertices[j].color[2]=1.0f;
-                    vertices[j].color[3]=1.0f/(float)(pass+1);
-                }
-                if(!maage_client_ui_append_quads(ui,vertices,1))return;
+    int face, i, x, y;
+    const int step = 3;
+    for (i = 1; i <= 6; ++i)
+        if (!ui->resources.title_available[i]) return;
+    yaw = ui->notice_now * 0.004;
+    pitch = 0.16 + sin(ui->notice_now * 0.012) * 0.06;
+    camera.cy = cos(yaw); camera.sy = sin(yaw);
+    camera.cp = cos(pitch); camera.sp = sin(pitch);
+    camera.width = ui->width; camera.height = ui->height;
+    full.x = full.y = 0; full.width = ui->width; full.height = ui->height;
+    maage_client_ui_panel(ui, full, 0.48f, 0.55f, 0.61f, 1.0f);
+    for (y = 0; y < (int)ui->height; y += step) {
+        for (x = 0; x < (int)ui->width; x += step) {
+            left = (float)x; top = (float)y;
+            right = left + step; bottom = top + step;
+            if (right > ui->width) right = ui->width;
+            if (bottom > ui->height) bottom = ui->height;
+            title_ray(&camera, (left + right) * 0.5f,
+                (top + bottom) * 0.5f, ray);
+            face = title_face(ray);
+            for (j = 0; j < 4U; ++j) {
+                sx = (j == 0U || j == 3U) ? left : right;
+                sy = j < 2U ? top : bottom;
+                vertices[j].position[0] = sx;
+                vertices[j].position[1] = sy;
+                title_ray(&camera, sx, sy, ray);
+                title_uv(ui, ray, face, &vertices[j].uv[0], &vertices[j].uv[1]);
+                vertices[j].color[0] = vertices[j].color[1] =
+                    vertices[j].color[2] = vertices[j].color[3] = 1.0f;
             }
+            if (!maage_client_ui_append_quads(ui, vertices, 1)) return;
         }
     }
-    maage_client_ui_panel(ui,full,0.38f,0.36f,0.43f,0.28f);
+    maage_client_ui_panel(ui, full, 0.38f, 0.36f, 0.43f, 0.28f);
 }
 static maage_client_ui_rect title_button(const maage_client_ui *ui,unsigned int id)
 {
@@ -144,7 +139,8 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
     maage_client_ui_frontend *f=(maage_client_ui_frontend *)context;
     maage_client_ui_rect r;
     title_panorama(ui);title_logo(ui);title_splash(ui);
-    r=title_button(ui,0);maage_client_ui_button(ui,r,"Singleplayer",f->focus==0);
+    r=title_button(ui,0);maage_client_ui_button(ui,r,"Singleplayer",
+        title_hit(ui,r)||(f->focus_keyboard&&f->focus==0));
     r=title_button(ui,1);
     maage_client_ui_button_state(ui,r,"Multiplayer",MAAGE_CLIENT_UI_BUTTON_DISABLED);
     r=title_button(ui,2);
@@ -156,8 +152,10 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
         (title_hit(ui,r)?126.0f:106.0f)/ui->resources.atlas_edge,
         276.0f/ui->resources.atlas_edge,
         (title_hit(ui,r)?146.0f:126.0f)/ui->resources.atlas_edge,1,1,1,1);
-    r=title_button(ui,4);maage_client_ui_button(ui,r,"Options...",f->focus==4);
-    r=title_button(ui,5);maage_client_ui_button(ui,r,"Quit Game",f->focus==5);
+    r=title_button(ui,4);maage_client_ui_button(ui,r,"Options...",
+        title_hit(ui,r)||(f->focus_keyboard&&f->focus==4));
+    r=title_button(ui,5);maage_client_ui_button(ui,r,"Quit Game",
+        title_hit(ui,r)||(f->focus_keyboard&&f->focus==5));
     maage_client_ui_text(ui,"Minecraft 1.7.10",3,ui->height-9,MAAGE_CLIENT_UI_LEFT,0.14f,0.14f,0.14f);
     maage_client_ui_text(ui,"Minecraft 1.7.10",2,ui->height-10,MAAGE_CLIENT_UI_LEFT,1,1,1);
     maage_client_ui_text(ui,"Copyright Mojang AB. Do not distribute!",
@@ -171,17 +169,24 @@ unsigned int maage_client_ui_title_input(maage_client_ui *ui,
     maage_client_ui_frontend *f=(maage_client_ui_frontend *)context;
     int hover=-1;
     unsigned int ids[3]={0,4,5},k;
-    if(input->next||input->previous) {
-        for(k=0;k<3;++k)if(f->focus==ids[k])break;
-        if(k==3)k=0;
-        if(input->next)k=(k+1)%3;else k=(k+2)%3;
-        f->focus=ids[k];
+    /* Keyboard focus is retained only after keyboard navigation. Pointer
+     * movement clears it even when the pointer leaves every button. */
+    if (ui->mouse_x != ui->previous_mouse_x ||
+        ui->mouse_y != ui->previous_mouse_y || input->primary_pressed)
+        f->focus_keyboard = 0;
+    if (input->next || input->previous) {
+        for (k = 0; k < 3; ++k) if (f->focus == ids[k]) break;
+        if (k == 3) k = 0;
+        if (input->next) k = (k + 1) % 3;
+        else k = (k + 2) % 3;
+        f->focus = ids[k];
+        f->focus_keyboard = 1;
     }
-    for(k=0;k<3;++k)if(title_hit(ui,title_button(ui,ids[k])))hover=(int)ids[k];
-    if(hover>=0&&(input->primary_pressed||ui->mouse_x!=ui->previous_mouse_x||
-        ui->mouse_y!=ui->previous_mouse_y))f->focus=(unsigned int)hover;
-    if(!(input->accept||(input->primary_pressed&&hover>=0)))return 0;
-    if(input->primary_pressed)f->focus=(unsigned int)hover;
+    for (k = 0; k < 3; ++k)
+        if (title_hit(ui, title_button(ui, ids[k]))) hover = (int)ids[k];
+    if (!f->focus_keyboard && hover >= 0) f->focus = (unsigned int)hover;
+    if (!(input->accept || (input->primary_pressed && hover >= 0))) return 0;
+    if (input->primary_pressed) f->focus = (unsigned int)hover;
     /* Inactive buttons are neither selectable nor audible. The UI callback
      * is invoked only when a real title action is accepted. */
     if(f->focus==0) {

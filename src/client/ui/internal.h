@@ -62,6 +62,7 @@ struct maage_client_ui {
     maage_window_insets safe_area;
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
+    int selected_keyboard;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, dragging_fps, leaves_mode;
     int audio_volume[7], dragging_volume;
     int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;

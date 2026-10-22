@@ -116,18 +116,46 @@ void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float 
 void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle,
     const char *label, maage_client_ui_button_visual state)
 {
-    maage_client_ui_rect half;
-    float v,center,tint;
-    if(!ui||!label||state<MAAGE_CLIENT_UI_BUTTON_DISABLED||
-        state>MAAGE_CLIENT_UI_BUTTON_HOVER)return;
-    /* Original widgets.png rows: disabled 46, enabled 66, hover 86. */
-    v=(46.0f+(float)state*20.0f)/ui->resources.atlas_edge;
-    half=rectangle;half.width*=0.5f;
-    maage_client_ui_rectangle(ui,half,256.0f/ui->resources.atlas_edge,v,
-        356.0f/ui->resources.atlas_edge,v+20.0f/ui->resources.atlas_edge,1,1,1,1);
-    half.x+=half.width;
-    maage_client_ui_rectangle(ui,half,356.0f/ui->resources.atlas_edge,v,
-        456.0f/ui->resources.atlas_edge,v+20.0f/ui->resources.atlas_edge,1,1,1,1);
+    maage_client_ui_rect part;
+    float v, center, tint, cap, mid_width, source_mid;
+    float tx[4], uv[4], y0[3], ty[3];
+    int col, row;
+    if (!ui || !label || state < MAAGE_CLIENT_UI_BUTTON_DISABLED ||
+        state > MAAGE_CLIENT_UI_BUTTON_HOVER ||
+        rectangle.width <= 0.0f || rectangle.height <= 0.0f) return;
+    /* Six-slice the vanilla 200x20 widgets.png button (3 columns x 2 rows).
+     * Pixel-sized endcaps remain native size for half-width buttons; the
+     * center source span is cropped instead of compressing both 100px halves. */
+    cap = rectangle.width < 4.0f ? rectangle.width * 0.25f : 2.0f;
+    mid_width = rectangle.width - cap * 2.0f;
+    source_mid = mid_width < 196.0f ? mid_width : 196.0f;
+    v = 46.0f + (float)state * 20.0f;
+    tx[0] = rectangle.x;
+    tx[1] = tx[0] + cap;
+    tx[2] = rectangle.x + rectangle.width - cap;
+    tx[3] = rectangle.x + rectangle.width;
+    uv[0] = 0.0f;
+    uv[1] = cap;
+    uv[2] = 200.0f - cap;
+    uv[3] = 200.0f;
+    /* The middle is a single stretchable region. Only its interior scales;
+     * corner pixels are never stretched. */
+    y0[0] = rectangle.y;
+    y0[1] = rectangle.y + rectangle.height * 0.5f;
+    y0[2] = rectangle.y + rectangle.height;
+    ty[0] = v; ty[1] = v + 10.0f; ty[2] = v + 20.0f;
+    for (row = 0; row < 2; ++row) {
+        for (col = 0; col < 3; ++col) {
+            part.x = tx[col]; part.y = y0[row];
+            part.width = tx[col+1]-tx[col];
+            part.height = y0[row+1]-y0[row];
+            maage_client_ui_rectangle(ui,part,
+                (256.0f+uv[col])/ui->resources.atlas_edge,
+                ty[row]/ui->resources.atlas_edge,
+                (256.0f+uv[col+1])/ui->resources.atlas_edge,
+                ty[row+1]/ui->resources.atlas_edge,1,1,1,1);
+        }
+    }
     center=rectangle.x+rectangle.width*0.5f;
     maage_client_ui_text(ui,label,center+1,rectangle.y+7,
         MAAGE_CLIENT_UI_CENTER,0.22f,0.22f,0.22f);

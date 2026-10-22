@@ -29,6 +29,12 @@ static int maage_client_ui_contains(maage_client_ui_rect rectangle, float x, flo
     return x >= rectangle.x && x < rectangle.x + rectangle.width &&
         y >= rectangle.y && y < rectangle.y + rectangle.height;
 }
+static int maage_client_ui_highlight(const maage_client_ui *ui,
+    maage_client_ui_rect rectangle,unsigned int index)
+{
+    return maage_client_ui_contains(rectangle,ui->mouse_x,ui->mouse_y) ||
+        (ui->selected_keyboard && ui->selected == index);
+}
 
 
 /* One shared integer slider: 0..26 selects 10..260, 26 means Unlimited.
@@ -47,7 +53,7 @@ static void maage_client_ui_slider_draw(maage_client_ui *ui, maage_client_ui_rec
     char text[64];
     if (ui->fps_step == 26) strcpy(text, "Max FPS: Unlimited");
     else sprintf(text, "Max FPS: %d", (ui->fps_step + 1) * 10);
-    maage_client_ui_button(ui, rect, text, ui->selected == 0);
+    maage_client_ui_button(ui, rect, text, maage_client_ui_highlight(ui,rect,0));
     bar = rect; bar.x += 12; bar.width -= 24; bar.y += 15; bar.height = 2;
     maage_client_ui_panel(ui, bar, 0.12f, 0.12f, 0.12f, 1);
     handle = bar; handle.x += bar.width * ui->fps_step / 26.0f - 3;
@@ -97,8 +103,17 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
         rectangle = maage_client_ui_menu_rectangle(ui, n, screen);
         if (maage_client_ui_contains(rectangle, ui->mouse_x, ui->mouse_y)) hover = (int)n;
     }
-    if (input->previous) ui->selected = (ui->selected + count - 1) % count;
-    if (input->next) ui->selected = (ui->selected + 1) % count;
+    if (ui->mouse_x != ui->previous_mouse_x ||
+        ui->mouse_y != ui->previous_mouse_y || input->primary_pressed)
+        ui->selected_keyboard = 0;
+    if (input->previous) {
+        ui->selected = (ui->selected + count - 1) % count;
+        ui->selected_keyboard = 1;
+    }
+    if (input->next) {
+        ui->selected = (ui->selected + 1) % count;
+        ui->selected_keyboard = 1;
+    }
     if (hover >= 0 && (input->primary_pressed || ui->mouse_x != ui->previous_mouse_x ||
         ui->mouse_y != ui->previous_mouse_y)) ui->selected = (unsigned int)hover;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
@@ -203,7 +218,8 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
         for (n = 0; n < 3; ++n) {
             rect = maage_client_ui_menu_rectangle(ui, n, screen);
             maage_client_ui_button(ui, rect, n == 0 && ui->has_snapshot &&
-                !ui->snapshot.player.health ? "Respawn" : labels[n], ui->selected == n);
+                !ui->snapshot.player.health ? "Respawn" : labels[n],
+                maage_client_ui_highlight(ui,rect,n));
         }
         return;
     }
@@ -211,27 +227,27 @@ static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
     maage_client_ui_slider_draw(ui, rect);
     rect = maage_client_ui_menu_rectangle(ui, 1, screen);
     maage_client_ui_button(ui, rect, !ui->vsync_supported ? "VSync: Unavailable" :
-        (ui->vsync ? "VSync: On" : "VSync: Off"), ui->selected == 1);
+        (ui->vsync ? "VSync: On" : "VSync: Off"), maage_client_ui_highlight(ui,rect,1));
     rect = maage_client_ui_menu_rectangle(ui, 2, screen);
     sprintf(label, "GUI Scale: %s", scales[ui->requested_scale]);
-    maage_client_ui_button(ui, rect, label, ui->selected == 2);
+    maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,2));
     rect = maage_client_ui_menu_rectangle(ui, 3, screen);
     sprintf(label, "Leaves: %s", leaves[ui->leaves_mode]);
-    maage_client_ui_button(ui, rect, label, ui->selected == 3);
+    maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,3));
     rect = maage_client_ui_menu_rectangle(ui, 4, screen);
     sprintf(label, "Window: %s", ui->mode_pending || ui->mode_changing ?
         "Switching..." : modes[ui->window_mode]);
-    maage_client_ui_button(ui, rect, label, ui->selected == 4);
+    maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,4));
     rect = maage_client_ui_menu_rectangle(ui, 5, screen);
     maage_client_ui_button(ui, rect, !ui->has_snapshot ? "Game: N/A" :
         (ui->snapshot.player.game_mode == MAAGE_GAME_MODE_CREATIVE ?
-        "Game: Creative" : "Game: Survival"), ui->selected == 5);
+        "Game: Creative" : "Game: Survival"), maage_client_ui_highlight(ui,rect,5));
     rect = maage_client_ui_menu_rectangle(ui, 6, screen);
-    maage_client_ui_button(ui, rect, "Back", ui->selected == 6);
+    maage_client_ui_button(ui, rect, "Back", maage_client_ui_highlight(ui,rect,6));
     for (n = 0; n < 7U; ++n) {
         rect = maage_client_ui_menu_rectangle(ui, n + 7U, screen);
         sprintf(label, "%s: %d%%", buses[n], ui->audio_volume[n]);
-        maage_client_ui_button(ui, rect, label, ui->selected == n + 7U);
+        maage_client_ui_button(ui, rect, label, maage_client_ui_highlight(ui,rect,n+7U));
         bar = rect; bar.x += 12; bar.width -= 24; bar.y += 15; bar.height = 2;
         maage_client_ui_panel(ui, bar, 0.12f, 0.12f, 0.12f, 1);
         handle = bar; handle.x += bar.width * ui->audio_volume[n] / 100.0f - 3;

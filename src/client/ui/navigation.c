@@ -72,6 +72,7 @@ maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id
     for (i = 0; i < navigation->depth; ++i) if (navigation->stack[i] == id)
         return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     navigation->stack[navigation->depth++] = id; ui->selected = 0;
+    ui->selected_keyboard = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_NAVIGATE, 0);
 }
 
@@ -80,6 +81,7 @@ maage_status maage_client_ui_back(maage_client_ui *ui)
     if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     if (!ui->navigation.depth) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_NAVIGATE, 0);
     --ui->navigation.depth; ui->selected = 0;
+    ui->selected_keyboard = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_NAVIGATE, 0);
 }
 
