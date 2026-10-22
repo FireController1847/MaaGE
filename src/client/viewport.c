@@ -545,7 +545,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps = -1, logged_vsync = -1, paused_command = -1;
-    int selected_hotbar = 0, view_sent = 0, disconnected = 0;
+    int selected_hotbar = 0, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
     unsigned int ui_actions = 0, event_budget;
     memset(&resources, 0, sizeof(resources));
     memset(&cache, 0, sizeof(cache));
