@@ -498,8 +498,8 @@ typedef struct maage_client_audio_engine_bridge {
     maage_audio *engine;
     maage_audio_buffer **buffers;
     unsigned long buffer_count, buffer_capacity;
-    maage_audio_voice_id *voices;
-    size_t voice_count, voice_capacity;
+    maage_audio_voice_id voices[256];
+    unsigned int voice_next;
 } maage_client_audio_engine_bridge;
 
 static maage_status maage_client_audio_bridge_result(unsigned char code,
@@ -638,7 +638,7 @@ static maage_status maage_client_audio_bridge_engine_destroy(void *handle,
     for (i = 0; i < bridge->buffer_count; ++i)
         if (bridge->buffers[i]) (void)maage_audio_buffer_destroy(bridge->buffers[i]);
     result = maage_audio_destroy(bridge->engine, trace);
-    free(bridge->buffers); free(bridge->voices); free(bridge);
+    free(bridge->buffers); free(bridge);
     return result;
 }
 static maage_status maage_client_audio_bridge_upload(void *handle,
@@ -718,8 +718,7 @@ static maage_status maage_client_audio_bridge_play(void *handle,
     maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
     maage_audio_play_desc desc;
     maage_audio_voice_id voice = 0;
-    maage_audio_voice_id *storage;
-    size_t grown;
+    unsigned int slot;
     maage_status result;
     (void)distance;
     if (!bridge || !id || id > bridge->buffer_count ||
@@ -740,23 +739,15 @@ static maage_status maage_client_audio_bridge_play(void *handle,
         desc.position.y = (float)location[1];
         desc.position.z = (float)location[2];
     }
-    /* Reserve voice ID tracking before spawning, so shutdown can stop every
-     * owned voice without an allocation after playback starts. */
-    if (bridge->voice_count == bridge->voice_capacity) {
-        grown = bridge->voice_capacity ? bridge->voice_capacity * 2U : 128U;
-        if (grown <= bridge->voice_capacity ||
-            grown > (size_t)-1 / sizeof(*storage))
-            return maage_client_audio_bridge_result(MAAGE_STATUS_BUFFER_OVERFLOW,
-                MAAGE_OPERATION_SUBMIT);
-        storage = (maage_audio_voice_id *)realloc(bridge->voices,
-            grown * sizeof(*storage));
-        if (!storage) return maage_client_audio_bridge_result(MAAGE_STATUS_ALLOCATION_FAILED,
-            MAAGE_OPERATION_SUBMIT);
-        bridge->voices = storage; bridge->voice_capacity = grown;
-    }
     result = maage_audio_play(bridge->engine, &desc, &voice, trace);
-    if (!maage_status_failed(result) && voice)
-        bridge->voices[bridge->voice_count++] = voice;
+    if (!maage_status_failed(result) && voice) {
+        /* Stop and recycle the oldest recorded voice ID: bounded memory even
+         * after hours of footsteps, and no untracked active sound at shutdown. */
+        slot = bridge->voice_next++ % 256U;
+        if (bridge->voices[slot])
+            (void)maage_audio_stop(bridge->engine, bridge->voices[slot]);
+        bridge->voices[slot] = voice;
+    }
     return result;
 }
 static maage_status maage_client_audio_bridge_catalog_create(void *bank,
@@ -829,19 +820,22 @@ static maage_status maage_client_audio_bridge_stop_voices(void *handle,
     maage_status_trace *trace)
 {
     maage_client_audio_engine_bridge *bridge = (maage_client_audio_engine_bridge *)handle;
-    size_t i;
+    unsigned int i;
     maage_status result, first;
     (void)trace;
     if (!bridge) return maage_client_audio_bridge_result(MAAGE_STATUS_NOOP,
         MAAGE_OPERATION_STOP);
     first = maage_client_audio_bridge_result(MAAGE_STATUS_SUCCESS,
         MAAGE_OPERATION_STOP);
-    for (i = 0; i < bridge->voice_count; ++i) {
+    for (i = 0; i < 256U; ++i) if (bridge->voices[i]) {
         result = maage_audio_stop(bridge->engine, bridge->voices[i]);
-        if (maage_status_failed(result) && !maage_status_failed(first))
+        /* Already-finished generational voices are normal, not a new shutdown
+         * failure; active ones still receive their stop request. */
+        if (maage_status_failed(result) && !maage_status_failed(first) &&
+            maage_status_code(result) != MAAGE_STATUS_NOT_FOUND)
             first = result;
+        bridge->voices[i] = 0;
     }
-    bridge->voice_count = 0;
     return first;
 }
 static maage_status maage_client_audio_bridge_engine_stop(void *handle,
