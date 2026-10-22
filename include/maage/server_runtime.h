@@ -2,6 +2,8 @@
 #define MAAGE_SERVER_RUNTIME_H
 #include "maage/world.h"
 #include "maage/status.h"
+#include "maage/content.h"
+#include "maage/local_session.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -9,8 +11,6 @@ extern "C" {
 
 /* Both entry points use one owner-thread simulation and persistence lifecycle. */
 typedef struct maage_server_runtime maage_server_runtime;
-typedef struct maage_content maage_content;
-typedef struct maage_local_session maage_local_session;
 enum { MAAGE_SERVER_INTEGRATED = 1U, MAAGE_SERVER_DEDICATED = 2U };
 
 typedef struct maage_server_config {
