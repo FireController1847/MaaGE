@@ -780,7 +780,8 @@ static maage_status mn_scene_destroy(void *handle, maage_status_trace *trace)
         if (scene->sounds[i].stream) mn_scene_music_release(scene, &scene->sounds[i]);
         if (scene->sounds[i].buffer) {
             result = maage_audio_buffer_destroy(scene->sounds[i].buffer);
-            if (maage_status_failed(result) && !maage_status_failed(first)) first = result;
+            if (maage_status_failed(result)) return result;
+            scene->sounds[i].buffer = NULL;
         }
     }
     free(scene->sounds);

@@ -267,8 +267,10 @@ maage_status maage_client_audio_service_create(const char *data_root,
             /* A failed callback may still allocate a partial scene. Dispose of
              * it now instead of updating it or leaking it later. */
             if (service->scene) {
-                service->api.scene_destroy(service->scene, trace);
-                service->scene = NULL;
+                maage_status cleanup = service->api.scene_destroy(service->scene, trace);
+                /* A failed destroy preserves this owned handle for shutdown.
+                 * The logical scene may still borrow the engine and bank. */
+                if (!maage_status_failed(cleanup)) service->scene = NULL;
             }
             problem = result;
             recovered = maage_client_audio_recover(problem, MAAGE_OPERATION_CREATE, trace);
