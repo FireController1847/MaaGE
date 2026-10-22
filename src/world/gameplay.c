@@ -159,6 +159,7 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode)
     if (!game || mode > MAAGE_GAME_MODE_CREATIVE) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     game->mode = mode; game->breaking_active = 0; game->break_progress = 0;
     game->fall_distance = 0; game->jump_window = 0;
+    game->footstep_distance = 0;
     if (mode == MAAGE_GAME_MODE_SURVIVAL) game->flying = 0;
     else if (!game->health) game->health = 20;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
@@ -170,6 +171,7 @@ maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
     maage_player_spawn(player, world);
     game->health = game->hunger = 20; game->saturation = 5;
     game->exhaustion = game->fall_distance = 0; game->flying = 0;
+    game->footstep_distance = 0;
     game->breaking_active = game->has_target = 0; game->break_progress = 0;
     game->hunger_ticks = game->jump_window = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
@@ -595,13 +597,13 @@ maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *pla
     } else if (grounded && player->grounded && !game->flying) {
         /* Distance, never input count, drives the footstep cadence. */
         if (travel > 0.0001) game->footstep_distance += travel;
-        if (game->footstep_distance >= 0.6) {
+        if (travel > 0.0001 && game->footstep_distance >= 0.6) {
             game->footstep_distance -= 0.6;
             maage_gameplay_sound(&sink, MAAGE_SOUND_FOOTSTEP,
                 maage_gameplay_underfoot(world, player),
                 player->position[0], player->position[1] + 0.1,
                 player->position[2], travel > 0.16 ? 1.0 : 0.7, 1.0);
-            if (game->footstep_distance > 0.6) game->footstep_distance = 0.6;
+            if (game->footstep_distance >= 0.6) game->footstep_distance = 0.599;
         }
     } else game->footstep_distance = 0;
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
@@ -611,24 +613,33 @@ maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *pla
     }
     for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) {
         result = maage_gameplay_collect_drop(game, player, items, &game->pickups[i]);
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
+        if (maage_status_failed(result))
+            return maage_gameplay_sound_result(MAAGE_STATUS_PROPAGATE(trace,
+                result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK),
+                &sink, written, trace);
     }
     for (j = 0; j < game->overflow_count; ++j) {
         result = maage_gameplay_collect_drop(game, player, items, &game->overflow_pickups[j]);
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
+        if (maage_status_failed(result))
+            return maage_gameplay_sound_result(MAAGE_STATUS_PROPAGATE(trace,
+                result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK),
+                &sink, written, trace);
     }
     result = maage_gameplay_target(game,player,world,intent->movement.yaw,intent->pitch);
-    if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return result;
+    if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND)
+        return maage_gameplay_sound_result(result, &sink, written, trace);
     if (intent->attack) {
         if (game->swing <= 0) game->swing = 1;
         result = maage_gameplay_action_result(maage_gameplay_break(game,player,world,items,&sink), world, trace);
-        if (maage_status_failed(result)) return result;
+        if (maage_status_failed(result))
+            return maage_gameplay_sound_result(result, &sink, written, trace);
         if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;
     } else { game->breaking_active = 0; game->break_progress = 0; }
     if (intent->use) {
         if (game->swing <= 0) game->swing = 1;
         result = maage_gameplay_action_result(maage_gameplay_place(game,player,world,items,intent->movement.yaw,&sink), world, trace);
-        if (maage_status_failed(result)) return result;
+        if (maage_status_failed(result))
+            return maage_gameplay_sound_result(result, &sink, written, trace);
         if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;
     }
     if (!game->has_target) { game->breaking_active = 0; game->break_progress = 0; }
