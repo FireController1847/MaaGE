@@ -4,12 +4,15 @@
 #include "maage/audio.h"
 #include "maage/sound_bank.h"
 #include "maage/thread.h"
+#include "maage/log.h"
 #include "../audio/catalog/sound_catalog.h"
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
 
-#define MAAGE_NATIVE_BANK_BUDGET ((size_t)48U * 1024U * 1024U)
+/* Catalog effects are retained by Audio; caching the same PCM in SoundBank
+ * duplicates memory. Other SoundBank users may choose a nonzero cache. */
+#define MAAGE_NATIVE_BANK_BUDGET 0U
 #define MAAGE_NATIVE_STREAM_FRAMES 16384U
 #define MAAGE_NATIVE_DECODE_FRAMES 4096U
 #define MAAGE_NATIVE_MAX_VOLUME 4.0f
@@ -461,9 +464,10 @@ static void mn_music_worker(void *context)
     music->result = result;
     (void)maage_audio_stream_finish(music->ring);
 }
-static void mn_music_release(maage_native_music *music)
+static maage_status mn_music_release(maage_native_music *music)
 {
-    if (!music) return;
+    maage_status result;
+    if (!music) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_RELEASE);
     if (music->mutex) {
         maage_mutex_lock(music->mutex);
         music->cancel = 1;
@@ -471,11 +475,14 @@ static void mn_music_release(maage_native_music *music)
         maage_mutex_unlock(music->mutex);
     }
     if (music->worker) (void)maage_thread_join(music->worker);
+    result = music->worker ? music->result :
+        mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_RELEASE);
     if (music->ring) (void)maage_audio_stream_destroy(music->ring);
     if (music->decoder) (void)maage_sound_stream_destroy(music->decoder);
     if (music->wake) (void)maage_condition_destroy(music->wake);
     if (music->mutex) (void)maage_mutex_destroy(music->mutex);
     free(music);
+    return result;
 }
 static maage_status mn_music_prepare(maage_native_scene *scene,
     maage_native_scene_sound *sound, size_t budget)
@@ -581,7 +588,7 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     int music;
     (void)catalog;
     if (numeric) *numeric = 0;
-    if (!scene || !path || !numeric || scene->sound_count >= ULONG_MAX)
+    if (!scene || !path || !numeric || scene->sound_count >= ULONG_MAX - 1UL)
         return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     id = scene->sound_count + 1U;
     result = mn_scene_sounds_reserve(scene, id + 1U);
@@ -694,11 +701,15 @@ static maage_status mn_scene_music_play(void *context, void *audio, void *pcm,
 static void mn_scene_music_release(void *context, void *pcm)
 {
     maage_native_scene_sound *sound = (maage_native_scene_sound *)pcm;
+    maage_status result;
     (void)context;
     if (!sound || !sound->stream) return;
-    mn_music_release(sound->stream);
+    result = mn_music_release(sound->stream);
     sound->stream = NULL;
     sound->bytes = 0;
+    if (maage_status_failed(result)) (void)maage_log_status(MAAGE_LOG_WARNING,
+        "maage.client.audio_native", result,
+        "Incremental Vorbis music decoding stopped due to an error");
 }
 static int mn_scene_voice_running(void *context, void *audio,
     maage_client_audio_scene_voice token)
