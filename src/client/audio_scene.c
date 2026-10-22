@@ -133,7 +133,9 @@ static maage_status sc_stop_channel(maage_client_audio_scene *scene, int channel
     maage_status r;
     if (!c->voice) return sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
     r = scene->ports.voice_stop(scene->context, scene->audio, c->voice);
-    c->voice = 0; c->looping = 0; c->source = -1;
+    if (!maage_status_failed(r)) {
+        c->voice = 0; c->looping = 0; c->source = -1;
+    }
     return r;
 }
 static maage_status sc_stop_music(maage_client_audio_scene *scene)
@@ -141,6 +143,7 @@ static maage_status sc_stop_music(maage_client_audio_scene *scene)
     maage_status result = sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
     if (scene->music_voice) {
         result = scene->ports.voice_stop(scene->context, scene->audio, scene->music_voice);
+        if (maage_status_failed(result)) return result;
         scene->music_voice = 0;
     }
     /* PCM is held until the mixer no longer references it. */
@@ -185,7 +188,13 @@ static void sc_start_channel(maage_client_audio_scene *scene, int channel,
         scene->sounds[index], category, position, gain, loop, &voice);
     c->next_at = now + sc_span(scene, minimum, maximum);
     if (maage_status_failed(r) || !voice) {
-        if (voice) (void)scene->ports.voice_stop(scene->context, scene->audio, voice);
+        if (voice) {
+            maage_status stopped = scene->ports.voice_stop(scene->context, scene->audio, voice);
+            if (maage_status_failed(stopped)) {
+                c->voice = voice; c->source = index; c->looping = loop;
+                c->applied_gain = gain;
+            }
+        }
         if (!maage_status_failed(r)) r = sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
         sc_resource_failed(scene, index, r, trace);
         return;
@@ -227,12 +236,18 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
     size_t bytes = 0;
     maage_status r;
     int selected;
+    if (!scene->music_enabled) {
+        if (scene->music_voice && maage_status_failed(sc_stop_music(scene)))
+            sc_record_device_failure(scene, sc_result(MAAGE_STATUS_ERROR, MAAGE_OPERATION_STOP), trace);
+        return;
+    }
     if (scene->music_voice) {
         if (scene->ports.voice_running(scene->context, scene->audio, scene->music_voice)) return;
-        (void)sc_stop_music(scene);
+        r = sc_stop_music(scene);
+        if (maage_status_failed(r)) { sc_record_device_failure(scene, r, trace); return; }
         scene->next_music = now + sc_span(scene, 120.0, 360.0);
     }
-    if (!scene->music_enabled || now < scene->next_music) return;
+    if (now < scene->next_music) return;
     /* Exactly one choice/prepare at a scheduling boundary, never per frame.
      * The adapter performs sound-bank acquisition outside the device callback. */
     selected = sc_select(scene, SC_MUSIC_BEGIN, SC_MUSIC_END, scene->last_music_index);
@@ -244,7 +259,17 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
     if (!maage_status_failed(r))
         r = scene->ports.music_play(scene->context, scene->audio, pcm, 1.0, &voice);
     if (maage_status_failed(r) || !voice) {
-        if (voice) (void)scene->ports.voice_stop(scene->context, scene->audio, voice);
+        if (voice) {
+            maage_status stopped = scene->ports.voice_stop(scene->context, scene->audio, voice);
+            if (maage_status_failed(stopped)) {
+                /* An uncertain stop may still be reading PCM. Retain both. */
+                scene->music_voice = voice; scene->music_pcm = pcm;
+                scene->music_bytes = bytes; scene->music_index = selected;
+                sc_record_device_failure(scene, stopped, trace);
+                sc_resource_failed(scene, selected, r, trace);
+                return;
+            }
+        }
         if (pcm) scene->ports.music_release(scene->context, pcm);
         if (!maage_status_failed(r)) r = sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
         sc_resource_failed(scene, selected, r, trace);
@@ -459,6 +484,9 @@ maage_status maage_client_audio_scene_destroy(maage_client_audio_scene *scene)
         r = sc_stop_music(scene);
         if (maage_status_failed(r) && !maage_status_failed(first)) first = r;
     }
+    /* Preserve ownership if an uncertain device stop may still reference PCM.
+     * Callers may retry destroy; dependencies must remain alive until success. */
+    if (maage_status_failed(first)) return first;
     free(scene);
     return first;
 }
