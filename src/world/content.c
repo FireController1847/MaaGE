@@ -221,9 +221,9 @@ maage_status maage_content_create(const maage_content_config *config,
                     MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
                 goto failed;
             }
-            memcpy(content->biomes.definitions[id].grass_color,
+            memcpy(content->biomes.builtin_definitions[id].grass_color,
                 source->grass_color, sizeof(source->grass_color));
-            memcpy(content->biomes.definitions[id].foliage_color,
+            memcpy(content->biomes.builtin_definitions[id].foliage_color,
                 source->foliage_color, sizeof(source->foliage_color));
         }
     }
