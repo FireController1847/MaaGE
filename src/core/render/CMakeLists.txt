@@ -32,6 +32,12 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
             -P "${CMAKE_CURRENT_SOURCE_DIR}/metal/embed_shader.cmake"
         DEPENDS metal/mesh.metal metal/embed_shader.cmake VERBATIM)
     target_sources(maage_render PRIVATE metal/render_metal.m "${MAAGE_METAL_GENERATED}.h")
+    # Apple's Metal Performance Shaders SDK headers use C99+ constructs such
+    # as inline. The shared renderer is C90-first, so isolate this language
+    # exception to the single macOS Objective-C backend translation unit.
+    # Source compile options follow the target's inherited -std=c90 flag.
+    set_source_files_properties(metal/render_metal.m PROPERTIES
+        COMPILE_OPTIONS "-std=gnu11")
     target_compile_definitions(maage_render PRIVATE MAAGE_RENDER_HAS_METAL)
     target_compile_options(maage_render PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>")
     target_link_libraries(maage_render PRIVATE "${MAAGE_METAL_FRAMEWORK}"
