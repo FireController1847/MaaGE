@@ -73,6 +73,7 @@ struct maage_client_audio_scene {
     size_t music_bytes;
     int music_index, last_music_index, music_enabled;
     int bound, paused, clock_ready, failure_logged;
+    unsigned long failure_count;
     double last_now, paused_since, next_music, next_thunder, next_cave;
 };
 
@@ -105,6 +106,7 @@ static void sc_resource_failed(maage_client_audio_scene *scene, int index,
     if (index < 0 || index >= SC_ASSET_COUNT) return;
     scene->disabled[index] = 1;
     if (scene->logged[index]) return;
+    ++scene->failure_count;
     scene->logged[index] = 1;
     MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD);
     maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.audio_scene",
@@ -154,6 +156,7 @@ static void sc_record_device_failure(maage_client_audio_scene *scene, maage_stat
 {
     if (scene->failure_logged) return;
     scene->failure_logged = 1;
+    ++scene->failure_count;
     MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.audio_scene", result, trace,
         "Optional ambient voice operation failed; environmental audio will continue");
@@ -311,6 +314,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
     maage_status r;
     double dt, rain, water, lava, radius, bearing, thunder_at[3], cave_at[3];
     unsigned int i;
+    unsigned long failures_before;
     sc_channel *c;
     int index;
     if (!scene || !snapshot || !listener_position || !scene->bound ||
@@ -321,6 +325,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
         if (!sc_valid_coordinate(listener_position[i]))
             return sc_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (scene->paused) return sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    failures_before = scene->failure_count;
     if (!scene->clock_ready) {
         scene->clock_ready = 1; scene->last_now = now;
         scene->random ^= ((unsigned long)fmod(now * 1000.0, 4294967296.0)) & 0xffffffffUL;
@@ -395,7 +400,8 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
         }
     }
     sc_music_update(scene, now, trace);
-    return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
+    return sc_result(scene->failure_count != failures_before ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS,
+        MAAGE_OPERATION_UPDATE);
 }
 maage_status maage_client_audio_scene_pause(maage_client_audio_scene *scene, int paused)
 {
@@ -433,7 +439,10 @@ maage_status maage_client_audio_scene_music_enabled(maage_client_audio_scene *sc
     enabled = enabled != 0;
     if (enabled == scene->music_enabled) return sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
     scene->music_enabled = enabled;
-    if (!enabled && scene->bound) return sc_stop_music(scene);
+    if (!enabled && scene->bound) {
+        maage_status r = sc_stop_music(scene);
+        return maage_status_failed(r) ? r : sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
+    }
     if (enabled && scene->clock_ready) scene->next_music = scene->last_now + sc_span(scene, 5.0, 15.0);
     return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
 }
