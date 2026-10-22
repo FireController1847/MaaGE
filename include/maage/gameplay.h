@@ -81,7 +81,7 @@ maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound
  * gameplay failures take precedence over this publication warning. */
 maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
-    const maage_gameplay_intent *intent, struct struct maage_sound_event *events,
+    const maage_gameplay_intent *intent, struct maage_sound_event *events,
     size_t capacity, size_t *written, maage_status_trace *trace);
 maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
