@@ -44,8 +44,11 @@ typedef struct maage_window_insets {
 } maage_window_insets;
 
 /* Dimensions and safe-area insets use logical units, except framebuffer sizes
- * which use backing pixels. Zero insets mean no known display obstruction.
- * Renderers may cover the full backing area; UI can respect the safe rectangle.
+ * which use backing pixels. Insets describe remaining unsafe UI margins INSIDE
+ * the reported drawable viewport: do not apply them twice. Cocoa native
+ * fullscreen constrains its stable drawable NSView to the intersection of
+ * AppKit's content layout and the screen safe area; safe_area is then normally
+ * zero in that mode. Cocoa Borderless can still cover the entire display.
  * Wayland's initial empty backing uses scale 1 (compositor scaling still applies). */
 typedef struct maage_window_state {
     int width;
@@ -56,8 +59,11 @@ typedef struct maage_window_state {
     int close_requested;
     int resized;
     int mode_transitioning; /* Native fullscreen is still entering or exiting. */
-    maage_window_mode mode;
+    maage_window_mode mode; /* Last confirmed mode, never the pending request. */
     maage_window_insets safe_area;
+    maage_status mode_result; /* Latest mode outcome, including asynchronous
+        native-fullscreen failures; preserved until the next mode outcome.
+        Other backends may leave this SUCCESS (zero). */
 } maage_window_state;
 
 /* Borrowed handles; never destroy them. Valid only while the window/system
@@ -97,11 +103,16 @@ maage_status maage_window_set_visible(maage_window *window, int visible);
 /* Sizes are logical content dimensions, not outer frames. Fullscreen sizes are
  * OS-controlled; resize returns UNSUPPORTED there. Mode changes may be async:
  * OK acknowledges a request, not compositor acceptance. Query state after polls.
- * Native fullscreen currently means AppKit fullscreen Spaces and requires a
- * visible window; other backends use BORDERLESS_FULLSCREEN and reject NATIVE.
- * EXCLUSIVE_FULLSCREEN captures one macOS display at its current mode and fills
- * its whole frame; it does not create a Space. Capture is suspended while the
- * application is inactive and reacquired on activation. Other backends reject it.
+ * On macOS, NATIVE_FULLSCREEN enters a genuine AppKit fullscreen Space and
+ * reserves the screen's notch-obstructed renderable area without cropping the
+ * camera output. A successful set_mode request may still be transitioning; mode
+ * remains the last confirmed mode until an AppKit completion callback. Transition
+ * failures are logged and exposed as state.mode_result without failing the event
+ * pump. Native fullscreen requires a visible window. Other backends reject it.
+ * EXCLUSIVE_FULLSCREEN is a separate legacy, explicit CoreGraphics capture
+ * operation (not the user-facing Fullscreen choice); it never creates a Space.
+ * Capture is suspended while inactive and reacquired on activation. Other
+ * backends reject it.
  * Wayland client-requested resize and forced borderless mode without decoration
  * negotiation return UNSUPPORTED. Normal Wayland decoration is compositor-owned.
  * Unsupported native fullscreen/borderless semantics return UNSUPPORTED. */
