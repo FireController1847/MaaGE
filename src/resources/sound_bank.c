@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAAGE_SOUND_RADIX_WIDTH 256U
+#define MAAGE_SOUND_RADIX_WIDTH 16U
 #define MAAGE_SOUND_DECODE_CHUNK 4096U
 
 typedef struct maage_sound_slot {
@@ -301,8 +301,8 @@ static maage_status maage_sound_decode_file(const char *path,
 }
 
 
-/* Four sparse 8-bit radix levels span the complete 32-bit ID domain.
- * One lookup touches at most four pages, regardless of ID magnitude. */
+/* Eight sparse 4-bit radix levels span the complete 32-bit ID domain.
+ * One lookup touches at most eight pages, regardless of ID magnitude. */
 static maage_sound_slot *maage_sound_lookup(const maage_sound_bank *bank,
     unsigned long id)
 {
@@ -310,11 +310,11 @@ static maage_sound_slot *maage_sound_lookup(const maage_sound_bank *bank,
     unsigned int level;
     if (!bank || !bank->root || !id || id > MAAGE_SOUND_MAX_CLIP_ID) return NULL;
     page = bank->root;
-    for (level = 3U; level != 0U; --level) {
-        page = (maage_sound_page *)page->entries[(unsigned int)((id >> (level * 8U)) & 255UL)];
+    for (level = 7U; level != 0U; --level) {
+        page = (maage_sound_page *)page->entries[(unsigned int)((id >> (level * 4U)) & 15UL)];
         if (!page) return NULL;
     }
-    return (maage_sound_slot *)page->entries[(unsigned int)(id & 255UL)];
+    return (maage_sound_slot *)page->entries[(unsigned int)(id & 15UL)];
 }
 static maage_status maage_sound_insert(maage_sound_bank *bank, unsigned long id,
     maage_sound_slot *slot)
@@ -327,8 +327,8 @@ static maage_status maage_sound_insert(maage_sound_bank *bank, unsigned long id,
             MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
     }
     page = bank->root;
-    for (level = 3U; level != 0U; --level) {
-        index = (unsigned int)((id >> (level * 8U)) & 255UL);
+    for (level = 7U; level != 0U; --level) {
+        index = (unsigned int)((id >> (level * 4U)) & 15UL);
         child = (maage_sound_page *)page->entries[index];
         if (!child) {
             child = (maage_sound_page *)calloc(1, sizeof(*child));
@@ -338,7 +338,7 @@ static maage_status maage_sound_insert(maage_sound_bank *bank, unsigned long id,
         }
         page = child;
     }
-    index = (unsigned int)(id & 255UL);
+    index = (unsigned int)(id & 15UL);
     if (page->entries[index]) return maage_status_make(MAAGE_STATUS_INVALID_STATE,
         MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
     page->entries[index] = slot;
@@ -627,7 +627,7 @@ maage_status maage_sound_pcm_destroy(maage_sound_pcm *pcm)
 maage_status maage_sound_bank_destroy(maage_sound_bank *bank)
 {
     if (!bank) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
-    maage_sound_page_destroy(bank, bank->root, 3U);
+    maage_sound_page_destroy(bank, bank->root, 7U);
     free(bank->data_root);
     free(bank);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
