@@ -63,14 +63,6 @@ const maage_biome_registry *maage_content_biomes(const maage_content *content);
 const maage_item_registry *maage_content_items(const maage_content *content);
 maage_status maage_content_destroy(maage_content *content);
 
-/* Transitional source-compatibility path for existing Client users that
- * separately own registries. It uses the exact same block registration logic
- * as maage_content_create and transfers the finalized blocks to the caller.
- * New Client/Server integrations should use maage_content_create instead. */
-maage_status maage_content_blocks_create(const maage_content_config *config,
-    const maage_biome_registry *biomes, maage_block_registry **output,
-    maage_status_trace *trace);
-
 #ifdef __cplusplus
 }
 #endif

@@ -77,7 +77,7 @@ maage_status maage_log_init(const maage_log_config *config, int argc, char *cons
 maage_status maage_log_override_set(const char *name, maage_log_level level)
 {
     size_t index;
-    if (level < MAAGE_LOG_TRACE || level > MAAGE_LOG_OFF) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 1);
+    if (level < MAAGE_LOG_VERBOSE || level > MAAGE_LOG_OFF) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 1);
     if (!name || !*name) { maage_log_current.config.level = level; return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0); }
     if (strlen(name) >= MAAGE_LOG_NAME_SIZE) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0);
     for (index = 0; index < maage_log_current.count; ++index)
@@ -110,7 +110,7 @@ static int maage_log_is_enabled(const char *logger, maage_log_level level)
 {
     maage_log_level effective = maage_log_current.config.level;
     size_t index, length, best = 0;
-    if (level < MAAGE_LOG_TRACE || level >= MAAGE_LOG_OFF) return 0;
+    if (level < MAAGE_LOG_VERBOSE || level >= MAAGE_LOG_OFF) return 0;
     if (!logger || !*logger) logger = "maage";
     for (index = 0; index < maage_log_current.count; ++index) {
         length = strlen(maage_log_current.overrides[index].name);
@@ -263,11 +263,8 @@ maage_status name(const char *logger, const char *format, ...) \
     return result; \
 }
 
-MAAGE_LOG_FUNCTION(maage_log_trace, MAAGE_LOG_TRACE)
-MAAGE_LOG_FUNCTION(maage_log_debug, MAAGE_LOG_DEBUG)
 MAAGE_LOG_FUNCTION(maage_log_verbose, MAAGE_LOG_VERBOSE)
 MAAGE_LOG_FUNCTION(maage_log_info, MAAGE_LOG_INFO)
-MAAGE_LOG_FUNCTION(maage_log_warn, MAAGE_LOG_WARN)
 MAAGE_LOG_FUNCTION(maage_log_warning, MAAGE_LOG_WARNING)
 MAAGE_LOG_FUNCTION(maage_log_error, MAAGE_LOG_ERROR)
 MAAGE_LOG_FUNCTION(maage_log_fatal, MAAGE_LOG_FATAL)

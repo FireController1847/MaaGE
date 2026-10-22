@@ -1,13 +1,23 @@
 # MaaGE Gameplay Roadmap
 
-Minecraft: Java Edition **1.7.10** is the gameplay and fidelity reference.
-Phases 1–5, including milestones 2.5, 2.75, 3.5 and 4.5, record implemented
-foundations and their limitations below; preserve their historical completion and
-validation notes. Compilation does not establish runtime correctness or vanilla
-fidelity. Phases 6 and 7 have source implementations combined on the
-integration branch; cross-platform builds and runtime/visual/audio behavior
-remain unverified. Do not mark their observable completion criteria satisfied
-until those checks are performed.
+Minecraft: Java Edition **1.7.10** is a loose gameplay/content reference, not an
+implementation, interoperability, seed-parity or architectural requirement.
+Phases 1–5, including milestones 2.5, 2.75, 3.5 and 4.5, record retained foundations
+and historical compilation notes. The descriptions reflect the current source:
+Phase 7's shared Server owns simulation and persistence, and Phase 6 supplies
+Client audio. Current macOS ARM64 Debug/Release Launcher, Client and Server builds
+and a separate headless Release Server build compile and link. The headless build
+disables Window, Render, Launcher and Client. No applications, tests, benchmarks,
+runtime/visual/audio validation or GitHub Actions ran; Windows/Linux remain
+uncompiled here. Historical build notes below do not establish runtime correctness
+or vanilla fidelity.
+
+MaaGE is in predevelopment. There is one current implementation of generation,
+metadata/chunk serialization, Launcher preferences, packages and resource layout.
+Old development data and APIs are disposable; format identifiers reject older
+encodings rather than selecting historical algorithms, migrations or fallback
+writers. Recreate rejected worlds/configurations/installations/caches as needed;
+no data directory is automatically deleted.
 
 **Permanent boundary:** Server architecture and multiplayer networking are
 separate milestones. Phase 7 establishes a single authoritative Server runtime
@@ -27,7 +37,7 @@ does not authorize implementing a phase.
 ## Phase 1 — Initial Voxel Client
 
 Implemented foundation: standalone `maage-client`, version queries, native Window
-and Input, reconstructed PNG resources, frozen numeric block/state registration,
+and Input, reconstructed PNG resources, finalized numeric block/state registration,
 indexed visible-face cube meshing, native Metal textured rendering, first-person
 camera, fixed 20 TPS movement, jumping/gravity and swept AABB collision. Phase 2
 extends these same modules; the nine-section static demonstration is superseded
@@ -58,21 +68,24 @@ Implemented in the existing portable `MaaGE::World` library:
   modulo, including negative coordinates. Column lookup uses a collision-checked
   integer hash table with expected O(1) access and cluster repair on eviction.
   Numeric block/state/biome definitions use deterministic direct O(1) arrays.
-- **IDs:** terrain types retain legacy IDs air 0, stone 1, grass 2, dirt 3,
-  bedrock 7, water 9, sand 12, gravel 13 and sandstone 24. State IDs are a separate
-  domain; biome grass states 256–261 reference grass with numeric metadata 1–6.
-  All texture references are precomputed. Name parsing occurs only at argument,
-  registration or save/import boundaries, never in generation, collision,
-  streaming, lighting, meshing or draw loops.
-- **Seeded generation:** signed 64-bit seeds are represented as two masked 32-bit
-  words in C90. Generator **1** hashes seed bits, stable coordinates and numeric
-  stages into gradient Perlin/fractal noise. Climate sampling selects numeric
-  ocean/plains/desert/extreme-hills/forest/taiga biomes; blended heights produce
-  stone, surface/filler layers, bedrock and static ocean water at Y=63. Generator
-  **2** uses the same terrain mathematics with persisted per-world sea-level and
-  spawn-search policies; generator 1's rules never change. Heightmaps and initial
-  lighting precede meshing. Generation has no mutable global PRNG and does not
-  depend on request order, worker scheduling or render radius.
+- **IDs:** block types, states, items and biomes have separate finalized numeric
+  registries with direct deterministic O(1) lookup. State definitions reference
+  numeric block types and metadata, including biome grass variants. Built-in
+  numbers are current registry choices, not an old save-mapping contract. Texture
+  references are precomputed; name resolution stays at registration, presentation
+  and save/import boundaries, never in generation, collision, streaming, lighting,
+  meshing or draw loops.
+- **Seeded generation:** signed 64-bit seeds are two masked 32-bit words in C90.
+  One active algorithm hashes seed bits, coordinates and numeric stages into
+  gradient/fractal noise. Climate sampling selects numeric ocean/plains/desert/
+  extreme-hills/forest/taiga biomes; blended heights produce stone, surface/filler
+  layers, bedrock and ocean water. The same pipeline always includes Phase 4's
+  caves, ores, decoration, vegetation and structures. Persisted configuration
+  contains only sea level and spawn-search radius/step, defaulting to 63 and
+  4096/16. `maage_generation_policy_default` takes no algorithm selector. Client,
+  integrated Server and dedicated Server share the algorithm and defaults.
+  Heightmaps and lighting precede meshing. No mutable global PRNG or historical
+  branch depends on request order, worker scheduling or render radius.
 - **Streaming:** bounded asynchronous jobs handle loading/generation, lighting,
   CPU meshing and saving; the owner commits results and evicts columns. The
   bounded desired grid prioritizes nearby and
@@ -101,12 +114,12 @@ Implemented in the existing portable `MaaGE::World` library:
   water attenuation and bounded six-neighbor propagation run on private worker snapshots.
   Both channels import neighboring column light and converge after arrivals,
   removals or changed boundary light. Numeric block emission properties seed the
-  emitted channel; current terrain blocks emit zero. Meshing combines neighboring
+  emitted channel, including lava and torch emission. Meshing combines neighboring
   light levels with temporary directional face shading. Lighting-only sections
   are published through controlled owner commits with stale-neighbor rejection.
-- **Diagnostics:** startup logs world ID, signed seed, generator and radius.
-  Periodic VERBOSE diagnostics report loaded/pending/ready columns, generated versus
-  disk-loaded counts, mesh rebuilds and approximate frame time.
+- **Diagnostics:** copied Server snapshots expose world identity, position,
+  generation and streaming statistics. VERBOSE diagnostics remain available at
+  handling boundaries; compact F3 uses the copied observation/performance data.
 
 ### Creation and Selection
 
@@ -124,50 +137,50 @@ maage-client --world=f4a2c9b1-8e36-4f1c-91ac-7d02ee39d82c --render-distance=4
 ```
 
 `--world=<id>` loads an existing world. Creating an existing ID fails instead of
-replacing it. Supplying a seed for an existing world is rejected. IDs are bounded,
-canonical UUIDs for new worlds; migrated legacy IDs remain loadable. Generated
+replacing it. Supplying a seed for an existing world is rejected. All world IDs
+are canonical UUIDs; non-UUID development IDs are rejected. Generated
 UUIDs and automatic seeds use OS cryptographic randomness. Instance-local
 `config/last-world` remembers the selection. Separate
 selection and lifetime world locks prevent concurrent writers.
 
-### Save Format and Recovery
+### Save Format and Atomic Writes
 
-Data lives beneath `instances/<instance-uuid>/worlds/<world-uuid>/`: `world.bin` metadata and
-`chunks/<signed-x>_<signed-z>.chunk`. Metadata records ID/name, signed seed,
-creation UTC, format/generator/blockset versions and player position/orientation.
-Player state saves after the pool's clean-shutdown flush. An interrupted first
-launch retains a pending-spawn flag; later interrupted launches resume the last
-successfully saved player state.
+Data lives beneath `instances/<instance-uuid>/worlds/<world-uuid>/`: `world.bin`
+metadata and `chunks/<signed-x>_<signed-z>.chunk`. One current metadata encoding
+stores UUID/name, signed seed, creation UTC, generation configuration, position/
+orientation, inventory, pickups, vitals and clock/weather. Item stacks use stable
+namespaced identities. One current chunk encoding stores namespaced block plus
+state-metadata and biome palettes, lighting, generation-stage/feature counts,
+relative scheduled-update delays and numeric block entities with checked payloads.
+Palette indices are file-local, independent of runtime IDs.
 
-Legacy chunk format **1**, generator **1**, blockset **1** remain readable with
-frozen numeric identities. Chunk format **2** introduced namespaced block/state and
-biome palettes local to each chunk, preserving expanded runtime ID registries;
-Phase 4 format **3** retains those palettes and adds column simulation state.
-Metadata schemas 1–4 retain generator-1 behavior; configured generator 2 uses
-metadata schema **5** with sea-level and spawn-search parameters. Phase 4 metadata
-schema **6** additionally persists clock/weather and supports generator 3. Headers carry
-matching generator/blockset versions. All files use explicit little-endian encoding
-and CRC32. Unsupported versions, lengths, coordinates, identities or checksums
-fail without replacing corrupt originals. Explicit migrations remain necessary
-for incompatible mappings or generation changes.
+Private format identifiers permit strict rejection. There are no historical
+metadata/chunk readers, numeric identity conversion, generator/blockset version
+branches or fallback writers. Explicit little-endian lengths/coordinates/values
+and CRC32 detect malformed input; unresolved identities fail without replacing
+saved data with unrelated blocks or air. A complete metadata save borrows the
+store's finalized item registry and serializes one owned gameplay/environment
+snapshot, without reloading the previous file or round-tripping through gameplay.
 
-Writes sync complete temporary files before atomic promotion. Abandoned `.tmp`
-files are ignored on read and removed before another write. Failed writes retain
-the previous save. This provides interrupted-write recovery; directory-entry
-power-loss durability and automatic recovery from existing file corruption are
-not claimed. Restore damaged files explicitly from a backup.
+The Server saves final player state after successful World flush. An interrupted
+first launch retains a pending-spawn flag; later interruptions retain the last
+successful player checkpoint. Chunk snapshots save asynchronously with one writer
+per file and dirty-revision protection. Writes sync complete temporary files before
+atomic replacement; failed writes retain the previous current-format file.
+Abandoned `.tmp` files are ignored on read and removed before another write.
+Directory-entry power-loss durability is not claimed. Rejected earlier development
+worlds must be recreated; no conversion, migration, backup or corruption-recovery
+framework is provided.
 
-### Compatibility and Remaining Limits
+### Generation and Remaining Limits
 
-Generator 1 is an original **approximation**, with coarse climate cells, blended
-height fields and seeded gradient noise. It does not reproduce Java Random,
-GenLayer, vanilla three-dimensional density, exact biome distribution or
-seed-for-seed 1.7.10 terrain. The generator version is persisted and unsupported
-versions are rejected rather than silently changing terrain.
-
-Generators 1/2 retain their original terrain without Phase 4 features; generator 3
-adds the generation features described below. Phase 3 supplies inventory and
-interaction, and Phase 4 supplies fluid updates and environmental presentation.
+The active generator is an original approximation with coarse climate cells,
+blended height fields, seeded gradient noise and regional feature replay. Java
+Random, GenLayer, vanilla three-dimensional density, exact biome distribution and
+seed-for-seed terrain are not goals. Historical generators and their selection
+arguments/APIs are removed; future algorithm changes may invalidate worlds.
+Phase 3 supplies inventory and interaction, while Phase 4 supplies generation
+features, fluid updates and environmental presentation.
 Water still uses an opaque tinted first texture frame without animation, swimming
 or underwater presentation. Lighting lacks vanilla parity and ambient occlusion.
 GPU positions remain floating-point world
@@ -177,9 +190,8 @@ bounded to the classic-scale ±30-million range.
 Native threading, storage and randomness stay behind Core APIs. Generic storage
 and headless World persistence require no Launcher UI, HTTP, JSON, OpenSSL,
 archive, window or graphics dependencies. Optional asset hashing remains a
-separate acquisition dependency. The existing Server can consume these same
-portable data/simulation modules later; networking and authoritative server
-integration are not implemented in this phase.
+separate acquisition dependency. Both integrated and dedicated Server now own
+these same portable data/simulation services; remote networking remains deferred.
 
 Local build coverage is macOS arm64. Windows/Linux source paths and all runtime
 world generation, streaming, lighting, save/reload and movement behavior require
@@ -213,8 +225,8 @@ Implemented as an extension of the existing World and Client:
   duplicate work is coalesced, accepted jobs and retained memory are bounded, and
   obsolete CPU requests are cancelled as the desired grid changes. Lighting
   imports staged immutable neighbor boundaries rather than mutating adjacent
-  columns. Generation retains generator 1's seed/coordinate/stage-derived random
-  state and terrain algorithms, so scheduling never selects different terrain.
+  columns. Generation derives random state solely from seed, coordinates and
+  numeric stage; scheduling never selects a different algorithm or feature set.
 - **Revisions and lifetime:** task results include column incarnation/revision
   identity and required neighbor revisions. Changed/unloaded inputs reject stale
   lighting and meshes; completion processing releases borrowed snapshots only
@@ -225,16 +237,16 @@ Implemented as an extension of the existing World and Client:
   Save completion clears dirty state only if the saved revision still matches;
   dirty columns remain resident until a successful save. Clean shutdown cancels
   obsolete CPU work, drains/joins the pool and flushes dirty revisions while the
-  registry and store remain alive. Existing save versions and corruption recovery
-  rules remain unchanged.
-- **Client phases:** input/native events, completion commits, ordered fixed
-  20 TPS player movement, rendering orchestration and GPU operations stay on the
-  owning thread. No other meaningful independent gameplay system exists yet;
-  entity frameworks or mechanics have not been added to demonstrate parallelism.
-  GPU uploads are budgeted by elapsed milliseconds per frame (adaptive by default
-  or explicitly configured), and unchanged resources remain resident.
-  Resource/world metadata opens during hidden startup; blocking flush,
-  join and final player metadata happen after the render loop stops.
+  registry and store remain alive. Only the current metadata/chunk encoding is
+  read or written; malformed authoritative data remains an explicit failure.
+- **Execution phases:** Client owns input/native events, camera, UI, audio,
+  rendering and GPU operations. The Server owner thread handles ordered 20 TPS
+  movement/gameplay/environment and pumps World scheduling/completion, including
+  while paused. Local commands and copied snapshots/events cross the boundary;
+  owned CPU meshes transfer to the Client without exposing borrowed columns.
+  GPU uploads use a configurable/adaptive millisecond budget, retaining unchanged
+  resources. Server metadata startup happens while the Client viewport is hidden;
+  shutdown flush, checkpoint and join follow the render loop.
 - **Diagnostics:** `--world-workers=<count>` configures the pool (0 is automatic). Startup reports its
   actual count. Five-second VERBOSE logs report queued/running jobs, accepted
   generation, lighting, meshing and I/O work, lifetime completed/cancelled/stale
@@ -243,8 +255,8 @@ Implemented as an extension of the existing World and Client:
 
 Synchronization remains at scheduler ownership handoffs and filesystem writer
 locks, where shared queue state and exclusive save ownership require it. Worker
-tasks have no graphics or native UI dependencies, allowing future Server reuse.
-Main-thread startup/shutdown metadata I/O is a lifecycle boundary; no chunk
+tasks have no graphics or native UI dependencies and serve both Server modes.
+Owner-thread startup/shutdown metadata I/O is a lifecycle boundary; no chunk
 generation, serialization, mesh construction or disk I/O runs inside the render
 loop. Runtime concurrency, cancellation, determinism and recovery require programmer
 testing; compilation alone does not establish their behavior.
@@ -265,8 +277,8 @@ AppKit/Win32/GTK controls:
   count; unknown IDs and navigation cycles fail explicitly.
 - **Screens and input:** the HUD contains a centered textured crosshair and an
   independently toggled F3 overlay. Escape opens Pause, whose actions resume,
-  open an Options placeholder or exit through normal Client shutdown. Options
-  demonstrates Back navigation without adding a settings system. Mouse controls
+  open Options or exit through normal Client shutdown. Options now persists
+  supported video/window/audio settings and retains Back navigation. Mouse controls
   and keyboard selection use native input snapshots; menus release capture and
   pause fixed-step player updates. Rendering, native events and bounded World
   completion/scheduling continue while paused. Closing menus restores gameplay
@@ -285,15 +297,15 @@ AppKit/Win32/GTK controls:
   and explicitly reject unsupported UI/gameplay commands; parity is deferred.
 - **F3:** Phase 4.5 refines this overlay into compact left/right columns with live
   gameplay observations and separately averaged performance measurements; see below.
-- **Read-only telemetry:** World observations use owner-published snapshots. One
-  brief scheduler snapshot copies bounded numeric states; no worker output reads,
+- **Read-only telemetry:** Client reads copied Server observations; the Server
+  takes one brief scheduler snapshot of bounded numeric states. No worker output reads,
   World lock, job wait, heap allocation or diagnostic disk I/O occurs per frame.
 
 The ASCII font, compact layout, scaling, capture/navigation, pause behavior and
 Metal presentation require programmer runtime/visual verification. Non-macOS
 source paths remain uncompiled locally. Phase 3 extends this UI with inventory,
-targeting and basic game-mode controls. Crafting, a full settings system and
-multiplayer menus remain future phases.
+targeting and basic game-mode controls. Crafting, complete settings and multiplayer
+menus remain future work.
 
 ## Phase 3 — Player Interaction and Core Gameplay
 
@@ -317,9 +329,9 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   destination, height and player AABB; numeric placement callbacks permit future
   state orientation. Ten reconstructed damage textures are precomposited into
   the atlas at initialization and drawn through the existing mesh pipeline.
-- **Items and inventory:** a finalized direct-index item registry supplies seven
-  usable block items (stone, grass, dirt, bedrock, sand, gravel and sandstone),
-  stack limits, block/icon states, display names and extensible tool properties.
+- **Items and inventory:** a finalized direct-index item registry supplies built-in
+  block items, from stone/grass/dirt/bedrock/sand/gravel/sandstone through Phase 4
+  content, with stack limits, block/icon states, names and tool properties.
   Thirty-six fixed stack slots include the nine-slot hotbar, plus a cursor stack.
   Left click moves/merges/swaps; right click splits or places one. Numeric screen
   3 provides the classic storage layout and a paged Creative catalogue, reusing
@@ -335,16 +347,16 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   Space/Shift ascends/descends. Survival tracks health, hunger, saturation,
   exhaustion, fall damage, slow regeneration and starvation. Death opens Pause
   with Respawn, retaining inventory at the session-start position.
-- **Drops:** ordinary successful harvests enter inventory immediately. Overflow
-  uses at most 64 numeric position/stack records and is collected within two
-  blocks; a full pickup pool prevents another overflowing break. These records
-  persist but have no rendered item entities, movement or despawn yet.
-- **Persistence:** CRC-protected player metadata schemas 1–3 remain readable.
-  Schema 4 writes namespaced stable item identities and expandable pickup
-  records; configured generator 2 uses schema 5. Existing numeric item mapping
-  1 retains its legacy seven-item interpretation. Chunk format 2 persists
-  namespaced block/state/biome palettes while reading old format-1 chunks.
-  Final player metadata writes only after rendering stops and World flush succeeds.
+- **Drops:** ordinary successful harvests enter inventory immediately. Pickups use
+  64 inline numeric position/stack records plus a growable owned overflow array;
+  allocation failure remains explicit rather than imposing a 64-record limit.
+  Collection occurs within two blocks. Records persist without rendered item
+  entities, movement or despawn yet.
+- **Persistence:** the sole CRC-protected metadata representation stores named item
+  identities and all inventory/cursor/pickup records. Chunk-local namespaced
+  block/state/biome palettes resolve at import. Old schemas and numeric mappings
+  are rejected. Server writes final player metadata after rendering stops and
+  World flush succeeds.
 - **F3:** target IDs/face/position, selected item/slot, mode/flight, health/hunger,
   reach/break progress, mutation totals and dirty columns join existing scheduler
   diagnostics through bounded owner snapshots.
@@ -414,16 +426,16 @@ directory as `instances/.deleted-<uuid>` for recovery.
 
 Launcher schema 3 retains the existing installation registry as UUID references:
 `selected` and `default` UUIDs, and `installations: [{"uuid":"..."}]`. Name,
-Client association and mappings are read from manifests. Legacy Launcher schemas
-1/2 create manifests before replacing the registry atomically; invalid manifests
-fail without resetting configuration. Installed Client packages remain independent
+Client association and mappings are read from manifests. Only this current schema
+is accepted; old preference schemas are not converted. Invalid manifests fail
+without resetting configuration. Installed Client packages remain independent
 and can serve several instances. Play validates the manifest/build pair on its
 existing worker and passes `--instance=<uuid>` plus the shared data root. The
 Client holds its own instance lease after Launcher exit.
-Client metadata/descriptors declare numeric `instance_storage: 1`. Older packages
-remain installed and referenced but are unavailable for Play until an instance-aware
-Client is imported; the Launcher never starts an old Client that would ignore its
-instance argument and write global worlds. No network protocol is implied.
+Client metadata/descriptors require numeric `instance_storage: 1` and the current
+standalone-executable package layout. Missing/unsupported descriptors and package
+registry schemas are rejected, with no legacy bundle/default conversion. Import
+and verification never execute selected code. No network protocol is implied.
 
 Direct CLI startup accepts the same `--instance=<uuid>` or uses the selected/default
 Launcher UUID. It never creates a random instance or falls back to global worlds.
@@ -443,47 +455,38 @@ and refuses busy instances or populated private folders. The Client then starts
 normally. Numeric folder kinds resolve and cache paths during initialization;
 world simulation/meshing performs no name lookup or instance-path probing.
 
-Legacy global `worlds/` migrates automatically only for the sole configured
-instance. With multiple instances, the Launcher reports migration pending and
-preserves legacy data. Choose a destination explicitly while Clients are closed:
+Global worlds, migration journals/receipts, migration startup flags and pending-
+migration UI warnings are removed. World loading and creation require canonical
+UUIDs inside the selected physical instance. Earlier data is not moved, copied or
+converted automatically; recreate rejected development worlds as needed.
 
-```sh
-maage-client --instance=<destination-uuid> --migrate-legacy-worlds
-```
-
-Migration holds the legacy selection lock and every world writer lock, validates
-metadata and refuses occupied destinations or conflicting last-world selections.
-A CRC journal at `config/worlds-migration` records the destination and selection
-before an exclusive atomic directory move. If relocation is unavailable, a bounded
-copy into `.worlds-migration-<uuid>` verifies synced files byte for byte and checks
-the whole tree before atomic promotion; original legacy files remain as backup.
-The completion receipt is `config/legacy-worlds-migrated`. Journal recovery resumes
-an interrupted atomic move or accepts an already promoted copy only if its source
-and destination trees still match. Interrupted partial copies remain available for
-manual cleanup/recovery; retries preserve originals and never overwrite worlds.
-Existing IDs, seeds, generator versions, chunks and player data are retained;
-new worlds use canonical UUIDs, while old non-UUID IDs remain a compatibility case.
+Minecraft resources use only the shared `minecraft/` layout: indexed objects,
+metadata and `assets/reconst/` logical files. No historical MaaGE directory reuse,
+migration or cleanup is attempted. Current setup/repair retains authorized
+Minecraft 1.7.10 indexed/JAR acquisition, hash verification, reconstruction,
+cancellation and retry; verified current-layout local sources remain reusable.
 
 An exclusive UUID-scoped instance lease currently permits one Client per instance
 and blocks rename, deletion and remapping during use. Each world retains its own
 lifetime writer lock. There is no lock across ordinary operations in different
-instances; legacy migration alone serializes access to the old global collection.
-The existing asynchronous chunk saves/revisions and post-render shutdown remain.
-Server management can opt into the same storage library without UI/graphics;
-Server hosting, mod loading and complete shared-folder settings remain deferred.
+instances. Asynchronous chunk saves/revisions and post-render shutdown remain.
+The authoritative Server uses the same storage library without UI/graphics;
+Launcher Server management, mod loading and complete shared-folder settings remain
+deferred.
 
 macOS ARM64 Debug/Release Launcher/Client and headless Release Instance/World/Server
 builds passed. No applications, tests, benchmarks, runtime migrations, UI validation
 or GitHub Actions were run. Windows/Linux implementations remain uncompiled here;
-filesystem/link/remapping/migration behavior requires programmer runtime testing.
+filesystem/link/remapping behavior requires programmer runtime testing. These are
+historical compilation notes, not validation of the current refactor.
 
 ## Phase 4 — World Simulation and Environmental Systems
 
 Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
 
-- **Generation:** new worlds default to generator **3**. `--generator-version=1|2|3`
-  selects a creation policy; loads retain the recorded policy. Generators 1/2
-  remain frozen. Eight numeric stages cover biome selection, terrain shaping,
+- **Generation:** one current pipeline is used by every entry point. There is no
+  generator-selection argument or historical execution branch. Eight numeric
+  stages cover biome selection, terrain shaping,
   caves, underground resources, surface decoration, vegetation, structures and
   final heightmaps. Fluid initialization and existing asynchronous lighting follow;
   the final generation stage does not claim completed lighting.
@@ -494,7 +497,7 @@ Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
   mushrooms, snow and biome surfaces. Blocks use the existing reconstructed atlas;
   plants use crossed geometry, and snow/cactus/torch content has explicit shapes.
   Spawn planning shares tree/cactus geometry and accounts for snow thickness.
-- **Structures:** numeric, versioned regional placement generates underground
+- **Structures:** numeric regional placement generates underground
   cobblestone/mossy dungeon shells with terrain constraints and an entrance.
   Chests, spawners, loot, encounters, pyramids, temples and villages are deferred.
 - **Determinism/concurrency:** workers replay bounded regional owners in fixed
@@ -520,10 +523,10 @@ Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
   sky/block light channels with a frame sky factor, preserving emitted light at night
   without relighting. Existing draw submission accepts optional background/overlay
   batches for sky color, sun/moon movement/phases, bounded rain/snow and thunder flashes.
-- **Persistence:** metadata **6** reads schemas 1–5 and retains policies/stable item
-  identities, adding clock/weather to the final player checkpoint after successful
-  World flush. Chunk **3** reads formats 1/2 and retains stable palettes, stage/feature
-  counts, updates and block entities. Pending work serializes remaining two-word
+- **Persistence:** current-only metadata retains generation configuration, named
+  item identities and clock/weather in the final checkpoint after successful
+  World flush. Current-only chunks retain identity palettes, stage/feature counts,
+  updates and block entities. Pending work serializes remaining two-word
   delays and rebases on load, independent of an interrupted session's older clock.
   Instance paths, asynchronous single-writer saves, CRC/identity/length checks,
   atomic promotion and dirty-eviction protection remain intact.
@@ -536,11 +539,12 @@ Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
 
 This remains original approximate generation without Java Random/GenLayer,
 vanilla three-dimensional density or seed parity. Built-in feature tables are
-frozen by generator 3; sea level and spawn search remain its per-world controls.
+actively maintained; sea level and spawn search remain per-world controls.
 No jungle biome or surface lakes are implemented. Ore blocks drop themselves;
 tree variants use base-log drops. Fluids omit vanilla slope search/exact update
 order, swimming, buoyancy and lava damage. Plant support/leaf decay, snow
-accumulation/melting and weather audio remain deferred. Fluid textures are opaque
+accumulation/melting remain deferred; Phase 6 adds source-integrated weather audio.
+Fluid textures are opaque
 first frames. Precipitation is a screen-space overlay gated by the player's sky/
 climate observation, without world-depth particles or distant roof occlusion.
 Clock/player checkpoints occur on clean shutdown; chunks save independently.
@@ -567,7 +571,8 @@ runtime shader compilation remain unverified; only Metal implements gameplay dra
 - **Logging:** inclusive VERBOSE/INFO/WARNING/ERROR/FATAL thresholds; actual Debug
   builds default VERBOSE, other builds INFO. Existing `--log-level=`, INI overrides,
   logger inheritance, synchronized output, stream capture and shutdown archives
-  remain. TRACE/DEBUG/WARN spellings remain compatibility aliases. Structured
+  remain. Only canonical VERBOSE/INFO/WARNING/ERROR/FATAL APIs and spellings are
+  accepted; TRACE/DEBUG/WARN aliases and redundant wrappers are removed. Structured
   records include the hex outcome and separate path/column/job context; failure
   caches and owner handling boundaries prevent repeated reports every frame.
 - **Visual recovery:** an original generated magenta/black checkerboard occupies a
@@ -646,15 +651,16 @@ runtime/visual validation or GitHub Actions were executed.
 
 ## Phase 6 — Audio Engine & Soundscape
 
-**Source-integrated; build and observable completion unverified.** A native
-cross-platform audio foundation and Client-owned integration layer have been
-combined. The following requirements remain the acceptance criteria:
+**Source-integrated; macOS compilation passed, observable completion unverified.**
+The native audio foundation and Client integration compile in macOS ARM64 Debug
+and Release. Other-platform compilation and runtime/audio behavior remain
+unverified. The following requirements remain the acceptance criteria:
 
 - Abstract audio backends and load/play sound resources, including the Minecraft
   1.7.10 sound assets and their mappings.
 - Register sounds as numeric events, resolving resource names at setup/registration
-  boundaries rather than inside gameplay loops. A future Server must be able to
-  emit numeric sound-event notifications without an audio device or Client internals.
+  boundaries rather than inside gameplay loops. Server now emits numeric semantic
+  sound notifications without an audio device or Client implementation dependency.
 - Play appropriate footsteps by block material; breaking, placement, player and
   inventory interaction sounds; environmental and ambient sounds; and rain,
   thunder, water and lava audio.
@@ -669,27 +675,31 @@ sounds degrade gracefully. Merely linking an audio library is insufficient.
 
 ## Phase 7 — Authoritative Simulation & Integrated Server
 
-**Source-integrated; build and observable completion unverified.** A reusable
-authoritative Server and Client/local-session path have been combined, with
-remaining runtime/lifecycle verification required. The acceptance criteria are:
+**Source-integrated; macOS compilation passed, observable completion unverified.**
+Debug/Release application builds and a separate headless Release build compile
+on macOS ARM64. Runtime/lifecycle behavior and Windows/Linux remain unverified.
+One reusable `MaaGE::Server` owns content, World, player, gameplay, environment and
+persistence on its authoritative thread in both entry points:
 
-- Run that runtime in-process as an integrated Server for Client single-player,
-  and through the independent headless dedicated Server executable. These
-  entry points must not contain divergent gameplay implementations.
-- Transfer authority for worlds, players, simulation and gameplay out of Client
-  presentation orchestration. The Server owns ordered fixed **20 TPS** simulation,
-  lifecycle and world persistence for both modes.
-- Share numeric commands, events and state contracts with explicit ownership.
-  Use an in-process local communication abstraction for integrated play; do not
-  require TCP for single-player.
-- Keep Client responsibility for input, UI, camera, rendering, audio and justified
-  local presentation/prediction; the Client must not decide authoritative world
-  or player outcomes.
-- Preserve bounded Jobs/concurrency ownership, immutable worker handoffs and
-  safe simulation scheduling. Propagate Operation Status and causal tracing
-  across simulation boundaries.
-- Prepare transport-independent contracts for later remote connectivity, but
-  **do not implement full multiplayer or its network protocol in this phase**.
+- Integrated single-player runs that Server inside the Client process; the
+  independently buildable dedicated executable uses the same runtime headlessly.
+  Neither duplicates gameplay, and no TCP transport is required for single-player.
+- The Server owns ordered fixed **20 TPS** simulation, startup/restore, generation,
+  streaming/completion commits and shutdown persistence. The safe World pump
+  continues while integrated gameplay is paused. Borrowed registries, stores and
+  local transport outlive every worker that uses them.
+- A bounded local session carries numeric sequenced commands, copied snapshots,
+  events and Operation Status traces. Owned CPU meshes transfer to Client GPU
+  presentation; neither side exposes worker-private columns or borrowed stack data.
+- Client handles native input, UI, camera/interpolation, rendering, audio and
+  optional presentation prediction. Inventory, movement and block outcomes remain
+  Server decisions. Server sound notifications use the same numeric event contract.
+- After rendering stops, Server shutdown drains/flushes World work and saves the
+  complete current-format player/environment checkpoint. Clean join precedes
+  releasing borrowed content/transport; lifecycle failures retain needed resources.
+- Remote multiplayer, a network protocol, administration GUI and Launcher Server
+  management are deferred. Transport-independent local contracts establish the
+  authority boundary without implementing these features.
 
 **Observable completion:** Single-player actions pass through the integrated
 authoritative Server, while the dedicated Server hosts the same simulation

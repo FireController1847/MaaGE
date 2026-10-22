@@ -9,7 +9,7 @@ typedef struct maage_client_interaction_visual {
     unsigned long session_epoch, world_epoch;
     int visible, stage;
     maage_status last_result;
-    float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CLIENT_TEXTURE_COUNT][4];
+    float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CONTENT_TEXTURE_COUNT][4];
 } maage_client_interaction_visual;
 /* Copies pre-resolved crack UVs. The frame path uses bounded stack geometry and
  * uploads only when the target or damage stage changes. */

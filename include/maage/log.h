@@ -12,10 +12,6 @@ typedef enum maage_log_level {
     MAAGE_LOG_VERBOSE, MAAGE_LOG_INFO, MAAGE_LOG_WARNING,
     MAAGE_LOG_ERROR, MAAGE_LOG_FATAL, MAAGE_LOG_OFF
 } maage_log_level;
-/* Source/configuration compatibility: all routine diagnostics are VERBOSE. */
-#define MAAGE_LOG_TRACE MAAGE_LOG_VERBOSE
-#define MAAGE_LOG_DEBUG MAAGE_LOG_VERBOSE
-#define MAAGE_LOG_WARN MAAGE_LOG_WARNING
 
 typedef struct maage_log_config {
     maage_log_level level;
@@ -78,10 +74,7 @@ maage_status maage_log_trace_status(maage_log_level level, const char *logger,
     maage_status result, const maage_status_trace *trace, const char *format, ...);
 maage_status maage_log_verbose(const char *logger, const char *format, ...);
 maage_status maage_log_warning(const char *logger, const char *format, ...);
-maage_status maage_log_trace(const char *logger, const char *format, ...);
-maage_status maage_log_debug(const char *logger, const char *format, ...);
 maage_status maage_log_info(const char *logger, const char *format, ...);
-maage_status maage_log_warn(const char *logger, const char *format, ...);
 maage_status maage_log_error(const char *logger, const char *format, ...);
 maage_status maage_log_fatal(const char *logger, const char *format, ...);
 

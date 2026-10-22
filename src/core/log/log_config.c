@@ -38,18 +38,13 @@ static maage_status maage_log_parse_level(const char *text, maage_log_level *lev
 {
     static const char *names[] = { "VERBOSE", "INFO", "WARNING", "ERROR", "FATAL", "OFF" };
     int index;
-    if (strcmp(text, "TRACE") == 0 || strcmp(text, "DEBUG") == 0) *level = MAAGE_LOG_VERBOSE;
-    else if (strcmp(text, "WARN") == 0) *level = MAAGE_LOG_WARNING;
-    else {
-        for (index = 0; index <= (int)MAAGE_LOG_OFF; ++index) {
-            if (strcmp(text, names[index]) == 0) {
-                *level = (maage_log_level)index;
-                return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
-            }
+    for (index = 0; index <= (int)MAAGE_LOG_OFF; ++index) {
+        if (strcmp(text, names[index]) == 0) {
+            *level = (maage_log_level)index;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
         }
-        return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
     }
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
+    return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
 }
 
 static maage_status maage_log_parse_bool(const char *text, int *value)
@@ -156,7 +151,7 @@ maage_status maage_log_configure(const maage_log_config *defaults, int argc, cha
     maage_log_config_init(config);
     maage_log_path(config->file_path);
     if (defaults) {
-        if (defaults->level >= MAAGE_LOG_TRACE && defaults->level <= MAAGE_LOG_OFF) config->level = defaults->level;
+        if (defaults->level >= MAAGE_LOG_VERBOSE && defaults->level <= MAAGE_LOG_OFF) config->level = defaults->level;
         else maage_log_problem(&status, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0), "Invalid default logging level", NULL);
         config->console = defaults->console != 0; config->file = defaults->file != 0;

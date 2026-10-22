@@ -104,7 +104,7 @@ static maage_status maage_transfer_start(maage_transfer *transfer, CURLM *multi,
     if (curl_multi_add_handle(multi, easy) != CURLM_OK) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_DOWNLOAD, MAAGE_OPERATION_SUBMIT, 0);
     transfer->active = 1; ++transfer->attempts;
     maage_log_info("maage.core.download", "Downloading (attempt %u/%u): %s -> %s", transfer->attempts, options->max_attempts, transfer->request->url, transfer->request->destination);
-    maage_log_debug("maage.core.download", "Temporary file: %s; expected bytes: %.0f; SHA-1: %s", transfer->temporary, transfer->request->size, transfer->request->sha1 ? transfer->request->sha1 : "not supplied");
+    maage_log_verbose("maage.core.download", "Temporary file: %s; expected bytes: %.0f; SHA-1: %s", transfer->temporary, transfer->request->size, transfer->request->sha1 ? transfer->request->sha1 : "not supplied");
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_START, 0);
 }
 static void maage_transfer_close(maage_transfer *transfer, CURLM *multi)
@@ -187,7 +187,7 @@ maage_status maage_download_batch_with_options(const maage_download_request *req
             maage_transfer_close(transfer, multi);
             if (active) --active;
             if (maage_transfer_cancel((void *)observer)) goto cleanup;
-            maage_log_debug("maage.core.download", "Verifying transfer: %s (%.0f bytes received)", transfer->temporary, transfer->received);
+            maage_log_verbose("maage.core.download", "Verifying transfer: %s (%.0f bytes received)", transfer->temporary, transfer->received);
             child = maage_download_result((CURLcode)transfer->result, MAAGE_OPERATION_DOWNLOAD);
             if (!maage_status_failed(child)) child = maage_storage_stat(transfer->temporary, &size, fingerprint);
             if (!maage_status_failed(child) && transfer->request->size >= 0 && size != transfer->request->size)
@@ -232,7 +232,7 @@ cleanup:
     for (i = 0; i < count; ++i) {
         maage_transfer_close(&transfers[i], multi);
         if (transfers[i].temporary[0] && maage_status_failed(maage_storage_remove(transfers[i].temporary)))
-            maage_log_warn("maage.core.download", "Cannot remove temporary download: %s", transfers[i].temporary);
+            maage_log_warning("maage.core.download", "Cannot remove temporary download: %s", transfers[i].temporary);
     }
     curl_multi_cleanup(multi);
     free(transfers);

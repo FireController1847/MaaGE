@@ -58,7 +58,7 @@ static maage_status maage_content_register_state(maage_block_registry *registry,
     return maage_block_registry_register_state(registry, &state);
 }
 
-maage_status maage_content_blocks_create(
+static maage_status maage_content_blocks_create(
     const maage_content_config *config, const maage_biome_registry *biomes,
     maage_block_registry **output, maage_status_trace *trace)
 {

@@ -2,8 +2,6 @@
 #define MAAGE_INPUT_H
 #include "maage/window.h"
 
-#define MAAGE_INPUT_API_VERSION 4
-
 /* Physical movement-key positions, independent of the current text layout. */
 typedef enum maage_input_key {
     MAAGE_INPUT_KEY_W = 0,

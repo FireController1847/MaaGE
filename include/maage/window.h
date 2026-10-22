@@ -23,8 +23,7 @@ typedef enum maage_window_mode {
     MAAGE_WINDOW_WINDOWED = 0,
     MAAGE_WINDOW_BORDERLESS_WINDOWED,
     MAAGE_WINDOW_BORDERLESS_FULLSCREEN,
-    MAAGE_WINDOW_NATIVE_FULLSCREEN,
-    MAAGE_WINDOW_EXCLUSIVE_FULLSCREEN
+    MAAGE_WINDOW_NATIVE_FULLSCREEN
 } maage_window_mode;
 
 typedef struct maage_window_config {
@@ -109,10 +108,6 @@ maage_status maage_window_set_visible(maage_window *window, int visible);
  * remains the last confirmed mode until an AppKit completion callback. Transition
  * failures are logged and exposed as state.mode_result without failing the event
  * pump. Native fullscreen requires a visible window. Other backends reject it.
- * EXCLUSIVE_FULLSCREEN is a separate legacy, explicit CoreGraphics capture
- * operation (not the user-facing Fullscreen choice); it never creates a Space.
- * Capture is suspended while inactive and reacquired on activation. Other
- * backends reject it.
  * Wayland client-requested resize and forced borderless mode without decoration
  * negotiation return UNSUPPORTED. Normal Wayland decoration is compositor-owned.
  * Unsupported native fullscreen/borderless semantics return UNSUPPORTED. */

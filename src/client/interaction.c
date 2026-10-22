@@ -13,7 +13,7 @@ static const int maage_interaction_corners[6][4][3] = {
 
 static void maage_interaction_box(maage_mesh_vertex *vertices, unsigned int *indices,
     size_t *faces, const double minimum[3], const double maximum[3],
-    const maage_block_state_definition *state, const float uv[MAAGE_CLIENT_TEXTURE_COUNT][4],
+    const maage_block_state_definition *state, const float uv[MAAGE_CONTENT_TEXTURE_COUNT][4],
     float brightness)
 {
     static const unsigned int offsets[6] = {0,1,2,0,2,3};
@@ -106,7 +106,7 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
     }
     if (stage >= 0) {
         for (axis = 0; axis < MAAGE_FACE_COUNT; ++axis)
-            if (state->faces[axis].texture_id >= MAAGE_CLIENT_TEXTURE_COUNT) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+            if (state->faces[axis].texture_id >= MAAGE_CONTENT_TEXTURE_COUNT) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
         for (axis = 0; axis < 3; ++axis) { low[axis] = minimum[axis] - 0.001; high[axis] = maximum[axis] + 0.001; }
         /* v1 observes light at the player, not the targeted block. A consistent
          * fullbright crack is preferable to an unsafe World query or using

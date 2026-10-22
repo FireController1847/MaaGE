@@ -32,12 +32,6 @@ maage_status maage_folder_link_remove(const char *path);
 /* Atomic directory move without replacement; no cross-filesystem copy fallback.
  * SUCCESS on completion; NOT_IMPLEMENTED for unavailable atomic primitives. */
 maage_status maage_folder_link_move(const char *source, const char *destination);
-/* Exclusive new destination, owned directories/files, no links/special files.
- * Source writers must be excluded by the caller. Copies sync and compare each
- * file; both tree operations reject depth >64 or more than 1000000 entries.
- * Failure retains the owned partial destination and never removes source data. */
-maage_status maage_folder_link_copy_verified(const char *source, const char *destination);
-int maage_folder_link_equal_tree(const char *left, const char *right);
 /* Names contain one basename, never a relative path. Returning zero from the
  * callback stops enumeration and makes list report INTERRUPTED; entries are not followed. */
 typedef int (*maage_folder_link_entry)(const char *name,

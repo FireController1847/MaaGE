@@ -24,11 +24,11 @@ freely redesign, optimize, multithread, extend or replace systems. The Java
 engine's limitations must not constrain MaaGE. Develop independent native
 or data-driven systems, not Java/Forge compatibility or Java mod execution.
 
-The repository has a CMake workspace, a minimal shared core, and a reusable native
-windowing and rendering subsystems consumed by the Launcher. The architecture and roadmap describe
-future responsibilities,
-not implemented capabilities or authorization to build them. Inspect current code
-before claiming functionality or successful platform validation.
+The CMake workspace contains reusable Core, native Window/Render, World/content,
+local Session and authoritative Server services, plus independently versioned
+Launcher, Client and Server applications. Architectural goals and the roadmap do
+not authorize future features or establish runtime correctness. Inspect current
+source and build evidence before claiming capabilities or platform validation.
 
 ## Non-negotiable engineering principles
 
@@ -160,10 +160,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   decoding, name resolution, or per-block/per-face allocations in gameplay loops.
 - `MaaGE::World` owns portable registry, numeric chunk storage, CPU meshing and
   movement/collision contracts independently of Client, graphics and native UI.
-  Client currently coordinates input/camera/presentation and provisional local
-  simulation. Phase 7 moves authoritative World/player/gameplay ownership into a
-  reusable Server runtime shared by integrated and dedicated sessions, with no
-  graphical dependencies.
+  The reusable `MaaGE::Server` runtime owns World, player, gameplay, environment
+  and persistence on its authoritative thread in both integrated and dedicated
+  sessions, without graphical dependencies. Client consumes copied snapshots,
+  numeric events and owned mesh handoffs for input/camera/presentation.
 
 ### World architecture and persistence
 
@@ -175,11 +175,13 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   C90-compatible word pairs. Maintain one active generator with configurable
   sea-level/spawn policy and independent ordered terrain, cave, ore, surface,
   vegetation and structure stages using worker-owned columns without neighbor
-  waits. Existing generators 1/2/3 are predevelopment implementations to
-  consolidate, NOT frozen behaviors to retain. Future changes may invalidate
-  all previous worlds. Java Random/GenLayer and seed parity are not goals.
+  waits. `maage_generation_policy` contains only sea level and spawn-search
+  radius/step; defaults are 63 and 4096/16. Client and dedicated Server use the
+  same defaults and algorithm, with no generator selector or historical branches.
+  Future changes may invalidate previous worlds; Java Random/GenLayer and seed
+  parity are not goals.
 - Parallelize independent CPU-intensive world work by default through reusable
-  `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
+  `MaaGE::Jobs`, used by integrated and headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
   one, with a minimum of one; detect the processor count through Core's platform
   abstraction. If detection fails, use eight workers directly. Positive explicit
@@ -192,7 +194,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   simulation and deferred result commits. Workers own their output buffers and
   borrow immutable inputs/registries until completion. Independent column load,
   generation, lighting, CPU mesh and save tasks may overlap. No worker mutates
-  published columns or Client gameplay state. Keep fixed-step player updates
+  published columns or authoritative gameplay state. Keep fixed-step player updates
   ordered; parallelize existing gameplay only when workloads are independent.
 - Localize and justify synchronization: brief scheduler queue/token handoffs and
   completion notifications are necessary; global World locks, frame barriers,
@@ -220,12 +222,17 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Old formats do not require readers or migration. Static sky/block light remains 0..15;
   frame daylight scales sky only, without tick-driven global relighting.
 - Store worlds under instances/<instance-uuid>/worlds/<world-uuid>/,
-  separate from shared Minecraft resources. Maintain one current save format;
-  generator/format/blockset identifiers may detect and reject stale development
-  data, not require conversion. Validate current-format lengths, coordinates,
-  IDs and CRCs; maintain correct concurrent writer ownership and cleanup.
-  No historical-format recovery or backups are required for disposable worlds.
-  World/biome/storage services remain reusable by the headless Server.
+  separate from shared Minecraft resources. World IDs are canonical UUIDs.
+  Maintain one current metadata encoding and one current chunk encoding, with
+  private format identifiers for strict rejection. Inventories/pickups use
+  namespaced item identities; chunk-local palettes use namespaced biome/block
+  identities plus state metadata. No legacy numeric mappings, fallback writers,
+  historical readers or generator/blockset compatibility fields. Validate current
+  lengths, coordinates, identities and CRCs; retain single-writer ownership and
+  atomic replacement. `maage_world_store_open` borrows finalized item definitions;
+  `maage_world_store_save` writes one complete player/game/environment checkpoint.
+  Prior development data must be recreated when rejected; never reset it
+  automatically or introduce migration/backup machinery.
 
 ### Client game UI
 
@@ -265,8 +272,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Native fullscreen reserves the camera-notch safe area for UI/application
   content, while world rendering may cover available drawable pixels. Embed a
   Client-specific Info.plist in its standalone Mach-O executable (not the
-  Launcher bundle) to disable notch compatibility mode. Obsolete exclusive
-  fullscreen support is not a compatibility obligation; remove it if unused.
+  Launcher bundle) to disable notch compatibility mode. Window modes are only
+  Windowed, Borderless and native Fullscreen; no exclusive display-capture API.
   Unsupported platform operations return explicit status instead of silently
   relabeling modes. Reconcile native transitions, saved mode, F11, geometry
   and input capture.
@@ -290,7 +297,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 - `MaaGE::World` owns portable item/inventory and Creative/Survival rules alongside
   movement. Owner-thread 20 TPS intents control breaking, placement, vitals and
-  bounded pickups; Client owns native input, camera, GUI and visual feedback.
+  pickups; Client owns native input, camera, GUI and visual feedback. Pickups use
+  64 inline records plus a growable owned overflow array, not a 64-pickup ceiling.
 - Shape-aware numeric DDA stops at unavailable terrain. Definitions resolve
   hardness, tool requirements, drops and separate selection/collision AABBs before
   gameplay. Placement-state callbacks consume numeric metadata and face inputs.
@@ -300,8 +308,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   mutate worker-borrowed storage or introduce a global World lock.
 - Maintain one current player/chunk metadata representation with named item
   identities, extensible pickups, simulation state and generation configuration.
-  Prior schemas, numeric mappings and chunk decoders require no preservation.
-  Save final player metadata only after rendering and successful World flush.
+  Historical schemas, numeric mappings and chunk decoders are not supported.
+  Server saves final player metadata after rendering stops and World flush succeeds.
   Respawn retains inventory at session-start position; full death/entity/food
   rules remain provisional against Java Edition 1.7.10.
 
@@ -326,9 +334,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   falls back to global worlds. Resolve paths only at initialization/I/O boundaries.
   Client descriptors identify the current instance-storage contract; reject
   incompatible builds instead of preserving support for older executables.
-- Global-world-to-instance migration, journals and legacy manifest conversion are
-  not required; obsolete development data may be recreated. Instance deletion
-  must not accidentally delete explicitly shared external folder targets.
+- Only the current Launcher schema, instance manifest and Client descriptor are
+  accepted. No global-world migration, journals, receipts, legacy IDs or manifest
+  conversion. Recreate rejected development data; never delete it automatically.
+  Instance deletion must not delete explicitly shared external folder targets.
 
 ### Mandatory token-efficient development
 
@@ -399,8 +408,8 @@ Shared functionality belongs in reusable modules, not duplicate implementations.
   executable, macOS app bundle, or desktop entry. Headless builds/runs require no
   display server, graphics device, Vulkan, Metal, X11, Wayland, Cocoa, or GUI
   dependencies. Future GUI dependencies must load only when requested, never at
-  headless startup; simulation/networking remain independent. Phase 7 establishes
-  the shared authoritative runtime; Phase 12 adds remote multiplayer networking.
+  headless startup; simulation/networking remain independent. The shared runtime
+  is source-integrated for both entry points; Phase 12 adds remote networking.
   Do not implement the administration interface until explicitly requested.
 - **Core (`src/core/`):** reusable platform-independent foundations and shared
   contracts, without application implementation dependencies.
@@ -450,8 +459,7 @@ API and common implementation remain C90. Linux builds require the selected nati
 development libraries and protocol tools. Disable the optional windowing target for
 headless-only workspaces; never link it into Server core or the headless executable.
 A future optional GUI frontend inside the Server process may consume it.
-Obsolete exclusive display capture may be removed, rather than maintained
-for earlier MaaGE versions. Other adapters currently support Windowed and
+The Window API exposes no exclusive display capture. Other adapters support Windowed and
 Borderless and may reject native fullscreen. Wayland client-requested resize
 is unsupported. macOS AppKit calls belong on the main thread; native fullscreen
 uses a Space and reports the notch-safe region, while Borderless covers the
@@ -657,14 +665,17 @@ tuning remain provisional until programmer fidelity verification.
 one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
 creates a unique UUID world; default startup resumes the instance's `config/last-world` or creates a
 unique world if none exists. Never overwrite an existing ID during creation or
-change its generator/seed implicitly. `--render-distance=<positive integer>`
+change its generation settings/seed implicitly. UUIDs are required for loading
+and creation; generator-selection command-line arguments are removed.
+`--render-distance=<positive integer>`
 defaults to 8, subject to World-coordinate, allocation and resource constraints;
 `--world-workers=<count>` selects a positive pool size (0 uses automatic policy).
 `--mesh-upload-budget-ms=<milliseconds>` optionally fixes the GPU upload
 budget; 0 uses an adaptive fraction of `--mesh-frame-target-ms` (60 FPS default).
 Dynamic Client GPU mesh storage follows resident presentation demand.
-World metadata opens while the viewport is hidden; final player metadata and
-blocking flush/join occur after rendering stops, never inside the frame loop.
+The authoritative Server opens world metadata during hidden Client startup.
+After rendering stops, Server shutdown flushes World, saves the complete player/
+environment checkpoint and joins outside the frame loop.
 Generic `MaaGE::Storage`, `MaaGE::Thread` and `MaaGE::Jobs` have no Launcher acquisition
 dependencies; optional `MaaGE::StorageHash` owns OpenSSL SHA-1 for asset acquisition.
 
@@ -673,9 +684,9 @@ Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 configuration, and Launcher logs. Minecraft-specific data belongs beneath minecraft/: assets/indexes/1.7.10.json,
 assets/objects/<prefix>/<hash>, assets/reconst/<logical-name> and
 metadata/1.7.10.json. Receipts and manifests live in minecraft/metadata/.
-Only the current MaaGE resource layout requires support; do not migrate old
-assets/, assets/reconstructed/ or versions/1.7.10/ data. Re-download or
-reconstruct resources as necessary. Never create old Minecraft versions/ trees.
+Only this MaaGE resource layout is supported. No old-layout lookup, reuse,
+migration or cleanup is performed; setup/repair downloads or reconstructs current
+resources as necessary. Never create old Minecraft versions/ trees.
 Downloads are content-addressed, SHA-1/size-verified, use configurable
 concurrency, retry count and network timeout/low-speed policies
 (`MAAGE_DOWNLOAD_*` environment settings), and atomically promote temporary
@@ -713,9 +724,8 @@ and unrelated package/signature metadata. Strip only the leading `assets/` from
 JAR resources: `assets/minecraft/textures/...` maps to
 `assets/reconst/minecraft/textures/...`. Preserve every namespace, root pack
 paths, and resource bytes; record original archive paths alongside logical names.
-Use only the current asset reconstruction layout. Remove obsolete-layout
-reuse/cleanup code when simplifying the asset manager; there is no obligation
-to preserve resources from old MaaGE installs. Never invent categories.
+Use only the current asset reconstruction layout; no obsolete-layout reuse or
+cleanup paths. Never invent categories.
 Bound entry count/size/expansion and verify CRC, size, and derived SHA-1 before
 atomic promotion. Equal-content JAR entries can share hard links; collisions
 must match both spelling and contents, otherwise fail before reconstruction.
@@ -870,9 +880,9 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   reusable, bounded C90 stream compression through private zlib >=1.2.3; all Core
   logging builds, including headless, require zlib without graphical dependencies.
 - Log levels/labels are exactly `[VERBOSE]`, `[INFO]`, `[WARNING]`, `[ERROR]`,
-  `[FATAL]`, in increasing severity. Old TRACE/DEBUG/WARN aliases and spellings may be deleted with their callers;
-  no historical API or configuration compatibility is required. Routine detail uses VERBOSE; lifecycle
-  uses INFO. Align logger names with padding after the closing `]`,
+  `[FATAL]`, in increasing severity. Only canonical VERBOSE/INFO/WARNING/ERROR/
+  FATAL APIs and configuration spellings are supported; no TRACE/DEBUG/WARN
+  aliases. Routine detail uses VERBOSE; lifecycle uses INFO. Align logger names with padding after the closing `]`,
   never inside brackets (for example, `[INFO]  [maage.launcher]`).
 
 ## Independent application versions
@@ -903,7 +913,8 @@ do not bump it automatically for builds or commits.
 The Launcher owns `config/client-builds.json` and side-by-side `clients/<build-id>/`
 packages, separate from installation configurations and shared `minecraft/` resources.
 UUID-referenced instance manifests select stable build IDs; never silently
-substitute another Client. No migrations of older Launcher configs are required.
+substitute another Client. Reject older Launcher schemas, package registries and
+Client descriptors; there are no conversion paths or legacy instance defaults.
 Strict SemVer ordering ignores build metadata; identity also includes
 build/platform/type and executable SHA-256. Exact duplicate imports are rejected;
 changed builds coexist, and referenced builds must be unassigned before removal.
@@ -920,8 +931,8 @@ never move originals or link to developer source trees. Preserve only relative
 POSIX package links whose resolved targets stay inside the package; reject escaping
 links, Windows reparse points, special files, unsafe paths and bounded-tree
 violations. Future verified remote distribution uses
-the same registry origin distinction; no download service is implemented. Obsolete
-bundle registries and conversion paths do not require support.
+the same registry origin distinction; no download service is implemented. Current
+package inspection requires a standalone executable and current descriptor.
 Play starts only the exact selected verified build, with current Minecraft access
 and prepared resources. The reusable Core Process API invokes executables directly
 with structured arguments, an explicit working directory, inherited environment,
@@ -936,10 +947,10 @@ future Launcher milestone; software versions do not define protocol compatibilit
 
 ## Development roadmap
 
-`docs/development-roadmap.md` documents the roadmap and earlier phases. Its
-historical compatibility requirements do not override the predevelopment
-breaking-change policy above. Milestones describe intent, not current feature
-completeness or authorization to start a phase.
+`docs/development-roadmap.md` documents current source boundaries, retained
+milestone features and historical build notes. Milestones do not promise backward
+compatibility or authorize new work. Compilation does not establish runtime,
+visual or audio completion.
 
 - **Historical Phases 1–5:** Initial Voxel Client; World Generation & Chunk
   Streaming (2); Multithreaded Architecture (2.5); Client UI Foundation (2.75);
@@ -947,14 +958,16 @@ completeness or authorization to start a phase.
   (3.5); World Simulation & Environmental Systems (4); Client Resilience &
   Operation Status (4.5); Universal Operation Status & Execution Tracing (5).
   These milestones are history, not implementation or compatibility obligations.
-- **Phase 6 — Audio Engine & Soundscape (source-integrated; verification pending):**
+- **Phase 6 — Audio Engine & Soundscape (source-integrated; macOS compiled):**
   native audio backends, reconstructed 1.7.10 sound mappings, Client audio scene,
   semantic gameplay sounds/music and seven persisted volume settings.
 - **Phase 7 — Authoritative Simulation & Integrated Server (source-integrated;
-  verification pending):** integrated Client and headless dedicated executable
+  macOS compiled):** integrated Client and headless dedicated executable
   use one reusable Server runtime owning the 20 TPS simulation and persistence,
   with bounded local commands, copied snapshots/events and owned mesh handoff.
-  This status records source integration, not compiled or runtime validation.
+  Debug/Release Launcher, Client and Server and a separate headless Release
+  Server compile/link on macOS ARM64. Runtime/visual/audio behavior and Windows/
+  Linux compilation remain unverified; no applications, tests or Actions ran.
 - **Phase 8 — Client GUI & Menu Completion:** title/world selection and management,
   creation/loading, Options, inventory and navigable gameplay workflows.
 - **Phase 9 — Visual Fidelity & Game Feel:** consistent 1.7.10-inspired rendering,
@@ -967,8 +980,8 @@ completeness or authorization to start a phase.
   synchronization, connected players and dedicated hosting administration.
 
 **Server architecture and multiplayer networking are separate milestones.**
-Build the integrated/dedicated authoritative simulation boundary in Phase 7, not
-Phase 12. All gameplay added after Phase 7 must use that same Server authority
+Preserve Phase 7's integrated/dedicated authoritative simulation boundary;
+Phase 12 extends it with remote networking. All gameplay added after Phase 7 must use that same Server authority
 from the start; never implement separate single-player and multiplayer gameplay.
 Preserve independent Launcher/Client/Server applications, numeric identities,
 portable shared systems, instance ownership, Jobs, Status, and renderer abstractions.

@@ -131,7 +131,7 @@ typedef struct maage_block_definition {
 typedef struct maage_block_state_definition {
     maage_block_state_id id;
     maage_block_id block_id;
-    /* Legacy metadata-compatible numeric property payload; no text at runtime. */
+    /* Numeric property payload; no text at runtime. */
     unsigned int metadata;
     unsigned int fluid_kind, fluid_level;
     maage_block_state_id fluid_source_state, fluid_states[16];

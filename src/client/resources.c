@@ -164,7 +164,7 @@ maage_status maage_client_resources_load(const char *application_data,
         else memcpy(biome->foliage_color, default_foliage, sizeof(default_foliage));
     }
     resources->recovery_status = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
-    rows = (MAAGE_CLIENT_TEXTURE_COUNT + columns - 1) / columns;
+    rows = (MAAGE_CONTENT_TEXTURE_COUNT + columns - 1) / columns;
     if (edge > INT_MAX - 2 || edge + 2 > INT_MAX / columns ||
         edge + 2 > INT_MAX / rows / (1 + MAAGE_CLIENT_BREAK_STAGES)) goto done;
     tile = edge + 2; group_height = tile * rows;
@@ -177,21 +177,21 @@ maage_status maage_client_resources_load(const char *application_data,
     if (!resources->image.pixels) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0); goto done;
     }
-    for (i = 0; i < MAAGE_CLIENT_TEXTURE_COUNT; ++i) {
+    for (i = 0; i < MAAGE_CONTENT_TEXTURE_COUNT; ++i) {
         tile_x = (i % columns) * tile; tile_y = (i / columns) * tile;
-        biome_id = i >= 11 && i < MAAGE_CLIENT_TEXTURE_EXTRA ? (i - 11) / 2 : MAAGE_BIOME_PLAINS;
-        source_index = i == MAAGE_CLIENT_TEXTURE_MISSING ? -1 :
-            (i >= MAAGE_CLIENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CLIENT_TEXTURE_EXTRA :
+        biome_id = i >= 11 && i < MAAGE_CONTENT_TEXTURE_EXTRA ? (i - 11) / 2 : MAAGE_BIOME_PLAINS;
+        source_index = i == MAAGE_CONTENT_TEXTURE_MISSING ? -1 :
+            (i >= MAAGE_CONTENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CONTENT_TEXTURE_EXTRA :
             (i >= 11 ? ((i - 11) % 2 ? 3 : 2) : atlas_sources[i]));
-        if (i == MAAGE_CLIENT_TEXTURE_EXTRA + 28 || i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE)
+        if (i == MAAGE_CONTENT_TEXTURE_EXTRA + 28 || i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE)
             biome_id = MAAGE_BIOME_TAIGA;
-        else if (i == MAAGE_CLIENT_TEXTURE_EXTRA + 31 || i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH)
+        else if (i == MAAGE_CONTENT_TEXTURE_EXTRA + 31 || i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH)
             biome_id = MAAGE_BIOME_FOREST;
         /* Missing opaque variants degrade to a solid version of the cutout
          * source, not the magenta/black missing-texture tile. */
-        if (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK && !sources[source_index].pixels) source_index = 32;
-        else if (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE && !sources[source_index].pixels) source_index = 52;
-        else if (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH && !sources[source_index].pixels) source_index = 55;
+        if (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK && !sources[source_index].pixels) source_index = 32;
+        else if (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE && !sources[source_index].pixels) source_index = 52;
+        else if (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH && !sources[source_index].pixels) source_index = 55;
         selected = source_index >= 0 && sources[source_index].pixels ? &sources[source_index] : &missing;
         tint = source_index == 32 || source_index == 52 || source_index == 55 ||
             source_index == 57 || source_index == 58 || source_index == 59 ?
@@ -223,7 +223,7 @@ maage_status maage_client_resources_load(const char *application_data,
                     pixel[1] = (unsigned char)((unsigned int)pixel[1] * 118 / 255);
                     pixel[2] = (unsigned char)((unsigned int)pixel[2] * 228 / 255); pixel[3] = 255;
                 } else if (source_index == 26 ||
-                    (i >= MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK && i <= MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH))
+                    (i >= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK && i <= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH))
                     pixel[3] = 255;
             }
         }
@@ -254,16 +254,16 @@ maage_status maage_client_resources_load(const char *application_data,
     }
     /* Every failed visual resolves to the same canonical tile in the shared
      * renderer-owned atlas; registration never publishes a missing handle. */
-    for (i = 0; i < MAAGE_CLIENT_TEXTURE_MISSING; ++i) {
-        source_index = i >= MAAGE_CLIENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CLIENT_TEXTURE_EXTRA :
+    for (i = 0; i < MAAGE_CONTENT_TEXTURE_MISSING; ++i) {
+        source_index = i >= MAAGE_CONTENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CONTENT_TEXTURE_EXTRA :
             (i >= 11 ? ((i - 11) % 2 ? 3 : 2) : atlas_sources[i]);
         if (sources[source_index].pixels) continue;
-        if (i >= MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK &&
-            sources[i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK ? 32 :
-                (i == MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE ? 52 : 55)].pixels) continue;
-        memcpy(resources->uv[i], resources->uv[MAAGE_CLIENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
+        if (i >= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK &&
+            sources[i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK ? 32 :
+                (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE ? 52 : 55)].pixels) continue;
+        memcpy(resources->uv[i], resources->uv[MAAGE_CONTENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
         for (stage = 0; stage < MAAGE_CLIENT_BREAK_STAGES; ++stage)
-            memcpy(resources->breaking_uv[stage][i], resources->breaking_uv[stage][MAAGE_CLIENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
+            memcpy(resources->breaking_uv[stage][i], resources->breaking_uv[stage][MAAGE_CONTENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
     }
     resources->atlas.pixels = resources->image.pixels;
     resources->atlas.width = resources->image.width; resources->atlas.height = resources->image.height;
@@ -295,15 +295,15 @@ static maage_status maage_client_content_resolve(void *context,
     (void)state_id;
     (void)face;
     if (!resources || !presentation || !leaf_fast_uv ||
-        presentation->texture_id >= MAAGE_CLIENT_TEXTURE_COUNT)
+        presentation->texture_id >= MAAGE_CONTENT_TEXTURE_COUNT)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     memcpy(presentation->uv, resources->uv[presentation->texture_id],
         sizeof(presentation->uv));
     if (block == MAAGE_BLOCK_LEAVES) {
-        fast_tile = metadata == 1 ? MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_SPRUCE :
-            (metadata == 2 ? MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_BIRCH :
-                MAAGE_CLIENT_TEXTURE_LEAVES_OPAQUE_OAK);
+        fast_tile = metadata == 1 ? MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE :
+            (metadata == 2 ? MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH :
+                MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK);
         memcpy(leaf_fast_uv, resources->uv[fast_tile], sizeof(resources->uv[fast_tile]));
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
@@ -332,31 +332,6 @@ maage_status maage_client_content_create(const maage_client_resources *resources
         "Finalized %lu block types / %lu states; direct numeric runtime indexing.",
         (unsigned long)maage_block_registry_block_count(maage_content_blocks(*output)),
         (unsigned long)maage_block_registry_state_count(maage_content_blocks(*output)));
-    return result;
-}
-
-/* Legacy Client signature: retain the old ownership contract but delegate
- * entirely to the shared authoritative registration implementation. */
-maage_status maage_client_register_blocks(
-    const maage_client_resources *resources, const maage_biome_registry *biomes,
-    maage_block_registry **output, maage_status_trace *trace)
-{
-    maage_content_config config;
-    maage_status result;
-    if (output) *output = NULL;
-    if (!resources || !biomes || !output) return maage_status_make(
-        MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE,
-        !resources ? 0 : (!biomes ? 1 : 2));
-    memset(&config, 0, sizeof(config));
-    config.resolver = maage_client_content_resolve;
-    config.resolver_context = (void *)resources;
-    result = maage_content_blocks_create(&config, biomes, output, trace);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace,
-        result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_REGISTER);
-    maage_log_info("maage.client.world",
-        "Finalized %lu block types / %lu states; direct numeric runtime indexing.",
-        (unsigned long)maage_block_registry_block_count(*output),
-        (unsigned long)maage_block_registry_state_count(*output));
     return result;
 }
 
