@@ -775,7 +775,12 @@ static maage_status mn_scene_destroy(void *handle, maage_status_trace *trace)
     size_t i;
     (void)trace;
     if (!scene) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
-    first = maage_client_audio_scene_destroy(scene->scene);
+    /* A failed logical-scene stop can leave buffers in use. Preserve the
+     * adapter and borrowed dependencies so the owner can retry shutdown. */
+    first = scene->scene ? maage_client_audio_scene_destroy(scene->scene) :
+        mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
+    if (maage_status_failed(first)) return first;
+    scene->scene = NULL;
     for (i = 1; i <= scene->sound_count; ++i) {
         if (scene->sounds[i].stream) mn_scene_music_release(scene, &scene->sounds[i]);
         if (scene->sounds[i].buffer) {

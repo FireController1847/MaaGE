@@ -146,11 +146,17 @@ static maage_status maage_client_audio_release(maage_client_audio_service *servi
     }
     if (service->engine) {
         result = service->api.stop_voices(service->engine, trace);
-        if (maage_status_failed(result) && !maage_status_failed(first_failure)) first_failure = result;
+        if (maage_status_failed(result)) {
+            /* Never release catalog PCM while device voices may read it. */
+            return result;
+        }
     }
     if (service->scene) {
         result = service->api.scene_destroy(service->scene, trace);
-        if (maage_status_failed(result) && !maage_status_failed(first_failure)) first_failure = result;
+        if (maage_status_failed(result)) {
+            /* The scene owns a still-live handle; retain all dependencies. */
+            return result;
+        }
         service->scene = NULL;
     }
     /* All playing references are quiescent before catalog PCM release. */
@@ -398,12 +404,12 @@ maage_status maage_client_audio_service_destroy(maage_client_audio_service *serv
     maage_status result;
     if (!service) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
     result = maage_client_audio_release(service, trace);
-    if (maage_status_failed(result))
+    if (maage_status_failed(result)) {
         maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_DESTROY, result, trace,
-            "Audio shutdown reported a cleanup failure.");
+            "Audio shutdown reported a cleanup failure; retained resources can be retried.");
+        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_DESTROY);
+    }
     --maage_client_audio_live;
     free(service);
-    if (maage_status_failed(result))
-        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_DESTROY);
     return maage_client_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
