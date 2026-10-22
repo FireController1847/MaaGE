@@ -1342,7 +1342,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         operation = maage_local_session_read_snapshot(session, &incoming);
         if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS &&
             incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION &&
-            incoming.sequence > latest.sequence) {
+            (incoming.session_epoch != latest.session_epoch ||
+             incoming.world_epoch != latest.world_epoch ||
+             incoming.sequence > latest.sequence)) {
             if (incoming.session_epoch != latest.session_epoch ||
                 incoming.world_epoch != latest.world_epoch) {
                 (void)maage_client_mesh_cache_clear(&cache);
