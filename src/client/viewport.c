@@ -931,7 +931,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps = -1, logged_vsync = -1, paused_command = -1;
-    int selected_hotbar = 0, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
+    int selected_hotbar = 0, queued_hotbar = -1, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
+    int jump_latched = 0, attack_latched = 0, use_latched = 0, respawn_latched = 0;
     unsigned int ui_actions = 0, event_budget;
     memset(&resources, 0, sizeof(resources));
     memset(&cache, 0, sizeof(cache));
@@ -1073,7 +1074,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             latest = previous = incoming;
             world_epoch = latest.world_epoch;
             last_seen_tick = latest.tick;
-            selected_hotbar = (int)latest.player.inventory.selected;
+            selected_hotbar = queued_hotbar = (int)latest.player.inventory.selected;
             valid_snapshot = 1;
             break;
         }
@@ -1211,12 +1212,15 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         operation = maage_client_outbox_flush(&outbox, session);
         if (maage_status_failed(operation) &&
             maage_status_code(operation) != MAAGE_STATUS_BUFFER_OVERFLOW) goto done;
-        if (ui_actions & MAAGE_CLIENT_UI_RESPAWN) {
+        if (ui_actions & MAAGE_CLIENT_UI_RESPAWN) respawn_latched = 1;
+        if (respawn_latched) {
             memset(&command, 0, sizeof(command));
             command.kind = MAAGE_CMD_RESPAWN;
             operation = maage_client_outbox_queue(&outbox, &command);
-            if (!maage_status_failed(operation)) (void)maage_client_ui_back(ui);
-            else maage_client_ui_notify(ui, operation, now);
+            if (!maage_status_failed(operation)) {
+                respawn_latched = 0;
+                (void)maage_client_ui_back(ui);
+            } else maage_client_ui_notify(ui, operation, now);
         }
         for (i = 0; i < 64 && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY; ++i) {
             operation = maage_client_ui_take_command(ui, &command);
@@ -1267,15 +1271,23 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
                 selected_hotbar = (selected_hotbar - i + 900) % (int)MAAGE_HOTBAR_SLOTS;
                 wheel -= (double)i;
             }
-            if ((unsigned int)selected_hotbar != latest.player.inventory.selected) {
+            if (selected_hotbar != queued_hotbar) {
                 memset(&command, 0, sizeof(command));
                 command.kind = MAAGE_CMD_HOTBAR;
                 command.hotbar_slot = (unsigned int)selected_hotbar;
                 operation = maage_client_outbox_queue(&outbox, &command);
                 if (maage_status_failed(operation))
                     maage_client_ui_notify(ui, operation, now);
+                else queued_hotbar = selected_hotbar;
             }
         } else wheel = 0.0;
+        if (active) {
+            if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_latched = 1;
+            if (input.primary_pressed) attack_latched = 1;
+            if (input.secondary_pressed) use_latched = 1;
+        } else {
+            jump_latched = attack_latched = use_latched = 0;
+        }
         if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
             memset(&command, 0, sizeof(command));
             command.kind = MAAGE_CMD_INPUT;
@@ -1287,14 +1299,20 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
                 command.intent.movement.strafe =
                     (double)(input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
                 command.intent.movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE];
-                command.intent.jump_pressed = input.pressed[MAAGE_INPUT_KEY_SPACE];
+                command.intent.jump_pressed = jump_latched;
                 command.intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
-                command.intent.attack = input.primary_down || input.primary_pressed;
-                command.intent.use = input.secondary_down || input.secondary_pressed;
+                command.intent.attack = input.primary_down || attack_latched;
+                command.intent.use = input.secondary_down || use_latched;
             }
             operation = maage_client_outbox_queue(&outbox, &command);
             if (maage_status_failed(operation))
                 maage_client_ui_notify(ui, operation, now);
+            else jump_latched = attack_latched = use_latched = 0;
+        } else {
+            /* The input edge latches above are retained until an ordered
+             * command can be queued; never acknowledge an unsent click. */
+            maage_client_ui_notify(ui, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0), now);
         }
         operation = maage_client_outbox_flush(&outbox, session);
         if (maage_status_failed(operation) &&
@@ -1311,6 +1329,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
                 view_sent = 0;
                 sound_epoch = sound_world_epoch = last_sound_sequence = 0;
                 yaw = incoming.player.yaw; pitch = incoming.player.pitch;
+                selected_hotbar = queued_hotbar = (int)incoming.player.inventory.selected;
+                jump_latched = attack_latched = use_latched = respawn_latched = 0;
             } else previous = latest;
             latest = incoming;
             received_time = now;
