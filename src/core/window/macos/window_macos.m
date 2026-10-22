@@ -323,6 +323,9 @@ static void maage_cocoa_layout_viewport(maage_window *window)
         if (!NSIsEmptyRect(visible)) {
             window_rect = [handle convertRectFromScreen:visible];
             target = [root convertRect:window_rect fromView:nil];
+            /* Stay inside the unobscured rectangle and on backing-pixel
+             * boundaries, avoiding fractional drawable/viewport dimensions. */
+            target = [root backingAlignedRect:target options:NSAlignAllEdgesInward];
         }
     }
     if (!NSEqualRects([native->viewport frame], target)) {
