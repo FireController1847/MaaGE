@@ -106,6 +106,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
 maage_status maage_client_ui_draw(maage_client_ui *ui,
     const maage_client_ui_debug *debug, const maage_render_ui_data **output);
 /* Current option values; 0 FPS means Unlimited; 0 GUI scale means Auto. */
+double maage_client_ui_fov_radians(const maage_client_ui *ui);
 int maage_client_ui_max_fps(const maage_client_ui *ui);
 int maage_client_ui_vsync(const maage_client_ui *ui);
 int maage_client_ui_gui_scale(const maage_client_ui *ui);

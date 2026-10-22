@@ -164,6 +164,17 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
     if(!(input->accept||(input->primary_pressed&&hover>=0)))return 0;
     if(input->primary_pressed)f->focus=(unsigned int)hover;
     n=f->focus;if(f->busy)return 0;
+    /* Text fields are not buttons. Invalid/disabled actions make no sound. */
+    if(screen==MAAGE_CLIENT_UI_WORLDS) {
+        if(n==0&&!(f->selected<f->count&&
+            !maage_status_failed(f->entries[f->selected].status)))return 0;
+        if(n==2&&!(f->selected<f->count&&
+            !maage_status_failed(f->entries[f->selected].status)))return 0;
+        if(n==3&&f->selected>=f->count)return 0;
+    }
+    if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||
+        screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&n==0&&!f->name[0])return 0;
+    if(ui->click)ui->click(ui->click_context);
     if(input->accept&&n>=3&&(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD))n=0;
     if(screen==MAAGE_CLIENT_UI_WORLDS) {
         if(n==0&&f->selected<f->count&&!maage_status_failed(f->entries[f->selected].status))f->play=1;

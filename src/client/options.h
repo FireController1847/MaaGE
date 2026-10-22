@@ -41,6 +41,7 @@ typedef enum maage_client_audio_bus {
 #define MAAGE_CLIENT_AUDIO_KEY_UI "ui"
 typedef struct maage_client_options {
     int audio_volume[MAAGE_CLIENT_AUDIO_BUS_COUNT]; /* Fixed numeric bus order; 0..100. */
+    int fov_degrees; /* Vertical field of view, 30..110, default 70. */
     int max_fps; /* 0 unlimited, otherwise 10..260 in increments of 10. */
     int vsync;
     int gui_scale; /* 0 auto; 1..4 explicit. */

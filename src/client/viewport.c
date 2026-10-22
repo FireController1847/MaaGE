@@ -35,7 +35,6 @@
 /* Phase 1 camera tuning, pending 1.7.10 feel/fidelity verification. */
 #define MAAGE_CLIENT_MOUSE_RADIANS 0.0025
 #define MAAGE_CLIENT_PITCH_LIMIT 1.553343034
-#define MAAGE_CLIENT_FOV_RADIANS 1.221730476
 #define MAAGE_CLIENT_MAX_FRAME_SECONDS 0.25
 
 typedef struct maage_client_world_options {
@@ -369,7 +368,7 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
         MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
 }
 
-static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius)
+static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius, double fov)
 {
     double sy = sin(yaw), cy = cos(yaw), sp = sin(pitch), cp = cos(pitch);
     double forward[3], right[3], up[3], focal, far_clip;
@@ -383,7 +382,7 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
         view[k * 4] = (float)right[k]; view[k * 4 + 1] = (float)up[k]; view[k * 4 + 2] = (float)-forward[k];
         view[12] -= (float)(right[k] * eye[k]); view[13] -= (float)(up[k] * eye[k]); view[14] += (float)(forward[k] * eye[k]);
     }
-    view[15] = 1.0f; focal = 1.0 / tan(MAAGE_CLIENT_FOV_RADIANS * 0.5);
+    view[15] = 1.0f; focal = 1.0 / tan(fov * 0.5);
     projection[0] = (float)(focal / aspect); projection[5] = (float)focal;
     /* Include the furthest chunk corner and full world height, even while
      * moving within the center chunk; keep the established minimum range. */
@@ -1104,7 +1103,7 @@ choose_world:
         if (maage_status_failed(rendered)) goto done;
         rendered = maage_client_environment_update(environment_view,
             renderer, &latest, maage_client_ui_width(ui),
-            maage_client_ui_height(ui), MAAGE_CLIENT_FOV_RADIANS);
+            maage_client_ui_height(ui), maage_client_ui_fov_radians(ui));
         if (maage_status_failed(rendered)) goto done;
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
@@ -1142,7 +1141,8 @@ choose_world:
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
             maage_client_camera(matrix, eye, render_yaw, render_pitch,
-                (double)state.framebuffer_width / state.framebuffer_height, options.radius);
+                (double)state.framebuffer_width / state.framebuffer_height,
+                options.radius, maage_client_ui_fov_radians(ui));
             rendered = maage_renderer_draw_frame(renderer, cache.draws,
                 draw_count, matrix, ui_draw, trace);
             if (maage_status_failed(rendered)) goto done;

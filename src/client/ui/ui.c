@@ -283,6 +283,9 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     maage_status result;
     if (!ui || !options) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
         MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
+    ui->fov_degrees = options->fov_degrees;
+    if(ui->fov_degrees<30)ui->fov_degrees=30;
+    if(ui->fov_degrees>110)ui->fov_degrees=110;
     ui->fps_step = options->max_fps ? options->max_fps / 10 - 1 : 26;
     ui->requested_scale = options->gui_scale;
     ui->leaves_mode = options->leaves;
@@ -310,6 +313,7 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
 void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options *options)
 {
     if (!ui || !options) return;
+    options->fov_degrees=ui->fov_degrees;
     options->max_fps = ui->fps_step == 26 ? 0 : (ui->fps_step + 1) * 10;
     options->vsync = ui->vsync;
     options->gui_scale = ui->requested_scale;
@@ -331,6 +335,10 @@ int maage_client_ui_options_visible(const maage_client_ui *ui)
 int maage_client_ui_window_mode_changing(const maage_client_ui *ui)
 { return ui && (ui->mode_pending || ui->mode_changing); }
 
+double maage_client_ui_fov_radians(const maage_client_ui *ui)
+{
+    return (ui ? ui->fov_degrees : 70)*0.017453292519943295;
+}
 int maage_client_ui_max_fps(const maage_client_ui *ui) { return ui && ui->fps_step != 26 ? (ui->fps_step + 1) * 10 : 0; }
 int maage_client_ui_vsync(const maage_client_ui *ui) { return ui ? ui->vsync : 1; }
 int maage_client_ui_gui_scale(const maage_client_ui *ui) { return ui ? ui->requested_scale : 0; }
