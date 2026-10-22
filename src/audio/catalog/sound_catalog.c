@@ -222,7 +222,7 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
             MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     if (event->intensity <= 0.0f) return maage_cat_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     rule = &maage_cat_rules[event_id];
-    material = event->material_id < MAAGE_CAT_MATERIAL_COUNT ? event->material_id : 0;
+    material = event->material < MAAGE_CAT_MATERIAL_COUNT ? event->material : 0;
     selected = rule->family;
     if (rule->material_map == 1) selected = maage_cat_step[material];
     else if (rule->material_map == 2) selected = maage_cat_dig[material];
@@ -237,9 +237,9 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
             MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
         family = &catalog->family[fallback];
     }
-    position[0] = event->x;
-    position[1] = event->y;
-    position[2] = event->z;
+    position[0] = event->position[0];
+    position[1] = event->position[1];
+    position[2] = event->position[2];
     if (rule->positional) {
         if (position[0] != position[0] || position[1] != position[1] ||
             position[2] != position[2] || position[0] > 100000000.0 ||
@@ -253,9 +253,9 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     hash = maage_cat_mix(2166136261UL, (unsigned long)event->tick);
     hash = maage_cat_mix(hash, (unsigned long)event->sequence);
     hash = maage_cat_mix(hash, (unsigned long)event_id * 31UL + material);
-    hash = maage_cat_position_mix(hash, event->x);
-    hash = maage_cat_position_mix(hash, event->y);
-    hash = maage_cat_position_mix(hash, event->z);
+    hash = maage_cat_position_mix(hash, event->position[0]);
+    hash = maage_cat_position_mix(hash, event->position[1]);
+    hash = maage_cat_position_mix(hash, event->position[2]);
     selected = family->active[hash % family->ready];
     jitter = 0.96f + (float)((hash >> 12) & 255UL) / 255.0f * 0.08f;
     gain = rule->gain * (event->intensity > 2.0f ? 2.0f : event->intensity);
