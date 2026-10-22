@@ -7,6 +7,8 @@
 #include "maage/player.h"
 #include "maage/gameplay.h"
 #include "maage/world_store.h"
+#include "maage/session_protocol.h"
+#include "maage/local_session.h"
 #include "maage/log.h"
 #include "resources.h"
 #include "ui/ui.h"
@@ -355,6 +357,82 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
         output[column * 4 + row] = 0;
         for (k = 0; k < 4; ++k) output[column * 4 + row] += projection[k * 4 + row] * view[column * 4 + k];
     }
+}
+
+/* Session outbound commands are ordered and never silently discarded when
+ * the transport backpressures. Unobserved held-only INPUT samples may be
+ * replaced by a newer held-only sample; discrete actions and the ordering of
+ * PAUSE, inventory, respawn and disconnect are preserved. This queue belongs
+ * exclusively to the presentation thread. */
+#define MAAGE_CLIENT_OUTBOX_CAPACITY 128U
+typedef struct maage_client_outbox {
+    maage_session_command commands[MAAGE_CLIENT_OUTBOX_CAPACITY];
+    unsigned int head, count;
+    unsigned long next_sequence;
+} maage_client_outbox;
+
+static int maage_client_input_coalescible(const maage_session_command *command)
+{
+    return command->kind == MAAGE_CMD_INPUT &&
+        !command->intent.jump_pressed &&
+        !command->intent.attack &&
+        !command->intent.use &&
+        !command->intent.movement.jump;
+}
+
+static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
+    const maage_session_command *input)
+{
+    maage_session_command command;
+    unsigned int tail, previous;
+    if (!outbox || !input) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+    command = *input;
+    command.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
+    if (outbox->count && maage_client_input_coalescible(&command)) {
+        previous = (outbox->head + outbox->count - 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
+        if (maage_client_input_coalescible(&outbox->commands[previous])) {
+            /* Keep the original FIFO sequence; the last held-only input wins.
+             * No edge-triggered or authoritative command is overwritten. */
+            command.sequence = outbox->commands[previous].sequence;
+            outbox->commands[previous] = command;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+        }
+    }
+    if (outbox->count == MAAGE_CLIENT_OUTBOX_CAPACITY)
+        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+    if (outbox->next_sequence == ULONG_MAX)
+        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 1);
+    command.sequence = ++outbox->next_sequence;
+    tail = (outbox->head + outbox->count) % MAAGE_CLIENT_OUTBOX_CAPACITY;
+    outbox->commands[tail] = command;
+    ++outbox->count;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+}
+
+/* A full local mailbox is not a lost command. Leave the FIFO head intact,
+ * pump native events/presentation, and retry before sampling another input. */
+static maage_status maage_client_outbox_flush(maage_client_outbox *outbox,
+    maage_local_session *session)
+{
+    maage_status result;
+    if (!outbox || !session)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+    while (outbox->count) {
+        result = maage_local_session_send(session, &outbox->commands[outbox->head]);
+        if (maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW)
+            return result;
+        if (maage_status_failed(result)) return result;
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS)
+            return maage_status_make(MAAGE_STATUS_INVALID_STATE,
+                MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+        outbox->head = (outbox->head + 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
+        --outbox->count;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
 }
 
 maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *trace)
