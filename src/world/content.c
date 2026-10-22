@@ -178,7 +178,7 @@ maage_status maage_content_blocks_create(
         }
     }
     for (i = 0; i < MAAGE_BIOME_COUNT; ++i) {
-        if (!biomes->occupied[i] || maage_status_failed(result = maage_content_register_state(registry, config,
+        if (!biomes->builtin_names[i] || maage_status_failed(result = maage_content_register_state(registry, config,
                 MAAGE_STATE_BIOME_GRASS(i), MAAGE_BLOCK_GRASS,
                 (unsigned int)i + 1, MAAGE_CONTENT_TEXTURE_GRASS_TOP, i))) goto failed;
     }
