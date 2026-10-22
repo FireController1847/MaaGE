@@ -204,6 +204,9 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
         runtime->pending_attack |= command->intent.attack;
         runtime->pending_use |= command->intent.use;
         runtime->sampled = command->intent;
+        /* jump_pressed is an edge, unlike held movement.jump/attack/use.
+         * Only the pending latch may survive to the next simulation step. */
+        runtime->sampled.jump_pressed = 0;
         runtime->yaw = command->intent.movement.yaw;
         runtime->pitch = command->intent.pitch;
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
@@ -609,6 +612,17 @@ static void server_thread_entry(void *context)
             caught_up = 0;
             while (now >= deadline && caught_up < MAAGE_SERVER_MAX_CATCHUP &&
                 !runtime->paused && !server_stop_requested(runtime)) {
+                /* Sample bounded commands for every ordered step, not merely
+                 * once per render-independent scheduler wake. */
+                result = server_take_commands(runtime);
+                if (maage_status_failed(result)) {
+                    server_capture_failure(runtime, result, NULL);
+                    break;
+                }
+                if (runtime->paused || server_stop_requested(runtime)) {
+                    deadline = now + MAAGE_SERVER_STEP_SECONDS;
+                    break;
+                }
                 maage_status_trace_init(&trace);
                 result = server_tick(runtime, &trace);
                 if (maage_status_failed(result)) {
