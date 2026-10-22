@@ -43,7 +43,7 @@ static maage_status maage_server_parse(int argc, char **argv,
             number = strtoul(value, &end, 10);
             if (errno || !*value || *end || number > UINT_MAX) goto invalid;
             if (!strncmp(argument, "--render-distance=", 18)) {
-                if (number < 1 || number > 32) goto invalid;
+                if (number < 1 || number > MAAGE_WORLD_MAX_RADIUS) goto invalid;
                 config->render_distance = (int)number;
             } else if (!strncmp(argument, "--world-workers=", 16)) config->world_workers = (unsigned int)number;
             else {
