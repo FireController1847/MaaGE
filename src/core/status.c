@@ -87,6 +87,7 @@ const char *maage_status_context_name(unsigned char context)
         case MAAGE_CONTEXT_CONFIG: return "CONFIG";
         case MAAGE_CONTEXT_REGISTRY: return "REGISTRY";
         case MAAGE_CONTEXT_RESOURCE: return "RESOURCE";
+        case MAAGE_CONTEXT_AUDIO: return "AUDIO";
         case MAAGE_CONTEXT_RENDER: return "RENDER";
         case MAAGE_CONTEXT_WORLD_IO: return "WORLD_IO";
         case MAAGE_CONTEXT_GUI: return "GUI";
@@ -98,7 +99,7 @@ const char *maage_status_context_name(unsigned char context)
 const char *maage_status_operation_name(unsigned char context, unsigned char operation)
 {
     if (context > MAAGE_CONTEXT_REGISTRY && context != MAAGE_CONTEXT_RESOURCE &&
-        context != MAAGE_CONTEXT_RENDER && context != MAAGE_CONTEXT_WORLD_IO &&
+        context != MAAGE_CONTEXT_AUDIO && context != MAAGE_CONTEXT_RENDER && context != MAAGE_CONTEXT_WORLD_IO &&
         context != MAAGE_CONTEXT_GUI && context != MAAGE_CONTEXT_SCHEDULER &&
         context != MAAGE_CONTEXT_WORLD) return "UNKNOWN";
     switch (operation) {
@@ -212,6 +213,10 @@ size_t maage_status_format(maage_status result, char *buffer, size_t capacity)
         maage_status_append(buffer, capacity, &length, detail == MAAGE_DETAIL_CANCELLED ? " Cancelled." : " Stale result.");
     } else if (context == MAAGE_CONTEXT_WINDOW && detail == MAAGE_DETAIL_WRONG_THREAD) {
         maage_status_append(buffer, capacity, &length, " Wrong owning thread.");
+    } else if (context == MAAGE_CONTEXT_AUDIO && detail == MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE) {
+        maage_status_append(buffer, capacity, &length, " Audio device unavailable.");
+    } else if (context == MAAGE_CONTEXT_AUDIO && detail == MAAGE_DETAIL_AUDIO_DEVICE_LOST) {
+        maage_status_append(buffer, capacity, &length, " Audio output failed.");
     } else if (context == MAAGE_CONTEXT_RENDER && detail == MAAGE_DETAIL_DEVICE_LOST) {
         maage_status_append(buffer, capacity, &length, " Device lost.");
     } else if (context == MAAGE_CONTEXT_RENDER && detail == MAAGE_DETAIL_SURFACE_LOST) {
