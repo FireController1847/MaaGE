@@ -293,10 +293,16 @@ static maage_status server_take_commands(maage_server_runtime *runtime)
     if (!runtime->config.session) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_POLL);
     for (count = 0; count < MAAGE_SERVER_COMMAND_BUDGET; ++count) {
         result = maage_local_session_take_command(runtime->config.session, &command);
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP ||
-            maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) break;
+        if (maage_status_code(result) == MAAGE_STATUS_NOOP) break;
+        if (maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) {
+            /* A closed Client mailbox is a disconnected session, not an
+             * invitation to keep advancing orphaned integrated gameplay. */
+            maage_server_runtime_request_stop(runtime);
+            break;
+        }
         if (maage_status_failed(result)) return result;
         (void)server_apply_command(runtime, &command); /* rejected action is not fatal */
+        if (command.kind == MAAGE_CMD_DISCONNECT) break;
     }
     return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_POLL);
 }
