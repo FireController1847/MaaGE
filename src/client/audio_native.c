@@ -42,6 +42,7 @@ typedef struct maage_native_music {
     maage_mutex *mutex;
     maage_condition *wake;
     maage_status result;
+    unsigned int channels;
     int cancel;
 } maage_native_music;
 typedef struct maage_native_scene_sound {
@@ -414,6 +415,119 @@ static maage_status mn_engine_destroy(void *handle, maage_status_trace *trace)
     free(engine->buffers);
     free(engine);
     return first;
+}
+
+
+/* One bounded decoder worker per selected music track. The mixer sees only
+ * a preallocated float ring and never touches the decoder or filesystem. */
+static void mn_music_worker(void *context)
+{
+    maage_native_music *music = (maage_native_music *)context;
+    float samples[MAAGE_NATIVE_DECODE_FRAMES * 2U];
+    size_t received, offset, accepted;
+    maage_status result = mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DECODE);
+    int cancelled = 0;
+    for (;;) {
+        maage_mutex_lock(music->mutex);
+        cancelled = music->cancel;
+        maage_mutex_unlock(music->mutex);
+        if (cancelled) break;
+        received = 0;
+        result = maage_sound_stream_read(music->decoder, samples,
+            MAAGE_NATIVE_DECODE_FRAMES, &received, NULL);
+        if (maage_status_failed(result) || !received) break;
+        offset = 0;
+        while (offset < received) {
+            maage_mutex_lock(music->mutex);
+            cancelled = music->cancel;
+            maage_mutex_unlock(music->mutex);
+            if (cancelled) break;
+            accepted = 0;
+            result = maage_audio_stream_write(music->ring,
+                samples + offset * music->channels, received - offset, &accepted);
+            if (maage_status_failed(result)) break;
+            offset += accepted;
+            if (!accepted) {
+                maage_mutex_lock(music->mutex);
+                if (!music->cancel) (void)maage_condition_timed_wait(
+                    music->wake, music->mutex, 10UL);
+                cancelled = music->cancel;
+                maage_mutex_unlock(music->mutex);
+                if (cancelled) break;
+            }
+        }
+        if (maage_status_failed(result) || cancelled) break;
+    }
+    music->result = result;
+    (void)maage_audio_stream_finish(music->ring);
+}
+static void mn_music_release(maage_native_music *music)
+{
+    if (!music) return;
+    if (music->mutex) {
+        maage_mutex_lock(music->mutex);
+        music->cancel = 1;
+        if (music->wake) maage_condition_broadcast(music->wake);
+        maage_mutex_unlock(music->mutex);
+    }
+    if (music->worker) (void)maage_thread_join(music->worker);
+    if (music->ring) (void)maage_audio_stream_destroy(music->ring);
+    if (music->decoder) (void)maage_sound_stream_destroy(music->decoder);
+    if (music->wake) (void)maage_condition_destroy(music->wake);
+    if (music->mutex) (void)maage_mutex_destroy(music->mutex);
+    free(music);
+}
+static maage_status mn_music_prepare(maage_native_scene *scene,
+    maage_native_scene_sound *sound, size_t budget)
+{
+    maage_native_music *music;
+    maage_status result;
+    unsigned int channels = 0, rate = 0;
+    size_t bytes;
+    music = (maage_native_music *)calloc(1, sizeof(*music));
+    if (!music) return mn_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
+    result = maage_sound_bank_stream_open(scene->bank->bank, sound->clip_id,
+        &music->decoder, NULL);
+    if (maage_status_failed(result)) { mn_music_release(music); return result; }
+    result = maage_sound_stream_format(music->decoder, &channels, &rate);
+    if (maage_status_failed(result)) { mn_music_release(music); return result; }
+    bytes = MAAGE_NATIVE_STREAM_FRAMES * (size_t)channels * sizeof(float);
+    if (bytes > budget) {
+        mn_music_release(music);
+        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_CREATE);
+    }
+    music->channels = channels;
+    result = maage_audio_stream_create(scene->engine->audio, channels, rate,
+        MAAGE_NATIVE_STREAM_FRAMES, &music->ring, NULL);
+    if (maage_status_failed(result)) { mn_music_release(music); return result; }
+    result = maage_mutex_create(&music->mutex);
+    if (maage_status_failed(result)) { mn_music_release(music); return result; }
+    result = maage_condition_create(&music->wake);
+    if (maage_status_failed(result)) { mn_music_release(music); return result; }
+    result = maage_thread_start(mn_music_worker, music, &music->worker);
+    if (maage_status_failed(result)) { mn_music_release(music); return result; }
+    sound->stream = music;
+    sound->bytes = bytes;
+    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
+}
+static maage_status mn_scene_sounds_reserve(maage_native_scene *scene, size_t need)
+{
+    maage_native_scene_sound *grown;
+    size_t capacity = scene->sound_capacity ? scene->sound_capacity : 32U;
+    if (need <= scene->sound_capacity) return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESIZE);
+    while (capacity < need) {
+        if (capacity > ((size_t)-1) / 2U) return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_RESIZE);
+        capacity *= 2U;
+    }
+    if (capacity > ((size_t)-1) / sizeof(*grown) || capacity - 1U > ULONG_MAX)
+        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_RESIZE);
+    grown = (maage_native_scene_sound *)realloc(scene->sounds, capacity * sizeof(*grown));
+    if (!grown) return mn_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_RESIZE);
+    memset(grown + scene->sound_capacity, 0,
+        (capacity - scene->sound_capacity) * sizeof(*grown));
+    scene->sounds = grown;
+    scene->sound_capacity = capacity;
+    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESIZE);
 }
 
 /* The environment scene consumes copied numeric Server observations only.
