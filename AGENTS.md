@@ -167,7 +167,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 ### World architecture and persistence
 
-- Use 1.7.10 geometry: 16x16 columns, up to sixteen sparse 16x16x16 sections,
+- The current baseline uses 16x16 columns and up to sixteen sparse 16x16x16 sections; these dimensions may change when the architecture warrants it.
   Y=0..255. Negative coordinates use floor division and positive modulo.
   Coordinate-keyed hashing is expected O(1), not deterministic worst-case O(1).
 - Seeded generation must remain deterministic for the CURRENT algorithm,
@@ -687,7 +687,7 @@ filters. Completion requires both the verified object cache and valid logical
 files. Track unique objects, logical files, cached/downloaded objects,
 reconstruction progress, and outstanding missing/corrupt files separately.
 Log actual file operations through Core logging: indexed names/hashes, download
-URLs/destinations/attempts/retries, verified installation, migration, reconstruction
+URLs/destinations/attempts/retries, verified installation, reconstruction
 source/destination and hard-link/copy results, cancellation, failures, and summaries.
 Use INFO for performed work and VERBOSE for per-file verification and unchanged cache
 reuse. Derive resource names and mappings from the downloaded index; keep static
@@ -936,9 +936,10 @@ future Launcher milestone; software versions do not define protocol compatibilit
 
 ## Development roadmap
 
-`docs/development-roadmap.md` is the authoritative detailed roadmap; these
-milestones summarize sequence and permanent architectural decisions, not current
-feature completeness or authorization to start a phase.
+`docs/development-roadmap.md` documents the roadmap and earlier phases. Its
+historical compatibility requirements do not override the predevelopment
+breaking-change policy above. Milestones describe intent, not current feature
+completeness or authorization to start a phase.
 
 - **Historical Phases 1–5:** Initial Voxel Client; World Generation & Chunk
   Streaming (2); Multithreaded Architecture (2.5); Client UI Foundation (2.75);
