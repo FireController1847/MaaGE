@@ -118,6 +118,8 @@ maage_status maage_client_frontend_run(maage_client_frontend *f,maage_window_sys
             if(maage_status_failed(completion.result)) {
                 maage_log_trace_status(MAAGE_LOG_WARNING,"maage.client.worlds",
                     completion.result,&completion.trace,"World catalog operation failed: %s",f->io.error);
+                free(f->io.entries);
+                f->io.entries=NULL;
                 maage_client_ui_front_error(f->view,"World operation failed; see logs/client.log");
             } else {
                 free(f->entries);f->entries=f->io.entries;f->count=f->io.count;f->io.entries=NULL;

@@ -95,11 +95,13 @@ static void title_splash(maage_client_ui *ui)
 {
     size_t first=ui->batch.vertex_count,i;
     double radians=-0.3490658504,c=cos(radians),s=sin(radians);
+    double scale=1.8-fabs(sin(ui->notice_now*5.0)*0.1);
     float x=ui->content.x+ui->content.width*0.5f+90,y=ui->content.y+70;
+    maage_client_ui_text(ui,"Engage!",x+1,y+1,MAAGE_CLIENT_UI_CENTER,0.18f,0.18f,0);
     maage_client_ui_text(ui,"Engage!",x,y,MAAGE_CLIENT_UI_CENTER,1,1,0);
     for(i=first;i<ui->batch.vertex_count;++i) {
-        double dx=(ui->vertices[i].position[0]-x)*1.8;
-        double dy=(ui->vertices[i].position[1]-y-4)*1.8;
+        double dx=(ui->vertices[i].position[0]-x)*scale;
+        double dy=(ui->vertices[i].position[1]-y-4)*scale;
         ui->vertices[i].position[0]=(float)(x+dx*c-dy*s);
         ui->vertices[i].position[1]=(float)(y+dx*s+dy*c);
     }
@@ -121,7 +123,10 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
     }
     r=title_button(ui,4);maage_client_ui_button(ui,r,"Options...",f->focus==4);
     r=title_button(ui,5);maage_client_ui_button(ui,r,"Quit Game",f->focus==5);
+    maage_client_ui_text(ui,"Minecraft 1.7.10",3,ui->height-9,MAAGE_CLIENT_UI_LEFT,0.14f,0.14f,0.14f);
     maage_client_ui_text(ui,"Minecraft 1.7.10",2,ui->height-10,MAAGE_CLIENT_UI_LEFT,1,1,1);
+    maage_client_ui_text(ui,"Copyright Mojang AB. Do not distribute!",
+        ui->width-1,ui->height-9,MAAGE_CLIENT_UI_RIGHT,0.14f,0.14f,0.14f);
     maage_client_ui_text(ui,"Copyright Mojang AB. Do not distribute!",
         ui->width-2,ui->height-10,MAAGE_CLIENT_UI_RIGHT,1,1,1);
 }
