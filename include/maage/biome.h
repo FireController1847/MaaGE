@@ -21,15 +21,12 @@ typedef struct maage_biome_definition {
     float grass_color[3], foliage_color[3];
 } maage_biome_definition;
 typedef struct maage_biome_registry {
-    /* Inline defaults allocate nothing. Additional registrations grow owned
-     * direct-indexed arrays; call destroy if extension registrations are used. */
-    maage_biome_definition *definitions;
-    unsigned char *occupied;
-    const char **names;
-    size_t capacity;
+    /* Builtins are inline; extensions use a private sparse numeric index.
+     * Names/definitions remain immutable after finalization. */
     maage_biome_definition builtin_definitions[MAAGE_BIOME_COUNT];
-    unsigned char builtin_occupied[MAAGE_BIOME_COUNT];
     const char *builtin_names[MAAGE_BIOME_COUNT];
+    void *extension_pages;
+    void *extensions;
     int finalized;
 } maage_biome_registry;
 /* Initialize classic biomes, register additional stable names before finalizing.

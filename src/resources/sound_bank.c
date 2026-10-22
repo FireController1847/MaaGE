@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAAGE_SOUND_TABLE_COUNT ((size_t)MAAGE_SOUND_MAX_CLIP_ID + 1U)
+#define MAAGE_SOUND_RADIX_WIDTH 16U
 #define MAAGE_SOUND_DECODE_CHUNK 4096U
 
 typedef struct maage_sound_slot {
@@ -27,11 +27,23 @@ typedef struct maage_sound_slot {
     struct maage_sound_slot *previous, *next;
 } maage_sound_slot;
 
+typedef struct maage_sound_page {
+    void *entries[MAAGE_SOUND_RADIX_WIDTH];
+} maage_sound_page;
+
 struct maage_sound_bank {
     char *data_root;
-    maage_sound_slot **slots;
+    maage_sound_page *root;
     size_t budget, retained_bytes;
     maage_sound_slot *most_recent, *least_recent;
+};
+
+/* A stream owns both decoder and FILE; no whole-track PCM allocation. */
+struct maage_sound_stream {
+    FILE *file;
+    stb_vorbis *decoder;
+    unsigned int channels, sample_rate;
+    int finished;
 };
 
 static maage_status maage_sound_result(unsigned char code,
@@ -288,6 +300,68 @@ static maage_status maage_sound_decode_file(const char *path,
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DECODE, 0);
 }
 
+
+/* Eight sparse 4-bit radix levels span the complete 32-bit ID domain.
+ * One lookup touches at most eight pages, regardless of ID magnitude. */
+static maage_sound_slot *maage_sound_lookup(const maage_sound_bank *bank,
+    unsigned long id)
+{
+    maage_sound_page *page;
+    unsigned int level;
+    if (!bank || !bank->root || !id || id > MAAGE_SOUND_MAX_CLIP_ID) return NULL;
+    page = bank->root;
+    for (level = 7U; level != 0U; --level) {
+        page = (maage_sound_page *)page->entries[(unsigned int)((id >> (level * 4U)) & 15UL)];
+        if (!page) return NULL;
+    }
+    return (maage_sound_slot *)page->entries[(unsigned int)(id & 15UL)];
+}
+static maage_status maage_sound_insert(maage_sound_bank *bank, unsigned long id,
+    maage_sound_slot *slot)
+{
+    maage_sound_page *page, *child;
+    unsigned int index, level;
+    if (!bank->root) {
+        bank->root = (maage_sound_page *)calloc(1, sizeof(*bank->root));
+        if (!bank->root) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
+    }
+    page = bank->root;
+    for (level = 7U; level != 0U; --level) {
+        index = (unsigned int)((id >> (level * 4U)) & 15UL);
+        child = (maage_sound_page *)page->entries[index];
+        if (!child) {
+            child = (maage_sound_page *)calloc(1, sizeof(*child));
+            if (!child) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+                MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
+            page->entries[index] = child;
+        }
+        page = child;
+    }
+    index = (unsigned int)(id & 15UL);
+    if (page->entries[index]) return maage_status_make(MAAGE_STATUS_INVALID_STATE,
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
+    page->entries[index] = slot;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+static void maage_sound_page_destroy(maage_sound_bank *bank,
+    maage_sound_page *page, unsigned int level)
+{
+    unsigned int i;
+    if (!page) return;
+    for (i = 0; i < MAAGE_SOUND_RADIX_WIDTH; ++i) if (page->entries[i]) {
+        if (level) {
+            maage_sound_page_destroy(bank, (maage_sound_page *)page->entries[i], level - 1U);
+        } else {
+            maage_sound_slot *slot = (maage_sound_slot *)page->entries[i];
+            maage_sound_cache_unlink(bank, slot);
+            free(slot->path);
+            free(slot);
+        }
+    }
+    free(page);
+}
+
 maage_status maage_sound_bank_create(const char *data_root, size_t memory_budget,
     maage_sound_bank **output, maage_status_trace *trace)
 {
@@ -312,20 +386,14 @@ maage_status maage_sound_bank_create(const char *data_root, size_t memory_budget
     if (maage_status_failed(result))
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE,
             MAAGE_OPERATION_CREATE);
-    if (MAAGE_SOUND_TABLE_COUNT > (size_t)-1 / sizeof(maage_sound_slot *))
-        return maage_sound_result(MAAGE_STATUS_BUFFER_OVERFLOW,
-            MAAGE_OPERATION_CREATE, trace);
     count = strlen(data_root) + 1;
     bank = (maage_sound_bank *)calloc(1, sizeof(*bank));
     if (!bank)
         return maage_sound_result(MAAGE_STATUS_ALLOCATION_FAILED,
             MAAGE_OPERATION_CREATE, trace);
     bank->data_root = (char *)malloc(count);
-    bank->slots = (maage_sound_slot **)calloc(MAAGE_SOUND_TABLE_COUNT,
-        sizeof(*bank->slots));
-    if (!bank->data_root || !bank->slots) {
+    if (!bank->data_root) {
         free(bank->data_root);
-        free(bank->slots);
         free(bank);
         return maage_sound_result(MAAGE_STATUS_ALLOCATION_FAILED,
             MAAGE_OPERATION_CREATE, trace);
@@ -337,7 +405,7 @@ maage_status maage_sound_bank_create(const char *data_root, size_t memory_budget
 }
 
 maage_status maage_sound_bank_register(maage_sound_bank *bank,
-    unsigned int numeric_clip_id, const char *logical_asset_path,
+    unsigned long numeric_clip_id, const char *logical_asset_path,
     maage_status_trace *trace)
 {
     maage_sound_slot *slot;
@@ -345,10 +413,11 @@ maage_status maage_sound_bank_register(maage_sound_bank *bank,
     const char *extension;
     size_t length;
     maage_status result;
-    if (!bank || !logical_asset_path || numeric_clip_id > MAAGE_SOUND_MAX_CLIP_ID)
+    if (!bank || !logical_asset_path || !numeric_clip_id ||
+        numeric_clip_id > MAAGE_SOUND_MAX_CLIP_ID)
         return maage_sound_result(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_OPERATION_REGISTER, trace);
-    if (bank->slots[numeric_clip_id])
+    if (maage_sound_lookup(bank, numeric_clip_id))
         return maage_sound_result(MAAGE_STATUS_INVALID_STATE,
             MAAGE_OPERATION_REGISTER, trace);
     extension = strrchr(logical_asset_path, '.');
@@ -372,12 +441,18 @@ maage_status maage_sound_bank_register(maage_sound_bank *bank,
             MAAGE_OPERATION_REGISTER, trace);
     }
     memcpy(slot->path, path, length);
-    bank->slots[numeric_clip_id] = slot;
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+    result = maage_sound_insert(bank, numeric_clip_id, slot);
+    if (maage_status_failed(result)) {
+        free(slot->path);
+        free(slot);
+        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE,
+            MAAGE_OPERATION_REGISTER);
+    }
+    return result;
 }
 
 maage_status maage_sound_bank_decode(maage_sound_bank *bank,
-    unsigned int numeric_clip_id, maage_sound_pcm *pcm,
+    unsigned long numeric_clip_id, maage_sound_pcm *pcm,
     maage_status_trace *trace)
 {
     maage_sound_slot *slot;
@@ -388,7 +463,7 @@ maage_status maage_sound_bank_decode(maage_sound_bank *bank,
         pcm->channels || pcm->sample_rate || numeric_clip_id > MAAGE_SOUND_MAX_CLIP_ID)
         return maage_sound_result(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_OPERATION_DECODE, trace);
-    slot = bank->slots[numeric_clip_id];
+    slot = maage_sound_lookup(bank, numeric_clip_id);
     if (!slot)
         return maage_sound_result(MAAGE_STATUS_NOT_FOUND,
             MAAGE_OPERATION_DECODE, trace);
@@ -426,6 +501,118 @@ maage_status maage_sound_bank_decode(maage_sound_bank *bank,
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DECODE, 0);
 }
 
+
+/* This open is deliberately separate from full decode and its size policy.
+ * The caller schedules it off the callback thread and owns the stream. */
+maage_status maage_sound_bank_stream_open(maage_sound_bank *bank,
+    unsigned long numeric_clip_id, maage_sound_stream **output,
+    maage_status_trace *trace)
+{
+    maage_sound_slot *slot;
+    maage_sound_stream *stream;
+    stb_vorbis_info info;
+    int decoder_error;
+    int saved_errno;
+    maage_status result;
+    if (!output) return maage_sound_result(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_OPERATION_OPEN, trace);
+    *output = NULL;
+    slot = maage_sound_lookup(bank, numeric_clip_id);
+    if (!slot) return maage_sound_result(MAAGE_STATUS_NOT_FOUND,
+        MAAGE_OPERATION_OPEN, trace);
+    if (slot->has_failure) return MAAGE_STATUS_PROPAGATE(trace, slot->failure,
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_OPEN);
+    stream = (maage_sound_stream *)calloc(1, sizeof(*stream));
+    if (!stream) return maage_sound_result(MAAGE_STATUS_ALLOCATION_FAILED,
+        MAAGE_OPERATION_OPEN, trace);
+    errno = 0;
+    stream->file = maage_storage_open(slot->path, "rb");
+    if (!stream->file) {
+        saved_errno = errno ? errno : EIO;
+        result = maage_status_from_errno(saved_errno, MAAGE_CONTEXT_STORAGE,
+            MAAGE_OPERATION_OPEN);
+        free(stream);
+    } else {
+        decoder_error = VORBIS__no_error;
+        stream->decoder = stb_vorbis_open_file(stream->file, 0, &decoder_error, NULL);
+        if (!stream->decoder) {
+            result = maage_status_make(decoder_error == VORBIS_outofmem ?
+                MAAGE_STATUS_ALLOCATION_FAILED : MAAGE_STATUS_MALFORMED_INPUT,
+                MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_OPEN, 0);
+            fclose(stream->file);
+            free(stream);
+        } else {
+            info = stb_vorbis_get_info(stream->decoder);
+            stream->channels = (unsigned int)info.channels;
+            stream->sample_rate = (unsigned int)info.sample_rate;
+            if ((stream->channels != 1U && stream->channels != 2U) ||
+                stream->sample_rate < 8000U || stream->sample_rate > 192000U) {
+                result = maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED,
+                    MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_OPEN, 0);
+                stb_vorbis_close(stream->decoder);
+                fclose(stream->file);
+                free(stream);
+            } else {
+                *output = stream;
+                return maage_status_make(MAAGE_STATUS_SUCCESS, 0,
+                    MAAGE_OPERATION_OPEN, 0);
+            }
+        }
+    }
+    if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED) {
+        slot->has_failure = 1;
+        slot->failure = result;
+    }
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_OPEN);
+}
+maage_status maage_sound_stream_format(const maage_sound_stream *stream,
+    unsigned int *channels, unsigned int *sample_rate)
+{
+    if (!stream || !channels || !sample_rate)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOOKUP, 0);
+    *channels = stream->channels;
+    *sample_rate = stream->sample_rate;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOOKUP, 0);
+}
+maage_status maage_sound_stream_read(maage_sound_stream *stream,
+    float *samples, size_t frame_capacity, size_t *frames_read,
+    maage_status_trace *trace)
+{
+    int got, error;
+    unsigned int request;
+    if (frames_read) *frames_read = 0;
+    if (!stream || !samples || !frames_read || !frame_capacity)
+        return maage_sound_result(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_OPERATION_DECODE, trace);
+    if (stream->finished) return maage_status_make(MAAGE_STATUS_NOOP, 0,
+        MAAGE_OPERATION_DECODE, 0);
+    request = frame_capacity > MAAGE_SOUND_DECODE_CHUNK ?
+        MAAGE_SOUND_DECODE_CHUNK : (unsigned int)frame_capacity;
+    got = stb_vorbis_get_samples_float_interleaved(stream->decoder,
+        (int)stream->channels, samples, (int)(request * stream->channels));
+    error = stb_vorbis_get_error(stream->decoder);
+    if (got < 0 || error != VORBIS__no_error || (unsigned int)got > request)
+        return maage_sound_result(error == VORBIS_outofmem ?
+            MAAGE_STATUS_ALLOCATION_FAILED : MAAGE_STATUS_MALFORMED_INPUT,
+            MAAGE_OPERATION_DECODE, trace);
+    *frames_read = (size_t)got;
+    if (!got) stream->finished = 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DECODE, 0);
+}
+maage_status maage_sound_stream_destroy(maage_sound_stream *stream)
+{
+    int close_result;
+    if (!stream) return maage_status_make(MAAGE_STATUS_NOOP, 0,
+        MAAGE_OPERATION_DESTROY, 0);
+    stb_vorbis_close(stream->decoder);
+    close_result = fclose(stream->file);
+    free(stream);
+    if (close_result) return maage_status_make(MAAGE_STATUS_IO_ERROR,
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_DESTROY, 0);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+}
+
 maage_status maage_sound_pcm_destroy(maage_sound_pcm *pcm)
 {
     int had_samples;
@@ -439,17 +626,8 @@ maage_status maage_sound_pcm_destroy(maage_sound_pcm *pcm)
 
 maage_status maage_sound_bank_destroy(maage_sound_bank *bank)
 {
-    size_t i;
-    maage_sound_slot *slot;
     if (!bank) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
-    for (i = 0; i < MAAGE_SOUND_TABLE_COUNT; ++i) {
-        slot = bank->slots[i];
-        if (!slot) continue;
-        maage_sound_cache_unlink(bank, slot);
-        free(slot->path);
-        free(slot);
-    }
-    free(bank->slots);
+    maage_sound_page_destroy(bank, bank->root, 7U);
     free(bank->data_root);
     free(bank);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);

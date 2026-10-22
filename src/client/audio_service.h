@@ -11,8 +11,11 @@ typedef struct maage_client_audio_service maage_client_audio_service;
 /* The component adapter is installed once before create, by the aggregate
  * Client build. It binds the independently owned Audio, Bank, Catalog and
  * audio_scene APIs; this API deliberately makes no new Audio-core ABI claims.
- * Component callbacks must NOT acquire files/decoder resources from update,
- * listener or play_event; prepare resources during create.
+ * Event playback and listener callbacks never acquire decoder resources.
+ * The optional environmental scene can decode a previously registered effect
+ * on first use on the Client presentation thread, not the device callback;
+ * this may briefly stall that presentation frame until asynchronous effect
+ * prefetch is implemented. Music uses a separate streaming producer.
  * Nonfatal warnings/partial results may accompany usable output handles.
  * All handles are owned by the service, not the adapter or the caller.
  * set_volume's bus is the numeric MAAGE_CLIENT_AUDIO_BUS_* value.
@@ -59,6 +62,9 @@ maage_status maage_client_audio_service_ui_click(maage_client_audio_service *ser
 maage_status maage_client_audio_service_update(maage_client_audio_service *service,
     const maage_session_snapshot *session_snapshot, const double listener_position[3],
     const double listener_forward[3], double now, maage_status_trace *trace);
+/* Stops active voices before releasing dependent resources. On a failed
+ * quiesce or scene teardown, ownership is retained and destroy may be retried;
+ * a failed return does not guarantee that the service pointer was released. */
 maage_status maage_client_audio_service_destroy(maage_client_audio_service *service,
     maage_status_trace *trace);
 

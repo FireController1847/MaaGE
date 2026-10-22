@@ -43,7 +43,7 @@ static maage_status maage_server_parse(int argc, char **argv,
             number = strtoul(value, &end, 10);
             if (errno || !*value || *end || number > UINT_MAX) goto invalid;
             if (!strncmp(argument, "--render-distance=", 18)) {
-                if (number < 1 || number > 32) goto invalid;
+                if (number < 1 || number > MAAGE_WORLD_MAX_RADIUS) goto invalid;
                 config->render_distance = (int)number;
             } else if (!strncmp(argument, "--world-workers=", 16)) config->world_workers = (unsigned int)number;
             else {
@@ -58,7 +58,7 @@ static maage_status maage_server_parse(int argc, char **argv,
             if (errno || !argument[8] || *end || config->interaction_range <= 0 ||
                 config->interaction_range > 64) goto invalid;
         } else if (!strcmp(argument, "--help")) {
-            puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--generator=<version>] [--render-distance=1..32] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
+            puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--generator=<version>] [--render-distance=<within-world-bounds>] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
             return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PARSE, 0);
         } else goto invalid;
     }

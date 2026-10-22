@@ -18,7 +18,6 @@
 #define MAAGE_SERVER_COMMAND_BUDGET 64U
 #define MAAGE_SERVER_MESH_BUDGET 16U
 #define MAAGE_SERVER_WAIT_MS 25UL
-#define MAAGE_SERVER_MAX_RADIUS 32
 
 struct maage_server_runtime {
     maage_server_config config;
@@ -255,7 +254,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
     case MAAGE_CMD_VIEW:
         if (command->render_radius < 1 ||
-            command->render_radius > MAAGE_SERVER_MAX_RADIUS ||
+            command->render_radius > MAAGE_WORLD_MAX_RADIUS ||
             command->leaves_mode > MAAGE_LEAVES_FANCY ||
             !server_finite(command->view_yaw) ||
             fabs(command->view_yaw) > 1000000000.0)
@@ -713,7 +712,7 @@ maage_status maage_server_runtime_create(const maage_server_config *config,
     if (output) *output = NULL;
     if (!config || !output || !config->instance_root ||
         !*config->instance_root || config->render_distance < 1 ||
-        config->render_distance > MAAGE_SERVER_MAX_RADIUS ||
+        config->render_distance > MAAGE_WORLD_MAX_RADIUS ||
         (config->initial_game_mode != -1 &&
          config->initial_game_mode != MAAGE_GAME_MODE_SURVIVAL &&
          config->initial_game_mode != MAAGE_GAME_MODE_CREATIVE) ||

@@ -13,25 +13,35 @@ void maage_audio_lock_leave(maage_audio_lock *lock);
 struct maage_audio_buffer {
     struct maage_audio *owner;
     struct maage_audio_buffer *next;
-    signed short *samples;
+    float *samples;
     size_t frames;
     unsigned int channels, rate, references;
     int retired;
 };
+struct maage_audio_stream {
+    struct maage_audio *owner;
+    struct maage_audio_stream *next;
+    float *samples;
+    size_t capacity, read_index, buffered;
+    unsigned int channels, rate, references;
+    int retired, ended;
+};
 typedef struct maage_audio_voice {
     maage_audio_buffer *buffer;
+    maage_audio_stream *stream;
     maage_audio_voice_id id;
-    unsigned long generation;
-    double cursor;
+    double cursor; /* Static position, or streaming fractional-frame offset. */
     maage_audio_vec3 position;
     float gain, pitch;
     unsigned int category;
-    int positional, loop;
+    int positional, loop, paused;
 } maage_audio_voice;
 struct maage_audio {
     maage_audio_lock *lock;
     maage_audio_buffer *buffers;
+    maage_audio_stream *streams;
     maage_audio_voice *voices;
+    maage_audio_voice_id last_voice_id;
     unsigned int voice_count, rate, quantum;
     float volume[MAAGE_AUDIO_BUS_COUNT];
     maage_audio_vec3 listener, right;
