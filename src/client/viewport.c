@@ -922,6 +922,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
     double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
+    double render_yaw = 0.0, render_pitch = 0.0, yaw_arc = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
     unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
     float matrix[16];
@@ -1413,14 +1414,27 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         if (alpha > 1.0 || previous.tick == latest.tick) alpha = 1.0;
         if (previous.world_epoch != latest.world_epoch ||
             previous.session_epoch != latest.session_epoch) alpha = 1.0;
+        /* Shortest-arc angular interpolation uses only copied authoritative
+         * snapshots. Local mouse-look is an independent presentation override
+         * while captured; it never changes the Server state in a snapshot. */
+        yaw_arc = atan2(sin(latest.player.yaw - previous.player.yaw),
+            cos(latest.player.yaw - previous.player.yaw));
+        render_yaw = previous.player.yaw + yaw_arc * alpha;
+        render_pitch = previous.player.pitch +
+            (latest.player.pitch - previous.player.pitch) * alpha;
+        if (active) {
+            render_yaw = yaw; render_pitch = pitch;
+        } else {
+            yaw = render_yaw; pitch = render_pitch;
+        }
         for (axis = 0; axis < 3; ++axis)
             eye[axis] = previous.player.player.position[axis] +
                 (latest.player.player.position[axis] -
                 previous.player.player.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
-        forward[0] = sin(yaw) * cos(pitch);
-        forward[1] = -sin(pitch);
-        forward[2] = -cos(yaw) * cos(pitch);
+        forward[0] = sin(render_yaw) * cos(render_pitch);
+        forward[1] = -sin(render_pitch);
+        forward[2] = -cos(render_yaw) * cos(render_pitch);
         if (audio) {
             maage_client_ui_get_options(ui, &current_options);
             (void)maage_client_audio_service_apply_options(audio, &current_options);
@@ -1469,7 +1483,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
-            maage_client_camera(matrix, eye, yaw, pitch,
+            maage_client_camera(matrix, eye, render_yaw, render_pitch,
                 (double)state.framebuffer_width / state.framebuffer_height, options.radius);
             rendered = maage_renderer_draw_frame(renderer, cache.draws,
                 draw_count, matrix, ui_draw, trace);
