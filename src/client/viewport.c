@@ -20,6 +20,8 @@
 #include "environment.h"
 #include "storage_context.h"
 #include "options.h"
+#include "frontend.h"
+#include "pacing.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -489,6 +491,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_renderer *renderer = NULL;
     maage_render_texture *atlas = NULL;
     maage_client_ui *ui = NULL;
+    maage_client_frontend *frontend = NULL;
+    maage_client_world_choice choice;
+    int direct_world = 0;
     maage_client_environment *environment_view = NULL;
     maage_client_audio_service *audio = NULL;
     maage_local_session *session = NULL;
@@ -525,6 +530,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     char directory[MAAGE_PATH_CAPACITY];
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
     double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
+    maage_client_pacing pacing = {0, 0.0};
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
     double render_yaw = 0.0, render_pitch = 0.0, yaw_arc = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
@@ -612,9 +618,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_ui_create(renderer, window, directory, &resources.atlas, &ui, trace);
     (void)maage_client_resources_destroy(&resources);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_finalize(ui);
-    if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_set_content(ui, items, blocks);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_frontend_create(ui, instance, items, &frontend, trace);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_ui_finalize(ui);
     if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice))
         resource_notice = maage_client_ui_resource_status(ui);
@@ -639,6 +647,39 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         maage_status_trace_init(trace);
     }
     if (audio) maage_client_ui_set_click_callback(ui, maage_client_audio_click, audio);
+    direct_world = options.id || options.create || options.seeded;
+    result = maage_window_set_visible(window, 1);
+    if (maage_status_failed(result)) goto window_failed;
+    operation = maage_client_ui_apply_options(ui, &video_options);
+    if (maage_status_failed(operation)) goto done;
+    options_ready = 1;
+choose_world:
+    if (!direct_world) {
+        operation = maage_client_frontend_run(frontend, system, &choice, trace);
+        if (maage_status_code(operation) == MAAGE_STATUS_NOOP) { ok = 1; goto done; }
+        if (maage_status_failed(operation)) goto done;
+        maage_client_ui_get_options(ui, &video_options);
+        operation = maage_client_options_store(instance, ui, &saved_video_options, 1);
+        if (maage_status_failed(operation)) goto done;
+        options.id = choice.create ? NULL : choice.id;
+        options.name = choice.create ? choice.name : NULL;
+        options.create = choice.create; options.mode = choice.create ? choice.mode : -1;
+        options.seeded = choice.create && choice.seed[0];
+        if (options.seeded) {
+            operation = maage_world_seed_parse(choice.seed, &options.seed);
+            if (maage_status_failed(operation)) goto done;
+        }
+    }
+    direct_world = 0;
+    memset(&outbox, 0, sizeof(outbox));
+    memset(&mesh_activity, 0, sizeof(mesh_activity));
+    world_epoch = last_sound_sequence = last_seen_tick = sound_epoch = sound_world_epoch = 0;
+    active = was_active = was_modal = was_focused = was_changing_mode = 0;
+    paused_command = -1; view_sent = disconnected = 0; initial_capture = 1;
+    jump_latched = attack_latched = use_latched = respawn_latched = 0;
+    pacing.deadline = 0; pacing.fps = 0;
+    operation = maage_client_frontend_loading(frontend, trace);
+    if (maage_status_failed(operation)) goto done;
     operation = maage_local_session_create(256U, 256U, 512U, &session);
     if (maage_status_failed(operation)) goto done;
     server_config.instance_root = maage_instance_directory(instance);
@@ -697,9 +738,12 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             failure_message = "Integrated Server bootstrap timed out without a copied snapshot.";
             goto done;
         }
-        result = maage_window_wait_events(system, 16);
+        operation = maage_client_frontend_loading(frontend, trace);
+        if (maage_status_failed(operation)) goto done;
+        result = maage_window_wait_events(system, 1);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
     }
+    while (maage_client_ui_modal(ui)) (void)maage_client_ui_back(ui);
     operation = maage_client_ui_set_snapshot(ui, &latest);
     if (maage_status_failed(operation)) goto done;
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
@@ -793,7 +837,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         }
         was_changing_mode = changing_mode;
         was_focused = input.focused;
-        if (ui_actions & MAAGE_CLIENT_UI_EXIT) { ok = 1; break; }
+        if (ui_actions & MAAGE_CLIENT_UI_EXIT) goto return_to_title;
         if (maage_client_ui_modal(ui)) {
             initial_capture = 0;
             if (input.captured) result = maage_window_capture_mouse(window, 0);
@@ -1123,32 +1167,47 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
              * without busy-spinning while presentation catches up. */
             int wait_ms = state.visible && !state.mode_transitioning &&
                 state.framebuffer_width > 0 && state.framebuffer_height > 0 ? 1 : 16;
+            pacing.deadline = 0; pacing.fps = 0;
             result = maage_window_wait_events(system, wait_ms);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-        } else if (maage_client_ui_max_fps(ui) > 0) {
-            maage_window_state waited_state;
-            double deadline = now + 1.0 / maage_client_ui_max_fps(ui);
-            double remaining = deadline - frame_end;
-            int milliseconds;
-            while (remaining > 0.0) {
-                /* Truncation avoids routinely overshooting the 240 FPS
-                 * target by a full millisecond on coarse event waits. */
-                milliseconds = (int)(remaining * 1000.0);
-                if (milliseconds < 1) milliseconds = 1;
-                if (milliseconds > 100) milliseconds = 100;
-                result = maage_window_wait_events(system, milliseconds);
-                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-                result = maage_window_get_state(window, &waited_state);
-                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
-                resize_pending = resize_pending || waited_state.resized;
-                if (waited_state.close_requested) break;
-                frame_end = maage_time_monotonic_seconds();
-                if (frame_end < 0.0) goto clock_failed;
-                remaining = deadline - frame_end;
+        } else {
+            operation = maage_client_pacing_wait(&pacing, system, window,
+                maage_client_ui_max_fps(ui), now, &resize_pending);
+            if (maage_status_failed(operation)) {
+                failure_message = "Presentation pacing failed.";
+                goto done;
             }
         }
     }
     goto done;
+return_to_title:
+    result = maage_window_capture_mouse(window, 0);
+    if (maage_status_failed(result)) goto window_failed;
+    maage_server_runtime_request_stop(server);
+    operation = maage_server_runtime_join(server, trace);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_server_runtime_destroy(server);
+    if (maage_status_failed(operation)) goto done;
+    server = NULL; server_started = 0;
+    operation = maage_local_session_close(session);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_local_session_destroy(session);
+    if (maage_status_failed(operation)) goto done;
+    session = NULL;
+    operation = maage_client_mesh_cache_clear(&cache);
+    if (maage_status_failed(operation)) goto done;
+    maage_client_ui_get_options(ui, &video_options);
+    maage_client_ui_set_click_callback(ui, NULL, NULL);
+    operation = maage_client_audio_service_destroy(audio, trace);
+    if (maage_status_failed(operation)) goto done;
+    audio = NULL;
+    operation = maage_client_audio_service_create(directory, &video_options, &audio, trace);
+    if (maage_status_failed(operation) && !audio) goto done;
+    if (audio) maage_client_ui_set_click_callback(ui, maage_client_audio_click, audio);
+    rendered = maage_renderer_set_scene(renderer, 1, NULL, NULL);
+    if (maage_status_failed(rendered)) goto done;
+    goto choose_world;
+
 clock_failed:
     outcome = maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED,
         MAAGE_CONTEXT_CORE, MAAGE_OPERATION_QUERY, 0);
@@ -1194,6 +1253,12 @@ done:
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_render_mesh_destroy(interaction.mesh),
         &outcome, &cleanup_trace, trace);
+    operation = maage_client_frontend_destroy(frontend);
+    if (maage_status_failed(operation)) {
+        maage_client_storage_retain();
+        return MAAGE_STATUS_PROPAGATE(trace, operation, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);
+    }
+    frontend = NULL;
     maage_client_cleanup_result(maage_client_ui_destroy(ui),
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_render_texture_destroy(atlas),

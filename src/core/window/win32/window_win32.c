@@ -68,6 +68,9 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
         switch (message) {
         case WM_SETFOCUS: maage_window_input_focus(window, 1); break;
         case WM_KILLFOCUS: maage_window_input_focus(window, 0); break;
+        case WM_CHAR:
+            if (!window->input.captured) maage_window_input_character(window, (unsigned int)wp);
+            break;
         case WM_KEYDOWN: case WM_KEYUP:
             maage_window_input_key(window, (maage_input_key)maage_win32_key(lp), message == WM_KEYDOWN);
             break;

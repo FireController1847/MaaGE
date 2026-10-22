@@ -11,6 +11,12 @@ typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_PAUSE 1U
 #define MAAGE_CLIENT_UI_OPTIONS 2U
 #define MAAGE_CLIENT_UI_INVENTORY 3U
+#define MAAGE_CLIENT_UI_TITLE 4U
+#define MAAGE_CLIENT_UI_WORLDS 5U
+#define MAAGE_CLIENT_UI_CREATE_WORLD 6U
+#define MAAGE_CLIENT_UI_DELETE_WORLD 7U
+#define MAAGE_CLIENT_UI_RENAME_WORLD 8U
+#define MAAGE_CLIENT_UI_LOADING 9U
 #define MAAGE_CLIENT_UI_EXIT 1U
 #define MAAGE_CLIENT_UI_RESPAWN 2U
 #define MAAGE_CLIENT_UI_DEBUG_LINES 32
@@ -18,6 +24,9 @@ typedef unsigned int maage_client_ui_screen_id;
 
 typedef struct maage_client_ui_input {
     int escape, f3, f11, accept, previous, next, left, right, primary_pressed, primary_down, secondary_pressed, inventory;
+    int list_up, list_down;
+    const char *text;
+    double scroll;
     float mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
 } maage_client_ui_input;
 typedef struct maage_client_ui_debug {

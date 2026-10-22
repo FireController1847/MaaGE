@@ -41,6 +41,8 @@ typedef struct maage_input_snapshot {
     double mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
     double mouse_delta_x;
     double mouse_delta_y;
+    /* Ordered ASCII text/backspace events, consumed with press edges. */
+    char text[128];
     int focused;
     int captured;
 } maage_input_snapshot;

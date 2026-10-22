@@ -238,9 +238,21 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 - Client-owned `src/client/ui/` remains separate from native Launcher widgets.
   Register screens before finalization through numeric IDs and direct O(1)
-  indexing; gameplay/HUD is ID 0, Pause 1, Options 2 and Inventory 3. Navigation uses a numeric
-  stack: submenus push, Back/Escape pops, and the root returns to gameplay.
+  indexing; gameplay/HUD is ID 0, Pause 1, Options 2, Inventory 3, Title 4, Worlds 5,
+  Create World 6, Delete confirmation 7, Rename 8 and Loading 9. Navigation uses a numeric
+  stack: submenus push and Back/Escape pops; the gameplay root resumes play,
+  while Title remains the frontend root.
   Unknown IDs and navigation cycles fail explicitly. No runtime name lookup.
+- Default Client startup opens Title before creating a Server. Singleplayer lists
+  only the selected instance's worlds, with create/name/seed/mode, rename and
+  confirmed permanent deletion. Catalog/admin I/O uses a bounded Jobs worker and
+  current World storage APIs; no render-loop disk I/O or live simulation access.
+  Play starts the same integrated Server; Save and Quit joins/flushes it before
+  releasing borrowed state and returning to Title. Explicit world/creation CLI
+  arguments still bypass Title. Multiplayer remains unavailable until networking.
+  Reuse registered numeric screens, reconstructed buttons/font/dirt atlas data,
+  native ASCII text/backspace events and shared Client frame pacing. No Java code
+  or GUI toolkit is embedded; text entry currently matches the ASCII GUI font.
 - Keep registration/navigation, input routing, immediate drawing primitives,
   resource loading and debug collection separate. Reuse reconstructed 1.7.10
   icons/widgets/ASCII font through existing Image/Texture APIs at initialization;
@@ -256,6 +268,9 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
 - New Client configurations default to 240 FPS; 0 remains Unlimited, with GPU/display backpressure rather than an artificial FPS ceiling. Preserve explicit saved preferences.
+  Capped pacing carries monotonic deadlines forward, rebasing after stalls or
+  cap changes. Use native event waits for whole milliseconds and a bounded final
+  sub-millisecond clock wait; never round every fractional remainder up to 1 ms.
 - Register all 1.7.10 music tracks by numeric asset ID; decode and upload only a
   selected track when music playback begins, and release its Audio buffer after
   playback stops. Memory bounds constrain decoded clips, not the number of
@@ -670,8 +685,8 @@ interpolated presentation, pausing when capture/focus is lost. Physics and camer
 tuning remain provisional until programmer fidelity verification.
 `--world=<id>` loads a saved world; `--new-world` or `--create-world=<id>` creates
 one, optionally with `--seed=<signed64>` and `--world-name=<name>`. A seed alone
-creates a unique UUID world; default startup resumes the instance's `config/last-world` or creates a
-unique world if none exists. Never overwrite an existing ID during creation or
+creates a unique UUID world; default startup opens Title and world selection.
+Server callers may resume `config/last-world` when no world is specified. Never overwrite an existing ID during creation or
 change its generation settings/seed implicitly. UUIDs are required for loading
 and creation; generator-selection command-line arguments are removed.
 `--render-distance=<positive integer>`

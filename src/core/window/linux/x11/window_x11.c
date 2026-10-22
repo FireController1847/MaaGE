@@ -254,6 +254,13 @@ static maage_status maage_x11_poll(maage_window_system *system, int timeout_ms)
             if (event.type == FocusOut && event.xfocus.mode != NotifyGrab && event.xfocus.mode != NotifyUngrab)
                 maage_window_input_focus(window, 0);
             if (event.type == UnmapNotify) maage_window_input_focus(window, 0);
+            if (event.type == KeyPress && !window->input.captured) {
+                char text[64];
+                KeySym symbol;
+                int length, n;
+                length = XLookupString(&event.xkey, text, sizeof(text), &symbol, NULL);
+                for (n = 0; n < length; ++n) maage_window_input_character(window, (unsigned char)text[n]);
+            }
             if (event.type == KeyPress || event.type == KeyRelease) {
                 /* Servers without detectable repeat emit release/press pairs. */
                 if (event.type == KeyRelease && XPending(native->display)) {

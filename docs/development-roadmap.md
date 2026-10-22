@@ -129,7 +129,7 @@ explicitly. `--data-directory=<absolute root>` overrides the global resource and
 registry root. Client never authenticates or downloads Minecraft resources.
 
 ```sh
-maage-client                         # Resume last world; create one if none exists
+maage-client                         # Title screen and instance world selection
 maage-client --new-world              # Unique world ID and automatic seed
 maage-client --seed=-123456789         # Unique world ID with the specified seed
 maage-client --create-world=f4a2c9b1-8e36-4f1c-91ac-7d02ee39d82c --seed=42 --world-name="Example World"
@@ -708,11 +708,24 @@ Server executable without moving actual gameplay authority does not qualify.
 
 ## Phase 8 — Client GUI & Menu Completion
 
+The current Client has original MaaGE title/world-selection screens implemented
+within its numeric GUI registry, with reconstructed widgets/font/dirt textures.
+Default startup shows Title without starting simulation; Singleplayer supports
+scrollable saved-world selection, double-click/keyboard play, creation with a
+name, optional signed seed and Creative/Survival mode, rename, refresh and confirmed
+permanent deletion. Corrupt/unsupported saves remain visible and cannot be played.
+Catalog and administration use a bounded worker and reusable current-format World
+storage APIs. Loading starts the existing integrated Server; Save and Quit flushes
+and joins it before returning to Title. Explicit world CLI arguments retain direct
+startup. Native text fields currently accept ASCII, matching the existing font.
+The same frame limiter serves menus and gameplay. Multiplayer is disabled until
+its transport is implemented. Runtime/UI verification remains programmer-owned.
+
 Build upon Phase 2.75's existing numeric screen registration, GUI primitives and
 screen stack; do not introduce a parallel UI/navigation system.
 
-- Add the main/title screen, single-player world selection, world creation and
-  management, and loading/progress screens.
+- Build upon the implemented title, world selection, creation, management and
+  loading screens; extend progress reporting as startup stages expose it.
 - Complete Options, including sound, video and controls, and finish the pause menu.
 - Improve inventory and Creative interfaces, logical GUI scaling, focus and input
   routing, and correct Back/Escape navigation.

@@ -155,6 +155,18 @@ maage_status maage_window_get_state(maage_window *window, maage_window_state *st
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
 }
 
+void maage_window_input_character(maage_window *window, unsigned int character)
+{
+    size_t length;
+    if (!window || !window->input.focused) return;
+    if (character == 127) character = 8;
+    if (character != 8 && (character < 32 || character > 126)) return;
+    length = strlen(window->input.text);
+    if (length + 1 < sizeof(window->input.text)) {
+        window->input.text[length] = (char)character;
+        window->input.text[length + 1] = 0;
+    }
+}
 void maage_window_input_key(maage_window *window, maage_input_key key, int down)
 {
     if (key < 0 || key >= MAAGE_INPUT_KEY_COUNT) return;
@@ -184,6 +196,7 @@ maage_status maage_window_get_input(maage_window *window, maage_input_snapshot *
     window->input.primary_pressed = 0;
     window->input.secondary_pressed = 0;
     window->input.scroll_y = 0;
+    window->input.text[0] = 0;
     window->input.mouse_delta_x = window->input.mouse_delta_y = 0.0;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
 }

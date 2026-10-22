@@ -183,7 +183,7 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
 }
 static void maage_client_ui_menu_draw(maage_client_ui *ui, void *context)
 {
-    static const char *const labels[3] = {"Resume Game", "Options...", "Exit Client"};
+    static const char *const labels[3] = {"Resume Game", "Options...", "Save and Quit to Title"};
     static const char *const scales[5] = {"Auto", "1x", "2x", "3x", "4x"};
     static const char *const leaves[3] = {"Fast", "Smart", "Fancy"};
     static const char *const modes[3] = {"Windowed", "Borderless", "Fullscreen"};
@@ -359,7 +359,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         (input->primary_pressed || input->accept)) ui->click(ui->click_context);
     if (input->f11) maage_client_ui_request_window_mode(ui,
         (maage_client_window_choice)(ui->window_mode ? MAAGE_CLIENT_WINDOWED : ui->last_nonwindowed_mode));
-    if (input->escape) { ui->dragging_fps = 0; ui->dragging_volume = 0;
+    if (input->escape && maage_client_ui_current(ui) < MAAGE_CLIENT_UI_TITLE) { ui->dragging_fps = 0; ui->dragging_volume = 0;
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
@@ -609,8 +609,8 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     ui->draw_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.logical_width = ui->width; ui->batch.logical_height = ui->height;
     ui->clip.x = ui->clip.y = 0; ui->clip.width = ui->width; ui->clip.height = ui->height;
-    maage_client_ui_gameplay_draw(ui);
-    if (!maage_client_ui_modal(ui)) {
+    if (ui->has_snapshot) maage_client_ui_gameplay_draw(ui);
+    if (ui->has_snapshot && !maage_client_ui_modal(ui)) {
         rectangle.x = ui->width * 0.5f - 7.5f;
         rectangle.y = ui->height * 0.5f - 7.5f;
         rectangle.width = rectangle.height = 15;

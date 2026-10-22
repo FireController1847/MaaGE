@@ -15,6 +15,22 @@ typedef struct maage_world_record {
     int new_world; /* pending initial spawn; persists until first player save */
     maage_gameplay_save gameplay;
 } maage_world_record;
+/* Menu/admin I/O boundary: copied display metadata, never live gameplay data.
+ * List owns a growable array released with free(); corrupt entries retain their
+ * UUID and failure status so they remain visible without becoming playable.
+ * Call while holding the instance lease; mutations also acquire the world lock. */
+typedef struct maage_world_summary {
+    char id[37], name[128], created_utc[32];
+    unsigned int game_mode;
+    maage_status status;
+} maage_world_summary;
+maage_status maage_world_store_list(const char *instance_root,
+    const maage_item_registry *items, maage_world_summary **entries, size_t *count,
+    char error[256], maage_status_trace *trace);
+maage_status maage_world_store_rename(const char *instance_root, const char *id,
+    const char *name, const maage_item_registry *items, char error[256], maage_status_trace *trace);
+maage_status maage_world_store_delete(const char *instance_root, const char *id,
+    char error[256], maage_status_trace *trace);
 /* Metadata/import boundary only. instance_root is an absolute physical instance
  * directory containing instance.json; global application-data roots are rejected.
  * World IDs are canonical UUIDs. NULL id resumes the instance's last selection,

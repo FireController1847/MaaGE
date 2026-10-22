@@ -527,6 +527,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
     maage_window *window;
     maage_cocoa_window *native;
     maage_input_key key;
+    int text_event = 0;
     NSEventType type = [event type];
     for (window = system->windows; window; window = window->next) {
         native = window->platform;
@@ -537,6 +538,16 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
         }
         if (type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
             if (type == NSEventTypeKeyDown && ([event modifierFlags] & NSEventModifierFlagCommand)) return 0;
+            if (type == NSEventTypeKeyDown && !window->input.captured) {
+                NSString *characters = [event characters];
+                NSUInteger n;
+                for (n = 0; n < [characters length]; ++n) {
+                    unsigned int character = [characters characterAtIndex:n];
+                    maage_window_input_character(window, character);
+                    if (character == 8 || character == 127 || (character >= 32 && character <= 126))
+                        text_event = 1;
+                }
+            }
             switch ([event keyCode]) {
             case 13: key = MAAGE_INPUT_KEY_W; break;
             case 0: key = MAAGE_INPUT_KEY_A; break;
@@ -562,7 +573,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
             case 26: key = MAAGE_INPUT_KEY_7; break;
             case 28: key = MAAGE_INPUT_KEY_8; break;
             case 25: key = MAAGE_INPUT_KEY_9; break;
-            default: return 0;
+            default: return text_event;
             }
             maage_window_input_key(window, key, type == NSEventTypeKeyDown);
             return 1;

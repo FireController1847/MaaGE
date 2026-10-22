@@ -1209,3 +1209,176 @@ incompatible:
     maage_store_error(error, "Chunk has invalid heights or unresolved registered content identities.");
     return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
 }
+
+/* Catalog reads use the same current-format decoder as authoritative startup. */
+typedef struct maage_store_catalog {
+    const char *root;
+    const maage_item_registry *items;
+    maage_world_summary *entries;
+    size_t count, capacity;
+    maage_status result;
+} maage_store_catalog;
+static int maage_store_catalog_entry(const char *name, maage_folder_link_kind kind, void *context)
+{
+    maage_store_catalog *catalog = (maage_store_catalog *)context;
+    maage_world_store *store;
+    maage_world_summary *grown, *entry;
+    char error[256];
+    size_t capacity;
+    if (kind != MAAGE_FOLDER_LINK_DIRECTORY || !maage_storage_uuid_valid(name)) return 1;
+    if (catalog->count == catalog->capacity) {
+        capacity = catalog->capacity ? catalog->capacity * 2 : 16;
+        if (capacity < catalog->capacity || capacity > (size_t)-1 / sizeof(*grown)) goto memory;
+        grown = (maage_world_summary *)realloc(catalog->entries, capacity * sizeof(*grown));
+        if (!grown) goto memory;
+        catalog->entries = grown; catalog->capacity = capacity;
+    }
+    store = (maage_world_store *)calloc(1, sizeof(*store));
+    if (!store) goto memory;
+    store->items = catalog->items;
+    entry = &catalog->entries[catalog->count++]; memset(entry, 0, sizeof(*entry));
+    strcpy(entry->id, name); strcpy(entry->name, "Unreadable world");
+    entry->status = maage_storage_join(store->directory, sizeof(store->directory), catalog->root, name);
+    if (!maage_status_failed(entry->status))
+        entry->status = maage_store_metadata_load(store, name, &store->record, error, NULL);
+    if (!maage_status_failed(entry->status)) {
+        strcpy(entry->name, store->record.name); strcpy(entry->created_utc, store->record.created_utc);
+        entry->game_mode = store->record.gameplay.mode;
+    }
+    maage_gameplay_save_clear(&store->record.gameplay); free(store);
+    return 1;
+memory:
+    catalog->result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, 0);
+    return 0;
+}
+static int maage_store_catalog_order(const void *left, const void *right)
+{
+    const maage_world_summary *a = (const maage_world_summary *)left;
+    const maage_world_summary *b = (const maage_world_summary *)right;
+    int order = strcmp(b->created_utc, a->created_utc);
+    return order ? order : strcmp(a->id, b->id);
+}
+maage_status maage_world_store_list(const char *instance_root, const maage_item_registry *items,
+    maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace)
+{
+    maage_store_catalog catalog;
+    char path[MAAGE_PATH_CAPACITY];
+    maage_status result;
+    if (!entries || !count || !items || !maage_item_registry_is_finalized(items) ||
+        !maage_folder_link_managed_path(instance_root, 0))
+        return maage_store_fail(error, "Invalid world catalog arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+    *entries = NULL; *count = 0;
+    result = maage_storage_join(path, sizeof(path), instance_root, "instance.json");
+    if (maage_status_failed(result)) return result;
+    if (maage_storage_status(path) != 1) return maage_store_fail(error, "A physical instance is required.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+    result = maage_storage_join(path, sizeof(path), instance_root, "worlds");
+    if (maage_status_failed(result)) return result;
+    if (!maage_storage_status(path)) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
+    memset(&catalog, 0, sizeof(catalog)); catalog.root = path; catalog.items = items;
+    result = maage_folder_link_list(path, maage_store_catalog_entry, &catalog);
+    if (maage_status_failed(catalog.result)) result = catalog.result;
+    if (maage_status_failed(result)) { free(catalog.entries); return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD); }
+    if (catalog.count > 1) qsort(catalog.entries, catalog.count, sizeof(*catalog.entries), maage_store_catalog_order);
+    *entries = catalog.entries; *count = catalog.count; return result;
+}
+maage_status maage_world_store_rename(const char *instance_root, const char *id,
+    const char *name, const maage_item_registry *items, char error[256], maage_status_trace *trace)
+{
+    maage_world_store *store;
+    char worlds[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY];
+    maage_storage_lock *selection = NULL;
+    maage_status result, closed;
+    if (!name || !maage_store_name(name) || !id || !maage_storage_uuid_valid(id) ||
+        !items || !maage_item_registry_is_finalized(items) ||
+        !maage_folder_link_managed_path(instance_root, 0))
+        return maage_store_fail(error, "Invalid world rename arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SAVE, trace);
+    store = (maage_world_store *)calloc(1, sizeof(*store));
+    if (!store) return maage_store_fail(error, "Cannot allocate world metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
+    store->items = items;
+    result = maage_storage_join(path, sizeof(path), instance_root, "instance.json");
+    if (!maage_status_failed(result) && maage_storage_status(path) != 1)
+        result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_VALIDATE, 0);
+    if (!maage_status_failed(result)) result = maage_storage_join(worlds, sizeof(worlds), instance_root, "worlds");
+    if (!maage_status_failed(result)) result = maage_storage_join(store->directory, sizeof(store->directory), worlds, id);
+    if (!maage_status_failed(result) && !maage_folder_link_managed_path(store->directory, 0))
+        result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0);
+    if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), worlds, ".selection.lock");
+    if (!maage_status_failed(result)) result = maage_storage_acquire(path, &selection, trace);
+    if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), store->directory, ".world.lock");
+    if (!maage_status_failed(result)) result = maage_storage_acquire(path, &store->lock, trace);
+    if (!maage_status_failed(result)) result = maage_store_metadata_load(store, id, &store->record, error, trace);
+    if (!maage_status_failed(result)) {
+        strcpy(store->record.name, name);
+        result = maage_store_metadata_write(store, &store->record, error, trace);
+    }
+    closed = maage_world_store_close(store);
+    if (!maage_status_failed(result)) result = closed;
+    closed = maage_storage_release(selection);
+    return maage_status_failed(result) ? result : closed;
+}
+
+typedef struct maage_store_remove {
+    const char *path;
+    int chunks;
+    maage_status result;
+} maage_store_remove;
+static int maage_store_remove_entry(const char *name, maage_folder_link_kind kind, void *context)
+{
+    maage_store_remove *remove = (maage_store_remove *)context, child;
+    char path[MAAGE_PATH_CAPACITY];
+    if (!strcmp(name, ".world.lock")) return 1;
+    remove->result = maage_storage_join(path, sizeof(path), remove->path, name);
+    if (maage_status_failed(remove->result)) return 0;
+    if (kind == MAAGE_FOLDER_LINK_FILE) remove->result = maage_storage_remove(path);
+    else if (!remove->chunks && kind == MAAGE_FOLDER_LINK_DIRECTORY && !strcmp(name, "chunks")) {
+        child.path = path; child.chunks = 1; child.result = 0;
+        remove->result = maage_folder_link_list(path, maage_store_remove_entry, &child);
+        if (maage_status_failed(child.result)) remove->result = child.result;
+        if (!maage_status_failed(remove->result)) remove->result = maage_storage_remove_directory(path);
+    } else remove->result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+    return !maage_status_failed(remove->result);
+}
+maage_status maage_world_store_delete(const char *instance_root, const char *id,
+    char error[256], maage_status_trace *trace)
+{
+    char worlds[MAAGE_PATH_CAPACITY], directory[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY];
+    maage_storage_lock *selection = NULL, *lock = NULL;
+    maage_store_remove remove;
+    maage_status result, closed;
+    if (!id || !maage_storage_uuid_valid(id) || !maage_folder_link_managed_path(instance_root, 0))
+        return maage_store_fail(error, "Invalid world deletion arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REMOVE, trace);
+    result = maage_storage_join(path, sizeof(path), instance_root, "instance.json");
+    if (!maage_status_failed(result) && maage_storage_status(path) != 1)
+        result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_VALIDATE, 0);
+    if (!maage_status_failed(result)) result = maage_storage_join(worlds, sizeof(worlds), instance_root, "worlds");
+    if (!maage_status_failed(result)) result = maage_storage_join(directory, sizeof(directory), worlds, id);
+    if (!maage_status_failed(result) && !maage_folder_link_managed_path(directory, 0))
+        result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+    if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), worlds, ".selection.lock");
+    if (!maage_status_failed(result)) result = maage_storage_acquire(path, &selection, trace);
+    if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), directory, ".world.lock");
+    if (!maage_status_failed(result)) result = maage_storage_acquire(path, &lock, trace);
+    if (!maage_status_failed(result)) {
+        remove.path = directory; remove.chunks = 0; remove.result = 0;
+        result = maage_folder_link_list(directory, maage_store_remove_entry, &remove);
+        if (maage_status_failed(remove.result)) result = remove.result;
+    }
+    closed = maage_storage_release(lock);
+    if (!maage_status_failed(result)) result = closed;
+    if (!maage_status_failed(result)) result = maage_storage_remove(path);
+    if (!maage_status_failed(result)) result = maage_storage_remove_directory(directory);
+    if (!maage_status_failed(result)) {
+        unsigned char *selected = NULL;
+        size_t length = 0;
+        result = maage_storage_join(path, sizeof(path), instance_root, "config/last-world");
+        if (!maage_status_failed(result) && maage_storage_status(path) == 1) {
+            result = maage_store_read(path, 37, &selected, &length, error, trace);
+            if (!maage_status_failed(result) && (length == 36 || (length == 37 && selected[36] == '\n')) &&
+                !memcmp(selected, id, 36)) result = maage_storage_remove(path);
+            free(selected);
+        }
+    }
+    closed = maage_storage_release(selection);
+    if (!maage_status_failed(result)) result = closed;
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE);
+}
