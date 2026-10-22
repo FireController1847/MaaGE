@@ -76,30 +76,28 @@ static const maage_chunk *maage_mesh_neighbor(const maage_chunk *chunk,
     return chunk;
 }
 
-/* Keep the exposed leaf face and one additional cutout face per viewing
- * direction. A third plane behind two leaves (or a leaf backed by opaque
- * stone/wood) rarely adds visible foliage, even through cutout holes.
- * Unknown neighbor chunks are not treated as occluders. The look is
- * deliberately between Fancy's six faces per leaf and Fast's solid shell. */
+/* Preserve the exposed plane and two interior cutout planes per direction.
+ * The caller has checked the first leaf; both deeper samples must also be
+ * leaves. A distant trunk cannot replace foliage coverage through cutout holes.
+ * Missing neighbors and thin crowns retain their faces. */
 static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry,
     const maage_chunk *chunk, const maage_chunk *neighbors[4],
     int x, int y, int z, unsigned int face)
 {
     const maage_chunk *sample;
     const maage_block_state_definition *state;
-    const maage_block_definition *block;
-    int nx, ny, nz;
-    nx = x + 2 * maage_face_neighbor[face][0];
-    ny = y + 2 * maage_face_neighbor[face][1];
-    nz = z + 2 * maage_face_neighbor[face][2];
-    if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) return 0;
-    sample = maage_mesh_neighbor(chunk, neighbors, &nx, &nz);
-    if (!sample) return 0;
-    state = maage_block_registry_state(registry, maage_chunk_get(sample, nx, ny, nz));
-    if (!state) return 0;
-    if (state->block_id == MAAGE_BLOCK_LEAVES) return 1;
-    block = maage_block_registry_block(registry, state->block_id);
-    return block && block->opaque;
+    int distance, nx, ny, nz;
+    for (distance = 2; distance <= 3; ++distance) {
+        nx = x + distance * maage_face_neighbor[face][0];
+        ny = y + distance * maage_face_neighbor[face][1];
+        nz = z + distance * maage_face_neighbor[face][2];
+        if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) return 0;
+        sample = maage_mesh_neighbor(chunk, neighbors, &nx, &nz);
+        if (!sample) return 0;
+        state = maage_block_registry_state(registry, maage_chunk_get(sample, nx, ny, nz));
+        if (!state || state->block_id != MAAGE_BLOCK_LEAVES) return 0;
+    }
+    return 1;
 }
 
 static size_t maage_mesh_generate(const maage_block_registry *registry,

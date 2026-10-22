@@ -248,9 +248,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Logical GUI coordinates scale independently of framebuffer resolution.
 - The Client Leaves option is persistent: Fast uses opaque textures and aggressive
   internal-face culling; Smart uses cutout textures and culls leaf-to-leaf faces
-  obscured behind two face-facing leaf layers or a leaf backed by an opaque block,
-  retaining the exposed and first interior cutout planes per direction; Fancy
-  (default) uses cutout textures and preserves all internal leaf faces. Smart
+  obscured behind three consecutive face-facing leaf layers, retaining the exposed
+  plane and two interior cutout planes per direction. Distant trunks/opaque blocks
+  never substitute for leaf coverage; leaf faces touching opaque blocks still cull.
+  Fancy (default) uses cutout textures and preserves all internal leaf faces. Smart
   must meaningfully reduce geometry without Fast's hollow-canopy appearance.
   Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
