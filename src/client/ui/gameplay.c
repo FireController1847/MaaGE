@@ -352,3 +352,22 @@ void maage_client_ui_queue_respawn(maage_client_ui *ui)
     command.kind = MAAGE_CMD_RESPAWN;
     ui->route_result = maage_client_ui_queue_command(ui, &command);
 }
+
+maage_status maage_client_ui_retry_command(maage_client_ui *ui,
+    const maage_session_command *command)
+{
+    if (!ui || !command || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SUBMIT, 0);
+    if (ui->command_count == MAAGE_CLIENT_UI_COMMAND_CAPACITY) {
+        ui->route_result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+            MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SUBMIT, 0);
+        maage_client_ui_notify(ui, ui->route_result, maage_time_monotonic_seconds());
+        return ui->route_result;
+    }
+    ui->command_read = (ui->command_read + MAAGE_CLIENT_UI_COMMAND_CAPACITY - 1U) %
+        MAAGE_CLIENT_UI_COMMAND_CAPACITY;
+    ui->commands[ui->command_read] = *command;
+    ++ui->command_count;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+}

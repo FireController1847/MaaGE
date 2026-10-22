@@ -80,7 +80,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     double now, const maage_session_snapshot *snapshot, int radius, int paused,
     maage_renderer *renderer, const maage_client_mesh_stats *meshes)
 {
-    maage_client_ui_debug *text = &debug->text;
+    maage_client_ui_debug *text;
     const maage_client_metadata *identity = maage_client_identity();
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
     const maage_world_stats *stats;
@@ -92,6 +92,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     unsigned left = 0, right = 0;
     if (!debug || !snapshot || !renderer || !meshes ||
         snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
+    text = &debug->text;
     stats = &snapshot->world_stats;
     player = &snapshot->player.player;
     yaw = snapshot->player.yaw;

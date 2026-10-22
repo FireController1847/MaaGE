@@ -102,7 +102,10 @@ static unsigned int maage_client_ui_menu_input(maage_client_ui *ui,
     if (hover >= 0 && (input->primary_pressed || ui->mouse_x != ui->previous_mouse_x ||
         ui->mouse_y != ui->previous_mouse_y)) ui->selected = (unsigned int)hover;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
-        if (!ui->has_snapshot && ui->selected == 5U) ui->selected = 6U;
+        if (!ui->has_snapshot && ui->selected == 5U) {
+            if (hover == 5 && input->primary_pressed) return 0;
+            ui->selected = input->previous ? 4U : 6U;
+        }
         if ((input->primary_pressed && hover == 0) ||
             (ui->dragging_fps && input->primary_down)) {
             rectangle = maage_client_ui_menu_rectangle(ui, 0, screen);
@@ -245,7 +248,13 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->renderer = renderer; ui->window = window;
     ui->last_nonwindowed_mode = ui->confirmed_fullscreen_style = MAAGE_CLIENT_BORDERLESS;
     ui->fps_step = 26; ui->vsync = 1; ui->leaves_mode = MAAGE_LEAVES_FANCY;
-    { unsigned int n; for (n = 0; n < 7; ++n) ui->audio_volume[n] = 100; }
+    ui->audio_volume[0] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
+    ui->audio_volume[1] = MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS;
+    ui->audio_volume[2] = MAAGE_CLIENT_AUDIO_DEFAULT_PLAYER;
+    ui->audio_volume[3] = MAAGE_CLIENT_AUDIO_DEFAULT_AMBIENT;
+    ui->audio_volume[4] = MAAGE_CLIENT_AUDIO_DEFAULT_WEATHER;
+    ui->audio_volume[5] = MAAGE_CLIENT_AUDIO_DEFAULT_MUSIC;
+    ui->audio_volume[6] = MAAGE_CLIENT_AUDIO_DEFAULT_UI;
     ui->vsync_supported = maage_status_code(maage_renderer_set_vsync(renderer, 1)) == MAAGE_STATUS_SUCCESS;
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;

@@ -54,6 +54,10 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,
  * BUFFER_OVERFLOW and retains the unconsumed request for caller feedback. */
 maage_status maage_client_ui_take_command(maage_client_ui *ui,
     maage_session_command *command);
+/* On local transport BUFFER_OVERFLOW, restore the just-taken command at the
+ * front without reordering later GUI requests. Main-thread caller retries. */
+maage_status maage_client_ui_retry_command(maage_client_ui *ui,
+    const maage_session_command *command);
 /* Registration grows direct numeric indexing before finalization. ID zero is
  * gameplay (no modal). Unknown IDs and navigation cycles fail explicitly. */
 maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,
