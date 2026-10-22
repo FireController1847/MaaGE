@@ -80,6 +80,10 @@ typedef struct maage_render_ui_data {
     maage_render_texture *texture;
     float logical_width;
     float logical_height;
+    /* The first N indices compose an opaque background. Supporting backends
+     * Gaussian-blur their completed render target before drawing the remaining
+     * indices at native resolution. Others simply render the batch unchanged. */
+    size_t gaussian_background_indices;
 } maage_render_ui_data;
 
 const char *maage_render_backend_name(maage_render_backend backend);

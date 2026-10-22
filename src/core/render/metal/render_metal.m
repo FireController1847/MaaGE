@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
+#import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CATransaction.h>
 #include "../render_internal.h"
@@ -28,6 +29,10 @@ typedef struct maage_metal_renderer {
     id<MTLBuffer> ui_indices[MAAGE_METAL_FRAME_SLOTS][3];
     id<MTLCommandBuffer> frames[MAAGE_METAL_FRAME_SLOTS];
     id<MTLTexture> colors[MAAGE_METAL_FRAME_SLOTS];
+    /* Per-slot targets never overwrite in-flight GPU work. */
+    id<MTLTexture> panorama_source[MAAGE_METAL_FRAME_SLOTS];
+    id<MTLTexture> panorama_blurred[MAAGE_METAL_FRAME_SLOTS];
+    MPSImageGaussianBlur *panorama_filter;
     id<MTLCommandQueue> present_queue;
     maage_mutex *present_mutex;
     maage_condition *present_condition;
@@ -305,6 +310,10 @@ static maage_status maage_metal_create(maage_renderer *renderer)
     if (maage_status_failed(result)) return result;
     native->device = MTLCreateSystemDefaultDevice();
     if (!native->device) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    native->panorama_filter = [[MPSImageGaussianBlur alloc] initWithDevice:native->device sigma:9.0f];
+    if (!native->panorama_filter)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    native->panorama_filter.edgeMode = MPSImageEdgeModeClamp;
     if ([native->device name]) {
         strncpy(renderer->device_name, [[native->device name] UTF8String], sizeof(renderer->device_name) - 1);
         renderer->device_name[sizeof(renderer->device_name) - 1] = 0;
@@ -396,7 +405,10 @@ static maage_status maage_metal_destroy(maage_renderer *renderer)
             }
         }
         [native->colors[slot] release];
+        [native->panorama_source[slot] release];
+        [native->panorama_blurred[slot] release];
     }
+    [native->panorama_filter release];
     if (native->installed) {
         [(NSWindow *)renderer->native.handles.cocoa.window setBackgroundColor:native->previous_background];
         [native->view setLayer:native->previous_layer];
@@ -461,6 +473,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     maage_metal_mesh *geometry;
     size_t index;
     const maage_render_ui_data *layers[3], *batch;
+    size_t panorama_count = 0;
     int layer;
     CGRect frame;
     CGSize drawable_size;
@@ -472,6 +485,8 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     double started, acquired;
     layers[0] = preparing ? NULL : renderer->background;
     layers[1] = preparing ? NULL : renderer->overlay; layers[2] = ui;
+    if (ui && ui->gaussian_background_indices <= ui->index_count)
+        panorama_count = ui->gaussian_background_indices;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, MAAGE_STATUS_INVALID_STATE);
     result = maage_metal_present_result(renderer);
     if (maage_status_failed(result)) return result;
@@ -654,7 +669,84 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         }
     }
     [encoder endEncoding];
-    if ((layers[1] && layers[1]->index_count) || (layers[2] && layers[2]->index_count)) {
+    if (panorama_count) {
+        id<MTLTexture> source, blurred;
+        MTLTextureDescriptor *description;
+        MTLRenderPassDescriptor *offscreen;
+        maage_render_ui_vertex quad[4];
+        float logical[2] = {ui->logical_width, ui->logical_height};
+        unsigned int vertex;
+        if (!native->panorama_source[slot] ||
+            native->panorama_source[slot].width != color.width ||
+            native->panorama_source[slot].height != color.height) {
+            description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+                MTLPixelFormatBGRA8Unorm width:color.width height:color.height mipmapped:NO];
+            description.storageMode = MTLStorageModePrivate;
+            description.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+            source = [native->device newTextureWithDescriptor:description];
+            description.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
+            blurred = [native->device newTextureWithDescriptor:description];
+            if (!source || !blurred) {
+                [source release]; [blurred release]; [pool drain];
+                return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED,
+                    MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+            }
+            [native->panorama_source[slot] release];
+            [native->panorama_blurred[slot] release];
+            native->panorama_source[slot] = source;
+            native->panorama_blurred[slot] = blurred;
+        }
+        source = native->panorama_source[slot];
+        blurred = native->panorama_blurred[slot];
+        /* Compose all six cube faces in framebuffer space first. */
+        offscreen = [MTLRenderPassDescriptor renderPassDescriptor];
+        offscreen.colorAttachments[0].texture = source;
+        offscreen.colorAttachments[0].loadAction = MTLLoadActionClear;
+        offscreen.colorAttachments[0].storeAction = MTLStoreActionStore;
+        offscreen.colorAttachments[0].clearColor = MTLClearColorMake(
+            renderer->clear[0], renderer->clear[1], renderer->clear[2], renderer->clear[3]);
+        encoder = [command renderCommandEncoderWithDescriptor:offscreen];
+        if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+        [encoder setRenderPipelineState:native->ui_pipeline];
+        [encoder setCullMode:MTLCullModeNone];
+        [encoder setVertexBuffer:native->ui_vertices[slot][2] offset:0 atIndex:0];
+        [encoder setVertexBytes:logical length:sizeof(logical) atIndex:1];
+        [encoder setFragmentTexture:(id<MTLTexture>)ui->texture->platform atIndex:0];
+        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:panorama_count
+            indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][2] indexBufferOffset:0];
+        [encoder endEncoding];
+        /* Gaussian blur AFTER full compositing, with zero CPU readback. */
+        [native->panorama_filter encodeToCommandBuffer:command
+            sourceTexture:source destinationTexture:blurred];
+        /* Draw filtered image as an opaque full-screen image, before UI. */
+        memset(quad, 0, sizeof(quad));
+        for (vertex = 0; vertex < 4; ++vertex) {
+            quad[vertex].position[0] = (vertex == 1 || vertex == 3) ? logical[0] : 0.0f;
+            quad[vertex].position[1] = vertex >= 2 ? logical[1] : 0.0f;
+            quad[vertex].uv[0] = (vertex == 1 || vertex == 3) ? 1.0f : 0.0f;
+            quad[vertex].uv[1] = vertex >= 2 ? 1.0f : 0.0f;
+            quad[vertex].color[0] = quad[vertex].color[1] =
+                quad[vertex].color[2] = quad[vertex].color[3] = 1.0f;
+        }
+        offscreen = [MTLRenderPassDescriptor renderPassDescriptor];
+        offscreen.colorAttachments[0].texture = color;
+        offscreen.colorAttachments[0].loadAction = MTLLoadActionLoad;
+        offscreen.colorAttachments[0].storeAction = MTLStoreActionStore;
+        encoder = [command renderCommandEncoderWithDescriptor:offscreen];
+        if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+        [encoder setRenderPipelineState:native->ui_pipeline];
+        [encoder setDepthStencilState:nil];
+        [encoder setCullMode:MTLCullModeNone];
+        [encoder setVertexBytes:quad length:sizeof(quad) atIndex:0];
+        [encoder setVertexBytes:logical length:sizeof(logical) atIndex:1];
+        [encoder setFragmentTexture:blurred atIndex:0];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        [encoder endEncoding];
+    }
+    if ((layers[1] && layers[1]->index_count) ||
+        (layers[2] && layers[2]->index_count > panorama_count)) {
         MTLViewport viewport = {0, 0, color.width, color.height, 0, 1};
         pass = [MTLRenderPassDescriptor renderPassDescriptor];
         pass.colorAttachments[0].texture = color;
@@ -671,8 +763,14 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
             [encoder setVertexBuffer:native->ui_vertices[slot][layer] offset:0 atIndex:0];
             [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
             [encoder setFragmentTexture:(id<MTLTexture>)batch->texture->platform atIndex:0];
-            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:batch->index_count
-                indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][layer] indexBufferOffset:0];
+            {
+                size_t first = layer == 2 ? panorama_count : 0;
+                if (batch->index_count > first)
+                    [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                        indexCount:batch->index_count-first indexType:MTLIndexTypeUInt32
+                        indexBuffer:native->ui_indices[slot][layer]
+                        indexBufferOffset:first*sizeof(unsigned int)];
+            }
         }
         [encoder endEncoding];
     }

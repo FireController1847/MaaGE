@@ -397,6 +397,11 @@ maage_status maage_renderer_draw_frame(maage_renderer *renderer,
     for (layer = 0; layer < 3; ++layer) {
         batch = layers[layer];
         if (!batch || !batch->index_count) continue;
+        if (batch == ui && (batch->gaussian_background_indices > batch->index_count ||
+            batch->gaussian_background_indices % 3U))
+            return MAAGE_STATUS_PROPAGATE(trace,
+                MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0),
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
         if (!batch->texture || batch->texture->renderer != renderer || !batch->texture->owned ||
             !batch->vertices || !batch->indices || !batch->vertex_count || batch->index_count % 3 ||
             batch->vertex_count > UINT_MAX ||

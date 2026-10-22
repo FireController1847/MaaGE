@@ -90,6 +90,9 @@ static void title_panorama(maage_client_ui *ui)
         }
     }
     maage_client_ui_panel(ui, full, 0.38f, 0.36f, 0.43f, 0.28f);
+    /* Finished panorama. The renderer filters this composed segment before
+     * drawing the crisp logo, splash text, widgets, and footer. */
+    ui->batch.gaussian_background_indices = ui->batch.index_count;
 }
 static maage_client_ui_rect title_button(const maage_client_ui *ui,unsigned int id)
 {

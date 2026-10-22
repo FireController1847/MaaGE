@@ -3,7 +3,6 @@
 #include "maage/storage.h"
 #include "maage/log.h"
 #include <limits.h>
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,76 +32,6 @@ static maage_status maage_client_ui_decoration_fallback(maage_image *image, int 
         }
     }
     return result;
-}
-
-/* Separable Gaussian convolution on decoded locally verified panorama faces.
- * This is a one-time resource preprocessing step, not per-frame CPU filtering.
- * It avoids the block mosaic from drawing large screen-space blur quads and
- * leaves the UI atlas, font, and native renderer unchanged. */
-static int maage_client_ui_panorama_gaussian(maage_image *image)
-{
-    enum { RADIUS = 9 };
-    double kernel[RADIUS+1], total, sum, component;
-    unsigned char *horizontal, *src, *dst;
-    size_t bytes;
-    int x, y, channel, offset, sample, i;
-    if (!image || !image->pixels || image->width <= 0 || image->height <= 0 ||
-        image->stride < (size_t)image->width * 4U ||
-        (size_t)image->height > ((size_t)-1) / image->stride)
-        return 0;
-    bytes = (size_t)image->height * image->stride;
-    horizontal = (unsigned char *)malloc(bytes);
-    if (!horizontal) return 0;
-    total = 1.0;
-    kernel[0] = 1.0;
-    for (i = 1; i <= RADIUS; ++i) {
-        kernel[i] = exp(-((double)i * (double)i) / (2.0 * 3.5 * 3.5));
-        total += 2.0 * kernel[i];
-    }
-    for (i = 0; i <= RADIUS; ++i) kernel[i] /= total;
-    for (y = 0; y < image->height; ++y) {
-        src = image->pixels + (size_t)y * image->stride;
-        dst = horizontal + (size_t)y * image->stride;
-        for (x = 0; x < image->width; ++x) {
-            for (channel = 0; channel < 4; ++channel) {
-                sum = kernel[0] * src[(size_t)x*4U+channel];
-                for (offset = 1; offset <= RADIUS; ++offset) {
-                    sample = x - offset;
-                    if (sample < 0) sample = 0;
-                    sum += kernel[offset] * src[(size_t)sample*4U+channel];
-                    sample = x + offset;
-                    if (sample >= image->width) sample = image->width - 1;
-                    sum += kernel[offset] * src[(size_t)sample*4U+channel];
-                }
-                component = sum + 0.5;
-                dst[(size_t)x*4U+channel] = (unsigned char)(component > 255.0 ? 255 :
-                    (component < 0.0 ? 0 : (int)component));
-            }
-        }
-    }
-    for (y = 0; y < image->height; ++y) {
-        dst = image->pixels + (size_t)y * image->stride;
-        for (x = 0; x < image->width; ++x) {
-            for (channel = 0; channel < 4; ++channel) {
-                sum = kernel[0] * horizontal[(size_t)y*image->stride+(size_t)x*4U+channel];
-                for (offset = 1; offset <= RADIUS; ++offset) {
-                    sample = y-offset;
-                    if (sample < 0) sample = 0;
-                    sum += kernel[offset] * horizontal[(size_t)sample*image->stride+
-                        (size_t)x*4U+channel];
-                    sample = y+offset;
-                    if (sample >= image->height) sample = image->height-1;
-                    sum += kernel[offset] * horizontal[(size_t)sample*image->stride+
-                        (size_t)x*4U+channel];
-                }
-                component = sum + 0.5;
-                dst[(size_t)x*4U+channel] = (unsigned char)(component > 255.0 ? 255 :
-                    (component < 0.0 ? 0 : (int)component));
-            }
-        }
-    }
-    free(horizontal);
-    return 1;
 }
 
 maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources,
@@ -211,13 +140,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
                 maage_image_destroy(&title_images[i]);
                 maage_log_status(MAAGE_LOG_WARNING,"maage.client.ui",status,
                     "Original title resource unavailable: %s.",names_title[i]);
-            } else {
-                if (i >= 1 && i <= 6 &&
-                    !maage_client_ui_panorama_gaussian(&title_images[i]))
-                    maage_log_info("maage.client.ui",
-                        "Gaussian panorama prefilter unavailable; using the original face.");
-                resources->title_available[i] = 1;
-            }
+            } else resources->title_available[i] = 1;
         }
     }
     atlas.width = atlas.height = edge;

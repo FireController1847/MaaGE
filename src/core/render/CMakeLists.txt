@@ -22,6 +22,7 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
     find_library(MAAGE_METAL_FRAMEWORK Metal REQUIRED)
     find_library(MAAGE_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
     find_library(MAAGE_RENDER_APPKIT_FRAMEWORK AppKit REQUIRED)
+    find_library(MAAGE_METAL_PERFORMANCE_SHADERS_FRAMEWORK MetalPerformanceShaders REQUIRED)
     set(MAAGE_METAL_GENERATED "${PROJECT_BINARY_DIR}/generated/maage_mesh")
     # Embed one authoritative MSL asset for the native runtime shader compiler;
     # command-line-tools installations need no optional offline Metal toolchain.
@@ -34,7 +35,8 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
     target_compile_definitions(maage_render PRIVATE MAAGE_RENDER_HAS_METAL)
     target_compile_options(maage_render PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>")
     target_link_libraries(maage_render PRIVATE "${MAAGE_METAL_FRAMEWORK}"
-        "${MAAGE_QUARTZCORE_FRAMEWORK}" "${MAAGE_RENDER_APPKIT_FRAMEWORK}" MaaGE::Thread)
+        "${MAAGE_QUARTZCORE_FRAMEWORK}" "${MAAGE_RENDER_APPKIT_FRAMEWORK}"
+        "${MAAGE_METAL_PERFORMANCE_SHADERS_FRAMEWORK}" MaaGE::Thread)
 endif()
 if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
     # Required for Vulkan-enabled builds: never silently drop the native backend.

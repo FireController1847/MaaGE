@@ -623,6 +623,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     if (!ui || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_PRESENT, !ui ? 0 : 2);
     if (!ui->navigation.finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.vertex_count = ui->batch.index_count = 0;
+    ui->batch.gaussian_background_indices = 0;
     ui->draw_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.logical_width = ui->width; ui->batch.logical_height = ui->height;
     ui->clip.x = ui->clip.y = 0; ui->clip.width = ui->width; ui->clip.height = ui->height;
