@@ -1,5 +1,5 @@
 #include "maage/biome.h"
-#include "registry_pages.h"
+#include "maage/internal/registry_pages.h"
 #include <stdlib.h>
 #include <string.h>
 
