@@ -6,11 +6,11 @@
   <em>A modular, cross-platform reimagining of Minecraft in C, built for performance, extensibility, and modding.</em>
 </p>
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License: Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/language-ISO%20C90-555555?style=flat-square" alt="Language: ISO C90">
-  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-526b80?style=flat-square" alt="Platforms: Windows, Linux, macOS">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/Language-ISO%20C90-00599C?style=flat-square&amp;logo=c&amp;logoColor=white" alt="Language: ISO C90">
+  <img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-526b80?style=flat-square" alt="Platforms: Windows, Linux, macOS">
   <a href="https://github.com/FireController1847/MaaGE/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/FireController1847/MaaGE/build.yml?branch=main&amp;event=workflow_dispatch&amp;style=flat-square&amp;label=Latest%20Build" alt="Latest Build"></a>
-  <img src="https://img.shields.io/badge/status-Early%20Development-orange?style=flat-square" alt="Status: Early Development">
+  <img src="https://img.shields.io/badge/Status-Early%20Development-orange?style=flat-square" alt="Status: Early Development">
 </p>
 
 > **MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.**
