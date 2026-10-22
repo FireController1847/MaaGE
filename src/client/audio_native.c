@@ -575,16 +575,15 @@ static maage_status mn_scene_read_snapshot(void *context,
 /* Ambient assets use preloaded PCM; all music is registered by numeric ID
  * and decoded incrementally by a worker only when selected. The audio
  * callback performs neither file I/O nor decoding. */
+/* Registration records a logical asset only. Presentation residency starts
+ * on first playback, independently of registered sound count. */
 static maage_status mn_scene_resolve(void *context, const void *catalog,
     const char *path, maage_client_audio_scene_sound_id *numeric)
 {
     maage_native_scene *scene = (maage_native_scene *)context;
     maage_native_scene_sound *sound;
-    maage_native_pcm *pcm = NULL;
-    maage_audio_buffer *buffer = NULL;
     maage_status result;
-    size_t samples, id;
-    int music;
+    size_t id;
     (void)catalog;
     if (numeric) *numeric = 0;
     if (!scene || !path || !numeric || scene->sound_count >= ULONG_MAX - 1UL)
@@ -594,37 +593,19 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     if (maage_status_failed(result)) return result;
     scene->sound_count = id;
     sound = &scene->sounds[id];
-    music = strstr(path, "/music/") != NULL;
-    if (music) {
-        /* Register every track without decoding. Only a selected track
-         * owns a bounded streaming ring and decoder worker. */
-        if (scene->bank->next_id >= MAAGE_SOUND_MAX_CLIP_ID)
-            return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
-        sound->clip_id = ++scene->bank->next_id;
-        result = maage_sound_bank_register(scene->bank->bank, sound->clip_id, path, NULL);
-        if (maage_status_failed(result)) return result;
-        sound->music = 1;
-        *numeric = (maage_client_audio_scene_sound_id)id;
-        return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
+    if (scene->bank->next_id >= MAAGE_SOUND_MAX_CLIP_ID)
+        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
+    sound->clip_id = ++scene->bank->next_id;
+    result = maage_sound_bank_register(scene->bank->bank, sound->clip_id, path, NULL);
+    if (maage_status_failed(result)) {
+        sound->clip_id = 0;
+        return result;
     }
-    result = mn_decode_file(scene->bank, path, &pcm, NULL);
-    if (maage_status_failed(result)) return result;
-    if (pcm->pcm.frame_count > ((size_t)-1) / pcm->pcm.channels / sizeof(float)) {
-        mn_catalog_release_pcm(scene->bank, pcm);
-        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_RESOLVE);
-    }
-    samples = pcm->pcm.frame_count * (size_t)pcm->pcm.channels;
-    sound->bytes = samples * sizeof(float);
-    result = mn_upload_pcm(scene->engine, pcm, &buffer, NULL);
-    mn_catalog_release_pcm(scene->bank, pcm);
-    if (maage_status_failed(result) || !buffer)
-        return maage_status_failed(result) ? result :
-            mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_UPLOAD);
-    sound->buffer = buffer;
-    sound->music = music;
-    sound->loop = strstr(path, "/weather/rain") != NULL ||
-        strstr(path, "/liquid/water") != NULL ||
-        strstr(path, "/liquid/lava.") != NULL;
+    sound->music = strstr(path, "/music/") != NULL;
+    sound->loop = !sound->music &&
+        (strstr(path, "/weather/rain") != NULL ||
+         strstr(path, "/liquid/water") != NULL ||
+         strstr(path, "/liquid/lava.") != NULL);
     *numeric = (maage_client_audio_scene_sound_id)id;
     return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
 }
@@ -633,8 +614,7 @@ static maage_native_scene_sound *mn_scene_get(maage_native_scene *scene,
 {
     if (!scene || !numeric || numeric > scene->sound_count)
         return NULL;
-    return scene->sounds[numeric].buffer || scene->sounds[numeric].music ?
-        &scene->sounds[numeric] : NULL;
+    return scene->sounds[numeric].clip_id ? &scene->sounds[numeric] : NULL;
 }
 static int mn_scene_can_loop(void *context, const void *catalog,
     maage_client_audio_scene_sound_id numeric)
@@ -642,6 +622,28 @@ static int mn_scene_can_loop(void *context, const void *catalog,
     maage_native_scene_sound *sound = mn_scene_get((maage_native_scene *)context, numeric);
     (void)catalog;
     return sound && sound->loop;
+}
+/* The Client presentation thread may materialize an effect on first use;
+ * no asset decoding, allocation, or filesystem I/O occurs in the audio callback. */
+static maage_status mn_scene_prepare_buffer(maage_native_scene *scene,
+    maage_native_scene_sound *sound)
+{
+    maage_sound_pcm pcm;
+    maage_audio_buffer *buffer = NULL;
+    maage_status result;
+    if (sound->buffer) return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOAD);
+    if (!sound->clip_id || sound->music)
+        return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD);
+    memset(&pcm, 0, sizeof(pcm));
+    result = maage_sound_bank_decode(scene->bank->bank, sound->clip_id, &pcm, NULL);
+    if (maage_status_failed(result)) return result;
+    result = maage_audio_buffer_create_float(scene->engine->audio, pcm.samples,
+        pcm.frame_count, pcm.channels, pcm.sample_rate, &buffer, NULL);
+    (void)maage_sound_pcm_destroy(&pcm);
+    if (maage_status_failed(result)) return result;
+    if (!buffer) return mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_LOAD);
+    sound->buffer = buffer;
+    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOAD);
 }
 static maage_status mn_scene_play_sound(void *context, void *audio,
     maage_client_audio_scene_sound_id numeric, unsigned int category,
@@ -651,11 +653,14 @@ static maage_status mn_scene_play_sound(void *context, void *audio,
     static const double origin[3] = {0.0, 0.0, 0.0};
     maage_native_scene *scene = (maage_native_scene *)context;
     maage_native_scene_sound *sound = mn_scene_get(scene, numeric);
+    maage_status result;
     unsigned int bus;
     (void)audio;
     if (voice) *voice = 0;
-    if (!sound || !sound->buffer || !voice || (loop && !sound->loop))
+    if (!sound || !voice || sound->music || (loop && !sound->loop))
         return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
+    result = mn_scene_prepare_buffer(scene, sound);
+    if (maage_status_failed(result)) return result;
     bus = category == MAAGE_AUDIO_SCENE_WEATHER ? MAAGE_AUDIO_WEATHER :
         (category == MAAGE_AUDIO_SCENE_MUSIC ? MAAGE_AUDIO_MUSIC : MAAGE_AUDIO_AMBIENT);
     return mn_play(scene->engine, sound->buffer, NULL, bus, position != NULL,

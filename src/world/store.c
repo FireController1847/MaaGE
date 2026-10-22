@@ -779,6 +779,17 @@ maage_status maage_world_store_open_configured(const char *instance_root, const 
             }
         }
     }
+    /* An implicit new world selects the feature-capable generator. Reject an
+     * absent item mapping before creating a world directory or metadata that
+     * the version-3 serializer cannot encode. Legacy explicit policies remain
+     * available to callers that intentionally omit item definitions. */
+    if (create && !items && (!generation_policy ||
+        generation_policy->generator_version >= MAAGE_GENERATION_CONFIGURABLE_VERSION)) {
+        result = maage_store_fail(error,
+            "New feature-capable worlds require a finalized item registry.",
+            MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+        goto done;
+    }
     store = (maage_world_store *)calloc(1, sizeof(*store));
     if (!store) { result = maage_store_fail(error, "Not enough memory to open world storage.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_LOAD, trace); goto done; }
     store->items = items;

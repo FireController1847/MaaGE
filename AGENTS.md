@@ -178,6 +178,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   waits. Existing generators 1/2/3 are predevelopment implementations to
   consolidate, NOT frozen behaviors to retain. Future changes may invalidate
   all previous worlds. Java Random/GenLayer and seed parity are not goals.
+  The interim format still records generator policies 1/2/3, restores recorded
+  choices on opening existing worlds, and creates new default worlds with the
+  feature-capable generator 3. This does not require future compatibility when
+  the predevelopment generator implementations are consolidated.
 - Parallelize independent CPU-intensive world work by default through reusable
   `MaaGE::Jobs`, shared by Client and future headless Server. Use bounded pools,
   never threads per object. Automatic worker count is logical processors minus
@@ -248,10 +252,14 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Mode changes invalidate only World meshes and rebuild through Jobs, preserving
   lighting and simulation.
 - New Client configurations default to 240 FPS; 0 remains Unlimited, with GPU/display backpressure rather than an artificial FPS ceiling. Preserve explicit saved preferences.
-- Register all 1.7.10 music tracks by numeric asset ID; decode and upload only a
-  selected track when music playback begins, and release its Audio buffer after
-  playback stops. Memory bounds constrain decoded clips, not the number of
-  registered tracks; never report a policy limit as NOT_FOUND on disk.
+- Register all 1.7.10 music and ambient tracks by numeric asset ID without
+  decoding, retaining PCM, or reserving active voices during scene binding.
+  Stream selected music incrementally on a decoder worker into a bounded ring;
+  the device callback never decodes, allocates, or accesses the filesystem.
+  Ambient effects become resident on first use on the presentation thread.
+  Clip registry addressability is independent from per-clip decode limits,
+  resident cache budgets, streaming-ring sizes, and active-voice capacity.
+  Surface genuine allocation/policy failures, never disguise them as NOT_FOUND.
 - Client persists FPS, VSync, GUI Scale, Leaves and Window Mode in per-instance
   `config/options.ini`, using numeric settings in memory and atomic Core Storage replacement.
   Game Mode remains world data. Save on Options exit, completed F11/window transitions,
