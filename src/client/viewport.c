@@ -1360,6 +1360,10 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             received_time = now;
             operation = maage_client_ui_set_snapshot(ui, &latest);
             if (maage_status_failed(operation)) goto done;
+            if (!latest.player.health &&
+                latest.player.game_mode == MAAGE_GAME_MODE_SURVIVAL &&
+                !maage_client_ui_modal(ui))
+                (void)maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
         } else if (maage_status_failed(operation) &&
             maage_status_code(operation) != MAAGE_STATUS_NOOP &&
             maage_status_code(operation) != MAAGE_STATUS_INVALID_STATE) goto done;
