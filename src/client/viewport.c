@@ -1134,7 +1134,13 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             diagnostic_time = now; frames = 0;
         }
         if (maage_status_code(rendered) == MAAGE_STATUS_NOOP) {
-            result = maage_window_wait_events(system, 100);
+            /* A visible Metal mailbox can be full for just one refresh.
+             * Sleeping 100 ms here caused severe, avoidable frame hitches
+             * under both unlimited FPS and high caps. Keep AppKit responsive
+             * without busy-spinning while presentation catches up. */
+            int wait_ms = state.visible && !state.mode_transitioning &&
+                state.framebuffer_width > 0 && state.framebuffer_height > 0 ? 1 : 16;
+            result = maage_window_wait_events(system, wait_ms);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
         } else if (maage_client_ui_max_fps(ui) > 0) {
             maage_window_state waited_state;
@@ -1142,7 +1148,10 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             double remaining = deadline - frame_end;
             int milliseconds;
             while (remaining > 0.0) {
-                milliseconds = (int)ceil(remaining * 1000.0);
+                /* Truncation avoids routinely overshooting the 240 FPS
+                 * target by a full millisecond on coarse event waits. */
+                milliseconds = (int)(remaining * 1000.0);
+                if (milliseconds < 1) milliseconds = 1;
                 if (milliseconds > 100) milliseconds = 100;
                 result = maage_window_wait_events(system, milliseconds);
                 if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;

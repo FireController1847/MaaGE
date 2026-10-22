@@ -15,7 +15,7 @@ void maage_client_options_defaults(maage_client_options *options)
     options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_WEATHER] = MAAGE_CLIENT_AUDIO_DEFAULT_WEATHER;
     options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MUSIC] = MAAGE_CLIENT_AUDIO_DEFAULT_MUSIC;
     options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_UI] = MAAGE_CLIENT_AUDIO_DEFAULT_UI;
-    options->max_fps = 0;
+    options->max_fps = 240;
     options->vsync = 1;
     options->gui_scale = 0;
     options->leaves = MAAGE_LEAVES_FANCY;

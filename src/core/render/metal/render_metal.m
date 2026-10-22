@@ -10,6 +10,7 @@
 #include <string.h>
 
 #define MAAGE_METAL_FRAME_SLOTS 4
+#define MAAGE_METAL_MAX_PENDING_PRESENTS 2U
 
 typedef struct maage_metal_renderer {
     id<MTLDevice> device;
@@ -521,10 +522,11 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         maage_mutex_lock(native->present_mutex);
         result = native->present_result;
         if (!maage_status_failed(result) &&
-            (native->submissions_since_present >= MAAGE_METAL_FRAME_SLOTS ||
+            (native->submissions_since_present >= MAAGE_METAL_MAX_PENDING_PRESENTS ||
              started < native->drawable_retry_after)) {
-            /* The display has not consumed the previous bounded burst yet.
-             * Keep processing input/events instead of submitting busy GPU work. */
+            /* Do not flood the compositor with renders it cannot display.
+             * Keep up to two new images available for low-latency mailbox
+             * selection, independent of monitor refresh or FPS preferences. */
             ++native->deferred_frames;
             maage_mutex_unlock(native->present_mutex);
             [pool drain];
