@@ -174,6 +174,9 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
     }
     if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||
         screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&n==0&&!f->name[0])return 0;
+    /* Merely focusing a text box must not play button audio. */
+    if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||
+        screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&input->primary_pressed&&n>=3)return 0;
     if(ui->click)ui->click(ui->click_context);
     if(input->accept&&n>=3&&(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD))n=0;
     if(screen==MAAGE_CLIENT_UI_WORLDS) {

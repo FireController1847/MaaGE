@@ -241,7 +241,8 @@ static void maage_options_action(maage_client_ui *ui,
     maage_status result;
     if(!maage_options_enabled(ui,screen,id))return;
     if(screen==MAAGE_CLIENT_UI_OPTIONS) {
-        if(id==3U) {
+        if(id==0U)maage_options_adjust(ui,screen,id,1);
+        else if(id==3U) {
             ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_SOUND_SETTINGS);
         }else if(id==5U) {
             ui->video_first_row=0;
@@ -287,6 +288,7 @@ static unsigned int maage_options_input(maage_client_ui *ui,
     if(input->next)maage_options_focus_step(ui,screen,1);
     if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS) {
         visible=maage_options_visible_rows(ui);
+        if(input->scroll!=0.0)ui->selected_keyboard=0;
         if(input->scroll>0.0&&ui->video_first_row>0)--ui->video_first_row;
         if(input->scroll<0.0&&
             (unsigned int)ui->video_first_row+visible<9U)++ui->video_first_row;
