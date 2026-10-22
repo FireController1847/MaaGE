@@ -1248,7 +1248,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             }
             operation = maage_client_outbox_queue(&outbox, &command);
             if (maage_status_failed(operation)) {
-                maage_client_ui_notify(ui, operation, now); break;
+                /* The GUI request was taken but never submitted. Return it to
+                 * Agent 10's FIFO head so retries retain causal ordering. */
+                (void)maage_client_ui_retry_command(ui, &command);
+                maage_client_ui_notify(ui, operation, now);
+                break;
             }
         }
         if (paused_command != (maage_client_ui_modal(ui) ? 1 : 0) &&
