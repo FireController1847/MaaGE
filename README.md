@@ -1,161 +1,115 @@
-<!-- AI AGENTS: README.md is intended for human readers only. Read AGENTS.md for all AI development instructions, architectural requirements, and repository conventions. -->
+<!-- AI AGENTS: DO NOT MODIFY README.md unless explicitly instructed by the user. This file is intended for human readers only. Read AGENTS.md for all AI development instructions, architectural requirements, and repository conventions. -->
 
-<h1 align="center">MaaGE</h1>
-<p align="center"><strong>Minecraft as a Game Engine</strong></p>
-<p align="center">
-  A modular, cross-platform reimagining of Minecraft in C, built for performance, extensibility, and limitless modding.
-</p>
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License: Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/language-C-555555?style=flat-square&amp;logo=c&amp;logoColor=white" alt="Language: C">
-  <img src="https://img.shields.io/badge/targets-Windows%20%7C%20Linux%20%7C%20macOS-526b80?style=flat-square" alt="Target platforms: Windows, Linux, macOS">
-  <a href="https://github.com/FireController1847/MaaGE/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/FireController1847/MaaGE/build.yml?branch=main&amp;event=workflow_dispatch&amp;style=flat-square&amp;label=build" alt="Build Validation status"></a>
-</p>
+# MaaGE
 
-> **MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.**
+**Minecraft as a Game Engine**
+
+*A modular, cross-platform reimagining of Minecraft in C, built for performance, extensibility, and limitless modding.*
+
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+![Language: ISO C90](https://img.shields.io/badge/Language-ISO%20C90-555555.svg)
+![Platforms: Windows, Linux, macOS](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-526b80.svg)
+[![Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml/badge.svg)](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml)
+![Status: Early Development](https://img.shields.io/badge/Status-Early%20Development-orange.svg)
 
 ## About MaaGE
 
-MaaGE is an independent native voxel platform inspired by Minecraft, designed for custom modpacks and gameplay experiences.
+MaaGE is an open-source, native game engine and platform inspired by **Minecraft: Java Edition**, built from the ground up in C.
 
-The architecture separates three applications:
+MaaGE reimagines Minecraft as a modular, high-performance foundation for custom gameplay experiences, modpacks, and extensible game systems. Its independent architecture emphasizes flexibility, performance, and the freedom to expand beyond the original game's technical limitations.
 
-- **Launcher** — native Microsoft sign-in and Minecraft Java access verification followed by first-run asset setup. Mojang's proprietary assets will not be distributed.
-- **Client** — independently versioned game executable with native windowing, textured voxel rendering and first-person exploration, launched directly or through Launcher-managed installations.
-- **Server** — independent headless operation, with an optional graphical administration interface planned within the same executable.
+**Minecraft: Java Edition 1.7.10** serves as the initial reference for gameplay mechanics, content, and visual fidelity, while MaaGE's architecture supports continued innovation and expansion.
 
-The portable core targets ISO C90, with platform-specific integrations kept separate.
+MaaGE is an independent implementation, not a Forge replacement or compatibility layer for existing Java mods.
+
+## Architecture
+
+MaaGE consists of three independently developed applications:
+
+- **Launcher** — A native application for account verification, Minecraft asset preparation, installation management, and launching game instances.
+- **Client** — A standalone game executable responsible for rendering, input, audio, and gameplay presentation.
+- **Server** — An independent executable designed for authoritative game simulation, integrated single-player sessions, and dedicated headless hosting.
+
+The platform emphasizes portable **ISO C90** code, reusable libraries, explicit subsystem boundaries, and replaceable platform backends.
+
+Target platforms include **Windows, Linux, and macOS**, with native Metal rendering on macOS and Vulkan, OpenGL, and software rendering backends at varying stages of development.
 
 ## Development Status
 
-**Early development.** The Launcher has native Verify Minecraft Access and Preparing MaaGE interfaces (AppKit on macOS, Win32 on Windows, GTK 3 on Linux), a Microsoft OAuth/PKCE account service, and a resumable asset manager that verifies and reconstructs Minecraft Java Edition 1.7.10's full asset index and client-JAR game resources. After setup, a native sidebar opens Play, News, Installations, and Settings. Play starts the selected managed Client in a separate process; News has an honest empty state. The Client implements numeric block/state and biome registries, deterministic seeded terrain, streamed 256-block-high chunk columns, basic lighting, persistent worlds, first-person exploration, a crosshair, F3 diagnostics and a small pause UI through Metal. Other renderers do not yet support gameplay meshes or UI batches. The Server remains a startup stub. macOS builds have been compiled locally; full Windows/Linux builds and runtime/UI testing remain outstanding. The [gameplay roadmap](docs/development-roadmap.md) separates implemented, provisional and future behavior.
+**MaaGE is in early development and is not yet ready for general gameplay.**
 
-Local builds use macOS arm64 with Apple Clang. [Build Validation](https://github.com/FireController1847/MaaGE/actions/workflows/build.yml) runs manually on Windows, Linux, and macOS.
+The project contains foundations for native launching, asset management, voxel world generation, rendering, player movement, and persistent world storage.
 
-## Build
+Many systems are still incomplete or undergoing architectural development. Platform support and runtime validation also vary.
 
-Release builds optimize for size and strip nonessential symbols; use Debug for source-level debugging. Set `MAAGE_OPTIMIZE_SIZE=OFF` to disable the size-specific build settings.
+See the [Development Roadmap](docs/development-roadmap.md) for implemented milestones, known limitations, and planned functionality.
 
-Use **CMake 3.21+** and a C compiler. The Linux and macOS presets also require **Ninja**. From the repository root:
+## Building From Source
 
-Core logging requires **zlib 1.2.3+** for GZip archives, including headless builds. The Apple SDK supplies it; use Debian/Ubuntu `zlib1g-dev` or vcpkg `zlib:x64-windows` elsewhere. The reusable `MaaGE::GZip` target exposes C90 stream compression without zlib types in public headers.
+MaaGE uses **CMake 3.21+** and requires a supported C compiler.
 
-Linux windowing requires X11 and Wayland development libraries, `wayland-protocols`, `wayland-scanner`, and pkg-config. Either backend can be disabled with `MAAGE_WINDOW_ENABLE_X11` or `MAAGE_WINDOW_ENABLE_WAYLAND`; both are enabled by default. Windows/Linux rendering requires Vulkan development headers and a loader discoverable by CMake. macOS uses Xcode's AppKit, Metal, and QuartzCore frameworks.
+Dependencies vary by platform and selected build targets:
 
-Launcher setup also requires **libcurl 7.85+** with HTTPS/TLS support, **json-c 0.15+**, **OpenSSL Crypto 1.1.0+**, and **libzip 1.7+**. Linux additionally needs **GTK 3.22+**. These dependencies are excluded from headless workspaces. On macOS, `brew install json-c openssl@3 libzip` supplies the additional libraries; the Apple SDK supplies libcurl. On Debian/Ubuntu, install `libgtk-3-dev libcurl4-openssl-dev libjson-c-dev libssl-dev libzip-dev ca-certificates`. On Windows, install `curl:x64-windows json-c:x64-windows openssl:x64-windows libzip[core]:x64-windows` with vcpkg and pass `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` when configuring. Keep dependency libraries available at runtime; standalone dependency bundling is not yet implemented.
+- **Core:** zlib.
+- **Launcher:** libcurl, json-c, OpenSSL, and libzip; GTK 3 on Linux.
+- **Client:** libpng and the corresponding native graphics and windowing development libraries.
+- **macOS:** Xcode Command Line Tools and the Apple SDK.
+- **Windows:** Visual Studio 2022 and the relevant dependencies, optionally managed through vcpkg.
+- **Linux:** GCC or Clang, Ninja, and applicable X11, Wayland, and Vulkan development packages.
 
-Client additionally requires **libpng 1.6+**: `brew install libpng`, Debian/Ubuntu `libpng-dev`, or vcpkg `libpng:x64-windows`. Set `CMAKE_PREFIX_PATH` to the dependency prefix when needed. Client-only builds default to enabling shared resource paths, PNG decoding and the portable World library. A headless Server-only build excludes these libraries by default; `MAAGE_BUILD_WORLD=ON` independently enables the graphics-free world/generation/lighting/persistence library with native threading and storage. It does not acquire Launcher or graphics dependencies.
+### macOS and Linux
 
-**Linux / macOS** — GCC or Clang on Linux; Apple Clang on macOS:
-
-```sh
+```powershell
 cmake --preset release
 cmake --build --preset release
 ```
 
-**Windows** — with the Visual Studio 2022 C toolchain installed:
+For a Debug build, replace `release` with `debug`.
+
+### Windows
+
+Using the Visual Studio 2022 toolchain:
 
 ```powershell
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc-release
 ```
 
-Both build `maage_launcher`, `maage_client`, `maage_server`, `maage_core`, `maage_window`, and `maage_render`. Add `--target maage_server` to build only the server and its dependencies. For Debug builds, use `debug` on Linux/macOS or build with `windows-msvc-debug` on Windows. For a headless workspace, configure with `-DMAAGE_BUILD_LAUNCHER=OFF -DMAAGE_BUILD_RENDER=OFF -DMAAGE_BUILD_WINDOW=OFF`.
+The Windows configuration requires the appropriate dependency libraries and may require a CMake toolchain file for vcpkg.
 
-Generated files go in `cmake/<preset>/`; compiled output goes in `build/<preset>/bin/` and `lib/`. macOS produces the Launcher `MaaGE.app`, the standalone `maage-client`, and the command-line `server`. Client filenames are stable: `maage-client` on macOS/Linux and `maage-client.exe` on Windows, inside a version/platform/architecture package directory beneath `bin/<configuration>/`. No Client app bundle is produced. Visual Studio adds `Release/` or `Debug/` subdirectories. For Server-only builds, also disable Client with `-DMAAGE_BUILD_CLIENT=OFF`.
+### Headless Builds
 
-Install with `cmake --install cmake/release --prefix <destination>` (add `--config Release` for multi-config builds). The Linux Launcher desktop entry uses the installed executable path and does not require a terminal. Headless Server builds require no windowing or graphics SDK.
+MaaGE supports building its portable libraries and Server without Launcher or graphical dependencies.
 
-Launcher data lives in `%APPDATA%/MaaGE/` on Windows, `~/Library/Application Support/MaaGE/` on macOS, and `$XDG_DATA_HOME/maage/` or `~/.local/share/maage/` on Linux. Launcher logs use `logs/launcher.log`; old `.maage` logs are retained in place. The Client uses the same Core logger with one `logs/client.log` in the selected physical instance, combining normal messages, errors and native stdout/stderr. Both applications flush records immediately; captured Client streams are unbuffered. Files remain writable and shareable while open, including Windows read/write/delete sharing. Shutdown keeps the latest plain log and creates a compressed copy such as `client.2026-10-21_10-50-00.log.gz` (local close time, with a numeric suffix only on collision). Empty logs create no archive. Startup preserves any unarchived previous output before resetting the plain file; matching compressed copies are reused. Archives are staged and synced before publication, retained without overwriting history, and compression failures preserve the original. Logging configuration and command-line options can override the defaults.
+```powershell
+cmake --preset release -DMAAGE_BUILD_LAUNCHER=OFF -DMAAGE_BUILD_CLIENT=OFF -DMAAGE_BUILD_WINDOW=OFF -DMAAGE_BUILD_RENDER=OFF -DMAAGE_BUILD_WORLD=ON
+cmake --build --preset release
+```
 
-## Initial Setup
+Build artifacts are generated beneath `build/`, with CMake configuration files beneath `cmake/`.
 
-The workflow is **Verify Minecraft Access → Microsoft sign-in → Java access verification → Preparing MaaGE → download and reconstruct resources → main Launcher**. The existing native dark setup offers system-browser sign-in, device-code fallback (verification URL, code, copy/open buttons, expiry countdown), progress, cancellation and retry. Continue requires a current verified Java account. No renderer initializes for setup or ordinary Launcher UI. `--renderer-demo` still opens the RGB demonstration after setup.
+## Minecraft Assets and Ownership
 
-The main Launcher defaults to Play, with a compact account selector and synchronized MaaGE configuration selector. Installations manages named, UUID-identified gameplay instances with independent worlds and configuration. Removal archives the instance data. Global preferences and UUID references live in `config/launcher.json`; each `instances/<uuid>/instance.json` manifest owns its name, Client selection and explicit folder mappings, separately from account credentials. Settings shows the resource location and readiness, opens the established account and repair workflows, and includes About information. Appearance follows the system by default, with Light/Dark overrides in AppKit and GTK; Win32 uses native system colors. News links to the project while no feed is configured. Play starts the exact instance-capable Client referenced by the selected installation when its account, resources and build are ready. Older packages remain registered but require importing a Client whose descriptor declares `instance_storage: 1`.
+MaaGE does **not** distribute Minecraft's proprietary game assets or original Java client.
 
-Client releases are defined independently in `CMakeVersions.cmake`; the current release is `0.1.0-alpha.13`. A Client exposes its location-independent identity through `maage/client.h`, `--version`, and schema-1 `--version-json`; metadata queries bypass logging, rendering and resources. Git is separate build metadata, and the unimplemented network protocol is reported as `null`.
+The Launcher provides Microsoft account authentication and verifies access to Minecraft Java Edition before preparing the resources required by MaaGE.
 
-**Installed Clients** lists managed builds separately from **MaaGE Installations**, which reference a specific build ID. Select a Client in the installation editor; the selection survives restarts. Old configurations inherit a build only when exactly one available build exists during migration. Missing or incompatible builds require an explicit selection. Play reports that selection and availability, and starts the selected executable directly. The Client owns its viewport and simulation independently of the Launcher.
+Supported resources are obtained from Minecraft's official distribution infrastructure and stored locally.
 
-With resources already prepared, start `maage-client` directly or import the current package into a Debug Launcher. Direct startup uses MaaGE's platform data directory; `--data-directory=<absolute MaaGE root>` overrides it. Gameplay requires Metal (`--renderer=metal` or `auto` on macOS); explicit unsupported renderer families fail clearly. WASD walks, Space jumps, F3 toggles diagnostics, and Escape opens the pause menu or returns from its Options placeholder. Resume Game returns to gameplay; Exit Client uses normal shutdown. Missing or malformed optional textures use generated fallbacks with Operation Status diagnostics; unsafe registry, world-data or critical rendering failures stop cleanly. No Minecraft resources are downloaded by the Client. Runtime behavior and 1.7.10 movement fidelity await programmer testing.
+A legitimate Minecraft Java Edition account is required for the supported asset preparation workflow. All third-party content remains subject to its original licensing and usage restrictions.
 
-Default startup uses the Launcher-selected instance and resumes its last world, creating a UUID world with an automatic seed if none exists. Direct CLI launches may select `--instance=<uuid>`. Use `--new-world`, `--create-world=<uuid> --seed=<signed64>`, or `--world=<uuid>`; `--render-distance=<positive integer>` defaults to 8 and scales with resource availability. Worlds live under `instances/<instance-uuid>/worlds/<world-uuid>/`, separately from globally shared Minecraft resources and Client packages. Screenshots, shaderpacks and resourcepacks support explicit private/shared/custom folder mappings; worlds, mods, config and logs remain private. Legacy-world migration and mapping commands are documented in the [Phase 3.5 roadmap](docs/development-roadmap.md#phase-35--instance-storage--shared-folder-mapping). Generator 1 retains the legacy terrain policy; generator 2 supports explicit persisted sea-level/spawn-search settings through the World Store API. Neither claims seed-for-seed 1.7.10 compatibility. Save/reload, lighting and streaming await programmer runtime validation; see the [world workflow and limitations](docs/development-roadmap.md).
+## Development and Contributions
 
-Phase 2.5 moves independent column loading, generation, lighting, meshing and saving onto a bounded worker pool. `--world-workers=<count>` defaults to 0: MaaGE detects logical processors and uses one fewer, with a minimum of one worker. If detection fails, it uses eight workers. Positive explicit counts have no fixed ceiling; allocation and operating-system resources determine availability. Queued work and retained snapshots are bounded separately, with independent runtime World cache and accepted-job capacities. The main thread commits versioned results and owns input, fixed-step player movement and GPU operations; workers use immutable observations and private output buffers. Five-second VERBOSE diagnostics report worker/queue counts, operation counts, completions, cancellations, stale results and scheduling latency. The portable scheduler can also be enabled alone with `MAAGE_BUILD_JOBS=ON` and has no rendering or Launcher dependencies; concurrent runtime behavior still requires programmer validation.
+MaaGE is developed collaboratively by **human contributors and AI coding agents**, with human direction, engineering oversight, and review.
 
-Phase 2.75 adds Client-owned text, textured rectangles, panels, buttons, logical GUI scaling and numeric screen-stack navigation, separate from the Launcher's native UI. It uses the prepared 1.7.10 GUI icons, widgets and ASCII font through the existing texture API. Visible UI, input and F3 gameplay observations update every rendered frame. Phase 4.5 keeps F3 compact: one version/hash, integer FPS/TPS, chunks, live position/facing/target/biome/light, memory, renderer/platform and compact workers. Noisy measurements use a 0.75-second history displayed every 250 ms; live gameplay state is immediate. Its pixel text uses left/right columns and translucent backgrounds; narrow views clip the columns to prevent overlap. Pausing stops player simulation while rendering, native events and safe background-job processing continue without artificial menu delays. Telemetry adds no per-frame heap allocation, World lock, job wait or disk I/O. Inventory, targeting and full settings remain future work.
+AI-assisted development is an intentional part of this project. Contributions are held to the same standards of correctness, maintainability, security, attribution, and licensing regardless of how they were produced.
 
-Debug Launchers offer **Import Local Client**. Choose `maage-client` (macOS/Linux) or `maage-client.exe` (Windows) from its dedicated package directory, beside `maage-client.json` and any required runtime files. Import copies that parent package after confirmation; do not select an executable in a directory of unrelated programs. A Debug Launcher can import a Release Client. The generated manifest lives beside the executable on every platform. Import reads the descriptor, validates SemVer/platform/native executable structure and SHA-256, shows a trust confirmation, then copies and rechecks the whole package on a worker without executing it. The descriptor identifies a trusted development build; it is not a cryptographic publisher signature. POSIX packages preserve relative symlinks only when their resolved targets stay within the package. Escaping/absolute links, Windows reparse points, special files and trees exceeding 32 levels, 50,000 entries or 8 GiB are rejected. Stage required runtime dependencies inside the package before importing; dependencies outside it are not bundled automatically. Sources stay unchanged, and copied files retain executable permissions (macOS file metadata/resource forks are preserved).
-
-Builds live beneath `clients/<build-id>/`; `config/client-builds.json` records their version, build identity, origin, platform, architecture, timestamp and metadata. Availability is checked against the managed manifest/executable on load. Build IDs include executable SHA-256, so different binaries can share a SemVer/build label without overwriting each other. Exact duplicates are rejected. Select an installed local build and choose **Replace Client…** to import a newer package, switch every installation using the selected build, and remove the old managed package in one flow. Close that Client before replacing it. Copy or assignment-save failures preserve the old assignments and package. To reinstall the exact same build after damage, unassign it, remove it, then import again. Removing an unused local build preserves developer originals and shared Minecraft resources. Public Release Launchers exclude local import code and controls; `MAAGE_LAUNCHER_DEVELOPER_IMPORT=ON` explicitly enables it for developer builds. Verified remote distribution and dedicated Server management remain future work. Legacy bundled builds retain registry references but become unavailable until a standalone build is imported and explicitly selected.
-
-Client startup validates the selected managed package on a worker, then uses direct POSIX `fork`/`execve` or Windows `CreateProcessW` with an explicit working directory and structured arguments. It inherits the runtime environment and shares MaaGE's existing application-data resource location. No shell, `open -a`, Launch Services, authentication tokens or invented authentication flags are involved. The Launcher passes the selected instance UUID and merges startup stdout/stderr into its private `logs/client.log`. After acquiring its instance lease, the Client adopts that file through Core logging and creates its GZip archive at shutdown while retaining the plain latest file. The Launcher polls process/exit status and blocks duplicate launches and removal of the running build. Closing the Launcher does not terminate the Client or stop its logging. Renderer selection uses the existing `--renderer` behavior inside the Client process; the Launcher does not host its graphics.
-
-MaaGE's approved public Microsoft Entra application is `ff5d912a-45ca-409e-a364-9d1bf9512f61`. It uses the consumer authority and requests `XboxLive.signin offline_access`. Browser sign-in follows [Microsoft's authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow) with S256 PKCE, cryptographically random state, a temporary IPv4 localhost callback with the same exact redirect in authorization and token exchange, a five-minute deadline, and one-time callback consumption. There is no client secret, embedded browser, password collection, application-ID substitution, or third-party token import. [Device authorization](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code) is available explicitly and is used when MaaGE cannot open the browser or create a callback receiver; polling respects pending/slow-down responses and backs off on transient failures.
-
-The Microsoft access token is exchanged with Xbox Live (identity-platform `d=` RPS ticket), then XSTS (`RETAIL`, Minecraft Services relying party), then Minecraft Services. Separate transient credentials are wiped after each exchange. Errors identify the failing endpoint and HTTP status with known, sanitized service errors; a 403 is not automatically diagnosed as an allowlist problem. Successful Microsoft or Xbox login alone never grants resource access.
-
-Verification requires an authenticated Minecraft Java profile with a valid username/UUID and an explicit `game_minecraft` entitlement. Both `entitlements/mcstore` (signed items) and `entitlements/license?requestId=...` (signed aggregate with item name/source, including non-store access) are consulted. The license schema is described by the maintained [PrismarineJS interface](https://github.com/PrismarineJS/prismarine-auth/blob/master/index.d.ts); the endpoint is also used by [Modrinth](https://github.com/modrinth/code/blob/main/packages/app-lib/src/state/minecraft_auth.rs). Empty lists, unrelated/Bedrock entitlements, failed profiles, and public cached flags cannot pass. Current Java access is verified; opaque license sources do not establish a permanent-purchase guarantee or conclusively classify subscription versus purchase. API schemas and app-specific acceptance still require programmer runtime validation.
-
-MaaGE keeps one UUID-keyed registry at `config/minecraft-profiles.json`. Add / Manage Microsoft Accounts reuses the same native account controls from the Play selector and Settings: add, select, refresh/reverify, sign out, and remove. Sign-out deletes MaaGE credentials while retaining profile metadata; removal also removes the profile. Previously imported profiles retain their identity but require Microsoft sign-in; no external launcher credential files are read. Minecraft resources remain installed when access expires or an account is removed.
-
-By explicit project policy, **MaaGE does not use native credential storage**. On macOS, Windows and Linux, `config/accounts/<uuid>.account` contains AES-256-GCM-encrypted Microsoft refresh/Minecraft session credentials, stable identity, provider version and bounded verification lease. `config/accounts/key.bin` is the OS-random local encryption key. Files have owner-only permissions (0600 on POSIX; protected current-user DACL on Windows), UUID-authenticated ciphertext, atomic replacement and a store lock. A process running as the same user can access both key and ciphertext; protect them together in backups. No refresh token is stored in ordinary plaintext configuration. Transient credentials, HTTP payloads, and raw responses do not enter logs or dialogs.
-
-Startup restores authenticated leases for up to one hour, capped by Minecraft token expiry. Expiring sessions refresh through MaaGE's own client application; rotated refresh credentials are saved before Xbox/Minecraft exchanges. Unexpired leases avoid interactive login, and refreshed credentials receive a new Java access check. Revoked authorization requires sign-in again. Use `--manage-accounts` to retain the account screen even when startup can continue automatically. The controller and asset-manager boundary enforce a current verified lease for acquisition, repair, retry and active work; cancellation/sign-out/expiry stop unauthorized work while preserving resources.
-
-System-browser sign-in uses the registered `http://localhost` redirect under **Microsoft Entra → App registrations → MaaGE Launcher → Authentication → Mobile and desktop applications**, with public-client flows enabled. The existing client ID remains unchanged. [Microsoft's localhost redirect rules](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url) permit an ephemeral port; pathless redirects receive a trailing slash in the response. MaaGE preserves the registered pathless form in its outgoing OAuth requests.
-
-Before opening the browser, the existing access worker listens exclusively on `127.0.0.1` with an OS-selected port. Both authorization and code exchange use that attempt's exact `http://localhost:<port>` redirect, encoded once in each request. Logs identify the public authorization/token endpoints, client ID and effective redirect without exposing the complete authorization URL or its state/PKCE values. The bounded HTTP adapter accepts only `GET /` with the expected localhost Host header, then validates the cryptographically random OAuth state before consuming a code. Unrelated paths/methods, malformed requests, and mismatched state cannot complete the attempt. The browser receives a small static success/failure page with no secrets; successful receipt means Microsoft authorization was received, not that Minecraft access has already passed. MaaGE automatically proceeds through its existing authentication stages. Cancellation, an OAuth error, a five-minute timeout, or a transport failure closes the listener and leaves sign-in retryable.
-
-The same socket implementation supports macOS, Windows and Linux without a web server dependency. Native adapters continue to open the default system browser. No custom URI handler, macOS URL scheme registration, Windows protocol registry entry, or Linux MIME association is required. Device-code sign-in remains available, including when listener creation or browser launch is unavailable. The browser must be able to reach the local IPv4 loopback listener; no external interface is opened.
-
-Authorization diagnostics use `maage.launcher.access` and its `oauth`, `http`, `callback`, `verify`, and `platform` child loggers. Normal logs record stages, cancellation, refresh/account persistence, and failures. `--log-level=VERBOSE` adds request timing, loopback callback details, and routine device polling; an INI `[loggers]` entry `maage.launcher.access=VERBOSE` can limit that verbosity to authorization. Launcher logs remain in `<MaaGE Application Data>/logs/launcher.log`. Diagnostics include only allowlisted endpoint paths/error names and numeric service/OS codes. Tokens, authorization/device codes, state/PKCE values, account identities, URL queries, payloads, and raw response/error text are excluded at every log level.
-
-Only compilation is performed during development. Browser callback delivery, authentication, refresh/revocation, native UI behavior and non-macOS builds remain for programmer validation. The separate Minecraft Services HTTP 403 response is not resolved by changing OAuth callback transport; its sanitized endpoint/status/error diagnostics remain available.
-
-Setup retrieves the official manifest, Minecraft 1.7.10 metadata, its referenced asset index, every unique content-addressed object in that index, and `downloads.client` from the same official 1.7.10 metadata. The client JAR is downloaded with the metadata-provided URL, SHA-1, and size, using the existing HTTPS/retry/cancellation/atomic-download infrastructure. Minecraft 1.7.10 is the fixed resource baseline; MaaGE application versions remain independent. A verified Minecraft Java account is required first; the official client JAR is downloaded as a resource archive. No Java runtime, server JAR, native game library, or existing Minecraft installation is required. The client archive supplies additional resources absent from the index, including its actual texture and shader files.
-
-Minecraft files live beneath the application's `minecraft/` directory:
-
-- `assets/indexes/1.7.10.json` preserves the complete logical-name-to-hash mapping.
-- `assets/objects/<prefix>/<hash>` holds the verified, deduplicated object cache.
-- `assets/reconst/<logical-name>` exposes every indexed resource under its original name and directory hierarchy.
-- `cache/client-1.7.10.jar` — verified client resource source archive.
-- `metadata/1.7.10.json` stores the version metadata; the manifest and integrity receipt also live in `metadata/`.
-
-The previous `assets/reconstructed/` folder is renamed to `assets/reconst/` when the new folder does not exist. If both exist, the old folder is preserved and setup prepares `reconst/` from verified caches.
-
-The source JAR is retained at `minecraft/cache/client-1.7.10.jar`. A private archive adapter uses [libzip](https://libzip.org/documentation/) to inventory entries and stream game resources. Selected files are `assets/<namespace>/...`, `pack.png`, and `pack.mcmeta`, when actually present; no model/blockstate directories are fabricated. Java `.class`/`.java` files, embedded archives, native executables/libraries, scripts, signatures, and unrelated root package files are excluded. The JAR is never executed.
-
-JAR resources omit only the leading `assets/`: `assets/minecraft/textures/...` becomes `minecraft/assets/reconst/minecraft/textures/...`, merging directly with indexed resources while retaining the `minecraft` namespace. Other namespaces and root pack resources are preserved. Existing verified files in either the old nested or flattened layout are reused; after successful reconstruction, verified obsolete originals and empty directories are removed while indexed and unknown files are preserved. Every archive path/type is checked, including excluded entries. Traversal, absolute paths, links/reparse entries, unsafe names, selected case aliases, and file/directory conflicts fail closed. Expansion and entry counts are bounded. Source streams pass CRC/size checks and produce SHA-1 hashes; staged output and installed files are checked against those hashes. Identical JAR resource contents can reuse hard links. Conflicting index/JAR paths are rejected before reconstruction; identical spelling/content can share one file.
-
-The existing `assets-state.json` receipt records indexed mappings in `reconstructed`, JAR logical mappings with original archive paths and SHA-1/size/fingerprint in `client_resources`, and each source's hash. Completion requires the verified index/object cache, verified client archive, and valid reconstructed files from both sources. Missing/corrupt files rebuild from those local sources without resource downloads; only an invalid/missing JAR is reacquired when indexed objects remain valid. The existing account-verification prerequisite still applies. Every setup checks the JAR's hash and hashes its selected logical resources; full repair also hashes all indexed objects/copies.
-
-The Preparing MaaGE checklist now includes client resources. It reports JAR bytes transferred and known archive size (retries can add traffic), actual applicable archive-entry counts, reconstruction progress, and final verification. Work stays on the setup worker; cancellation/retry and disabled Continue remain in force until all required resources are ready. Progress stays indeterminate until archive work totals are known.
-
-Existing files from the previous `assets/` and `versions/1.7.10/metadata.json` layout are verified and migrated as needed, preserving valid downloads across interrupted migration. After successful setup, recognized legacy files and their temporary files are removed; unrecognized contents are retained, and only empty legacy directories are removed. MaaGE's `config/` and `logs/` remain outside `minecraft/`.
-
-Downloads use verified HTTPS with configurable concurrency, retry and timeout/low-speed policies. Reconstruction stages hard links where available and verified copies otherwise, then installs them atomically. Unsafe logical paths and symlink/reparse directories are rejected. Cancellation preserves verified resources, and Retry resumes the same operation. Continue remains disabled until both indexed and client-JAR resources pass verification. The setup interface reports unique-object/download counts, transferred bytes, and reconstructed logical-file counts separately. INFO logs record individual downloads (logical name, URL, destination, attempts/retries), verified installation, migration, and reconstruction source/destination paths with hard-link/copy results. Use `--log-level=VERBOSE` to also log indexed mappings, per-file verification, and reuse of unchanged cached resources. These diagnostics use the downloaded index rather than an embedded asset list.
-
-Subsequent launches check cached metadata and both resource forms using sizes and file fingerprints; unchanged installations need no network requests or full rehash. Changed files and incomplete installations receive hash checks. `--repair-assets` uses the same implementation to fully verify and repair the cache and reconstructed resources. Missing derived files are restored from valid cached objects without network downloads. Hard links share already verified content; independent copies receive their own integrity checks.
-
-Resource consumers can link `MaaGE::MinecraftAssets` and call `maage_minecraft_asset_path` with a logical name and caller-owned output buffer. Set `MAAGE_BUILD_MINECRAFT_ASSETS=ON` to build this C90 resource-path library independently of the Launcher UI, downloader, and renderer. It resolves paths without certifying installation integrity; use resources after setup/repair succeeds. Runtime migration, downloading, reconstruction, and UI behavior await programmer testing.
-
-## AI Collaborative Development
-
-**MaaGE is developed collaboratively by humans and AI coding agents.** AI is intentionally used throughout development, with human engineering and oversight. AI-generated contributions are reviewed, refined, and maintained through the normal development workflow.
-
-Contributors should disclose substantial AI involvement and remain responsible for their work. AI assistance does not excuse poor quality, insecure code, licensing violations, or unmaintainable implementations.
-
-We stand by this approach. Anyone who objects to AI-assisted development is free not to use or contribute to MaaGE.
-
-Human and AI-assisted contributions are welcome.
+Both human-written and AI-assisted contributions are welcome. Contributors remain responsible for the quality and legality of their work.
 
 ## License and Independence
 
-MaaGE's original project code and documentation are licensed under the **Apache License 2.0 (Apache-2.0)**. The complete, unmodified license is available in [LICENSE](LICENSE).
+MaaGE's original source code and documentation are licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) for the complete license terms.
 
-This license does not cover third-party code or assets, or Minecraft, Mojang, or Microsoft intellectual property. Third-party materials remain subject to their respective licenses and permissions. Minecraft assets and branding are not relicensed by this project.
+This license does not extend to third-party software, Minecraft assets, trademarks, or other intellectual property owned by Mojang, Microsoft, or their respective rights holders.
 
-MaaGE is an independent project and is not affiliated with, endorsed by, or sponsored by Mojang or Microsoft.
+**MaaGE is an independent project and is not affiliated with, endorsed by, approved by, or sponsored by Mojang Studios or Microsoft.**

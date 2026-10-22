@@ -947,6 +947,9 @@ polish phase exists. Follow the permanent BUILD-BUT-DO-NOT-TEST policy.
   disclosure, and legally relevant notices. Do not add visible agent instructions.
   Use MLA title capitalization for README headings and concise, professional prose.
   Do not add a design-goals section or feature-card block to the README.
+- Never modify `README.md` unless the user explicitly authorizes edits to that file.
+  Feature work, bug fixes, general documentation requests, and architectural changes
+  do not implicitly authorize README updates.
 - Source holds implementation and necessary local comments; useful API references
   describe public contracts and usage. Human technical specifications may exist.
   Build files configure builds. None is a substitute home for persistent AI context.
