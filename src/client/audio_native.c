@@ -705,22 +705,19 @@ static int mn_scene_voice_running(void *context, void *audio,
 {
     maage_native_scene *scene = (maage_native_scene *)context;
     maage_native_voice *voice;
+    maage_audio_voice_state state = MAAGE_AUDIO_VOICE_STOPPED;
     (void)audio;
     if (!scene) return 0;
     voice = mn_voice_find(scene->engine, (unsigned long)token);
     if (!voice) return 0;
-    if (voice->paused || voice->playback.loop) return 1;
-    /* Audio exposes no completion query: duration is based on the exact decoded
-     * frame count and chosen pitch; expired one-shots are reaped by the scene. */
-    return voice->duration > 0.0 && scene->engine->now - voice->started < voice->duration;
+    (void)maage_audio_voice_get_state(scene->engine->audio, voice->native_id, &state);
+    return state != MAAGE_AUDIO_VOICE_STOPPED;
 }
 static maage_status mn_scene_voice_gain(void *context, void *audio,
     maage_client_audio_scene_voice token, double gain)
 {
     maage_native_scene *scene = (maage_native_scene *)context;
     maage_native_voice *voice;
-    maage_audio_play_desc desc;
-    maage_audio_voice_id replacement = 0;
     maage_status result;
     float clamped;
     (void)audio;
@@ -728,26 +725,8 @@ static maage_status mn_scene_voice_gain(void *context, void *audio,
     voice = mn_voice_find(scene->engine, (unsigned long)token);
     if (!voice) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
     clamped = gain < 0.0 ? 0.0f : (gain > MAAGE_NATIVE_MAX_VOLUME ? MAAGE_NATIVE_MAX_VOLUME : (float)gain);
-    if (clamped - voice->playback.gain < 0.05f &&
-        voice->playback.gain - clamped < 0.05f)
-        return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
-    /* Engine v1 has no per-voice gain setter. Restart only on significant
-     * envelope changes instead of re-decoding, and retain the logical token. */
-    desc = voice->playback;
-    desc.gain = clamped;
-    if (voice->paused) { voice->playback = desc; return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET); }
-    result = maage_audio_stop(scene->engine->audio, voice->native_id);
-    if (maage_status_failed(result)) return result;
-    voice->native_id = 0;
-    result = maage_audio_play(scene->engine->audio, &desc, &replacement, NULL);
-    if (maage_status_failed(result) || !replacement) {
-        voice->active = 0;
-        return maage_status_failed(result) ? result :
-            mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
-    }
-    voice->native_id = replacement;
-    voice->playback = desc;
-    voice->started = scene->engine->now;
+    result = maage_audio_voice_set_gain(scene->engine->audio, voice->native_id, clamped);
+    if (!maage_status_failed(result)) voice->playback.gain = clamped;
     return result;
 }
 static maage_status mn_scene_voice_pause(void *context, void *audio,
@@ -755,26 +734,11 @@ static maage_status mn_scene_voice_pause(void *context, void *audio,
 {
     maage_native_scene *scene = (maage_native_scene *)context;
     maage_native_voice *voice;
-    maage_audio_voice_id replacement = 0;
-    maage_status result;
     (void)audio;
     if (!scene) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);
     voice = mn_voice_find(scene->engine, (unsigned long)token);
-    if (!voice || paused == voice->paused) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
-    if (paused) {
-        result = maage_audio_stop(scene->engine->audio, voice->native_id);
-        if (maage_status_failed(result)) return result;
-        voice->native_id = 0;
-        voice->paused = 1;
-        return result;
-    }
-    result = maage_audio_play(scene->engine->audio, &voice->playback, &replacement, NULL);
-    if (maage_status_failed(result) || !replacement) return maage_status_failed(result) ? result :
-        mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
-    voice->native_id = replacement;
-    voice->started = scene->engine->now;
-    voice->paused = 0;
-    return result;
+    if (!voice) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
+    return maage_audio_voice_pause(scene->engine->audio, voice->native_id, paused);
 }
 static maage_status mn_scene_voice_stop(void *context, void *audio,
     maage_client_audio_scene_voice token)
@@ -795,14 +759,18 @@ static maage_status mn_scene_destroy(void *handle, maage_status_trace *trace)
 {
     maage_native_scene *scene = (maage_native_scene *)handle;
     maage_status first, result;
-    unsigned int i;
+    size_t i;
     (void)trace;
     if (!scene) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
     first = maage_client_audio_scene_destroy(scene->scene);
-    for (i = 1; i <= scene->sound_count; ++i) if (scene->sounds[i].buffer) {
-        result = maage_audio_buffer_destroy(scene->sounds[i].buffer);
-        if (maage_status_failed(result) && !maage_status_failed(first)) first = result;
+    for (i = 1; i <= scene->sound_count; ++i) {
+        if (scene->sounds[i].stream) mn_scene_music_release(scene, &scene->sounds[i]);
+        if (scene->sounds[i].buffer) {
+            result = maage_audio_buffer_destroy(scene->sounds[i].buffer);
+            if (maage_status_failed(result) && !maage_status_failed(first)) first = result;
+        }
     }
+    free(scene->sounds);
     free(scene);
     return first;
 }
@@ -844,7 +812,6 @@ static maage_status mn_scene_update(void *handle, const maage_session_snapshot *
     maage_native_scene *scene = (maage_native_scene *)handle;
     (void)forward;
     if (!scene || !snapshot) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
-    scene->engine->now = now;
     return maage_client_audio_scene_update(scene->scene, snapshot, position, now, trace);
 }
 static maage_status mn_scene_stop(void *handle, maage_status_trace *trace)
