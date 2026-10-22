@@ -30,6 +30,8 @@ typedef struct maage_client_audio_components {
     maage_status (*scene_update)(void *scene, const maage_session_snapshot *snapshot,
         const double position[3], const double forward[3], double now, maage_status_trace *trace);
     maage_status (*scene_stop)(void *scene, maage_status_trace *trace);
+    /* Optional nonblocking device health check; never opens devices or files. */
+    maage_status (*poll)(void *engine, maage_status_trace *trace);
     /* Optional: avoid starting background tracks while Music is muted. */
     maage_status (*scene_music_enabled)(void *scene, int enabled);
     maage_status (*stop_voices)(void *engine, maage_status_trace *trace);
