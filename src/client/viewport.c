@@ -6,7 +6,6 @@
 #include "maage/time.h"
 #include "maage/player.h"
 #include "maage/gameplay.h"
-#include "maage/world_store.h"
 #include "maage/session_protocol.h"
 #include "maage/local_session.h"
 #include "maage/server_runtime.h"
@@ -40,7 +39,6 @@ typedef struct maage_client_world_options {
     const char *id, *name;
     maage_world_seed seed;
     unsigned int workers;
-    unsigned long generator_version;
     int create, seeded, radius, mode;
     double reach, mesh_budget_ms, frame_target_ms;
 } maage_client_world_options;
@@ -65,13 +63,12 @@ typedef struct maage_client_mesh_activity {
 /* Textual options are resolved before any world/runtime work begins. */
 static maage_status maage_client_world_options_parse(int argc, char *const argv[], maage_client_world_options *options)
 {
-    int i, generator_selected = 0;
+    int i;
     const char *argument;
     char *end;
     long value;
     unsigned long workers;
     memset(options, 0, sizeof(*options)); options->radius = 8; options->mode = -1;
-    options->generator_version = MAAGE_GENERATION_FEATURES_VERSION;
     options->frame_target_ms = 1000.0 / 60.0;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
@@ -100,12 +97,6 @@ static maage_status maage_client_world_options_parse(int argc, char *const argv[
             errno = 0; options->frame_target_ms = strtod(argument + 23, &end);
             if (errno || !argument[23] || *end ||
                 !(options->frame_target_ms > 0.0 && options->frame_target_ms <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
-        } else if (!strncmp(argument, "--generator-version=", 20)) {
-            maage_generation_policy policy;
-            if (argument[20] < '0' || argument[20] > '9') return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
-            errno = 0; options->generator_version = strtoul(argument + 20, &end, 10);
-            if (errno || *end || maage_status_failed(maage_generation_policy_default(options->generator_version, &policy))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
-            generator_selected = 1;
         } else if (!strncmp(argument, "--world-workers=", 16)) {
             if (argument[16] < '0' || argument[16] > '9') return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
             errno = 0; workers = strtoul(argument + 16, &end, 10);
@@ -120,13 +111,12 @@ static maage_status maage_client_world_options_parse(int argc, char *const argv[
             if (errno || !argument[20] || *end || !(options->reach > 0 && options->reach <= 64)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
         } else if (!strcmp(argument, "--world") || !strcmp(argument, "--create-world") ||
             !strcmp(argument, "--seed") || !strcmp(argument, "--world-name") || !strcmp(argument, "--render-distance") ||
-            !strcmp(argument, "--world-workers") || !strcmp(argument, "--generator-version") || !strcmp(argument, "--mesh-upload-budget-ms") ||
+            !strcmp(argument, "--world-workers") || !strcmp(argument, "--mesh-upload-budget-ms") ||
             !strcmp(argument, "--mesh-frame-target-ms") || !strcmp(argument, "--gamemode") ||
             !strcmp(argument, "--interaction-range")) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
     }
     if (options->seeded && options->id && !options->create) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
     if (options->name && !options->create && !options->seeded) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
-    if (generator_selected && !options->create && !options->seeded) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
 }
 
@@ -523,7 +513,6 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_window_config window_config;
     maage_window_state state;
     maage_input_snapshot input;
-    maage_generation_policy policy;
     maage_server_config server_config;
     maage_session_snapshot latest, previous, incoming;
     maage_session_event event;
@@ -564,7 +553,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_world_options_parse(argc, argv, &options);
     if (maage_status_failed(operation)) {
-        failure_message = "Invalid world, seed, generator, worker, radius, or gameplay options.";
+        failure_message = "Invalid world, seed, worker, radius, or gameplay options.";
         goto done;
     }
     if (!instance) {
@@ -582,9 +571,6 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_log_info("maage.client.instance", "Instance: %s (%s).",
         maage_instance_get_info(instance)->name,
         maage_instance_get_info(instance)->id);
-    if (maage_world_store_legacy_pending(directory))
-        maage_log_warn("maage.client.instance",
-            "Legacy world migration requires Server-owned storage migration. No Client-owned World stores are opened.");
     biomes = (maage_biome_registry *)calloc(1, sizeof(*biomes));
     if (!biomes) {
         operation = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
@@ -653,8 +639,6 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         maage_status_trace_init(trace);
     }
     if (audio) maage_client_ui_set_click_callback(ui, maage_client_audio_click, audio);
-    operation = maage_generation_policy_default(options.generator_version, &policy);
-    if (maage_status_failed(operation)) goto done;
     operation = maage_local_session_create(256U, 256U, 512U, &session);
     if (maage_status_failed(operation)) goto done;
     server_config.instance_root = maage_instance_directory(instance);
@@ -663,7 +647,6 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     server_config.create_world = options.create;
     server_config.has_seed = options.seeded;
     server_config.seed = options.seed;
-    server_config.generation_policy = options.create || options.seeded ? &policy : NULL;
     server_config.world_workers = options.workers;
     server_config.render_distance = options.radius;
     server_config.initial_game_mode = options.mode;
@@ -1125,7 +1108,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
             tick_count, 0.0);
         ++frames;
         if (now - diagnostic_time >= 5.0) {
-            maage_log_debug("maage.client.server",
+            maage_log_verbose("maage.client.server",
                 "Tick=%lu; loaded=%u; pending=%u; ready=%u; gpu=%lu; uploads=%.1f/s; frame=%.1fms.",
                 latest.tick, latest.world_stats.loaded, latest.world_stats.pending,
                 latest.world_stats.ready, (unsigned long)resident_count,

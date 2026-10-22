@@ -43,7 +43,7 @@ typedef enum maage_session_material_id {
 typedef struct maage_session_command {
     unsigned int protocol_version;
     unsigned int kind;
-    unsigned long sequence;
+    unsigned long sequence; /* Nonzero and increasing within the session. */
     maage_gameplay_intent intent;
     unsigned int hotbar_slot;
     unsigned int inventory_slot;

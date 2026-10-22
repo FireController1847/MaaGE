@@ -6,7 +6,6 @@
 #include "maage/jobs.h"
 #include "maage/environment.h"
 #define MAAGE_SECTION_VOLUME 4096
-#define MAAGE_WORLD_BLOCKSET_VERSION 1UL
 
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit air above the heightmap has skylight 15. */
@@ -55,15 +54,15 @@ maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell,
 maage_status maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int cell);
 /* Workers mutate only detached columns. Published columns are immutable and
  * pinned by the owner until every snapshot job has returned its completion.
- * Versioned algorithms are original approximations, not seed-compatible vanilla. */
-maage_status maage_generate_chunk_job_policy(maage_chunk *chunk, maage_world_seed seed,
+ * Generation is original and has no vanilla seed-parity requirement. */
+maage_status maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
     const maage_block_registry *blocks, const maage_biome_registry *biomes,
     const maage_generation_policy *policy, const maage_job_token *token,
     maage_status_trace *trace);
-maage_status maage_generator_spawn_policy(maage_world_seed seed,
+maage_status maage_generation_spawn(maage_world_seed seed,
     const maage_biome_registry *biomes, const maage_generation_policy *policy,
     double feet[3]);
-/* Generator-3 stages replay bounded regional owners in coordinate order and
+/* Feature stages replay bounded regional owners in coordinate order and
  * clip writes to the private output column; no neighbor storage is borrowed. */
 typedef struct maage_generation_context {
     maage_chunk *chunk;

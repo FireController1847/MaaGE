@@ -361,7 +361,7 @@ static void maage_world_run(void *context, const maage_job_token *token)
             maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, 0);
     } else if (task->kind == MAAGE_JOB_GENERATE) {
         task->status = maage_chunk_create(task->x, task->z, &task->output);
-        if (!maage_status_failed(task->status)) task->status = maage_generate_chunk_job_policy(task->output,
+        if (!maage_status_failed(task->status)) task->status = maage_generate_chunk_job(task->output,
             task->seed, task->blocks, task->biomes, &task->generation_policy, token, trace);
         if (maage_status_failed(task->status)) strcpy(task->error, "Chunk generation failed.");
     } else if (task->kind == MAAGE_JOB_SAVE) {
@@ -779,8 +779,8 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
         maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, config ? 1 : 0),
         MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     policy = config->generation_policy;
-    if (!policy.schema_version && !policy.generator_version &&
-        maage_status_failed(maage_generation_policy_default(MAAGE_WORLD_GENERATOR_VERSION, &policy)))
+    if (!policy.sea_level && !policy.spawn_search_radius && !policy.spawn_search_step &&
+        maage_status_failed(maage_generation_policy_default(&policy)))
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     if (!maage_generation_policy_valid(&policy)) return MAAGE_STATUS_TRACE(trace,
@@ -818,7 +818,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->cache_limit = cache_limit; world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
     if (config->new_world &&
-        maage_status_failed(maage_generator_spawn_policy(config->seed, config->biomes, &policy,
+        maage_status_failed(maage_generation_spawn(config->seed, config->biomes, &policy,
             world->spawn))) { free(world); goto invalid_spawn; }
     for (axis = 0; axis < 3; ++axis)
         if (!(world->spawn[axis] > -MAAGE_WORLD_LIMIT && world->spawn[axis] < MAAGE_WORLD_LIMIT)) { free(world); goto invalid_spawn; }

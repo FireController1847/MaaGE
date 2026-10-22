@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Material classification is stable numeric legacy-block logic; unknown blocks
+/* Material classification uses numeric builtin definitions; unknown blocks
  * deliberately use DEFAULT. State metadata is resolved through the registry. */
 static unsigned int maage_gameplay_material(maage_block_id id)
 {
@@ -524,7 +524,7 @@ static maage_status maage_gameplay_action_result(maage_status result,
     }
     return result;
 }
-maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *player,
+maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
     const maage_gameplay_intent *intent, maage_sound_event *events,
     size_t capacity, size_t *written, maage_status_trace *trace)
@@ -647,11 +647,4 @@ maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *pla
         outcome = MAAGE_STATUS_PROPAGATE(trace, maage_world_status(world),
             MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
     return maage_gameplay_sound_result(outcome, &sink, written, trace);
-}
-maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
-    maage_world *world, const maage_item_registry *items,
-    const maage_gameplay_intent *intent, maage_status_trace *trace)
-{
-    return maage_gameplay_tick_collect(game, player, world, items, intent,
-        NULL, 0, NULL, trace);
 }

@@ -46,7 +46,7 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size)
 
 static int session_command_valid(const maage_session_command *command)
 {
-    if (command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+    if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_DISCONNECT)
         return 0;
     switch (command->kind) {

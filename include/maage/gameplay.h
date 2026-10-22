@@ -14,8 +14,7 @@ typedef struct maage_gameplay_pickup {
     maage_item_stack stack;
     double position[3];
 } maage_gameplay_pickup;
-/* Versioned persistence payload: numeric item mapping version 1 preserves the
- * seven currently usable legacy block item IDs, metadata zero. */
+/* Owned player checkpoint; storage resolves item identities at the I/O boundary. */
 typedef struct maage_gameplay_save {
     maage_inventory inventory;
     unsigned int mode, health, hunger;
@@ -66,8 +65,6 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
  * Creative/Survival blocks; positive configured reach is bounded to 64. */
 maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player,
     const maage_world *world, double yaw, double pitch);
-/* One 20 TPS owner-thread simulation phase: movement, damage, interactions.
- * No graphics, filesystem I/O, worker waits, or string identity operations. */
 /* Numeric event construction for Server-owned successful inventory commands.
  * No audio device, transport, allocation, or string identity is involved. */
 maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound_event *event,
@@ -75,15 +72,12 @@ maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound
     double intensity, double pitch);
 
 /* One fixed-step owner tick. The caller owns the bounded event array.
- * (NULL, 0, NULL) disables event generation for existing callers. Otherwise
+ * (NULL, 0, NULL) disables event generation. Otherwise
  * written is required, and capacity > 0 requires a non-NULL events array.
  * Audio-event overflow returns PARTIAL without undoing gameplay mutations;
  * gameplay failures take precedence over this publication warning. */
-maage_status maage_gameplay_tick_collect(maage_gameplay *game, maage_player *player,
+maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
     const maage_gameplay_intent *intent, struct maage_sound_event *events,
     size_t capacity, size_t *written, maage_status_trace *trace);
-maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
-    maage_world *world, const maage_item_registry *items,
-    const maage_gameplay_intent *intent, maage_status_trace *trace);
 #endif

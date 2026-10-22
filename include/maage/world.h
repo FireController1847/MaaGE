@@ -15,15 +15,8 @@ typedef char maage_world_required_address_space[((size_t)-1 >= 262144UL) ? 1 : -
 #define MAAGE_CHUNK_EDGE 16
 #define MAAGE_WORLD_HEIGHT 256
 #define MAAGE_WORLD_LIMIT 30000000
-/* Legacy Client compile-time compatibility only. Neither constant bounds World
- * cache occupancy; use the runtime capacity in maage_world_stats instead. */
+/* Coordinate-derived render bound; cache occupancy is configured at runtime. */
 #define MAAGE_WORLD_MAX_RADIUS (MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 4)
-#define MAAGE_WORLD_MAX_CHUNKS 512
-/* Versions 1/2 are frozen; 3 layers regional features over the same base terrain. */
-#define MAAGE_WORLD_GENERATOR_VERSION 1UL
-#define MAAGE_GENERATION_CONFIGURABLE_VERSION 2UL
-#define MAAGE_GENERATION_FEATURES_VERSION 3UL
-#define MAAGE_GENERATION_POLICY_SCHEMA 1U
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,14 +32,12 @@ typedef enum maage_generation_stage {
     MAAGE_GENERATION_STAGE_COUNT
 } maage_generation_stage;
 typedef struct maage_generation_policy {
-    unsigned int schema_version;
-    unsigned long generator_version;
     int sea_level;
     int spawn_search_radius;
     int spawn_search_step;
 } maage_generation_policy;
-maage_status maage_generation_policy_default(unsigned long generator_version,
-    maage_generation_policy *policy);
+/* One current algorithm; defaults are sea level 63, spawn radius 4096/step 16. */
+maage_status maage_generation_policy_default(maage_generation_policy *policy);
 int maage_generation_policy_valid(const maage_generation_policy *policy);
 
 typedef struct maage_world maage_world;
@@ -76,7 +67,7 @@ typedef struct maage_world_config {
      * Cache and accepted-job limits are independent runtime allocations. */
     unsigned int cache_capacity;
     unsigned int job_capacity;
-    /* All-zero selects frozen generator-1 defaults. */
+    /* All-zero selects the current generation defaults. */
     maage_generation_policy generation_policy;
     /* Copied during creation; NULL starts the seeded clock/weather defaults. */
     const struct maage_environment_state *initial_environment;
@@ -116,7 +107,7 @@ typedef struct maage_world_observation {
     unsigned int section_count;
     unsigned char light; /* skylight in high nibble, block light in low nibble */
     int light_available;
-    double temperature, rainfall; /* temperature includes generator-3 altitude cooling */
+    double temperature, rainfall; /* temperature includes altitude cooling */
     int sky_exposed;
 } maage_world_observation;
 typedef struct maage_world_mesh_update {

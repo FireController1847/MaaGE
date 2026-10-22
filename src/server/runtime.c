@@ -178,11 +178,10 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
     const maage_item_registry *items = maage_content_items(runtime->content);
     if (command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION)
         return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
-    /* A zero sequence is permitted for transitional producers; otherwise
-     * reject stale/replayed commands before affecting authoritative state. */
-    if (command->sequence && command->sequence <= runtime->last_command_sequence)
+    /* Reject missing, stale or replayed command identities. */
+    if (!command->sequence || command->sequence <= runtime->last_command_sequence)
         return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
-    if (command->sequence) runtime->last_command_sequence = command->sequence;
+    runtime->last_command_sequence = command->sequence;
     switch (command->kind) {
     case MAAGE_CMD_INPUT:
         if (!server_finite(command->intent.movement.forward) ||
@@ -401,7 +400,7 @@ static maage_status server_open_world(maage_server_runtime *runtime,
     items = maage_content_items(runtime->content);
     memset(&runtime->record, 0, sizeof(runtime->record));
     error[0] = 0;
-    result = maage_world_store_open_configured(runtime->config.instance_root,
+    result = maage_world_store_open(runtime->config.instance_root,
         runtime->config.world_id, runtime->config.create_world,
         runtime->config.world_name,
         runtime->config.has_seed ? &runtime->config.seed : NULL,
@@ -474,10 +473,9 @@ static void server_close_world(maage_server_runtime *runtime,
         maage_world_environment(runtime->world, &environment);
         maage_status_trace_init(&cleanup_trace);
         error[0] = 0;
-        result = maage_world_store_save_environment_gameplay(runtime->store,
+        result = maage_world_store_save(runtime->store,
             runtime->player.position, runtime->yaw, runtime->pitch,
-            &runtime->game, maage_content_items(runtime->content),
-            &environment, error, &cleanup_trace);
+            &runtime->game, &environment, error, &cleanup_trace);
         if (maage_status_failed(result)) {
             server_capture_failure(runtime, result, &cleanup_trace);
             server_status_event(runtime, result, &cleanup_trace);
@@ -529,7 +527,7 @@ static maage_status server_tick(maage_server_runtime *runtime,
     intent.movement.yaw = runtime->yaw;
     intent.pitch = runtime->pitch;
     runtime->pending_jump = runtime->pending_attack = runtime->pending_use = 0;
-    result = maage_gameplay_tick_collect(&runtime->game, &runtime->player,
+    result = maage_gameplay_tick(&runtime->game, &runtime->player,
         runtime->world, maage_content_items(runtime->content), &intent,
         sounds, sizeof(sounds) / sizeof(sounds[0]), &sound_count, trace);
     /* Effects describe outcomes already resolved by authoritative gameplay.
@@ -652,7 +650,7 @@ static void server_thread_entry(void *context)
                 server_status_event(runtime, server_status(MAAGE_STATUS_WARNING,
                     MAAGE_OPERATION_TICK), NULL);
                 if (runtime->overloads == 1UL || runtime->overloads % 100UL == 0UL)
-                    maage_log_warn("maage.server.tick",
+                    maage_log_warning("maage.server.tick",
                         "20 TPS scheduler overloaded (%lu bounded catch-ups); simulation time was not accelerated.",
                         runtime->overloads);
             }

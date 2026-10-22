@@ -8,7 +8,7 @@
 #include <string.h>
 
 static maage_status maage_server_parse(int argc, char **argv,
-    maage_server_config *config, maage_generation_policy *policy)
+    maage_server_config *config)
 {
     int i;
     unsigned long number;
@@ -35,30 +35,24 @@ static maage_status maage_server_parse(int argc, char **argv,
             if (maage_status_failed(maage_world_seed_parse(argument + 7, &config->seed))) goto invalid;
             config->has_seed = 1;
         } else if (!strncmp(argument, "--render-distance=", 18) ||
-            !strncmp(argument, "--world-workers=", 16) ||
-            !strncmp(argument, "--generator=", 12)) {
-            const char *value = argument + (!strncmp(argument, "--render-distance=", 18) ? 18 :
-                (!strncmp(argument, "--world-workers=", 16) ? 16 : 12));
+            !strncmp(argument, "--world-workers=", 16)) {
+            const char *value = argument + (!strncmp(argument, "--render-distance=", 18) ? 18 : 16);
             errno = 0;
             number = strtoul(value, &end, 10);
-            if (errno || !*value || *end || number > UINT_MAX) goto invalid;
+            if (errno || *value < '0' || *value > '9' || *end || number > UINT_MAX) goto invalid;
             if (!strncmp(argument, "--render-distance=", 18)) {
                 if (number < 1 || number > MAAGE_WORLD_MAX_RADIUS) goto invalid;
                 config->render_distance = (int)number;
-            } else if (!strncmp(argument, "--world-workers=", 16)) config->world_workers = (unsigned int)number;
-            else {
-                if (maage_status_failed(maage_generation_policy_default(number, policy))) goto invalid;
-                config->generation_policy = policy;
-            }
+            } else config->world_workers = (unsigned int)number;
         } else if (!strcmp(argument, "--survival")) config->initial_game_mode = 0;
         else if (!strcmp(argument, "--creative")) config->initial_game_mode = 1;
         else if (!strncmp(argument, "--reach=", 8)) {
             errno = 0;
             config->interaction_range = strtod(argument + 8, &end);
-            if (errno || !argument[8] || *end || config->interaction_range <= 0 ||
-                config->interaction_range > 64) goto invalid;
+            if (errno || !argument[8] || *end ||
+                !(config->interaction_range > 0 && config->interaction_range <= 64)) goto invalid;
         } else if (!strcmp(argument, "--help")) {
-            puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--generator=<version>] [--render-distance=<within-world-bounds>] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
+            puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--render-distance=<within-world-bounds>] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
             return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PARSE, 0);
         } else goto invalid;
     }
@@ -74,11 +68,10 @@ int main(int argc, char **argv)
     maage_status result, shutdown;
     maage_status_trace trace;
     maage_server_config config;
-    maage_generation_policy policy;
     maage_status_trace_init(&trace);
     result = maage_log_init(NULL, argc, argv);
     if (!maage_status_failed(result)) {
-        result = maage_server_parse(argc, argv, &config, &policy);
+        result = maage_server_parse(argc, argv, &config);
         if (maage_status_code(result) == MAAGE_STATUS_NOOP) result = 0;
         else if (!maage_status_failed(result)) result = maage_server_run(&config, &trace);
     }
