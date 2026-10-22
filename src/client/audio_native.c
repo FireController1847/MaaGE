@@ -400,8 +400,9 @@ static maage_status mn_scene_read_snapshot(void *context,
     return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
 }
 
-/* Exactly one registration/decode/upload per logical ambient asset at bind.
- * No resource lookup, disk access, or decoding occurs in scene_update. */
+/* Ambient assets are decoded/uploaded once at bind; all music tracks are
+ * registered by ID and lazily decoded when selected. No resource I/O or
+ * decoding occurs on the audio callback thread. */
 static maage_status mn_scene_resolve(void *context, const void *catalog,
     const char *path, maage_client_audio_scene_sound_id *numeric)
 {
@@ -440,10 +441,6 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     }
     samples = pcm->pcm.frame_count * (size_t)pcm->pcm.channels;
     sound->bytes = samples * sizeof(float);
-    if (music && sound->bytes > MAAGE_AUDIO_SCENE_MAX_PCM_BYTES) {
-        mn_catalog_release_pcm(scene->bank, pcm);
-        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_RESOLVE);
-    }
     result = mn_upload_pcm(scene->engine, pcm, &buffer, NULL);
     if (pcm->pcm.sample_rate)
         sound->duration = (double)pcm->pcm.frame_count / (double)pcm->pcm.sample_rate;

@@ -476,7 +476,9 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   VSync Off renders into bounded offscreen targets; a backend presenter acquires
   drawables independently and shows the latest completed target. Retain target
   ownership through its GPU copy; never borrow caller batches or traces across threads.
-  Mailbox backpressure must not produce 100 ms Client event sleeps or flood the GPU;
+  Keep only a bounded number of in-flight Metal GPU frame slots, never 100 ms
+  event sleeps or an arbitrary submitted-frames-per-presentation throttle.
+  Unlimited FPS is unbounded by software except real resource backpressure;
   keep main-thread event pumping responsive while presentation catches up.
   Re-enabling VSync must restore the synchronous direct-drawable presentation
   path, not leave the mailbox worker active with only displaySyncEnabled flipped.

@@ -10,7 +10,6 @@
 #include <string.h>
 
 #define MAAGE_METAL_FRAME_SLOTS 4
-#define MAAGE_METAL_MAX_PENDING_PRESENTS 2U
 
 typedef struct maage_metal_renderer {
     id<MTLDevice> device;
@@ -37,7 +36,6 @@ typedef struct maage_metal_renderer {
      * A 64-bit serial avoids the 32-bit unsigned-long rollover during long runs. */
     unsigned long long sequence[MAAGE_METAL_FRAME_SLOTS], submitted;
     unsigned long presented, deferred_frames, drawable_misses, size_misses;
-    unsigned int submissions_since_present;
     double drawable_retry_after;
     int asynchronous, stopping, presenting;
     maage_status present_result;
@@ -164,12 +162,10 @@ static void maage_metal_present_loop(void *context)
             /* A successful GPU copy allows another bounded burst of renders.
              * This is presentation-resource backpressure, not an FPS ceiling. */
             ++native->presented;
-            native->submissions_since_present = 0;
             native->drawable_retry_after = 0;
         } else if (!cancelled && !maage_status_failed(result)) {
             /* Retry unavailable drawables without flooding the GPU. A resize
              * mismatch is retried immediately with newly sized render slots. */
-            native->submissions_since_present = 0;
             if (!drawable) {
                 ++native->drawable_misses;
                 native->drawable_retry_after = CACurrentMediaTime() + 0.05;
@@ -522,11 +518,10 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         maage_mutex_lock(native->present_mutex);
         result = native->present_result;
         if (!maage_status_failed(result) &&
-            (native->submissions_since_present >= MAAGE_METAL_MAX_PENDING_PRESENTS ||
-             started < native->drawable_retry_after)) {
-            /* Do not flood the compositor with renders it cannot display.
-             * Keep up to two new images available for low-latency mailbox
-             * selection, independent of monitor refresh or FPS preferences. */
+            started < native->drawable_retry_after) {
+            /* Only the temporary drawable retry gate applies. Uncapped FPS
+             * must not be limited to a fixed number of renders per refresh.
+             * The four GPU slots already bound outstanding GPU work. */
             ++native->deferred_frames;
             maage_mutex_unlock(native->present_mutex);
             [pool drain];
@@ -692,7 +687,6 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     native->frames[slot] = [command retain];
     if (asynchronous) {
         native->sequence[slot] = ++native->submitted;
-        ++native->submissions_since_present;
         maage_condition_signal(native->present_condition);
     } else ++native->presented;
     maage_mutex_unlock(native->present_mutex);
@@ -849,7 +843,6 @@ static maage_status maage_metal_set_vsync(maage_renderer *renderer, int enabled)
           }
         }
         native->frame_slot = 0;
-        native->submissions_since_present = 0;
         native->drawable_retry_after = 0;
         native->presenting = -1;
     }
