@@ -1,4 +1,5 @@
 #include "maage/items.h"
+#include "registry_pages.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -7,13 +8,18 @@ typedef struct maage_item_slot {
     char *name, *display;
 } maage_item_slot;
 struct maage_item_registry {
-    maage_item_slot *slots;
+    maage_registry_pages slots;
     maage_item_id *ordered;
     size_t *name_buckets, bucket_count;
     size_t capacity, count;
     int finalized;
 };
-
+static maage_item_slot *maage_item_slot_get(const maage_item_registry *registry,
+    maage_item_id id)
+{
+    void **entry = registry ? maage_registry_pages_find(&registry->slots, id) : NULL;
+    return entry ? (maage_item_slot *)*entry : NULL;
+}
 static unsigned long maage_item_name_hash(const char *name)
 {
     unsigned long hash = 2166136261UL;
@@ -25,7 +31,7 @@ static size_t maage_item_name_bucket(const maage_item_registry *registry,
 {
     size_t bucket = maage_item_name_hash(name) % registry->bucket_count, entry;
     while ((entry = registry->name_buckets[bucket]) != 0) {
-        if (!strcmp(registry->slots[entry - 1].name, name)) {
+        if (!strcmp(maage_item_slot_get(registry, registry->ordered[entry - 1])->name, name)) {
             *found = 1; return bucket;
         }
         bucket = (bucket + 1) % registry->bucket_count;
@@ -45,7 +51,7 @@ static int maage_item_grow_names(maage_item_registry *registry)
     for (i = 0; i < registry->bucket_count; ++i) {
         entry = registry->name_buckets[i];
         if (!entry) continue;
-        index = maage_item_name_hash(registry->slots[entry - 1].name) % count;
+        index = maage_item_name_hash(maage_item_slot_get(registry, registry->ordered[entry - 1])->name) % count;
         while (buckets[index]) index = (index + 1) % count;
         buckets[index] = entry;
     }
@@ -56,26 +62,14 @@ static int maage_item_grow_names(maage_item_registry *registry)
 }
 static int maage_item_registry_grow(maage_item_registry *registry, maage_item_id id)
 {
-    maage_item_slot *slots;
     maage_item_id *ordered;
-    size_t count, old;
-    if (id < registry->capacity) return 1;
-    if (id >= (size_t)-1 / sizeof(maage_item_slot) ||
-        id >= (size_t)-1 / sizeof(maage_item_id)) return 0;
-    old = registry->capacity;
-    count = old;
-    while (count <= id) {
-        if (count > ((size_t)-1 / sizeof(maage_item_slot)) / 2 ||
-            count > ((size_t)-1 / sizeof(maage_item_id)) / 2) {
-            count = (size_t)id + 1; break;
-        }
-        count *= 2;
-    }
-    /* Each allocation is independently recoverable on failure. */
-    slots = (maage_item_slot *)realloc(registry->slots, count * sizeof(*slots));
-    if (!slots) return 0;
-    memset(slots + old, 0, (count - old) * sizeof(*slots));
-    registry->slots = slots;
+    size_t count;
+    (void)id;
+    if (registry->count < registry->capacity) return 1;
+    if (registry->capacity > ((size_t)-1 / sizeof(*ordered)) / 2)
+        count = registry->count + 1;
+    else count = registry->capacity * 2;
+    if (count <= registry->count || count > (size_t)-1 / sizeof(*ordered)) return 0;
     ordered = (maage_item_id *)realloc(registry->ordered, count * sizeof(*ordered));
     if (!ordered) return 0;
     registry->ordered = ordered;
@@ -93,12 +87,11 @@ maage_status maage_item_registry_create(size_t capacity, maage_item_registry **o
         return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
     registry = (maage_item_registry *)calloc(1, sizeof(*registry));
     if (!registry) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
-    registry->slots = (maage_item_slot *)calloc(capacity, sizeof(*registry->slots));
     registry->ordered = (maage_item_id *)calloc(capacity, sizeof(*registry->ordered));
     registry->capacity = capacity;
     registry->bucket_count = 33;
     registry->name_buckets = (size_t *)calloc(registry->bucket_count, sizeof(size_t));
-    if (!registry->slots || !registry->ordered || !registry->name_buckets) {
+    if (!registry->ordered || !registry->name_buckets) {
         maage_item_registry_destroy(registry);
         return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
     }
@@ -108,12 +101,16 @@ maage_status maage_item_registry_create(size_t capacity, maage_item_registry **o
 maage_status maage_item_registry_destroy(maage_item_registry *registry)
 {
     size_t i;
+    maage_item_slot *slot;
     if (!registry) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
-    if (registry->slots) for (i = 0; i < registry->capacity; ++i) {
-        free(registry->slots[i].name); free(registry->slots[i].display);
+    for (i = 0; i < registry->count; ++i) {
+        slot = maage_item_slot_get(registry, registry->ordered[i]);
+        if (slot) { free(slot->name); free(slot->display); free(slot); }
     }
+    maage_registry_pages_destroy(&registry->slots, NULL);
     free(registry->name_buckets);
-    free(registry->slots); free(registry->ordered); free(registry);
+    free(registry->ordered);
+    free(registry);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_status maage_item_registry_register(maage_item_registry *registry,
@@ -125,7 +122,7 @@ maage_status maage_item_registry_register(maage_item_registry *registry,
     if (!registry || !definition || !name || !definition->display_name)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    if (!definition->id ||
+    if (!definition->id || definition->id > 4294967295UL ||
         !definition->max_stack || definition->max_stack > 64 ||
         (definition->durability && definition->max_stack != 1) ||
         !(definition->mining_speed >= 1 && definition->mining_speed <= 1024))
@@ -148,19 +145,29 @@ maage_status maage_item_registry_register(maage_item_registry *registry,
     if (!maage_item_registry_grow(registry, definition->id) ||
         !maage_item_grow_names(registry))
         return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    slot = &registry->slots[definition->id];
-    if (slot->name) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (maage_item_slot_get(registry, definition->id))
+        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    slot = (maage_item_slot *)calloc(1, sizeof(*slot));
+    if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     bucket = maage_item_name_bucket(registry, name, &found);
     slot->name = (char *)malloc(length + 1);
     slot->display = (char *)malloc(display_length + 1);
     if (!slot->name || !slot->display) {
-        free(slot->name); free(slot->display); memset(slot, 0, sizeof(*slot));
+        free(slot->name); free(slot->display); free(slot);
         return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     }
     memcpy(slot->name, name, length + 1);
     memcpy(slot->display, definition->display_name, display_length + 1);
     slot->definition = *definition; slot->definition.display_name = slot->display;
-    registry->name_buckets[bucket] = (size_t)definition->id + 1;
+    {
+        void **entry = maage_registry_pages_ensure(&registry->slots, definition->id);
+        if (!entry) {
+            free(slot->name); free(slot->display); free(slot);
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+        }
+        *entry = slot;
+    }
+    registry->name_buckets[bucket] = registry->count + 1;
     registry->ordered[registry->count++] = definition->id;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
@@ -177,8 +184,8 @@ int maage_item_registry_is_finalized(const maage_item_registry *registry)
 const maage_item_definition *maage_item_registry_get(const maage_item_registry *registry,
     maage_item_id id)
 {
-    if (!registry || id >= registry->capacity || !registry->slots[id].name) return NULL;
-    return &registry->slots[id].definition;
+    maage_item_slot *slot = maage_item_slot_get(registry, id);
+    return slot ? &slot->definition : NULL;
 }
 size_t maage_item_registry_count(const maage_item_registry *registry)
 {
@@ -318,7 +325,8 @@ maage_status maage_item_placement_state(const maage_item_definition *item,
 
 const char *maage_item_registry_name(const maage_item_registry *registry, maage_item_id id)
 {
-    return maage_item_registry_get(registry, id) ? registry->slots[id].name : NULL;
+    maage_item_slot *slot = maage_item_slot_get(registry, id);
+    return slot ? slot->name : NULL;
 }
 maage_status maage_item_registry_resolve_name(
     const maage_item_registry *registry, const char *name, maage_item_id *id)
@@ -328,6 +336,6 @@ maage_status maage_item_registry_resolve_name(
     if (!registry || !name || !id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     bucket = maage_item_name_bucket(registry, name, &found);
     if (!found) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-    *id = (maage_item_id)(registry->name_buckets[bucket] - 1);
+    *id = registry->ordered[registry->name_buckets[bucket] - 1];
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
 }
