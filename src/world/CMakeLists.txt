@@ -7,11 +7,3 @@ target_link_libraries(maage_world PUBLIC MaaGE::Status PRIVATE MaaGE::Storage Ma
 if(NOT WIN32)
     target_link_libraries(maage_world PUBLIC m)
 endif()
-
-if(MAAGE_BUILD_TESTS)
-    add_executable(maage_mesh_leaves_test mesh_leaves_test.c)
-    maage_configure_portable_target(maage_mesh_leaves_test)
-    target_include_directories(maage_mesh_leaves_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-    target_link_libraries(maage_mesh_leaves_test PRIVATE MaaGE::World)
-    add_test(NAME maage_mesh_leaves COMMAND maage_mesh_leaves_test)
-endif()

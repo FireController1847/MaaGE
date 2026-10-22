@@ -30,7 +30,6 @@ endif()
 option(MAAGE_BUILD_WORLD "Build portable block, world, meshing and player modules" ${MAAGE_WORLD_DEFAULT})
 option(MAAGE_BUILD_AUDIO "Build the native Client audio service" ${MAAGE_BUILD_CLIENT})
 option(MAAGE_BUILD_INSTANCE "Build reusable instance storage and manifests" ${MAAGE_RESOURCE_DEFAULT})
-option(MAAGE_BUILD_TESTS "Register application smoke tests" OFF)
 
 # Single-config builds use bin/ and lib/; multi-config builds append Debug/, etc.
 set(MAAGE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build/${MAAGE_BINARY_SUBDIR}")
@@ -126,10 +125,6 @@ function(maage_configure_portable_target target)
     )
     target_include_directories(${target} PRIVATE "${PROJECT_BINARY_DIR}/generated")
 endfunction()
-
-if(MAAGE_BUILD_TESTS)
-    enable_testing()
-endif()
 
 add_subdirectory(src/core)
 # Reusable Audio core is built only when explicitly selected (Client default).

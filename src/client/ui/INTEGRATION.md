@@ -66,23 +66,3 @@ numeric sliders from 0–100 percent. Keyboard left/right changes by 5
 points; the mouse can drag sliders. Save at established Client options
 boundaries, never per adjustment. Agent 5 owns defaults and persistence;
 Agent 11 applies audio bus changes to playback.
-
-## Programmer visual/input checks (not executed by Agent 10)
-
-1. Start an integrated single-player session; confirm HUD hotbar, inventory
-   icons, cursor stack, health/hunger and Creative pages match Server snapshots.
-2. Click inventory primary/secondary and Creative item; assert exactly one
-   corresponding numeric command and no Client gameplay mutation.
-3. Exercise Server backpressure: fill both queues, verify status notice,
-   retry FIFO order, then complete actions without loss.
-4. Toggle game mode and respawn; presentation updates only after Server snapshot.
-5. Exercise F3, selection changes and damage stages; verify no live World query
-   occurs on Client; confirm sky/rain/snow respond to copied observations.
-6. Change all seven audio sliders with keyboard and mouse, navigate Back,
-   reload options.ini; confirm persisted numeric percentages and one local
-   click sound per GUI activation.
-7. F11 Windowed↔Borderless and Windowed↔Fullscreen; test AppKit Spaces,
-   notch-safe GUI placement and borderless desktop Space; force mode-request
-   failure and verify status + last confirmed mode.
-8. Resize at GUI scale 1–4, test smallest logical dimensions and pointer
-   selection across both options columns.

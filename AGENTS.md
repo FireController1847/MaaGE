@@ -357,10 +357,16 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 - Configure, compile, and link affected targets; fix introduced configuration,
   compiler, and linker failures without disabling targets or hiding relevant errors.
-- Unless the programmer explicitly requests otherwise, never execute applications,
-  unit/integration/smoke/UI tests, benchmarks, CTest, or runtime validation. Do not
-  add automated testing steps or run separate validation scripts/passes beyond
-  what successful compilation requires. Runtime testing belongs to the programmer.
+- During predevelopment, do not create or retain authored test suites, test
+  executables/frameworks, fixtures/mocks, synthetic harnesses, test-only build
+  options/targets/presets, test scripts, or manual test checklists unless the
+  programmer specifically authorizes them. This prohibits both writing and
+  running tests; do not add automated test or benchmark execution.
+- Never execute applications, tests, CTest, benchmarks, or runtime-validation
+  scripts/passes without explicit programmer authorization. Runtime testing
+  belongs to the programmer. Normal compilation/linking, CMake compiler/SDK
+  feature detection, dependency checks, production invariants, input validation
+  and diagnostic tools remain permitted.
 - Report builds, errors, and uncompiled platforms concisely. Compilation does not
   establish correct runtime behavior. This policy applies to subsequent tasks.
 - Prefer focused builds of directly affected targets, shared components, and
