@@ -577,14 +577,16 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
     maage_native_pcm *pcm = NULL;
     maage_audio_buffer *buffer = NULL;
     maage_status result;
-    size_t samples;
-    unsigned int id;
+    size_t samples, id;
     int music;
     (void)catalog;
     if (numeric) *numeric = 0;
-    if (!scene || !path || !numeric || scene->sound_count + 1U >= MAAGE_NATIVE_SCENE_SOUNDS)
-        return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_RESOLVE);
-    id = ++scene->sound_count;
+    if (!scene || !path || !numeric || scene->sound_count >= ULONG_MAX)
+        return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    id = scene->sound_count + 1U;
+    result = mn_scene_sounds_reserve(scene, id + 1U);
+    if (maage_status_failed(result)) return result;
+    scene->sound_count = id;
     sound = &scene->sounds[id];
     music = strstr(path, "/music/") != NULL;
     if (music) {
@@ -625,7 +627,7 @@ static maage_status mn_scene_resolve(void *context, const void *catalog,
 static maage_native_scene_sound *mn_scene_get(maage_native_scene *scene,
     maage_client_audio_scene_sound_id numeric)
 {
-    if (!scene || !numeric || numeric > scene->sound_count || numeric >= MAAGE_NATIVE_SCENE_SOUNDS)
+    if (!scene || !numeric || numeric > scene->sound_count)
         return NULL;
     return scene->sounds[numeric].buffer || scene->sounds[numeric].music ?
         &scene->sounds[numeric] : NULL;
@@ -652,8 +654,8 @@ static maage_status mn_scene_play_sound(void *context, void *audio,
         return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
     bus = category == MAAGE_AUDIO_SCENE_WEATHER ? MAAGE_AUDIO_WEATHER :
         (category == MAAGE_AUDIO_SCENE_MUSIC ? MAAGE_AUDIO_MUSIC : MAAGE_AUDIO_AMBIENT);
-    return mn_play(scene->engine, sound->buffer, bus, position != NULL,
-        position ? position : origin, (float)gain, 1.0f, loop, sound->duration,
+    return mn_play(scene->engine, sound->buffer, NULL, bus, position != NULL,
+        position ? position : origin, (float)gain, 1.0f, loop,
         (unsigned long *)voice, NULL);
 }
 static maage_status mn_scene_music_prepare(void *context, const void *catalog,
