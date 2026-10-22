@@ -487,54 +487,6 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     pool = [[NSAutoreleasePool alloc] init];
     started = CACurrentMediaTime();
-    if (asynchronous) {
-        maage_mutex_lock(native->present_mutex);
-        result = native->present_result;
-        if (!maage_status_failed(result) &&
-            (native->submissions_since_present >= MAAGE_METAL_FRAME_SLOTS ||
-             started < native->drawable_retry_after)) {
-            /* The display has not consumed the previous bounded burst yet.
-             * Keep processing input/events instead of submitting busy GPU work. */
-            ++native->deferred_frames;
-            maage_mutex_unlock(native->present_mutex);
-            [pool drain];
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
-        }
-        if (!maage_status_failed(result)) {
-            /* The presenter leases one slot at a time. Reservation hides a
-             * stale publication before its command buffer can be retired. */
-            for (candidate = 0; candidate < MAAGE_METAL_FRAME_SLOTS; ++candidate) {
-                slot = (native->frame_slot + candidate) % MAAGE_METAL_FRAME_SLOTS;
-                if ((int)slot != native->presenting) break;
-            }
-            native->sequence[slot] = 0;
-        } else if (renderer->operation_trace) *renderer->operation_trace = native->present_trace;
-        maage_mutex_unlock(native->present_mutex);
-        if (maage_status_failed(result)) { [pool drain]; return result; }
-    }
-    result = maage_metal_complete(renderer, slot);
-    native->wait_seconds += CACurrentMediaTime() - started;
-    if (maage_status_failed(result)) { [pool drain]; return result; }
-    for (layer = 0; layer < 3; ++layer) {
-        batch = layers[layer];
-        if (!batch || !batch->index_count) continue;
-        if (sizeof(unsigned int) != 4 || sizeof(maage_render_ui_vertex) != 32) {
-            [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
-        }
-        if (!native->pipeline) {
-            result = maage_metal_pipeline(renderer);
-            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
-        }
-        result = maage_metal_ui_buffer(native, &native->ui_vertices[slot][layer],
-            batch->vertex_count * sizeof(*batch->vertices));
-        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
-            result = maage_metal_ui_buffer(native, &native->ui_indices[slot][layer],
-                batch->index_count * sizeof(*batch->indices));
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
-        /* Only this slot has completed; other frames retain their own data. */
-        memcpy([native->ui_vertices[slot][layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
-        memcpy([native->ui_indices[slot][layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
-    }
     /* Use the entire content view, including permitted notch-adjacent regions.
      * Safe-area insets are for UI placement, not drawable cropping. */
     frame = NSRectToCGRect([native->view bounds]);
@@ -565,6 +517,68 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [CATransaction flush];
     }
     renderer->refresh = 0;
+    if (asynchronous) {
+        maage_mutex_lock(native->present_mutex);
+        result = native->present_result;
+        if (!maage_status_failed(result) &&
+            (native->submissions_since_present >= MAAGE_METAL_FRAME_SLOTS ||
+             started < native->drawable_retry_after)) {
+            /* The display has not consumed the previous bounded burst yet.
+             * Keep processing input/events instead of submitting busy GPU work. */
+            ++native->deferred_frames;
+            maage_mutex_unlock(native->present_mutex);
+            [pool drain];
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+        }
+        if (!maage_status_failed(result)) {
+            /* The presenter leases one slot at a time. Reservation hides a
+             * stale publication before its command buffer can be retired. */
+            for (candidate = 0; candidate < MAAGE_METAL_FRAME_SLOTS; ++candidate) {
+                id<MTLCommandBuffer> old;
+                MTLCommandBufferStatus status;
+                slot = (native->frame_slot + candidate) % MAAGE_METAL_FRAME_SLOTS;
+                if ((int)slot == native->presenting) continue;
+                old = native->frames[slot];
+                status = old ? [old status] : MTLCommandBufferStatusCompleted;
+                if (status == MTLCommandBufferStatusCompleted ||
+                    status == MTLCommandBufferStatusError) break;
+            }
+            if (candidate == MAAGE_METAL_FRAME_SLOTS) {
+                /* No completed free slot: yield instead of blocking AppKit on
+                 * GPU completion. A subsequent frame rechecks availability. */
+                ++native->deferred_frames;
+                maage_mutex_unlock(native->present_mutex);
+                [pool drain];
+                return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+            }
+            native->sequence[slot] = 0;
+        } else if (renderer->operation_trace) *renderer->operation_trace = native->present_trace;
+        maage_mutex_unlock(native->present_mutex);
+        if (maage_status_failed(result)) { [pool drain]; return result; }
+    }
+    result = maage_metal_complete(renderer, slot);
+    native->wait_seconds += CACurrentMediaTime() - started;
+    if (maage_status_failed(result)) { [pool drain]; return result; }
+    for (layer = 0; layer < 3; ++layer) {
+        batch = layers[layer];
+        if (!batch || !batch->index_count) continue;
+        if (sizeof(unsigned int) != 4 || sizeof(maage_render_ui_vertex) != 32) {
+            [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+        }
+        if (!native->pipeline) {
+            result = maage_metal_pipeline(renderer);
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
+        }
+        result = maage_metal_ui_buffer(native, &native->ui_vertices[slot][layer],
+            batch->vertex_count * sizeof(*batch->vertices));
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
+            result = maage_metal_ui_buffer(native, &native->ui_indices[slot][layer],
+                batch->index_count * sizeof(*batch->indices));
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
+        /* Only this slot has completed; other frames retain their own data. */
+        memcpy([native->ui_vertices[slot][layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
+        memcpy([native->ui_indices[slot][layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
+    }
     drawable = nil;
     if (asynchronous) {
         if (!native->colors[slot] || native->colors[slot].width != (NSUInteger)state->framebuffer_width ||
