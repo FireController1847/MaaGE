@@ -97,6 +97,15 @@ static int sc_valid_coordinate(double x)
 { return x == x && x > -30000000.0 && x < 30000000.0; }
 static maage_status sc_result(unsigned int status, unsigned int operation)
 { return maage_status_make((unsigned char)status, MAAGE_CONTEXT_CLIENT, (unsigned char)operation, 0); }
+/* Voice-capacity and allocation pressure are transient, not evidence that
+ * a registered sound resource is corrupt or missing. */
+static int sc_transient_pressure(maage_status result)
+{
+    unsigned int code = maage_status_code(result);
+    return code == MAAGE_STATUS_BUFFER_OVERFLOW ||
+        code == MAAGE_STATUS_ALLOCATION_FAILED ||
+        code == MAAGE_STATUS_TIMEOUT;
+}
 
 /* Log only once for each immutable resource generation (the scene's lifetime).
  * Preserve the original result, not an invented success from recovery. */
@@ -196,7 +205,8 @@ static void sc_start_channel(maage_client_audio_scene *scene, int channel,
             }
         }
         if (!maage_status_failed(r)) r = sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
-        sc_resource_failed(scene, index, r, trace);
+        if (sc_transient_pressure(r)) c->next_at = now + 1.0;
+        else sc_resource_failed(scene, index, r, trace);
         return;
     }
     c->voice = voice; c->source = index; c->looping = loop;
@@ -266,13 +276,13 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
                 scene->music_voice = voice; scene->music_pcm = pcm;
                 scene->music_bytes = bytes; scene->music_index = selected;
                 sc_record_device_failure(scene, stopped, trace);
-                sc_resource_failed(scene, selected, r, trace);
+                if (!sc_transient_pressure(r)) sc_resource_failed(scene, selected, r, trace);
                 return;
             }
         }
         if (pcm) scene->ports.music_release(scene->context, pcm);
         if (!maage_status_failed(r)) r = sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
-        sc_resource_failed(scene, selected, r, trace);
+        if (!sc_transient_pressure(r)) sc_resource_failed(scene, selected, r, trace);
         scene->next_music = now + 7.0; /* Retry a different track; never tight-loop. */
         return;
     }
@@ -419,7 +429,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
                 if (maage_status_failed(r) || !voice) {
                     if (voice) (void)scene->ports.voice_stop(scene->context, scene->audio, voice);
                     if (!maage_status_failed(r)) r = sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
-                    sc_resource_failed(scene, index, r, trace);
+                    if (!sc_transient_pressure(r)) sc_resource_failed(scene, index, r, trace);
                 } else { c->voice = voice; c->source = index; }
             }
         }
