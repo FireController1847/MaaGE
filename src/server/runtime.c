@@ -254,7 +254,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
     case MAAGE_CMD_VIEW:
         if (command->render_radius < 1 ||
-            command->render_radius > MAAGE_SERVER_MAX_RADIUS ||
+            command->render_radius > MAAGE_WORLD_MAX_RADIUS ||
             command->leaves_mode > MAAGE_LEAVES_FANCY ||
             !server_finite(command->view_yaw) ||
             fabs(command->view_yaw) > 1000000000.0)
