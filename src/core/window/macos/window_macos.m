@@ -231,7 +231,10 @@ static NSUInteger maage_cocoa_style(maage_window *window, int decorated)
 {
     NSUInteger style = decorated ? (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
         NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable) : NSWindowStyleMaskBorderless;
-    if (window->full_display_content) style |= NSWindowStyleMaskFullSizeContentView;
+    /* A normal titled window must reserve its native title bar. Only the
+     * borderless surface may use the full display/notch region. */
+    if (window->full_display_content && !decorated)
+        style |= NSWindowStyleMaskFullSizeContentView;
     return style;
 }
 
@@ -303,6 +306,7 @@ static maage_status maage_cocoa_restore_non_native(maage_window *window, maage_w
         }
     }
     [handle setStyleMask:maage_cocoa_style(window, mode == MAAGE_WINDOW_WINDOWED)];
+    [handle setTitlebarAppearsTransparent:mode != MAAGE_WINDOW_WINDOWED];
     [handle setFrame:frame display:YES];
     window->state.mode = mode;
     native->desired_mode = mode;
@@ -458,7 +462,7 @@ static maage_status maage_cocoa_create(maage_window *window, const maage_window_
     [[native->handle contentView] addSubview:native->viewport];
     [native->viewport release];
     window->state.mode_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
-    [native->handle setTitlebarAppearsTransparent:window->full_display_content != 0];
+    [native->handle setTitlebarAppearsTransparent:NO];
     [native->handle setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary];
     [native->handle center];
     native->normal_frame = [native->handle frame];

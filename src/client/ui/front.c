@@ -61,16 +61,12 @@ static void front_field(maage_client_ui_frontend *f, const char *text, float y, 
 static void front_draw(maage_client_ui *ui, void *context)
 {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *)context;
-    unsigned int screen = maage_client_ui_current(ui), n;
+    unsigned int screen = maage_client_ui_current(ui);
     size_t i, end;
-    float w=ui->content.width,h=ui->content.height,y,x;
+    float w=ui->content.width,h=ui->content.height,y;
     maage_client_ui_rect r;
     char line[192];
-    r=ui->content; maage_client_ui_panel(ui,r,0.16f,0.13f,0.10f,1);
-    if(f->dirt_uv[2]>f->dirt_uv[0])for(y=0;y<h;y+=32)for(x=0;x<w;x+=32) {
-        r=front_rect(f,x,y,32,32);
-        maage_client_ui_rectangle(ui,r,f->dirt_uv[0],f->dirt_uv[1],f->dirt_uv[2],f->dirt_uv[3],0.35f,0.35f,0.35f,1);
-    }
+    maage_client_ui_menu_background(ui);
     if(screen == MAAGE_CLIENT_UI_LOADING) {
         front_center(f,"Loading world...",h/2-12,1,1,1);
         front_center(f,"Preparing terrain and starting simulation",h/2+8,0.7f,0.7f,0.7f);
@@ -190,7 +186,6 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
 maage_status maage_client_ui_front_register(maage_client_ui *ui,maage_client_ui_frontend **output)
 {
     maage_client_ui_frontend *f;
-    const maage_block_state_definition *dirt;
     maage_status result;
     unsigned int id;
     if(output)*output=NULL;
@@ -198,13 +193,6 @@ maage_status maage_client_ui_front_register(maage_client_ui *ui,maage_client_ui_
     f=(maage_client_ui_frontend *)calloc(1,sizeof(*f));
     if(!f)return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,MAAGE_CONTEXT_GUI,MAAGE_OPERATION_REGISTER,0);
     f->ui=ui;f->last_row=(size_t)-1;
-    dirt=maage_block_registry_state(ui->blocks,MAAGE_STATE_DIRT);
-    if(dirt) {
-        f->dirt_uv[0]=dirt->faces[0].uv[0]*ui->resources.block_atlas_width/ui->resources.atlas_edge;
-        f->dirt_uv[2]=dirt->faces[0].uv[2]*ui->resources.block_atlas_width/ui->resources.atlas_edge;
-        f->dirt_uv[1]=(dirt->faces[0].uv[1]*ui->resources.block_atlas_height+MAAGE_CLIENT_UI_BLOCK_ATLAS_Y)/ui->resources.atlas_edge;
-        f->dirt_uv[3]=(dirt->faces[0].uv[3]*ui->resources.block_atlas_height+MAAGE_CLIENT_UI_BLOCK_ATLAS_Y)/ui->resources.atlas_edge;
-    }
     for(id=MAAGE_CLIENT_UI_TITLE;id<=MAAGE_CLIENT_UI_LOADING;++id) {
         result=maage_client_ui_register_screen(ui,id,
             id==MAAGE_CLIENT_UI_TITLE?maage_client_ui_title_draw:front_draw,

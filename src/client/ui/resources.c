@@ -42,7 +42,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
         "minecraft/textures/font/ascii.png", "minecraft/textures/gui/container/inventory.png"
     };
     static const int origins[4][2] = {{0, 0}, {256, 0}, {0, 256}, {256, 256}};
-    maage_image sources[4], title_images[7], atlas;
+    maage_image sources[4], title_images[7], menu_image, atlas;
     maage_pixel_buffer pixels;
     maage_status result;
     maage_status status;
@@ -90,7 +90,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     resources->block_atlas_width = block_atlas->width;
     resources->block_atlas_height = block_atlas->height;
     memset(sources, 0, sizeof(sources)); memset(title_images,0,sizeof(title_images));
-    memset(&atlas, 0, sizeof(atlas));
+    memset(&menu_image, 0, sizeof(menu_image)); memset(&atlas, 0, sizeof(atlas));
     for (i = 0; i < 4; ++i) {
         maage_status_trace_init(&source_trace);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
@@ -143,6 +143,31 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
             } else resources->title_available[i] = 1;
         }
     }
+    /* Store the original 1.7.10 options_background.png in the still-free
+     * 256x256 cell immediately below the final title atlas column.
+     * Screens tile this resource; no repeated file I/O or texture uploads. */
+    maage_status_trace_init(&source_trace);
+    status = maage_minecraft_asset_path(application_data,
+        "minecraft/textures/gui/options_background.png",
+        path, sizeof(path), &source_trace);
+    if (!maage_status_failed(status))
+        status = maage_image_load_png(path, &menu_image, &source_trace);
+    if (!maage_status_failed(status) &&
+        (menu_image.width < 1 || menu_image.height < 1 ||
+        menu_image.width > 256 || menu_image.height > 256))
+        status = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
+            MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD_TEXTURE, 0);
+    if (maage_status_failed(status)) {
+        maage_image_destroy(&menu_image);
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.ui", status,
+            "Vanilla menu background unavailable; using registered dirt texture.");
+    } else {
+        resources->menu_background_available = 1;
+        resources->menu_background_uv[0] = 1280.0f / edge;
+        resources->menu_background_uv[1] = 256.0f / edge;
+        resources->menu_background_uv[2] = (1280.0f + menu_image.width) / edge;
+        resources->menu_background_uv[3] = (256.0f + menu_image.height) / edge;
+    }
     atlas.width = atlas.height = edge;
     atlas.stride = (size_t)atlas.width * 4;
     atlas.pixels = (unsigned char *)calloc((size_t)atlas.height, atlas.stride);
@@ -161,6 +186,11 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
             (size_t)(512+(i%4)*256)*4,
             title_images[i].pixels+(size_t)y*title_images[i].stride,
             (size_t)title_images[i].width*4);
+    if (resources->menu_background_available)
+        for (y = 0; y < menu_image.height; ++y)
+            memcpy(atlas.pixels + (size_t)(256+y)*atlas.stride + (size_t)1280*4,
+                menu_image.pixels+(size_t)y*menu_image.stride,
+                (size_t)menu_image.width*4);
     memset(atlas.pixels + (size_t)(edge - 1) * atlas.stride +
         (size_t)(edge - 1) * 4, 255, 4);
     resources->recovery_status = maage_client_ui_font_initialize(resources, &sources[2]);
@@ -177,6 +207,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
 done:
     for (i = 0; i < 4; ++i) maage_image_destroy(&sources[i]);
     for(i=0;i<7;++i)maage_image_destroy(&title_images[i]);
+    maage_image_destroy(&menu_image);
     maage_image_destroy(&atlas);
     if (!ok) return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
     if (trace && resources->failed_resources) *trace = recovered_trace;

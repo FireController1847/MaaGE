@@ -26,6 +26,8 @@ typedef struct maage_client_ui_resources {
     maage_status source_results[4];
     unsigned int failed_resources;
     unsigned char title_available[7];
+    int menu_background_available;
+    float menu_background_uv[4];
 } maage_client_ui_resources;
 /* One optional retained F3 column; the left gameplay column stays immediate. */
 typedef struct maage_client_ui_debug_cache {
@@ -78,6 +80,9 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
 maage_status maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
 maage_status maage_client_ui_font_fallback(maage_image *font);
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
+/* Vanilla 1.7.10 tiled options background over the entire drawable,
+ * restoring the previous clipping region before returning. */
+void maage_client_ui_menu_background(maage_client_ui *ui);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,

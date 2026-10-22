@@ -10,7 +10,6 @@ struct maage_client_ui_frontend {
     int focus_keyboard;
     int busy, quit, play, mode;
     char name[128], seed[64], message[256];
-    float dirt_uv[4];
     double last_click;
 };
 void maage_client_ui_title_draw(maage_client_ui *ui,void *context);

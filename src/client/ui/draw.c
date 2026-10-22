@@ -93,6 +93,52 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
     ui->batch.vertex_count += 4; ui->batch.index_count += 6;
 }
 
+
+/* Draw the original tiled options dirt across the complete framebuffer,
+ * including macOS borderless/notch margins. Only subsequent interactive
+ * elements use ui->content for safe-area positioning. */
+void maage_client_ui_menu_background(maage_client_ui *ui)
+{
+    const maage_block_state_definition *dirt;
+    maage_client_ui_rect previous, full, tile;
+    float uv[4], x, y;
+    int available = 0;
+    if (!ui) return;
+    previous = ui->clip;
+    full.x = full.y = 0.0f;
+    full.width = ui->width;
+    full.height = ui->height;
+    ui->clip = full;
+    maage_client_ui_panel(ui, full, 0.16f, 0.13f, 0.10f, 1.0f);
+    if (ui->resources.menu_background_available) {
+        memcpy(uv, ui->resources.menu_background_uv, sizeof(uv));
+        available = 1;
+    } else {
+        dirt = ui->blocks ? maage_block_registry_state(ui->blocks, MAAGE_STATE_DIRT) : NULL;
+        if (dirt && ui->resources.atlas_edge > 0) {
+            uv[0] = dirt->faces[0].uv[0] *
+                ui->resources.block_atlas_width / ui->resources.atlas_edge;
+            uv[2] = dirt->faces[0].uv[2] *
+                ui->resources.block_atlas_width / ui->resources.atlas_edge;
+            uv[1] = (dirt->faces[0].uv[1]*ui->resources.block_atlas_height +
+                MAAGE_CLIENT_UI_BLOCK_ATLAS_Y) / ui->resources.atlas_edge;
+            uv[3] = (dirt->faces[0].uv[3]*ui->resources.block_atlas_height +
+                MAAGE_CLIENT_UI_BLOCK_ATLAS_Y) / ui->resources.atlas_edge;
+            available = uv[2] > uv[0] && uv[3] > uv[1];
+        }
+    }
+    if (available) {
+        tile.width = tile.height = 32.0f;
+        for (y=0.0f; y < full.height; y+=32.0f)
+            for (x=0.0f; x < full.width; x+=32.0f) {
+                tile.x=x; tile.y=y;
+                maage_client_ui_rectangle(ui,tile,uv[0],uv[1],uv[2],uv[3],
+                    0.25f,0.25f,0.25f,1.0f);
+            }
+    }
+    ui->clip = previous;
+}
+
 void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float red, float green, float blue, float alpha)
 {

@@ -1,4 +1,5 @@
 #include "maage/window.h"
+#include "maage/client.h"
 #include "maage/input.h"
 #include "maage/render.h"
 #include "maage/storage.h"
@@ -528,6 +529,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_status_trace cleanup_trace;
     const char *failure_message = "Client presentation cannot continue.";
     char directory[MAAGE_PATH_CAPACITY];
+    char window_title[128];
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
     double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
     maage_client_pacing pacing = {0, 0.0};
@@ -601,8 +603,12 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system, trace);
     if (maage_status_failed(result)) goto window_failed;
     maage_window_config_init(&window_config);
-    window_config.title = "MaaGE Client";
+    /* Platform title APIs receive the same immutable release/build identity. */
+    sprintf(window_title, "MaaGE %.112s", maage_client_identity()->version);
+    window_config.title = window_title;
     window_config.visible = 0;
+    /* Enables the notch-capable drawable only for borderless/fullscreen;
+     * ordinary macOS Windowed mode still keeps its opaque native title bar. */
     window_config.full_display_content = 1;
     result = maage_window_create(system, &window_config, &window, trace);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;

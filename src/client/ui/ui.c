@@ -643,9 +643,13 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     id = maage_client_ui_current(ui);
     if (id) {
         rectangle = ui->clip;
-        if(id!=MAAGE_CLIENT_UI_TITLE && id!=MAAGE_CLIENT_UI_LOADING)
+        if (id == MAAGE_CLIENT_UI_OPTIONS)
+            maage_client_ui_menu_background(ui);
+        else if (id < MAAGE_CLIENT_UI_TITLE)
             maage_client_ui_panel(ui, rectangle, 0.03f, 0.03f, 0.04f, 0.68f);
-        ui->clip = ui->content;
+        /* Only interactive content is kept within safe-area bounds; the title
+         * panorama and its darkening layer must fill even the notch region. */
+        ui->clip = id == MAAGE_CLIENT_UI_TITLE ? rectangle : ui->content;
         screen = maage_client_ui_screen_get(ui, id);
         screen->draw(ui, screen->context);
     }
