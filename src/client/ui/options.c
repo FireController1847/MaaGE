@@ -85,7 +85,8 @@ static maage_client_ui_rect maage_options_rect(const maage_client_ui *ui,
         if(id==MAAGE_OPTIONS_MAIN_DONE) {
             r.width=ui->content.width>224.0f?200.0f:ui->content.width-24.0f;
             r.x=center-r.width*0.5f;
-            r.y=ui->content.y+ui->content.height-28.0f;
+            /* GuiOptions 1.7.10: Done is placed at height/6 + 168. */
+            r.y=maage_options_top(ui)+180.0f;
             return r;
         }
         if(id==0U||id==1U){if(id==1U)r.x=center+5.0f;return r;}
@@ -370,7 +371,7 @@ static void maage_options_draw(maage_client_ui *ui,void *context)
     unsigned int n,count=maage_options_count(screen),bus;
     maage_client_ui_rect r;
     char label[96];
-    float center=maage_options_center(ui),title_y=maage_options_top(ui)-15.0f;
+    float center=maage_options_center(ui),title_y=ui->content.y+15.0f;
     int highlight,enabled;
     const char *title=screen==MAAGE_CLIENT_UI_OPTIONS?"Options":
         (screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS?"Video Settings":"Music & Sounds");
