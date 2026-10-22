@@ -374,7 +374,7 @@ maage_status maage_client_audio_service_update(maage_client_audio_service *servi
                 "A sound event could not play; remaining events continue.");
         }
     }
-    if (service->scene && session_snapshot) {
+    if (service->scene && service->api.scene_update) {
         result = service->api.scene_update(service->scene, session_snapshot,
             listener_position, listener_forward, now, trace);
         if (maage_status_failed(result)) {

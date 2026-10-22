@@ -655,7 +655,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     options_ready = 1;
 choose_world:
     if (!direct_world) {
-        operation = maage_client_frontend_run(frontend, system, &choice, trace);
+        operation = maage_client_frontend_run(frontend, system, audio, &choice, trace);
         if (maage_status_code(operation) == MAAGE_STATUS_NOOP) { ok = 1; goto done; }
         if (maage_status_failed(operation)) goto done;
         maage_client_ui_get_options(ui, &video_options);

@@ -59,7 +59,7 @@ maage_status maage_client_frontend_create(maage_client_ui *ui,const maage_instan
     *output=f;return result;
 }
 maage_status maage_client_frontend_run(maage_client_frontend *f,maage_window_system *system,
-    maage_client_world_choice *choice,maage_status_trace *trace)
+    maage_client_audio_service *audio,maage_client_world_choice *choice,maage_status_trace *trace)
 {
     maage_client_ui *ui=f->ui;
     maage_window_state state;
@@ -77,6 +77,8 @@ maage_status maage_client_frontend_run(maage_client_frontend *f,maage_window_sys
     int i, was_options, was_transitioning;
     maage_client_options options;
     maage_client_ui_front_request request;
+    static const double menu_listener[3] = {0.0,0.0,0.0};
+    static const double menu_forward[3] = {0.0,0.0,1.0};
     memset(choice,0,sizeof(*choice));memset(matrix,0,sizeof(matrix));for(i=0;i<4;++i)matrix[i*5]=1;
     maage_client_ui_get_options(ui,&f->saved_options);
     maage_client_ui_front_begin(f->view);
@@ -154,6 +156,14 @@ maage_status maage_client_frontend_run(maage_client_frontend *f,maage_window_sys
                 if(maage_status_failed(result))return result;
                 f->busy=1;maage_client_ui_front_busy(f->view,1);
             }
+        }
+        /* Both queued button clicks and the original menu music need the
+         * same audio service tick used during gameplay. */
+        if(audio) {
+            maage_client_ui_get_options(ui,&options);
+            (void)maage_client_audio_service_apply_options(audio,&options);
+            (void)maage_client_audio_service_update(audio,NULL,
+                menu_listener,menu_forward,start,NULL);
         }
         result=maage_client_ui_draw(ui,NULL,&draw);if(maage_status_failed(result))return result;
         result=maage_renderer_draw_frame(maage_client_ui_renderer(ui),NULL,0,matrix,draw,trace);if(maage_status_failed(result))return result;

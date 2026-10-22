@@ -16,7 +16,8 @@ enum {
     SC_WATER = 7, SC_LAVA = 8, SC_LAVA_POP = 9,
     SC_CAVE_BEGIN = 10, SC_CAVE_END = 18,
     SC_MUSIC_BEGIN = 18, SC_MUSIC_END = 30,
-    SC_ASSET_COUNT = 30,
+    SC_MENU_BEGIN = 30, SC_MENU_END = 34,
+    SC_ASSET_COUNT = 34,
     SC_CHANNEL_RAIN = 0, SC_CHANNEL_WATER = 1,
     SC_CHANNEL_LAVA = 2, SC_CHANNEL_CAVE = 3,
     SC_CHANNEL_THUNDER = 4, SC_CHANNEL_COUNT = 5
@@ -51,7 +52,11 @@ static const char *const sc_assets[SC_ASSET_COUNT] = {
     "minecraft/sounds/music/game/nuance2.ogg",
     "minecraft/sounds/music/game/piano1.ogg",
     "minecraft/sounds/music/game/piano2.ogg",
-    "minecraft/sounds/music/game/piano3.ogg"
+    "minecraft/sounds/music/game/piano3.ogg",
+    "minecraft/sounds/music/menu/menu1.ogg",
+    "minecraft/sounds/music/menu/menu2.ogg",
+    "minecraft/sounds/music/menu/menu3.ogg",
+    "minecraft/sounds/music/menu/menu4.ogg"
 };
 typedef struct sc_channel {
     maage_client_audio_scene_voice voice;
@@ -72,7 +77,7 @@ struct maage_client_audio_scene {
     void *music_pcm;
     size_t music_bytes;
     int music_index, last_music_index, music_enabled;
-    int bound, paused, clock_ready, failure_logged;
+    int bound, paused, clock_ready, failure_logged, menu_mode;
     unsigned long failure_count;
     double last_now, paused_since, next_music, next_thunder, next_cave;
 };
@@ -245,7 +250,7 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
     void *pcm = NULL;
     size_t bytes = 0;
     maage_status r;
-    int selected;
+    int selected, begin, end;
     if (!scene->music_enabled) {
         if (scene->music_voice && maage_status_failed(sc_stop_music(scene)))
             sc_record_device_failure(scene, sc_result(MAAGE_STATUS_ERROR, MAAGE_OPERATION_STOP), trace);
@@ -260,7 +265,9 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
     if (now < scene->next_music) return;
     /* Exactly one choice/prepare at a scheduling boundary, never per frame.
      * The adapter performs sound-bank acquisition outside the device callback. */
-    selected = sc_select(scene, SC_MUSIC_BEGIN, SC_MUSIC_END, scene->last_music_index);
+    begin = scene->menu_mode ? SC_MENU_BEGIN : SC_MUSIC_BEGIN;
+    end = scene->menu_mode ? SC_MENU_END : SC_MUSIC_END;
+    selected = sc_select(scene, begin, end, scene->last_music_index);
     if (selected < 0) { scene->next_music = now + 600.0; return; }
     r = scene->ports.music_prepare(scene->context, scene->catalog,
         scene->sounds[selected], MAAGE_AUDIO_SCENE_MAX_PCM_BYTES, &pcm, &bytes);
@@ -352,7 +359,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
     unsigned long failures_before;
     sc_channel *c;
     int index;
-    if (!scene || !snapshot || !listener_position || !scene->bound ||
+    if (!scene || !listener_position || !scene->bound ||
         !(now >= 0.0) || now > 1.0e15)
         return MAAGE_STATUS_PROPAGATE(trace, sc_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE),
             MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
@@ -373,6 +380,22 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
             MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     dt = now - scene->last_now; scene->last_now = now;
     if (dt > 1.0) dt = 1.0; /* Do not jump the envelope after a frame stall. */
+    /* A NULL snapshot means the Client is at its frontend, not that audio is
+     * unavailable. Keep the one streamed music scheduler active without
+     * fabricating an environmental/world observation. */
+    if (scene->menu_mode != (snapshot == NULL)) {
+        r = sc_stop_music(scene);
+        if (maage_status_failed(r)) return r;
+        scene->menu_mode = snapshot == NULL;
+        scene->last_music_index = -1;
+        scene->next_music = now + sc_span(scene,scene->menu_mode ? 2.0 : 12.0,
+            scene->menu_mode ? 8.0 : 40.0);
+    }
+    if (!snapshot) {
+        sc_music_update(scene,now,trace);
+        return sc_result(scene->failure_count != failures_before ?
+            MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS,MAAGE_OPERATION_UPDATE);
+    }
     memset(&obs, 0, sizeof(obs));
     r = scene->ports.read_snapshot(scene->context, snapshot, listener_position, &obs);
     if (maage_status_failed(r)) return MAAGE_STATUS_PROPAGATE(trace, r, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SNAPSHOT);
