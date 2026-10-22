@@ -47,9 +47,10 @@ typedef unsigned long maage_client_audio_scene_voice;
  * catalog IDs only at bind time (no decoding or I/O there).
  * voice 0 is reserved as "no voice". play_sound owns at most one active voice
  * per scene channel, and loops only when sound_can_loop explicitly permits it.
- * music_prepare lazily returns one ref-counted/owned PCM handle and its true
- * decoded allocation size, without allocating more than max_bytes; music_release must be safe after voice_stop.
- * music_play borrows that handle until the voice stops or completes.
+ * music_prepare returns a selected track's owned streaming handle and the
+ * retained ring-buffer allocation size, bounded by max_bytes; it does not
+ * decode the entire track. music_play borrows the handle until stopped or
+ * naturally complete; music_release stops/joins its decoder producer first.
  * The Audio service owns final category/mute settings.
  */
 typedef struct maage_client_audio_scene_ports {
@@ -81,7 +82,6 @@ typedef struct maage_client_audio_scene_ports {
 } maage_client_audio_scene_ports;
 
 #define MAAGE_AUDIO_SCENE_MAX_PCM_BYTES ((size_t)96U * 1024U * 1024U)
-#define MAAGE_AUDIO_SCENE_MAX_VOICES 6U
 
 maage_status maage_client_audio_scene_create(const void *catalog, void *audio,
     maage_client_audio_scene **output, maage_status_trace *trace);
