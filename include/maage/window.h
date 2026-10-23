@@ -26,6 +26,11 @@ typedef enum maage_window_mode {
     MAAGE_WINDOW_NATIVE_FULLSCREEN
 } maage_window_mode;
 
+typedef enum maage_window_cursor {
+    MAAGE_WINDOW_CURSOR_ARROW = 0,
+    MAAGE_WINDOW_CURSOR_POINTER = 1
+} maage_window_cursor;
+
 typedef struct maage_window_config {
     const char *title;
     int width;
@@ -99,6 +104,9 @@ maage_status maage_window_get_state(maage_window *window,
     maage_window_state *state);
 maage_status maage_window_set_title(maage_window *window, const char *title);
 maage_status maage_window_set_visible(maage_window *window, int visible);
+/* Client-area shape only; capture continues to control cursor visibility.
+ * Unsupported backends return NOT_IMPLEMENTED and retain their native cursor. */
+maage_status maage_window_set_cursor(maage_window *window, maage_window_cursor cursor);
 /* Sizes are logical content dimensions, not outer frames. Fullscreen sizes are
  * OS-controlled; resize returns UNSUPPORTED there. Mode changes may be async:
  * OK acknowledges a request, not compositor acceptance. Query state after polls.

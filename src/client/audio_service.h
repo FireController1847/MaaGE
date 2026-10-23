@@ -59,6 +59,8 @@ maage_status maage_client_audio_service_event(maage_client_audio_service *servic
 /* Uses MAAGE_SOUND_GUI_CLICK through the same semantic numeric event contract. */
 maage_status maage_client_audio_service_ui_click(maage_client_audio_service *service,
     maage_status_trace *trace);
+/* Stop world effects, discard their queued events and flush queued local GUI
+ * activations before a caller begins blocking world teardown. */
 maage_status maage_client_audio_service_reset_world(maage_client_audio_service *service,
     maage_status_trace *trace);
 maage_status maage_client_audio_service_update(maage_client_audio_service *service,

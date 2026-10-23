@@ -201,6 +201,20 @@ maage_status maage_window_get_input(maage_window *window, maage_input_snapshot *
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_QUERY, 0);
 }
 
+maage_status maage_window_set_cursor(maage_window *window, maage_window_cursor cursor)
+{
+    maage_status result;
+    if (!window || (cursor != MAAGE_WINDOW_CURSOR_ARROW && cursor != MAAGE_WINDOW_CURSOR_POINTER))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (window->cursor == cursor)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window->system->api->cursor)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    result = window->system->api->cursor(window, cursor);
+    if (maage_status_is_success(result)) window->cursor = cursor;
+    return result;
+}
+
 maage_status maage_window_capture_mouse(maage_window *window, int capture)
 {
     maage_status result;

@@ -311,6 +311,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Modal screens release capture and pause fixed-step gameplay; closing them
   restores gameplay capture appropriately. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
+- Enabled GUI buttons/sliders show a native pointer on actual mouse hover,
+  an arrow while the primary button is held, and restore hover on release.
+  Disabled controls and keyboard focus do not request the pointer. World teardown
+  preserves local UI activation audio and flushes it before blocking shutdown.
 - Visible UI, input and F3 gameplay state update every rendered frame without
   artificial menu delays. Keep F3 compact: one version/hash, FPS/TPS, chunks,
   live position/facing/target/biome/light, memory, OS/GPU and compact workers.

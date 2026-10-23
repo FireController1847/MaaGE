@@ -2,6 +2,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/XKBlib.h>
+#include <X11/cursorfont.h>
 #include <poll.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ typedef struct maage_x11_window {
     int normal_height;
     maage_window_mode decoration;
     Cursor hidden_cursor;
+    Cursor pointer_cursor;
     int pointer_x;
     int pointer_y;
     int warp_pending;
@@ -182,10 +184,25 @@ static void maage_x11_destroy(maage_window *window)
     if (!native) return;
     maage_window_input_focus(window, 0);
     if (native->hidden_cursor) XFreeCursor(system->display, native->hidden_cursor);
+    if (native->pointer_cursor) XFreeCursor(system->display, native->pointer_cursor);
     if (native->handle) XDestroyWindow(system->display, native->handle);
     XFlush(system->display);
     free(native);
 }
+static maage_status maage_x11_cursor(maage_window *window, maage_window_cursor cursor)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    if (cursor == MAAGE_WINDOW_CURSOR_POINTER) {
+        if (!native->pointer_cursor) native->pointer_cursor = XCreateFontCursor(system->display, XC_hand2);
+        if (!native->pointer_cursor)
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        XDefineCursor(system->display, native->handle, native->pointer_cursor);
+    } else XUndefineCursor(system->display, native->handle);
+    XFlush(system->display);
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+}
+
 static maage_status maage_x11_capture(maage_window *window, int capture)
 {
     maage_x11_system *system = window->system->platform;
@@ -393,5 +410,5 @@ const maage_window_backend_api maage_window_x11_api = {
     MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,
     maage_x11_destroy, maage_x11_poll, maage_x11_state, maage_x11_title,
     maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL, maage_x11_pixels,
-    maage_x11_capture
+    maage_x11_capture, maage_x11_cursor
 };

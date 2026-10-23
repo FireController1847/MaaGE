@@ -5,6 +5,19 @@
 #include <stdio.h>
 #include <string.h>
 
+static void maage_client_ui_cursor(maage_client_ui *ui, int pointer)
+{
+    maage_status result;
+    if (ui->cursor_unavailable) return;
+    result = maage_window_set_cursor(ui->window,
+        pointer ? MAAGE_WINDOW_CURSOR_POINTER : MAAGE_WINDOW_CURSOR_ARROW);
+    if (maage_status_failed(result)) {
+        ui->cursor_unavailable = 1;
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.ui", result,
+            "Native cursor shapes unavailable; retaining the platform cursor.");
+    }
+}
+
 /* Pause retains the translucent world overlay; Settings has its own
  * Vanilla 1.7.10-inspired numeric screens in options.c. */
 static maage_client_ui_rect pause_rect(const maage_client_ui *ui,unsigned int n)
@@ -197,6 +210,8 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->previous_mouse_x = ui->mouse_x; ui->previous_mouse_y = ui->mouse_y;
     ui->mouse_x = input->mouse_x * (float)framebuffer_width / (float)window_width / scale;
     ui->mouse_y = input->mouse_y * (float)framebuffer_height / (float)window_height / scale;
+    ui->primary_down = input->primary_down;
+    if (ui->primary_down) maage_client_ui_cursor(ui, 0);
     if (input->f3) ui->debug = !ui->debug;
     if (input->f11) maage_client_ui_request_window_mode(ui,
         (maage_client_window_choice)(ui->window_mode ? MAAGE_CLIENT_WINDOWED : ui->last_nonwindowed_mode));
@@ -463,6 +478,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     if (!ui || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_PRESENT, !ui ? 0 : 2);
     if (!ui->navigation.finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.vertex_count = ui->batch.index_count = 0;
+    ui->pointer_hover = 0;
     ui->batch.gaussian_background_indices = 0;
     ui->draw_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.logical_width = ui->width; ui->batch.logical_height = ui->height;
@@ -508,6 +524,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
             MAAGE_CLIENT_UI_LEFT, 0.88f, 0.88f, 0.88f);
     }
     if (maage_status_failed(ui->draw_result)) return ui->draw_result;
+    maage_client_ui_cursor(ui, id && ui->pointer_hover);
     *output = &ui->batch;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
 }

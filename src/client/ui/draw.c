@@ -159,6 +159,16 @@ void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float 
     maage_client_ui_font_draw(ui, text, x, y, red, green, blue);
 }
 
+static void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle)
+{
+    if (!ui->primary_down &&
+        ui->mouse_x >= rectangle.x && ui->mouse_x < rectangle.x + rectangle.width &&
+        ui->mouse_y >= rectangle.y && ui->mouse_y < rectangle.y + rectangle.height &&
+        ui->mouse_x >= ui->clip.x && ui->mouse_x < ui->clip.x + ui->clip.width &&
+        ui->mouse_y >= ui->clip.y && ui->mouse_y < ui->clip.y + ui->clip.height)
+        ui->pointer_hover = 1;
+}
+
 void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle,
     const char *label, maage_client_ui_button_visual state)
 {
@@ -169,6 +179,7 @@ void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rect
     if (!ui || !label || state < MAAGE_CLIENT_UI_BUTTON_DISABLED ||
         state > MAAGE_CLIENT_UI_BUTTON_HOVER ||
         rectangle.width <= 0.0f || rectangle.height <= 0.0f) return;
+    if (state != MAAGE_CLIENT_UI_BUTTON_DISABLED) maage_client_ui_pointer(ui, rectangle);
     /* Six-slice the 200x20 widgets.png button (3 columns x 2 rows).
      * Native-size endcaps preserve borders and corners on half-width buttons.
      * Only the long middle section is stretched. */
@@ -225,6 +236,7 @@ void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect r,
     maage_client_ui_rect knob;
     float atlas,y,center,tint;
     if(!ui||!label||r.width<8.0f||r.height<=0.0f)return;
+    maage_client_ui_pointer(ui,r);
     if(value<0.0f)value=0.0f;
     if(value>1.0f)value=1.0f;
     /* Minecraft 1.7.10 GuiOptionSlider.getHoverState() returns 0:

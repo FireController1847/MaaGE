@@ -66,6 +66,13 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
     } else window = (maage_window *)GetWindowLongPtrW(handle, GWLP_USERDATA);
     if (window) {
         switch (message) {
+        case WM_SETCURSOR:
+            if (LOWORD(lp) == HTCLIENT) {
+                SetCursor(window->input.captured ? NULL : LoadCursorW(NULL,
+                    window->cursor == MAAGE_WINDOW_CURSOR_POINTER ? IDC_HAND : IDC_ARROW));
+                return TRUE;
+            }
+            break;
         case WM_SETFOCUS: maage_window_input_focus(window, 1); break;
         case WM_KILLFOCUS: maage_window_input_focus(window, 0); break;
         case WM_CHAR:
@@ -258,6 +265,20 @@ static void maage_win32_destroy(maage_window *window)
     if (native->handle) DestroyWindow(native->handle);
     free(native);
 }
+static maage_status maage_win32_cursor(maage_window *window, maage_window_cursor cursor)
+{
+    maage_win32_window *native = window->platform;
+    HCURSOR handle;
+    POINT point;
+    RECT client;
+    handle = LoadCursorW(NULL, cursor == MAAGE_WINDOW_CURSOR_POINTER ? IDC_HAND : IDC_ARROW);
+    if (!handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window->input.captured && GetCursorPos(&point) && WindowFromPoint(point) == native->handle &&
+        ScreenToClient(native->handle, &point) && GetClientRect(native->handle, &client) && PtInRect(&client, point))
+        SetCursor(handle);
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+}
+
 static maage_status maage_win32_capture(maage_window *window, int capture)
 {
     maage_win32_system *system = window->system->platform;
@@ -381,5 +402,5 @@ const maage_window_backend_api maage_window_win32_api = {
     MAAGE_WINDOW_WIN32, maage_win32_init, maage_win32_shutdown, maage_win32_create,
     maage_win32_destroy, maage_win32_poll, maage_win32_state, maage_win32_title,
     maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL, maage_win32_pixels,
-    maage_win32_capture
+    maage_win32_capture, maage_win32_cursor
 };

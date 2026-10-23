@@ -66,6 +66,7 @@ struct maage_client_ui {
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
     int selected_keyboard;
+    int primary_down, pointer_hover, cursor_unavailable;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, dragging_fps, leaves_mode;
     int audio_volume[7], dragging_volume;
     int dragging_fov, fov_degrees, video_first_row;

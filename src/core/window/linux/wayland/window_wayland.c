@@ -409,5 +409,5 @@ const maage_window_backend_api maage_window_wayland_api = {
     MAAGE_WINDOW_WAYLAND, maage_wayland_init, maage_wayland_shutdown, maage_wayland_create,
     maage_wayland_destroy, maage_wayland_poll, maage_wayland_state, maage_wayland_title,
     maage_wayland_visible, maage_wayland_resize, maage_wayland_mode, maage_wayland_native,
-    maage_wayland_surface, maage_wayland_pixels, NULL
+    maage_wayland_surface, maage_wayland_pixels, NULL, NULL
 };

@@ -19,6 +19,7 @@ typedef struct maage_window_backend_api {
     maage_status (*surface)(maage_window *window, int external);
     maage_status (*pixels)(maage_window *window, const maage_pixel_buffer *buffer);
     maage_status (*capture)(maage_window *window, int capture);
+    maage_status (*cursor)(maage_window *window, maage_window_cursor cursor);
 } maage_window_backend_api;
 
 struct maage_window_system {
@@ -34,6 +35,7 @@ struct maage_window {
     maage_input_snapshot input;
     int full_display_content;
     int surface_owned;
+    maage_window_cursor cursor;
 };
 
 extern const maage_window_backend_api maage_window_win32_api;

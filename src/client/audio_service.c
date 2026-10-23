@@ -353,10 +353,34 @@ maage_status maage_client_audio_service_ui_click(maage_client_audio_service *ser
 maage_status maage_client_audio_service_reset_world(maage_client_audio_service *service,
     maage_status_trace *trace)
 {
+    maage_sound_event event;
+    maage_status result, first_failure;
     if (!service) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
-    service->count = service->first = 0;
-    if (!service->engine) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
-    return service->api.reset_world(service->engine, trace);
+    if (!service->engine) {
+        service->count = service->first = 0;
+        return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
+    }
+    first_failure = service->api.reset_world(service->engine, trace);
+    if (maage_status_failed(first_failure)) return first_failure;
+    /* Navigation can leave the frame before its queued activation is played.
+     * Flush local UI effects while discarding obsolete gameplay effects. */
+    while (service->count) {
+        event = service->queue[service->first];
+        service->first = (service->first + 1U) % MAAGE_CLIENT_AUDIO_QUEUE_SIZE;
+        --service->count;
+        if (event.event_id != MAAGE_SOUND_GUI_CLICK || !service->accepting || !service->playable) continue;
+        result = service->api.play_event(service->catalog, service->engine, &event, trace);
+        if (maage_status_failed(result)) {
+            maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_EVENT, result, trace,
+                "A GUI activation sound could not play during navigation.");
+            if (!maage_status_failed(first_failure))
+                first_failure = result;
+        }
+    }
+    service->first = 0;
+    if (maage_status_failed(first_failure))
+        return maage_client_audio_recover(first_failure, MAAGE_OPERATION_STOP, trace);
+    return first_failure;
 }
 
 maage_status maage_client_audio_service_update(maage_client_audio_service *service,

@@ -1215,6 +1215,8 @@ choose_world:
     }
     goto done;
 return_to_title:
+    operation = maage_client_audio_service_reset_world(audio, trace);
+    if (maage_status_failed(operation)) goto done;
     result = maage_window_capture_mouse(window, 0);
     if (maage_status_failed(result)) goto window_failed;
     maage_server_runtime_request_stop(server);
@@ -1231,8 +1233,6 @@ return_to_title:
     operation = maage_client_mesh_cache_clear(&cache);
     if (maage_status_failed(operation)) goto done;
     maage_client_ui_get_options(ui, &video_options);
-    operation = maage_client_audio_service_reset_world(audio, trace);
-    if (maage_status_failed(operation)) goto done;
     rendered = maage_renderer_set_scene(renderer, 1, NULL, NULL);
     if (maage_status_failed(rendered)) goto done;
     rendered = maage_renderer_set_foreground(renderer, NULL, NULL, 0, 0);

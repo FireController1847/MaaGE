@@ -37,6 +37,20 @@ static void maage_cocoa_presentation(maage_window_system *);
 - (BOOL)canBecomeKeyWindow { return YES; }
 @end
 
+@interface MaaGEViewport : NSView {
+@public
+    maage_window_cursor cursor_shape;
+}
+@end
+@implementation MaaGEViewport
+- (void)resetCursorRects
+{
+    [super resetCursorRects];
+    [self addCursorRect:[self bounds] cursor:cursor_shape == MAAGE_WINDOW_CURSOR_POINTER ?
+        [NSCursor pointingHandCursor] : [NSCursor arrowCursor]];
+}
+@end
+
 @interface MaaGEBitmapView : NSView {
 @public
     NSBitmapImageRep *image;
@@ -456,7 +470,7 @@ static maage_status maage_cocoa_create(maage_window *window, const maage_window_
     [native->handle setAcceptsMouseMovedEvents:YES];
     /* The NSWindow's root contentView may extend behind titlebar/notch areas.
      * The independently sized drawable subview remains stable for all modes. */
-    native->viewport = [[NSView alloc] initWithFrame:[[native->handle contentView] bounds]];
+    native->viewport = [[MaaGEViewport alloc] initWithFrame:[[native->handle contentView] bounds]];
     if (!native->viewport)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     [[native->handle contentView] addSubview:native->viewport];
@@ -489,6 +503,19 @@ static void maage_cocoa_destroy(maage_window *window)
     free(native);
     maage_cocoa_presentation(window->system);
 }
+static maage_status maage_cocoa_cursor(maage_window *window, maage_window_cursor cursor)
+{
+    maage_cocoa_window *native = window->platform;
+    MaaGEViewport *view = (MaaGEViewport *)native->viewport;
+    NSPoint point;
+    view->cursor_shape = cursor;
+    [native->handle invalidateCursorRectsForView:view];
+    point = [view convertPoint:[native->handle mouseLocationOutsideOfEventStream] fromView:nil];
+    if (!window->input.captured && [native->handle isKeyWindow] && NSPointInRect(point, [view bounds]))
+        [(cursor == MAAGE_WINDOW_CURSOR_POINTER ? [NSCursor pointingHandCursor] : [NSCursor arrowCursor]) set];
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+}
+
 static maage_status maage_cocoa_capture(maage_window *window, int capture)
 {
     maage_cocoa_window *native = window->platform;
@@ -737,5 +764,5 @@ const maage_window_backend_api maage_window_cocoa_api = {
     MAAGE_WINDOW_COCOA, maage_cocoa_init, maage_cocoa_shutdown, maage_cocoa_create,
     maage_cocoa_destroy, maage_cocoa_poll, maage_cocoa_state, maage_cocoa_title,
     maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native,
-    maage_cocoa_surface, maage_cocoa_pixels, maage_cocoa_capture
+    maage_cocoa_surface, maage_cocoa_pixels, maage_cocoa_capture, maage_cocoa_cursor
 };
