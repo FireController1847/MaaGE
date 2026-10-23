@@ -15,6 +15,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* C SDK declarations do not instantiate the WASAPI interface UUIDs. */
+static const CLSID maage_wasapi_enumerator_class = {
+    0xbcde0395, 0xe52f, 0x467c, {0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e}};
+static const IID maage_wasapi_enumerator_interface = {
+    0xa95664d2, 0x9614, 0x4f35, {0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6}};
+static const IID maage_wasapi_client_interface = {
+    0x1cb9ad4c, 0xdbfa, 0x4c32, {0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2}};
+static const IID maage_wasapi_render_interface = {
+    0xf294acfc, 0x3146, 0x4483, {0xa7, 0xbf, 0xad, 0xdc, 0xa7, 0xc2, 0x60, 0xe2}};
+static const GUID maage_wasapi_pcm = {STATIC_KSDATAFORMAT_SUBTYPE_PCM};
+static const GUID maage_wasapi_float = {STATIC_KSDATAFORMAT_SUBTYPE_IEEE_FLOAT};
+
 typedef struct maage_wasapi_state {
     maage_audio *audio;
     maage_thread *worker;
@@ -33,9 +45,9 @@ static int select_format(const WAVEFORMATEX *w)
     if (tag == WAVE_FORMAT_EXTENSIBLE) {
         const WAVEFORMATEXTENSIBLE *e = (const WAVEFORMATEXTENSIBLE *)w;
         if (w->cbSize < 22) return 0;
-        if (!memcmp(&e->SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, sizeof(GUID)))
+        if (!memcmp(&e->SubFormat, &maage_wasapi_float, sizeof(GUID)))
             tag = WAVE_FORMAT_IEEE_FLOAT;
-        else if (!memcmp(&e->SubFormat, &KSDATAFORMAT_SUBTYPE_PCM, sizeof(GUID)))
+        else if (!memcmp(&e->SubFormat, &maage_wasapi_pcm, sizeof(GUID)))
             tag = WAVE_FORMAT_PCM;
         else return 0;
     }
@@ -78,12 +90,12 @@ static void wasapi_worker(void *context)
     hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) goto finish;
     initialized = 1;
-    hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_INPROC_SERVER,
-        &IID_IMMDeviceEnumerator, (void **)&enumerator);
+    hr = CoCreateInstance(&maage_wasapi_enumerator_class, NULL, CLSCTX_INPROC_SERVER,
+        &maage_wasapi_enumerator_interface, (void **)&enumerator);
     if (FAILED(hr)) goto finish;
     hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(enumerator, eRender, eConsole, &device);
     if (FAILED(hr)) goto finish;
-    hr = IMMDevice_Activate(device, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
+    hr = IMMDevice_Activate(device, &maage_wasapi_client_interface, CLSCTX_INPROC_SERVER,
         NULL, (void **)&client);
     if (FAILED(hr)) goto finish;
     hr = IAudioClient_GetMixFormat(client, &format);
@@ -99,7 +111,7 @@ static void wasapi_worker(void *context)
     if (FAILED(hr)) goto finish;
     hr = IAudioClient_GetBufferSize(client, &capacity);
     if (FAILED(hr) || !capacity) goto finish;
-    hr = IAudioClient_GetService(client, &IID_IAudioRenderClient, (void **)&render);
+    hr = IAudioClient_GetService(client, &maage_wasapi_render_interface, (void **)&render);
     if (FAILED(hr)) goto finish;
     s->wake = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (!s->wake) { hr = HRESULT_FROM_WIN32(GetLastError()); goto finish; }

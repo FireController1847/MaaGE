@@ -624,6 +624,18 @@ Ordinary Launcher UI must not initialize a renderer. Core graphics remain for
 actual rendering needs; `--renderer-demo` explicitly opens the existing RGB
 demonstration after setup instead of the main Launcher.
 Client processes own their graphics; the native Launcher never hosts their renderer.
+Group Launcher platform adapters under `src/launcher/native/windows/`, `macos/`
+and `linux/`; keep shared setup contracts/formatting at the `native/` root.
+Windows Launcher uses a Launcher-only Common Controls v6/PerMonitorV2 manifest
+and shared private Win32 DPI/font helpers (Windows 10 1703+). Store layout in
+96-DPI logical units, rebuild fonts and geometry on `WM_DPICHANGED`, and scale
+window frames, painting and list columns consistently. Retain native controls,
+keyboard/focus/accessibility behavior and system high-contrast colors; dark setup
+buttons use native custom-draw notifications, not a second widget system. Dark
+dropdown fields/lists and determinate/marquee progress retain native controls
+with shared private painting and DPI-scaled metrics. Preserve combo strings for
+accessibility and native high-contrast rendering. Timer refreshes update changed
+text/list/progress state only; parent painting must clip child controls.
 
 Preserve the native initial setup experience. The main Launcher uses a compact
 native sidebar with Play as the default page/principal action; News, Installations,
@@ -856,7 +868,8 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   options/configuration variables. Public headers/include paths use `maage`;
   project namespaces and aliases use `MaaGE`. Preserve external identifiers.
 - Keep the root clean: `README.md`, `AGENTS.md`, `LICENSE`, `.gitignore`,
-  `CMakeLists.txt`, `CMakePresets.json`, `CMakeVersions.cmake`, `CMakeApplications.cmake`, and the
+  `CMakeLists.txt`, `CMakePresets.json`, `CMakeVersions.cmake`, `CMakeApplications.cmake`,
+  `CMakeDependencies.cmake`, `vcpkg-windows.json`, and the
   `CMakeConfig.h` template belong here.
   The three application directories and `src/core/` are the established source layout.
 - Target compact Release executables (currently aiming below 60 KiB for the
@@ -875,11 +888,21 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
 - Keep build validation in `.github/workflows/build.yml` manually triggered only
   (`workflow_dispatch`) until explicitly authorized otherwise. Preserve read-only
   permissions and existing CMake layout.
-- CI must provision and verify required build dependencies before configuring
-  CMake. Keep them platform-specific and minimal, pin versions where practical,
+- CI must provision and verify required build dependencies before consumers use
+  them; vcpkg manifest installation runs during CMake toolchain initialization.
+  Keep them platform-specific and minimal, pin versions where practical,
   and fail clearly rather than disabling required applications or backends.
   Default graphics builds require Vulkan headers/loader on Windows/Linux and native
   Metal/AppKit/QuartzCore from the Apple SDK on macOS; do not install MoltenVK.
+- Windows configuration discovers vcpkg from its environment/PATH or Visual Studio
+  before `project()`; explicit toolchains take precedence and `MAAGE_USE_VCPKG=OFF`
+  disables discovery. The pinned manifest selects dependencies from enabled modules,
+  including Vulkan build files, and vcpkg selects the target triplet. Copy
+  `vcpkg-windows.json` into the Windows build tree as `vcpkg-manifest/vcpkg.json`;
+  never auto-enable it for other platforms or replace an explicit user manifest.
+  Non-Windows/custom cross toolchains retain `project()` before module options.
+  Keep installs under the generated build tree; clear the CMake cache when changing
+  toolchains or manifest selection.
 - Preserve the existing Git author and committer identity. Every commit created
   or amended on the user's behalf must include:
   `Co-authored-by: Codex <noreply@openai.com>`.

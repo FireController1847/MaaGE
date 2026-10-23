@@ -2,12 +2,13 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <shellapi.h>
-#include "../access/oauth.h"
+#include "../../access/oauth.h"
+#include <limits.h>
 #include <stdlib.h>
 maage_status maage_auth_random(unsigned char *bytes, size_t count)
 {
     NTSTATUS native;
-    if ((!bytes && count) || count > MAXULONG) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);
+    if ((!bytes && count) || count > ULONG_MAX) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);
     if (!count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CREATE, 0);
     native = BCryptGenRandom(NULL, bytes, (ULONG)count, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     return maage_status_make(native ? MAAGE_STATUS_ERROR : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);

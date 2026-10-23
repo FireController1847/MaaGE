@@ -1,0 +1,27 @@
+{
+  "name": "maage",
+  "builtin-baseline": "e5a1490e1409d175932ef6014519e9ae149ddb7c",
+  "dependencies": ["zlib"],
+  "features": {
+    "instances": {
+      "description": "Instance manifest storage",
+      "dependencies": ["json-c"]
+    },
+    "launcher": {
+      "description": "Launcher acquisition and account services",
+      "dependencies": [
+        {"name": "curl", "default-features": false, "features": ["ssl"]},
+        "openssl",
+        {"name": "libzip", "default-features": false}
+      ]
+    },
+    "image": {
+      "description": "PNG resource decoding",
+      "dependencies": ["libpng"]
+    },
+    "vulkan": {
+      "description": "Native Vulkan build headers and loader",
+      "dependencies": [{"name": "vulkan-loader", "platform": "windows | linux"}]
+    }
+  }
+}

@@ -60,41 +60,16 @@ jobs:
         run: |
           Get-Command cl.exe, link.exe, cmake, ninja -ErrorAction Stop
 
-      - name: Provision Windows application dependencies
+      - name: Initialize Windows dependency manager
         if: runner.os == 'Windows'
         run: |
           if (-not $env:VCPKG_INSTALLATION_ROOT) { throw 'The runner must provide vcpkg.' }
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows curl:x64-windows json-c:x64-windows openssl:x64-windows libzip[core]:x64-windows libpng:x64-windows
-          if ($LASTEXITCODE -ne 0) { throw 'Launcher dependency provisioning failed.' }
-          foreach ($header in @('zlib.h', 'curl/curl.h', 'json-c/json.h', 'openssl/evp.h', 'zip.h', 'png.h')) {
-            if (-not (Test-Path "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/include/$header")) {
-              throw "Missing Launcher dependency: $header"
-            }
+          $toolchain = "$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          if (-not (Test-Path -LiteralPath $toolchain -PathType Leaf)) {
+            throw "Missing vcpkg toolchain: $toolchain"
           }
-          "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
-
-      - name: Provision Windows Vulkan headers and loader
-        if: runner.os == 'Windows'
-        uses: humbletim/setup-vulkan-sdk@c25f41106918cde0bf347e6f201277392b3a9e9d # v1.2.1
-        env:
-          CMAKE_GENERATOR: Ninja
-        with:
-          vulkan-query-version: '1.4.304.1'
-          vulkan-components: Vulkan-Headers, Vulkan-Loader
-          vulkan-use-cache: false
-
-      - name: Verify Windows Vulkan SDK
-        if: runner.os == 'Windows'
-        run: |
-          if (-not $env:VULKAN_SDK) { throw 'Vulkan setup did not export VULKAN_SDK.' }
-          # FindVulkan uses these directories beneath VULKAN_SDK automatically.
-          foreach ($relative in @('include/vulkan/vulkan.h', 'lib/vulkan-1.lib')) {
-            $path = Join-Path $env:VULKAN_SDK $relative
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Required Vulkan build dependency missing: $path"
-            }
-          }
-          Write-Host "Vulkan SDK: $env:VULKAN_SDK"
+          # CMake installs the pinned manifest's enabled features before find_package.
+          "CMAKE_TOOLCHAIN_FILE=$toolchain" >> $env:GITHUB_ENV
 
       - name: Provision macOS application dependencies
         if: runner.os == 'macOS'

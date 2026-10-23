@@ -1,6 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
-#include "setup.h"
+#include "../setup.h"
 #include <string.h>
 
 static NSColor *maage_setup_color(CGFloat value)

@@ -1,7 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
-#include "../access/access.h"
-#include "../access/oauth.h"
+#include "../../access/access.h"
+#include "../../access/oauth.h"
 #include "maage/time.h"
 #include <string.h>
 static NSColor *maage_access_color(CGFloat gray)

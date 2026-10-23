@@ -6,7 +6,22 @@ if(MAAGE_BINARY_SUBDIR STREQUAL "" OR MAAGE_BINARY_SUBDIR MATCHES "^\\.\\." OR I
     message(FATAL_ERROR "Configure beneath cmake/<name>, or use a root CMake preset.")
 endif()
 
-project(MaaGE DESCRIPTION "Native, extensible voxel game platform" LANGUAGES C)
+# Only native Windows/vcpkg setup needs module options before project(). Other
+# platforms and custom cross toolchains retain their original initialization order.
+set(MAAGE_WINDOWS_DEPENDENCIES OFF)
+set(MAAGE_EXPLICIT_TOOLCHAIN "${CMAKE_TOOLCHAIN_FILE}")
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
+    set(MAAGE_EXPLICIT_TOOLCHAIN "$ENV{CMAKE_TOOLCHAIN_FILE}")
+endif()
+get_filename_component(MAAGE_TOOLCHAIN_NAME "${MAAGE_EXPLICIT_TOOLCHAIN}" NAME)
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR
+        (NOT CMAKE_SYSTEM_NAME AND CMAKE_HOST_WIN32 AND
+            (NOT MAAGE_EXPLICIT_TOOLCHAIN OR
+                (MAAGE_TOOLCHAIN_NAME STREQUAL "vcpkg.cmake" AND NOT VCPKG_CHAINLOAD_TOOLCHAIN_FILE))))
+    set(MAAGE_WINDOWS_DEPENDENCIES ON)
+else()
+    project(MaaGE DESCRIPTION "Native, extensible voxel game platform" LANGUAGES C)
+endif()
 
 set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -30,6 +45,12 @@ endif()
 option(MAAGE_BUILD_WORLD "Build portable block, world, meshing and player modules" ${MAAGE_WORLD_DEFAULT})
 option(MAAGE_BUILD_AUDIO "Build the native Client audio service" ${MAAGE_BUILD_CLIENT})
 option(MAAGE_BUILD_INSTANCE "Build reusable instance storage and manifests" ${MAAGE_RESOURCE_DEFAULT})
+
+if(MAAGE_WINDOWS_DEPENDENCIES)
+    # Dependency features must be selected before project() loads vcpkg.
+    include(CMakeDependencies.cmake)
+    project(MaaGE DESCRIPTION "Native, extensible voxel game platform" LANGUAGES C)
+endif()
 
 # Single-config builds use bin/ and lib/; multi-config builds append Debug/, etc.
 set(MAAGE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build/${MAAGE_BINARY_SUBDIR}")

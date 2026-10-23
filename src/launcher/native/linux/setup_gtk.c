@@ -1,4 +1,4 @@
-#include "setup.h"
+#include "../setup.h"
 #include "maage/log.h"
 #include <gtk/gtk.h>
 #include <string.h>
