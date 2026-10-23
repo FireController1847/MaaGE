@@ -725,7 +725,10 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
                     player->position[2], strength, maage_gameplay_sound_pitch(game, 0.4));
             }
             surface = maage_gameplay_underfoot(world, player, 2);
-            if (surface && surface->fluid_kind == MAAGE_FLUID_NONE)
+            /* A nearby surface can still be sampled after takeoff. Ground
+             * steps require current contact; climbing keeps its own cadence. */
+            if (surface && surface->fluid_kind == MAAGE_FLUID_NONE &&
+                (player->grounded || surface->block_id == 65UL))
                 maage_gameplay_sound(&sink, MAAGE_SOUND_FOOTSTEP,
                     maage_gameplay_material(surface->block_id), player->position[0],
                     player->position[1], player->position[2], 1.0, 1.0);
