@@ -22,19 +22,20 @@ extern "C" {
 #define MAAGE_CONTENT_TEXTURE_SANDSTONE 8
 #define MAAGE_CONTENT_TEXTURE_SANDSTONE_TOP 9
 #define MAAGE_CONTENT_TEXTURE_SANDSTONE_BOTTOM 10
-#define MAAGE_CONTENT_TEXTURE_BIOME_TOP(id) (11 + 2 * (id))
-#define MAAGE_CONTENT_TEXTURE_BIOME_SIDE(id) (12 + 2 * (id))
-#define MAAGE_CONTENT_TEXTURE_EXTRA (11 + 2 * MAAGE_BIOME_COUNT)
+#define MAAGE_CONTENT_TEXTURE_EXTRA 11
 #define MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK (MAAGE_CONTENT_TEXTURE_EXTRA + 33)
 #define MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE (MAAGE_CONTENT_TEXTURE_EXTRA + 34)
 #define MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH (MAAGE_CONTENT_TEXTURE_EXTRA + 35)
-#define MAAGE_CONTENT_TEXTURE_MISSING (MAAGE_CONTENT_TEXTURE_EXTRA + 36)
+#define MAAGE_CONTENT_TEXTURE_GRASS_SIDE_OVERLAY (MAAGE_CONTENT_TEXTURE_EXTRA + 36)
+#define MAAGE_CONTENT_TEXTURE_GRASS_SIDE_SNOW (MAAGE_CONTENT_TEXTURE_EXTRA + 37)
+#define MAAGE_CONTENT_TEXTURE_MISSING (MAAGE_CONTENT_TEXTURE_EXTRA + 38)
 #define MAAGE_CONTENT_TEXTURE_COUNT (MAAGE_CONTENT_TEXTURE_MISSING + 1)
 
 typedef struct maage_content maage_content;
 
-/* Initialization only: the callback may populate face UVs/tints and opaque
- * leaf UVs. The face's numeric texture_id is authoritative and must not change.
+/* Initialization only: the callback may populate face UVs, tint selections,
+ * overlays, animation metadata and opaque leaf UVs. The numeric texture_id is
+ * authoritative and must not change.
  * state_id, block_id, metadata and face are numeric; no graphics headers needed.
  * The callback and its context are never retained by finalized content. */
 typedef maage_status (*maage_content_presentation_resolver)(

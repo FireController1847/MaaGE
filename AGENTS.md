@@ -582,6 +582,18 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   Other families retain their existing clear/presentation functionality and return
   unsupported for gameplay mesh commands. MSL lives in an original `.metal` asset,
   embedded at build time and compiled by native Metal at initialization.
+- Mesh vertices carry numeric opaque, cutout, translucent or multiply-overlay
+  semantics and optional immutable-atlas animation coordinates. Keep solid/cutout
+  depth writes separate from sorted translucent depth reads. RGBA is straight
+  alpha; emission sprites use explicit additive blending (the original sun/moon
+  PNGs have opaque black backgrounds), never black-key pixel replacement.
+  First-person hand/items use a separate camera-local perspective/depth pass
+  before GUI, with copied authoritative swing/light observations.
+- Grass base/overlay and foliage use neutral atlas pixels and initialization-resolved
+  numeric tint modes. Smooth World meshing samples a retained eight-column
+  neighbor halo for corner light, AO, biome colors and fluid heights; validate
+  all borrowed revisions and invalidate diagonal dependencies. Keep Fast/Smart/
+  Fancy leaf culling distinct and animation independent of chunk remeshing.
 - Indexed UI batches use backend-neutral logical positions, atlas UVs and RGBA,
   drawn after world geometry with alpha blending and depth disabled, then one
   presentation. Advertise `UI` only where implemented: currently Metal. Other

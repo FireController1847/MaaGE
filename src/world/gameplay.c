@@ -380,6 +380,11 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     memset(&drop, 0, sizeof(drop)); inventory = game->inventory;
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && harvest && block->drop_count) {
         drop.item_id = block->drop_item_id; drop.count = block->drop_count;
+        if (block->id == MAAGE_BLOCK_LOG) {
+            const maage_block_state_definition *broken = maage_block_registry_state(
+                maage_world_registry(world), game->target.state_id);
+            if (broken) drop.metadata = broken->metadata & 3U;
+        }
         if (!maage_item_stack_valid(items, &drop)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
         result = maage_inventory_add(&inventory, items, &drop, &remaining);
         if (maage_status_failed(result)) return result;
@@ -447,7 +452,7 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
     if (!item || !item->has_block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     result = maage_item_placement_state(item, held->metadata, game->target.face, yaw, &placed);
-    if (maage_status_failed(result)) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     state = maage_block_registry_state(maage_world_registry(world), placed);
     block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
     if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
@@ -463,6 +468,22 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
     if (!old_block || !old_block->replaceable ||
         (block->solid && maage_gameplay_player_overlap(player,x,y,z,&block->collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (block->mesh_shape == MAAGE_BLOCK_MESH_TORCH) {
+        int support_x, support_y, support_z;
+        static const int supports[6][3] = {
+            {0,-1,0}, {-1,0,0}, {1,0,0}, {0,0,-1}, {0,0,1}, {0,-1,0}
+        };
+        if (state->metadata < 1 || state->metadata > 5)
+            return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+        support_x = x + supports[state->metadata][0];
+        support_y = y + supports[state->metadata][1];
+        support_z = z + supports[state->metadata][2];
+        old_state = maage_block_registry_state(maage_world_registry(world),
+            maage_world_get(world, support_x, support_y, support_z));
+        old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
+        if (!old_block || !old_block->solid || !old_block->opaque)
+            return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    }
     result = maage_world_set(world,x,y,z,old,placed);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE,

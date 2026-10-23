@@ -7,13 +7,21 @@
  * path; only the optional initialization-time presentation resolver differs. */
 static maage_status maage_content_register_state(maage_block_registry *registry,
     const maage_content_config *config, maage_block_state_id id,
-    maage_block_id block, unsigned int metadata, int texture, int grass_biome)
+    maage_block_id block, unsigned int metadata, int texture)
 {
     maage_block_state_definition state;
-    int face, channel, selected, level;
+    int face, channel, selected, level, species, log_axis;
     maage_status result;
     memset(&state, 0, sizeof(state));
     state.id = id; state.block_id = block; state.metadata = metadata;
+    if (block == MAAGE_BLOCK_TORCH && metadata >= 1 && metadata <= 4) {
+        state.selection_shape.minimum[0] = state.selection_shape.minimum[2] = 0.35;
+        state.selection_shape.maximum[0] = state.selection_shape.maximum[2] = 0.65;
+        state.selection_shape.minimum[1] = 0.2; state.selection_shape.maximum[1] = 0.8;
+        log_axis = metadata <= 2 ? 0 : 2;
+        state.selection_shape.minimum[log_axis] = metadata & 1 ? 0.0 : 0.7;
+        state.selection_shape.maximum[log_axis] = metadata & 1 ? 0.3 : 1.0;
+    }
     if (block == MAAGE_BLOCK_WATER || block == MAAGE_BLOCK_LAVA) {
         state.fluid_kind = block == MAAGE_BLOCK_WATER ? MAAGE_FLUID_WATER : MAAGE_FLUID_LAVA;
         state.fluid_level = metadata; state.fluid_source_state = block;
@@ -24,18 +32,20 @@ static maage_status maage_content_register_state(maage_block_registry *registry,
     for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
         selected = texture;
         if (block == MAAGE_BLOCK_GRASS) {
-            selected = grass_biome >= 0 ? MAAGE_CONTENT_TEXTURE_BIOME_SIDE(grass_biome) : MAAGE_CONTENT_TEXTURE_GRASS_SIDE;
+            selected = MAAGE_CONTENT_TEXTURE_GRASS_SIDE;
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_CONTENT_TEXTURE_DIRT;
             if (face == MAAGE_FACE_POSITIVE_Y)
-                selected = grass_biome >= 0 ? MAAGE_CONTENT_TEXTURE_BIOME_TOP(grass_biome) : MAAGE_CONTENT_TEXTURE_GRASS_TOP;
+                selected = MAAGE_CONTENT_TEXTURE_GRASS_TOP;
         }
         if (block == MAAGE_BLOCK_SANDSTONE) {
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_CONTENT_TEXTURE_SANDSTONE_TOP;
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_CONTENT_TEXTURE_SANDSTONE_BOTTOM;
         }
         if (block == MAAGE_BLOCK_LOG) {
-            selected = MAAGE_CONTENT_TEXTURE_EXTRA + (metadata == 1 ? 26 : (metadata == 2 ? 29 : 6));
-            if (face == MAAGE_FACE_NEGATIVE_Y || face == MAAGE_FACE_POSITIVE_Y) ++selected;
+            species = metadata & 3;
+            selected = MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 26 : (species == 2 ? 29 : 6));
+            log_axis = (metadata & 12) == 4 ? 0 : ((metadata & 12) == 8 ? 2 : 1);
+            if (face / 2 == log_axis) ++selected;
         } else if (block == MAAGE_BLOCK_LEAVES)
             selected = MAAGE_CONTENT_TEXTURE_EXTRA + (metadata == 1 ? 28 : (metadata == 2 ? 31 : 8));
         else if (block == MAAGE_BLOCK_CACTUS) {
@@ -82,6 +92,7 @@ static maage_status maage_content_blocks_create(
         memset(&block, 0, sizeof(block));
         block.id = ids[i];
         block.solid = block.opaque = ids[i] != MAAGE_BLOCK_AIR && ids[i] != MAAGE_BLOCK_WATER;
+        block.light_opacity = block.opaque ? 15U : (ids[i] == MAAGE_BLOCK_WATER ? 3U : 0U);
         block.emitted_light = 0;
         block.selectable = block.solid;
         block.replaceable = !block.solid;
@@ -97,7 +108,7 @@ static maage_status maage_content_blocks_create(
             block.selection_shape = block.collision_shape;
         }
         if (maage_status_failed(result = maage_block_registry_register_block(registry, names[i], &block)) ||
-            maage_status_failed(result = maage_content_register_state(registry, config, ids[i], ids[i], 0, textures[i], -1))) goto failed;
+            maage_status_failed(result = maage_content_register_state(registry, config, ids[i], ids[i], 0, textures[i]))) goto failed;
     }
     {
         static const struct {
@@ -113,7 +124,7 @@ static maage_status maage_content_blocks_create(
             {32,"dead_bush",11,0,0,1,0,0}, {37,"dandelion",12,0,0,1,0,0},
             {38,"poppy",13,0,0,1,0,0}, {39,"brown_mushroom",14,0,0,1,0,0},
             {40,"red_mushroom",15,0,0,1,0,0}, {48,"mossy_cobblestone",16,1,1,0,2,0},
-            {49,"obsidian",17,1,1,0,50,0}, {50,"torch",18,0,0,1,0,14},
+            {49,"obsidian",17,1,1,0,50,0}, {50,"torch",18,0,0,0,0,14},
             {56,"diamond_ore",19,1,1,0,3,0}, {73,"redstone_ore",20,1,1,0,3,0},
             {78,"snow",21,1,0,0,0.1,0}, {79,"ice",32,1,0,0,0.5,0},
             {81,"cactus",22,1,0,0,0.4,0}, {129,"emerald_ore",25,1,1,0,3,0}
@@ -125,8 +136,11 @@ static maage_status maage_content_blocks_create(
             memset(&block, 0, sizeof(block));
             block.id = content[entry].id; block.solid = content[entry].solid;
             block.opaque = content[entry].opaque; block.hardness = content[entry].hardness;
+            block.light_opacity = block.opaque ? 15U :
+                (block.id == MAAGE_BLOCK_LEAVES ? 1U : (block.id == MAAGE_BLOCK_ICE ? 3U : 0U));
             block.emitted_light = content[entry].emission;
             block.mesh_shape = content[entry].cross ? MAAGE_BLOCK_MESH_CROSS : MAAGE_BLOCK_MESH_CUBE;
+            if (block.id == MAAGE_BLOCK_TORCH) block.mesh_shape = MAAGE_BLOCK_MESH_TORCH;
             block.selectable = block.id != MAAGE_BLOCK_LAVA; block.replaceable = !block.solid;
             if (block.id != MAAGE_BLOCK_LAVA && block.id != MAAGE_BLOCK_LEAVES) {
                 block.drop_item_id = block.id; block.drop_count = 1;
@@ -137,16 +151,17 @@ static maage_status maage_content_blocks_create(
                 block.selection_shape.minimum[0] = block.selection_shape.minimum[2] = 0.1;
                 block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 0.9;
                 block.selection_shape.maximum[1] = 0.8;
-                if (block.id == MAAGE_BLOCK_TORCH) {
-                    block.selection_shape.minimum[0] = block.selection_shape.minimum[2] = 0.4;
-                    block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 0.6;
-                    block.selection_shape.maximum[1] = 0.625;
-                } else if (block.id != MAAGE_BLOCK_TALL_GRASS && block.id != MAAGE_BLOCK_DEAD_BUSH) {
+                if (block.id != MAAGE_BLOCK_TALL_GRASS && block.id != MAAGE_BLOCK_DEAD_BUSH) {
                     block.selection_shape.minimum[0] = block.selection_shape.minimum[2] = 0.3;
                     block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 0.7;
                     block.selection_shape.maximum[1] = block.id == MAAGE_BLOCK_BROWN_MUSHROOM ||
                         block.id == MAAGE_BLOCK_RED_MUSHROOM ? 0.4 : 0.6;
                 }
+            }
+            if (block.id == MAAGE_BLOCK_TORCH) {
+                block.selection_shape.minimum[0] = block.selection_shape.minimum[2] = 0.4;
+                block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 0.6;
+                block.selection_shape.maximum[1] = 0.6;
             }
             if (block.id == MAAGE_BLOCK_SNOW) {
                 block.collision_shape.maximum[1] = block.selection_shape.maximum[1] = 0.125;
@@ -155,6 +170,7 @@ static maage_status maage_content_blocks_create(
                 block.collision_shape.minimum[0] = block.collision_shape.minimum[2] = 0.0625;
                 block.collision_shape.maximum[0] = block.collision_shape.maximum[2] = 0.9375;
                 block.selection_shape = block.collision_shape;
+                block.collision_shape.maximum[1] = 0.9375;
             }
             if (block.id == MAAGE_BLOCK_LOG || block.id == MAAGE_BLOCK_PLANKS) block.required_tool = MAAGE_TOOL_AXE;
             else if (block.solid && block.id != MAAGE_BLOCK_LEAVES && block.id != MAAGE_BLOCK_SNOW &&
@@ -164,23 +180,34 @@ static maage_status maage_content_blocks_create(
             strcpy(name, "minecraft:"); strcat(name, content[entry].name);
             if (maage_status_failed(result = maage_block_registry_register_block(registry, name, &block)) ||
                 maage_status_failed(result = maage_content_register_state(registry, config, block.id, block.id,
-                    block.id == MAAGE_BLOCK_TALL_GRASS ? 1U : 0U, MAAGE_CONTENT_TEXTURE_EXTRA + content[entry].texture, -1))) goto failed;
+                    block.id == MAAGE_BLOCK_TALL_GRASS ? 1U : (block.id == MAAGE_BLOCK_TORCH ? 5U : 0U),
+                    MAAGE_CONTENT_TEXTURE_EXTRA + content[entry].texture))) goto failed;
         }
-        if (maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_SPRUCE_LOG, MAAGE_BLOCK_LOG, 1, 0, -1)) ||
-            maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LOG, MAAGE_BLOCK_LOG, 2, 0, -1)) ||
-            maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_BLOCK_LEAVES, 1, 0, -1)) ||
-            maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LEAVES, MAAGE_BLOCK_LEAVES, 2, 0, -1))) goto failed;
+        if (maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_SPRUCE_LOG, MAAGE_BLOCK_LOG, 1, 0)) ||
+            maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LOG, MAAGE_BLOCK_LOG, 2, 0)) ||
+            maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_BLOCK_LEAVES, 1, 0)) ||
+            maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LEAVES, MAAGE_BLOCK_LEAVES, 2, 0))) goto failed;
+        for (i = 0; i < 4; ++i)
+            if (maage_status_failed(result = maage_content_register_state(registry, config,
+                MAAGE_STATE_TORCH_NEGATIVE_X + i, MAAGE_BLOCK_TORCH, (unsigned int)i + 1,
+                MAAGE_CONTENT_TEXTURE_EXTRA + 18))) goto failed;
+        for (i = 0; i < 3; ++i) {
+            if (maage_status_failed(result = maage_content_register_state(registry, config,
+                    MAAGE_STATE_LOG_X_BASE + i, MAAGE_BLOCK_LOG, (unsigned int)i | 4U, 0)) ||
+                maage_status_failed(result = maage_content_register_state(registry, config,
+                    MAAGE_STATE_LOG_Z_BASE + i, MAAGE_BLOCK_LOG, (unsigned int)i | 8U, 0))) goto failed;
+        }
         for (i = 1; i < 16; ++i) {
             if (maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_WATER_FLOW_BASE + i - 1,
-                    MAAGE_BLOCK_WATER, (unsigned int)i, MAAGE_CONTENT_TEXTURE_WATER, -1)) ||
+                    MAAGE_BLOCK_WATER, (unsigned int)i, MAAGE_CONTENT_TEXTURE_WATER)) ||
                 maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_LAVA_FLOW_BASE + i - 1,
-                    MAAGE_BLOCK_LAVA, (unsigned int)i, MAAGE_CONTENT_TEXTURE_EXTRA + 2, -1))) goto failed;
+                    MAAGE_BLOCK_LAVA, (unsigned int)i, MAAGE_CONTENT_TEXTURE_EXTRA + 2))) goto failed;
         }
     }
     for (i = 0; i < MAAGE_BIOME_COUNT; ++i) {
         if (!biomes->builtin_names[i] || maage_status_failed(result = maage_content_register_state(registry, config,
                 MAAGE_STATE_BIOME_GRASS(i), MAAGE_BLOCK_GRASS,
-                (unsigned int)i + 1, MAAGE_CONTENT_TEXTURE_GRASS_TOP, i))) goto failed;
+                (unsigned int)i + 1, MAAGE_CONTENT_TEXTURE_GRASS_TOP))) goto failed;
     }
     if (maage_status_failed(result = maage_block_registry_finalize(registry))) goto failed;
     *output = registry;

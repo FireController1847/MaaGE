@@ -249,25 +249,3 @@ void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect r,
     maage_client_ui_text(ui,label,center,r.y+6.0f,
         MAAGE_CLIENT_UI_CENTER,tint,tint,highlighted?0.63f:tint);
 }
-
-/* The GPU clips held-item faces; no world or texture work. */
-void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
-    const float uv[4], float shade)
-{
-    static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
-    maage_render_ui_vertex *vertex;
-    size_t first, i;
-    if (!ui || !maage_client_ui_reserve_quad(ui)) return;
-    first = ui->batch.vertex_count;
-    for (i = 0; i < 4; ++i) {
-        vertex = &ui->vertices[first + i];
-        vertex->position[0] = positions[i][0]; vertex->position[1] = positions[i][1];
-        vertex->uv[0] = i == 0 || i == 3 ? uv[0] : uv[2];
-        vertex->uv[1] = i < 2 ? uv[1] : uv[3];
-        vertex->color[0] = vertex->color[1] = vertex->color[2] = shade;
-        vertex->color[3] = 1;
-    }
-    for (i = 0; i < 6; ++i)
-        ui->indices[ui->batch.index_count + i] = (unsigned int)first + order[i];
-    ui->batch.vertex_count += 4; ui->batch.index_count += 6;
-}

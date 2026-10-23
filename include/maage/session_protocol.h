@@ -11,7 +11,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 1U
+#define MAAGE_SESSION_PROTOCOL_VERSION 2U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2, MAAGE_CMD_INVENTORY = 3,
@@ -76,6 +76,7 @@ typedef struct maage_session_player_view {
     int has_target, breaking_active;
     maage_world_target target, breaking;
     double break_progress;
+    double swing; /* Authoritative remaining six-tick arm swing, normalized 0..1. */
 } maage_session_player_view;
 
 typedef struct maage_session_snapshot {

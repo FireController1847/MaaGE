@@ -45,6 +45,9 @@ struct maage_renderer {
     void *platform;
     float clear[4], sky_light;
     const maage_render_ui_data *background, *overlay;
+    const maage_render_mesh *foreground;
+    float foreground_matrix[16];
+    float foreground_light[2], animation_tick;
     int refresh;
     maage_status failure;
     /* Borrowed only during a synchronous backend call; always cleared before

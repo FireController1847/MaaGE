@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <float.h>
+#include <limits.h>
 
 typedef struct maage_block_slot {
     maage_block_definition definition;
@@ -197,7 +198,7 @@ maage_status maage_block_registry_register_block(
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE,
         MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->id > 4294967295UL || definition->emitted_light > 15 ||
-        definition->mesh_shape > MAAGE_BLOCK_MESH_CROSS ||
+        definition->light_opacity > 15 || definition->mesh_shape > MAAGE_BLOCK_MESH_TORCH ||
         !maage_block_name_valid(external_name))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!(definition->hardness >= -DBL_MAX && definition->hardness <= DBL_MAX))
@@ -235,6 +236,25 @@ maage_status maage_block_registry_register_block(
     ++registry->block_count;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
+static int maage_block_uv_valid(const float uv[4], int optional)
+{
+    unsigned int component;
+    for (component = 0; component < 4; ++component)
+        if (!(uv[component] >= 0.0f && uv[component] <= 1.0f)) return 0;
+    if (optional && uv[0] == 0.0f && uv[1] == 0.0f && uv[2] == 0.0f && uv[3] == 0.0f)
+        return 1;
+    return uv[0] < uv[2] && uv[1] < uv[3];
+}
+static int maage_block_animation_valid(const float uv[4], const float animation[3])
+{
+    float count = animation[1] < 0.0f ? -animation[1] : animation[1];
+    if (count == 0.0f) return animation[0] == 0.0f && animation[2] == 0.0f;
+    return count >= 2.0f && count < (float)INT_MAX && count == (float)(int)count &&
+        animation[0] > 0.0f && animation[0] <= 1.0f &&
+        animation[2] >= 1.0f && animation[2] <= FLT_MAX &&
+        uv[3] + animation[0] * (count - 1.0f) <= 1.0f;
+}
+
 maage_status maage_block_registry_register_state(
     maage_block_registry *registry,
     const maage_block_state_definition *definition)
@@ -256,6 +276,12 @@ maage_status maage_block_registry_register_state(
     if (definition->fluid_kind == MAAGE_FLUID_NONE)
         for (component = 0; component < 16; ++component)
             if (definition->fluid_states[component]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (definition->selection_shape.maximum[0] != 0.0)
+        for (component = 0; component < 3; ++component)
+            if (!(definition->selection_shape.minimum[component] >= 0.0 &&
+                definition->selection_shape.maximum[component] <= 1.0 &&
+                definition->selection_shape.minimum[component] < definition->selection_shape.maximum[component]))
+                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!maage_block_registry_block(registry, definition->block_id))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (maage_block_registry_state(registry, definition->id))
@@ -266,16 +292,20 @@ maage_status maage_block_registry_register_state(
     if (definition->block_id != MAAGE_BLOCK_AIR) {
         for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
             texture = &definition->faces[face];
+            if (texture->tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL ||
+                texture->overlay_tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL ||
+                !maage_block_uv_valid(texture->uv, 0) ||
+                !maage_block_uv_valid(texture->overlay_uv, 1) ||
+                !maage_block_uv_valid(texture->snow_uv, 1) ||
+                !maage_block_uv_valid(texture->flow_uv, 1) ||
+                !maage_block_animation_valid(texture->uv, texture->animation) ||
+                !maage_block_animation_valid(texture->flow_uv, texture->flow_animation))
+                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
             for (component = 0; component < 4; ++component) {
-                if (!(texture->uv[component] >= 0.0f &&
-                    texture->uv[component] <= 1.0f &&
-                    texture->tint[component] >= 0.0f &&
+                if (!(texture->tint[component] >= 0.0f &&
                     texture->tint[component] <= 1.0f))
                     return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
             }
-            if (texture->uv[0] >= texture->uv[2] ||
-                texture->uv[1] >= texture->uv[3])
-                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         }
     }
     if (!maage_block_grow_state_buckets(registry))

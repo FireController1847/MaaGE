@@ -66,8 +66,22 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/blocks/ice.png",
     "minecraft/textures/blocks/leaves_oak_opaque.png",
     "minecraft/textures/blocks/leaves_spruce_opaque.png",
-    "minecraft/textures/blocks/leaves_birch_opaque.png"
+    "minecraft/textures/blocks/leaves_birch_opaque.png",
+    "minecraft/textures/entity/steve.png",
+    "minecraft/textures/blocks/grass_side_snowed.png",
+    "minecraft/textures/blocks/water_flow.png",
+    "minecraft/textures/blocks/lava_flow.png"
 };
+
+static int maage_client_texture_source(int texture)
+{
+    static const int base[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};
+    if (texture == MAAGE_CONTENT_TEXTURE_MISSING) return -1;
+    if (texture == MAAGE_CONTENT_TEXTURE_GRASS_SIDE_OVERLAY) return 4;
+    if (texture == MAAGE_CONTENT_TEXTURE_GRASS_SIDE_SNOW) return 61;
+    return texture >= MAAGE_CONTENT_TEXTURE_EXTRA ?
+        24 + texture - MAAGE_CONTENT_TEXTURE_EXTRA : base[texture];
+}
 
 static void maage_client_colormap(const maage_image *map,
     double temperature, double rainfall, float color[3])
@@ -102,7 +116,10 @@ static void maage_client_resource_failure(maage_client_resources *resources,
 maage_status maage_client_resources_load(const char *application_data,
     maage_client_resources *resources, maage_biome_registry *biomes, maage_status_trace *trace)
 {
-    static const int atlas_sources[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};
+    static const int arm_rect[MAAGE_FACE_COUNT][4] = {
+        {40,20,44,32}, {48,20,52,32}, {44,16,48,20},
+        {48,16,52,20}, {44,20,48,32}, {52,20,56,32}
+    };
     static const float default_grass[3] = {0.50f, 0.72f, 0.35f};
     static const float default_foliage[3] = {0.35f, 0.66f, 0.30f};
     maage_image sources[MAAGE_CLIENT_SOURCE_COUNT], missing;
@@ -111,11 +128,12 @@ maage_status maage_client_resources_load(const char *application_data,
     maage_status result;
     maage_status_trace source_trace, recovered_trace;
     char path[MAAGE_PATH_CAPACITY];
-    const float *tint;
-    unsigned char *pixel, *source, *overlay;
-    unsigned int channel, alpha, value;
-    int i, j, x, y, sx, sy, edge = 16, tile, source_index, biome_id, stage, ok = 0;
-    int columns = 32, rows, tile_x, tile_y, group_height;
+    unsigned char *pixel, *source;
+    int i, j, x, y, sx, sy, edge = 16, tile, source_index, stage, ok = 0;
+    int columns = 32, rows, tile_x, tile_y, arm_face;
+    int arm_width, arm_height;
+    int fluid, frame, frames[4], animation_y, animation_height, frame_edge, frame_tile;
+    float *fluid_uv, *fluid_animation;
     if (!resources || !biomes || biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !resources ? 1 : 2);
     memset(sources, 0, sizeof(sources)); memset(&missing, 0, sizeof(missing));
     memset(resources, 0, sizeof(*resources));
@@ -138,9 +156,10 @@ maage_status maage_client_resources_load(const char *application_data,
             /* Normalize each valid source independently into the canonical
              * 16px atlas. One unusual texture cannot resize unrelated tiles. */
             if ((i == 5 || i == 11) ? (sources[i].width != 256 || sources[i].height != 256) :
+                (i == 60 ? (sources[i].width != 64 || sources[i].height != 32) :
                 (sources[i].height != sources[i].width &&
-                !((i == 7 || i == 26) && sources[i].height >= sources[i].width &&
-                sources[i].height % sources[i].width == 0)))
+                !((i == 7 || i == 26 || i == 62 || i == 63) && sources[i].height >= sources[i].width &&
+                sources[i].height % sources[i].width == 0))))
                 result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
         }
         resources->source_results[i] = result;
@@ -151,6 +170,9 @@ maage_status maage_client_resources_load(const char *application_data,
         } else maage_log_verbose("maage.client.resources", "Loaded %s (%dx%d).",
             maage_client_texture_names[i], sources[i].width, sources[i].height);
     }
+    if (sources[5].pixels)
+        maage_client_colormap(&sources[5], 0.5, 1.0, resources->inventory_grass_color);
+    else memcpy(resources->inventory_grass_color, default_grass, sizeof(default_grass));
     for (i = 0; i < MAAGE_BIOME_COUNT; ++i) {
         if (!biomes->builtin_names[i]) {
             resources->recovery_status = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION,
@@ -164,12 +186,25 @@ maage_status maage_client_resources_load(const char *application_data,
         else memcpy(biome->foliage_color, default_foliage, sizeof(default_foliage));
     }
     resources->recovery_status = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
-    rows = (MAAGE_CONTENT_TEXTURE_COUNT + columns - 1) / columns;
+    rows = (MAAGE_CONTENT_TEXTURE_COUNT + MAAGE_FACE_COUNT + MAAGE_CLIENT_BREAK_STAGES + columns - 1) / columns;
     if (edge > INT_MAX - 2 || edge + 2 > INT_MAX / columns ||
-        edge + 2 > INT_MAX / rows / (1 + MAAGE_CLIENT_BREAK_STAGES)) goto done;
-    tile = edge + 2; group_height = tile * rows;
+        edge + 2 > INT_MAX / rows) goto done;
+    tile = edge + 2;
     resources->image.width = tile * columns;
-    resources->image.height = group_height * (1 + MAAGE_CLIENT_BREAK_STAGES);
+    animation_y = tile * rows;
+    frames[0] = sources[7].pixels ? sources[7].height / sources[7].width : 1;
+    frames[1] = sources[26].pixels ? sources[26].height / sources[26].width : 1;
+    frames[2] = sources[62].pixels ? sources[62].height / sources[62].width : 1;
+    frames[3] = sources[63].pixels ? sources[63].height / sources[63].width : 1;
+    animation_height = 0;
+    for (fluid = 0; fluid < 4; ++fluid) {
+        frame_tile = fluid < 2 ? tile : 34;
+        if (frames[fluid] > INT_MAX / frame_tile) goto done;
+        if (frames[fluid] * frame_tile > animation_height)
+            animation_height = frames[fluid] * frame_tile;
+    }
+    if (animation_y > INT_MAX - animation_height) goto done;
+    resources->image.height = animation_y + animation_height;
     if ((size_t)resources->image.width > (size_t)-1 / 4) goto done;
     resources->image.stride = (size_t)resources->image.width * 4;
     if ((size_t)resources->image.height > (size_t)-1 / resources->image.stride) goto done;
@@ -177,94 +212,117 @@ maage_status maage_client_resources_load(const char *application_data,
     if (!resources->image.pixels) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0); goto done;
     }
-    for (i = 0; i < MAAGE_CONTENT_TEXTURE_COUNT; ++i) {
+    for (i = 0; i < MAAGE_CONTENT_TEXTURE_COUNT + MAAGE_FACE_COUNT + MAAGE_CLIENT_BREAK_STAGES; ++i) {
         tile_x = (i % columns) * tile; tile_y = (i / columns) * tile;
-        biome_id = i >= 11 && i < MAAGE_CONTENT_TEXTURE_EXTRA ? (i - 11) / 2 : MAAGE_BIOME_PLAINS;
-        source_index = i == MAAGE_CONTENT_TEXTURE_MISSING ? -1 :
-            (i >= MAAGE_CONTENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CONTENT_TEXTURE_EXTRA :
-            (i >= 11 ? ((i - 11) % 2 ? 3 : 2) : atlas_sources[i]));
-        if (i == MAAGE_CONTENT_TEXTURE_EXTRA + 28 || i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE)
-            biome_id = MAAGE_BIOME_TAIGA;
-        else if (i == MAAGE_CONTENT_TEXTURE_EXTRA + 31 || i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH)
-            biome_id = MAAGE_BIOME_FOREST;
+        arm_face = i - MAAGE_CONTENT_TEXTURE_COUNT;
+        stage = arm_face - MAAGE_FACE_COUNT;
+        arm_width = arm_height = edge;
+        if (arm_face >= 0 && stage < 0) {
+            arm_width = arm_rect[arm_face][2] - arm_rect[arm_face][0];
+            arm_height = arm_rect[arm_face][3] - arm_rect[arm_face][1];
+        }
+        source_index = stage >= 0 ? 14 + stage :
+            (arm_face >= 0 ? 60 : maage_client_texture_source(i));
         /* Missing opaque variants degrade to a solid version of the cutout
          * source, not the magenta/black missing-texture tile. */
         if (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK && !sources[source_index].pixels) source_index = 32;
         else if (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE && !sources[source_index].pixels) source_index = 52;
         else if (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH && !sources[source_index].pixels) source_index = 55;
         selected = source_index >= 0 && sources[source_index].pixels ? &sources[source_index] : &missing;
-        tint = source_index == 32 || source_index == 52 || source_index == 55 ||
-            source_index == 57 || source_index == 58 || source_index == 59 ?
-            biomes->builtin_definitions[biome_id].foliage_color : biomes->builtin_definitions[biome_id].grass_color;
         for (y = 0; y < tile; ++y) {
             sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
             for (x = 0; x < tile; ++x) {
                 sx = x == 0 ? 0 : (x > edge ? edge - 1 : x - 1);
                 pixel = resources->image.pixels + (size_t)(tile_y + y) * resources->image.stride + (size_t)(tile_x + x) * 4;
-                source = selected->pixels + (size_t)(sy * selected->width / edge) * selected->stride +
-                    (size_t)(sx * selected->width / edge) * 4;
+                if (arm_face >= 0 && stage < 0 && selected != &missing)
+                    source = selected->pixels +
+                        (size_t)(arm_rect[arm_face][1] + (sy < arm_height ? sy : arm_height - 1)) * selected->stride +
+                        (size_t)(arm_rect[arm_face][0] + (sx < arm_width ? sx : arm_width - 1)) * 4;
+                else source = selected->pixels + (size_t)(sy * selected->width / edge) * selected->stride +
+                        (size_t)(sx * selected->width / edge) * 4;
                 memcpy(pixel, source, 4);
+                /* An unavailable crack stage is an omitted decoration. */
+                if (stage >= 0 && selected == &missing) memset(pixel, 0, 4);
                 if (selected == &missing) continue;
-                if (source_index == 2 || source_index == 32 || source_index == 34 ||
-                    source_index == 52 || source_index == 55 ||
-                    source_index == 57 || source_index == 58 || source_index == 59)
-                    for (channel = 0; channel < 3; ++channel) pixel[channel] = (unsigned char)((float)pixel[channel] * tint[channel]);
-                if (source_index == 3 && sources[4].pixels) {
-                    overlay = sources[4].pixels + (size_t)(sy * sources[4].width / edge) * sources[4].stride +
-                        (size_t)(sx * sources[4].width / edge) * 4;
-                    alpha = overlay[3];
-                    for (channel = 0; channel < 3; ++channel) {
-                        value = (unsigned int)((float)overlay[channel] * tint[channel]);
-                        pixel[channel] = (unsigned char)((value * alpha + (unsigned int)pixel[channel] * (255 - alpha) + 127) / 255);
-                    }
-                }
-                if (source_index == 7) {
-                    pixel[0] = (unsigned char)((unsigned int)pixel[0] * 63 / 255);
-                    pixel[1] = (unsigned char)((unsigned int)pixel[1] * 118 / 255);
-                    pixel[2] = (unsigned char)((unsigned int)pixel[2] * 228 / 255); pixel[3] = 255;
-                } else if (source_index == 26 ||
+                if (source_index == 26 ||
                     (i >= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK && i <= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH))
                     pixel[3] = 255;
             }
+        }
+        if (stage >= 0) {
+            resources->breaking_uv[stage][0] = (float)(tile_x + 1) / resources->image.width;
+            resources->breaking_uv[stage][1] = (float)(tile_y + 1) / resources->image.height;
+            resources->breaking_uv[stage][2] = (float)(tile_x + 1 + edge) / resources->image.width;
+            resources->breaking_uv[stage][3] = (float)(tile_y + 1 + edge) / resources->image.height;
+            continue;
+        } else if (arm_face >= 0) {
+            resources->arm_uv[arm_face][0] = (float)(tile_x + 1) / resources->image.width;
+            resources->arm_uv[arm_face][1] = (float)(tile_y + 1) / resources->image.height;
+            resources->arm_uv[arm_face][2] = (float)(tile_x + 1 + arm_width) / resources->image.width;
+            resources->arm_uv[arm_face][3] = (float)(tile_y + 1 + arm_height) / resources->image.height;
+            continue;
         }
         resources->uv[i][0] = (float)(tile_x + 1) / resources->image.width;
         resources->uv[i][1] = (float)(tile_y + 1) / resources->image.height;
         resources->uv[i][2] = (float)(tile_x + 1 + edge) / resources->image.width;
         resources->uv[i][3] = (float)(tile_y + 1 + edge) / resources->image.height;
-        for (stage = 0; stage < MAAGE_CLIENT_BREAK_STAGES; ++stage) {
-            for (y = 0; y < tile; ++y) {
-                sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
-                for (x = 0; x < tile; ++x) {
-                    sx = x == 0 ? 0 : (x > edge ? edge - 1 : x - 1);
-                    source = resources->image.pixels + (size_t)(tile_y + y) * resources->image.stride + (size_t)(tile_x + x) * 4;
-                    pixel = source + (size_t)(stage + 1) * group_height * resources->image.stride;
-                    memcpy(pixel, source, 4);
-                    if (!sources[14 + stage].pixels) continue;
-                    overlay = sources[14 + stage].pixels + (size_t)(sy * sources[14 + stage].width / edge) * sources[14 + stage].stride +
-                        (size_t)(sx * sources[14 + stage].width / edge) * 4;
-                    for (channel = 0; channel < 3; ++channel)
-                        pixel[channel] = (unsigned char)((unsigned int)source[channel] *
-                            (255U - overlay[3] + (unsigned int)overlay[channel] * overlay[3] / 255U) / 255U);
-                }
-            }
-            memcpy(resources->breaking_uv[stage][i], resources->uv[i], sizeof(resources->uv[i]));
-            resources->breaking_uv[stage][i][1] += (float)(stage + 1) / (1 + MAAGE_CLIENT_BREAK_STAGES);
-            resources->breaking_uv[stage][i][3] += (float)(stage + 1) / (1 + MAAGE_CLIENT_BREAK_STAGES);
-        }
     }
     /* Every failed visual resolves to the same canonical tile in the shared
      * renderer-owned atlas; registration never publishes a missing handle. */
     for (i = 0; i < MAAGE_CONTENT_TEXTURE_MISSING; ++i) {
-        source_index = i >= MAAGE_CONTENT_TEXTURE_EXTRA ? 24 + i - MAAGE_CONTENT_TEXTURE_EXTRA :
-            (i >= 11 ? ((i - 11) % 2 ? 3 : 2) : atlas_sources[i]);
+        source_index = maage_client_texture_source(i);
         if (sources[source_index].pixels) continue;
-        if (i >= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK &&
+        if (i >= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK && i <= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH &&
             sources[i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK ? 32 :
                 (i == MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE ? 52 : 55)].pixels) continue;
         memcpy(resources->uv[i], resources->uv[MAAGE_CONTENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
-        for (stage = 0; stage < MAAGE_CLIENT_BREAK_STAGES; ++stage)
-            memcpy(resources->breaking_uv[stage][i], resources->breaking_uv[stage][MAAGE_CONTENT_TEXTURE_MISSING], sizeof(resources->uv[i]));
     }
+    /* Immutable padded animation strips keep all mesh UVs stable. The original
+     * 1.7.10 water metadata visits every frame; lava visits 0..19..1, both with
+     * two game ticks per frame. Flow metadata uses one tick for water and three
+     * for lava. No texture decode, upload or remesh per tick. */
+    for (fluid = 0; fluid < 4; ++fluid) {
+        source_index = fluid < 2 ? (fluid ? 26 : 7) : 60 + fluid;
+        if (!sources[source_index].pixels) continue;
+        selected = &sources[source_index];
+        frame_edge = fluid < 2 ? edge : 32; frame_tile = frame_edge + 2;
+        tile_x = fluid < 2 ? fluid * tile : 2 * tile + (fluid - 2) * frame_tile;
+        for (frame = 0; frame < frames[fluid]; ++frame) {
+            tile_y = animation_y + frame * frame_tile;
+            for (y = 0; y < frame_tile; ++y) {
+                sy = y == 0 ? 0 : (y > frame_edge ? frame_edge - 1 : y - 1);
+                for (x = 0; x < frame_tile; ++x) {
+                    sx = x == 0 ? 0 : (x > frame_edge ? frame_edge - 1 : x - 1);
+                    pixel = resources->image.pixels + (size_t)(tile_y + y) * resources->image.stride +
+                        (size_t)(tile_x + x) * 4;
+                    source = selected->pixels + (size_t)(frame * selected->width +
+                        sy * selected->width / frame_edge) * selected->stride +
+                        (size_t)(sx * selected->width / frame_edge) * 4;
+                    memcpy(pixel, source, 4);
+                    if (fluid == 1 || fluid == 3) pixel[3] = 255;
+                }
+            }
+        }
+        i = fluid ? MAAGE_CONTENT_TEXTURE_EXTRA + 2 : MAAGE_CONTENT_TEXTURE_WATER;
+        fluid_uv = fluid < 2 ? resources->uv[i] : resources->fluid_flow_uv[fluid - 2];
+        fluid_animation = fluid < 2 ? resources->fluid_animation[fluid] : resources->fluid_flow_animation[fluid - 2];
+        fluid_uv[0] = (float)(tile_x + 1) / resources->image.width;
+        fluid_uv[1] = (float)(animation_y + 1) / resources->image.height;
+        fluid_uv[2] = (float)(tile_x + 1 + frame_edge) / resources->image.width;
+        fluid_uv[3] = (float)(animation_y + 1 + frame_edge) / resources->image.height;
+        if (frames[fluid] > 1) {
+            fluid_animation[0] = (float)frame_tile / resources->image.height;
+            fluid_animation[1] = (float)(fluid == 1 ? -frames[fluid] : frames[fluid]);
+            fluid_animation[2] = fluid < 2 ? 2.0f : (fluid == 2 ? 1.0f : 3.0f);
+        }
+    }
+    pixel = resources->image.pixels + (size_t)(resources->image.height - 1) * resources->image.stride +
+        (size_t)(resources->image.width - 1) * 4;
+    memset(pixel, 255, 4);
+    resources->white_uv[0] = resources->white_uv[2] =
+        ((float)resources->image.width - 0.5f) / resources->image.width;
+    resources->white_uv[1] = resources->white_uv[3] =
+        ((float)resources->image.height - 0.5f) / resources->image.height;
     resources->atlas.pixels = resources->image.pixels;
     resources->atlas.width = resources->image.width; resources->atlas.height = resources->image.height;
     resources->atlas.stride = resources->image.stride;
@@ -291,16 +349,50 @@ static maage_status maage_client_content_resolve(void *context,
     maage_block_face_definition *presentation, float leaf_fast_uv[4])
 {
     const maage_client_resources *resources = (const maage_client_resources *)context;
-    int fast_tile;
+    static const unsigned long leaf_colors[2] = {6396257UL, 8431445UL};
+    unsigned long color;
+    int fast_tile, channel;
     (void)state_id;
-    (void)face;
     if (!resources || !presentation || !leaf_fast_uv ||
         presentation->texture_id >= MAAGE_CONTENT_TEXTURE_COUNT)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     memcpy(presentation->uv, resources->uv[presentation->texture_id],
         sizeof(presentation->uv));
+    /* Preserve the canonical fallback's magenta/black texels without biome
+     * multiplication or decorative overlays. */
+    if (presentation->texture_id == MAAGE_CONTENT_TEXTURE_MISSING ||
+        maage_status_failed(resources->source_results[
+            maage_client_texture_source((int)presentation->texture_id)]))
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+    if (block == MAAGE_BLOCK_GRASS) {
+        if (face == MAAGE_FACE_POSITIVE_Y) presentation->tint_mode = MAAGE_BLOCK_TINT_GRASS;
+        else if (face != MAAGE_FACE_NEGATIVE_Y) {
+            if (!maage_status_failed(resources->source_results[4])) {
+                memcpy(presentation->overlay_uv, resources->uv[MAAGE_CONTENT_TEXTURE_GRASS_SIDE_OVERLAY],
+                    sizeof(presentation->overlay_uv));
+                presentation->overlay_tint_mode = MAAGE_BLOCK_TINT_GRASS;
+            }
+            if (!maage_status_failed(resources->source_results[61]))
+                memcpy(presentation->snow_uv, resources->uv[MAAGE_CONTENT_TEXTURE_GRASS_SIDE_SNOW],
+                    sizeof(presentation->snow_uv));
+        }
+    } else if (block == MAAGE_BLOCK_TALL_GRASS && metadata)
+        presentation->tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
+    else if (block == MAAGE_BLOCK_WATER || block == MAAGE_BLOCK_LAVA) {
+        memcpy(presentation->animation, resources->fluid_animation[block == MAAGE_BLOCK_LAVA],
+            sizeof(presentation->animation));
+        memcpy(presentation->flow_uv, resources->fluid_flow_uv[block == MAAGE_BLOCK_LAVA],
+            sizeof(presentation->flow_uv));
+        memcpy(presentation->flow_animation, resources->fluid_flow_animation[block == MAAGE_BLOCK_LAVA],
+            sizeof(presentation->flow_animation));
+    }
     if (block == MAAGE_BLOCK_LEAVES) {
+        if (metadata == 1 || metadata == 2) {
+            color = leaf_colors[metadata - 1];
+            for (channel = 0; channel < 3; ++channel)
+                presentation->tint[channel] = (float)((color >> ((2 - channel) * 8)) & 255UL) / 255;
+        } else presentation->tint_mode = MAAGE_BLOCK_TINT_FOLIAGE;
         fast_tile = metadata == 1 ? MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_SPRUCE :
             (metadata == 2 ? MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH :
                 MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK);
@@ -333,6 +425,34 @@ maage_status maage_client_content_create(const maage_client_resources *resources
         (unsigned long)maage_block_registry_block_count(maage_content_blocks(*output)),
         (unsigned long)maage_block_registry_state_count(maage_content_blocks(*output)));
     return result;
+}
+
+void maage_client_item_face_tint(const float grass_color[3],
+    const maage_block_face_definition *face, unsigned int mode, float color[4])
+{
+    static const float foliage_color[3] = {72.0f / 255, 181.0f / 255, 24.0f / 255};
+    int channel;
+    for (channel = 0; channel < 3; ++channel) {
+        color[channel] = face->tint[channel];
+        if (mode == MAAGE_BLOCK_TINT_GRASS || mode == MAAGE_BLOCK_TINT_GRASS_LOCAL)
+            color[channel] *= grass_color[channel];
+        else if (mode == MAAGE_BLOCK_TINT_FOLIAGE)
+            color[channel] *= foliage_color[channel];
+    }
+    color[3] = face->tint[3];
+}
+
+const maage_block_state_definition *maage_client_item_icon_state(
+    const maage_block_registry *blocks, const maage_item_definition *item,
+    unsigned int metadata)
+{
+    const maage_block_state_definition *state;
+    unsigned int species = metadata & 3;
+    if (!item) return NULL;
+    state = maage_block_registry_state(blocks, item->icon_state_id);
+    if (state && state->block_id == MAAGE_BLOCK_LOG && (species == 1 || species == 2))
+        state = maage_block_registry_state(blocks, MAAGE_STATE_SPRUCE_LOG + species - 1);
+    return state;
 }
 
 maage_status maage_client_resources_destroy(maage_client_resources *resources)

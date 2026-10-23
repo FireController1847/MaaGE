@@ -21,8 +21,9 @@ static const maage_client_environment_resource maage_client_environment_resource
 struct maage_client_environment {
     maage_renderer *renderer;
     maage_render_texture *texture;
-    maage_render_ui_vertex sky_vertices[8], weather_vertices[MAAGE_ENVIRONMENT_QUADS * 4];
-    unsigned int sky_indices[12], weather_indices[MAAGE_ENVIRONMENT_QUADS * 6];
+    maage_render_ui_vertex sky_vertices[12], weather_vertices[MAAGE_ENVIRONMENT_QUADS * 4];
+    float sky_depth[12];
+    unsigned int sky_indices[24], weather_indices[MAAGE_ENVIRONMENT_QUADS * 6];
     maage_render_ui_data sky, weather;
     maage_status load_status;
     unsigned int failed_resources;
@@ -101,7 +102,9 @@ maage_status maage_client_environment_create(maage_renderer *renderer,
     if (maage_status_code(uploaded) != MAAGE_STATUS_SUCCESS) goto done;
     view->renderer = renderer;
     view->sky.texture = view->weather.texture = view->texture;
+    view->sky.blend = MAAGE_RENDER_BLEND_ADDITIVE;
     view->sky.vertices = view->sky_vertices; view->sky.indices = view->sky_indices;
+    view->sky.projective_depth = view->sky_depth;
     view->weather.vertices = view->weather_vertices; view->weather.indices = view->weather_indices;
     ok = 1;
 done:
@@ -134,19 +137,84 @@ static void maage_client_environment_body(maage_client_environment *view, const 
     float width, float height, int moon, unsigned int phase, float alpha)
 {
     const maage_client_environment_resource *resource = &maage_client_environment_resources[moon ? 1 : 0];
-    double depth = direction[0] * forward[0] + direction[1] * forward[1] + direction[2] * forward[2];
-    float x, y, size, u, v, uv_width, uv_height;
-    if (depth <= 0.02) return;
-    x = width * 0.5f + focal * (float)(direction[0] * right[0] + direction[1] * right[1] + direction[2] * right[2]) / (float)depth;
-    y = height * 0.5f - focal * (float)(direction[0] * up[0] + direction[1] * up[1] + direction[2] * up[2]) / (float)depth;
-    size = focal * (moon ? 0.16f : 0.19f) / (float)depth;
-    if (x + size < 0 || x - size > width || y + size < 0 || y - size > height) return;
-    uv_width = (float)resource->width / (moon ? 4 : 1) / 256;
-    uv_height = (float)resource->height / (moon ? 2 : 1) / 256;
-    u = (float)resource->x / 256 + (moon ? (float)(phase % 4) * uv_width : 0);
-    v = (float)resource->y / 256 + (moon ? (float)(phase / 4) * uv_height : 0);
-    maage_client_environment_quad(&view->sky, x - size * 0.5f, y - size * 0.5f, size, size,
-        u, v, uv_width, uv_height, alpha);
+    /* Project the orbit's actual plane, including its orientation. Clip before
+     * division so a sprite crossing the camera plane stays well-defined. */
+    double points[4][5], clipped[6][5], position[3], tangent[3];
+    double half = moon ? 20.0 : 30.0, fraction, horizontal, vertical;
+    double u, v, uv_width, uv_height;
+    int corner, previous, count = 0, component;
+    size_t first = view->sky.vertex_count;
+    maage_render_ui_vertex *vertex;
+    tangent[0] = -direction[1]; tangent[1] = direction[0]; tangent[2] = 0;
+    uv_width = (double)resource->width / (moon ? 4 : 1) / 256;
+    uv_height = (double)resource->height / (moon ? 2 : 1) / 256;
+    u = (double)resource->x / 256 + (moon ? (phase % 4) * uv_width : 0);
+    v = (double)resource->y / 256 + (moon ? (phase / 4) * uv_height : 0);
+    for (corner = 0; corner < 4; ++corner) {
+        horizontal = corner == 1 || corner == 2 ? 1 : -1;
+        vertical = corner >= 2 ? 1 : -1;
+        for (component = 0; component < 3; ++component)
+            position[component] = direction[component] * 100 + tangent[component] * vertical * half;
+        position[2] += horizontal * half;
+        points[corner][0] = position[0] * right[0] + position[1] * right[1] + position[2] * right[2];
+        points[corner][1] = position[0] * up[0] + position[1] * up[1] + position[2] * up[2];
+        points[corner][2] = position[0] * forward[0] + position[1] * forward[1] + position[2] * forward[2];
+        points[corner][3] = u + ((moon ? -horizontal : horizontal) + 1) * 0.5 * uv_width;
+        points[corner][4] = v + ((moon ? -vertical : vertical) + 1) * 0.5 * uv_height;
+    }
+    for (corner = 0, previous = 3; corner < 4; previous = corner++) {
+        if ((points[corner][2] >= 0.1) != (points[previous][2] >= 0.1)) {
+            fraction = (0.1 - points[previous][2]) / (points[corner][2] - points[previous][2]);
+            for (component = 0; component < 5; ++component)
+                clipped[count][component] = points[previous][component] +
+                    fraction * (points[corner][component] - points[previous][component]);
+            ++count;
+        }
+        if (points[corner][2] >= 0.1) {
+            memcpy(clipped[count], points[corner], sizeof(points[corner])); ++count;
+        }
+    }
+    if (count < 3) return;
+    for (corner = 0; corner < count; ++corner) {
+        view->sky_depth[view->sky.vertex_count] = (float)clipped[corner][2];
+        vertex = &view->sky_vertices[view->sky.vertex_count++];
+        vertex->position[0] = width * 0.5f + focal * (float)(clipped[corner][0] / clipped[corner][2]);
+        vertex->position[1] = height * 0.5f - focal * (float)(clipped[corner][1] / clipped[corner][2]);
+        vertex->uv[0] = (float)clipped[corner][3]; vertex->uv[1] = (float)clipped[corner][4];
+        vertex->color[0] = vertex->color[1] = vertex->color[2] = 1;
+        vertex->color[3] = alpha;
+    }
+    for (corner = 1; corner < count - 1; ++corner) {
+        view->sky_indices[view->sky.index_count++] = (unsigned int)first;
+        view->sky_indices[view->sky.index_count++] = (unsigned int)first + corner;
+        view->sky_indices[view->sky.index_count++] = (unsigned int)first + corner + 1;
+    }
+}
+static void maage_client_sky_color(double temperature, double brightness,
+    double rain, double thunder, float color[3])
+{
+    double hue, saturation, part, gray, weight;
+    int sector;
+    temperature /= 3;
+    if (temperature < -1) temperature = -1;
+    if (temperature > 1) temperature = 1;
+    hue = (0.6222222222 - temperature * 0.05) * 6;
+    saturation = 0.5 + temperature * 0.1;
+    sector = (int)hue; part = hue - sector;
+    color[0] = (float)(sector == 3 ? 1 - saturation : 1 - saturation * (1 - part));
+    color[1] = (float)(sector == 3 ? 1 - saturation * part : 1 - saturation);
+    color[2] = 1;
+    color[0] *= (float)brightness; color[1] *= (float)brightness; color[2] *= (float)brightness;
+    gray = (color[0] * 0.3 + color[1] * 0.59 + color[2] * 0.11) * 0.6;
+    weight = rain * 0.75;
+    color[0] = (float)(color[0] * (1 - weight) + gray * weight);
+    color[1] = (float)(color[1] * (1 - weight) + gray * weight);
+    color[2] = (float)(color[2] * (1 - weight) + gray * weight);
+    gray = (color[0] * 0.3 + color[1] * 0.59 + color[2] * 0.11) * 0.2;
+    weight = thunder * rain * 0.75;
+    color[0] = (float)(color[0] * (1 - weight) + gray * weight);
+    color[1] = (float)(color[1] * (1 - weight) + gray * weight);
+    color[2] = (float)(color[2] * (1 - weight) + gray * weight);
 }
 maage_status maage_client_environment_update(maage_client_environment *view,
     maage_renderer *renderer, const maage_session_snapshot *snapshot,
@@ -155,8 +223,9 @@ maage_status maage_client_environment_update(maage_client_environment *view,
     const maage_client_environment_resource *resource;
     const maage_environment_state *state;
     double yaw, pitch;
-    double forward[3], right[3], up[3], sun[3], angle, phase, sunlight, rain;
+    double forward[3], right[3], up[3], sun[3], angle, phase, sunlight, rain, sky_brightness;
     float focal, x, y, size, alpha;
+    float sky_color[3];
     unsigned int i, hash;
     int cold = 0, precipitation = 0;
     maage_status result;
@@ -172,14 +241,20 @@ maage_status maage_client_environment_update(maage_client_environment *view,
     view->sky.logical_width = view->weather.logical_width = width;
     view->sky.logical_height = view->weather.logical_height = height;
     sunlight = maage_environment_sunlight(state); rain = state->rain_intensity;
-    result = maage_renderer_set_clear_color(renderer, (float)(0.02 + 0.51 * sunlight * (1 - rain * 0.4)),
-        (float)(0.025 + 0.735 * sunlight * (1 - rain * 0.4)), (float)(0.06 + 0.94 * sunlight * (1 - rain * 0.3)), 1);
+    result = maage_renderer_set_animation_tick(renderer, (float)(state->ticks_low % 3648UL));
+    if (maage_status_failed(result)) return result;
+    angle = maage_environment_celestial_angle(state) * 6.283185307179586;
+    sky_brightness = cos(angle) * 2 + 0.5;
+    if (sky_brightness < 0) sky_brightness = 0;
+    if (sky_brightness > 1) sky_brightness = 1;
+    maage_client_sky_color(snapshot->has_observation ? snapshot->observation.temperature : 0.8,
+        sky_brightness, rain, state->thunder_intensity, sky_color);
+    result = maage_renderer_set_clear_color(renderer, sky_color[0], sky_color[1], sky_color[2], 1);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     forward[0] = sin(yaw) * cos(pitch); forward[1] = -sin(pitch); forward[2] = -cos(yaw) * cos(pitch);
     right[0] = cos(yaw); right[1] = 0; right[2] = sin(yaw);
     up[0] = sin(yaw) * sin(pitch); up[1] = cos(pitch); up[2] = -cos(yaw) * sin(pitch);
-    angle = (double)state->day_tick / MAAGE_WORLD_DAY_TICKS * 6.283185307179586;
-    sun[0] = cos(angle); sun[1] = sin(angle); sun[2] = 0;
+    sun[0] = -sin(angle); sun[1] = cos(angle); sun[2] = 0;
     focal = height * 0.5f / (float)tan(vertical_fov * 0.5);
     if (view->available[0]) maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 0, 0, (float)(1 - rain));
     for (i = 0; i < 3; ++i) sun[i] = -sun[i];

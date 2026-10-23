@@ -1,17 +1,18 @@
 #include "internal.h"
+#include "../resources.h"
 #include "maage/time.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 static void maage_client_ui_block_uv(const maage_client_ui *ui,
-    const maage_block_face_definition *face, float uv[4])
+    const float source[4], float uv[4])
 {
-    uv[0] = face->uv[0] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
-    uv[2] = face->uv[2] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
-    uv[1] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + face->uv[1] * ui->resources.block_atlas_height) /
+    uv[0] = source[0] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
+    uv[2] = source[2] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
+    uv[1] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + source[1] * ui->resources.block_atlas_height) /
         ui->resources.atlas_edge;
-    uv[3] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + face->uv[3] * ui->resources.block_atlas_height) /
+    uv[3] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + source[3] * ui->resources.block_atlas_height) /
         ui->resources.atlas_edge;
 }
 
@@ -21,53 +22,35 @@ static const maage_block_state_definition *maage_client_ui_item_state(
     const maage_item_definition *item;
     if (!stack || !stack->count || !ui->items || !ui->blocks) return NULL;
     item = maage_item_registry_get(ui->items, stack->item_id);
-    return item ? maage_block_registry_state(ui->blocks, item->icon_state_id) : NULL;
+    return item ? maage_client_item_icon_state(ui->blocks, item, stack->metadata) : NULL;
 }
 
 static void maage_client_ui_stack(maage_client_ui *ui,
     const maage_item_stack *stack, float x, float y)
 {
     const maage_block_state_definition *state;
+    const maage_block_face_definition *face;
     maage_client_ui_rect rectangle;
-    float uv[4];
+    float uv[4], color[4];
     char count[16];
     state = maage_client_ui_item_state(ui, stack);
     if (!state) return;
-    maage_client_ui_block_uv(ui, &state->faces[MAAGE_FACE_POSITIVE_Z], uv);
+    face = &state->faces[MAAGE_FACE_POSITIVE_Z];
+    maage_client_ui_block_uv(ui, face->uv, uv);
+    maage_client_item_face_tint(ui->inventory_grass_color, face, face->tint_mode, color);
     rectangle.x = x; rectangle.y = y; rectangle.width = rectangle.height = 16;
-    maage_client_ui_rectangle(ui, rectangle, uv[0], uv[1], uv[2], uv[3], 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, rectangle, uv[0], uv[1], uv[2], uv[3],
+        color[0], color[1], color[2], face->tint[3]);
+    if (face->overlay_uv[2] > face->overlay_uv[0]) {
+        maage_client_ui_block_uv(ui, face->overlay_uv, uv);
+        maage_client_item_face_tint(ui->inventory_grass_color, face, face->overlay_tint_mode, color);
+        maage_client_ui_rectangle(ui, rectangle, uv[0], uv[1], uv[2], uv[3],
+            color[0], color[1], color[2], 1);
+    }
     if (stack->count > 1) {
         sprintf(count, "%u", stack->count);
         maage_client_ui_text(ui, count, x + 17, y + 10, MAAGE_CLIENT_UI_RIGHT, 0.18f, 0.18f, 0.18f);
         maage_client_ui_text(ui, count, x + 16, y + 9, MAAGE_CLIENT_UI_RIGHT, 1, 1, 1);
-    }
-}
-
-static void maage_client_ui_held(maage_client_ui *ui)
-{
-    static const int faces[3] = {MAAGE_FACE_POSITIVE_Y, MAAGE_FACE_NEGATIVE_X, MAAGE_FACE_POSITIVE_Z};
-    static const float offsets[3][4][2] = {
-        {{-44, -68}, {0, -91}, {44, -68}, {0, -45}},
-        {{-44, -68}, {0, -45}, {0, 20}, {-44, -3}},
-        {{0, -45}, {44, -68}, {44, -3}, {0, 20}}
-    };
-    static const float shades[3] = {1, 0.68f, 0.85f};
-    const maage_block_state_definition *state;
-    float uv[4], positions[4][2], x, y, swing;
-    int face, corner;
-    state = maage_client_ui_item_state(ui, maage_inventory_selected(&ui->snapshot.player.inventory));
-    if (!state) return;
-    /* Swing fraction is not yet copied by protocol v1; stable fallback. */
-    swing = 0;
-    x = ui->width - 40 - swing * 24;
-    y = ui->height + 10 - swing * 17;
-    for (face = 0; face < 3; ++face) {
-        maage_client_ui_block_uv(ui, &state->faces[faces[face]], uv);
-        for (corner = 0; corner < 4; ++corner) {
-            positions[corner][0] = x + offsets[face][corner][0];
-            positions[corner][1] = y + offsets[face][corner][1];
-        }
-        maage_client_ui_quad(ui, positions, uv, shades[face]);
     }
 }
 
@@ -101,7 +84,6 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui)
     float x, y;
     unsigned int i;
     if (!ui->has_snapshot || !ui->items) return;
-    if (!maage_client_ui_modal(ui)) maage_client_ui_held(ui);
     x = (float)(int)(ui->content.x + (ui->content.width - 182) * 0.5f);
     y = ui->content.y + ui->content.height - 22;
     rectangle.x = x; rectangle.y = y; rectangle.width = 182; rectangle.height = 22;
@@ -277,13 +259,15 @@ maage_status maage_client_ui_inventory_register(maage_client_ui *ui)
 }
 
 maage_status maage_client_ui_set_content(maage_client_ui *ui,
-    const maage_item_registry *items, const maage_block_registry *blocks)
+    const maage_item_registry *items, const maage_block_registry *blocks,
+    const float inventory_grass_color[3])
 {
-    if (!ui || !items || !blocks) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+    if (!ui || !items || !blocks || !inventory_grass_color) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
         MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
     if (!maage_item_registry_is_finalized(items) || !maage_block_registry_is_finalized(blocks))
         return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
     ui->items = items; ui->blocks = blocks;
+    memcpy(ui->inventory_grass_color, inventory_grass_color, sizeof(ui->inventory_grass_color));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,

@@ -72,6 +72,7 @@ typedef struct maage_render_ui_vertex {
     float uv[2];
     float color[4];
 } maage_render_ui_vertex;
+enum { MAAGE_RENDER_BLEND_ALPHA = 0, MAAGE_RENDER_BLEND_ADDITIVE = 1 };
 typedef struct maage_render_ui_data {
     const maage_render_ui_vertex *vertices;
     size_t vertex_count;
@@ -84,6 +85,11 @@ typedef struct maage_render_ui_data {
      * Gaussian-blur their completed render target before drawing the remaining
      * indices at native resolution. Others simply render the batch unchanged. */
     size_t gaussian_background_indices;
+    unsigned int blend; /* Straight alpha, or source-alpha additive emission. */
+    /* Optional positive camera depths, one per vertex. NULL keeps ordinary
+     * screen-space interpolation; supplied depths preserve projective UVs.
+     * Borrowed with vertices through draw_frame, then copied by the backend. */
+    const float *projective_depth;
 } maage_render_ui_data;
 
 const char *maage_render_backend_name(maage_render_backend backend);
@@ -123,6 +129,15 @@ maage_status maage_renderer_set_clear_color(maage_renderer *renderer,
  * Implemented mesh/UI backends only; others return UNSUPPORTED. */
 maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
     const maage_render_ui_data *background, const maage_render_ui_data *overlay);
+/* Borrow a camera-local presentation mesh until cleared/destroyed; copy its
+ * column-major transform. Draw after the scene with independent depth, before
+ * GUI. NULL clears the pass. Requires TEXTURED_MESH and SCENE support. */
+maage_status maage_renderer_set_foreground(maage_renderer *renderer,
+    const maage_render_mesh *mesh, const float view_projection[16],
+    float sky_light, float block_light);
+/* Presentation clock in 20 Hz ticks; caller may wrap at a common animation
+ * period. No texture uploads or mesh invalidation are needed to advance it. */
+maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float tick);
 /* Prime the initial clear frame before showing a hidden window. Currently Metal
  * only; UNSUPPORTED leaves other backends unchanged. SKIPPED means no drawable
  * yet. Does not change window visibility; normal present still skips hidden windows. */

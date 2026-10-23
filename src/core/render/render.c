@@ -226,6 +226,36 @@ maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
     renderer->sky_light = sky_light; renderer->background = background; renderer->overlay = overlay;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
 }
+maage_status maage_renderer_set_foreground(maage_renderer *renderer,
+    const maage_render_mesh *mesh, const float view_projection[16],
+    float sky_light, float block_light)
+{
+    int index;
+    if (!renderer || !(sky_light >= 0 && sky_light <= 1 && block_light >= 0 && block_light <= 1) ||
+        (mesh && (mesh->renderer != renderer || !view_projection)))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_TEXTURED_MESH) ||
+        !(renderer->capabilities.features & MAAGE_RENDER_CAP_SCENE))
+        return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (mesh) {
+        for (index = 0; index < 16; ++index)
+            if (!(view_projection[index] >= -FLT_MAX && view_projection[index] <= FLT_MAX))
+                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 2);
+        memcpy(renderer->foreground_matrix, view_projection, sizeof(renderer->foreground_matrix));
+    }
+    renderer->foreground = mesh;
+    renderer->foreground_light[0] = sky_light; renderer->foreground_light[1] = block_light;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float tick)
+{
+    if (!renderer || !(tick >= 0 && tick <= FLT_MAX))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_SCENE))
+        return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    renderer->animation_tick = tick;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
 maage_status maage_renderer_prepare_frame(maage_renderer *renderer, maage_status_trace *trace)
 {
     maage_window_state state;
@@ -331,6 +361,24 @@ maage_status maage_renderer_upload_geometry(maage_renderer *renderer,
     if (!renderer->api->upload_geometry) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     for (index = 0; index < data->index_count; ++index)
         if (data->indices[index] >= data->vertex_count) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    for (index = 0; index < data->index_count; index += 3) {
+        float material = data->vertices[data->indices[index]].material;
+        if (!(material == MAAGE_MESH_MATERIAL_OPAQUE || material == MAAGE_MESH_MATERIAL_CUTOUT ||
+            material == MAAGE_MESH_MATERIAL_TRANSLUCENT || material == MAAGE_MESH_MATERIAL_MULTIPLY) ||
+            data->vertices[data->indices[index + 1]].material != material ||
+            data->vertices[data->indices[index + 2]].material != material)
+            return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    }
+    for (index = 0; index < data->vertex_count; ++index) {
+        const float *animation = data->vertices[index].animation;
+        if (!(animation[0] >= 0 && animation[0] <= 1 &&
+            animation[1] >= -FLT_MAX && animation[1] <= FLT_MAX &&
+            animation[2] >= 0 && animation[2] <= FLT_MAX) ||
+            (animation[1] != 0 && !(animation[2] >= 1)))
+            return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    }
     mesh = (maage_render_mesh *)calloc(1, sizeof(*mesh));
     if (!mesh) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh->renderer = renderer;
@@ -367,6 +415,7 @@ maage_status maage_renderer_upload_mesh(maage_renderer *renderer,
 maage_status maage_render_mesh_destroy(maage_render_mesh *mesh)
 {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    if (mesh->renderer->foreground == mesh) mesh->renderer->foreground = NULL;
     mesh->renderer->api->destroy_mesh(mesh);
     if (mesh->previous) mesh->previous->next = mesh->next;
     else mesh->renderer->meshes = mesh->next;
@@ -402,7 +451,8 @@ maage_status maage_renderer_draw_frame(maage_renderer *renderer,
             return MAAGE_STATUS_PROPAGATE(trace,
                 MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0),
                 MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
-        if (!batch->texture || batch->texture->renderer != renderer || !batch->texture->owned ||
+        if (batch->blend > MAAGE_RENDER_BLEND_ADDITIVE ||
+            !batch->texture || batch->texture->renderer != renderer || !batch->texture->owned ||
             !batch->vertices || !batch->indices || !batch->vertex_count || batch->index_count % 3 ||
             batch->vertex_count > UINT_MAX ||
             batch->vertex_count > (size_t)-1 / sizeof(*batch->vertices) ||
@@ -413,6 +463,13 @@ maage_status maage_renderer_draw_frame(maage_renderer *renderer,
         for (mesh_index = 0; mesh_index < batch->index_count; ++mesh_index)
             if (batch->indices[mesh_index] >= batch->vertex_count)
                 return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
+        if (batch->projective_depth)
+            for (mesh_index = 0; mesh_index < batch->vertex_count; ++mesh_index)
+                if (!(batch->projective_depth[mesh_index] > 0.0f &&
+                    batch->projective_depth[mesh_index] <= FLT_MAX))
+                    return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(
+                        MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER,
+                        MAAGE_OPERATION_PRESENT, 1), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
         if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_UI) ||
             !renderer->api->draw_frame) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT);
     }

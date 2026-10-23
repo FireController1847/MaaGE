@@ -368,11 +368,12 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
         MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
 }
 
-static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius, double fov)
+static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch,
+    double aspect, int radius, double fov, const float bob[16])
 {
     double sy = sin(yaw), cy = cos(yaw), sp = sin(pitch), cp = cos(pitch);
     double forward[3], right[3], up[3], focal, far_clip;
-    float view[16], projection[16];
+    float view[16], projection[16], bobbed_view[16];
     int row, column, k;
     forward[0] = sy * cp; forward[1] = -sp; forward[2] = -cy * cp;
     right[0] = cy; right[1] = 0; right[2] = sy;
@@ -392,8 +393,13 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
     projection[10] = (float)(far_clip / (0.05 - far_clip)); projection[11] = -1.0f;
     projection[14] = (float)(0.05 * far_clip / (0.05 - far_clip));
     for (column = 0; column < 4; ++column) for (row = 0; row < 4; ++row) {
+        bobbed_view[column * 4 + row] = 0;
+        for (k = 0; k < 4; ++k)
+            bobbed_view[column * 4 + row] += bob[k * 4 + row] * view[column * 4 + k];
+    }
+    for (column = 0; column < 4; ++column) for (row = 0; row < 4; ++row) {
         output[column * 4 + row] = 0;
-        for (k = 0; k < 4; ++k) output[column * 4 + row] += projection[k * 4 + row] * view[column * 4 + k];
+        for (k = 0; k < 4; ++k) output[column * 4 + row] += projection[k * 4 + row] * bobbed_view[column * 4 + k];
     }
 }
 
@@ -509,6 +515,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_world_options options;
     maage_client_options video_options, saved_video_options, current_options;
     maage_client_interaction_visual interaction;
+    maage_client_first_person first_person;
     maage_client_debug debug;
     maage_client_mesh_stats mesh_stats;
     maage_client_ui_input ui_input;
@@ -550,6 +557,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     memset(&cache, 0, sizeof(cache));
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&interaction, 0, sizeof(interaction));
+    memset(&first_person, 0, sizeof(first_person));
     memset(&debug, 0, sizeof(debug));
     memset(&outbox, 0, sizeof(outbox));
     memset(&latest, 0, sizeof(latest));
@@ -620,10 +628,12 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_interaction_init(&interaction, &resources);
     if (maage_status_failed(operation)) goto done;
+    operation = maage_client_first_person_init(&first_person, &resources);
+    if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_create(renderer, window, directory, &resources.atlas, &ui, trace);
     (void)maage_client_resources_destroy(&resources);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_set_content(ui, items, blocks);
+    operation = maage_client_ui_set_content(ui, items, blocks, first_person.grass_color);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_frontend_create(ui, instance, items, &frontend, trace);
     if (maage_status_failed(operation)) goto done;
@@ -1140,9 +1150,14 @@ choose_world:
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
+            rendered = maage_client_first_person_update(&first_person, renderer, atlas,
+                items, blocks, &previous, &latest, alpha, eye, render_yaw, render_pitch,
+                raw_elapsed, (double)state.framebuffer_width / state.framebuffer_height,
+                !maage_client_ui_modal(ui), trace);
+            if (maage_status_failed(rendered)) goto done;
             maage_client_camera(matrix, eye, render_yaw, render_pitch,
                 (double)state.framebuffer_width / state.framebuffer_height,
-                options.radius, maage_client_ui_fov_radians(ui));
+                options.radius, maage_client_ui_fov_radians(ui), first_person.camera_bob);
             rendered = maage_renderer_draw_frame(renderer, cache.draws,
                 draw_count, matrix, ui_draw, trace);
             if (maage_status_failed(rendered)) goto done;
@@ -1212,6 +1227,9 @@ return_to_title:
     if (audio) maage_client_ui_set_click_callback(ui, maage_client_audio_click, audio);
     rendered = maage_renderer_set_scene(renderer, 1, NULL, NULL);
     if (maage_status_failed(rendered)) goto done;
+    rendered = maage_renderer_set_foreground(renderer, NULL, NULL, 0, 0);
+    if (maage_status_failed(rendered)) goto done;
+    first_person.initialized = 0;
     goto choose_world;
 
 clock_failed:
@@ -1258,6 +1276,8 @@ done:
     maage_client_cleanup_result(maage_client_environment_destroy(environment_view),
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_render_mesh_destroy(interaction.mesh),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_first_person_destroy(&first_person, renderer),
         &outcome, &cleanup_trace, trace);
     operation = maage_client_frontend_destroy(frontend);
     if (maage_status_failed(operation)) {

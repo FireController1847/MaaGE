@@ -86,9 +86,13 @@ enum {
     MAAGE_STATE_EMERALD_ORE = 129,
     MAAGE_STATE_SPRUCE_LOG = 272, MAAGE_STATE_BIRCH_LOG = 273,
     MAAGE_STATE_SPRUCE_LEAVES = 274, MAAGE_STATE_BIRCH_LEAVES = 275,
+    MAAGE_STATE_TORCH_NEGATIVE_X = 276, MAAGE_STATE_TORCH_POSITIVE_X = 277,
+    MAAGE_STATE_TORCH_NEGATIVE_Z = 278, MAAGE_STATE_TORCH_POSITIVE_Z = 279,
+    MAAGE_STATE_LOG_X_BASE = 280, MAAGE_STATE_LOG_Z_BASE = 283,
     MAAGE_STATE_WATER_FLOW_BASE = 512, MAAGE_STATE_LAVA_FLOW_BASE = 528
 };
-enum { MAAGE_BLOCK_MESH_CUBE = 0, MAAGE_BLOCK_MESH_CROSS = 1 };
+enum { MAAGE_BLOCK_MESH_CUBE = 0, MAAGE_BLOCK_MESH_CROSS = 1,
+    MAAGE_BLOCK_MESH_TORCH = 2 };
 enum { MAAGE_FLUID_NONE = 0, MAAGE_FLUID_WATER = 1, MAAGE_FLUID_LAVA = 2 };
 
 typedef enum maage_block_face {
@@ -101,11 +105,26 @@ typedef enum maage_block_face {
     MAAGE_FACE_COUNT
 } maage_block_face;
 
+enum {
+    MAAGE_BLOCK_TINT_NONE = 0,
+    MAAGE_BLOCK_TINT_GRASS = 1,
+    MAAGE_BLOCK_TINT_FOLIAGE = 2,
+    MAAGE_BLOCK_TINT_GRASS_LOCAL = 3
+};
+
 typedef struct maage_block_face_definition {
     maage_texture_id texture_id;
     /* Pre-resolved top-left-origin atlas rectangle: u0, v0, u1, v1. */
     float uv[4];
     float tint[4];
+    /* Numeric biome color selection, applied once during immutable meshing.
+     * Optional overlay uses its own atlas region; zero region means absent. */
+    unsigned int tint_mode, overlay_tint_mode;
+    float overlay_uv[4];
+    float snow_uv[4];
+    /* V stride, signed frame count (negative ping-pongs), ticks per frame. */
+    float animation[3];
+    float flow_uv[4], flow_animation[3];
 } maage_block_face_definition;
 
 /* Local voxel coordinates; selection and collision may differ. Empty shapes
@@ -119,8 +138,9 @@ typedef struct maage_block_definition {
     int solid;
     int opaque;
     unsigned int emitted_light; /* 0..15; resolved during registration. */
+    unsigned int light_opacity; /* 0..15; independent of face occlusion. */
     int selectable, replaceable;
-    unsigned int mesh_shape; /* Numeric CUBE or crossed cutout quads. */
+    unsigned int mesh_shape; /* Numeric cube, crossed plant or narrow torch. */
     double hardness; /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
     unsigned long drop_item_id; /* Item domain, resolved at registration. */
@@ -133,6 +153,8 @@ typedef struct maage_block_state_definition {
     maage_block_id block_id;
     /* Numeric property payload; no text at runtime. */
     unsigned int metadata;
+    /* Optional selection override; all-zero keeps the type's bounds. */
+    maage_block_shape selection_shape;
     unsigned int fluid_kind, fluid_level;
     maage_block_state_id fluid_source_state, fluid_states[16];
     maage_block_face_definition faces[MAAGE_FACE_COUNT];

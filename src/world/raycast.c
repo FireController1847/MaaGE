@@ -43,6 +43,7 @@ maage_status maage_world_raycast(const maage_world *world, const double origin[3
 {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
+    const maage_block_shape *shape;
     double ray[3], next[3], delta[3], magnitude, scale, travelled, distance;
     int cell[3], step[3], axis, chosen;
     maage_block_state_id state_id;
@@ -85,12 +86,14 @@ maage_status maage_world_raycast(const maage_world *world, const double origin[3
             state = maage_block_registry_state(maage_world_registry(world), state_id);
             block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
             if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RAYCAST, 0);
+            shape = state->selection_shape.maximum[0] != 0.0 ?
+                &state->selection_shape : &block->selection_shape;
             if (block->selectable && maage_ray_shape(origin, ray, cell,
-                &block->selection_shape, range, &distance, &face)) {
+                shape, range, &distance, &face)) {
                 target->x = cell[0]; target->y = cell[1]; target->z = cell[2];
                 target->state_id = state_id; target->block_id = state->block_id;
                 target->face = face; target->distance = distance;
-                target->bounds = block->selection_shape;
+                target->bounds = *shape;
                 return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RAYCAST, 0);
             }
         }

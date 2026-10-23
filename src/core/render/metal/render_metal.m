@@ -9,9 +9,15 @@
 #include "maage_mesh.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define MAAGE_METAL_FRAME_SLOTS 4
 
+typedef struct maage_metal_ordered_mesh {
+    const maage_render_mesh *mesh;
+    float depth;
+    size_t order;
+} maage_metal_ordered_mesh;
 typedef struct maage_metal_renderer {
     id<MTLDevice> device;
     id<MTLCommandQueue> queue;
@@ -23,10 +29,15 @@ typedef struct maage_metal_renderer {
     int installed;
     id<MTLRenderPipelineState> pipeline;
     id<MTLDepthStencilState> depth_state;
+    id<MTLDepthStencilState> translucent_depth;
     id<MTLTexture> depth;
     id<MTLRenderPipelineState> ui_pipeline;
+    id<MTLRenderPipelineState> additive_pipeline, translucent_pipeline, multiply_pipeline;
+    maage_metal_ordered_mesh *ordered;
+    size_t ordered_capacity;
     id<MTLBuffer> ui_vertices[MAAGE_METAL_FRAME_SLOTS][3];
     id<MTLBuffer> ui_indices[MAAGE_METAL_FRAME_SLOTS][3];
+    id<MTLBuffer> ui_depth[MAAGE_METAL_FRAME_SLOTS][3];
     id<MTLCommandBuffer> frames[MAAGE_METAL_FRAME_SLOTS];
     id<MTLTexture> colors[MAAGE_METAL_FRAME_SLOTS];
     /* Per-slot targets never overwrite in-flight GPU work. */
@@ -49,10 +60,21 @@ typedef struct maage_metal_renderer {
     double sample_start, drawable_seconds, wait_seconds, gpu_seconds;
     unsigned long sample_frames, gpu_samples;
 } maage_metal_renderer;
+typedef struct maage_metal_triangle {
+    unsigned int indices[3];
+    float center[3], depth;
+    size_t order;
+} maage_metal_triangle;
 typedef struct maage_metal_mesh {
     id<MTLBuffer> vertices;
     id<MTLBuffer> indices;
     NSUInteger index_count;
+    NSUInteger solid_count, translucent_count, multiply_count;
+    maage_metal_triangle *triangles;
+    id<MTLBuffer> sorted_indices[MAAGE_METAL_FRAME_SLOTS];
+    unsigned long sorted_revision[MAAGE_METAL_FRAME_SLOTS], revision;
+    double sort_origin[3];
+    float center[3];
 } maage_metal_mesh;
 
 /* Only the cached layer and immutable Metal objects cross this boundary.
@@ -219,13 +241,14 @@ static maage_status maage_metal_present_result(maage_renderer *renderer)
 }
 
 static maage_status maage_metal_compile_pipeline(maage_renderer *renderer,
-    id<MTLLibrary> library, int ui, id<MTLRenderPipelineState> *output)
+    id<MTLLibrary> library, int mode, id<MTLRenderPipelineState> *output)
 {
     maage_metal_renderer *native = renderer->platform;
     id<MTLFunction> vertex, fragment;
     id<MTLRenderPipelineState> compiled;
     MTLRenderPipelineDescriptor *pipeline;
     NSError *error = nil;
+    int ui = mode == 1 || mode == 4;
     *output = nil;
     vertex = [library newFunctionWithName:ui ? @"maage_ui_vertex_shader" : @"maage_mesh_vertex_shader"];
     fragment = [library newFunctionWithName:ui ? @"maage_ui_fragment_shader" : @"maage_mesh_fragment_shader"];
@@ -233,13 +256,16 @@ static maage_status maage_metal_compile_pipeline(maage_renderer *renderer,
     pipeline.vertexFunction = vertex;
     pipeline.fragmentFunction = fragment;
     pipeline.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-    if (ui) {
+    if (mode != 0) {
         pipeline.colorAttachments[0].blendingEnabled = YES;
-        pipeline.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
-        pipeline.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        pipeline.colorAttachments[0].sourceRGBBlendFactor = mode == 3 ?
+            MTLBlendFactorDestinationColor : MTLBlendFactorSourceAlpha;
+        pipeline.colorAttachments[0].destinationRGBBlendFactor = mode == 4 ? MTLBlendFactorOne :
+            (mode == 3 ? MTLBlendFactorSourceColor : MTLBlendFactorOneMinusSourceAlpha);
         pipeline.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
         pipeline.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-    } else pipeline.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    }
+    if (!ui) pipeline.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
     compiled = vertex && fragment && pipeline ?
         [native->device newRenderPipelineStateWithDescriptor:pipeline error:&error] : nil;
     [pipeline release];
@@ -256,11 +282,12 @@ static maage_status maage_metal_pipeline(maage_renderer *renderer)
     maage_metal_renderer *native = renderer->platform;
     NSString *source;
     id<MTLLibrary> library;
-    id<MTLRenderPipelineState> compiled = nil, ui_pipeline = nil;
+    id<MTLRenderPipelineState> compiled[5] = {nil, nil, nil, nil, nil};
     maage_status result;
     id<MTLDepthStencilState> depth_state;
     MTLDepthStencilDescriptor *depth;
     NSError *error = nil;
+    int mode;
     source = [[NSString alloc] initWithUTF8String:maage_metal_mesh_source];
     if (!source) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     library = [native->device newLibraryWithSource:source options:nil error:&error];
@@ -270,26 +297,32 @@ static maage_status maage_metal_pipeline(maage_renderer *renderer)
             maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0),
             MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, __FILE__, __LINE__, error ? (long)[error code] : 0);
     }
-    result = maage_metal_compile_pipeline(renderer, library, 0, &compiled);
-    if (!maage_status_failed(result)) result = maage_metal_compile_pipeline(renderer, library, 1, &ui_pipeline);
+    for (mode = 0; mode < 5; ++mode) {
+        result = maage_metal_compile_pipeline(renderer, library, mode, &compiled[mode]);
+        if (maage_status_failed(result)) break;
+    }
     [library release];
-    if (!compiled || !ui_pipeline) {
-        [compiled release];
-        [ui_pipeline release];
+    if (mode != 5) {
+        for (mode = 0; mode < 5; ++mode) [compiled[mode] release];
         return MAAGE_STATUS_PROPAGATE(renderer->operation_trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE);
     }
     depth = [[MTLDepthStencilDescriptor alloc] init];
     depth.depthCompareFunction = MTLCompareFunctionLessEqual;
     depth.depthWriteEnabled = YES;
     depth_state = depth ? [native->device newDepthStencilStateWithDescriptor:depth] : nil;
+    depth.depthWriteEnabled = NO;
+    native->translucent_depth = depth ? [native->device newDepthStencilStateWithDescriptor:depth] : nil;
     [depth release];
-    if (!depth_state) {
-        [compiled release];
-        [ui_pipeline release];
+    if (!depth_state || !native->translucent_depth) {
+        [depth_state release];
+        for (mode = 0; mode < 5; ++mode) [compiled[mode] release];
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
-    native->pipeline = compiled;
-    native->ui_pipeline = ui_pipeline;
+    native->pipeline = compiled[0];
+    native->ui_pipeline = compiled[1];
+    native->translucent_pipeline = compiled[2];
+    native->multiply_pipeline = compiled[3];
+    native->additive_pipeline = compiled[4];
     native->depth_state = depth_state;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
@@ -419,13 +452,19 @@ static maage_status maage_metal_destroy(maage_renderer *renderer)
     [native->layer release];
     [native->depth release];
     [native->depth_state release];
+    [native->translucent_depth release];
     [native->pipeline release];
     [native->ui_pipeline release];
+    [native->additive_pipeline release];
+    [native->translucent_pipeline release];
+    [native->multiply_pipeline release];
+    free(native->ordered);
     {
         int layer;
         for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot)
             for (layer = 0; layer < 3; ++layer) {
                 [native->ui_vertices[slot][layer] release]; [native->ui_indices[slot][layer] release];
+                [native->ui_depth[slot][layer] release];
             }
     }
     [native->queue release];
@@ -457,6 +496,109 @@ static maage_status maage_metal_ui_buffer(maage_metal_renderer *native,
     *buffer = replacement;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
 }
+static void maage_metal_bind_ui_depth(id<MTLRenderCommandEncoder> encoder,
+    id<MTLBuffer> depth)
+{
+    unsigned int projective = depth != nil;
+    float ordinary_depth = 1.0f;
+    if (projective) [encoder setVertexBuffer:depth offset:0 atIndex:2];
+    else [encoder setVertexBytes:&ordinary_depth length:sizeof(ordinary_depth) atIndex:2];
+    [encoder setVertexBytes:&projective length:sizeof(projective) atIndex:3];
+}
+
+static int maage_metal_triangle_order(const void *left, const void *right)
+{
+    const maage_metal_triangle *a = left, *b = right;
+    if (a->depth != b->depth) return a->depth > b->depth ? -1 : 1;
+    return a->order < b->order ? -1 : a->order != b->order;
+}
+static int maage_metal_mesh_order(const void *left, const void *right)
+{
+    const maage_metal_ordered_mesh *a = left, *b = right;
+    if (a->depth != b->depth) return a->depth > b->depth ? -1 : 1;
+    return a->order < b->order ? -1 : a->order != b->order;
+}
+static int maage_metal_camera_origin(const float matrix[16], double origin[3])
+{
+    /* The eye maps to clip X=Y=W=0. Solve those three planes without assuming
+     * a world axis or a backend-specific projection convention. */
+    double a[3] = {matrix[0], matrix[4], matrix[8]};
+    double b[3] = {matrix[1], matrix[5], matrix[9]};
+    double c[3] = {matrix[3], matrix[7], matrix[11]};
+    double cross[3][3], determinant;
+    int axis, next, last;
+    for (axis = 0; axis < 3; ++axis) {
+        next = (axis + 1) % 3; last = (axis + 2) % 3;
+        cross[0][axis] = b[next] * c[last] - b[last] * c[next];
+        cross[1][axis] = c[next] * a[last] - c[last] * a[next];
+        cross[2][axis] = a[next] * b[last] - a[last] * b[next];
+    }
+    determinant = a[0] * cross[0][0] + a[1] * cross[0][1] + a[2] * cross[0][2];
+    if (fabs(determinant) < 1e-12) return 0;
+    for (axis = 0; axis < 3; ++axis)
+        origin[axis] = -(matrix[12] * cross[0][axis] + matrix[13] * cross[1][axis] +
+            matrix[15] * cross[2][axis]) / determinant;
+    return 1;
+}
+static maage_status maage_metal_sort_geometry(maage_metal_renderer *native,
+    maage_metal_mesh *geometry, const float matrix[16], unsigned int slot)
+{
+    double origin[3], movement = 0;
+    int perspective = maage_metal_camera_origin(matrix, origin), axis;
+    size_t index, count = geometry->translucent_count / 3;
+    unsigned int *indices;
+    maage_status result;
+    if (!count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPLOAD, 0);
+    if (!perspective) {
+        origin[0] = matrix[2]; origin[1] = matrix[6]; origin[2] = matrix[10];
+    }
+    for (axis = 0; axis < 3; ++axis)
+        movement += (origin[axis] - geometry->sort_origin[axis]) *
+            (origin[axis] - geometry->sort_origin[axis]);
+    /* Rotation alone does not change distance ordering. Reuse each immutable
+     * result until half a block of travel, and upload only into a retired slot. */
+    if (!geometry->revision || movement > (perspective ? 0.25 : 0.0001)) {
+        for (index = 0; index < count; ++index) {
+            maage_metal_triangle *triangle = &geometry->triangles[index];
+            double depth = 0, difference;
+            for (axis = 0; axis < 3; ++axis) {
+                difference = triangle->center[axis] - origin[axis];
+                depth += perspective ? difference * difference : triangle->center[axis] * origin[axis];
+            }
+            triangle->depth = (float)depth;
+        }
+        qsort(geometry->triangles, count, sizeof(*geometry->triangles), maage_metal_triangle_order);
+        memcpy(geometry->sort_origin, origin, sizeof(origin));
+        if (++geometry->revision == 0) {
+            geometry->revision = 1;
+            memset(geometry->sorted_revision, 0, sizeof(geometry->sorted_revision));
+        }
+    }
+    if (geometry->sorted_revision[slot] != geometry->revision) {
+        result = maage_metal_ui_buffer(native, &geometry->sorted_indices[slot],
+            geometry->translucent_count * sizeof(unsigned int));
+        if (maage_status_failed(result)) return result;
+        indices = [geometry->sorted_indices[slot] contents];
+        for (index = 0; index < count; ++index)
+            memcpy(indices + index * 3, geometry->triangles[index].indices, 3 * sizeof(unsigned int));
+        geometry->sorted_revision[slot] = geometry->revision;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
+}
+static void maage_metal_draw_geometry(id<MTLRenderCommandEncoder> encoder,
+    const maage_render_mesh *mesh, int layer, unsigned int slot)
+{
+    maage_metal_mesh *geometry = mesh->platform;
+    NSUInteger count = layer == 0 ? geometry->solid_count :
+        (layer == 1 ? geometry->translucent_count : geometry->multiply_count);
+    NSUInteger offset = layer == 2 ? geometry->solid_count + geometry->translucent_count : 0;
+    if (!count) return;
+    [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
+    [encoder setFragmentTexture:(id<MTLTexture>)mesh->texture->platform atIndex:0];
+    [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:count
+        indexType:MTLIndexTypeUInt32 indexBuffer:layer == 1 ? geometry->sorted_indices[slot] : geometry->indices
+        indexBufferOffset:offset * sizeof(unsigned int)];
+}
 static maage_status maage_metal_frame(maage_renderer *renderer, const maage_window_state *state,
     int preparing, const maage_render_mesh *const *meshes, size_t count, const float *view_projection,
     const maage_render_ui_data *ui)
@@ -472,6 +614,11 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     maage_status result;
     maage_metal_mesh *geometry;
     size_t index;
+    size_t translucent_meshes = 0;
+    const maage_render_mesh *foreground = preparing ? NULL : renderer->foreground;
+    float lighting[4] = {renderer->sky_light, 0, 0, 0};
+    double camera_origin[3] = {0, 0, 0};
+    int perspective = view_projection ? maage_metal_camera_origin(view_projection, camera_origin) : 0;
     const maage_render_ui_data *layers[3], *batch;
     size_t panorama_count = 0;
     int layer;
@@ -587,10 +734,16 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
             result = maage_metal_ui_buffer(native, &native->ui_indices[slot][layer],
                 batch->index_count * sizeof(*batch->indices));
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS && batch->projective_depth)
+            result = maage_metal_ui_buffer(native, &native->ui_depth[slot][layer],
+                batch->vertex_count * sizeof(*batch->projective_depth));
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) { [pool drain]; return result; }
         /* Only this slot has completed; other frames retain their own data. */
         memcpy([native->ui_vertices[slot][layer] contents], batch->vertices, batch->vertex_count * sizeof(*batch->vertices));
         memcpy([native->ui_indices[slot][layer] contents], batch->indices, batch->index_count * sizeof(*batch->indices));
+        if (batch->projective_depth)
+            memcpy([native->ui_depth[slot][layer] contents], batch->projective_depth,
+                batch->vertex_count * sizeof(*batch->projective_depth));
     }
     drawable = nil;
     if (asynchronous) {
@@ -612,7 +765,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         if (!drawable) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
         color = drawable.texture;
     }
-    if (count && (!native->depth || native->depth.width != color.width ||
+    if ((count || foreground) && (!native->depth || native->depth.width != color.width ||
         native->depth.height != color.height)) {
         MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
             MTLPixelFormatDepth32Float width:color.width height:color.height mipmapped:NO];
@@ -621,6 +774,36 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         descriptor.usage = MTLTextureUsageRenderTarget;
         native->depth = [native->device newTextureWithDescriptor:descriptor];
         if (!native->depth) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+    }
+    if (count > native->ordered_capacity) {
+        maage_metal_ordered_mesh *ordered;
+        if (count > (size_t)-1 / sizeof(*ordered)) { [pool drain]; return maage_status_make(
+            MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+        ordered = realloc(native->ordered, count * sizeof(*ordered));
+        if (!ordered) { [pool drain]; return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+        native->ordered = ordered; native->ordered_capacity = count;
+    }
+    for (index = 0; index < count; ++index) {
+        geometry = meshes[index]->platform;
+        if (!geometry->translucent_count) continue;
+        result = maage_metal_sort_geometry(native, geometry, view_projection, slot);
+        if (maage_status_failed(result)) { [pool drain]; return result; }
+        native->ordered[translucent_meshes].mesh = meshes[index];
+        if (perspective) {
+            double dx = geometry->center[0] - camera_origin[0];
+            double dy = geometry->center[1] - camera_origin[1];
+            double dz = geometry->center[2] - camera_origin[2];
+            native->ordered[translucent_meshes].depth = (float)(dx * dx + dy * dy + dz * dz);
+        } else native->ordered[translucent_meshes].depth = geometry->center[0] * view_projection[2] +
+            geometry->center[1] * view_projection[6] + geometry->center[2] * view_projection[10];
+        native->ordered[translucent_meshes++].order = index;
+    }
+    if (translucent_meshes > 1) qsort(native->ordered, translucent_meshes,
+        sizeof(*native->ordered), maage_metal_mesh_order);
+    if (foreground) {
+        result = maage_metal_sort_geometry(native, foreground->platform, renderer->foreground_matrix, slot);
+        if (maage_status_failed(result)) { [pool drain]; return result; }
     }
     command = [native->queue commandBuffer];
     pass = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -634,10 +817,12 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         float logical_size[2] = {layers[0]->logical_width, layers[0]->logical_height};
         encoder = [command renderCommandEncoderWithDescriptor:pass];
         if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
-        [encoder setRenderPipelineState:native->ui_pipeline];
+        [encoder setRenderPipelineState:layers[0]->blend == MAAGE_RENDER_BLEND_ADDITIVE ?
+            native->additive_pipeline : native->ui_pipeline];
         [encoder setCullMode:MTLCullModeNone];
         [encoder setVertexBuffer:native->ui_vertices[slot][0] offset:0 atIndex:0];
         [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
+        maage_metal_bind_ui_depth(encoder, layers[0]->projective_depth ? native->ui_depth[slot][0] : nil);
         [encoder setFragmentTexture:(id<MTLTexture>)layers[0]->texture->platform atIndex:0];
         [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:layers[0]->index_count
             indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][0] indexBufferOffset:0];
@@ -659,14 +844,20 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [encoder setCullMode:MTLCullModeBack];
         [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
         [encoder setVertexBytes:view_projection length:16 * sizeof(float) atIndex:1];
-        [encoder setFragmentBytes:&renderer->sky_light length:sizeof(float) atIndex:0];
+        [encoder setVertexBytes:&renderer->animation_tick length:sizeof(float) atIndex:2];
+        [encoder setFragmentBytes:lighting length:sizeof(lighting) atIndex:0];
         for (index = 0; index < count; ++index) {
-            geometry = meshes[index]->platform;
-            [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
-            [encoder setFragmentTexture:(id<MTLTexture>)meshes[index]->texture->platform atIndex:0];
-            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:geometry->index_count
-                indexType:MTLIndexTypeUInt32 indexBuffer:geometry->indices indexBufferOffset:0];
+            maage_metal_draw_geometry(encoder, meshes[index], 0, slot);
         }
+        [encoder setRenderPipelineState:native->translucent_pipeline];
+        [encoder setDepthStencilState:native->translucent_depth];
+        [encoder setCullMode:MTLCullModeNone];
+        for (index = 0; index < translucent_meshes; ++index)
+            maage_metal_draw_geometry(encoder, native->ordered[index].mesh, 1, slot);
+        [encoder setRenderPipelineState:native->multiply_pipeline];
+        [encoder setCullMode:MTLCullModeBack];
+        for (index = 0; index < count; ++index)
+            maage_metal_draw_geometry(encoder, meshes[index], 2, slot);
     }
     [encoder endEncoding];
     if (panorama_count) {
@@ -712,6 +903,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [encoder setCullMode:MTLCullModeNone];
         [encoder setVertexBuffer:native->ui_vertices[slot][2] offset:0 atIndex:0];
         [encoder setVertexBytes:logical length:sizeof(logical) atIndex:1];
+        maage_metal_bind_ui_depth(encoder, ui->projective_depth ? native->ui_depth[slot][2] : nil);
         [encoder setFragmentTexture:(id<MTLTexture>)ui->texture->platform atIndex:0];
         [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:panorama_count
             indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][2] indexBufferOffset:0];
@@ -741,27 +933,63 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [encoder setCullMode:MTLCullModeNone];
         [encoder setVertexBytes:quad length:sizeof(quad) atIndex:0];
         [encoder setVertexBytes:logical length:sizeof(logical) atIndex:1];
+        maage_metal_bind_ui_depth(encoder, nil);
         [encoder setFragmentTexture:blurred atIndex:0];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         [encoder endEncoding];
     }
-    if ((layers[1] && layers[1]->index_count) ||
-        (layers[2] && layers[2]->index_count > panorama_count)) {
+    for (layer = 1; layer < 3; ++layer) {
         MTLViewport viewport = {0, 0, color.width, color.height, 0, 1};
+        if (layer == 2 && foreground) {
+            pass = [MTLRenderPassDescriptor renderPassDescriptor];
+            pass.colorAttachments[0].texture = color;
+            pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
+            pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+            pass.depthAttachment.texture = native->depth;
+            pass.depthAttachment.loadAction = MTLLoadActionClear;
+            pass.depthAttachment.storeAction = MTLStoreActionDontCare;
+            pass.depthAttachment.clearDepth = 1;
+            encoder = [command renderCommandEncoderWithDescriptor:pass];
+            if (!encoder) { [pool drain]; return maage_status_make(MAAGE_STATUS_ERROR,
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
+            lighting[1] = renderer->foreground_light[0];
+            lighting[2] = renderer->foreground_light[1]; lighting[3] = 1;
+            [encoder setViewport:viewport];
+            [encoder setCullMode:MTLCullModeBack];
+            [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
+            [encoder setVertexBytes:renderer->foreground_matrix length:16 * sizeof(float) atIndex:1];
+            [encoder setVertexBytes:&renderer->animation_tick length:sizeof(float) atIndex:2];
+            [encoder setFragmentBytes:lighting length:sizeof(lighting) atIndex:0];
+            [encoder setRenderPipelineState:native->pipeline];
+            [encoder setDepthStencilState:native->depth_state];
+            maage_metal_draw_geometry(encoder, foreground, 0, slot);
+            [encoder setRenderPipelineState:native->translucent_pipeline];
+            [encoder setDepthStencilState:native->translucent_depth];
+            [encoder setCullMode:MTLCullModeNone];
+            maage_metal_draw_geometry(encoder, foreground, 1, slot);
+            [encoder setRenderPipelineState:native->multiply_pipeline];
+            [encoder setCullMode:MTLCullModeBack];
+            maage_metal_draw_geometry(encoder, foreground, 2, slot);
+            [encoder endEncoding];
+        }
+        batch = layers[layer];
+        if (!batch || batch->index_count <= (layer == 2 ? panorama_count : 0)) continue;
         pass = [MTLRenderPassDescriptor renderPassDescriptor];
         pass.colorAttachments[0].texture = color;
         pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
         pass.colorAttachments[0].storeAction = MTLStoreActionStore;
         encoder = [command renderCommandEncoderWithDescriptor:pass];
         if (!encoder) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0); }
-        [encoder setViewport:viewport]; [encoder setRenderPipelineState:native->ui_pipeline];
+        [encoder setViewport:viewport];
+        [encoder setRenderPipelineState:batch->blend == MAAGE_RENDER_BLEND_ADDITIVE ?
+            native->additive_pipeline : native->ui_pipeline];
         [encoder setDepthStencilState:nil]; [encoder setCullMode:MTLCullModeNone];
-        for (layer = 1; layer < 3; ++layer) {
+        {
             float logical_size[2];
-            batch = layers[layer]; if (!batch || !batch->index_count) continue;
             logical_size[0] = batch->logical_width; logical_size[1] = batch->logical_height;
             [encoder setVertexBuffer:native->ui_vertices[slot][layer] offset:0 atIndex:0];
             [encoder setVertexBytes:logical_size length:sizeof(logical_size) atIndex:1];
+            maage_metal_bind_ui_depth(encoder, batch->projective_depth ? native->ui_depth[slot][layer] : nil);
             [encoder setFragmentTexture:(id<MTLTexture>)batch->texture->platform atIndex:0];
             {
                 size_t first = layer == 2 ? panorama_count : 0;
@@ -871,8 +1099,10 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
     maage_metal_mesh *geometry;
     NSAutoreleasePool *pool;
     maage_status result;
+    size_t index, destination[3], category, triangle_count = 0;
+    unsigned int *indices;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, MAAGE_STATUS_INVALID_STATE);
-    if (sizeof(unsigned int) != 4 || sizeof(maage_mesh_vertex) != 56)
+    if (sizeof(unsigned int) != 4 || sizeof(maage_mesh_vertex) != 72)
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     pool = [[NSAutoreleasePool alloc] init];
     /* Clear-only renderers do not need the mesh shaders or depth state. */
@@ -885,18 +1115,59 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
     mesh->platform = geometry;
     geometry->vertices = [native->device newBufferWithBytes:data->vertices
         length:data->vertex_count * sizeof(*data->vertices) options:MTLResourceStorageModeShared];
-    geometry->indices = [native->device newBufferWithBytes:data->indices
-        length:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
+    geometry->indices = [native->device newBufferWithLength:
+        data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
     geometry->index_count = data->index_count;
+    if (!geometry->vertices || !geometry->indices) { [pool drain]; return maage_status_make(
+        MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0); }
+    for (index = 0; index < data->index_count; index += 3) {
+        float material = data->vertices[data->indices[index]].material;
+        if (material == MAAGE_MESH_MATERIAL_TRANSLUCENT) geometry->translucent_count += 3;
+        else if (material == MAAGE_MESH_MATERIAL_MULTIPLY) geometry->multiply_count += 3;
+        else geometry->solid_count += 3;
+    }
+    if (geometry->translucent_count) {
+        if (geometry->translucent_count / 3 > (size_t)-1 / sizeof(*geometry->triangles)) {
+            [pool drain]; return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
+                MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+        }
+        geometry->triangles = calloc(geometry->translucent_count / 3, sizeof(*geometry->triangles));
+        if (!geometry->triangles) { [pool drain]; return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0); }
+    }
+    indices = [geometry->indices contents];
+    destination[0] = 0; destination[1] = geometry->solid_count;
+    destination[2] = geometry->solid_count + geometry->translucent_count;
+    for (index = 0; index < data->index_count; index += 3) {
+        float material = data->vertices[data->indices[index]].material;
+        category = material == MAAGE_MESH_MATERIAL_TRANSLUCENT ? 1 :
+            (material == MAAGE_MESH_MATERIAL_MULTIPLY ? 2 : 0);
+        memcpy(indices + destination[category], data->indices + index, 3 * sizeof(*indices));
+        destination[category] += 3;
+        if (category == 1) {
+            maage_metal_triangle *triangle = &geometry->triangles[triangle_count];
+            size_t corner, axis;
+            memcpy(triangle->indices, data->indices + index, sizeof(triangle->indices));
+            triangle->order = triangle_count++;
+            for (axis = 0; axis < 3; ++axis) {
+                for (corner = 0; corner < 3; ++corner)
+                    triangle->center[axis] += data->vertices[triangle->indices[corner]].position[axis] / 3;
+                geometry->center[axis] += triangle->center[axis] / (geometry->translucent_count / 3);
+            }
+        }
+    }
     [pool drain];
     return geometry->vertices && geometry->indices ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
 }
 static void maage_metal_destroy_mesh(maage_render_mesh *mesh)
 {
     maage_metal_mesh *geometry = mesh->platform;
+    unsigned int slot;
     if (!geometry) return;
     [geometry->vertices release];
     [geometry->indices release];
+    for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot) [geometry->sorted_indices[slot] release];
+    free(geometry->triangles);
     free(geometry);
     mesh->platform = NULL;
 }

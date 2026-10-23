@@ -68,14 +68,24 @@ unsigned int maage_environment_weather(const maage_environment_state *state)
     if (!state || (!state->raining && state->rain_intensity <= 0)) return MAAGE_WEATHER_CLEAR;
     return state->thundering || state->thunder_intensity > 0 ? MAAGE_WEATHER_THUNDER : MAAGE_WEATHER_RAIN;
 }
+double maage_environment_celestial_angle(const maage_environment_state *state)
+{
+    double phase, eased;
+    if (!state) return 0;
+    phase = (double)state->day_tick / MAAGE_WORLD_DAY_TICKS - 0.25;
+    if (phase < 0) phase += 1;
+    eased = (1.0 - cos(phase * 3.141592653589793)) * 0.5;
+    return phase + (eased - phase) / 3.0;
+}
 double maage_environment_sunlight(const maage_environment_state *state)
 {
     double light;
     if (!state) return 1;
-    light = 0.5 - 2.0*cos(((double)state->day_tick+6000.0)*6.283185307179586/24000.0);
-    if (light < 0.05) light = 0.05;
+    light = cos(maage_environment_celestial_angle(state) * 6.283185307179586) * 2.0 + 0.2;
+    if (light < 0) light = 0;
     if (light > 1) light = 1;
-    return light*(1.0-0.35*state->rain_intensity)*(1.0-0.35*state->thunder_intensity);
+    return 0.2 + 0.8 * light * (1.0 - state->rain_intensity * 5.0 / 16.0) *
+        (1.0 - state->thunder_intensity * state->rain_intensity * 5.0 / 16.0);
 }
 static int maage_update_before(const maage_scheduled_update *a, const maage_scheduled_update *b)
 {

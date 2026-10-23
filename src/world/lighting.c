@@ -98,7 +98,7 @@ maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registr
     maage_section *section;
     maage_block_state_id id;
     size_t index, local;
-    unsigned int sky;
+    unsigned int sky, opacity;
     unsigned char desired;
     int x, y, z, section_y, changed, valid;
     unsigned char failure = MAAGE_STATUS_ALLOCATION_FAILED;
@@ -133,17 +133,16 @@ maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registr
                     failure = MAAGE_STATUS_INVARIANT_VIOLATION; valid = 0;
                     goto maage_light_done;
                 }
-                if (block->opaque) {
+                opacity = block->light_opacity;
+                if (opacity == 15) {
                     work.attenuation[index] = MAAGE_LIGHT_OPAQUE;
                     sky = 0;
                 } else {
-                    work.attenuation[index] =
-                        state->block_id == MAAGE_BLOCK_WATER ? 3 : 1;
-                    /* Direct unobstructed sky stays 15 down an air column.
-                     * Water consumes 3; indirect light loses at least 1. */
-                    if (sky != 15 || state->block_id != MAAGE_BLOCK_AIR)
-                        sky = sky > work.attenuation[index] ?
-                            sky - work.attenuation[index] : 0;
+                    work.attenuation[index] = (unsigned char)(opacity ? opacity : 1);
+                    /* Clear plants/torches do not shade direct sky. Once sky
+                     * is attenuated, even empty cells lose one level. */
+                    if (!opacity && sky != 15) opacity = 1;
+                    sky = sky > opacity ? sky - opacity : 0;
                 }
                 work.sky[index] = (unsigned char)sky;
                 work.emitted[index] = (unsigned char)block->emitted_light;

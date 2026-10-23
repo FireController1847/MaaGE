@@ -58,7 +58,8 @@ void maage_client_ui_notice_time(maage_client_ui *ui, double now);
 maage_status maage_client_ui_destroy(maage_client_ui *ui);
 /* Immutable numeric content borrowed for icons; Server snapshots copied by value. */
 maage_status maage_client_ui_set_content(maage_client_ui *ui,
-    const maage_item_registry *items, const maage_block_registry *blocks);
+    const maage_item_registry *items, const maage_block_registry *blocks,
+    const float inventory_grass_color[3]);
 maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,
     const maage_session_snapshot *snapshot);
 /* NOOP when empty. FIFO of authoritative commands; a full queue returns

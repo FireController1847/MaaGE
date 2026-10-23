@@ -3,13 +3,19 @@
 #include "maage/image.h"
 #include "maage/pixels.h"
 #include "maage/content.h"
-#define MAAGE_CLIENT_SOURCE_COUNT 60
+#define MAAGE_CLIENT_SOURCE_COUNT 64
 #define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
     maage_image image;
     maage_pixel_buffer atlas;
     float uv[MAAGE_CONTENT_TEXTURE_COUNT][4];
-    float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][MAAGE_CONTENT_TEXTURE_COUNT][4];
+    float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][4];
+    /* Original default skin arm faces, resolved into the same shared atlas. */
+    float arm_uv[MAAGE_FACE_COUNT][4];
+    float inventory_grass_color[3];
+    float fluid_animation[2][3];
+    float fluid_flow_uv[2][4], fluid_flow_animation[2][3];
+    float white_uv[4];
     /* Initialization-only numeric failure cache. Gameplay never retries loads.
      * Destroy/reload explicitly retries all sources on the renderer owner.
      * load_status retains the first original error; recovery_status reports
@@ -26,5 +32,11 @@ maage_status maage_client_resources_load(const char *application_data,
 maage_status maage_client_content_create(const maage_client_resources *resources,
     const maage_biome_registry *biomes, maage_content **output,
     maage_status_trace *trace);
+/* Pure fixed item/inventory color transform; world biome tinting stays in mesh. */
+void maage_client_item_face_tint(const float grass_color[3],
+    const maage_block_face_definition *face, unsigned int mode, float color[4]);
+const maage_block_state_definition *maage_client_item_icon_state(
+    const maage_block_registry *blocks, const maage_item_definition *item,
+    unsigned int metadata);
 maage_status maage_client_resources_destroy(maage_client_resources *resources);
 #endif

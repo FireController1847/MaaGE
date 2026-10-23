@@ -47,6 +47,7 @@ struct maage_client_ui {
     maage_window *window;
     const maage_item_registry *items;
     const maage_block_registry *blocks;
+    float inventory_grass_color[3];
     maage_session_snapshot snapshot; /* Value-only, no World pointers. */
     int has_snapshot;
     maage_session_command commands[MAAGE_CLIENT_UI_COMMAND_CAPACITY];
@@ -99,8 +100,6 @@ maage_status maage_client_ui_queue_command(maage_client_ui *ui,
 void maage_client_ui_queue_game_mode(maage_client_ui *ui);
 void maage_client_ui_queue_respawn(maage_client_ui *ui);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
-void maage_client_ui_quad(maage_client_ui *ui, const float positions[4][2],
-    const float uv[4], float shade);
 /* Appends already-clipped quads, rebasing indices into the current frame. */
 int maage_client_ui_append_quads(maage_client_ui *ui,
     const maage_render_ui_vertex *vertices, size_t count);

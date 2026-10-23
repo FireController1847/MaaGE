@@ -329,6 +329,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     snapshot.player.target = runtime->game.target;
     snapshot.player.breaking = runtime->game.breaking;
     snapshot.player.break_progress = runtime->game.break_progress;
+    snapshot.player.swing = runtime->game.swing;
     maage_world_environment(runtime->world, &snapshot.environment);
     cell_x = (int)floor(runtime->player.position[0]);
     cell_y = (int)floor(runtime->player.position[1] + MAAGE_PLAYER_EYE_HEIGHT);

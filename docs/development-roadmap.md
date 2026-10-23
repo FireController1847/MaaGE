@@ -181,8 +181,9 @@ seed-for-seed terrain are not goals. Historical generators and their selection
 arguments/APIs are removed; future algorithm changes may invalidate worlds.
 Phase 3 supplies inventory and interaction, while Phase 4 supplies generation
 features, fluid updates and environmental presentation.
-Water still uses an opaque tinted first texture frame without animation, swimming
-or underwater presentation. Lighting lacks vanilla parity and ambient occlusion.
+Water/lava now use animated still/flow textures and shared corner heights;
+underwater fog/overlays remain incomplete. Lighting includes smooth corner
+sampling and ambient occlusion, without claiming exact vanilla parity.
 GPU positions remain floating-point world
 coordinates, so precision decreases far from the origin. World coordinates are
 bounded to the classic-scale ±30-million range.
@@ -316,7 +317,7 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   columns stop targeting. Default reach is 5 blocks in Creative and 4.5 in Survival;
   `--interaction-range=<positive blocks>` optionally overrides it, up to 64.
   Twelve depth-tested black edges outline the target. Selection and collision use
-  separate registered shapes; current content remains full cubes.
+  separate registered shapes, including partial blocks and oriented torches.
 - **Mutations:** owner-thread expected-state edits copy a column and publish an
   immutable replacement. Center/neighbor lighting and mesh revisions are
   invalidated; stale jobs/results cannot replace newer edits. Resident dirty columns
@@ -327,8 +328,8 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   20 TPS, consumes placed stacks, applies tool durability where defined and
   harvests basic numeric drops. Placement validates replaceability, loaded
   destination, height and player AABB; numeric placement callbacks permit future
-  state orientation. Ten reconstructed damage textures are precomposited into
-  the atlas at initialization and drawn through the existing mesh pipeline.
+  state orientation. Ten raw reconstructed damage textures multiply the existing
+  lit surface through the mesh pipeline, preserving biome tint and base textures.
 - **Items and inventory:** a finalized direct-index item registry supplies built-in
   block items, from stone/grass/dirt/bedrock/sand/gravel/sandstone through Phase 4
   content, with stack limits, block/icon states, names and tool properties.
@@ -738,6 +739,13 @@ without command-line world-selection arguments. Rendered buttons alone are
 not sufficient.
 
 ## Phase 9 — Visual Fidelity & Game Feel
+
+The current source includes neutral biome-tinted grass/foliage, oriented torch
+and log models, smooth light/AO, animated fluid surfaces, explicit material
+passes, additive celestial sprites and perspective first-person presentation.
+See [Visual Fidelity Implementation](visual-fidelity.md) for reference evidence,
+build results, remaining limits and programmer comparison steps. These changes
+are build-verified; runtime visual completion is not established.
 
 Dedicate a milestone to consistent, performant gameplay presentation, using
 Minecraft Java Edition 1.7.10 as the visual and mechanical reference while

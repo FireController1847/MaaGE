@@ -197,6 +197,34 @@ const maage_item_definition *maage_item_registry_at(const maage_item_registry *r
     return registry && index < registry->count ?
         maage_item_registry_get(registry, registry->ordered[index]) : NULL;
 }
+static maage_status maage_item_oriented_placement(const maage_item_definition *item,
+    unsigned int metadata, maage_block_face face, double yaw,
+    maage_block_state_id *state)
+{
+    static const maage_block_state_id torches[MAAGE_FACE_COUNT] = {
+        MAAGE_STATE_TORCH_POSITIVE_X, MAAGE_STATE_TORCH_NEGATIVE_X,
+        MAAGE_STATE_AIR, MAAGE_STATE_TORCH,
+        MAAGE_STATE_TORCH_POSITIVE_Z, MAAGE_STATE_TORCH_NEGATIVE_Z
+    };
+    unsigned int species;
+    (void)yaw;
+    if ((unsigned int)face >= MAAGE_FACE_COUNT)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    if (item->block_id == MAAGE_BLOCK_TORCH) {
+        *state = torches[face];
+        if (face == MAAGE_FACE_NEGATIVE_Y)
+            return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESOLVE, 0);
+    } else {
+        species = metadata & 3U;
+        if (species > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+            MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+        if (face / 2 == 0) *state = MAAGE_STATE_LOG_X_BASE + species;
+        else if (face / 2 == 2) *state = MAAGE_STATE_LOG_Z_BASE + species;
+        else *state = species ? MAAGE_STATE_SPRUCE_LOG + species - 1 : MAAGE_STATE_LOG;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
+
 maage_status maage_item_registry_create_builtin(const maage_block_registry *blocks,
     maage_item_registry **output)
 {
@@ -226,6 +254,8 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
         item.placement_state_id = item.icon_state_id = ids[i]; item.max_stack = 64;
         item.mining_speed = 1; item.texture_id = state->faces[MAAGE_FACE_POSITIVE_Z].texture_id;
         item.display_name = displays[i];
+        if (item.block_id == MAAGE_BLOCK_TORCH || item.block_id == MAAGE_BLOCK_LOG)
+            item.placement = maage_item_oriented_placement;
         result = maage_item_registry_register(registry, names[i], &item);
         if (maage_status_failed(result)) goto failed;
     }

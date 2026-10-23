@@ -43,8 +43,8 @@ struct maage_world_task {
     maage_world_seed seed;
     maage_generation_policy generation_policy;
     maage_world_store *store;
-    maage_chunk_snapshot *inputs[5]; /* center, -X,+X,-Z,+Z */
-    unsigned long input_epochs[5]; /* geometry/light identity, independent of queues */
+    maage_chunk_snapshot *inputs[9]; /* center, cardinal and diagonal mesh halo */
+    unsigned long input_epochs[9]; /* geometry/light identity, independent of queues */
     maage_chunk *output;
     maage_world_mesh *mesh;
     maage_status status;
@@ -204,11 +204,12 @@ static int maage_world_distance(const maage_world *world, const maage_world_slot
 }
 static int maage_world_complete(const maage_world_slot *slot)
 { return slot && slot->data && !slot->failed; }
-static void maage_world_neighbors(const maage_world *world, int x, int z, maage_world_slot *neighbors[4])
+static void maage_world_neighbors(const maage_world *world, int x, int z, maage_world_slot *neighbors[8])
 {
-    static const int offsets[4][2] = {{-1,0},{1,0},{0,-1},{0,1}};
+    static const int offsets[8][2] = {{-1,0},{1,0},{0,-1},{0,1},
+        {-1,-1},{1,-1},{-1,1},{1,1}};
     int side;
-    for (side = 0; side < 4; ++side) {
+    for (side = 0; side < 8; ++side) {
         neighbors[side] = maage_world_find(world, x + offsets[side][0], z + offsets[side][1]);
         if (!maage_world_complete(neighbors[side])) neighbors[side] = NULL;
     }
@@ -221,11 +222,15 @@ static void maage_world_invalidate(maage_world *world, maage_world_slot *slot, i
 }
 static void maage_world_invalidate_neighbors(maage_world *world, int x, int z, unsigned mask)
 {
-    maage_world_slot *neighbors[4];
+    maage_world_slot *neighbors[8];
     int side;
     maage_world_neighbors(world, x, z, neighbors);
-    for (side = 0; side < 4; ++side)
-        if (neighbors[side] && (mask & (1U << side))) maage_world_invalidate(world, neighbors[side], 1);
+    for (side = 0; side < 8; ++side) {
+        unsigned affected = side < 4 ? 1U << side :
+            ((1U << ((side - 4) & 1)) | (1U << (side < 6 ? 2 : 3)));
+        if (neighbors[side] && (mask & affected))
+            maage_world_invalidate(world, neighbors[side], side < 4);
+    }
 }
 static void maage_world_failure_status(maage_world *world, maage_world_slot *slot,
     maage_status result, const char *error)
@@ -344,7 +349,7 @@ static unsigned maage_world_light_boundaries(const maage_chunk *before, const ma
 static void maage_world_run(void *context, const maage_job_token *token)
 {
     maage_world_task *task = (maage_world_task *)context;
-    const maage_chunk *neighbors[4];
+    const maage_chunk *neighbors[8];
     maage_section *added[16];
     int side, section;
     maage_status_trace *trace = maage_job_trace(token);
@@ -369,7 +374,7 @@ static void maage_world_run(void *context, const maage_job_token *token)
             task->inputs[0]->chunk, task->blocks, task->biomes, task->tick_low, task->tick_high, task->error, trace) :
             maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SAVE, 0);
     } else {
-        for (side = 0; side < 4; ++side) neighbors[side] = task->inputs[side + 1] ? task->inputs[side + 1]->chunk : NULL;
+        for (side = 0; side < 8; ++side) neighbors[side] = task->inputs[side + 1] ? task->inputs[side + 1]->chunk : NULL;
         if (task->kind == MAAGE_JOB_MESH) {
             task->status = maage_world_mesh_create_chunk_job(task->blocks, task->biomes,
                 task->inputs[0]->chunk, neighbors, task->leaves_mode, token, &task->mesh, trace);
@@ -404,7 +409,7 @@ finished:
 static void maage_world_task_release(maage_world *world, maage_world_task *task)
 {
     int input;
-    for (input = 0; input < 5; ++input) maage_world_release(task->inputs[input]);
+    for (input = 0; input < 9; ++input) maage_world_release(task->inputs[input]);
     maage_chunk_destroy(task->output); maage_world_mesh_destroy(task->mesh);
     if (task->kind == MAAGE_JOB_SAVE) --world->saves_active;
     world->free_tasks[world->free_count++] = (unsigned)(task - world->tasks);
@@ -412,11 +417,11 @@ static void maage_world_task_release(maage_world *world, maage_world_task *task)
 }
 static int maage_world_inputs_current(const maage_world *world, const maage_world_slot *slot, const maage_world_task *task)
 {
-    maage_world_slot *neighbors[4];
+    maage_world_slot *neighbors[8];
     int side;
     if (slot->data_epoch != task->input_epochs[0]) return 0;
     maage_world_neighbors(world, slot->x, slot->z, neighbors);
-    for (side = 0; side < 4; ++side)
+    for (side = 0; side < (task->kind == MAAGE_JOB_MESH ? 8 : 4); ++side)
         if ((neighbors[side] ? neighbors[side]->data_epoch : 0) != task->input_epochs[side + 1]) return 0;
     return 1;
 }
@@ -551,7 +556,7 @@ static maage_status maage_world_collect(maage_world *world)
 static maage_status maage_world_submit(maage_world *world, maage_world_slot *slot, int kind, unsigned priority)
 {
     maage_world_task *task = NULL;
-    maage_world_slot *neighbors[4];
+    maage_world_slot *neighbors[8];
     unsigned index;
     int side;
     maage_environment_state environment;
@@ -571,7 +576,7 @@ static maage_status maage_world_submit(maage_world *world, maage_world_slot *slo
         task->input_epochs[0] = slot->data_epoch;
         if (kind != MAAGE_JOB_SAVE) {
             maage_world_neighbors(world, slot->x, slot->z, neighbors);
-            for (side = 0; side < 4; ++side) if (neighbors[side]) {
+            for (side = 0; side < (kind == MAAGE_JOB_MESH ? 8 : 4); ++side) if (neighbors[side]) {
                 task->inputs[side + 1] = neighbors[side]->data; ++task->inputs[side + 1]->references;
                 task->input_epochs[side + 1] = neighbors[side]->data_epoch;
             }

@@ -41,6 +41,9 @@ void maage_environment_snapshot(const maage_environment *environment,
     maage_environment_state *state);
 unsigned int maage_environment_weather(const maage_environment_state *state);
 double maage_environment_sunlight(const maage_environment_state *state);
+/* Current day phase in turns, with the eased celestial orbit shared by sky
+ * presentation and daylight. Pure numeric calculation; no World access. */
+double maage_environment_celestial_angle(const maage_environment_state *state);
 /* Owner mutation hook schedules this cell and its six neighbors when fluid
  * behavior could change. Missing columns are ignored; boundary work retries
  * in a single deduplicated pending entry rather than growing the queue. */

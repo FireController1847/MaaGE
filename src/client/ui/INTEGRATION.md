@@ -8,7 +8,7 @@ Agent 6 `include/maage/session_protocol.h` and Agent 5 audio-enabled
 ## Exact API replacements
 
 - Removed `maage_client_ui_set_gameplay(maage_client_ui *, const maage_item_registry *, maage_gameplay *, const maage_block_registry *)`.
-- Added `maage_client_ui_set_content(maage_client_ui *, const maage_item_registry *, const maage_block_registry *)`. Both registries must be finalized and remain alive throughout UI use.
+- Added `maage_client_ui_set_content(maage_client_ui *, const maage_item_registry *, const maage_block_registry *, const float inventory_grass_color[3])`. Both registries must be finalized and remain alive throughout UI use.
 - Added `maage_client_ui_set_snapshot(maage_client_ui *, const maage_session_snapshot *)`. Copies the full numeric value; caller may immediately reuse its source buffer.
 - Added `maage_client_ui_take_command(maage_client_ui *, maage_session_command *)`; SUCCESS consumes the oldest queued command, NOOP means empty.
 - Added `maage_client_ui_retry_command(maage_client_ui *, const maage_session_command *)` for restoring the just-taken command at FIFO front if `maage_local_session_send` returns BUFFER_OVERFLOW. Break the drain loop after restoring it.
@@ -37,14 +37,14 @@ The Server snapshot owns HUD selected slot, health, hunger, inventory cursor,
 game mode and target/break progress. Optimistic UI state is not written to
 this copy. Snapshot version is validated on attachment.
 
-## Presentation fallbacks and pending protocol improvements
+## Presentation ownership
 
-Version-1 snapshots copy the player climate/sky observation but not
-per-target light. Cracks remain fullbright rather than reading World
-memory or abusing the player's observation. The HUD held item remains
-stationary between item changes because v1 lacks a copied swing fraction.
-Adding a target light value and swing fraction to a later protocol version
-would restore those two visual details.
+Version-2 snapshots copy the authoritative arm-swing fraction and player
+climate/sky observation. The Client interpolates swing and sampled lighting
+for cached camera-local 3D block, extruded-icon and default-skin arm geometry.
+The independent foreground depth pass precedes the GUI; no held decoration
+is emitted by the HUD. Breaking overlays multiply the existing lit surface
+and never query World or substitute the player's unrelated target light.
 
 Interaction mesh caching also checks session/world epochs. Environment
 rendering samples snapshot day/weather and the authoritative player
