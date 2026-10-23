@@ -42,6 +42,8 @@ struct maage_server_runtime {
     int pending_jump, pending_attack, pending_use;
     unsigned long tick, publication_sequence, event_sequence;
     unsigned long last_command_sequence, overloads, dropped_sound_events;
+    unsigned long audio_random, cave_ticks;
+    maage_session_audio_observation audio_observation;
     maage_status last_world_notice;
     maage_session_event pending_status;
     int has_pending_status;
@@ -136,9 +138,11 @@ static void server_emit_sound(maage_server_runtime *runtime,
     event.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     event.kind = MAAGE_EVENT_SOUND;
     event.session_epoch = event.world_epoch = 1UL;
-    event.tick = runtime->tick;
+    event.tick = sound->tick;
     event.sequence = ++runtime->event_sequence;
     event.sound = *sound;
+    event.sound.sequence = event.sequence;
+    event.emitted_at = maage_time_monotonic_seconds();
     result = maage_local_session_publish_event(runtime->config.session, &event);
     if (maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
         /* Audio is best effort; never block or replay an obsolete positional
@@ -149,15 +153,108 @@ static void server_emit_sound(maage_server_runtime *runtime,
         server_capture_failure(runtime, result, NULL);
 }
 
-static void server_inventory_sound(maage_server_runtime *runtime)
+/* Private bounded PRNG: soundscape sampling cannot change terrain/weather RNG. */
+static unsigned long server_audio_random(maage_server_runtime *runtime, unsigned long bound)
 {
-    maage_sound_event event;
-    maage_status result;
-    if (!runtime->config.session) return;
-    result = maage_gameplay_build_sound(&runtime->game, &event,
-        MAAGE_SOUND_INVENTORY_CLICK, MAAGE_MATERIAL_DEFAULT,
-        runtime->player.position, 0.5, 1.0);
-    if (!maage_status_failed(result)) server_emit_sound(runtime, &event);
+    runtime->audio_random = (runtime->audio_random * 1664525UL + 1013904223UL) & 0xffffffffUL;
+    return (runtime->audio_random >> 8) % bound;
+}
+
+static void server_audio_observe(maage_server_runtime *runtime)
+{
+    maage_session_audio_observation *audio = &runtime->audio_observation;
+    const maage_block_registry *registry = maage_world_registry(runtime->world);
+    const maage_block_state_definition *state, *above;
+    const maage_block_definition *block;
+    maage_world_observation observation, local;
+    maage_environment_state environment;
+    maage_sound_event sound;
+    double position[3], dx, dy, dz, rain;
+    int px, py, pz, x, y, z, cx, cz, i, samples;
+    unsigned long water_count = 0, lava_count = 0, rain_count = 0;
+    memset(audio, 0, sizeof(*audio));
+    px = (int)floor(runtime->player.position[0]);
+    py = (int)floor(runtime->player.position[1]);
+    pz = (int)floor(runtime->player.position[2]);
+    /* Copy bounded local display trial counts and reservoir-selected
+     * environmental positions for Client playback. */
+    for (i = 0; i < 1000; ++i) {
+        x = px + (int)server_audio_random(runtime, 16) - (int)server_audio_random(runtime, 16);
+        y = py + (int)server_audio_random(runtime, 16) - (int)server_audio_random(runtime, 16);
+        z = pz + (int)server_audio_random(runtime, 16) - (int)server_audio_random(runtime, 16);
+        if (y < 0 || y >= MAAGE_WORLD_HEIGHT) continue;
+        state = maage_block_registry_state(registry, maage_world_get(runtime->world, x, y, z));
+        if (!state) continue;
+        if (state->fluid_kind == MAAGE_FLUID_WATER && state->fluid_level > 0 && state->fluid_level < 8) {
+            if (server_audio_random(runtime, ++water_count) == 0) {
+                audio->flowing_water_available = 1;
+                audio->water_position[0] = x + 0.5; audio->water_position[1] = y + 0.5;
+                audio->water_position[2] = z + 0.5;
+            }
+        } else if (state->fluid_kind == MAAGE_FLUID_LAVA) {
+            above = maage_block_registry_state(registry, maage_world_get(runtime->world, x, y + 1, z));
+            if (above && above->block_id == MAAGE_BLOCK_AIR &&
+                server_audio_random(runtime, ++lava_count) == 0) {
+                audio->lava_available = 1;
+                audio->lava_position[0] = x; audio->lava_position[1] = y;
+                audio->lava_position[2] = z;
+            }
+        }
+    }
+    audio->water_samples = (unsigned int)water_count;
+    audio->lava_samples = (unsigned int)lava_count;
+    maage_world_environment(runtime->world, &environment);
+    rain = environment.rain_intensity;
+    samples = (int)(100.0 * rain * rain);
+    memset(&local, 0, sizeof(local));
+    (void)maage_world_observe(runtime->world, px, py, pz, &local);
+    /* Sample real precipitation surfaces,
+     * reject snow/desert/lava/air, and reservoir-select one impact. */
+    for (i = 0; i < samples; ++i) {
+        x = px + (int)server_audio_random(runtime, 10) - (int)server_audio_random(runtime, 10);
+        z = pz + (int)server_audio_random(runtime, 10) - (int)server_audio_random(runtime, 10);
+        if (!maage_world_observe(runtime->world, x, py, z, &observation)) continue;
+        y = observation.precipitation_height;
+        if (y < 1 || y >= MAAGE_WORLD_HEIGHT || y < py - 10 || y > py + 10) continue;
+        if (!maage_world_observe(runtime->world, x, y, z, &observation) ||
+            observation.rainfall <= 0.0 || observation.temperature < 0.15) continue;
+        state = maage_block_registry_state(registry, maage_world_get(runtime->world, x, y - 1, z));
+        block = state ? maage_block_registry_block(registry, state->block_id) : NULL;
+        if (!block || state->block_id == MAAGE_BLOCK_AIR || state->fluid_kind == MAAGE_FLUID_LAVA) continue;
+        if (server_audio_random(runtime, ++rain_count) != 0) continue;
+        audio->rain_available = 1;
+        audio->rain_position[0] = x + server_audio_random(runtime, 65536) / 65536.0;
+        audio->rain_position[1] = y + 0.1 - block->selection_shape.minimum[1];
+        audio->rain_position[2] = z + server_audio_random(runtime, 65536) / 65536.0;
+    }
+    audio->rain_above = audio->rain_available &&
+        audio->rain_position[1] > runtime->player.position[1] + 1.0 && local.precipitation_height > py;
+    /* Cave ambience requires real dark air, 2..8 blocks from the
+     * player, and a 6000..17999 tick cooldown. Only nearby columns can pass
+     * that distance predicate, so no scan of all loaded World columns. */
+    if (runtime->cave_ticks) { --runtime->cave_ticks; return; }
+    for (cx = -1; cx <= 1; ++cx) for (cz = -1; cz <= 1; ++cz) {
+        x = (maage_world_chunk_coordinate(px) + cx) * 16 + (int)server_audio_random(runtime, 16);
+        y = (int)server_audio_random(runtime, 256);
+        z = (maage_world_chunk_coordinate(pz) + cz) * 16 + (int)server_audio_random(runtime, 16);
+        position[0] = x + 0.5; position[1] = y + 0.5; position[2] = z + 0.5;
+        dx = position[0] - runtime->player.position[0];
+        dy = position[1] - runtime->player.position[1];
+        dz = position[2] - runtime->player.position[2];
+        if (dx*dx + dy*dy + dz*dz <= 4.0 || dx*dx + dy*dy + dz*dz > 64.0) continue;
+        if (maage_world_get(runtime->world, x, y, z) != MAAGE_STATE_AIR ||
+            !maage_world_observe(runtime->world, x, y, z, &observation) ||
+            !observation.light_available || (observation.light >> 4) != 0 ||
+            (observation.light & 15) > server_audio_random(runtime, 8)) continue;
+        if (!maage_status_failed(maage_gameplay_build_sound(&runtime->game, &sound,
+            MAAGE_SOUND_CAVE_AMBIENT, MAAGE_MATERIAL_DEFAULT, position, 1.0,
+            0.8 + server_audio_random(runtime, 65536) / 65536.0 * 0.2))) {
+            sound.tick = runtime->tick + 1UL;
+            server_emit_sound(runtime, &sound);
+        }
+        runtime->cave_ticks = 6000UL + server_audio_random(runtime, 12000);
+        return;
+    }
 }
 
 static maage_status server_reject(maage_server_runtime *runtime,
@@ -194,17 +291,20 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
             fabs(command->intent.pitch) > 1.553343034 ||
             (command->intent.attack != 0 && command->intent.attack != 1) ||
             (command->intent.use != 0 && command->intent.use != 1) ||
+            (command->intent.attack_pressed != 0 && command->intent.attack_pressed != 1) ||
+            (command->intent.use_pressed != 0 && command->intent.use_pressed != 1) ||
             (command->intent.jump_pressed != 0 && command->intent.jump_pressed != 1) ||
             (command->intent.movement.jump != 0 && command->intent.movement.jump != 1) ||
             (command->intent.descend != 0 && command->intent.descend != 1))
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
         runtime->pending_jump |= command->intent.jump_pressed;
-        runtime->pending_attack |= command->intent.attack;
-        runtime->pending_use |= command->intent.use;
+        runtime->pending_attack |= command->intent.attack_pressed;
+        runtime->pending_use |= command->intent.use_pressed;
         runtime->sampled = command->intent;
         /* jump_pressed is an edge, unlike held movement.jump/attack/use.
          * Only the pending latch may survive to the next simulation step. */
         runtime->sampled.jump_pressed = 0;
+        runtime->sampled.attack_pressed = runtime->sampled.use_pressed = 0;
         runtime->yaw = command->intent.movement.yaw;
         runtime->pitch = command->intent.pitch;
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
@@ -219,17 +319,11 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
         result = maage_inventory_click(&runtime->game.inventory, items,
             command->inventory_slot, command->secondary_click);
-        if (!maage_status_failed(result) &&
-            maage_status_code(result) != MAAGE_STATUS_NOOP)
-            server_inventory_sound(runtime);
         break;
     case MAAGE_CMD_CREATIVE_PICK:
         if (runtime->game.mode != MAAGE_GAME_MODE_CREATIVE)
             return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
         result = maage_inventory_creative(&runtime->game.inventory, items, command->item_id);
-        if (!maage_status_failed(result) &&
-            maage_status_code(result) != MAAGE_STATUS_NOOP)
-            server_inventory_sound(runtime);
         break;
     case MAAGE_CMD_GAME_MODE:
         if (command->game_mode != MAAGE_GAME_MODE_SURVIVAL &&
@@ -314,6 +408,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     snapshot.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     snapshot.session_epoch = snapshot.world_epoch = 1UL;
     snapshot.tick = runtime->tick;
+    snapshot.paused = runtime->paused;
     snapshot.sequence = ++runtime->publication_sequence;
     snapshot.player.player = runtime->player;
     snapshot.player.yaw = runtime->yaw;
@@ -343,6 +438,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
         runtime->last_stats_time = now;
     }
     snapshot.world_stats = runtime->stats;
+    snapshot.audio_observation = runtime->audio_observation;
     (void)maage_local_session_publish_snapshot(runtime->config.session, &snapshot);
 }
 
@@ -413,6 +509,9 @@ static maage_status server_open_world(maage_server_runtime *runtime,
     world_config.registry = maage_content_blocks(runtime->content);
     world_config.biomes = maage_content_biomes(runtime->content);
     world_config.seed = runtime->record.seed;
+    runtime->audio_random = (runtime->record.seed.low ^ runtime->record.seed.high ^
+        runtime->record.environment.ticks_low ^ 0x9e3779b9UL) & 0xffffffffUL;
+    runtime->cave_ticks = server_audio_random(runtime, 12000);
     world_config.store = runtime->store;
     world_config.worker_count = runtime->config.world_workers;
     world_config.render_distance = runtime->config.render_distance;
@@ -525,6 +624,8 @@ static maage_status server_tick(maage_server_runtime *runtime,
     intent.movement.jump |= runtime->pending_jump;
     intent.attack |= runtime->pending_attack;
     intent.use |= runtime->pending_use;
+    intent.attack_pressed |= runtime->pending_attack;
+    intent.use_pressed |= runtime->pending_use;
     intent.movement.yaw = runtime->yaw;
     intent.pitch = runtime->pitch;
     runtime->pending_jump = runtime->pending_attack = runtime->pending_use = 0;
@@ -545,6 +646,7 @@ static maage_status server_tick(maage_server_runtime *runtime,
     result = maage_world_tick(runtime->world);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result,
         MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_TICK);
+    server_audio_observe(runtime);
     ++runtime->tick;
     return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
@@ -557,7 +659,7 @@ static void server_thread_entry(void *context)
     double now, deadline, remaining, last_published;
     unsigned int caught_up;
     unsigned long sleep_ms, last_published_tick = 0UL;
-    int center_x, center_z, spawn_ready;
+    int center_x, center_z, spawn_ready, last_published_paused = -1;
     maage_status_trace_init(&trace);
     result = server_open_world(runtime, &trace);
     if (maage_status_failed(result)) {
@@ -657,10 +759,11 @@ static void server_thread_entry(void *context)
             }
         }
         if (last_published < 0.0 || now - last_published >= 0.1 ||
-            runtime->tick != last_published_tick) {
+            runtime->tick != last_published_tick || runtime->paused != last_published_paused) {
             server_publish_snapshot(runtime, now);
             last_published = now;
             last_published_tick = runtime->tick;
+            last_published_paused = runtime->paused;
         }
         server_publish_status(runtime);
         remaining = deadline - now;

@@ -3,49 +3,59 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <float.h>
 
-#define MAAGE_CAT_EVENT_COUNT 15U
-#define MAAGE_CAT_MATERIAL_COUNT 13U
+#define MAAGE_CAT_EVENT_COUNT (MAAGE_SOUND_MAX + 1U)
+#define MAAGE_CAT_MATERIAL_COUNT (MAAGE_MATERIAL_MAX + 1U)
 
-/* The stable event/material ordinals are provided by session_protocol.h. The
- * following are mapping tables indexed by those ordinals, not ID registries. */
+/* Material families: dirt uses gravel; leaves use grass. Glass only
+ * overrides destruction and placement, while metal changes stone's pitch. */
 static const unsigned char maage_cat_step[MAAGE_CAT_MATERIAL_COUNT] = {
     MAAGE_CAT_STEP_STONE, MAAGE_CAT_STEP_STONE, MAAGE_CAT_STEP_GRASS,
-    MAAGE_CAT_STEP_GRASS, MAAGE_CAT_STEP_WOOD, MAAGE_CAT_STEP_SAND,
+    MAAGE_CAT_STEP_GRAVEL, MAAGE_CAT_STEP_WOOD, MAAGE_CAT_STEP_SAND,
     MAAGE_CAT_STEP_GRAVEL, MAAGE_CAT_STEP_SNOW, MAAGE_CAT_STEP_STONE,
-    MAAGE_CAT_STEP_STONE, MAAGE_CAT_SWIM, MAAGE_CAT_STEP_STONE,
-    MAAGE_CAT_STEP_GRASS
+    MAAGE_CAT_STEP_STONE, MAAGE_CAT_NONE, MAAGE_CAT_NONE,
+    MAAGE_CAT_STEP_GRASS, MAAGE_CAT_STEP_CLOTH, MAAGE_CAT_STEP_LADDER,
+    MAAGE_CAT_NONE
 };
 static const unsigned char maage_cat_dig[MAAGE_CAT_MATERIAL_COUNT] = {
     MAAGE_CAT_DIG_STONE, MAAGE_CAT_DIG_STONE, MAAGE_CAT_DIG_GRASS,
     MAAGE_CAT_DIG_GRAVEL, MAAGE_CAT_DIG_WOOD, MAAGE_CAT_DIG_SAND,
     MAAGE_CAT_DIG_GRAVEL, MAAGE_CAT_DIG_SNOW, MAAGE_CAT_DIG_STONE,
-    MAAGE_CAT_GLASS, MAAGE_CAT_SPLASH, MAAGE_CAT_LAVA_POP,
-    MAAGE_CAT_DIG_CLOTH
+    MAAGE_CAT_GLASS, MAAGE_CAT_NONE, MAAGE_CAT_NONE,
+    MAAGE_CAT_DIG_GRASS, MAAGE_CAT_DIG_CLOTH, MAAGE_CAT_DIG_WOOD,
+    MAAGE_CAT_DIG_STONE
 };
 
 typedef struct maage_cat_rule {
     unsigned char family, material_map, bus, positional;
-    float gain, pitch, range;
+    float gain, pitch;
 } maage_cat_rule;
-/* Indices 1..14 correspond to Agent 6's stable protocol ordinals. Values are
- * behavior parameters, not new protocol identities. map 1=step, 2=dig. */
+/* The producer supplies only action-specific speed/randomization multipliers.
+ * map 1=step, 2=break, 3=placement; no generic pitch jitter is applied. */
 static const maage_cat_rule maage_cat_rules[MAAGE_CAT_EVENT_COUNT] = {
-    {0, 0, 0, 0, 0.0f, 0.0f, 0.0f},
-    {MAAGE_CAT_STEP_STONE, 1, MAAGE_SOUND_CATALOG_PLAYERS, 1, 0.40f, 1.00f, 16.0f},
-    {MAAGE_CAT_DIG_STONE, 2, MAAGE_SOUND_CATALOG_BLOCKS, 1, 0.95f, 0.95f, 24.0f},
-    {MAAGE_CAT_DIG_STONE, 2, MAAGE_SOUND_CATALOG_BLOCKS, 1, 0.70f, 0.83f, 24.0f},
-    {MAAGE_CAT_STEP_STONE, 1, MAAGE_SOUND_CATALOG_PLAYERS, 1, 0.23f, 1.05f, 12.0f},
-    {MAAGE_CAT_FALL_SMALL, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 0.70f, 1.00f, 24.0f},
-    {MAAGE_CAT_HURT, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f, 24.0f},
-    {MAAGE_CAT_SWIM, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 0.48f, 1.00f, 20.0f},
-    {MAAGE_CAT_CLICK, 0, MAAGE_SOUND_CATALOG_UI, 0, 0.50f, 1.00f, 0.0f},
-    {MAAGE_CAT_CLICK, 0, MAAGE_SOUND_CATALOG_UI, 0, 0.35f, 1.00f, 0.0f},
-    {MAAGE_CAT_CAVE, 0, MAAGE_SOUND_CATALOG_AMBIENT, 1, 0.70f, 1.00f, 48.0f},
-    {MAAGE_CAT_RAIN, 0, MAAGE_SOUND_CATALOG_WEATHER, 0, 0.60f, 1.00f, 0.0f},
-    {MAAGE_CAT_THUNDER, 0, MAAGE_SOUND_CATALOG_WEATHER, 1, 1.00f, 1.00f, 256.0f},
-    {MAAGE_CAT_WATER, 0, MAAGE_SOUND_CATALOG_AMBIENT, 1, 0.55f, 1.00f, 28.0f},
-    {MAAGE_CAT_LAVA, 0, MAAGE_SOUND_CATALOG_AMBIENT, 1, 0.58f, 1.00f, 28.0f}
+    {0, 0, 0, 0, 0.0f, 0.0f},
+    {0, 1, MAAGE_SOUND_CATALOG_PLAYERS, 1, 0.15f, 1.00f},
+    {0, 2, MAAGE_SOUND_CATALOG_BLOCKS, 1, 1.00f, 0.80f},
+    {0, 3, MAAGE_SOUND_CATALOG_BLOCKS, 1, 1.00f, 0.80f},
+    {0, 0, 0, 0, 0.0f, 0.0f}, /* Ordinary jumps are silent. */
+    {0, 1, MAAGE_SOUND_CATALOG_PLAYERS, 1, 0.50f, 0.75f},
+    {MAAGE_CAT_HURT, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_SWIM, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f},
+    {0, 0, 0, 0, 0.0f, 0.0f}, /* Inventory manipulation is silent. */
+    {MAAGE_CAT_CLICK, 0, MAAGE_SOUND_CATALOG_UI, 0, 0.25f, 1.00f},
+    {MAAGE_CAT_CAVE, 0, MAAGE_SOUND_CATALOG_AMBIENT, 1, 0.70f, 1.00f},
+    {MAAGE_CAT_RAIN, 0, MAAGE_SOUND_CATALOG_WEATHER, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_THUNDER, 0, MAAGE_SOUND_CATALOG_WEATHER, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_WATER, 0, MAAGE_SOUND_CATALOG_BLOCKS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_LAVA, 0, MAAGE_SOUND_CATALOG_BLOCKS, 1, 1.00f, 1.00f},
+    {0, 1, MAAGE_SOUND_CATALOG_BLOCKS, 1, 0.25f, 0.50f},
+    {MAAGE_CAT_SPLASH, 0, MAAGE_SOUND_CATALOG_BLOCKS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_POP, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_FALL_SMALL, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_FALL_BIG, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_HURT, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f},
+    {MAAGE_CAT_ITEM_BREAK, 0, MAAGE_SOUND_CATALOG_PLAYERS, 1, 1.00f, 1.00f}
 };
 
 typedef struct maage_cat_slot {
@@ -91,10 +101,10 @@ maage_status maage_sound_catalog_create(void *sound_bank, void *audio,
         if (length + sizeof("minecraft/sounds/") + 2U + sizeof(".ogg") >= MAAGE_CAT_PATH_LIMIT) break;
         catalog->family[f].count = entry->count;
         for (i = 0; i < entry->count; ++i) {
-            if (!entry->first) sprintf(catalog->family[f].variants[i].path,
+            if (!entry->first && !i) sprintf(catalog->family[f].variants[i].path,
                 "minecraft/sounds/%s.ogg", entry->stem);
             else sprintf(catalog->family[f].variants[i].path,
-                "minecraft/sounds/%s%u.ogg", entry->stem, (unsigned int)entry->first + i);
+                "minecraft/sounds/%s%u.ogg", entry->stem, entry->first ? (unsigned int)entry->first + i : i + 1U);
         }
     }
     if (f != MAAGE_CAT_FAMILY_COUNT) {
@@ -172,20 +182,6 @@ maage_status maage_sound_catalog_preload(maage_sound_catalog *catalog,
         MAAGE_OPERATION_LOAD);
 }
 
-static unsigned char maage_cat_fallback(unsigned char family)
-{
-    if (family >= MAAGE_CAT_STEP_STONE && family <= MAAGE_CAT_STEP_CLOTH)
-        return family == MAAGE_CAT_STEP_STONE ? MAAGE_CAT_NONE : MAAGE_CAT_STEP_STONE;
-    if (family >= MAAGE_CAT_DIG_STONE && family <= MAAGE_CAT_DIG_CLOTH)
-        return family == MAAGE_CAT_DIG_STONE ? MAAGE_CAT_NONE : MAAGE_CAT_DIG_STONE;
-    if (family == MAAGE_CAT_GLASS) return MAAGE_CAT_DIG_STONE;
-    if (family == MAAGE_CAT_FALL_SMALL || family == MAAGE_CAT_FALL_BIG)
-        return MAAGE_CAT_STEP_STONE;
-    if (family == MAAGE_CAT_SWIM || family == MAAGE_CAT_WATER) return MAAGE_CAT_SPLASH;
-    if (family == MAAGE_CAT_LAVA) return MAAGE_CAT_LAVA_POP;
-    return MAAGE_CAT_NONE;
-}
-
 /* 32-bit arithmetic on C90 unsigned long, including 64-bit hosts. No global
  * PRNG state and no dependence on frame timing or preload order. */
 static unsigned long maage_cat_mix(unsigned long h, unsigned long value)
@@ -205,9 +201,9 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     const maage_cat_rule *rule;
     maage_cat_family *family;
     unsigned int event_id, material;
-    unsigned char selected, fallback;
+    unsigned char selected;
     unsigned long hash;
-    float gain, pitch, jitter;
+    float gain, pitch, volume, range;
     double position[3];
     maage_status result;
     if (!catalog || !event || !catalog->bound || !catalog->preloaded)
@@ -217,26 +213,30 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     if (!event_id || event_id >= MAAGE_CAT_EVENT_COUNT)
         return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND,
             MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
-    if (!(event->intensity == event->intensity) || !(event->pitch == event->pitch))
+    if (!(event->intensity >= 0.0) || event->intensity > (double)FLT_MAX / 16.0 ||
+        !(event->pitch >= 0.0) || event->pitch > (double)FLT_MAX / 2.0)
         return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     if (event->intensity <= 0.0f) return maage_cat_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     rule = &maage_cat_rules[event_id];
-    material = event->material < MAAGE_CAT_MATERIAL_COUNT ? event->material : 0;
+    material = event->material;
+    if (material >= MAAGE_CAT_MATERIAL_COUNT)
+        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND,
+            MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     selected = rule->family;
     if (rule->material_map == 1) selected = maage_cat_step[material];
-    else if (rule->material_map == 2) selected = maage_cat_dig[material];
-    if (event_id == 5) selected = event->intensity >= 0.85f ?
-        MAAGE_CAT_FALL_BIG : MAAGE_CAT_FALL_SMALL;
-    family = &catalog->family[selected];
-    fallback = selected;
-    while (!family->ready) {
-        fallback = maage_cat_fallback(fallback);
-        if (!fallback) return MAAGE_STATUS_PROPAGATE(trace,
-            maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP),
-            MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
-        family = &catalog->family[fallback];
+    else if (rule->material_map >= 2) {
+        selected = maage_cat_dig[material];
+        if (rule->material_map == 3 && material == MAAGE_MATERIAL_GLASS)
+            selected = MAAGE_CAT_STEP_STONE;
+        else if (rule->material_map == 3 && material == MAAGE_MATERIAL_ANVIL)
+            selected = MAAGE_CAT_ANVIL_LAND;
     }
+    if (!selected) return maage_cat_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
+    family = &catalog->family[selected];
+    if (!family->ready) return MAAGE_STATUS_PROPAGATE(trace,
+        maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP),
+        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     position[0] = event->position[0];
     position[1] = event->position[1];
     position[2] = event->position[2];
@@ -256,15 +256,32 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     hash = maage_cat_position_mix(hash, event->position[0]);
     hash = maage_cat_position_mix(hash, event->position[1]);
     hash = maage_cat_position_mix(hash, event->position[2]);
+    hash ^= hash >> 16;
+    hash = (hash * 2246822519UL) & 0xffffffffUL;
+    hash ^= hash >> 13;
+    hash = (hash * 3266489917UL) & 0xffffffffUL;
+    hash ^= hash >> 16;
     selected = family->active[hash % family->ready];
-    jitter = 0.96f + (float)((hash >> 12) & 255UL) / 255.0f * 0.08f;
-    gain = rule->gain * (event->intensity > 2.0f ? 2.0f : event->intensity);
-    pitch = rule->pitch * (event->pitch > 0.0f ? event->pitch : 1.0f);
-    pitch *= event_id == 8 || event_id == 9 ? 1.0f : jitter;
+    volume = material == MAAGE_MATERIAL_ANVIL ? 0.3f : 1.0f;
+    gain = rule->gain;
+    pitch = rule->pitch;
+    if (rule->material_map) {
+        if (event_id == MAAGE_SOUND_BLOCK_BREAK || event_id == MAAGE_SOUND_BLOCK_PLACE)
+            gain = (volume + 1.0f) * 0.5f;
+        else if (event_id == MAAGE_SOUND_BLOCK_DIG) gain = (volume + 1.0f) * 0.125f;
+        else gain *= volume;
+        if (material == MAAGE_MATERIAL_METAL) pitch *= 1.5f;
+    }
+    gain *= (float)event->intensity;
+    pitch *= (float)(event->pitch > 0.0 ? event->pitch : 1.0);
+    /* Expand linear attenuation using the original volume,
+     * then clamps the audible gain. Category/master gain is applied by Audio. */
+    range = 16.0f * (gain > 1.0f ? gain : 1.0f);
+    if (gain > 1.0f) gain = 1.0f;
     if (pitch < 0.5f) pitch = 0.5f;
     if (pitch > 2.0f) pitch = 2.0f;
     result = catalog->port.play(catalog->audio, family->variants[selected].buffer,
-        rule->bus, rule->positional, position, gain, pitch, rule->range, trace);
+        rule->bus, rule->positional, position, gain, pitch, range, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result,
         MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     return result;

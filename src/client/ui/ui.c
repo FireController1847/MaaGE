@@ -56,7 +56,7 @@ static unsigned int pause_input(maage_client_ui *ui,const maage_client_ui_input 
     if(hover>=0&&!ui->selected_keyboard)ui->selected=(unsigned int)hover;
     activate=(input->primary_pressed&&hover>=0)||input->accept;
     if(!activate)return 0;
-    selected=input->primary_pressed?(unsigned int)hover:ui->selected;
+    selected=input->primary_pressed&&hover>=0?(unsigned int)hover:ui->selected;
     if(ui->click)ui->click(ui->click_context);
     if(selected==0U) {
         if(ui->has_snapshot&&!ui->snapshot.player.health)

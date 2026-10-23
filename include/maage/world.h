@@ -109,6 +109,7 @@ typedef struct maage_world_observation {
     int light_available;
     double temperature, rainfall; /* temperature includes altitude cooling */
     int sky_exposed;
+    int precipitation_height; /* First cell above the column heightmap. */
 } maage_world_observation;
 typedef struct maage_world_mesh_update {
     int x, z;

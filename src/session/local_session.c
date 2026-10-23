@@ -76,8 +76,10 @@ static int session_event_valid(const maage_session_event *event)
         (event->has_trace != 0 && event->has_trace != 1)) return 0;
     if (event->kind == MAAGE_EVENT_SOUND)
         return event->sound.event_id >= MAAGE_SOUND_FOOTSTEP &&
-            event->sound.event_id <= MAAGE_SOUND_LAVA &&
-            event->sound.material <= MAAGE_MATERIAL_FOLIAGE;
+            event->sound.event_id <= MAAGE_SOUND_MAX &&
+            event->sound.material <= MAAGE_MATERIAL_MAX &&
+            event->sequence != 0UL && event->sound.sequence == event->sequence &&
+            event->sound.tick == event->tick;
     return 1;
 }
 
@@ -197,6 +199,7 @@ maage_status maage_local_session_publish_snapshot(maage_local_session *session,
     maage_status result;
     if (!session) return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
     if (!snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+        (snapshot->paused != 0 && snapshot->paused != 1) ||
         (snapshot->has_observation != 0 && snapshot->has_observation != 1))
         return session_argument(MAAGE_OPERATION_SNAPSHOT, 1);
     maage_mutex_lock(session->mutex);

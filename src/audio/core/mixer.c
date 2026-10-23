@@ -38,7 +38,8 @@ void maage_audio_mix(maage_audio *audio, float *output, unsigned int frames)
             dy = v->position.y - audio->listener.y;
             dz = v->position.z - audio->listener.z;
             dist = (float)sqrt((double)dx*dx + (double)dy*dy + (double)dz*dz);
-            gain /= 1.0f + 0.12f * dist * dist;
+            /* Linear distance attenuation uses the voice's resolved range. */
+            gain *= dist < v->max_distance ? 1.0f - dist / v->max_distance : 0.0f;
             if (dist > 0.0001f)
                 pan = (dx*audio->right.x + dy*audio->right.y + dz*audio->right.z) / dist;
             if (pan < -1.0f) pan = -1.0f;

@@ -282,6 +282,14 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   selected track when music playback begins, and release its Audio buffer after
   playback stops. Memory bounds constrain decoded clips, not the number of
   registered tracks; never report a policy limit as NOT_FOUND on disk.
+- Audio uses authoritative movement-distance steps, separate
+  mining-damage/destruction/placement outcomes,
+  and Client-local enabled-control activation. Ordinary jumping, ordinary landing
+  and inventory slot changes are silent. Never synthesize thunder from storm
+  intensity; require a real lightning event. Preserve bounded event expiry,
+  epoch/sequence rejection and pause behavior without tying cadence to rendering.
+  Keep audio documentation focused on MaaGE behavior, contracts and limits;
+  omit external implementation call-chain commentary and audits.
 - Client persists FPS, VSync, GUI Scale, Leaves and Window Mode in per-instance
   `config/options.ini`, using numeric settings in memory and atomic Core Storage replacement.
   Game Mode remains world data. Save on Options exit, completed F11/window transitions,

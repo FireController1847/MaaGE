@@ -13,6 +13,7 @@ typedef enum maage_catalog_family {
     MAAGE_CAT_SWIM, MAAGE_CAT_SPLASH, MAAGE_CAT_CLICK,
     MAAGE_CAT_CAVE, MAAGE_CAT_RAIN, MAAGE_CAT_THUNDER,
     MAAGE_CAT_WATER, MAAGE_CAT_LAVA, MAAGE_CAT_LAVA_POP,
+    MAAGE_CAT_STEP_LADDER, MAAGE_CAT_ANVIL_LAND, MAAGE_CAT_POP, MAAGE_CAT_ITEM_BREAK,
     MAAGE_CAT_FAMILY_COUNT
 } maage_catalog_family;
 
@@ -21,7 +22,7 @@ typedef enum maage_catalog_family {
 
 typedef struct maage_catalog_manifest_entry {
     const char *stem; /* Logical path relative to minecraft/sounds/ . */
-    unsigned char first, count; /* first=0 means an unnumbered .ogg. */
+    unsigned char first, count; /* first=0 starts unnumbered, followed by suffix 2 onward. */
 } maage_catalog_manifest_entry;
 
 extern const maage_catalog_manifest_entry maage_catalog_manifest[MAAGE_CAT_FAMILY_COUNT];

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <float.h>
 #include <math.h>
 
 maage_status maage_audio_result(unsigned char code, unsigned char operation,
@@ -370,6 +371,7 @@ maage_status maage_audio_play(maage_audio *audio,
         desc->category <= MAAGE_AUDIO_MASTER || desc->category >= MAAGE_AUDIO_BUS_COUNT ||
         !finite_range(desc->gain, 4.0f) || desc->gain < 0.0f ||
         !finite_range(desc->pitch, 4.0f) || desc->pitch < 0.25f ||
+        !finite_range(desc->max_distance, FLT_MAX) || desc->max_distance < 0.0f ||
         (desc->positional && !valid_vec(desc->position)) ||
         (desc->stream && desc->loop))
         return audio_trace(trace, maage_audio_result(MAAGE_STATUS_INVALID_ARGUMENT,
@@ -402,6 +404,7 @@ maage_status maage_audio_play(maage_audio *audio,
     voice->category = (unsigned int)desc->category;
     voice->gain = desc->gain;
     voice->pitch = desc->pitch;
+    voice->max_distance = desc->max_distance > 0.0f ? desc->max_distance : 16.0f;
     voice->positional = desc->positional != 0;
     voice->position = desc->position;
     voice->loop = desc->loop != 0;
@@ -433,6 +436,39 @@ maage_status maage_audio_stop_all(maage_audio *audio)
         if (audio->voices[i].id) maage_audio_voice_release(&audio->voices[i]);
     maage_audio_lock_leave(audio->lock);
     return maage_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_STOP, 0);
+}
+maage_status maage_audio_stop_category(maage_audio *audio, maage_audio_bus bus)
+{
+    unsigned int i;
+    int stopped = 0;
+    if (!audio || bus <= MAAGE_AUDIO_MASTER || bus >= MAAGE_AUDIO_BUS_COUNT)
+        return maage_audio_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_STOP, 0);
+    maage_audio_lock_enter(audio->lock);
+    for (i = 0; i < audio->voice_count; ++i)
+        if (audio->voices[i].id && audio->voices[i].category == (unsigned int)bus) {
+            maage_audio_voice_release(&audio->voices[i]);
+            stopped = 1;
+        }
+    maage_audio_lock_leave(audio->lock);
+    return maage_audio_result(stopped ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP,
+        MAAGE_OPERATION_STOP, 0);
+}
+maage_status maage_audio_pause_category(maage_audio *audio, maage_audio_bus bus, int paused)
+{
+    unsigned int i;
+    int changed = 0;
+    if (!audio || bus <= MAAGE_AUDIO_MASTER || bus >= MAAGE_AUDIO_BUS_COUNT)
+        return maage_audio_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET, 0);
+    maage_audio_lock_enter(audio->lock);
+    for (i = 0; i < audio->voice_count; ++i)
+        if (audio->voices[i].id && audio->voices[i].category == (unsigned int)bus &&
+            audio->voices[i].paused != (paused != 0)) {
+            audio->voices[i].paused = paused != 0;
+            changed = 1;
+        }
+    maage_audio_lock_leave(audio->lock);
+    return maage_audio_result(changed ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP,
+        MAAGE_OPERATION_SET, 0);
 }
 maage_status maage_audio_voice_get_state(maage_audio *audio,
     maage_audio_voice_id voice_id, maage_audio_voice_state *state)

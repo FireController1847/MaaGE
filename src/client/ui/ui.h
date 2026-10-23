@@ -93,7 +93,9 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
 void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options *options);
 int maage_client_ui_options_visible(const maage_client_ui *ui);
 int maage_client_ui_window_mode_changing(const maage_client_ui *ui);
-/* Presentation-only click intent for the local audio service. */
+/* Presentation-only activation for the local audio service: enabled buttons
+ * and option sliders click on press; sound sliders preview once on release.
+ * Hover, focus, Escape and inventory slot operations remain silent. */
 void maage_client_ui_set_click_callback(maage_client_ui *ui,
     maage_client_ui_click_callback callback, void *context);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.

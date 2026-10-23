@@ -662,9 +662,16 @@ unverified. The following requirements remain the acceptance criteria:
 - Register sounds as numeric events, resolving resource names at setup/registration
   boundaries rather than inside gameplay loops. Server now emits numeric semantic
   sound notifications without an audio device or Client implementation dependency.
-- Play appropriate footsteps by block material; breaking, placement, player and
-  inventory interaction sounds; environmental and ambient sounds; and rain,
-  thunder, water and lava audio.
+- Movement-distance footsteps, four-update mining damage, distinct
+  successful destruction/placement sounds and supported damage, fall, splash,
+  swimming, pickup and tool-break events. Ordinary jumps, landings and inventory
+  slot changes are silent. UI buttons click on press; volume sliders preview on
+  release. Protocol 3 carries explicit input edges, coherent sound identities,
+  local emission timestamps, pause and owner-sampled soundscape observations.
+- Cave sounds require authoritative dark-air samples and bounded cooldowns. Rain
+  uses actual precipitation surfaces; water/lava use conditional display trials,
+  with bounded copied source positions. Thunder remains silent until genuine
+  lightning events exist. Music uses context-specific pools/delays and pause rules.
 - Add background music with appropriate playback scheduling, volume categories
   and per-instance persistent settings, and positional audio where applicable.
 - Handle missing or invalid audio assets without crashing; report failures through

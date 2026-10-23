@@ -36,6 +36,10 @@
 #define MAAGE_CLIENT_MOUSE_RADIANS 0.0025
 #define MAAGE_CLIENT_PITCH_LIMIT 1.553343034
 #define MAAGE_CLIENT_MAX_FRAME_SECONDS 0.25
+/* Presentation policy: discard effects older than the Server's four-tick
+ * catch-up window instead of replaying a stale burst after a Client stall. */
+#define MAAGE_CLIENT_SOUND_MAX_AGE_TICKS 4UL
+#define MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS 0.2
 
 typedef struct maage_client_world_options {
     const char *id, *name;
@@ -420,7 +424,8 @@ static int maage_client_input_coalescible(const maage_session_command *command)
     /* Held actions are levels, but a freshly pressed jump is a one-shot.
      * Coalesce only when held action levels have not changed, so rapid
      * click/release transitions cannot be swallowed by frame-rate sampling. */
-    return command->kind == MAAGE_CMD_INPUT && !command->intent.jump_pressed;
+    return command->kind == MAAGE_CMD_INPUT && !command->intent.jump_pressed &&
+        !command->intent.attack_pressed && !command->intent.use_pressed;
 }
 
 static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
@@ -978,6 +983,8 @@ choose_world:
                 command.intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
                 command.intent.attack = input.primary_down || attack_latched;
                 command.intent.use = input.secondary_down || use_latched;
+                command.intent.attack_pressed = attack_latched;
+                command.intent.use_pressed = use_latched;
             }
             operation = maage_client_outbox_queue(&outbox, &command);
             if (maage_status_failed(operation))
@@ -1005,6 +1012,8 @@ choose_world:
                 world_epoch = incoming.world_epoch;
                 view_sent = 0;
                 sound_epoch = sound_world_epoch = last_sound_sequence = 0;
+                operation = maage_client_audio_service_reset_world(audio, trace);
+                if (maage_status_failed(operation)) goto done;
                 yaw = incoming.player.yaw; pitch = incoming.player.pitch;
                 selected_hotbar = queued_hotbar = (int)incoming.player.inventory.selected;
                 jump_latched = attack_latched = use_latched = respawn_latched = 0;
@@ -1045,7 +1054,11 @@ choose_world:
                 }
                 if (event.sequence > last_sound_sequence) {
                     last_sound_sequence = event.sequence;
-                    if (audio) (void)maage_client_audio_service_event(audio, &event.sound, trace);
+                    if (audio && (latest.tick <= event.tick ||
+                        latest.tick - event.tick <= MAAGE_CLIENT_SOUND_MAX_AGE_TICKS) &&
+                        (event.emitted_at < 0.0 || now - event.emitted_at <=
+                            MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS))
+                        (void)maage_client_audio_service_event(audio, &event.sound, trace);
                 }
             } else if (event.kind == MAAGE_EVENT_STATUS) {
                 maage_client_ui_notify(ui, event.status, now);
@@ -1218,13 +1231,8 @@ return_to_title:
     operation = maage_client_mesh_cache_clear(&cache);
     if (maage_status_failed(operation)) goto done;
     maage_client_ui_get_options(ui, &video_options);
-    maage_client_ui_set_click_callback(ui, NULL, NULL);
-    operation = maage_client_audio_service_destroy(audio, trace);
+    operation = maage_client_audio_service_reset_world(audio, trace);
     if (maage_status_failed(operation)) goto done;
-    audio = NULL;
-    operation = maage_client_audio_service_create(directory, &video_options, &audio, trace);
-    if (maage_status_failed(operation) && !audio) goto done;
-    if (audio) maage_client_ui_set_click_callback(ui, maage_client_audio_click, audio);
     rendered = maage_renderer_set_scene(renderer, 1, NULL, NULL);
     if (maage_status_failed(rendered)) goto done;
     rendered = maage_renderer_set_foreground(renderer, NULL, NULL, 0, 0);

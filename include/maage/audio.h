@@ -42,6 +42,7 @@ typedef struct maage_audio_play_desc {
     float pitch; /* 0.25..4; 1 = natural playback rate */
     maage_audio_vec3 position;
     int positional; /* Nonzero to apply distance attenuation and panning. */
+    float max_distance; /* Linear attenuation reaches silence here; 0 = 16. */
     int loop; /* Nonzero for seamless, interpolated loop wrap. */
 } maage_audio_play_desc;
 
@@ -87,6 +88,9 @@ maage_status maage_audio_play(maage_audio *audio,
     maage_status_trace *trace);
 maage_status maage_audio_stop(maage_audio *audio, maage_audio_voice_id voice_id);
 maage_status maage_audio_stop_all(maage_audio *audio);
+/* Stop a category without interrupting unrelated voices (for world changes). */
+maage_status maage_audio_stop_category(maage_audio *audio, maage_audio_bus bus);
+maage_status maage_audio_pause_category(maage_audio *audio, maage_audio_bus bus, int paused);
 maage_status maage_audio_voice_get_state(maage_audio *audio,
     maage_audio_voice_id voice_id, maage_audio_voice_state *state);
 maage_status maage_audio_voice_pause(maage_audio *audio,

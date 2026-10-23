@@ -12,8 +12,6 @@ extern "C" {
 /*
  * Presentation-thread environmental audio. Catalog and device are borrowed;
  * destroy the scene before either. Snapshot reads must copy Server-owned data.
- * This Client-private adapter isolates Agent 1/3/6 ABI changes while their
- * independent workstreams are in progress. Agent 5 installs it once at setup.
  */
 typedef struct maage_client_audio_scene maage_client_audio_scene;
 
@@ -21,21 +19,19 @@ typedef struct maage_client_audio_scene maage_client_audio_scene;
 enum {
     MAAGE_AUDIO_SCENE_WEATHER = 1,
     MAAGE_AUDIO_SCENE_AMBIENT = 2,
-    MAAGE_AUDIO_SCENE_MUSIC = 3
+    MAAGE_AUDIO_SCENE_MUSIC = 3,
+    MAAGE_AUDIO_SCENE_BLOCKS = 4
 };
 
-/*
- * The sampler extracts a bounded, local summary from a COPIED session snapshot.
- * Water/lava strengths are [0,1] normalized from a small nearby block sample
- * by the adapter; sample positions are copied. No World API may be called here.
- * All values are presentation observations, not authoritative mutations.
- */
+/* Bounded source candidates copied from the owner-thread world sampler.
+ * Flowing water requires metadata 1..7; lava requires an exposed air surface.
+ * These are observations, never Client-authoritative world mutations. */
 typedef struct maage_client_audio_scene_observation {
-    double rain_intensity, thunder_intensity;
-    double biome_rainfall, biome_temperature;
-    double water_strength, lava_strength, cave_darkness;
-    double water_position[3], lava_position[3];
-    int sky_exposed, under_cover, light_available;
+    double rain_intensity;
+    double rain_position[3], water_position[3], lava_position[3];
+    int rain_available, rain_above;
+    int flowing_water_available, lava_available;
+    unsigned int water_samples, lava_samples;
 } maage_client_audio_scene_observation;
 
 typedef unsigned long maage_client_audio_scene_sound_id;
@@ -63,7 +59,7 @@ typedef struct maage_client_audio_scene_ports {
         maage_client_audio_scene_sound_id sound);
     maage_status (*play_sound)(void *context, void *audio,
         maage_client_audio_scene_sound_id sound, unsigned int category,
-        const double *position, double gain, int loop,
+        const double *position, double gain, double pitch, int loop,
         maage_client_audio_scene_voice *voice);
     maage_status (*music_prepare)(void *context, const void *catalog,
         maage_client_audio_scene_sound_id sound, size_t max_bytes,

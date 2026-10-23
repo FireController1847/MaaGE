@@ -35,16 +35,21 @@ typedef struct maage_gameplay {
     maage_world_target target, breaking;
     int has_target, breaking_active;
     double break_progress, swing, reach;
-    unsigned int use_delay, break_delay, jump_window, hunger_ticks;
+    unsigned int use_delay, break_delay, attack_miss_delay, jump_window, hunger_ticks;
     unsigned long ticks, blocks_broken, blocks_placed;
     /* Ephemeral event identity and gait: deliberately excluded from saves. */
-    unsigned long sound_sequence;
+    unsigned long sound_sequence, sound_random;
     double footstep_distance;
+    unsigned int dig_ticks;
+    maage_item_id breaking_item;
+    unsigned int breaking_metadata;
+    int attack_held, use_held, audio_initialized, in_water;
 } maage_gameplay;
 typedef struct maage_gameplay_intent {
     maage_player_input movement;
     double pitch;
     int attack, use, jump_pressed, descend;
+    int attack_pressed, use_pressed; /* Latched input edges, consumed once. */
 } maage_gameplay_intent;
 
 maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
@@ -65,7 +70,7 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
  * Creative/Survival blocks; positive configured reach is bounded to 64. */
 maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player,
     const maage_world *world, double yaw, double pitch);
-/* Numeric event construction for Server-owned successful inventory commands.
+/* Numeric event construction for Server-owned gameplay/environment occurrences.
  * No audio device, transport, allocation, or string identity is involved. */
 maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound_event *event,
     unsigned int kind, unsigned int material, const double position[3],

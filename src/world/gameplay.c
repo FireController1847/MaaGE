@@ -18,23 +18,28 @@ static unsigned int maage_gameplay_material(maage_block_id id)
     case MAAGE_BLOCK_EMERALD_ORE: return MAAGE_MATERIAL_STONE;
     case MAAGE_BLOCK_GRASS: return MAAGE_MATERIAL_GRASS;
     case MAAGE_BLOCK_DIRT: return MAAGE_MATERIAL_DIRT;
-    case MAAGE_BLOCK_PLANKS: case MAAGE_BLOCK_LOG:
+    case MAAGE_BLOCK_PLANKS: case MAAGE_BLOCK_LOG: case MAAGE_BLOCK_TORCH:
     case 47UL: case 53UL: case 54UL: case 58UL: case 85UL:
     case 107UL: case 134UL: case 135UL: case 136UL: case 162UL:
         return MAAGE_MATERIAL_WOOD;
     case MAAGE_BLOCK_SAND: return MAAGE_MATERIAL_SAND;
-    case MAAGE_BLOCK_GRAVEL: return MAAGE_MATERIAL_GRAVEL;
+    case MAAGE_BLOCK_GRAVEL: case 60UL: case 82UL:
+        return MAAGE_MATERIAL_GRAVEL;
     case MAAGE_BLOCK_SNOW: case 80UL: return MAAGE_MATERIAL_SNOW;
     case MAAGE_BLOCK_ICE: case 20UL: case 95UL: case 102UL:
-    case 160UL: return MAAGE_MATERIAL_GLASS;
+    case 160UL: case 174UL: return MAAGE_MATERIAL_GLASS;
     case 41UL: case 42UL: case 57UL: case 101UL: case 133UL:
         return MAAGE_MATERIAL_METAL;
     case MAAGE_BLOCK_WATER: return MAAGE_MATERIAL_WATER;
     case MAAGE_BLOCK_LAVA: return MAAGE_MATERIAL_LAVA;
+    case MAAGE_BLOCK_CACTUS: case 35UL: case 171UL:
+        return MAAGE_MATERIAL_CLOTH;
+    case 65UL: return MAAGE_MATERIAL_LADDER;
+    case 145UL: return MAAGE_MATERIAL_ANVIL;
     case MAAGE_BLOCK_LEAVES: case MAAGE_BLOCK_TALL_GRASS:
     case MAAGE_BLOCK_DEAD_BUSH: case MAAGE_BLOCK_DANDELION:
     case MAAGE_BLOCK_POPPY: case MAAGE_BLOCK_BROWN_MUSHROOM:
-    case MAAGE_BLOCK_RED_MUSHROOM: case MAAGE_BLOCK_CACTUS:
+    case MAAGE_BLOCK_RED_MUSHROOM:
         return MAAGE_MATERIAL_FOLIAGE;
     default: return MAAGE_MATERIAL_DEFAULT;
     }
@@ -54,7 +59,7 @@ maage_status maage_gameplay_build_sound(maage_gameplay *game, maage_sound_event 
     double intensity, double pitch)
 {
     if (!game || !event || !position || kind < MAAGE_SOUND_FOOTSTEP ||
-        kind > MAAGE_SOUND_LAVA || material > MAAGE_MATERIAL_FOLIAGE ||
+        kind > MAAGE_SOUND_MAX || material > MAAGE_MATERIAL_MAX ||
         !(intensity >= 0.0 && intensity <= 4.0) ||
         !(pitch > 0.0 && pitch <= 4.0))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
@@ -93,36 +98,66 @@ static void maage_gameplay_sound(maage_gameplay_sound_sink *sink, unsigned int k
         ++sink->dropped;
     }
 }
-static unsigned int maage_gameplay_underfoot(const maage_world *world,
-    const maage_player *player)
+/* Isolated sound variation never advances world-generation randomness. */
+static double maage_gameplay_sound_random(maage_gameplay *game)
 {
+    game->sound_random = (game->sound_random * 1664525UL + 1013904223UL) &
+        4294967295UL;
+    return (double)(game->sound_random & 16777215UL) / 16777216.0;
+}
+static double maage_gameplay_sound_pitch(maage_gameplay *game, double spread)
+{
+    double first = maage_gameplay_sound_random(game);
+    return 1.0 + (first - maage_gameplay_sound_random(game)) * spread;
+}
+/* Sample the central supporting cell, including lower fence/gate/wall support. */
+static const maage_block_state_definition *maage_gameplay_underfoot(
+    const maage_world *world, const maage_player *player, int walking)
+{
+    const maage_block_registry *registry = maage_world_registry(world);
+    const maage_block_state_definition *state, *lower, *above;
     int x = (int)floor(player->position[0]);
-    int y = (int)floor(player->position[1] - 0.05);
+    int y = (int)floor(player->position[1] - 0.2);
     int z = (int)floor(player->position[2]);
-    maage_block_state_id state = maage_world_get(world, x, y, z);
-    if (state == MAAGE_STATE_AIR)
-        state = maage_world_get(world, (int)floor(player->position[0] + 0.25), y, z);
-    if (state == MAAGE_STATE_AIR)
-        state = maage_world_get(world, (int)floor(player->position[0] - 0.25), y, z);
-    if (state == MAAGE_STATE_AIR)
-        state = maage_world_get(world, x, y, (int)floor(player->position[2] + 0.25));
-    if (state == MAAGE_STATE_AIR)
-        state = maage_world_get(world, x, y, (int)floor(player->position[2] - 0.25));
-    return maage_gameplay_state_material(world, state);
+    if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x),
+        maage_world_chunk_coordinate(z))) return NULL;
+    state = maage_block_registry_state(registry, maage_world_get(world,x,y,z));
+    lower = maage_block_registry_state(registry, maage_world_get(world,x,y-1,z));
+    if (walking && lower && (lower->block_id == 85UL || lower->block_id == 107UL ||
+        lower->block_id == 113UL || lower->block_id == 139UL)) {
+        state = lower; --y;
+    }
+    if (!state || state->block_id == MAAGE_BLOCK_AIR) return NULL;
+    above = walking == 2 ? maage_block_registry_state(registry,
+        maage_world_get(world,x,y+1,z)) : NULL;
+    return above && above->block_id == MAAGE_BLOCK_SNOW ? above : state;
 }
 static int maage_gameplay_in_water(const maage_world *world,
     const maage_player *player)
 {
     const maage_block_registry *registry = maage_world_registry(world);
     const maage_block_state_definition *state;
-    int x = (int)floor(player->position[0]);
-    int z = (int)floor(player->position[2]);
-    int y = (int)floor(player->position[1] + 0.2);
-    state = maage_block_registry_state(registry, maage_world_get(world,x,y,z));
-    if (state && state->fluid_kind == MAAGE_FLUID_WATER) return 1;
-    y = (int)floor(player->position[1] + 0.9);
-    state = maage_block_registry_state(registry, maage_world_get(world,x,y,z));
-    return state && state->fluid_kind == MAAGE_FLUID_WATER;
+    int x, y, z;
+    int min_x = (int)floor(player->position[0] - MAAGE_PLAYER_WIDTH * 0.5 + 0.001);
+    int max_x = (int)floor(player->position[0] + MAAGE_PLAYER_WIDTH * 0.5 - 0.001);
+    int min_z = (int)floor(player->position[2] - MAAGE_PLAYER_WIDTH * 0.5 + 0.001);
+    int max_z = (int)floor(player->position[2] + MAAGE_PLAYER_WIDTH * 0.5 - 0.001);
+    int min_y = (int)floor(player->position[1] + 0.401);
+    int max_y = (int)floor(player->position[1] + MAAGE_PLAYER_HEIGHT - 0.401);
+    /* Contract the body rather than sampling the camera. Fluid movement
+     * remains part of the provisional player physics. */
+    for (z = min_z; z <= max_z; ++z)
+        for (x = min_x; x <= max_x; ++x)
+            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x),
+                maage_world_chunk_coordinate(z))) return 0;
+    for (z = min_z; z <= max_z; ++z)
+        for (x = min_x; x <= max_x; ++x) {
+            for (y = min_y; y <= max_y; ++y) {
+                state = maage_block_registry_state(registry, maage_world_get(world,x,y,z));
+                if (state && state->fluid_kind == MAAGE_FLUID_WATER) return 1;
+            }
+        }
+    return 0;
 }
 static maage_status maage_gameplay_sound_result(maage_status outcome,
     const maage_gameplay_sound_sink *sink, size_t *written,
@@ -158,8 +193,11 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode)
 {
     if (!game || mode > MAAGE_GAME_MODE_CREATIVE) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     game->mode = mode; game->breaking_active = 0; game->break_progress = 0;
+    game->dig_ticks = game->attack_miss_delay = 0;
+    game->attack_held = game->use_held = 0;
     game->fall_distance = 0; game->jump_window = 0;
     game->footstep_distance = 0;
+    game->audio_initialized = 0;
     if (mode == MAAGE_GAME_MODE_SURVIVAL) game->flying = 0;
     else if (!game->health) game->health = 20;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
@@ -172,6 +210,9 @@ maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
     game->health = game->hunger = 20; game->saturation = 5;
     game->exhaustion = game->fall_distance = 0; game->flying = 0;
     game->footstep_distance = 0;
+    game->audio_initialized = 0;
+    game->dig_ticks = game->attack_miss_delay = 0;
+    game->attack_held = game->use_held = 0;
     game->breaking_active = game->has_target = 0; game->break_progress = 0;
     game->hunger_ticks = game->jump_window = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
@@ -297,7 +338,7 @@ static maage_status maage_gameplay_drop_slot(maage_gameplay *game, maage_gamepla
 }
 static maage_status maage_gameplay_collect_drop(maage_gameplay *game,
     const maage_player *player, const maage_item_registry *items,
-    maage_gameplay_pickup *pickup)
+    maage_gameplay_pickup *pickup, maage_gameplay_sound_sink *sink)
 {
     double dx, dy, dz;
     unsigned int remaining;
@@ -309,6 +350,10 @@ static maage_status maage_gameplay_collect_drop(maage_gameplay *game,
     if (dx*dx + dy*dy + dz*dz > 4) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     result = maage_inventory_add(&game->inventory, items, &pickup->stack, &remaining);
     if (maage_status_failed(result)) return result;
+    if (remaining < pickup->stack.count)
+        maage_gameplay_sound(sink, MAAGE_SOUND_ITEM_PICKUP, MAAGE_MATERIAL_DEFAULT,
+            player->position[0], player->position[1], player->position[2],
+            0.2, maage_gameplay_sound_pitch(game, 0.7) * 2.0);
     pickup->stack.count = remaining;
     if (!remaining) memset(pickup, 0, sizeof(*pickup));
     return result;
@@ -329,7 +374,7 @@ maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *pla
     if (game->breaking_active && (!game->has_target || game->breaking.x != game->target.x ||
         game->breaking.y != game->target.y || game->breaking.z != game->target.z ||
         game->breaking.state_id != game->target.state_id)) {
-        game->breaking_active = 0; game->break_progress = 0;
+        game->breaking_active = 0; game->break_progress = 0; game->dig_ticks = 0;
     }
     return result;
 }
@@ -347,36 +392,59 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     maage_inventory inventory;
     unsigned int remaining = 0;
     maage_gameplay_pickup *pickup = NULL;
-    double speed = 1;
-    int harvest;
+    double speed = 1, progress;
+    int harvest, starting;
     maage_status result;
-    if (!game->has_target || game->break_delay) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (!game->has_target) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (game->mode == MAAGE_GAME_MODE_CREATIVE && !game->attack_held)
+        game->break_delay = 0;
+    if (game->break_delay) {
+        --game->break_delay;
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    }
+    if (maage_world_get(world, game->target.x, game->target.y, game->target.z) !=
+        game->target.state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     block = maage_block_registry_block(maage_world_registry(world), game->target.block_id);
-    if (!block || (game->mode == MAAGE_GAME_MODE_SURVIVAL && block->hardness < 0)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (!block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     held = &game->inventory.slots[game->inventory.selected];
     tool = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
     harvest = !block->required_tool_level || (tool && tool->tool_class == block->required_tool &&
         tool->tool_level >= block->required_tool_level);
-    if (!game->breaking_active || !maage_gameplay_same_target(&game->breaking, &game->target)) {
+    starting = !game->breaking_active || !maage_gameplay_same_target(&game->breaking, &game->target) ||
+        game->breaking_item != (held->count ? held->item_id : 0) ||
+        game->breaking_metadata != (held->count ? held->metadata : 0);
+    if (starting) {
         game->breaking = game->target; game->breaking_active = 1; game->break_progress = 0;
+        game->dig_ticks = 0;
+        game->breaking_item = held->count ? held->item_id : 0;
+        game->breaking_metadata = held->count ? held->metadata : 0;
     }
-    if (game->mode == MAAGE_GAME_MODE_CREATIVE || block->hardness == 0) game->break_progress = 1;
+    if (game->mode == MAAGE_GAME_MODE_CREATIVE || block->hardness == 0)
+        progress = 1;
+    else if (block->hardness < 0) progress = 0;
     else {
         if (tool && tool->tool_class == block->required_tool) speed = tool->mining_speed;
         if (!player->grounded) speed /= 5;
         if (maage_world_get(world, (int)floor(player->position[0]),
             (int)floor(player->position[1] + MAAGE_PLAYER_EYE_HEIGHT),
             (int)floor(player->position[2])) == MAAGE_STATE_WATER) speed /= 5;
-        game->break_progress += speed / (block->hardness * (harvest ? 30 : 100));
+        progress = speed / (block->hardness * (harvest ? 30 : 100));
     }
-    if (game->break_progress < 1) {
-        if (game->ticks % 4UL == 0UL)
-            maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_BREAK,
+    /* A changed held target initializes before the following damage updates
+     * advance both crack progression and dig cadence. */
+    if (starting && game->attack_held && progress < 1)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    game->break_progress += progress;
+    if (game->mode == MAAGE_GAME_MODE_SURVIVAL && !(starting && progress >= 1)) {
+        if (game->dig_ticks == 0)
+            maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_DIG,
                 maage_gameplay_material(block->id),
                 game->target.x + 0.5, game->target.y + 0.5,
-                game->target.z + 0.5, 0.28, 0.85);
-        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+                game->target.z + 0.5, 1.0, 1.0);
+        game->dig_ticks = (game->dig_ticks + 1U) % 4U;
     }
+    if (game->break_progress < 1)
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     memset(&drop, 0, sizeof(drop)); inventory = game->inventory;
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && harvest && block->drop_count) {
         drop.item_id = block->drop_item_id; drop.count = block->drop_count;
@@ -411,11 +479,17 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     }
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->exhaustion += 0.025;
-        if (tool && tool->durability && ++held->damage >= tool->durability)
+        if (tool && tool->durability && ++held->damage >= tool->durability) {
             memset(held, 0, sizeof(*held));
+            maage_gameplay_sound(sink, MAAGE_SOUND_ITEM_BREAK, MAAGE_MATERIAL_DEFAULT,
+                player->position[0], player->position[1], player->position[2],
+                0.8, 0.8 + maage_gameplay_sound_random(game) * 0.4);
+        }
     }
     ++game->blocks_broken; game->breaking_active = 0; game->break_progress = 0;
-    game->break_delay = 5;
+    game->dig_ticks = 0;
+    game->break_delay = game->mode == MAAGE_GAME_MODE_CREATIVE ?
+        (game->attack_held ? 5U : 4U) : (starting && progress >= 1 ? 0U : 5U);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
 static int maage_gameplay_player_overlap(const maage_player *player,
@@ -446,7 +520,10 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     maage_block_state_id placed, old;
     int x, y, z;
     maage_status result;
-    if (!game->has_target || game->use_delay) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (game->use_delay) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    /* Failed use also arms the held-input repeat timer. */
+    game->use_delay = 4;
+    if (!game->has_target) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     if (maage_world_get(world, game->target.x, game->target.y, game->target.z) != game->target.state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     held = &game->inventory.slots[game->inventory.selected];
     item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
@@ -488,23 +565,48 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE,
         maage_gameplay_state_material(world, placed),
-        x + 0.5, y + 0.5, z + 0.5, 0.9, 1.0);
+        x + 0.5, y + 0.5, z + 0.5, 1.0, 1.0);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && --held->count == 0) memset(held,0,sizeof(*held));
-    ++game->blocks_placed; game->use_delay = 4; game->swing = 1;
+    ++game->blocks_placed; game->swing = 1;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
+static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player,
+    unsigned int damage, maage_gameplay_sound_sink *sink)
+{
+    if (!damage || !game->health) return;
+    game->health = damage >= game->health ? 0 : game->health - damage;
+    maage_gameplay_sound(sink, game->health ? MAAGE_SOUND_PLAYER_HURT :
+        MAAGE_SOUND_PLAYER_DEATH, MAAGE_MATERIAL_DEFAULT,
+        player->position[0], player->position[1], player->position[2],
+        1.0, maage_gameplay_sound_pitch(game, 0.2));
+}
 static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *player,
-    const double previous[3], int was_grounded, int jumped)
+    const maage_world *world, const double previous[3], int was_grounded,
+    int jumped, int in_water, maage_gameplay_sound_sink *sink)
 {
     double dx = player->position[0] - previous[0], dz = player->position[2] - previous[2];
+    const maage_block_state_definition *surface;
     unsigned int damage;
     if (game->mode != MAAGE_GAME_MODE_SURVIVAL) { game->fall_distance = 0; return; }
-    if (!was_grounded && player->position[1] < previous[1])
+    if (in_water) game->fall_distance = 0;
+    else if (!was_grounded && player->position[1] < previous[1])
         game->fall_distance += previous[1] - player->position[1];
     if (player->grounded) {
         if (!was_grounded && game->fall_distance > 3) {
             damage = (unsigned int)ceil(game->fall_distance - 3);
-            game->health = damage >= game->health ? 0 : game->health - damage;
+            /* Fall impact, actual damage, then the supporting block's
+             * quieter/lower-pitched step family. */
+            maage_gameplay_sound(sink, damage > 4 ? MAAGE_SOUND_PLAYER_FALL_BIG :
+                MAAGE_SOUND_PLAYER_FALL_SMALL, MAAGE_MATERIAL_DEFAULT,
+                player->position[0], player->position[1], player->position[2],
+                1.0, 1.0);
+            maage_gameplay_hurt(game, player, damage, sink);
+            surface = maage_gameplay_underfoot(world, player, 0);
+            if (surface)
+                maage_gameplay_sound(sink, MAAGE_SOUND_PLAYER_LAND,
+                    maage_gameplay_material(surface->block_id),
+                    player->position[0], player->position[1], player->position[2],
+                    1.0, 1.0);
         }
         game->fall_distance = 0;
     }
@@ -517,10 +619,12 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
         } else if (game->hunger) --game->hunger;
     }
     if (game->saturation > game->hunger) game->saturation = game->hunger;
-    if (game->hunger >= 18 && game->health < 20) {
+    if (game->hunger >= 18 && game->health && game->health < 20) {
         if (++game->hunger_ticks >= 80) { ++game->health; game->exhaustion += 3; game->hunger_ticks = 0; }
     } else if (!game->hunger && game->health > 1) {
-        if (++game->hunger_ticks >= 80) { --game->health; game->hunger_ticks = 0; }
+        if (++game->hunger_ticks >= 80) {
+            maage_gameplay_hurt(game, player, 1, sink); game->hunger_ticks = 0;
+        }
     } else game->hunger_ticks = 0;
     /* Normalize after regeneration as well, keeping every persisted snapshot valid. */
     while (game->exhaustion > 4) {
@@ -551,8 +655,8 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     size_t capacity, size_t *written, maage_status_trace *trace)
 {
     maage_player_input movement;
-    double previous[3], dx, dz, travel, impact_distance;
-    unsigned int health_before;
+    double previous[3], velocity[3], dx, dy, dz, travel, strength;
+    const maage_block_state_definition *surface;
     int in_water;
     maage_gameplay_sound_sink sink;
     unsigned int i;
@@ -570,8 +674,8 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     sink.capacity = capacity; sink.enabled = written != NULL;
     ++game->ticks;
     if (game->swing > 0) { game->swing -= 1.0/6.0; if (game->swing < 0) game->swing = 0; }
-    if (game->break_delay) --game->break_delay;
     if (game->use_delay) --game->use_delay;
+    if (game->attack_miss_delay) --game->attack_miss_delay;
     if (game->jump_window) --game->jump_window;
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->breaking_active = 0; game->break_progress = 0; return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
@@ -582,65 +686,65 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     }
     movement = intent->movement; movement.flying = game->flying; movement.descend = intent->descend;
     memcpy(previous, player->position, sizeof(previous)); grounded = player->grounded;
+    memcpy(velocity, player->velocity, sizeof(velocity));
     result = maage_player_tick(player, world, &movement);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
     if (game->flying && player->grounded) game->flying = 0;
     dx = player->position[0] - previous[0];
+    dy = player->position[1] - previous[1];
     dz = player->position[2] - previous[2];
     travel = sqrt(dx * dx + dz * dz);
-    impact_distance = game->fall_distance;
-    if (!grounded && player->position[1] < previous[1])
-        impact_distance += previous[1] - player->position[1];
-    health_before = game->health;
-    maage_gameplay_vitals(game,player,previous,grounded,movement.jump);
     in_water = maage_gameplay_in_water(world, player);
-    if (grounded && movement.jump && !game->flying && !player->grounded &&
-        player->position[1] > previous[1])
-        maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_JUMP, MAAGE_MATERIAL_DEFAULT,
-            player->position[0], player->position[1] + 0.25,
-            player->position[2], 0.75, 1.0);
-    if (!grounded && player->grounded)
-        maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_LAND,
-            maage_gameplay_underfoot(world, player),
-            player->position[0], player->position[1] + 0.1,
-            player->position[2], impact_distance >= 3.0 ? 1.5 : 0.6, 1.0);
-    if (game->health < health_before)
-        maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_HURT, MAAGE_MATERIAL_DEFAULT,
-            player->position[0], player->position[1] + 1.0,
-            player->position[2], 1.0, 1.0);
-    if (in_water) {
-        game->footstep_distance = 0;
-        if (travel > 0.025 && game->ticks % 6UL == 0UL)
-            maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_SWIM,
-                MAAGE_MATERIAL_WATER,
-                player->position[0], player->position[1] + 0.5,
-                player->position[2], 0.65, 1.0);
-    } else if (grounded && player->grounded && !game->flying) {
-        /* Distance, never input count, drives the footstep cadence. */
-        if (travel > 0.0001) game->footstep_distance += travel;
-        if (travel > 0.0001 && game->footstep_distance >= 0.6) {
-            game->footstep_distance -= 0.6;
-            maage_gameplay_sound(&sink, MAAGE_SOUND_FOOTSTEP,
-                maage_gameplay_underfoot(world, player),
-                player->position[0], player->position[1] + 0.1,
-                player->position[2], travel > 0.16 ? 1.0 : 0.7, 1.0);
-            if (game->footstep_distance >= 0.6) game->footstep_distance = 0.599;
+    if (in_water && !game->in_water && game->audio_initialized) {
+        strength = sqrt((velocity[0] * velocity[0] + velocity[2] * velocity[2]) *
+            0.2 + velocity[1] * velocity[1]) * 0.2;
+        if (strength > 1.0) strength = 1.0;
+        maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_SPLASH,
+            MAAGE_MATERIAL_WATER, player->position[0], player->position[1],
+            player->position[2], strength, maage_gameplay_sound_pitch(game, 0.4));
+    }
+    game->in_water = in_water; game->audio_initialized = 1;
+    maage_gameplay_vitals(game,player,world,previous,grounded,movement.jump,
+        in_water,&sink);
+    /* Accumulate 0.6 * displacement and cross successive
+     * integer thresholds. Keep the fractional phase across stops and jumps.
+     * Shift is the current crouch intent; flying disables walking triggers. */
+    if (!movement.flying && !(grounded && intent->descend)) {
+        surface = maage_gameplay_underfoot(world, player, 1);
+        if (!surface || surface->block_id != 65UL) dy = 0;
+        game->footstep_distance += sqrt(dx * dx + dy * dy + dz * dz) * 0.6;
+        if ((travel > 0.0 || dy != 0.0) && game->footstep_distance > 1.0 && surface) {
+            game->footstep_distance -= floor(game->footstep_distance);
+            if (in_water) {
+                strength = sqrt((dx * dx + dz * dz) * 0.2 +
+                    (player->grounded ? 0.0 : (player->position[1] - previous[1]) *
+                    (player->position[1] - previous[1]))) * 0.35;
+                if (strength > 1.0) strength = 1.0;
+                maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_SWIM,
+                    MAAGE_MATERIAL_WATER, player->position[0], player->position[1],
+                    player->position[2], strength, maage_gameplay_sound_pitch(game, 0.4));
+            }
+            surface = maage_gameplay_underfoot(world, player, 2);
+            if (surface && surface->fluid_kind == MAAGE_FLUID_NONE)
+                maage_gameplay_sound(&sink, MAAGE_SOUND_FOOTSTEP,
+                    maage_gameplay_material(surface->block_id), player->position[0],
+                    player->position[1], player->position[2], 1.0, 1.0);
         }
-    } else game->footstep_distance = 0;
+    }
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->breaking_active = 0; game->break_progress = 0;
         return maage_gameplay_sound_result(maage_status_make(MAAGE_STATUS_NOOP,
             MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0), &sink, written, trace);
     }
     for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) {
-        result = maage_gameplay_collect_drop(game, player, items, &game->pickups[i]);
+        result = maage_gameplay_collect_drop(game, player, items, &game->pickups[i], &sink);
         if (maage_status_failed(result))
             return maage_gameplay_sound_result(MAAGE_STATUS_PROPAGATE(trace,
                 result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK),
                 &sink, written, trace);
     }
     for (j = 0; j < game->overflow_count; ++j) {
-        result = maage_gameplay_collect_drop(game, player, items, &game->overflow_pickups[j]);
+        result = maage_gameplay_collect_drop(game, player, items, &game->overflow_pickups[j], &sink);
         if (maage_status_failed(result))
             return maage_gameplay_sound_result(MAAGE_STATUS_PROPAGATE(trace,
                 result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK),
@@ -650,19 +754,35 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND)
         return maage_gameplay_sound_result(result, &sink, written, trace);
     if (intent->attack) {
+        if (intent->attack_pressed) {
+            game->attack_held = 0;
+            game->attack_miss_delay = 0;
+            game->breaking_active = 0; game->break_progress = 0; game->dig_ticks = 0;
+        }
+        /* A missed Survival press temporarily suppresses held attacks. */
+        if (!game->attack_held && !game->has_target &&
+            game->mode == MAAGE_GAME_MODE_SURVIVAL) game->attack_miss_delay = 10;
         if (game->swing <= 0) game->swing = 1;
-        result = maage_gameplay_action_result(maage_gameplay_break(game,player,world,items,&sink), world, trace);
-        if (maage_status_failed(result))
-            return maage_gameplay_sound_result(result, &sink, written, trace);
-        if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;
-    } else { game->breaking_active = 0; game->break_progress = 0; }
+        if (!game->attack_miss_delay) {
+            result = maage_gameplay_action_result(maage_gameplay_break(game,player,world,items,&sink), world, trace);
+            if (maage_status_failed(result))
+                return maage_gameplay_sound_result(result, &sink, written, trace);
+            if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;
+        }
+    } else {
+        game->breaking_active = 0; game->break_progress = 0;
+        game->dig_ticks = game->attack_miss_delay = 0;
+    }
+    game->attack_held = intent->attack;
     if (intent->use) {
+        if (intent->use_pressed || !game->use_held) game->use_delay = 0;
         if (game->swing <= 0) game->swing = 1;
         result = maage_gameplay_action_result(maage_gameplay_place(game,player,world,items,intent->movement.yaw,&sink), world, trace);
         if (maage_status_failed(result))
             return maage_gameplay_sound_result(result, &sink, written, trace);
         if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;
     }
+    game->use_held = intent->use;
     if (!game->has_target) { game->breaking_active = 0; game->break_progress = 0; }
     if (maage_world_failed(world))
         outcome = MAAGE_STATUS_PROPAGATE(trace, maage_world_status(world),

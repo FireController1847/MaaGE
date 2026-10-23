@@ -124,7 +124,7 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
 {
     maage_client_ui_frontend *f=(maage_client_ui_frontend *)context;
     unsigned int screen=maage_client_ui_current(ui),n,count=screen==MAAGE_CLIENT_UI_WORLDS?6:screen==MAAGE_CLIENT_UI_CREATE_WORLD?5:screen==MAAGE_CLIENT_UI_RENAME_WORLD?4:2;
-    int hover=-1;
+    int hover=-1,text_submit=0;
     float w=ui->content.width;
     size_t row;
     if(screen==MAAGE_CLIENT_UI_LOADING)return 0;
@@ -162,8 +162,13 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
         }
     }
     if(!(input->accept||(input->primary_pressed&&hover>=0)))return 0;
-    if(input->primary_pressed)f->focus=(unsigned int)hover;
+    if(input->primary_pressed&&hover>=0)f->focus=(unsigned int)hover;
     n=f->focus;if(f->busy)return 0;
+    if(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD) {
+        if(input->primary_pressed&&hover>=3)return 0;
+        /* Text-field Enter submits directly without a button activation. */
+        if(input->accept&&n>=3){n=0;text_submit=1;}
+    }
     /* Text fields are not buttons. Invalid/disabled actions make no sound. */
     if(screen==MAAGE_CLIENT_UI_WORLDS) {
         if(n==0&&!(f->selected<f->count&&
@@ -174,11 +179,7 @@ static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input 
     }
     if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||
         screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&n==0&&!f->name[0])return 0;
-    /* Merely focusing a text box must not play button audio. */
-    if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||
-        screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&input->primary_pressed&&n>=3)return 0;
-    if(ui->click)ui->click(ui->click_context);
-    if(input->accept&&n>=3&&(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD))n=0;
+    if(!text_submit&&ui->click)ui->click(ui->click_context);
     if(screen==MAAGE_CLIENT_UI_WORLDS) {
         if(n==0&&f->selected<f->count&&!maage_status_failed(f->entries[f->selected].status))f->play=1;
         if(n==1) { strcpy(f->name,"New World");f->seed[0]=0;f->mode=1;f->focus=3;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_CREATE_WORLD); }

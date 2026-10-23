@@ -140,6 +140,8 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui,
     unsigned int slot;
     size_t count, first;
     (void)context;
+    /* GuiContainer/GuiContainerCreative slot operations are silent; an
+     * inventory command is not a local menu-button activation. */
     if (!ui->has_snapshot || !ui->items || (!input->primary_pressed && !input->secondary_pressed)) return 0;
     frame = maage_client_ui_inventory_frame(ui);
     for (slot = 0; slot < MAAGE_INVENTORY_SLOTS; ++slot) {

@@ -2,11 +2,11 @@
 #include "maage/log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 
 /* An upper bound independent of frame rate and server-burst size. The caller
  * owns transport batching; this owner-thread queue never allocates on submit. */
 #define MAAGE_CLIENT_AUDIO_QUEUE_SIZE 128U
-#define MAAGE_CLIENT_AUDIO_EVENTS_PER_UPDATE 32U
 #define MAAGE_CLIENT_AUDIO_NOTICE_COMPONENTS 1U
 #define MAAGE_CLIENT_AUDIO_NOTICE_BANK 2U
 #define MAAGE_CLIENT_AUDIO_NOTICE_DEVICE 4U
@@ -87,7 +87,7 @@ maage_status maage_client_audio_service_components_install(const maage_client_au
     if (components->version != MAAGE_CLIENT_AUDIO_COMPONENTS_VERSION ||
         !components->bank_create || !components->engine_create || !components->catalog_create ||
         !components->set_volume || !components->set_listener || !components->play_event ||
-        !components->stop_voices || !components->engine_stop ||
+        !components->stop_voices || !components->reset_world || !components->engine_stop ||
         !components->catalog_destroy || !components->engine_destroy || !components->bank_destroy ||
         (components->scene_create && (!components->scene_update || !components->scene_stop ||
         !components->scene_destroy))) return maage_client_audio_invalid(MAAGE_OPERATION_REGISTER);
@@ -311,25 +311,31 @@ maage_status maage_client_audio_service_event(maage_client_audio_service *servic
     unsigned int tail;
     maage_status result;
     if (!service || !sound_event || !sound_event->event_id ||
+        sound_event->event_id > MAAGE_SOUND_MAX || sound_event->material > MAAGE_MATERIAL_MAX ||
         sound_event->intensity != sound_event->intensity ||
         sound_event->pitch != sound_event->pitch ||
-        sound_event->intensity < 0.0 || sound_event->intensity > 2.0 ||
-        sound_event->pitch < 0.0)
+        sound_event->intensity < 0.0 || sound_event->intensity > 10000.0 ||
+        sound_event->pitch < 0.0 || sound_event->pitch > DBL_MAX ||
+        !(sound_event->position[0] >= -DBL_MAX && sound_event->position[0] <= DBL_MAX) ||
+        !(sound_event->position[1] >= -DBL_MAX && sound_event->position[1] <= DBL_MAX) ||
+        !(sound_event->position[2] >= -DBL_MAX && sound_event->position[2] <= DBL_MAX))
         return MAAGE_STATUS_TRACE(trace, maage_client_audio_invalid(MAAGE_OPERATION_SUBMIT),
             MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT);
     if (!service->accepting) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     if (!service->playable || sound_event->intensity == 0)
         return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
+    result = maage_client_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
     if (service->count >= MAAGE_CLIENT_AUDIO_QUEUE_SIZE) {
         result = maage_client_audio_result(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_SUBMIT);
         maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_OVERFLOW, result, trace,
-            "Audio event queue saturated; excess sounds are dropped.");
-        return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT);
+            "Audio event queue saturated; oldest sounds are dropped.");
+        service->first = (service->first + 1U) % MAAGE_CLIENT_AUDIO_QUEUE_SIZE;
+        --service->count;
     }
     tail = (service->first + service->count) % MAAGE_CLIENT_AUDIO_QUEUE_SIZE;
     service->queue[tail] = *sound_event;
     ++service->count;
-    return maage_client_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
+    return result;
 }
 
 maage_status maage_client_audio_service_ui_click(maage_client_audio_service *service,
@@ -342,6 +348,15 @@ maage_status maage_client_audio_service_ui_click(maage_client_audio_service *ser
     click.intensity = 1.0;
     click.pitch = 1.0;
     return maage_client_audio_service_event(service, &click, trace);
+}
+
+maage_status maage_client_audio_service_reset_world(maage_client_audio_service *service,
+    maage_status_trace *trace)
+{
+    if (!service) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
+    service->count = service->first = 0;
+    if (!service->engine) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_STOP);
+    return service->api.reset_world(service->engine, trace);
 }
 
 maage_status maage_client_audio_service_update(maage_client_audio_service *service,
@@ -363,10 +378,12 @@ maage_status maage_client_audio_service_update(maage_client_audio_service *servi
         maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_LISTENER, result, trace,
             "Audio listener could not update; this frame's positional sounds may be inaccurate.");
     }
-    for (processed = 0; processed < MAAGE_CLIENT_AUDIO_EVENTS_PER_UPDATE && service->count; ++processed) {
+    for (processed = 0; processed < MAAGE_CLIENT_AUDIO_QUEUE_SIZE && service->count; ++processed) {
         event = service->queue[service->first];
         service->first = (service->first + 1U) % MAAGE_CLIENT_AUDIO_QUEUE_SIZE;
         --service->count;
+        if (session_snapshot && session_snapshot->paused &&
+            event.event_id != MAAGE_SOUND_GUI_CLICK) continue;
         result = service->api.play_event(service->catalog, service->engine, &event, trace);
         if (maage_status_failed(result)) {
             if (!maage_status_failed(first_failure)) first_failure = result;

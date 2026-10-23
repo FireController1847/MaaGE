@@ -32,7 +32,7 @@ typedef struct maage_audio_voice {
     maage_audio_voice_id id;
     double cursor; /* Static position, or streaming fractional-frame offset. */
     maage_audio_vec3 position;
-    float gain, pitch;
+    float gain, pitch, max_distance;
     unsigned int category;
     int positional, loop, paused;
 } maage_audio_voice;

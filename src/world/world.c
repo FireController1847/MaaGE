@@ -1034,6 +1034,7 @@ int maage_world_observe(const maage_world *world, int x, int y, int z,
         observation->rainfall = biome->rainfall;
     }
     observation->sky_exposed = y >= chunk->heightmap[local_z * 16 + local_x];
+    observation->precipitation_height = chunk->heightmap[local_z * 16 + local_x];
     for (section = 0; section < 16; ++section)
         if (chunk->sections[section]) ++observation->section_count;
     observation->light_available = slot->light_ready && !slot->light_dirty &&

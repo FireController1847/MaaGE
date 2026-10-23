@@ -191,7 +191,7 @@ unsigned int maage_client_ui_title_input(maage_client_ui *ui,
         if (title_hit(ui, title_button(ui, ids[k]))) hover = (int)ids[k];
     if (!f->focus_keyboard && hover >= 0) f->focus = (unsigned int)hover;
     if (!(input->accept || (input->primary_pressed && hover >= 0))) return 0;
-    if (input->primary_pressed) f->focus = (unsigned int)hover;
+    if (input->primary_pressed && hover >= 0) f->focus = (unsigned int)hover;
     /* Inactive buttons are neither selectable nor audible. The UI callback
      * is invoked only when a real title action is accepted. */
     if(f->focus==0) {

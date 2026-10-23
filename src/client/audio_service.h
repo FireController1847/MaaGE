@@ -4,7 +4,7 @@
 #include "maage/status.h"
 #include "maage/session_protocol.h"
 
-/* All event and snapshot records use Agent 6's numeric local-session ABI.
+/* All event and snapshot records use the numeric local-session ABI.
  * Client UI events are synthesized locally with the same numeric IDs. */
 typedef struct maage_client_audio_service maage_client_audio_service;
 
@@ -12,15 +12,13 @@ typedef struct maage_client_audio_service maage_client_audio_service;
  * Client build. It binds the independently owned Audio, Bank, Catalog and
  * audio_scene APIs; this API deliberately makes no new Audio-core ABI claims.
  * Event playback and listener callbacks never acquire decoder resources.
- * The optional environmental scene can decode a previously registered effect
- * on first use on the Client presentation thread, not the device callback;
- * this may briefly stall that presentation frame until asynchronous effect
- * prefetch is implemented. Music uses a separate streaming producer.
+ * Environmental effects are decoded at scene binding; playback performs no
+ * resource acquisition. Music uses a separate streaming producer.
  * Nonfatal warnings/partial results may accompany usable output handles.
  * All handles are owned by the service, not the adapter or the caller.
  * set_volume's bus is the numeric MAAGE_CLIENT_AUDIO_BUS_* value.
  * stop_voices must synchronously quiesce every voice before catalog release. */
-#define MAAGE_CLIENT_AUDIO_COMPONENTS_VERSION 1U
+#define MAAGE_CLIENT_AUDIO_COMPONENTS_VERSION 2U
 typedef struct maage_client_audio_components {
     unsigned int version;
     maage_status (*bank_create)(const char *data_root, void **bank, maage_status_trace *trace);
@@ -38,6 +36,8 @@ typedef struct maage_client_audio_components {
     /* Optional: avoid starting background tracks while Music is muted. */
     maage_status (*scene_music_enabled)(void *scene, int enabled);
     maage_status (*stop_voices)(void *engine, maage_status_trace *trace);
+    /* Quiesce World effects while preserving music and local interface audio. */
+    maage_status (*reset_world)(void *engine, maage_status_trace *trace);
     maage_status (*engine_stop)(void *engine, maage_status_trace *trace);
     maage_status (*scene_destroy)(void *scene, maage_status_trace *trace);
     maage_status (*catalog_destroy)(void *catalog, maage_status_trace *trace);
@@ -58,6 +58,8 @@ maage_status maage_client_audio_service_event(maage_client_audio_service *servic
     const maage_sound_event *sound_event, maage_status_trace *trace);
 /* Uses MAAGE_SOUND_GUI_CLICK through the same semantic numeric event contract. */
 maage_status maage_client_audio_service_ui_click(maage_client_audio_service *service,
+    maage_status_trace *trace);
+maage_status maage_client_audio_service_reset_world(maage_client_audio_service *service,
     maage_status_trace *trace);
 maage_status maage_client_audio_service_update(maage_client_audio_service *service,
     const maage_session_snapshot *session_snapshot, const double listener_position[3],

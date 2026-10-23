@@ -217,24 +217,23 @@ static void maage_options_drag(maage_client_ui *ui,
         ui->audio_volume[bus]=maage_options_value_from_mouse(ui,r,100);
     }
 }
-static void maage_options_adjust(maage_client_ui *ui,
+static int maage_options_adjust(maage_client_ui *ui,
     maage_client_ui_screen_id screen,unsigned int id,int direction)
 {
-    int *percent;
+    int *value,previous,minimum,maximum,step;
+    value=NULL;minimum=0;maximum=100;step=direction;
     if(screen==MAAGE_CLIENT_UI_OPTIONS&&id==0U) {
-        ui->fov_degrees+=direction;
-        if(ui->fov_degrees<30)ui->fov_degrees=30;
-        if(ui->fov_degrees>110)ui->fov_degrees=110;
+        value=&ui->fov_degrees;minimum=30;maximum=110;
     }else if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS&&id==3U) {
-        ui->fps_step+=direction;
-        if(ui->fps_step<0)ui->fps_step=0;
-        if(ui->fps_step>26)ui->fps_step=26;
+        value=&ui->fps_step;maximum=26;
     }else if(screen==MAAGE_CLIENT_UI_SOUND_SETTINGS&&id<7U) {
-        percent=&ui->audio_volume[maage_sound_buses[id]];
-        *percent+=direction*5;
-        if(*percent<0)*percent=0;
-        if(*percent>100)*percent=100;
+        value=&ui->audio_volume[maage_sound_buses[id]];step*=5;
     }
+    if(!value)return 0;
+    previous=*value;*value+=step;
+    if(*value<minimum)*value=minimum;
+    if(*value>maximum)*value=maximum;
+    return *value!=previous;
 }
 static void maage_options_action(maage_client_ui *ui,
     maage_client_ui_screen_id screen,unsigned int id)
@@ -280,7 +279,7 @@ static unsigned int maage_options_input(maage_client_ui *ui,
 {
     maage_client_ui_screen_id screen=maage_client_ui_current(ui);
     unsigned int chosen,visible;
-    int hovered,click,keyboard,held;
+    int hovered,click,keyboard,held,adjusted=0;
     (void)context;
     hovered=maage_options_hover(ui,screen);
     if(ui->mouse_x!=ui->previous_mouse_x||ui->mouse_y!=ui->previous_mouse_y||
@@ -302,11 +301,17 @@ static unsigned int maage_options_input(maage_client_ui *ui,
         maage_options_enabled(ui,screen,ui->selected)) {
         chosen=ui->selected;
         if(maage_options_slider_id(screen,chosen))
-            maage_options_adjust(ui,screen,chosen,input->right?1:-1);
-        else if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS&&chosen==6U)
+            adjusted=maage_options_adjust(ui,screen,chosen,input->right?1:-1);
+        else if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS&&chosen==6U) {
             ui->requested_scale=(ui->requested_scale+(input->right?1:4))%5;
-        else if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS&&chosen==11U)
+            adjusted=1;
+        }else if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS&&chosen==11U) {
             ui->leaves_mode=(ui->leaves_mode+(input->right?1:2))%3;
+            adjusted=1;
+        }
+        /* Keyboard navigation is silent; an actual discrete value change is
+         * the keyboard equivalent of activating the focused control. */
+        if(adjusted&&ui->click)ui->click(ui->click_context);
     }
     /* Keep an existing drag locked to its original slider, even when the
      * cursor leaves the widget; never replay click audio on mouse movement. */
@@ -325,6 +330,9 @@ static unsigned int maage_options_input(maage_client_ui *ui,
         }
     }
     if(!input->primary_down) {
+        /* Volume sliders suppress press audio and preview once on release. */
+        if(ui->dragging_volume&&screen==MAAGE_CLIENT_UI_SOUND_SETTINGS&&ui->click)
+            ui->click(ui->click_context);
         ui->dragging_fov=0;ui->dragging_fps=0;ui->dragging_volume=0;
     }
     click=input->primary_pressed&&hovered>=0;
@@ -332,14 +340,25 @@ static unsigned int maage_options_input(maage_client_ui *ui,
     if(!click&&!keyboard)return 0;
     chosen=click?(unsigned int)hovered:ui->selected;
     if(!maage_options_enabled(ui,screen,chosen))return 0;
-    if(ui->click)ui->click(ui->click_context);
     if(click&&maage_options_slider_id(screen,chosen)) {
         if(screen==MAAGE_CLIENT_UI_OPTIONS)ui->dragging_fov=1;
         else if(screen==MAAGE_CLIENT_UI_VIDEO_SETTINGS)ui->dragging_fps=1;
         else ui->dragging_volume=(int)maage_sound_buses[chosen]+1;
         maage_options_drag(ui,screen,chosen);
+        /* FOV/FPS sliders use press audio. A completed volume press/release
+         * may arrive in one native input snapshot. */
+        if(screen!=MAAGE_CLIENT_UI_SOUND_SETTINGS||!input->primary_down) {
+            if(ui->click)ui->click(ui->click_context);
+            if(screen==MAAGE_CLIENT_UI_SOUND_SETTINGS)ui->dragging_volume=0;
+        }
         return 0;
     }
+    if(keyboard&&maage_options_slider_id(screen,chosen)) {
+        if(!adjusted&&maage_options_adjust(ui,screen,chosen,1)&&ui->click)
+            ui->click(ui->click_context);
+        return 0;
+    }
+    if(ui->click)ui->click(ui->click_context);
     maage_options_action(ui,screen,chosen);
     return 0;
 }
