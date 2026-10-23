@@ -5,7 +5,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "files.h"
-#include <openssl/evp.h>
+#include "maage/crypto.h"
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -108,9 +108,9 @@ maage_status maage_client_absolute(const char *path, char out[MAAGE_PATH_CAPACIT
 maage_status maage_client_sha256(const char *path, char hash[65], maage_status_trace *trace)
 {
     FILE *file;
-    EVP_MD_CTX *digest;
-    unsigned char buffer[65536], bytes[EVP_MAX_MD_SIZE];
-    unsigned count, i;
+    maage_crypto_hash *digest = NULL;
+    unsigned char buffer[65536], bytes[32];
+    unsigned i;
     size_t received;
     maage_status result;
     if (hash) hash[0] = 0;
@@ -118,18 +118,13 @@ maage_status maage_client_sha256(const char *path, char hash[65], maage_status_t
         MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_HASH, !path ? 0 : 1), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_HASH);
     file = maage_storage_open(path, "rb");
     if (!file) return maage_client_errno(trace, MAAGE_OPERATION_OPEN);
-    digest = EVP_MD_CTX_new();
-    result = maage_status_make(!digest ? MAAGE_STATUS_ALLOCATION_FAILED :
-        (EVP_DigestInit_ex(digest, EVP_sha256(), NULL) == 1 ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_DEPENDENCY_FAILURE),
-        MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_HASH, 0);
+    result = maage_crypto_hash_open(MAAGE_CRYPTO_SHA256, &digest);
     while (!maage_status_failed(result) && (received = fread(buffer, 1, sizeof(buffer), file)) != 0)
-        if (EVP_DigestUpdate(digest, buffer, received) != 1) result = maage_status_make(MAAGE_STATUS_DEPENDENCY_FAILURE,
-            MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_HASH, 0);
+        result = maage_crypto_hash_update(digest, buffer, received);
     if (ferror(file) && !maage_status_failed(result)) result = maage_client_errno(trace, MAAGE_OPERATION_READ);
-    if (!maage_status_failed(result) && (EVP_DigestFinal_ex(digest, bytes, &count) != 1 || count != 32))
-        result = maage_status_make(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_HASH, 0);
+    if (!maage_status_failed(result)) result = maage_crypto_hash_finish(digest, bytes, sizeof(bytes));
     if (fclose(file) && !maage_status_failed(result)) result = maage_client_errno(trace, MAAGE_OPERATION_CLOSE);
-    EVP_MD_CTX_free(digest);
+    maage_crypto_hash_destroy(digest);
     if (!maage_status_failed(result)) {
         for (i = 0; i < 32; ++i) sprintf(hash + i * 2, "%02x", bytes[i]);
         hash[64] = 0;

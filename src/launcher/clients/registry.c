@@ -4,7 +4,7 @@
 #include "maage/log.h"
 #include "../access/verify.h"
 #include <json-c/json.h>
-#include <openssl/evp.h>
+#include "maage/crypto.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -91,9 +91,11 @@ static maage_status maage_client_executable(const char *package, const maage_cli
 }
 static maage_status maage_client_identity(maage_client_build *b, maage_status_trace *trace)
 {
-    char identity[1024]; unsigned char digest[32]; unsigned n, i;
+    char identity[1024]; unsigned char digest[32]; unsigned i;
+    maage_status result;
     sprintf(identity,"%s\n%s\n%s\n%s\n%s\n%s",b->version,b->build,b->platform,b->architecture,b->build_type,b->sha256);
-    if (EVP_Digest(identity,strlen(identity),digest,&n,EVP_sha256(),NULL) != 1 || n != 32) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_HASH, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    result = maage_crypto_digest(MAAGE_CRYPTO_SHA256, identity, strlen(identity), digest, sizeof(digest));
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
     for (i=0;i<32;++i) sprintf(b->id+i*2,"%02x",digest[i]);
     return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_HASH, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
 }

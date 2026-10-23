@@ -19,6 +19,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR
             (NOT MAAGE_EXPLICIT_TOOLCHAIN OR
                 (MAAGE_TOOLCHAIN_NAME STREQUAL "vcpkg.cmake" AND NOT VCPKG_CHAINLOAD_TOOLCHAIN_FILE))))
     set(MAAGE_WINDOWS_DEPENDENCIES ON)
+    # Match the static dependency CRT before project() initializes MSVC flags.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 else()
     project(MaaGE DESCRIPTION "Native, extensible voxel game platform" LANGUAGES C)
 endif()
@@ -68,6 +70,8 @@ set(MAAGE_PLATFORM_LINUX 0)
 set(MAAGE_PLATFORM_MACOS 0)
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(MAAGE_PLATFORM_WINDOWS 1)
+    # Also cover Windows targets selected by an explicit custom toolchain.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(MAAGE_PLATFORM_LINUX 1)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -124,7 +128,8 @@ if(MAAGE_OPTIMIZE_SIZE)
         endif()
     elseif(MSVC)
         add_compile_options("$<$<CONFIG:Release>:/O1>" "$<$<CONFIG:Release>:/Gy>" "$<$<CONFIG:Release>:/Gw>")
-        add_link_options("$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>")
+        add_link_options("$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>"
+            "$<$<CONFIG:Release>:/INCREMENTAL:NO>" "$<$<CONFIG:Release>:/DEBUG:NONE>")
     endif()
 endif()
 

@@ -43,6 +43,96 @@ set(MAAGE_VCPKG_MANIFEST_DIR "${CMAKE_BINARY_DIR}/vcpkg-manifest")
 if(DEFINED VCPKG_MANIFEST_DIR AND NOT VCPKG_MANIFEST_DIR STREQUAL MAAGE_VCPKG_MANIFEST_DIR)
     return()
 endif()
+
+# Select static libraries AND static CRT; static-md still needs the VC runtime.
+# Target information wins over the developer environment. Never infer a cross
+# target from the build host's processor.
+if(VCPKG_TARGET_TRIPLET)
+    if(VCPKG_TARGET_TRIPLET MATCHES "^(x86|x64|arm|arm64)-windows(-static-md)?$")
+        set(MAAGE_VCPKG_ARCH "${CMAKE_MATCH_1}")
+        set(MAAGE_VCPKG_PREVIOUS_TRIPLET "${VCPKG_TARGET_TRIPLET}")
+        set(VCPKG_TARGET_TRIPLET "${MAAGE_VCPKG_ARCH}-windows-maage-static"
+            CACHE STRING "MaaGE static Windows dependency triplet" FORCE)
+
+        # Find-package results still point to the previous triplet's import
+        # libraries. Invalidate those paths before loading the new toolchain.
+        if(VCPKG_INSTALLED_DIR)
+            file(TO_CMAKE_PATH "${VCPKG_INSTALLED_DIR}" MAAGE_VCPKG_PREVIOUS_ROOT)
+        else()
+            set(MAAGE_VCPKG_PREVIOUS_ROOT "${CMAKE_BINARY_DIR}/vcpkg_installed")
+        endif()
+        get_cmake_property(MAAGE_VCPKG_CACHE_VARIABLES CACHE_VARIABLES)
+        foreach(MAAGE_VCPKG_CACHE_VARIABLE IN LISTS MAAGE_VCPKG_CACHE_VARIABLES)
+            get_property(MAAGE_VCPKG_CACHE_VALUE CACHE "${MAAGE_VCPKG_CACHE_VARIABLE}" PROPERTY VALUE)
+            string(REPLACE "\\" "/" MAAGE_VCPKG_CACHE_VALUE "${MAAGE_VCPKG_CACHE_VALUE}")
+            string(FIND "${MAAGE_VCPKG_CACHE_VALUE}"
+                "${MAAGE_VCPKG_PREVIOUS_ROOT}/${MAAGE_VCPKG_PREVIOUS_TRIPLET}/" MAAGE_VCPKG_CACHE_MATCH)
+            if(NOT MAAGE_VCPKG_CACHE_MATCH EQUAL -1)
+                unset("${MAAGE_VCPKG_CACHE_VARIABLE}" CACHE)
+                unset("${MAAGE_VCPKG_CACHE_VARIABLE}")
+            endif()
+        endforeach()
+        message(STATUS "MaaGE dependencies: switching ${MAAGE_VCPKG_PREVIOUS_TRIPLET} to ${VCPKG_TARGET_TRIPLET}")
+    endif()
+    if(NOT VCPKG_TARGET_TRIPLET MATCHES "^(x86|x64|arm|arm64)-windows(-maage)?-static$")
+        message(FATAL_ERROR "MaaGE's Windows manifest requires a static CRT/library triplet. "
+            "Use a fresh CMake build directory to select it automatically, or set "
+            "VCPKG_TARGET_TRIPLET to <target>-windows-static (not static-md).")
+    endif()
+    set(MAAGE_VCPKG_ARCH "${CMAKE_MATCH_1}")
+else()
+    set(MAAGE_VCPKG_ARCH "${CMAKE_GENERATOR_PLATFORM}")
+    if(NOT MAAGE_VCPKG_ARCH AND CMAKE_C_COMPILER_TARGET)
+        string(REGEX REPLACE "-.*" "" MAAGE_VCPKG_ARCH "${CMAKE_C_COMPILER_TARGET}")
+    endif()
+    if(NOT MAAGE_VCPKG_ARCH)
+        set(MAAGE_VCPKG_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    if(NOT MAAGE_VCPKG_ARCH)
+        if(CMAKE_C_COMPILER)
+            find_program(MAAGE_VCPKG_COMPILER NAMES "${CMAKE_C_COMPILER}" NO_CACHE)
+        else()
+            find_program(MAAGE_VCPKG_COMPILER NAMES cl NO_CACHE)
+        endif()
+        if(MAAGE_VCPKG_COMPILER)
+            get_filename_component(MAAGE_VCPKG_COMPILER_DIR "${MAAGE_VCPKG_COMPILER}" DIRECTORY)
+            get_filename_component(MAAGE_VCPKG_COMPILER_ARCH "${MAAGE_VCPKG_COMPILER_DIR}" NAME)
+            string(TOLOWER "${MAAGE_VCPKG_COMPILER_ARCH}" MAAGE_VCPKG_COMPILER_ARCH)
+            if(MAAGE_VCPKG_COMPILER_ARCH MATCHES "^(x86|x64|amd64|arm|arm64)$")
+                set(MAAGE_VCPKG_ARCH "${MAAGE_VCPKG_COMPILER_ARCH}")
+            endif()
+        endif()
+    endif()
+    if(NOT MAAGE_VCPKG_ARCH)
+        set(MAAGE_VCPKG_ARCH "$ENV{VSCMD_ARG_TGT_ARCH}")
+    endif()
+    string(TOLOWER "${MAAGE_VCPKG_ARCH}" MAAGE_VCPKG_ARCH)
+    if(MAAGE_VCPKG_ARCH MATCHES "^(amd64|x86_64)$")
+        set(MAAGE_VCPKG_ARCH x64)
+    elseif(MAAGE_VCPKG_ARCH STREQUAL "aarch64")
+        set(MAAGE_VCPKG_ARCH arm64)
+    elseif(MAAGE_VCPKG_ARCH STREQUAL "win32")
+        set(MAAGE_VCPKG_ARCH x86)
+    endif()
+    if(NOT MAAGE_VCPKG_ARCH MATCHES "^(x86|x64|arm|arm64)$")
+        message(FATAL_ERROR "Set the Windows target architecture with -A for Visual Studio, "
+            "a target developer command prompt for Ninja, or VCPKG_TARGET_TRIPLET=<target>-windows-static.")
+    endif()
+    set(VCPKG_TARGET_TRIPLET "${MAAGE_VCPKG_ARCH}-windows-maage-static"
+        CACHE STRING "MaaGE static Windows dependency triplet")
+endif()
+
+# Separate names keep vcpkg binary caches distinct from the stock /O2 triplets.
+set(MAAGE_VCPKG_TRIPLETS "${CMAKE_BINARY_DIR}/vcpkg-triplets")
+file(MAKE_DIRECTORY "${MAAGE_VCPKG_TRIPLETS}")
+file(WRITE "${MAAGE_VCPKG_TRIPLETS}/${MAAGE_VCPKG_ARCH}-windows-maage-static.cmake"
+    "set(VCPKG_TARGET_ARCHITECTURE ${MAAGE_VCPKG_ARCH})\n"
+    "set(VCPKG_CRT_LINKAGE static)\nset(VCPKG_LIBRARY_LINKAGE static)\n"
+    "set(VCPKG_C_FLAGS_RELEASE \"/O1 /Gy /Gw\")\n"
+    "set(VCPKG_CXX_FLAGS_RELEASE \"/O1 /Gy /Gw\")\n")
+list(PREPEND VCPKG_OVERLAY_TRIPLETS "${MAAGE_VCPKG_TRIPLETS}")
+message(STATUS "MaaGE static Windows dependencies: ${VCPKG_TARGET_TRIPLET}")
+
 file(MAKE_DIRECTORY "${MAAGE_VCPKG_MANIFEST_DIR}")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/vcpkg-windows.json"
     "${MAAGE_VCPKG_MANIFEST_DIR}/vcpkg.json" COPYONLY)

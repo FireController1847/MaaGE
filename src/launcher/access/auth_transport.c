@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <openssl/crypto.h>
+#include "maage/crypto.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -295,7 +295,7 @@ maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size
             break;
         }
     }
-    OPENSSL_cleanse(request, MAAGE_AUTH_HTTP_LIMIT + 1); free(request);
+    maage_crypto_clear(request, MAAGE_AUTH_HTTP_LIMIT + 1); free(request);
     if (observer->cancelled(observer->context)) { maage_auth_client_close(listener); return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0); }
     if (!accepted) {
         maage_log_verbose("maage.launcher.access.callback", "Rejected loopback request: %s (HTTP %d); authorization remains pending.", reason, status);

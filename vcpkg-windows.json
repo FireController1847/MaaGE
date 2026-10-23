@@ -11,7 +11,6 @@
       "description": "Launcher acquisition and account services",
       "dependencies": [
         {"name": "curl", "default-features": false, "features": ["ssl"]},
-        "openssl",
         {"name": "libzip", "default-features": false}
       ]
     },
@@ -20,8 +19,8 @@
       "dependencies": ["libpng"]
     },
     "vulkan": {
-      "description": "Native Vulkan build headers and loader",
-      "dependencies": [{"name": "vulkan-loader", "platform": "windows | linux"}]
+      "description": "Vulkan headers (Windows loads the installed system runtime)",
+      "dependencies": ["vulkan-headers"]
     }
   }
 }

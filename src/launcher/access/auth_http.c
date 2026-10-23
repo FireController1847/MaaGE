@@ -2,7 +2,7 @@
 #include "verify.h"
 #include "maage/log.h"
 #include <curl/curl.h>
-#include <openssl/crypto.h>
+#include "maage/crypto.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -32,7 +32,7 @@ static void maage_auth_json_wipe(struct json_object *object)
     size_t i;
     struct json_object_iterator iterator, end;
     if (!object) return;
-    if (json_object_is_type(object, json_type_string)) OPENSSL_cleanse((char *)json_object_get_string(object), (size_t)json_object_get_string_len(object));
+    if (json_object_is_type(object, json_type_string)) maage_crypto_clear((char *)json_object_get_string(object), (size_t)json_object_get_string_len(object));
     else if (json_object_is_type(object, json_type_array)) {
         for (i = 0; i < json_object_array_length(object); ++i) maage_auth_json_wipe(json_object_array_get_idx(object, i));
     } else if (json_object_is_type(object, json_type_object)) {
@@ -47,7 +47,7 @@ maage_status maage_auth_json_free(struct json_object *object)
     const char *serialized;
     if (!object) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RELEASE, 0);
     serialized = json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN);
-    if (serialized) OPENSSL_cleanse((char *)serialized, strlen(serialized));
+    if (serialized) maage_crypto_clear((char *)serialized, strlen(serialized));
     maage_auth_json_wipe(object); json_object_put(object);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RELEASE, 0);
 }
@@ -215,9 +215,9 @@ done:
     } else if (!json) maage_log_verbose("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
     else maage_log_verbose("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
     if (curl) curl_easy_cleanup(curl);
-    if (authorization) { OPENSSL_cleanse(authorization, strlen(authorization)); free(authorization); }
-    for (entry = headers; entry; entry = entry->next) OPENSSL_cleanse(entry->data, strlen(entry->data));
-    curl_slist_free_all(headers); OPENSSL_cleanse(http, sizeof(*http)); free(http);
+    if (authorization) { maage_crypto_clear(authorization, strlen(authorization)); free(authorization); }
+    for (entry = headers; entry; entry = entry->next) maage_crypto_clear(entry->data, strlen(entry->data));
+    curl_slist_free_all(headers); maage_crypto_clear(http, sizeof(*http)); free(http);
     *response = json;
     return outcome;
 }

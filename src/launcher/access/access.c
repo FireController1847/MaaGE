@@ -6,7 +6,7 @@
 #include "maage/storage.h"
 #include "maage/time.h"
 #include "maage/log.h"
-#include <openssl/crypto.h>
+#include "maage/crypto.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -432,7 +432,7 @@ done:
         maage_access_status(a, "Cannot save profile registry. Check MaaGE data-folder permissions before continuing.");
     }
     maage_storage_release(refresh_lock);
-    if (s) { OPENSSL_cleanse(s, sizeof(*s)); free(s); }
+    if (s) { maage_crypto_clear(s, sizeof(*s)); free(s); }
     if (ok) maage_log_info("maage.launcher.access", "Account %s completed: Java access verified and saved.", operation_name);
     else if (maage_access_cancelled(a)) maage_log_info("maage.launcher.access", "Account %s cancelled; no new access granted.", operation_name);
     if (!ok && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
@@ -456,7 +456,7 @@ static maage_status maage_access_restore_worker(maage_access *a)
             if (a->view.profiles[i].state == MAAGE_ACCESS_VERIFIED) ++leases;
             maage_access_unlock(a);
         } else result = child;
-        OPENSSL_cleanse(s, sizeof(*s));
+        maage_crypto_clear(s, sizeof(*s));
     }
     free(s);
     maage_log_info("maage.launcher.access", "Saved account restoration: %u encrypted sessions restored; %u current leases reused; remaining accounts require refresh/sign-in.", restored, leases);
@@ -619,6 +619,6 @@ maage_status maage_access_destroy(maage_access *a)
     pthread_mutex_destroy(&a->mutex);
 #endif
     free(a->view.profiles); free(a->timing);
-    OPENSSL_cleanse(a, sizeof(*a)); free(a);
+    maage_crypto_clear(a, sizeof(*a)); free(a);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }

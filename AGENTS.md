@@ -387,10 +387,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Follow the current task's scope. Do not implement engine subsystems or planned
   integrations merely because they appear in the architectural goals.
 
-### Build, but do not test
+### Builds and runtime validation require authorization
 
-- Configure, compile, and link affected targets; fix introduced configuration,
-  compiler, and linker failures without disabling targets or hiding relevant errors.
+- Do not run CMake configuration, compilation or linking unless the programmer
+  explicitly authorizes it again. The programmer currently performs all builds.
+  Review source and diffs without creating synthetic validation harnesses.
 - During predevelopment, do not create or retain authored test suites, test
   executables/frameworks, fixtures/mocks, synthetic harnesses, test-only build
   options/targets/presets, test scripts, or manual test checklists unless the
@@ -398,12 +399,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   running tests; do not add automated test or benchmark execution.
 - Never execute applications, tests, CTest, benchmarks, or runtime-validation
   scripts/passes without explicit programmer authorization. Runtime testing
-  belongs to the programmer. Normal compilation/linking, CMake compiler/SDK
-  feature detection, dependency checks, production invariants, input validation
-  and diagnostic tools remain permitted.
+  belongs to the programmer. Read-only dependency/diagnostic inspection and
+  production invariants/input validation remain permitted.
 - Report builds, errors, and uncompiled platforms concisely. Compilation does not
   establish correct runtime behavior. This policy applies to subsequent tasks.
-- Prefer focused builds of directly affected targets, shared components, and
+- When builds are authorized, prefer focused builds of directly affected targets, shared components, and
   relevant primary backends. Build fallback backends only when modified or
   affected by shared API/build changes; do not repeatedly rebuild every platform
   or renderer after unrelated edits. Do not refactor unrelated code during
@@ -712,7 +712,11 @@ authentication files, OAuth clients, refresh tokens, or protected data.
 The Launcher asset manager is UI-independent, with worker-thread operations,
 locked progress snapshots, cancellation, Retry, and full repair (`--repair-assets`).
 Core provides generic UTF-8 storage/path and HTTPS transfer APIs, without Minecraft
-knowledge. Dependencies are libcurl >=7.85, json-c >=0.15, OpenSSL Crypto >=1.1.0, and libzip >=1.7.
+knowledge. Dependencies are libcurl >=7.85, json-c >=0.15 and libzip >=1.7;
+OpenSSL Crypto >=1.1.0 is required only outside Windows. `MaaGE::Crypto` provides
+SHA-1/SHA-256, AES-256-GCM, secure clearing/comparison and base64url encoding.
+Windows uses system CNG; macOS/Linux retain OpenSSL. Keep account record encoding,
+authenticated UUIDs, TLS verification and all security protections intact.
 Discover libzip through pkg-config on Linux to avoid distro CMake exports requiring
 uninstalled command-line tools. GTK >=3.22 stays in the Linux UI adapter. Keep these
 dependencies out of Server/headless targets.
@@ -742,7 +746,7 @@ The authoritative Server opens world metadata during hidden Client startup.
 After rendering stops, Server shutdown flushes World, saves the complete player/
 environment checkpoint and joins outside the frame loop.
 Generic `MaaGE::Storage`, `MaaGE::Thread` and `MaaGE::Jobs` have no Launcher acquisition
-dependencies; optional `MaaGE::StorageHash` owns OpenSSL SHA-1 for asset acquisition.
+dependencies; optional `MaaGE::StorageHash` uses `MaaGE::Crypto` SHA-1 for asset acquisition.
 
 Use `%APPDATA%/MaaGE`, `~/Library/Application Support/MaaGE`, or
 `$XDG_DATA_HOME/maage` (fallback `~/.local/share/maage`) for assets, metadata,
@@ -872,8 +876,8 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   `CMakeDependencies.cmake`, `vcpkg-windows.json`, and the
   `CMakeConfig.h` template belong here.
   The three application directories and `src/core/` are the established source layout.
-- Target compact Release executables (currently aiming below 60 KiB for the
-  Launcher). `MAAGE_OPTIMIZE_SIZE` enables size optimization, supported LTO,
+- Target the smallest practical uncompressed Release executables without sacrificing
+  functionality. `MAAGE_OPTIMIZE_SIZE` enables size optimization, supported LTO,
   dead-code removal and symbol stripping. Retain runtime metadata, protections,
   required backends, and useful diagnostics; report actual uncompressed sizes
   and distinguish executable bytes from bundle/disk allocation. Debug builds
@@ -892,12 +896,19 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   them; vcpkg manifest installation runs during CMake toolchain initialization.
   Keep them platform-specific and minimal, pin versions where practical,
   and fail clearly rather than disabling required applications or backends.
-  Default graphics builds require Vulkan headers/loader on Windows/Linux and native
+  Default graphics builds require Vulkan headers on Windows, headers/loader on Linux and native
   Metal/AppKit/QuartzCore from the Apple SDK on macOS; do not install MoltenVK.
 - Windows configuration discovers vcpkg from its environment/PATH or Visual Studio
   before `project()`; explicit toolchains take precedence and `MAAGE_USE_VCPKG=OFF`
   disables discovery. The pinned manifest selects dependencies from enabled modules,
-  including Vulkan build files, and vcpkg selects the target triplet. Copy
+  including Vulkan headers. Windows distribution links third-party libraries and
+  the MSVC CRT statically; never require neighboring third-party/runtime DLLs.
+  Generate a size-optimized static triplet from target architecture information;
+  automatically switch stock dynamic/static-md triplets to the static triplet,
+  invalidating cached dependency paths from the previous triplet before discovery.
+  Keep system DLL dependencies and dynamically loaded GPU drivers; the Vulkan
+  backend loads the installed system runtime rather than bundling its loader.
+  Copy
   `vcpkg-windows.json` into the Windows build tree as `vcpkg-manifest/vcpkg.json`;
   never auto-enable it for other platforms or replace an explicit user manifest.
   Non-Windows/custom cross toolchains retain `project()` before module options.

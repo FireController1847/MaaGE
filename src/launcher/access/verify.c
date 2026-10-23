@@ -1,7 +1,6 @@
 #include "verify.h"
 #include "maage/log.h"
 #include <curl/curl.h>
-#include <openssl/crypto.h>
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>

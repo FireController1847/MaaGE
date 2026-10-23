@@ -2,8 +2,7 @@
 #include "verify.h"
 #include "oauth.h"
 #include "maage/storage.h"
-#include <openssl/evp.h>
-#include <openssl/crypto.h>
+#include "maage/crypto.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,38 +86,22 @@ static maage_status maage_profile_key(const char *root, unsigned char key[32],
 static maage_status maage_profile_crypt(int encrypt, unsigned char *plain, int size,
     unsigned char *sealed, const unsigned char key[32], const char *uuid, maage_status_trace *trace)
 {
-    EVP_CIPHER_CTX *cipher = EVP_CIPHER_CTX_new();
-    int count = 0, final_count = 0;
-    maage_status result = maage_status_make(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_UPDATE, 0);
-    if (!cipher) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-        MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_UPDATE);
+    unsigned char aad[40];
+    maage_status result;
     if (encrypt) {
         memcpy(sealed, "MAAGEAC2", 8);
         result = maage_auth_random(sealed + 8, 12);
         if (maage_status_failed(result)) goto done;
-        result = maage_status_make(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_UPDATE, 0);
-        if (EVP_EncryptInit_ex(cipher, EVP_aes_256_gcm(), NULL, key, sealed + 8) != 1 ||
-            EVP_EncryptUpdate(cipher, NULL, &count, sealed, 8) != 1 ||
-            EVP_EncryptUpdate(cipher, NULL, &count, (const unsigned char *)uuid, 32) != 1 ||
-            EVP_EncryptUpdate(cipher, sealed + MAAGE_PROFILE_HEADER, &count, plain, size) != 1 || count != size ||
-            EVP_EncryptFinal_ex(cipher, sealed + MAAGE_PROFILE_HEADER + count, &final_count) != 1 || final_count != 0 ||
-            EVP_CIPHER_CTX_ctrl(cipher, EVP_CTRL_GCM_GET_TAG, 16, sealed + 20) != 1) goto done;
     } else {
         if (memcmp(sealed, "MAAGEAC2", 8)) {
             result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_DECODE, 0); goto done;
         }
-        if (EVP_DecryptInit_ex(cipher, EVP_aes_256_gcm(), NULL, key, sealed + 8) != 1 ||
-            EVP_DecryptUpdate(cipher, NULL, &count, sealed, 8) != 1 ||
-            EVP_DecryptUpdate(cipher, NULL, &count, (const unsigned char *)uuid, 32) != 1 ||
-            EVP_DecryptUpdate(cipher, plain, &count, sealed + MAAGE_PROFILE_HEADER, size) != 1 || count != size ||
-            EVP_CIPHER_CTX_ctrl(cipher, EVP_CTRL_GCM_SET_TAG, 16, sealed + 20) != 1) goto done;
-        if (EVP_DecryptFinal_ex(cipher, plain + count, &final_count) != 1 || final_count != 0) {
-            result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0); goto done;
-        }
     }
-    result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
+    memcpy(aad, sealed, 8); memcpy(aad + 8, uuid, 32);
+    result = maage_crypto_aes_gcm(encrypt, key, sealed + 8, sealed + 20, aad, sizeof(aad),
+        encrypt ? plain : sealed + MAAGE_PROFILE_HEADER, (size_t)size,
+        encrypt ? sealed + MAAGE_PROFILE_HEADER : plain);
 done:
-    EVP_CIPHER_CTX_free(cipher);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, encrypt ? MAAGE_OPERATION_SAVE : MAAGE_OPERATION_DECODE);
 }
 static double maage_profile_number(struct json_object *object, const char *key)
@@ -207,10 +190,10 @@ maage_status maage_profile_store_load(const char *root, const char *uuid,
 done:
     MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD);
     maage_auth_json_free(object);
-    if (plain) { OPENSSL_cleanse(plain, MAAGE_PROFILE_LIMIT + 1); free(plain); }
-    if (sealed) { OPENSSL_cleanse(sealed, MAAGE_PROFILE_LIMIT + MAAGE_PROFILE_HEADER + 1); free(sealed); }
-    OPENSSL_cleanse(key, sizeof(key));
-    if (maage_status_failed(result)) OPENSSL_cleanse(session, sizeof(*session));
+    if (plain) { maage_crypto_clear(plain, MAAGE_PROFILE_LIMIT + 1); free(plain); }
+    if (sealed) { maage_crypto_clear(sealed, MAAGE_PROFILE_LIMIT + MAAGE_PROFILE_HEADER + 1); free(sealed); }
+    maage_crypto_clear(key, sizeof(key));
+    if (maage_status_failed(result)) maage_crypto_clear(session, sizeof(*session));
     return maage_profile_unlock(lock, result, MAAGE_OPERATION_LOAD, trace);
 }
 static maage_status maage_profile_member(struct json_object *object, const char *key, struct json_object *value)
@@ -258,7 +241,7 @@ maage_status maage_profile_store_save(const char *root, const maage_profile_sess
     if (!plain) { result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE, 0); goto done; }
     size = strlen(plain);
     if (size > MAAGE_PROFILE_LIMIT) { result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE, 0); goto done; }
-    sealed = (unsigned char *)malloc(size + MAAGE_PROFILE_HEADER + EVP_MAX_BLOCK_LENGTH);
+    sealed = (unsigned char *)malloc(size + MAAGE_PROFILE_HEADER);
     if (!sealed) { result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE, 0); goto done; }
     sprintf(name, "%s.account", session->uuid);
     result = maage_profile_crypt(1, (unsigned char *)plain, (int)size, sealed, key, session->uuid, trace);
@@ -267,8 +250,8 @@ maage_status maage_profile_store_save(const char *root, const maage_profile_sess
 done:
     MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
     maage_auth_json_free(object);
-    if (sealed) { OPENSSL_cleanse(sealed, size + MAAGE_PROFILE_HEADER + EVP_MAX_BLOCK_LENGTH); free(sealed); }
-    OPENSSL_cleanse(key, sizeof(key));
+    if (sealed) { maage_crypto_clear(sealed, size + MAAGE_PROFILE_HEADER); free(sealed); }
+    maage_crypto_clear(key, sizeof(key));
     return maage_profile_unlock(lock, result, MAAGE_OPERATION_SAVE, trace);
 }
 maage_status maage_profile_store_remove(const char *root, const char *uuid, maage_status_trace *trace)

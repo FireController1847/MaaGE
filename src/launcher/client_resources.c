@@ -3,7 +3,7 @@
 #include "maage/minecraft_assets.h"
 #include "maage/log.h"
 #include <zip.h>
-#include <openssl/evp.h>
+#include "maage/crypto.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -54,29 +54,29 @@ static maage_status maage_client_stream(maage_client_resources *resources, maage
     FILE *output, const maage_client_observer *observer, char hash[41])
 {
     zip_file_t *file = zip_fopen_index(resources->archive, entry->index, 0);
-    EVP_MD_CTX *digest = EVP_MD_CTX_new();
-    unsigned char buffer[32768], bytes[EVP_MAX_MD_SIZE];
-    unsigned int length, i;
+    maage_crypto_hash *digest = NULL;
+    unsigned char buffer[32768], bytes[20];
+    unsigned int i;
     zip_int64_t received = -1;
     double total = 0;
     long native_code = 0;
-    maage_status result;
-    int ok = file && digest && EVP_DigestInit_ex(digest, EVP_sha1(), NULL) == 1;
+    maage_status result = maage_crypto_hash_open(MAAGE_CRYPTO_SHA1, &digest);
+    int ok = file && !maage_status_failed(result);
     while (ok && !observer->cancelled(observer->context)) {
         received = zip_fread(file, buffer, sizeof(buffer));
         if (received <= 0) break;
         total += (double)received;
         if (total > entry->size || total > MAAGE_CLIENT_ENTRY_LIMIT ||
-            EVP_DigestUpdate(digest, buffer, (size_t)received) != 1 ||
+            maage_status_failed(result = maage_crypto_hash_update(digest, buffer, (size_t)received)) ||
             (output && fwrite(buffer, 1, (size_t)received, output) != (size_t)received)) ok = 0;
     }
     if (observer->cancelled(observer->context) || received != 0 || total != entry->size) ok = 0;
-    if (ok && (EVP_DigestFinal_ex(digest, bytes, &length) != 1 || length != 20)) ok = 0;
+    if (ok && maage_status_failed(result = maage_crypto_hash_finish(digest, bytes, sizeof(bytes)))) ok = 0;
     if (file && !ok) native_code = zip_error_code_zip(zip_file_get_error(file));
     if (file && zip_fclose(file)) ok = 0;
-    if (digest) EVP_MD_CTX_free(digest);
-    if (ok) { for (i = 0; i < length; ++i) sprintf(hash + i * 2, "%02x", (unsigned)bytes[i]); hash[40] = 0; }
-    result = maage_status_make(ok ? MAAGE_STATUS_SUCCESS : observer->cancelled(observer->context) ? MAAGE_STATUS_INTERRUPTED : !digest ? MAAGE_STATUS_ALLOCATION_FAILED : MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, 0);
+    maage_crypto_hash_destroy(digest);
+    if (ok) { for (i = 0; i < sizeof(bytes); ++i) sprintf(hash + i * 2, "%02x", (unsigned)bytes[i]); hash[40] = 0; }
+    if (!maage_status_failed(result)) result = maage_status_make(ok ? MAAGE_STATUS_SUCCESS : observer->cancelled(observer->context) ? MAAGE_STATUS_INTERRUPTED : MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, 0);
     if (maage_status_failed(result)) maage_status_trace_record(observer->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, __FILE__, (unsigned long)__LINE__, native_code);
     return result;
 }
