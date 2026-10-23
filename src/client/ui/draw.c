@@ -159,7 +159,7 @@ void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float 
     maage_client_ui_font_draw(ui, text, x, y, red, green, blue);
 }
 
-static void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle)
+void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle)
 {
     if (!ui->primary_down &&
         ui->mouse_x >= rectangle.x && ui->mouse_x < rectangle.x + rectangle.width &&

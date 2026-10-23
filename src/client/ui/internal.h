@@ -88,6 +88,8 @@ float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 void maage_client_ui_menu_background(maage_client_ui *ui);
 void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect rectangle,
     const char *label,float value,int highlighted);
+/* Shared cursor feedback for standard and custom-drawn controls. */
+void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle);
 maage_status maage_client_ui_options_register(maage_client_ui *ui);
 void maage_client_ui_request_window_mode(maage_client_ui *ui,maage_client_window_choice choice);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,

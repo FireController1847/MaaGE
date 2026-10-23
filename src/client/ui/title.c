@@ -153,6 +153,7 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
     /* The 1.7.10 language globe is in widgets.png at (0,106/126),
      * not a separate language.png resource. */
     r=title_button(ui,3);
+    maage_client_ui_pointer(ui,r);
     maage_client_ui_rectangle(ui,r,256.0f/ui->resources.atlas_edge,
         (title_hit(ui,r)?126.0f:106.0f)/ui->resources.atlas_edge,
         276.0f/ui->resources.atlas_edge,
