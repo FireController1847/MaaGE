@@ -58,9 +58,21 @@ if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
     # Compile native GLSL once at build time and embed the resulting SPIR-V.
     # Compilers run on the build host even when Vulkan targets are cross-compiled.
     set(MAAGE_VULKAN_TOOL_HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
-    if(VCPKG_INSTALLED_DIR AND VCPKG_HOST_TRIPLET)
-        list(APPEND MAAGE_VULKAN_TOOL_HINTS
-            "${VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/glslang")
+    if(VCPKG_INSTALLED_DIR)
+        if(VCPKG_HOST_TRIPLET)
+            list(APPEND MAAGE_VULKAN_TOOL_HINTS
+                "${VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/glslang")
+        else()
+            # vcpkg resolves its default host triplet internally. This manifest
+            # installs glslang as a host dependency; never substitute the target
+            # triplet, which can differ even in a native static-library build.
+            file(GLOB MAAGE_VULKAN_HOST_TOOL_DIRS LIST_DIRECTORIES true
+                "${VCPKG_INSTALLED_DIR}/*/tools/glslang")
+            list(LENGTH MAAGE_VULKAN_HOST_TOOL_DIRS MAAGE_VULKAN_HOST_TOOL_COUNT)
+            if(MAAGE_VULKAN_HOST_TOOL_COUNT EQUAL 1)
+                list(APPEND MAAGE_VULKAN_TOOL_HINTS ${MAAGE_VULKAN_HOST_TOOL_DIRS})
+            endif()
+        endif()
     endif()
     find_program(MAAGE_GLSLC NAMES glslc HINTS ${MAAGE_VULKAN_TOOL_HINTS}
         NO_CMAKE_FIND_ROOT_PATH)
@@ -68,7 +80,8 @@ if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
         NO_CMAKE_FIND_ROOT_PATH)
     if(NOT MAAGE_GLSLC AND NOT MAAGE_GLSLANG)
         message(FATAL_ERROR "Vulkan shaders require a host glslc or glslangValidator executable. "
-            "Install Vulkan SDK shader tools or glslang-tools; Windows vcpkg provisions glslang[tools].")
+            "Install Vulkan SDK shader tools or glslang-tools; Windows vcpkg provisions glslang[tools]. "
+            "If multiple vcpkg tool directories exist, set VCPKG_HOST_TRIPLET or MAAGE_GLSLANG explicitly.")
     endif()
     set(MAAGE_VULKAN_GENERATED "${PROJECT_BINARY_DIR}/generated/vulkan")
     set(MAAGE_VULKAN_SPIRV)
