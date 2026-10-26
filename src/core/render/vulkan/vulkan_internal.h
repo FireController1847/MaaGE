@@ -11,6 +11,10 @@
 #if defined(MAAGE_RENDER_WAYLAND)
 #define VK_USE_PLATFORM_WAYLAND_KHR
 #endif
+#if defined(MAAGE_RENDER_COCOA)
+#define VK_USE_PLATFORM_METAL_EXT
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #include <vulkan/vulkan.h>
 #include "../render_internal.h"
 #if defined(MAAGE_RENDER_WIN32)
@@ -18,6 +22,10 @@
 #endif
 
 #define MAAGE_VULKAN_FRAME_SLOTS 2
+typedef struct maage_vulkan_ui_vertex {
+    maage_render_ui_vertex vertex;
+    float depth;
+} maage_vulkan_ui_vertex;
 typedef struct maage_vulkan_frame {
     VkCommandBuffer command;
     VkFence fence;
@@ -30,6 +38,8 @@ typedef struct maage_vulkan_renderer {
 #if defined(MAAGE_RENDER_WIN32)
     HMODULE library;
     maage_vulkan_dispatch dispatch;
+#elif defined(MAAGE_RENDER_COCOA)
+    void *cocoa;
 #endif
     VkInstance instance;
     VkSurfaceKHR surface;
@@ -56,7 +66,7 @@ typedef struct maage_vulkan_renderer {
     VkPresentModeKHR present_mode;
     unsigned long generation;
     int requested_width, requested_height;
-    int vsync, surface_lost, maintenance, maintenance_instance;
+    int vsync, surface_lost, maintenance, maintenance_instance, portability;
     maage_status failure;
     void *rendering;
 } maage_vulkan_renderer;
@@ -65,6 +75,11 @@ maage_status maage_vulkan_record(maage_renderer *renderer, VkResult value,
     const char *file, unsigned long line);
 #define maage_vulkan_result(value) \
     maage_vulkan_record(renderer, (value), __FILE__, (unsigned long)__LINE__)
+#if defined(MAAGE_RENDER_COCOA)
+maage_status maage_vulkan_cocoa_surface(maage_renderer *renderer);
+maage_status maage_vulkan_cocoa_update(maage_renderer *renderer, const maage_window_state *state);
+maage_status maage_vulkan_cocoa_destroy(maage_renderer *renderer);
+#endif
 maage_status maage_vulkan_platform_create(maage_renderer *renderer);
 maage_status maage_vulkan_platform_destroy(maage_renderer *renderer);
 /* Polls a submitted frame and forwards its owned submission trace on failure. */

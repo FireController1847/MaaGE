@@ -550,7 +550,14 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
   when available; baseline Vulkan uses per-image presentation semaphores and
   queue/device drains at replacement/shutdown, never GPU-wide waits every frame.
   Report exact device rejection reasons and preserve the primary initialization
-  failure when all fallback backends fail.
+  failure when all fallback backends fail. macOS builds Vulkan by default unless
+  `MAAGE_ENABLE_VULKAN=OFF`, using Vulkan headers, host GLSL tools and static
+  `libMoltenVK.a` linkage with its required Apple frameworks/system C++ runtime.
+  No separate MoltenVK dylib or Vulkan loader is distributed on macOS. Bind used
+  Vulkan entry points directly and retain Release dead stripping; do not force-load
+  the entire archive or keep MaaGE procedure tables on that path. Keep its
+  AppKit/CAMetalLayer bridge private to the Vulkan backend,
+  restore the previous view layer on teardown and honor portability extensions.
 - **Metal:** prepare the initial frame before revealing the Launcher window; match
   native backing to the initial clear color and synchronize the first drawable
   with Core Animation. Normal presentation continues to skip hidden windows.
@@ -567,7 +574,8 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
   path, not leave the mailbox worker active with only displaySyncEnabled flipped.
   Avoid joining that worker during native fullscreen/resize transitions.
   Use Apple's Metal API, with Cocoa/AppKit and `CAMetalLayer` where
-  appropriate. MoltenVK must not be the required implementation. Isolate necessary
+  appropriate. Native Metal remains the preferred macOS backend and requires no
+  Vulkan SDK or MoltenVK. Isolate necessary
   Objective-C/Objective-C++ translation units in macOS implementation directories;
   exclude Metal objects/types from portable C interfaces. Provide a suitable shader
   asset pipeline for Metal Shading Language when implementing this backend.
@@ -583,10 +591,10 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
   `opengl`, and `software` only. There is no renderer-version option.
   OpenGL selects modern or 1.1 legacy internally, not as a user-facing option.
   Explicit renderer selection never falls back to a different family.
-  AUTO tries Metal → modern GL → legacy GL → Software on macOS, and Vulkan →
+  AUTO tries Metal → optional Vulkan → modern GL → legacy GL → Software on macOS, and Vulkan →
   modern GL → legacy GL → Software on Windows/Linux. Advertise only actual
   compiled capabilities; log selection/failures and clean up failed attempts.
-  Load optional Vulkan runtime DLLs dynamically on Windows to permit fallback.
+  Load the optional Vulkan runtime dynamically on Windows; macOS links MoltenVK statically.
 - Version capability contracts; query native limits/formats conservatively and
   report zero for unknown limits. Device capabilities do not imply unimplemented
   public resource/draw commands exist. Keep interfaces backend-neutral and useful
@@ -662,7 +670,9 @@ and Settings (including About) remain separate. Account selection belongs in the
 Play header and controls service authorization. Keep Launcher state/configurations
 in Launcher-owned modules, independent of game UI/rendering; use `config/launcher.json`
 for nonsecret global preferences and UUID instance references; each instance manifest
-owns its name, Client association and folder mappings. Persist instance/account selections and supported appearance
+owns its name, Client association, optional Client CLI arguments and folder mappings.
+Native installation editors persist the arguments and pass parsed values directly
+to the Client without a shell; Launcher-managed instance/data-directory flags cannot be overridden. Persist instance/account selections and supported appearance
 preferences; default appearance follows the system. Reuse existing account/setup
 services for management and repair. Play starts the exact selected available Client
 after access/resource prerequisites; show an empty News state until a real source exists. Do not introduce
@@ -917,7 +927,12 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   and fail clearly rather than disabling required applications or backends.
   Default graphics builds require Vulkan headers and host GLSL tools on Windows,
   headers/loader and host GLSL tools on Linux, and native Metal/AppKit/QuartzCore
-  from the Apple SDK on macOS; do not install MoltenVK.
+  from the Apple SDK on macOS. Vulkan is enabled by default on all three platforms;
+  macOS additionally requires Vulkan headers, host GLSL tools and a MoltenVK
+  static archive (`MAAGE_MOLTENVK_STATIC_LIBRARY` may select its target-compatible
+  path). C++ is an external implementation detail; do not enable a C++ compiler
+  just to link the archive. Do not acquire these dependencies when Vulkan is
+  explicitly disabled or for headless builds.
 - Windows configuration discovers vcpkg from its environment/PATH or Visual Studio
   before `project()`; explicit toolchains take precedence and `MAAGE_USE_VCPKG=OFF`
   disables discovery. The pinned manifest selects dependencies from enabled modules,

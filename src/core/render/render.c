@@ -89,6 +89,9 @@ maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer
     static const maage_render_backend order[] = {
 #if MAAGE_PLATFORM_MACOS
         MAAGE_RENDER_METAL,
+#if defined(MAAGE_RENDER_HAS_VULKAN)
+        MAAGE_RENDER_VULKAN,
+#endif
 #elif MAAGE_PLATFORM_WINDOWS
         MAAGE_RENDER_VULKAN,
 #else

@@ -263,7 +263,7 @@ static void maage_options_action(maage_client_ui *ui,
         else if(id==17U&&ui->has_snapshot)maage_client_ui_queue_game_mode(ui);
         else if(id==9U&&ui->vsync_supported) {
             result=maage_renderer_set_vsync(ui->renderer,!ui->vsync);
-            if(maage_status_code(result)==MAAGE_STATUS_SUCCESS)
+            if(maage_status_is_success(result))
                 ui->vsync=!ui->vsync;
             else {
                 if(maage_status_code(result)==MAAGE_STATUS_NOT_IMPLEMENTED||

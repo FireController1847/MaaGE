@@ -58,6 +58,23 @@ shader builds require host `glslc` or `glslangValidator` and embed SPIR-V; Metal
 requires neither Vulkan tooling nor runtime shader files. Compilation and visual
 parity remain unverified after this consolidation. OpenGL and Software preserve
 their existing clear/presentation paths and reject unsupported gameplay commands.
+macOS Vulkan is enabled by default; `MAAGE_ENABLE_VULKAN=OFF` disables it. Its build
+requires Vulkan headers (discoverable through `VULKAN_SDK`), host GLSL tools and
+`libMoltenVK.a`. `MAAGE_MOLTENVK_STATIC_LIBRARY` can select a target-compatible
+static archive explicitly. Graphical executables link MoltenVK and its required
+Apple frameworks/system C++ runtime without requiring a C++ compiler for MaaGE.
+No adjacent MoltenVK dylib, system Vulkan loader or ICD manifest is needed on
+macOS. Used extension entry points are linked directly rather than rooting a
+MaaGE procedure-name dispatch table. Release size optimization/dead stripping
+remain enabled; the prebuilt archive's reachable implementation determines the
+retained size, and cross-library LTO requires a compatible bitcode archive.
+AUTO prefers Metal, then tries Vulkan when compiled in, before the existing
+OpenGL/Software fallbacks; `--renderer=vulkan` explicitly selects Vulkan.
+The Cocoa bridge owns/restores its
+CAMetalLayer, updates backing-pixel dimensions and defers swapchain changes during
+native fullscreen transitions. Device selection enables advertised portability
+extensions and checks vertex-stride alignment. Static integration has not been
+compiled or run; programmer builds and runtime/visual verification remain pending.
 Explicit renderer requests never switch families. Cocoa, Win32 and X11
 have native gameplay input; Wayland gameplay capture remains unsupported. X11's
 warp-relative fallback retains native pointer acceleration.
@@ -408,8 +425,20 @@ MaaGE/
 
 The reusable, graphics-independent `MaaGE::Instance` library uses json-c >=0.15
 and generic Storage. Manifest schema 1 contains `schema`, UUID `id`, display
-`name`, `clientBuildId`, optional `createdUtc`, and `folders`. Unknown root fields,
-including future modpack metadata, survive edits. A folder entry is one of:
+`name`, `clientBuildId`, optional `clientArguments` (empty by default), optional
+`createdUtc`, and `folders`. Unknown root fields,
+including future modpack metadata, survive edits. Native installation editors save
+Client CLI arguments per instance and preserve them when duplicating an installation
+or replacing its Client build. Arguments accept up to 4095 UTF-8 bytes without control
+characters. Separate arguments with spaces; single/double quotes preserve spaces
+and empty values. Backslashes escape backslashes and double quotes, plus single
+quotes/spaces outside quotes; single-quoted text is literal. For example,
+`--renderer=metal --world-name="My World"` passes two arguments. No shell expansion
+or command execution occurs. The Launcher supplies `--instance` and
+`--data-directory`; custom arguments cannot override these flags. Invalid quoting
+or reserved flags fail before saving or starting the Client.
+
+A folder entry is one of:
 
 ```json
 {"mode":"private"}

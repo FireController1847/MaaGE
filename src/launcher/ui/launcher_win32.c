@@ -12,6 +12,7 @@
 #define MAAGE_UI_INSTALLATION 111
 #define MAAGE_UI_LIST 112
 #define MAAGE_UI_NAME 113
+#define MAAGE_UI_ARGUMENTS 114
 #define MAAGE_UI_MANAGE 120
 #define MAAGE_UI_VERIFY 121
 #define MAAGE_UI_REPAIR 122
@@ -32,7 +33,7 @@
 #define MAAGE_UI_BACK_SETTINGS 126
 typedef struct maage_launcher_win32 {
     maage_launcher_ui *state;
-    HWND window, navigation[5], account, installation, list, name, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
+    HWND window, navigation[5], account, installation, list, name, arguments, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
     maage_launcher_win32_style native;
     HBRUSH background, sidebar;
     unsigned revision, client_revision;
@@ -175,6 +176,8 @@ static void maage_ui_open_installation(maage_launcher_win32 *ui)
 static void maage_ui_installation_action(maage_launcher_win32 *ui, int id)
 {
     int row=maage_ui_selected(ui); wchar_t wide[128]; char name[512];
+    wchar_t wide_arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY];
+    char arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY], client_id[65];
     const char *client = ""; LRESULT selected;
     if (id != MAAGE_UI_NEW && row < 0) return;
     if (id == MAAGE_UI_REMOVE) {
@@ -187,7 +190,15 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id)
         selected = SendMessageW(ui->client_choice, CB_GETCURSEL, 0, 0);
         if (selected > 0 && (unsigned)selected <= ui->state->clients->count) client = ui->state->clients->builds[selected - 1].id;
         if (id == MAAGE_UI_DUPLICATE && row >= 0) client = ui->state->installations[row].client;
-        maage_launcher_installation_write(ui->state,id==MAAGE_UI_EDIT ? row : -1,name,client);
+        GetWindowTextW(ui->arguments, wide_arguments, MAAGE_INSTANCE_ARGUMENTS_CAPACITY);
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_arguments, -1,
+                arguments, sizeof(arguments), NULL, NULL)) {
+            strcpy(ui->state->error, "Client arguments must be valid UTF-8 within 4095 bytes.");
+            maage_ui_refresh(ui); return;
+        }
+        if (id == MAAGE_UI_DUPLICATE) strcpy(arguments, ui->state->installations[row].arguments);
+        strcpy(client_id, client);
+        maage_launcher_installation_write(ui->state,id==MAAGE_UI_EDIT ? row : -1,name,client_id,arguments);
     }
     maage_ui_installations_reload(ui); maage_ui_refresh(ui);
 }
@@ -273,7 +284,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_NOTIFY:
         if (((NMHDR *)lparam)->code==NM_CUSTOMDRAW) return maage_launcher_win32_button(&ui->native,lparam);
         if (((NMHDR *)lparam)->hwndFrom==ui->list && ((NMHDR *)lparam)->code==LVN_ITEMCHANGED && !ui->updating) {
-            int row=maage_ui_selected(ui); if (row>=0) { maage_ui_text(ui->name,ui->state->installations[row].name); maage_ui_client_choices(ui, row); } maage_ui_refresh(ui);
+            int row=maage_ui_selected(ui); if (row>=0) { maage_ui_text(ui->name,ui->state->installations[row].name); maage_ui_text(ui->arguments,ui->state->installations[row].arguments); maage_ui_client_choices(ui, row); } maage_ui_refresh(ui);
         }
         return 0;
     case WM_MEASUREITEM: return maage_launcher_win32_combo_measure(&ui->native,lparam);
@@ -329,15 +340,18 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action)
     maage_ui_button(&ui,2,L"Remove Client...",410,150,170,MAAGE_UI_CLIENT_REMOVE);
 #endif
     maage_ui_label(&ui,2,L"MaaGE Installations - shared Minecraft 1.7.10 resources",198,198,-230,26);
-    ui.list=maage_ui_control(&ui,2,WC_LISTVIEWW,L"MaaGE installations",WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,198,230,-230,-570,MAAGE_UI_LIST);
+    ui.list=maage_ui_control(&ui,2,WC_LISTVIEWW,L"MaaGE installations",WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,198,230,-230,-650,MAAGE_UI_LIST);
     ListView_SetExtendedListViewStyle(ui.list,LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     memset(&column,0,sizeof(column)); column.mask=LVCF_TEXT | LVCF_WIDTH;
     column.pszText=L"Name"; column.cx=maage_launcher_win32_scale(&ui.native,245); SendMessageW(ui.list,LVM_INSERTCOLUMNW,0,(LPARAM)&column);
     column.pszText=L"Configuration"; column.cx=maage_launcher_win32_scale(&ui.native,260); SendMessageW(ui.list,LVM_INSERTCOLUMNW,1,(LPARAM)&column);
     column.pszText=L"Status"; column.cx=maage_launcher_win32_scale(&ui.native,100); SendMessageW(ui.list,LVM_INSERTCOLUMNW,2,(LPARAM)&column);
-    maage_ui_label(&ui,2,L"Configuration name",198,-305,200,26);
-    ui.name=maage_ui_control(&ui,2,L"EDIT",L"New Installation",WS_TABSTOP | ES_AUTOHSCROLL,198,-275,-230,30,MAAGE_UI_NAME); SendMessageW(ui.name,EM_SETLIMITTEXT,95,0);
-    ui.client_choice=maage_ui_control(&ui,2,L"COMBOBOX",L"Client build",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,198,-230,-230,220,MAAGE_UI_CLIENT_CHOICE);
+    maage_ui_label(&ui,2,L"Configuration name",198,-385,200,26);
+    ui.name=maage_ui_control(&ui,2,L"EDIT",L"New Installation",WS_TABSTOP | ES_AUTOHSCROLL,198,-355,-230,30,MAAGE_UI_NAME); SendMessageW(ui.name,EM_SETLIMITTEXT,95,0);
+    ui.client_choice=maage_ui_control(&ui,2,L"COMBOBOX",L"Client build",WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,198,-310,-230,220,MAAGE_UI_CLIENT_CHOICE);
+    maage_ui_label(&ui,2,L"Client CLI arguments (quote values containing spaces)",198,-270,-230,26);
+    ui.arguments=maage_ui_control(&ui,2,L"EDIT",L"",WS_TABSTOP | ES_AUTOHSCROLL,198,-240,-230,30,MAAGE_UI_ARGUMENTS);
+    SendMessageW(ui.arguments,EM_SETLIMITTEXT,MAAGE_INSTANCE_ARGUMENTS_CAPACITY - 1,0);
     { const wchar_t *titles[]={L"New",L"Save",L"Duplicate",L"Remove",L"Set as Default"}; for(i=0;i<5;++i) maage_ui_button(&ui,2,titles[i],198+i*128,-185,118,MAAGE_UI_NEW+i); }
     maage_ui_button(&ui,2,L"Open installation folder",198,-140,240,MAAGE_UI_OPEN_FOLDER);
     maage_ui_label(&ui,3,L"Launcher",198,80,250,26);

@@ -1,3 +1,4 @@
+#define MAAGE_VULKAN_LOAD_IMPLEMENTATION
 #include "vulkan_internal.h"
 #include "maage/log.h"
 #include <stdlib.h>
@@ -90,6 +91,10 @@ static maage_status maage_vulkan_surface(maage_renderer *renderer)
 {
     maage_vulkan_renderer *native = renderer->platform;
     const maage_window_native *window = &renderer->native;
+#if defined(MAAGE_RENDER_COCOA)
+    if (window->backend == MAAGE_WINDOW_COCOA)
+        return maage_vulkan_cocoa_surface(renderer);
+#endif
 #if defined(MAAGE_RENDER_WIN32)
     if (window->backend == MAAGE_WINDOW_WIN32) {
         VkWin32SurfaceCreateInfoKHR info;
@@ -138,7 +143,7 @@ static VkFormat maage_vulkan_depth(maage_vulkan_renderer *native, VkPhysicalDevi
 }
 static maage_status maage_vulkan_suitable(maage_renderer *renderer,
     VkPhysicalDevice physical, uint32_t *graphics, uint32_t *present,
-    int *maintenance, int *suitable)
+    int *maintenance, int *portability, int *suitable)
 {
     maage_vulkan_renderer *native = renderer->platform;
     VkExtensionProperties *extensions;
@@ -149,7 +154,7 @@ static maage_status maage_vulkan_suitable(maage_renderer *renderer,
     VkBool32 supported;
     uint32_t count = 0, index, formats, modes;
     int swapchain = 0, has_graphics = 0, has_present = 0, unified = 0;
-    *suitable = *maintenance = 0;
+    *suitable = *maintenance = *portability = 0;
     result = vkEnumerateDeviceExtensionProperties(physical, NULL, &count, NULL);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     if (!count) return maage_vulkan_unsupported(physical, "no device extensions available");
@@ -161,6 +166,7 @@ static maage_status maage_vulkan_suitable(maage_renderer *renderer,
     if (result == VK_SUCCESS)
         for (index = 0; index < count; ++index) {
             if (!strcmp(extensions[index].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) swapchain = 1;
+            if (!strcmp(extensions[index].extensionName, "VK_KHR_portability_subset")) *portability = 1;
 #if defined(VK_EXT_swapchain_maintenance1)
             if ((native->maintenance_instance & 1) && !*maintenance && !strcmp(extensions[index].extensionName,
                 VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)) *maintenance = 1;
@@ -171,12 +177,38 @@ static maage_status maage_vulkan_suitable(maage_renderer *renderer,
     free(extensions);
     if (result != VK_SUCCESS) return maage_vulkan_result(result);
     if (!swapchain) return maage_vulkan_unsupported(physical, "VK_KHR_swapchain is unavailable");
+#if defined(VK_KHR_portability_subset)
+    if (*portability) {
+        VkPhysicalDevicePortabilitySubsetPropertiesKHR subset = {0};
+        VkPhysicalDeviceProperties2KHR properties = {0};
+#if defined(MAAGE_RENDER_COCOA)
+        PFN_vkGetPhysicalDeviceProperties2KHR query = vkGetPhysicalDeviceProperties2KHR;
+#else
+        PFN_vkGetPhysicalDeviceProperties2KHR query = (PFN_vkGetPhysicalDeviceProperties2KHR)
+            vkGetInstanceProcAddr(native->instance, "vkGetPhysicalDeviceProperties2KHR");
+#endif
+        if (!query) return maage_vulkan_unsupported(physical, "portability property queries are unavailable");
+        subset.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR;
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+        properties.pNext = &subset; query(physical, &properties);
+        if (!subset.minVertexInputBindingStrideAlignment ||
+            sizeof(maage_mesh_vertex) % subset.minVertexInputBindingStrideAlignment ||
+            sizeof(maage_vulkan_ui_vertex) % subset.minVertexInputBindingStrideAlignment)
+            return maage_vulkan_unsupported(physical, "portability vertex-stride alignment is incompatible");
+        /* Current pipelines need none of the optional subset features: triangle
+         * lists, identity image views, zero LOD bias and no stencil/events. */
+    }
+#endif
 #if defined(VK_EXT_swapchain_maintenance1)
     if (*maintenance) {
         VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT support = {0};
         VkPhysicalDeviceFeatures2KHR features = {0};
+#if defined(MAAGE_RENDER_COCOA)
+        PFN_vkGetPhysicalDeviceFeatures2KHR query = vkGetPhysicalDeviceFeatures2KHR;
+#else
         PFN_vkGetPhysicalDeviceFeatures2KHR query = (PFN_vkGetPhysicalDeviceFeatures2KHR)
             vkGetInstanceProcAddr(native->instance, "vkGetPhysicalDeviceFeatures2KHR");
+#endif
         if (query) {
             support.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
             features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR;
@@ -232,8 +264,8 @@ static maage_status maage_vulkan_suitable(maage_renderer *renderer,
 maage_status maage_vulkan_platform_create(maage_renderer *renderer)
 {
     maage_vulkan_renderer *native;
-    const char *extensions[6] = { VK_KHR_SURFACE_EXTENSION_NAME, NULL };
-    const char *device_extensions[2] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, NULL };
+    const char *extensions[8] = { VK_KHR_SURFACE_EXTENSION_NAME, NULL };
+    const char *device_extensions[3] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, NULL };
     VkApplicationInfo application;
     VkInstanceCreateInfo instance;
     VkPhysicalDevice *devices;
@@ -246,19 +278,23 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
     VkSemaphoreCreateInfo semaphore;
     VkResult value;
     uint32_t count = 0, index, graphics, present, queue_count, extension_count = 2;
-    int found, suitable, maintenance, score, selected_score = -1;
+    int found, suitable, maintenance, portability, enumerate_portability, properties2;
+    int score, selected_score = -1;
     float priority = 1.0f;
     maage_status result, first_failure = 0;
     maage_status_trace selection_trace, first_failure_trace;
 #if defined(VK_EXT_swapchain_maintenance1)
     VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenance_feature;
-    int properties2, surface2, surface_maintenance, khr_surface_maintenance;
+    int surface2, surface_maintenance, khr_surface_maintenance;
 #endif
     native = calloc(1, sizeof(*native));
     if (!native) return maage_vulkan_status(renderer, MAAGE_STATUS_ALLOCATION_FAILED, 0);
     renderer->platform = native;
     native->vsync = 1;
     switch (renderer->native.backend) {
+#if defined(MAAGE_RENDER_COCOA)
+    case MAAGE_WINDOW_COCOA: extensions[1] = VK_EXT_METAL_SURFACE_EXTENSION_NAME; break;
+#endif
 #if defined(MAAGE_RENDER_WIN32)
     case MAAGE_WINDOW_WIN32: extensions[1] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME; break;
 #endif
@@ -279,9 +315,13 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
         if (!found) return maage_vulkan_unsupported(VK_NULL_HANDLE, extensions[index]);
     }
-#if defined(VK_EXT_swapchain_maintenance1)
     result = maage_vulkan_instance_extension(renderer, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, &properties2);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (properties2) extensions[extension_count++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
+    result = maage_vulkan_instance_extension(renderer, "VK_KHR_portability_enumeration", &enumerate_portability);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (enumerate_portability) extensions[extension_count++] = "VK_KHR_portability_enumeration";
+#if defined(VK_EXT_swapchain_maintenance1)
     result = maage_vulkan_instance_extension(renderer, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME, &surface2);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     result = maage_vulkan_instance_extension(renderer, VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME, &surface_maintenance);
@@ -289,7 +329,6 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
     result = maage_vulkan_instance_extension(renderer, "VK_KHR_surface_maintenance1", &khr_surface_maintenance);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (properties2 && surface2 && (surface_maintenance || khr_surface_maintenance)) {
-        extensions[extension_count++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
         extensions[extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
         if (surface_maintenance) {
             extensions[extension_count++] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
@@ -307,6 +346,7 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
     application.apiVersion = VK_API_VERSION_1_0;
     memset(&instance, 0, sizeof(instance));
     instance.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    if (enumerate_portability) instance.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     instance.pApplicationInfo = &application;
     instance.enabledExtensionCount = extension_count;
     instance.ppEnabledExtensionNames = extensions;
@@ -326,7 +366,7 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
     if (value == VK_SUCCESS)
         for (index = 0; index < count; ++index) {
             if (renderer->operation_trace) *renderer->operation_trace = selection_trace;
-            result = maage_vulkan_suitable(renderer, devices[index], &graphics, &present, &maintenance, &suitable);
+            result = maage_vulkan_suitable(renderer, devices[index], &graphics, &present, &maintenance, &portability, &suitable);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
                 if (!first_failure) {
                     first_failure = result;
@@ -343,6 +383,7 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
                 native->graphics_family = graphics;
                 native->present_family = present;
                 native->maintenance = maintenance;
+                native->portability = portability;
                 native->properties = properties;
                 selected_score = score;
             }
@@ -385,12 +426,12 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer)
     device.ppEnabledExtensionNames = device_extensions;
 #if defined(VK_EXT_swapchain_maintenance1)
     if (native->maintenance) {
-        device_extensions[1] = native->maintenance == 2 ?
+        device_extensions[device.enabledExtensionCount++] = native->maintenance == 2 ?
             "VK_KHR_swapchain_maintenance1" : VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME;
-        device.enabledExtensionCount = 2;
         device.pNext = &maintenance_feature;
     }
 #endif
+    if (native->portability) device_extensions[device.enabledExtensionCount++] = "VK_KHR_portability_subset";
     value = vkCreateDevice(native->physical, &device, NULL, &native->device);
     if (value != VK_SUCCESS) return maage_vulkan_result(value);
     vkGetDeviceQueue(native->device, native->graphics_family, 0, &native->graphics_queue);
@@ -492,6 +533,10 @@ maage_status maage_vulkan_platform_destroy(maage_renderer *renderer)
     }
     if (native->surface) vkDestroySurfaceKHR(native->instance, native->surface, NULL);
     if (native->instance) vkDestroyInstance(native->instance, NULL);
+#if defined(MAAGE_RENDER_COCOA)
+    waited = maage_vulkan_cocoa_destroy(renderer);
+    if (maage_status_failed(waited) && !maage_status_failed(result)) result = waited;
+#endif
 #if defined(MAAGE_RENDER_WIN32)
     if (native->library && !FreeLibrary(native->library)) {
         DWORD error = GetLastError();
@@ -713,6 +758,10 @@ maage_status maage_vulkan_begin(maage_renderer *renderer,
     maage_status result;
     *output = NULL; *image = 0;
     if (native->failure) return native->failure;
+#if defined(MAAGE_RENDER_COCOA)
+    result = maage_vulkan_cocoa_update(renderer, state);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+#endif
     /* Preserve any acquired image across the rare host-side presentation-fence
      * poll. Its semaphore must be consumed before recreation or reuse. */
     if (!frame->has_image) {

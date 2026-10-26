@@ -107,6 +107,7 @@ typedef struct maage_vulkan_dispatch {
 #undef MAAGE_VULKAN_DECLARE
 } maage_vulkan_dispatch;
 
+#if defined(MAAGE_VULKAN_LOAD_IMPLEMENTATION)
 static maage_status maage_vulkan_load_win32(maage_renderer *renderer,
     HMODULE *library, maage_vulkan_dispatch *dispatch)
 {
@@ -133,6 +134,7 @@ static maage_status maage_vulkan_load_win32(maage_renderer *renderer,
 #undef MAAGE_VULKAN_LOAD
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
 }
+#endif
 #undef MAAGE_VULKAN_FUNCTIONS
 #define vkAcquireNextImageKHR native->dispatch.vkAcquireNextImageKHR
 #define vkAllocateCommandBuffers native->dispatch.vkAllocateCommandBuffers

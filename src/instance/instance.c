@@ -277,6 +277,14 @@ static maage_status maage_instance_decode(maage_instance *instance, char error[2
         !json_object_object_get_ex(instance->manifest, "folders", &folders) || !json_object_is_type(folders, json_type_object))
         return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_DECODE,
             error, "The instance manifest has an unsupported schema or invalid identity.", trace);
+    instance->info.client_arguments[0] = 0;
+    if (json_object_object_get_ex(instance->manifest, "clientArguments", &value) &&
+        (!maage_instance_string(instance->manifest, "clientArguments", instance->info.client_arguments,
+            sizeof(instance->info.client_arguments)) ||
+         (*instance->info.client_arguments && !maage_instance_text(instance->info.client_arguments,
+            sizeof(instance->info.client_arguments)))))
+        return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_DECODE,
+            error, "The instance Client arguments must be valid UTF-8 within 4095 bytes, without control characters.", trace);
     iterator = json_object_iter_begin(folders); end = json_object_iter_end(folders);
     while (!json_object_iter_equal(&iterator, &end)) {
         int recognized = 0;
@@ -433,7 +441,7 @@ static maage_status maage_instance_member(struct json_object *object, const char
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
 }
 maage_status maage_instance_create(const char *root, const char *name, const char *build,
-    maage_instance **output, char error[256], maage_status_trace *trace)
+    const char *arguments, maage_instance **output, char error[256], maage_status_trace *trace)
 {
     maage_instance *instance;
     maage_storage_lock *lock = NULL;
@@ -445,9 +453,10 @@ maage_status maage_instance_create(const char *root, const char *name, const cha
     maage_status result, closed;
     if (output) *output = NULL;
     if (error) error[0] = 0;
-    if (!output || !maage_instance_text(name, 96) || !maage_instance_build(build))
+    if (!output || !maage_instance_text(name, 96) || !maage_instance_build(build) || !arguments ||
+        (*arguments && !maage_instance_text(arguments, MAAGE_INSTANCE_ARGUMENTS_CAPACITY)))
         return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE,
-            error, "Instance names and Client build identifiers must be valid and within their size limits.", trace);
+            error, "Instance names, Client build identifiers and arguments must be valid and within their size limits.", trace);
     instance = (maage_instance *)calloc(1, sizeof(*instance));
     if (!instance) return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_ALLOCATION_FAILED,
         MAAGE_OPERATION_CREATE, error, "Not enough memory to create the instance.", trace);
@@ -469,6 +478,7 @@ maage_status maage_instance_create(const char *root, const char *name, const cha
     if (!maage_status_failed(result)) result = maage_instance_member(instance->manifest, "id", json_object_new_string(instance->info.id), trace);
     if (!maage_status_failed(result)) result = maage_instance_member(instance->manifest, "name", json_object_new_string(name), trace);
     if (!maage_status_failed(result)) result = maage_instance_member(instance->manifest, "clientBuildId", json_object_new_string(build), trace);
+    if (!maage_status_failed(result)) result = maage_instance_member(instance->manifest, "clientArguments", json_object_new_string(arguments), trace);
     if (maage_status_failed(result)) goto done;
     folders = json_object_new_object();
     result = maage_instance_member(instance->manifest, "folders", folders, trace);
@@ -567,21 +577,24 @@ static maage_status maage_instance_admin(maage_instance *instance,
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_INSTANCE, MAAGE_OPERATION_ACQUIRE);
 }
 maage_status maage_instance_update(maage_instance *instance, const char *name,
-    const char *build, char error[256], maage_status_trace *trace)
+    const char *build, const char *arguments, char error[256], maage_status_trace *trace)
 {
     maage_instance *fresh;
     maage_storage_lock *lock;
     maage_status result, closed;
     if (error) error[0] = 0;
-    if (!maage_instance_text(name, 96) || !maage_instance_build(build)) return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_OPERATION_UPDATE, error, "Instance names or Client build identifiers are invalid.", trace);
+    if (!maage_instance_text(name, 96) || !maage_instance_build(build) || !arguments ||
+        (*arguments && !maage_instance_text(arguments, MAAGE_INSTANCE_ARGUMENTS_CAPACITY))) return MAAGE_INSTANCE_ERROR(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_OPERATION_UPDATE, error, "Instance names, Client build identifiers or arguments are invalid.", trace);
     result = maage_instance_admin(instance, &lock, &fresh, error, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_INSTANCE, MAAGE_OPERATION_UPDATE);
-    if (!strcmp(fresh->info.name, name) && !strcmp(fresh->info.client_build, build))
+    if (!strcmp(fresh->info.name, name) && !strcmp(fresh->info.client_build, build) &&
+        !strcmp(fresh->info.client_arguments, arguments))
         result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     else {
         result = maage_instance_member(fresh->manifest, "name", json_object_new_string(name), trace);
         if (!maage_status_failed(result)) result = maage_instance_member(fresh->manifest, "clientBuildId", json_object_new_string(build), trace);
+        if (!maage_status_failed(result)) result = maage_instance_member(fresh->manifest, "clientArguments", json_object_new_string(arguments), trace);
         if (!maage_status_failed(result)) result = maage_instance_decode(fresh, error, trace);
         if (!maage_status_failed(result)) result = maage_instance_manifest_write(fresh, error, trace);
         if (!maage_status_failed(result)) result = maage_instance_adopt(instance, fresh);

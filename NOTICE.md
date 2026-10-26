@@ -120,6 +120,15 @@ Used for native graphics rendering on supported platforms.
 [Official Vulkan Headers](https://github.com/KhronosGroup/Vulkan-Headers)  
 [Official Vulkan Loader](https://github.com/KhronosGroup/Vulkan-Loader)
 
+### MoltenVK
+
+Developed by The Brenwill Workshop and contributors.
+
+Statically linked into Vulkan-enabled macOS graphical executables to run Vulkan over Metal.
+
+**License:** Apache License 2.0
+[Source and Licensing Information](https://github.com/KhronosGroup/MoltenVK)
+
 ### Platform APIs and Development Tools
 
 MaaGE also uses platform APIs, SDKs, compilers, and build tools provided by Apple, Microsoft, the GNU Project, LLVM, Kitware, and other contributors.

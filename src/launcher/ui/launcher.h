@@ -12,6 +12,7 @@ typedef enum maage_launcher_page {
 typedef struct maage_installation {
     unsigned id;
     char uuid[37], name[96], client[65];
+    char arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY];
 } maage_installation;
 typedef struct maage_launcher_ui {
     maage_access *access;
@@ -41,7 +42,7 @@ typedef struct maage_launcher_ui {
 maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_assets *assets);
 maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui);
 maage_status maage_launcher_ui_save(maage_launcher_ui *ui);
-maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client);
+maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client, const char *arguments);
 maage_status maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned index);
 maage_status maage_launcher_installation_select(maage_launcher_ui *ui, unsigned index);
 maage_status maage_launcher_installation_default(maage_launcher_ui *ui, unsigned index);

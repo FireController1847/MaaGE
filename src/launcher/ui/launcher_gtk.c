@@ -114,7 +114,7 @@ static void maage_ui_account_changed(GtkComboBox *box, gpointer context)
 static void maage_ui_installation_action(GtkButton *button, gpointer context)
 {
     maage_launcher_gtk *ui = context; int action = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "action"));
-    int row = maage_ui_row(ui); GtkWidget *dialog, *entry, *area, *client; char name[128];
+    int row = maage_ui_row(ui); GtkWidget *dialog, *entry, *area, *client, *arguments, *editor_error; char name[128];
     if (action && row < 0) return;
     if (action == 4) { maage_launcher_installation_default(ui->state, (unsigned)row); maage_ui_installations_reload(ui); return; }
     if (action == 3) {
@@ -142,8 +142,22 @@ static void maage_ui_installation_action(GtkButton *button, gpointer context)
             gtk_combo_box_set_active_id(GTK_COMBO_BOX(client), id);
         }
         atk_object_set_name(gtk_widget_get_accessible(client), "Client build"); gtk_box_pack_start(GTK_BOX(area), client, FALSE, FALSE, 0);
+        maage_ui_label(area, "Client CLI arguments", NULL);
+        arguments = gtk_entry_new(); gtk_entry_set_max_length(GTK_ENTRY(arguments), MAAGE_INSTANCE_ARGUMENTS_CAPACITY - 1);
+        gtk_entry_set_text(GTK_ENTRY(arguments), action ? ui->state->installations[row].arguments : "");
+        atk_object_set_name(gtk_widget_get_accessible(arguments), "Client CLI arguments");
+        gtk_entry_set_placeholder_text(GTK_ENTRY(arguments), "Separate arguments with spaces; quote values containing spaces.");
+        gtk_box_pack_start(GTK_BOX(area), arguments, FALSE, FALSE, 0);
+        editor_error = gtk_label_new(""); gtk_label_set_line_wrap(GTK_LABEL(editor_error), TRUE);
+        gtk_box_pack_start(GTK_BOX(area), editor_error, FALSE, FALSE, 0);
+        gtk_entry_set_activates_default(GTK_ENTRY(arguments), TRUE);
         gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE); gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK); gtk_widget_show_all(area);
-        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_installation_write(ui->state, action == 1 ? row : -1, gtk_entry_get_text(GTK_ENTRY(entry)), gtk_combo_box_get_active_id(GTK_COMBO_BOX(client)));
+        while (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+            if (!maage_status_failed(maage_launcher_installation_write(ui->state, action == 1 ? row : -1,
+                    gtk_entry_get_text(GTK_ENTRY(entry)), gtk_combo_box_get_active_id(GTK_COMBO_BOX(client)),
+                    gtk_entry_get_text(GTK_ENTRY(arguments))))) break;
+            gtk_label_set_text(GTK_LABEL(editor_error), ui->state->error);
+        }
     }
     gtk_widget_destroy(dialog); maage_ui_installations_reload(ui);
 }

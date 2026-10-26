@@ -74,19 +74,21 @@ jobs:
       - name: Provision macOS application dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install json-c openssl@3 libzip libpng
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
+          brew install json-c openssl@3 libzip libpng vulkan-headers molten-vk glslang
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix):$(brew --prefix molten-vk)" >> "$GITHUB_ENV"
           test -f "$(brew --prefix json-c)/include/json-c/json.h"
           test -f "$(brew --prefix openssl@3)/include/openssl/evp.h"
           test -f "$(brew --prefix libzip)/include/zip.h"
           test -f "$(brew --prefix libpng)/include/png.h"
+          test -f "$(brew --prefix vulkan-headers)/include/vulkan/vulkan.h"
+          test -f "$(brew --prefix molten-vk)/lib/libMoltenVK.a"
           test -f "$(xcrun --sdk macosx --show-sdk-path)/usr/include/curl/curl.h"
           test -f "$(xcrun --sdk macosx --show-sdk-path)/usr/include/zlib.h"
 
       - name: Verify macOS native build dependencies
         if: runner.os == 'macOS'
         run: |
-          for tool in cc cmake ninja xcrun; do
+          for tool in cc cmake ninja xcrun glslangValidator; do
             command -v "$tool" || { echo "::error::Required build tool missing: $tool"; exit 1; }
           done
           sdk="$(xcrun --sdk macosx --show-sdk-path)"

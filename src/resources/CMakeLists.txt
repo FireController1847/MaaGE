@@ -25,6 +25,11 @@ if(MAAGE_BUILD_MINECRAFT_ASSETS)
         PRIVATE MaaGE::MinecraftAssets MaaGE::Storage maage_vorbis_decoder)
 endif()
 if(MAAGE_BUILD_IMAGE)
+    if(MAAGE_PLATFORM_MACOS)
+        # Frameworks such as Mono can bundle unrelated, older png.h headers.
+        # Keep this preference local to resource dependency discovery.
+        set(CMAKE_FIND_FRAMEWORK LAST)
+    endif()
     find_package(PNG 1.6 REQUIRED)
     add_library(maage_image STATIC image.c)
     add_library(MaaGE::Image ALIAS maage_image)

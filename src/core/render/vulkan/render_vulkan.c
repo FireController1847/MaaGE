@@ -42,10 +42,6 @@ typedef struct maage_vulkan_garbage {
     uint64_t serial;
     struct maage_vulkan_garbage *next;
 } maage_vulkan_garbage;
-typedef struct maage_vulkan_ui_vertex {
-    maage_render_ui_vertex vertex;
-    float depth;
-} maage_vulkan_ui_vertex;
 typedef struct maage_vulkan_push {
     float matrix[16], lighting[4], parameters[4];
 } maage_vulkan_push;

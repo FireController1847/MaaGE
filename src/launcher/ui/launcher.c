@@ -1,4 +1,5 @@
 #include "launcher.h"
+#include "../clients/launch.h"
 #include "maage/log.h"
 #include "../access/verify.h"
 #include <json-c/json.h>
@@ -140,14 +141,17 @@ static void maage_launcher_installation_info(maage_installation *installation,
     strcpy(installation->uuid, info->id);
     strcpy(installation->name, info->name);
     strcpy(installation->client, info->client_build);
+    strcpy(installation->arguments, info->client_arguments);
 }
-maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client)
+maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client, const char *arguments)
 {
     maage_status child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
     maage_launcher_ui previous;
     maage_instance *instance = NULL;
     char error[256];
     int created = index < 0, ok;
+    child_result = maage_client_arguments_validate(arguments, ui->error, &ui->trace);
+    if (maage_status_failed(child_result)) return child_result;
     if (!maage_launcher_name(name)) { strcpy(ui->error, "Enter a name of 1–95 UTF-8 bytes without control characters."); return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE); }
     if (ui->client_job) { strcpy(ui->error, "Wait for the Client operation to finish."); return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE); }
     if (!client) client = "";
@@ -157,13 +161,13 @@ maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index,
         if (ui->next_id >= 2147483647U) { strcpy(ui->error, "Instance identity exhausted."); return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE); }
         if (maage_status_failed(child_result = maage_launcher_reserve(ui, ui->count + 1))) { strcpy(ui->error, "Cannot allocate another Launcher installation."); return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE); }
         previous = *ui;
-        if (maage_status_failed(child_result = maage_instance_create(ui->root, name, client, &instance, ui->error, &ui->trace))) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
+        if (maage_status_failed(child_result = maage_instance_create(ui->root, name, client, arguments, &instance, ui->error, &ui->trace))) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
         index = (int)ui->count++; ui->installations[index].id = ui->next_id++;
     } else {
         if ((unsigned)index >= ui->count) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
         previous = *ui;
         if (maage_status_failed(child_result = maage_instance_open(ui->root, ui->installations[index].uuid, 0, &instance, ui->error, &ui->trace)) ||
-            maage_status_failed(child_result = maage_instance_update(instance, name, client, ui->error, &ui->trace))) {
+            maage_status_failed(child_result = maage_instance_update(instance, name, client, arguments, ui->error, &ui->trace))) {
             maage_instance_close(instance); return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
         }
     }
@@ -409,7 +413,7 @@ maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access,
         if (file_present) { strcpy(ui->error, "No instance references remain; recreate Launcher preferences."); goto failed; }
         if (maage_status_failed(child_result = maage_launcher_reserve(ui, 1))) { strcpy(ui->error, "Cannot allocate initial Launcher installation."); goto failed; }
         if (maage_status_failed(child_result = maage_instance_create(ui->root, "Default Installation",
-                "", &instance, ui->error, &ui->trace))) goto failed;
+                "", "", &instance, ui->error, &ui->trace))) goto failed;
         ui->count = 1; ui->installations[0].id = 1;
         maage_launcher_installation_info(&ui->installations[0], instance);
         maage_instance_close(instance); instance = NULL;
@@ -487,7 +491,7 @@ static maage_status maage_launcher_installation_reassign(maage_launcher_ui *ui, 
     maage_instance *instance = NULL;
     int ok;
     if (maage_status_failed(child_result = maage_instance_open(ui->root, ui->installations[index].uuid, 0, &instance, ui->error, &ui->trace))) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
-    ok = !maage_status_failed(child_result = maage_instance_update(instance, maage_instance_get_info(instance)->name, client, ui->error, &ui->trace));
+    ok = !maage_status_failed(child_result = maage_instance_update(instance, maage_instance_get_info(instance)->name, client, maage_instance_get_info(instance)->client_arguments, ui->error, &ui->trace));
     if (ok) maage_launcher_installation_info(&ui->installations[index], instance);
     maage_instance_close(instance); return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(((ok) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVALID_STATE), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
 }

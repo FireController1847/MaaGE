@@ -57,6 +57,11 @@ MaaGE uses **CMake 3.21+** and a supported C compiler. Build requirements vary d
 - Xcode Command Line Tools, including Apple Clang.
 - Ninja for the default CMake presets.
 - Apple SDK frameworks for AppKit, Metal, and QuartzCore.
+- Vulkan headers, host `glslc` or `glslangValidator`, and the `libMoltenVK.a`
+  static archive for the default Vulkan-enabled build. A Vulkan SDK can supply
+  these; Homebrew's `vulkan-headers`, `glslang`, and `molten-vk` packages are another
+  option. MoltenVK is linked into the graphical executables; no separate MoltenVK
+  dylib or Vulkan loader is required at runtime.
 - Homebrew or another package manager for third-party libraries.
 
 **Windows**
@@ -121,6 +126,27 @@ cmake --build --preset windows-msvc-debug
 ```
 
 When using vcpkg, configure CMake with the appropriate `CMAKE_TOOLCHAIN_FILE` path.
+
+### VS Code and Vulkan
+
+Vulkan compilation defaults to enabled on macOS, Windows, and Linux. Metal remains
+the preferred macOS renderer; AUTO tries Vulkan next, and `--renderer=vulkan`
+selects it explicitly. To build without Vulkan, set `MAAGE_ENABLE_VULKAN=OFF`:
+
+```sh
+cmake --preset debug -DMAAGE_ENABLE_VULKAN=OFF
+```
+
+In VS Code with CMake Tools, use **CMake: Select Configure Preset** to select
+`debug` or `release`, then **CMake: Delete Cache and Reconfigure** to discard an
+older cached Vulkan setting. No extra enable flag is needed. Explicit preset or
+user-preset cache variables still override the default. VS Code's configure
+environment must expose the Vulkan SDK through `VULKAN_SDK`, or the equivalent
+headers/libraries/tools through its normal search paths.
+`MAAGE_MOLTENVK_STATIC_LIBRARY` can select a target-compatible macOS static archive
+explicitly. Release builds retain size optimization and dead stripping; prebuilt
+MoltenVK archives benefit from further cross-library LTO only if they contain
+compatible compiler bitcode. Final size depends on the archive and reachable code.
 
 ### Headless Server Builds
 

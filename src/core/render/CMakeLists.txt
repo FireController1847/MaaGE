@@ -5,11 +5,11 @@ target_include_directories(maage_render PUBLIC "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(maage_render PUBLIC MaaGE::Window PRIVATE MaaGE::Log)
 
 set(MAAGE_DEFAULT_VULKAN OFF)
-if(MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX)
+if(MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX OR MAAGE_PLATFORM_MACOS)
     set(MAAGE_DEFAULT_VULKAN ON)
 endif()
 option(MAAGE_ENABLE_METAL "Build native Metal on macOS" ${MAAGE_PLATFORM_MACOS})
-option(MAAGE_ENABLE_VULKAN "Build Vulkan on Windows/Linux" ${MAAGE_DEFAULT_VULKAN})
+option(MAAGE_ENABLE_VULKAN "Build Vulkan (statically linked MoltenVK on macOS)" ${MAAGE_DEFAULT_VULKAN})
 option(MAAGE_ENABLE_OPENGL "Build modern OpenGL when its system SDK is available" ON)
 option(MAAGE_ENABLE_OPENGL_LEGACY "Build OpenGL 1.1 compatibility when available" ON)
 option(MAAGE_ENABLE_SOFTWARE "Build the portable CPU framebuffer renderer" ON)
@@ -46,11 +46,37 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
         "${MAAGE_QUARTZCORE_FRAMEWORK}" "${MAAGE_RENDER_APPKIT_FRAMEWORK}"
         "${MAAGE_METAL_PERFORMANCE_SHADERS_FRAMEWORK}" MaaGE::Thread)
 endif()
-if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
+if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX OR MAAGE_PLATFORM_MACOS) AND MAAGE_ENABLE_VULKAN)
     # Required for Vulkan-enabled builds: never silently drop the native backend.
     if(MAAGE_PLATFORM_WINDOWS)
         find_package(VulkanHeaders CONFIG REQUIRED)
         set(MAAGE_VULKAN_TARGET Vulkan::Headers)
+    elseif(MAAGE_PLATFORM_MACOS)
+        # Link the archive directly so no loader or adjacent runtime is needed.
+        find_path(MAAGE_VULKAN_INCLUDE_DIR vulkan/vulkan.h
+            HINTS "$ENV{VULKAN_SDK}/include" REQUIRED)
+        find_file(MAAGE_MOLTENVK_STATIC_LIBRARY NAMES libMoltenVK.a
+            HINTS "$ENV{VULKAN_SDK}/lib" PATH_SUFFIXES lib REQUIRED)
+        if(NOT EXISTS "${MAAGE_MOLTENVK_STATIC_LIBRARY}" OR IS_DIRECTORY "${MAAGE_MOLTENVK_STATIC_LIBRARY}"
+                OR NOT MAAGE_MOLTENVK_STATIC_LIBRARY MATCHES "\\.a$")
+            message(FATAL_ERROR "MAAGE_MOLTENVK_STATIC_LIBRARY must identify a target-compatible MoltenVK static archive.")
+        endif()
+        add_library(maage_vulkan_moltenvk STATIC IMPORTED)
+        set_target_properties(maage_vulkan_moltenvk PROPERTIES
+            IMPORTED_LOCATION "${MAAGE_MOLTENVK_STATIC_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${MAAGE_VULKAN_INCLUDE_DIR}")
+        # MoltenVK is implemented in C++/Objective-C, behind its C Vulkan ABI.
+        # System runtime linkage does not require enabling C++ for MaaGE sources.
+        find_library(MAAGE_VULKAN_CXX_LIBRARY c++ REQUIRED)
+        find_library(MAAGE_VULKAN_OBJC_LIBRARY objc REQUIRED)
+        set_property(TARGET maage_vulkan_moltenvk APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+            "${MAAGE_VULKAN_CXX_LIBRARY}" "${MAAGE_VULKAN_OBJC_LIBRARY}")
+        foreach(MAAGE_VULKAN_FRAMEWORK Metal Foundation QuartzCore CoreGraphics IOSurface IOKit AppKit)
+            find_library(MAAGE_VULKAN_${MAAGE_VULKAN_FRAMEWORK}_FRAMEWORK "${MAAGE_VULKAN_FRAMEWORK}" REQUIRED)
+            set_property(TARGET maage_vulkan_moltenvk APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+                "${MAAGE_VULKAN_${MAAGE_VULKAN_FRAMEWORK}_FRAMEWORK}")
+        endforeach()
+        set(MAAGE_VULKAN_TARGET maage_vulkan_moltenvk)
     else()
         find_package(Vulkan REQUIRED)
         set(MAAGE_VULKAN_TARGET Vulkan::Vulkan)
@@ -116,6 +142,13 @@ if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
     target_link_libraries(maage_render_vulkan PRIVATE ${MAAGE_VULKAN_TARGET})
     if(MAAGE_PLATFORM_WINDOWS)
         target_compile_definitions(maage_render_vulkan PRIVATE MAAGE_RENDER_WIN32)
+    elseif(MAAGE_PLATFORM_MACOS)
+        enable_language(OBJC)
+        set_target_properties(maage_render_vulkan PROPERTIES
+            OBJC_STANDARD 99 OBJC_STANDARD_REQUIRED ON OBJC_EXTENSIONS OFF)
+        target_sources(maage_render_vulkan PRIVATE vulkan/surface_macos.m)
+        target_compile_definitions(maage_render_vulkan PRIVATE MAAGE_RENDER_COCOA)
+        target_compile_options(maage_render_vulkan PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>")
     else()
         if(MAAGE_WINDOW_ENABLE_X11)
             find_package(X11 REQUIRED)

@@ -227,13 +227,13 @@ static NSTableView *maage_ui_navigation_table(void)
     name.accessibilityLabel = @"Installation name";
     /* NSAlert sizes its accessory from its frame. An unframed stack collapses
      * here even when its arranged controls were constructed with frames. */
-    NSView *editor = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 110)];
+    NSView *editor = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 200)];
     NSTextField *nameLabel = [NSTextField labelWithString:@"Installation name"];
-    nameLabel.frame = NSMakeRect(0, 90, 420, 16); [editor addSubview:nameLabel];
-    name.frame = NSMakeRect(0, 60, 420, 24); [editor addSubview:name];
+    nameLabel.frame = NSMakeRect(0, 180, 420, 16); [editor addSubview:nameLabel];
+    name.frame = NSMakeRect(0, 150, 420, 24); [editor addSubview:name];
     NSTextField *clientLabel = [NSTextField labelWithString:@"Client build"];
-    clientLabel.frame = NSMakeRect(0, 32, 420, 18); [editor addSubview:clientLabel];
-    NSPopUpButton *client = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 420, 26)];
+    clientLabel.frame = NSMakeRect(0, 122, 420, 18); [editor addSubview:clientLabel];
+    NSPopUpButton *client = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 90, 420, 26)];
     [client addItemWithTitle:@"Client selection required"]; client.lastItem.representedObject = @"";
     const char *selectedClient = row >= 0 && sender.tag ? self.state->installations[row].client : "";
     for (unsigned i = 0; i < self.state->clients->count; ++i) {
@@ -245,11 +245,21 @@ static NSTableView *maage_ui_navigation_table(void)
         [client addItemWithTitle:@"Referenced Client missing (keep reference)"]; client.lastItem.representedObject = @(selectedClient); [client selectItem:client.lastItem];
     }
     client.accessibilityLabel = @"Client build"; [editor addSubview:client]; alert.accessoryView = editor;
+    NSTextField *argumentsLabel = [NSTextField labelWithString:@"Client CLI arguments"];
+    argumentsLabel.frame = NSMakeRect(0, 62, 420, 18); [editor addSubview:argumentsLabel];
+    NSTextField *arguments = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 32, 420, 24)];
+    arguments.stringValue = row >= 0 && sender.tag ? @(self.state->installations[row].arguments) : @"";
+    arguments.accessibilityLabel = @"Client CLI arguments"; [editor addSubview:arguments];
+    NSTextField *hint = [NSTextField labelWithString:@"Separate arguments with spaces; quote values containing spaces."];
+    hint.font = [NSFont systemFontOfSize:11]; hint.frame = NSMakeRect(0, 6, 420, 18); [editor addSubview:hint];
     [alert addButtonWithTitle:@"Save"]; [alert addButtonWithTitle:@"Cancel"];
     [alert.window setInitialFirstResponder:name];
-    if ([alert runModal] == NSAlertFirstButtonReturn) {
-        maage_launcher_installation_write(self.state, creating ? -1 : (int)row, name.stringValue.UTF8String, [client.selectedItem.representedObject UTF8String]);
-        [self reloadInstallations];
+    while ([alert runModal] == NSAlertFirstButtonReturn) {
+        if (!maage_status_failed(maage_launcher_installation_write(self.state, creating ? -1 : (int)row,
+                name.stringValue.UTF8String, [client.selectedItem.representedObject UTF8String], arguments.stringValue.UTF8String))) {
+            [self reloadInstallations]; break;
+        }
+        alert.informativeText = @(self.state->error);
     }
 }
 - (void)removeInstallation:(id)sender

@@ -121,7 +121,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->audio_volume[4] = MAAGE_CLIENT_AUDIO_DEFAULT_WEATHER;
     ui->audio_volume[5] = MAAGE_CLIENT_AUDIO_DEFAULT_MUSIC;
     ui->audio_volume[6] = MAAGE_CLIENT_AUDIO_DEFAULT_UI;
-    ui->vsync_supported = maage_status_code(maage_renderer_set_vsync(renderer, 1)) == MAAGE_STATUS_SUCCESS;
+    ui->vsync_supported = maage_status_is_success(maage_renderer_set_vsync(renderer, 1));
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;
     result = maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas, trace);
@@ -315,7 +315,7 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     } }
     if (ui->vsync_supported && ui->vsync != options->vsync) {
         result = maage_renderer_set_vsync(ui->renderer, options->vsync);
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
+        if (!maage_status_is_success(result)) {
             if (maage_status_code(result) == MAAGE_STATUS_NOT_IMPLEMENTED ||
                 maage_status_code(result) == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)
                 ui->vsync_supported = 0;
