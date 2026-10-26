@@ -1,8 +1,10 @@
 # Visual Fidelity Implementation
 
-This pass refines existing content against Minecraft Java Edition 1.7.10.
-Implementation and compilation are complete; in-game appearance remains
-unverified. No applications, tests, benchmarks or GitHub Actions were executed.
+This document records content refinements against Minecraft Java Edition 1.7.10
+and the shared Metal/Vulkan rendering architecture. The original fidelity pass
+compiled on macOS; the subsequent renderer consolidation has not been compiled
+or executed. In-game appearance remains unverified. No applications, tests,
+benchmarks or GitHub Actions were executed.
 
 ## Reference Evidence
 
@@ -88,18 +90,50 @@ texture decoding was added. Animation and lighting use uniforms; held geometry
 uploads only on item changes. Translucent index copies are owned per frame slot;
 distance sorting refreshes after camera travel rather than every mouse rotation.
 
-Client advances to `0.1.0-alpha.35`; Server to `1.0.0-alpha.10`. Earlier worlds
+The original fidelity pass advanced Client to `0.1.0-alpha.35` and Server to
+`1.0.0-alpha.10`. Earlier worlds
 containing torch metadata 0 are rejected: recreate that disposable development
 data. No migration was added. Stored lighting is recalculated on load.
+
+## Shared Primary Rendering
+
+Metal and Vulkan consume the same indexed world, UI, scene, foreground and
+animation contracts. Shared portable C groups solid/cutout, translucent and
+multiply indices, prepares triangle centers, derives camera origin, and orders
+transparent meshes/triangles. Sorting updates after half a block of camera
+travel; each backend owns retired-frame index copies. Frame planning and
+transient capacity growth are shared; native command encoding remains separate.
+
+Native MSL and GLSL include authoritative material IDs, animation and nonlinear
+lighting equations. Metal embeds MSL for native compilation. Vulkan builds
+SPIR-V with a host `glslc` or `glslangValidator` and embeds it into the executable;
+no external shader files are required at runtime. Windows vcpkg provisions host
+glslang tools; Linux requires shader tools alongside Vulkan headers/loader.
+Metal-only and headless builds do not require Vulkan shader tools.
+
+The primary backends use the same straight-alpha and additive batches, material
+depth rules, atlas animation, independent foreground depth and projective
+panorama inputs. Metal retains MPS Gaussian blur; Vulkan uses separable GPU
+Gaussian passes with shared sigma and edge clamping. Native resource handling
+and presentation differ: Metal retains its bounded asynchronous presenter;
+Vulkan bounds command/fence slots and swapchain image synchronization. Vulkan
+VSync selects FIFO; disabling prefers supported MAILBOX, then IMMEDIATE, with
+FIFO as the required fallback. Hardware backpressure bounds uncapped work.
+Vulkan requires KHR or EXT swapchain/surface maintenance1 and its present-fence
+feature to retire presentation resources safely. Devices without that capability
+return an unsupported-system result. Ordinary resize preserves pipelines when
+the surface format is unchanged. UI copies and sorted indices belong to retired
+frame slots; immutable texture/mesh destruction defers GPU release until completion.
 
 ## Build Results and Remaining Limits
 
 macOS ARM64 Debug and Release Client/Server compile and link successfully.
 A separate Release headless Server builds with Client, Launcher, Window and
-Render disabled. Compiled macOS OpenGL/software adapters retain their existing
-capabilities; gameplay mesh support remains Metal-only. Windows/Linux and Vulkan
-were not compiled here. Existing unused helper/initializer and duplicate-library
-warnings remain.
+Render disabled. These results predate the shared renderer changes. Compiled
+macOS OpenGL/software adapters retain their existing capabilities. The current
+Metal/Vulkan changes have not been configured or compiled on any platform;
+Windows/Linux and Vulkan remain uncompiled here. Existing historical unused
+helper/initializer and duplicate-library warnings were not rechecked.
 
 The shader source is embedded by the build. Standalone `xcrun metal` compilation
 could not run because the optional Metal Toolchain is absent; native shader

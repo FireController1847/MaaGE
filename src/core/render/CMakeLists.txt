@@ -1,4 +1,4 @@
-add_library(maage_render STATIC render.c)
+add_library(maage_render STATIC render.c render_shared.c)
 add_library(MaaGE::Render ALIAS maage_render)
 maage_configure_portable_target(maage_render)
 target_include_directories(maage_render PUBLIC "${PROJECT_SOURCE_DIR}/include")
@@ -28,9 +28,11 @@ if(MAAGE_PLATFORM_MACOS AND MAAGE_ENABLE_METAL)
     # command-line-tools installations need no optional offline Metal toolchain.
     add_custom_command(OUTPUT "${MAAGE_METAL_GENERATED}.h"
         COMMAND "${CMAKE_COMMAND}" "-DMAAGE_METAL_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/metal/mesh.metal"
+            "-DMAAGE_MATERIAL_SOURCE=${PROJECT_SOURCE_DIR}/include/maage/geometry_materials.h"
             "-DMAAGE_METAL_HEADER=${MAAGE_METAL_GENERATED}.h"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/metal/embed_shader.cmake"
-        DEPENDS metal/mesh.metal metal/embed_shader.cmake VERBATIM)
+        DEPENDS metal/mesh.metal metal/embed_shader.cmake render_shader_common.h render_shader_defs.h
+            "${PROJECT_SOURCE_DIR}/include/maage/geometry_materials.h" VERBATIM)
     target_sources(maage_render PRIVATE metal/render_metal.m "${MAAGE_METAL_GENERATED}.h")
     # Apple's Metal Performance Shaders SDK headers use C99+ constructs such
     # as inline. The shared renderer is C90-first, so isolate this language
@@ -53,9 +55,51 @@ if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX) AND MAAGE_ENABLE_VULKAN)
         find_package(Vulkan REQUIRED)
         set(MAAGE_VULKAN_TARGET Vulkan::Vulkan)
     endif()
-    add_library(maage_render_vulkan OBJECT vulkan/render_vulkan.c)
+    # Compile native GLSL once at build time and embed the resulting SPIR-V.
+    # Compilers run on the build host even when Vulkan targets are cross-compiled.
+    set(MAAGE_VULKAN_TOOL_HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
+    if(VCPKG_INSTALLED_DIR AND VCPKG_HOST_TRIPLET)
+        list(APPEND MAAGE_VULKAN_TOOL_HINTS
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/glslang")
+    endif()
+    find_program(MAAGE_GLSLC NAMES glslc HINTS ${MAAGE_VULKAN_TOOL_HINTS}
+        NO_CMAKE_FIND_ROOT_PATH)
+    find_program(MAAGE_GLSLANG NAMES glslangValidator glslang HINTS ${MAAGE_VULKAN_TOOL_HINTS}
+        NO_CMAKE_FIND_ROOT_PATH)
+    if(NOT MAAGE_GLSLC AND NOT MAAGE_GLSLANG)
+        message(FATAL_ERROR "Vulkan shaders require a host glslc or glslangValidator executable. "
+            "Install Vulkan SDK shader tools or glslang-tools; Windows vcpkg provisions glslang[tools].")
+    endif()
+    set(MAAGE_VULKAN_GENERATED "${PROJECT_BINARY_DIR}/generated/vulkan")
+    set(MAAGE_VULKAN_SPIRV)
+    foreach(MAAGE_SHADER mesh.vert mesh.frag ui.vert ui.frag fullscreen.vert blur.frag)
+        string(REPLACE "." "_" MAAGE_SHADER_NAME "${MAAGE_SHADER}")
+        set(MAAGE_SHADER_OUTPUT "${MAAGE_VULKAN_GENERATED}/${MAAGE_SHADER_NAME}.spv")
+        if(MAAGE_GLSLC)
+            set(MAAGE_SHADER_COMMAND "${MAAGE_GLSLC}" --target-env=vulkan1.0 -O)
+        else()
+            set(MAAGE_SHADER_COMMAND "${MAAGE_GLSLANG}" --target-env vulkan1.0 -V)
+        endif()
+        add_custom_command(OUTPUT "${MAAGE_SHADER_OUTPUT}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${MAAGE_VULKAN_GENERATED}"
+            COMMAND ${MAAGE_SHADER_COMMAND} "-I${PROJECT_SOURCE_DIR}/include"
+                "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/${MAAGE_SHADER}"
+                -o "${MAAGE_SHADER_OUTPUT}"
+            DEPENDS "vulkan/shaders/${MAAGE_SHADER}" render_shader_common.h render_shader_defs.h
+                "${PROJECT_SOURCE_DIR}/include/maage/geometry_materials.h" VERBATIM)
+        list(APPEND MAAGE_VULKAN_SPIRV "${MAAGE_SHADER_OUTPUT}")
+    endforeach()
+    set(MAAGE_VULKAN_HEADER "${MAAGE_VULKAN_GENERATED}/maage_vulkan_shaders.h")
+    add_custom_command(OUTPUT "${MAAGE_VULKAN_HEADER}"
+        COMMAND "${CMAKE_COMMAND}" "-DMAAGE_VULKAN_DIRECTORY=${MAAGE_VULKAN_GENERATED}"
+            "-DMAAGE_VULKAN_HEADER=${MAAGE_VULKAN_HEADER}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/embed_shaders.cmake"
+        DEPENDS ${MAAGE_VULKAN_SPIRV} vulkan/embed_shaders.cmake VERBATIM)
+    add_library(maage_render_vulkan OBJECT vulkan/render_vulkan.c vulkan/vulkan_platform.c
+        "${MAAGE_VULKAN_HEADER}")
     set_target_properties(maage_render_vulkan PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-    target_include_directories(maage_render_vulkan PRIVATE "${PROJECT_SOURCE_DIR}/include")
+    target_include_directories(maage_render_vulkan PRIVATE "${PROJECT_SOURCE_DIR}/include"
+        "${MAAGE_VULKAN_GENERATED}")
     target_link_libraries(maage_render_vulkan PRIVATE ${MAAGE_VULKAN_TARGET})
     if(MAAGE_PLATFORM_WINDOWS)
         target_compile_definitions(maage_render_vulkan PRIVATE MAAGE_RENDER_WIN32)

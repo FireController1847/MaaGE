@@ -509,7 +509,7 @@ current display in the same Space. Keep controls clear of the camera cutout.
 
 Rendering is a reusable Core subsystem consumed through a C90, opaque,
 backend-independent API. Direct Vulkan on Windows/Linux and genuine native Apple
-Metal on macOS are the primary backends; Metal is the current development focus.
+Metal on macOS are the primary backends, sharing the same rendering semantics.
 Keep rendering separate from window lifecycle, applications, and gameplay;
 renderers borrow windows, which must outlive
 them. Native-content ownership is acquired exclusively through window interop;
@@ -524,7 +524,7 @@ requirements in backend targets; portable headers and common implementation stay
 
 | Project priority | Renderer | Role |
 | --- | --- | --- |
-| Primary | Native Metal | Main macOS development focus. |
+| Primary | Native Metal | Main macOS renderer. |
 | Primary | Vulkan | Main Windows/Linux renderer. |
 | Secondary | Modern OpenGL | Compatibility fallback. |
 | Secondary | Software | CPU fallback and portability. |
@@ -535,12 +535,20 @@ significantly expand, optimize, refactor, or chase feature parity in lower-prior
 for a small shared-interface adjustment, or required to fix compilation broken by
 the current task. Metal/Vulkan guide modern capabilities; optional capabilities
 let older backends support relevant subsets without unnecessary constraints or
-emulation. **Modularity is mandatory; feature parity is not.** Keep backend logic
-isolated and avoid speculative interfaces for hypothetical legacy requirements.
+emulation. Preserve Metal/Vulkan feature parity through shared C90 preparation
+and shader semantics; secondary backends need only their implemented subsets.
+Keep native GPU logic isolated and avoid speculative legacy interfaces.
 
 - **Vulkan:** isolate API types, device management, swapchains, pipelines, command
   recording, and synchronization inside the backend, away from generic engine and
-  gameplay interfaces.
+  gameplay interfaces. Bound frames, command resources and transient CPU copies;
+  poll retired GPU slots/acquire availability without blocking native events.
+  VSync uses FIFO; disabling prefers supported MAILBOX, then IMMEDIATE, then FIFO,
+  with GPU/presentation backpressure instead of a software FPS ceiling. Retire
+  resources only after pending GPU and presentation uses are accounted for.
+  Require KHR or EXT swapchain/surface maintenance1 present fences; reject
+  devices without this completion capability rather than assuming queue idle
+  proves presentation-resource retirement.
 - **Metal:** prepare the initial frame before revealing the Launcher window; match
   native backing to the initial clear color and synchronize the first drawable
   with Core Animation. Normal presentation continues to skip hidden windows.
@@ -590,10 +598,15 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   replacement must be demonstrable, not merely theoretical.
 - The indexed textured-mesh commands use neutral CPU geometry, shared owned RGBA8
   atlas resources, batched presentation and column-major transforms (clip depth
-  0..1). Advertise `TEXTURED_MESH` only for implemented commands: currently Metal.
-  Other families retain their existing clear/presentation functionality and return
-  unsupported for gameplay mesh commands. MSL lives in an original `.metal` asset,
-  embedded at build time and compiled by native Metal at initialization.
+  0..1). Metal and Vulkan consume shared material grouping, camera/depth ordering,
+  translucent triangle preparation/sorting, frame plans and transient-buffer
+  growth under `src/core/render/`. Keep only native GPU ownership, upload and
+  encoding in each adapter; do not restore duplicate CPU algorithms.
+  Material IDs, vertex layouts, animation, alpha and nonlinear lighting equations
+  have authoritative shared definitions. Native MSL is embedded at build time
+  and compiled by Metal; native GLSL compiles to embedded SPIR-V using a host
+  `glslc` or `glslangValidator`. Missing shader tools fail configuration. Windows
+  vcpkg provisions host glslang tools; Metal-only/headless builds need none.
 - Mesh vertices carry numeric opaque, cutout, translucent or multiply-overlay
   semantics and optional immutable-atlas animation coordinates. Keep solid/cutout
   depth writes separate from sorted translucent depth reads. RGBA is straight
@@ -608,8 +621,12 @@ isolated and avoid speculative interfaces for hypothetical legacy requirements.
   Fancy leaf culling distinct and animation independent of chunk remeshing.
 - Indexed UI batches use backend-neutral logical positions, atlas UVs and RGBA,
   drawn after world geometry with alpha blending and depth disabled, then one
-  presentation. Advertise `UI` only where implemented: currently Metal. Other
-  families explicitly reject unsupported UI commands; no feature-parity claim.
+  presentation. Metal/Vulkan share world, UI and scene contracts, including
+  projective panorama sampling, Gaussian blur, foreground depth and additive
+  environmental sprites. OpenGL/Software retain their existing clear/presentation
+  commands and reject unsupported gameplay/UI requests. The consolidated primary
+  backends require programmer compilation and runtime/visual verification; source
+  integration alone does not establish parity.
 - Keep high-level voxel rendering separate from the low-level graphics device API.
   Chunk meshing, visibility, world simulation, and content must not depend directly
   on graphics APIs. Headless operation must not acquire graphics dependencies;
@@ -896,8 +913,9 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   them; vcpkg manifest installation runs during CMake toolchain initialization.
   Keep them platform-specific and minimal, pin versions where practical,
   and fail clearly rather than disabling required applications or backends.
-  Default graphics builds require Vulkan headers on Windows, headers/loader on Linux and native
-  Metal/AppKit/QuartzCore from the Apple SDK on macOS; do not install MoltenVK.
+  Default graphics builds require Vulkan headers and host GLSL tools on Windows,
+  headers/loader and host GLSL tools on Linux, and native Metal/AppKit/QuartzCore
+  from the Apple SDK on macOS; do not install MoltenVK.
 - Windows configuration discovers vcpkg from its environment/PATH or Visual Studio
   before `project()`; explicit toolchains take precedence and `MAAGE_USE_VCPKG=OFF`
   disables discovery. The pinned manifest selects dependencies from enabled modules,
@@ -1029,7 +1047,7 @@ validation/spawning runs on the Client worker; prevent duplicate launches and
 removal of the active build. Closing the Launcher releases monitoring without
 terminating the Client. The Client owns its native viewport and existing renderer
 selection; metadata queries bypass both. Gameplay uses the portable persistent
-World and Metal mesh renderer. Dedicated Server builds/registry/process management are a separate
+World and the selected primary mesh renderer. Dedicated Server builds/registry/process management are a separate
 future Launcher milestone; software versions do not define protocol compatibility.
 
 ## Development roadmap

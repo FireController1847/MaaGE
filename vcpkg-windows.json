@@ -19,8 +19,11 @@
       "dependencies": ["libpng"]
     },
     "vulkan": {
-      "description": "Vulkan headers (Windows loads the installed system runtime)",
-      "dependencies": ["vulkan-headers"]
+      "description": "Vulkan headers and host shader compiler (system runtime loads dynamically)",
+      "dependencies": [
+        "vulkan-headers",
+        {"name": "glslang", "host": true, "default-features": false, "features": ["tools"]}
+      ]
     }
   }
 }

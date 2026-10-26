@@ -1,5 +1,10 @@
 #include <metal_stdlib>
 using namespace metal;
+#define MAAGE_SHADER_VEC2 float2
+#define MAAGE_SHADER_VEC3 float3
+#define MAAGE_SHADER_MOD fmod
+#define MAAGE_SHADER_SATURATE(value) saturate(value)
+#include "../render_shader_common.h"
 
 /* Packed fields match maage_mesh_vertex without graphics types in the C API. */
 struct maage_vertex {
@@ -26,14 +31,7 @@ vertex maage_fragment maage_mesh_vertex_shader(uint index [[vertex_id]],
     maage_fragment result;
     result.position = view_projection * float4(vertices[index].position, 1.0);
     result.uv = vertices[index].uv;
-    float3 animation = vertices[index].animation;
-    if (abs(animation.y) > 1.0 && animation.z > 0.0) {
-        float count = abs(animation.y);
-        float period = animation.y < 0.0 ? count * 2.0 - 2.0 : count;
-        float frame = fmod(floor(animation_tick / animation.z), period);
-        if (frame >= count) frame = period - frame;
-        result.uv.y += frame * animation.x;
-    }
+    result.uv.y += maage_shader_animation(vertices[index].animation, animation_tick);
     result.color = vertices[index].color;
     result.light = vertices[index].light;
     result.material = vertices[index].material;
@@ -45,21 +43,12 @@ fragment float4 maage_mesh_fragment_shader(maage_fragment input [[stage_in]],
     constexpr sampler pixels(coord::normalized, address::clamp_to_edge,
         filter::nearest, mip_filter::none);
     float4 texel = atlas.sample(pixels, input.uv);
-    if (input.material == 1.0 && texel.a < 0.1) discard_fragment();
-    if (input.material == 3.0)
+    if (input.material == float(MAAGE_MESH_MATERIAL_CUTOUT) && texel.a < MAAGE_RENDER_CUTOUT_ALPHA) discard_fragment();
+    if (input.material == float(MAAGE_MESH_MATERIAL_MULTIPLY))
         return float4(mix(float3(0.5), texel.rgb * input.color.rgb, texel.a), 1.0);
     float2 level = lighting.w > 0.0 ? lighting.yz : input.light;
-    /* Nonlinear level response and warm emission, independent of daylight.
-     * Evaluate the two static channels without changing chunk light at night. */
-    float2 brightness = saturate(level) / (4.0 - 3.0 * saturate(level));
-    float sky = brightness.x * (lighting.x * 0.95 + 0.05);
-    float torch = brightness.y * 1.5;
-    float3 emission = float3(torch, torch * (torch * 0.36 + 0.64),
-        torch * (torch * torch * 0.6 + 0.4));
-    float3 ambient = float3(sky * (lighting.x * 0.65 + 0.35),
-        sky * (lighting.x * 0.65 + 0.35), sky);
-    float3 light = saturate((saturate((ambient + emission) * 0.96 + 0.03)) * 0.96 + 0.03);
-    float alpha = input.material == 0.0 ? 1.0 : texel.a * input.color.a;
+    float3 light = maage_shader_lighting(level, lighting.x);
+    float alpha = maage_shader_alpha(input.material, texel.a, input.color.a);
     return float4(texel.rgb * input.color.rgb * light, alpha);
 }
 

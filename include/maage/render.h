@@ -138,8 +138,8 @@ maage_status maage_renderer_set_foreground(maage_renderer *renderer,
 /* Presentation clock in 20 Hz ticks; caller may wrap at a common animation
  * period. No texture uploads or mesh invalidation are needed to advance it. */
 maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float tick);
-/* Prime the initial clear frame before showing a hidden window. Currently Metal
- * only; UNSUPPORTED leaves other backends unchanged. SKIPPED means no drawable
+/* Prime the initial clear frame before showing a hidden window. Metal and
+ * Vulkan support this; UNSUPPORTED leaves others unchanged. SKIPPED means no drawable
  * yet. Does not change window visibility; normal present still skips hidden windows. */
 maage_status maage_renderer_prepare_frame(maage_renderer *renderer, maage_status_trace *trace);
 /* Presents a cleared frame; automatically observes framebuffer size changes.

@@ -1,12 +1,7 @@
 #ifndef MAAGE_GEOMETRY_H
 #define MAAGE_GEOMETRY_H
 #include <stddef.h>
-/* Numeric surface behavior, constant across a triangle. Translucent surfaces
- * blend after solid/cutout geometry with depth testing and no depth writes. */
-#define MAAGE_MESH_MATERIAL_OPAQUE 0
-#define MAAGE_MESH_MATERIAL_CUTOUT 1
-#define MAAGE_MESH_MATERIAL_TRANSLUCENT 2
-#define MAAGE_MESH_MATERIAL_MULTIPLY 3
+#include "maage/geometry_materials.h"
 /* CPU geometry shared by mesh producers and graphics backends. UVs address a
  * top-left-origin straight-alpha RGBA texture; colors multiply sampled texels. */
 typedef struct maage_mesh_vertex {

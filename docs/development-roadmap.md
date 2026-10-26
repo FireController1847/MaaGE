@@ -5,12 +5,13 @@ implementation, interoperability, seed-parity or architectural requirement.
 Phases 1–5, including milestones 2.5, 2.75, 3.5 and 4.5, record retained foundations
 and historical compilation notes. The descriptions reflect the current source:
 Phase 7's shared Server owns simulation and persistence, and Phase 6 supplies
-Client audio. Current macOS ARM64 Debug/Release Launcher, Client and Server builds
-and a separate headless Release Server build compile and link. The headless build
-disables Window, Render, Launcher and Client. No applications, tests, benchmarks,
-runtime/visual/audio validation or GitHub Actions ran; Windows/Linux remain
-uncompiled here. Historical build notes below do not establish runtime correctness
-or vanilla fidelity.
+Client audio. Prior macOS ARM64 Debug/Release Launcher, Client and Server builds
+and a separate headless Release Server build compiled and linked. The headless
+build disables Window, Render, Launcher and Client. The subsequent Metal/Vulkan
+consolidation has not been configured, compiled or executed on any platform.
+No applications, tests, benchmarks, runtime/visual/audio validation or GitHub
+Actions ran; Windows/Linux remain uncompiled here. Historical build notes below
+do not establish current runtime correctness or vanilla fidelity.
 
 MaaGE is in predevelopment. There is one current implementation of generation,
 metadata/chunk serialization, Launcher preferences, packages and resource layout.
@@ -49,9 +50,15 @@ long frames cap simulation catch-up. Inactive/hidden windows use event waits.
 The player bounds, eye height, acceleration/drag/jump values and camera tuning
 remain provisional pending programmer fidelity verification.
 
-**Metal remains the only textured-mesh renderer.** Vulkan, OpenGL and Software
-preserve their existing clear/presentation paths and reject unsupported gameplay
-commands. Explicit renderer requests never switch families. Cocoa, Win32 and X11
+Metal and Vulkan now implement the same textured-mesh/UI/scene API in source.
+Shared C90 preparation groups materials and sorts translucent geometry; native
+backends own GPU resources, command encoding and presentation. Native GLSL and
+MSL consume shared animation/lighting equations and numeric definitions. Vulkan
+shader builds require host `glslc` or `glslangValidator` and embed SPIR-V; Metal
+requires neither Vulkan tooling nor runtime shader files. Compilation and visual
+parity remain unverified after this consolidation. OpenGL and Software preserve
+their existing clear/presentation paths and reject unsupported gameplay commands.
+Explicit renderer requests never switch families. Cocoa, Win32 and X11
 have native gameplay input; Wayland gameplay capture remains unsupported. X11's
 warp-relative fallback retains native pointer acceleration.
 
@@ -293,9 +300,10 @@ AppKit/Win32/GTK controls:
   native window/framebuffer scale. Columns clip independently on narrow views.
 - **Rendering:** backend-neutral indexed UI triangles carry positions, UVs and
   RGBA. UI draws after world geometry with alpha blending and depth disabled,
-  followed by one presentation. **Metal currently implements UI and textured
-  gameplay.** Vulkan/OpenGL/Software retain existing clear/presentation behavior
-  and explicitly reject unsupported UI/gameplay commands; parity is deferred.
+  followed by one presentation. Metal and Vulkan consume the same Client UI,
+  scene and foreground contracts; projective panorama, Gaussian blur and additive
+  batches remain renderer operations. OpenGL/Software retain their existing
+  clear/presentation behavior and reject unsupported UI/gameplay commands.
 - **F3:** Phase 4.5 refines this overlay into compact left/right columns with live
   gameplay observations and separately averaged performance measurements; see below.
 - **Read-only telemetry:** Client reads copied Server observations; the Server
@@ -520,7 +528,7 @@ Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
 - **Time/weather/rendering:** a persisted two-word clock advances a 24,000-tick day.
   Modal/focus pauses stop simulation while streaming continues. Seeded clear/rain/
   thunder timers and intensity transitions advance on simulation ticks. Cold/wet
-  observations select snow and deserts suppress precipitation. Metal combines static
+  observations select snow and deserts suppress precipitation. Primary GPU shaders combine static
   sky/block light channels with a frame sky factor, preserving emitted light at night
   without relighting. Existing draw submission accepts optional background/overlay
   batches for sky color, sun/moon movement/phases, bounded rain/snow and thunder flashes.
@@ -552,7 +560,8 @@ Clock/player checkpoints occur on clean shutdown; chunks save independently.
 
 macOS ARM64 Debug/Release Client and headless World/Server builds passed. No applications, tests,
 benchmarks, runtime/visual validation or GitHub Actions ran. Windows/Linux and
-runtime shader compilation remain unverified; only Metal implements gameplay drawing.
+runtime shader compilation remain unverified. Metal/Vulkan consolidation and Vulkan
+gameplay drawing were implemented subsequently and have not been compiled here.
 
 ## Phase 4.5 — Client Resilience and Operation Status
 
