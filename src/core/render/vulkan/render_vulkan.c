@@ -783,7 +783,7 @@ static maage_status maage_vulkan_upload_submit(maage_renderer *renderer, maage_v
     gpu->upload = VK_NULL_HANDLE; gpu->staging = NULL;
     return MAAGE_VULKAN_OK;
 }
-static maage_status maage_vulkan_frame(maage_renderer *renderer, const maage_window_state *state,
+static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const maage_window_state *state,
     int preparing, const maage_render_mesh *const *meshes, size_t count,
     const float *matrix, const maage_render_ui_data *ui)
 {
@@ -1092,23 +1092,23 @@ static void maage_vulkan_destroy_texture(maage_render_texture *texture)
 }
 static maage_status maage_vulkan_present(maage_renderer *renderer, const maage_window_state *state)
 {
-    return maage_vulkan_frame(renderer, state, 0, NULL, 0, NULL, NULL);
+    return maage_vulkan_render_frame(renderer, state, 0, NULL, 0, NULL, NULL);
 }
 static maage_status maage_vulkan_prepare_frame(maage_renderer *renderer, const maage_window_state *state)
 {
-    return maage_vulkan_frame(renderer, state, 1, NULL, 0, NULL, NULL);
+    return maage_vulkan_render_frame(renderer, state, 1, NULL, 0, NULL, NULL);
 }
 static maage_status maage_vulkan_draw_meshes(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const maage_window_state *state, const float view_projection[16])
 {
-    return maage_vulkan_frame(renderer, state, 0, meshes, count, view_projection, NULL);
+    return maage_vulkan_render_frame(renderer, state, 0, meshes, count, view_projection, NULL);
 }
 static maage_status maage_vulkan_draw_frame(maage_renderer *renderer,
     const maage_render_mesh *const *meshes, size_t count,
     const maage_window_state *state, const float view_projection[16], const maage_render_ui_data *ui)
 {
-    return maage_vulkan_frame(renderer, state, 0, meshes, count, view_projection, ui);
+    return maage_vulkan_render_frame(renderer, state, 0, meshes, count, view_projection, ui);
 }
 static maage_status maage_vulkan_set_vsync(maage_renderer *renderer, int enabled)
 {
