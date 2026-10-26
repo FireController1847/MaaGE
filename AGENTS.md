@@ -546,9 +546,11 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
   VSync uses FIFO; disabling prefers supported MAILBOX, then IMMEDIATE, then FIFO,
   with GPU/presentation backpressure instead of a software FPS ceiling. Retire
   resources only after pending GPU and presentation uses are accounted for.
-  Require KHR or EXT swapchain/surface maintenance1 present fences; reject
-  devices without this completion capability rather than assuming queue idle
-  proves presentation-resource retirement.
+  KHR/EXT swapchain/surface maintenance1 is optional. Use its presentation fences
+  when available; baseline Vulkan uses per-image presentation semaphores and
+  queue/device drains at replacement/shutdown, never GPU-wide waits every frame.
+  Report exact device rejection reasons and preserve the primary initialization
+  failure when all fallback backends fail.
 - **Metal:** prepare the initial frame before revealing the Launcher window; match
   native backing to the initial clear color and synchronize the first drawable
   with Core Animation. Normal presentation continues to skip hidden windows.

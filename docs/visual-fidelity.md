@@ -119,9 +119,11 @@ and presentation differ: Metal retains its bounded asynchronous presenter;
 Vulkan bounds command/fence slots and swapchain image synchronization. Vulkan
 VSync selects FIFO; disabling prefers supported MAILBOX, then IMMEDIATE, with
 FIFO as the required fallback. Hardware backpressure bounds uncapped work.
-Vulkan requires KHR or EXT swapchain/surface maintenance1 and its present-fence
-feature to retire presentation resources safely. Devices without that capability
-return an unsupported-system result. Ordinary resize preserves pipelines when
+KHR/EXT swapchain/surface maintenance1 and its presentation fences are optional.
+The baseline uses per-image presentation semaphores and drains queues/devices
+at swapchain replacement and shutdown. Maintenance1 provides explicit presentation
+retirement; [Khronos documents the baseline limitation](https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html)
+in proving terminal presentation completion through queue idle alone. Ordinary resize preserves pipelines when
 the surface format is unchanged. UI copies and sorted indices belong to retired
 frame slots; immutable texture/mesh destruction defers GPU release until completion.
 

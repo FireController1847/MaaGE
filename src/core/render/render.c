@@ -99,6 +99,7 @@ maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer
     static const maage_render_backend opengl[] = { MAAGE_RENDER_OPENGL, MAAGE_RENDER_OPENGL_LEGACY };
     maage_renderer *renderer;
     maage_status cleanup, result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    maage_status first_failure = 0;
     const maage_render_backend_api *api;
     size_t index, count = 1;
     maage_render_backend backend, single = MAAGE_RENDER_AUTO;
@@ -132,6 +133,8 @@ maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer
         api = maage_render_api(backend);
         if (!api || api->version != MAAGE_RENDER_CAPABILITIES_VERSION) {
             result = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+            maage_log_verbose("maage.render", "Renderer '%s' is not compiled with the current interface.",
+                maage_render_backend_name(backend));
             continue;
         }
         renderer->api = api;
@@ -144,8 +147,16 @@ maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer
         result = api->create(renderer);
         renderer->operation_trace = NULL;
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS &&
-            (renderer->capabilities.features & desc->required_features) != desc->required_features)
+            (renderer->capabilities.features & desc->required_features) != desc->required_features) {
             result = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+            maage_log_status(MAAGE_LOG_WARNING, "maage.render", result,
+                "Renderer '%s' lacks required capabilities 0x%08lX (available 0x%08lX).",
+                maage_render_backend_name(backend),
+                desc->required_features & ~renderer->capabilities.features,
+                renderer->capabilities.features);
+        } else if (maage_status_code(result) != MAAGE_STATUS_SUCCESS)
+            maage_log_status(MAAGE_LOG_WARNING, "maage.render", result,
+                "Renderer '%s' initialization failed.", maage_render_backend_name(backend));
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             maage_log_info("maage.render", "Selected renderer: %s", maage_render_backend_name(backend));
             *output = renderer;
@@ -156,6 +167,7 @@ maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer
             return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE);
         }
         recovered = 1;
+        if (!first_failure) first_failure = result;
         MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE);
         renderer->operation_trace = trace; renderer->trace_operation = MAAGE_OPERATION_DESTROY;
         cleanup = api->destroy(renderer);
@@ -164,9 +176,11 @@ maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer
         renderer->platform = NULL;
         renderer->api = NULL;
         renderer->refresh = 1;
+        if (maage_status_is_fatal(result)) { first_failure = result; break; }
     }
     maage_window_release_surface(renderer->window);
     free(renderer);
+    if (first_failure) result = first_failure;
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE);
 }
 maage_status maage_renderer_destroy(maage_renderer *renderer, maage_status_trace *trace)
