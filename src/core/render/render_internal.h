@@ -1,26 +1,21 @@
 #ifndef MAAGE_RENDER_INTERNAL_H
 #define MAAGE_RENDER_INTERNAL_H
-#include "maage/render.h"
+#include "render_shared.h"
 
 typedef struct maage_render_backend_api {
     maage_render_backend kind;
     maage_status (*create)(maage_renderer *renderer);
     maage_status (*destroy)(maage_renderer *renderer);
-    maage_status (*present)(maage_renderer *renderer, const maage_window_state *state);
     unsigned int version;
-    maage_status (*prepare_frame)(maage_renderer *renderer, const maage_window_state *state);
+    maage_status (*present)(maage_renderer *renderer, const maage_window_state *state);
+    maage_status (*frame)(maage_renderer *renderer, const maage_window_state *state,
+        const maage_render_frame_plan *plan);
     maage_status (*upload_geometry)(maage_renderer *renderer, maage_render_mesh *mesh,
         const maage_mesh_data *data);
     void (*destroy_mesh)(maage_render_mesh *mesh);
-    maage_status (*draw_meshes)(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count,
-        const maage_window_state *state, const float view_projection[16]);
     maage_status (*create_texture)(maage_renderer *renderer,
         maage_render_texture *texture, const maage_pixel_buffer *atlas);
     void (*destroy_texture)(maage_render_texture *texture);
-    maage_status (*draw_frame)(maage_renderer *renderer,
-        const maage_render_mesh *const *meshes, size_t count,
-        const maage_window_state *state, const float view_projection[16],
-        const maage_render_ui_data *ui);
     maage_status (*set_vsync)(maage_renderer *renderer, int enabled);
 } maage_render_backend_api;
 struct maage_render_texture {
@@ -35,6 +30,7 @@ struct maage_render_mesh {
     maage_renderer *renderer;
     maage_render_texture *texture;
     void *platform;
+    maage_render_geometry geometry;
     maage_render_mesh *next;
     maage_render_mesh *previous;
 };
@@ -46,6 +42,8 @@ struct maage_renderer {
     float clear[4], sky_light;
     const maage_render_ui_data *background, *overlay;
     const maage_render_mesh *foreground;
+    const maage_render_instance *instances;
+    size_t instance_count;
     float foreground_matrix[16];
     float foreground_light[2], animation_tick;
     int refresh;
@@ -57,6 +55,8 @@ struct maage_renderer {
     maage_render_capabilities capabilities;
     maage_render_mesh *meshes;
     maage_render_texture *textures;
+    maage_render_ordered_mesh *ordered;
+    size_t ordered_capacity;
     char device_name[256];
 };
 extern const maage_render_backend_api maage_render_metal_api;

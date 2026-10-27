@@ -32,8 +32,28 @@ MAAGE_SHADER_VEC3 maage_shader_lighting(MAAGE_SHADER_VEC2 level, float daylight)
         MAAGE_RENDER_LIGHT_GAIN + MAAGE_RENDER_LIGHT_MINIMUM);
 }
 
-float maage_shader_alpha(float material, float texel_alpha, float vertex_alpha)
+bool maage_shader_cutout(float material, float alpha)
 {
-    return material == float(MAAGE_MESH_MATERIAL_OPAQUE) ? 1.0 : texel_alpha * vertex_alpha;
+    return material == float(MAAGE_MESH_MATERIAL_CUTOUT) && alpha < MAAGE_RENDER_CUTOUT_ALPHA;
+}
+MAAGE_SHADER_VEC4 maage_shader_mesh_color(MAAGE_SHADER_VEC4 texel, MAAGE_SHADER_VEC4 color,
+    MAAGE_SHADER_VEC2 level, float material, MAAGE_SHADER_VEC4 lighting)
+{
+    if (material == float(MAAGE_MESH_MATERIAL_MULTIPLY))
+        return MAAGE_SHADER_VEC4(mix(MAAGE_SHADER_VEC3(0.5), texel.rgb * color.rgb, texel.a), 1.0);
+    MAAGE_SHADER_VEC3 light = maage_shader_lighting(lighting.w > 0.0 ? lighting.yz : level, lighting.x);
+    float alpha = material == float(MAAGE_MESH_MATERIAL_OPAQUE) ? 1.0 : texel.a * color.a;
+    return MAAGE_SHADER_VEC4(texel.rgb * color.rgb * light, alpha);
+}
+MAAGE_SHADER_VEC4 maage_shader_ui_position(MAAGE_SHADER_VEC2 position,
+    MAAGE_SHADER_VEC2 logical_size, float depth)
+{
+    MAAGE_SHADER_VEC2 point = position / logical_size;
+    return MAAGE_SHADER_VEC4((point.x * 2.0 - 1.0) * depth,
+        (1.0 - point.y * 2.0) * depth, 0.0, depth);
+}
+MAAGE_SHADER_VEC2 maage_shader_fullscreen_uv(int index)
+{
+    return MAAGE_SHADER_VEC2(float((index << 1) & 2), float(index & 2));
 }
 #endif

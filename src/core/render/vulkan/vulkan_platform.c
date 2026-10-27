@@ -193,7 +193,7 @@ static maage_status maage_vulkan_suitable(maage_renderer *renderer,
         properties.pNext = &subset; query(physical, &properties);
         if (!subset.minVertexInputBindingStrideAlignment ||
             sizeof(maage_mesh_vertex) % subset.minVertexInputBindingStrideAlignment ||
-            sizeof(maage_vulkan_ui_vertex) % subset.minVertexInputBindingStrideAlignment)
+            sizeof(maage_render_ui_gpu_vertex) % subset.minVertexInputBindingStrideAlignment)
             return maage_vulkan_unsupported(physical, "portability vertex-stride alignment is incompatible");
         /* Current pipelines need none of the optional subset features: triangle
          * lists, identity image views, zero LOD bias and no stencil/events. */

@@ -3,7 +3,7 @@
 #include "maage/image.h"
 #include "maage/pixels.h"
 #include "maage/content.h"
-#define MAAGE_CLIENT_SOURCE_COUNT 64
+#define MAAGE_CLIENT_SOURCE_COUNT (64 + MAAGE_ITEM_TEXTURE_COUNT)
 #define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
     maage_image image;
@@ -38,5 +38,7 @@ void maage_client_item_face_tint(const float grass_color[3],
 const maage_block_state_definition *maage_client_item_icon_state(
     const maage_block_registry *blocks, const maage_item_definition *item,
     unsigned int metadata);
+const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack);
+maage_texture_id maage_client_item_texture(const maage_item_definition *item, unsigned int metadata);
 maage_status maage_client_resources_destroy(maage_client_resources *resources);
 #endif

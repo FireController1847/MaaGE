@@ -1,6 +1,5 @@
 /* Native resources and encoding; shared preparation and native WSI are separate. */
 #include "vulkan_internal.h"
-#include "../render_shared.h"
 #include "maage_vulkan_shaders.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -34,7 +33,6 @@ typedef struct maage_vulkan_descriptors {
 typedef struct maage_vulkan_mesh {
     maage_vulkan_buffer vertices, indices, sorted[MAAGE_VULKAN_FRAME_SLOTS];
     unsigned long sorted_revision[MAAGE_VULKAN_FRAME_SLOTS];
-    maage_render_geometry geometry;
 } maage_vulkan_mesh;
 typedef struct maage_vulkan_garbage {
     maage_vulkan_buffer buffer;
@@ -42,9 +40,6 @@ typedef struct maage_vulkan_garbage {
     uint64_t serial;
     struct maage_vulkan_garbage *next;
 } maage_vulkan_garbage;
-typedef struct maage_vulkan_push {
-    float matrix[16], lighting[4], parameters[4];
-} maage_vulkan_push;
 typedef struct maage_vulkan_frame_data {
     maage_vulkan_buffer vertices[3], indices[3];
     maage_vulkan_image scene, depth, panorama[2];
@@ -65,8 +60,6 @@ typedef struct maage_vulkan_rendering {
     maage_vulkan_garbage *staging, *retired;
     maage_vulkan_descriptors *pools;
     maage_vulkan_frame_data frames[MAAGE_VULKAN_FRAME_SLOTS];
-    maage_render_ordered_mesh *ordered;
-    size_t ordered_capacity;
     uint64_t submitted, completed;
     unsigned long generation;
     VkFormat pipeline_format;
@@ -424,7 +417,12 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
     VkSpecializationMapEntry entry = {0, 0, sizeof(uint32_t)};
     uint32_t srgb = output_srgb != 0;
     VkSpecializationInfo specialization = {1, &entry, sizeof(srgb), &srgb};
-    int ui = mode == 3 || mode == 4, fullscreen = mode == 5;
+    static const VkBlendFactor factors[] = {
+        VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        VK_BLEND_FACTOR_SRC_COLOR, VK_BLEND_FACTOR_DST_COLOR
+    };
+    const maage_render_pipeline_state *state = &maage_render_pipeline_states[mode];
+    int ui = state->ui, fullscreen = state->fullscreen;
     maage_status result;
     module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     for (unsigned int index = 0; index < 2; ++index) {
@@ -445,36 +443,29 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
         stages[index].module = modules[index]; stages[index].pName = "main";
     }
     if (fullscreen) stages[1].pSpecializationInfo = &specialization;
-    binding.stride = ui ? sizeof(maage_vulkan_ui_vertex) : sizeof(maage_mesh_vertex);
+    binding.stride = ui ? sizeof(maage_render_ui_gpu_vertex) : sizeof(maage_mesh_vertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    if (ui) {
-        attributes[0].location = MAAGE_RENDER_UI_POSITION_LOCATION;
-        attributes[1].location = MAAGE_RENDER_UI_UV_LOCATION;
-        attributes[2].location = MAAGE_RENDER_UI_COLOR_LOCATION;
-        attributes[3].location = MAAGE_RENDER_UI_DEPTH_LOCATION;
-        attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
-        attributes[0].offset = offsetof(maage_vulkan_ui_vertex, vertex.position);
-        attributes[1].format = VK_FORMAT_R32G32_SFLOAT;
-        attributes[1].offset = offsetof(maage_vulkan_ui_vertex, vertex.uv);
-        attributes[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-        attributes[2].offset = offsetof(maage_vulkan_ui_vertex, vertex.color);
-        attributes[3].format = VK_FORMAT_R32_SFLOAT;
-        attributes[3].offset = offsetof(maage_vulkan_ui_vertex, depth);
-    } else {
-        attributes[0].location = MAAGE_RENDER_MESH_POSITION_LOCATION;
-        attributes[1].location = MAAGE_RENDER_MESH_NORMAL_LOCATION;
-        attributes[2].location = MAAGE_RENDER_MESH_UV_LOCATION;
-        attributes[3].location = MAAGE_RENDER_MESH_COLOR_LOCATION;
-        attributes[4].location = MAAGE_RENDER_MESH_LIGHT_LOCATION;
-        attributes[5].location = MAAGE_RENDER_MESH_MATERIAL_LOCATION;
-        attributes[6].location = MAAGE_RENDER_MESH_ANIMATION_LOCATION;
-        attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT; attributes[0].offset = offsetof(maage_mesh_vertex, position);
-        attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT; attributes[1].offset = offsetof(maage_mesh_vertex, normal);
-        attributes[2].format = VK_FORMAT_R32G32_SFLOAT; attributes[2].offset = offsetof(maage_mesh_vertex, uv);
-        attributes[3].format = VK_FORMAT_R32G32B32A32_SFLOAT; attributes[3].offset = offsetof(maage_mesh_vertex, color);
-        attributes[4].format = VK_FORMAT_R32G32_SFLOAT; attributes[4].offset = offsetof(maage_mesh_vertex, light);
-        attributes[5].format = VK_FORMAT_R32_SFLOAT; attributes[5].offset = offsetof(maage_mesh_vertex, material);
-        attributes[6].format = VK_FORMAT_R32G32B32_SFLOAT; attributes[6].offset = offsetof(maage_mesh_vertex, animation);
+    {
+#define MAAGE_VERTEX_VEC1 VK_FORMAT_R32_SFLOAT
+#define MAAGE_VERTEX_VEC2 VK_FORMAT_R32G32_SFLOAT
+#define MAAGE_VERTEX_VEC3 VK_FORMAT_R32G32B32_SFLOAT
+#define MAAGE_VERTEX_VEC4 VK_FORMAT_R32G32B32A32_SFLOAT
+#define MAAGE_VERTEX_FIELD(slot, format, name) {slot, 0, format, offsetof(maage_mesh_vertex, name)},
+        static const VkVertexInputAttributeDescription mesh_fields[] = {
+            MAAGE_RENDER_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
+        };
+#undef MAAGE_VERTEX_FIELD
+#define MAAGE_VERTEX_FIELD(slot, format, name) {slot, 0, format, offsetof(maage_render_ui_gpu_vertex, vertex.name)},
+        static const VkVertexInputAttributeDescription ui_fields[] = {
+            MAAGE_RENDER_UI_ATTRIBUTES(MAAGE_VERTEX_FIELD)
+            {MAAGE_RENDER_UI_DEPTH_LOCATION, 0, VK_FORMAT_R32_SFLOAT, offsetof(maage_render_ui_gpu_vertex, depth)}
+        };
+#undef MAAGE_VERTEX_FIELD
+#undef MAAGE_VERTEX_VEC1
+#undef MAAGE_VERTEX_VEC2
+#undef MAAGE_VERTEX_VEC3
+#undef MAAGE_VERTEX_VEC4
+        memcpy(attributes, ui ? ui_fields : mesh_fields, ui ? sizeof(ui_fields) : sizeof(mesh_fields));
     }
     vertices.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertices.vertexBindingDescriptionCount = fullscreen ? 0 : 1; vertices.pVertexBindingDescriptions = &binding;
@@ -485,20 +476,19 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
     viewport.viewportCount = viewport.scissorCount = 1;
     raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     raster.polygonMode = VK_POLYGON_MODE_FILL; raster.lineWidth = 1.0f;
-    raster.cullMode = !ui && !fullscreen && mode != 1 ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+    raster.cullMode = state->cull ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
     /* Shader clip-Y inversion plus Vulkan's framebuffer convention preserves
      * the neutral CCW front-face contract. */
     raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     samples.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     samples.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depth.depthTestEnable = !ui && !fullscreen;
-    depth.depthWriteEnable = mode == 0; depth.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depth.depthTestEnable = state->depth_test;
+    depth.depthWriteEnable = state->depth_write; depth.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    blend.blendEnable = mode != 0 && !fullscreen;
-    blend.srcColorBlendFactor = mode == 2 ? VK_BLEND_FACTOR_DST_COLOR : VK_BLEND_FACTOR_SRC_ALPHA;
-    blend.dstColorBlendFactor = mode == 2 ? VK_BLEND_FACTOR_SRC_COLOR :
-        (mode == 4 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+    blend.blendEnable = state->blend;
+    blend.srcColorBlendFactor = factors[state->source_rgb];
+    blend.dstColorBlendFactor = factors[state->destination_rgb];
     blend.colorBlendOp = blend.alphaBlendOp = VK_BLEND_OP_ADD;
     blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -576,12 +566,12 @@ static maage_status maage_vulkan_targets_create(maage_renderer *renderer)
         for (unsigned int index = 0; index < 3; ++index)
             MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, index, 0, &gpu->mesh[index]));
         for (unsigned int index = 0; index < 2; ++index) {
-            MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, index + 3, 0, &gpu->ui[index]));
-            MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->color_pass, index + 3, 0, &gpu->panorama_ui[index]));
+            MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, index + MAAGE_RENDER_UI, 0, &gpu->ui[index]));
+            MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->color_pass, index + MAAGE_RENDER_UI, 0, &gpu->panorama_ui[index]));
         }
-        MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->color_pass, 5, 0, &gpu->blur));
-        MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, 5, 0, &gpu->scene_composite));
-        MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->present_pass, 5, srgb, &gpu->composite));
+        MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->color_pass, MAAGE_RENDER_FULLSCREEN, 0, &gpu->blur));
+        MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, MAAGE_RENDER_FULLSCREEN, 0, &gpu->scene_composite));
+        MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->present_pass, MAAGE_RENDER_FULLSCREEN, srgb, &gpu->composite));
         gpu->pipeline_format = native->format;
     }
     gpu->present_framebuffers = calloc(native->image_count, sizeof(*gpu->present_framebuffers));
@@ -662,7 +652,7 @@ static void maage_vulkan_pass_begin(maage_renderer *renderer, VkCommandBuffer co
     vkCmdSetViewport(command, 0, 1, &viewport); vkCmdSetScissor(command, 0, 1, &scissor);
 }
 static void maage_vulkan_bind(maage_vulkan_renderer *native, VkCommandBuffer command,
-    VkPipeline pipeline, VkDescriptorSet descriptor, const maage_vulkan_push *push)
+    VkPipeline pipeline, VkDescriptorSet descriptor, const maage_render_uniforms *push)
 {
     maage_vulkan_rendering *gpu = native->rendering;
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -683,53 +673,59 @@ static void maage_vulkan_indices(maage_vulkan_renderer *native, VkCommandBuffer 
     }
 }
 static maage_status maage_vulkan_sort(maage_renderer *renderer,
-    maage_vulkan_mesh *mesh, const float *matrix, unsigned int slot)
+    const maage_render_mesh *mesh, const float matrix[16], unsigned int slot)
 {
-    maage_status result;
-    if (!mesh->geometry.translucent_count) return MAAGE_VULKAN_OK;
-    result = maage_render_geometry_sort(&mesh->geometry, matrix);
-    if (maage_status_failed(result)) return result;
-    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
-        memset(mesh->sorted_revision, 0, sizeof(mesh->sorted_revision));
-    if (mesh->sorted_revision[slot] == mesh->geometry.revision) return MAAGE_VULKAN_OK;
-    MAAGE_VULKAN_TRY(maage_vulkan_host_buffer(renderer, &mesh->sorted[slot],
+    maage_vulkan_mesh *geometry = mesh->platform;
+    maage_status result = maage_render_geometry_sort_slot(mesh, matrix,
+        geometry->sorted_revision, MAAGE_VULKAN_FRAME_SLOTS, slot);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    MAAGE_VULKAN_TRY(maage_vulkan_host_buffer(renderer, &geometry->sorted[slot],
         mesh->geometry.translucent_count * sizeof(unsigned int), VK_BUFFER_USAGE_INDEX_BUFFER_BIT));
-    MAAGE_VULKAN_TRY(maage_render_geometry_write_sorted(&mesh->geometry, mesh->sorted[slot].mapped));
-    MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &mesh->sorted[slot]));
-    mesh->sorted_revision[slot] = mesh->geometry.revision;
+    MAAGE_VULKAN_TRY(maage_render_geometry_write_sorted(&mesh->geometry, geometry->sorted[slot].mapped));
+    MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &geometry->sorted[slot]));
+    geometry->sorted_revision[slot] = mesh->geometry.revision;
     return MAAGE_VULKAN_OK;
 }
 static void maage_vulkan_mesh_draw(maage_vulkan_renderer *native, VkCommandBuffer command,
-    const maage_render_mesh *mesh, unsigned int layer, unsigned int slot, const maage_vulkan_push *push)
+    const maage_render_mesh *mesh, unsigned int layer, unsigned int slot, const maage_render_uniforms *push)
 {
     maage_vulkan_rendering *gpu = native->rendering;
     maage_vulkan_mesh *geometry = mesh->platform;
     maage_vulkan_image *texture = mesh->texture->platform;
-    size_t count = layer == 0 ? geometry->geometry.solid_count :
-        (layer == 1 ? geometry->geometry.translucent_count : geometry->geometry.multiply_count);
-    size_t first = layer == 2 ? geometry->geometry.solid_count + geometry->geometry.translucent_count : 0;
+    size_t first, count = maage_render_geometry_range(&mesh->geometry, layer, &first);
     VkDeviceSize offset = 0;
     if (!count) return;
     maage_vulkan_bind(native, command, gpu->mesh[layer], texture->descriptor, push);
     vkCmdBindVertexBuffers(command, 0, 1, &geometry->vertices.buffer, &offset);
-    maage_vulkan_indices(native, command, layer == 1 ? geometry->sorted[slot].buffer : geometry->indices.buffer, first, count);
+    maage_vulkan_indices(native, command, layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted[slot].buffer : geometry->indices.buffer, first, count);
+}
+static void maage_vulkan_mesh_passes(maage_vulkan_renderer *native, VkCommandBuffer command,
+    const maage_render_frame_plan *plan, int foreground, unsigned int slot)
+{
+    maage_render_mesh_cursor cursor = {0, 0};
+    const maage_render_mesh *mesh;
+    maage_render_uniforms uniforms;
+    while ((mesh = maage_render_frame_next_mesh(plan, foreground, &cursor)) != NULL) {
+        maage_render_draw_uniforms(plan, foreground, &cursor, &uniforms);
+        if (cursor.instance && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
+            maage_vulkan_mesh *geometry = mesh->platform;
+            maage_vulkan_image *texture = mesh->texture->platform;
+            VkDeviceSize offset = 0;
+            maage_vulkan_bind(native, command, ((maage_vulkan_rendering *)native->rendering)->mesh[cursor.layer], texture->descriptor, &uniforms);
+            vkCmdBindVertexBuffers(command, 0, 1, &geometry->vertices.buffer, &offset);
+            maage_vulkan_indices(native, command, geometry->indices.buffer, cursor.triangle, 3);
+        } else maage_vulkan_mesh_draw(native, command, mesh, cursor.layer, slot, &uniforms);
+    }
 }
 static maage_status maage_vulkan_ui_prepare(maage_renderer *renderer,
     maage_vulkan_frame_data *frame, unsigned int layer, const maage_render_ui_data *batch)
 {
     if (!batch || !batch->index_count) return MAAGE_VULKAN_OK;
-    if (batch->vertex_count > (size_t)-1 / sizeof(maage_vulkan_ui_vertex))
-        return MAAGE_VULKAN_ERROR(MAAGE_STATUS_BUFFER_OVERFLOW);
     MAAGE_VULKAN_TRY(maage_vulkan_host_buffer(renderer, &frame->vertices[layer],
-        batch->vertex_count * sizeof(maage_vulkan_ui_vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT));
+        batch->vertex_count * sizeof(maage_render_ui_gpu_vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT));
     MAAGE_VULKAN_TRY(maage_vulkan_host_buffer(renderer, &frame->indices[layer],
         batch->index_count * sizeof(unsigned int), VK_BUFFER_USAGE_INDEX_BUFFER_BIT));
-    maage_vulkan_ui_vertex *vertices = frame->vertices[layer].mapped;
-    for (size_t index = 0; index < batch->vertex_count; ++index) {
-        vertices[index].vertex = batch->vertices[index];
-        vertices[index].depth = batch->projective_depth ? batch->projective_depth[index] : 1.0f;
-    }
-    memcpy(frame->indices[layer].mapped, batch->indices, batch->index_count * sizeof(unsigned int));
+    MAAGE_VULKAN_TRY(maage_render_ui_pack(batch, frame->vertices[layer].mapped, frame->indices[layer].mapped));
     MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &frame->vertices[layer]));
     return maage_vulkan_flush(renderer, &frame->indices[layer]);
 }
@@ -738,21 +734,20 @@ static void maage_vulkan_ui_draw(maage_vulkan_renderer *native, VkCommandBuffer 
     size_t first, size_t count, int panorama)
 {
     maage_vulkan_rendering *gpu = native->rendering;
-    maage_vulkan_push push = {0};
+    maage_render_uniforms push = {0};
     VkDeviceSize offset = 0;
     maage_vulkan_image *texture;
     if (!batch || !count) return;
     texture = batch->texture->platform;
-    push.parameters[1] = batch->logical_width; push.parameters[2] = batch->logical_height;
-    push.parameters[3] = batch->projective_depth != NULL;
-    maage_vulkan_bind(native, command, panorama ? gpu->panorama_ui[batch->blend] : gpu->ui[batch->blend], texture->descriptor, &push);
+    maage_render_ui_uniforms(batch, &push);
+    maage_vulkan_bind(native, command, panorama ? gpu->panorama_ui[MAAGE_RENDER_BLEND_ALPHA] : gpu->ui[batch->blend], texture->descriptor, &push);
     vkCmdBindVertexBuffers(command, 0, 1, &frame->vertices[layer].buffer, &offset);
     maage_vulkan_indices(native, command, frame->indices[layer].buffer, first, count);
 }
 static void maage_vulkan_fullscreen(maage_vulkan_renderer *native, VkCommandBuffer command,
     VkPipeline pipeline, maage_vulkan_image *source, float x, float y, int blur)
 {
-    maage_vulkan_push push = {0};
+    maage_render_uniforms push = {0};
     push.parameters[0] = x; push.parameters[1] = y;
     push.parameters[2] = (float)MAAGE_RENDER_BLUR_SIGMA;
     push.parameters[3] = blur ? MAAGE_RENDER_BLUR_RADIUS : 0;
@@ -780,54 +775,36 @@ static maage_status maage_vulkan_upload_submit(maage_renderer *renderer, maage_v
     return MAAGE_VULKAN_OK;
 }
 static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const maage_window_state *state,
-    int preparing, const maage_render_mesh *const *meshes, size_t count,
-    const float *matrix, const maage_render_ui_data *ui)
+    const maage_render_frame_plan *plan)
 {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_rendering *gpu = native->rendering;
     maage_vulkan_frame *flight = NULL;
     maage_vulkan_frame_data *frame;
-    maage_render_frame_plan plan;
-    maage_vulkan_push push = {0};
-    double origin[3] = {0, 0, 0};
-    int perspective = matrix ? maage_render_camera_origin(matrix, origin) : 0;
     uint32_t image;
     unsigned int slot;
-    size_t translucent = 0;
     maage_status result;
     MAAGE_VULKAN_TRY(maage_vulkan_collect(renderer));
-    MAAGE_VULKAN_TRY(maage_render_frame_plan_prepare(renderer, ui, preparing, &plan));
-    result = maage_vulkan_begin(renderer, state, preparing ? 2 : 0, &flight, &image);
+    result = maage_vulkan_begin(renderer, state, plan->preparing ? 2 : 0, &flight, &image);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     slot = (unsigned int)(flight - native->frames); frame = &gpu->frames[slot];
     result = maage_vulkan_collect(renderer);
     if (maage_status_failed(result)) goto failed;
     result = maage_vulkan_targets_create(renderer);
     if (maage_status_failed(result)) goto failed;
-    result = maage_vulkan_frame_targets(renderer, frame, plan.panorama_count != 0);
+    result = maage_vulkan_frame_targets(renderer, frame, plan->panorama_count != 0);
     if (maage_status_failed(result)) goto failed;
     for (unsigned int layer = 0; layer < 3; ++layer) {
-        result = maage_vulkan_ui_prepare(renderer, frame, layer, plan.layers[layer]);
+        result = maage_vulkan_ui_prepare(renderer, frame, layer, plan->layers[layer]);
         if (maage_status_failed(result)) goto failed;
     }
-    if (count > gpu->ordered_capacity) {
-        maage_render_ordered_mesh *ordered;
-        if (count > (size_t)-1 / sizeof(*ordered)) { result = MAAGE_VULKAN_ERROR(MAAGE_STATUS_BUFFER_OVERFLOW); goto failed; }
-        ordered = realloc(gpu->ordered, count * sizeof(*ordered));
-        if (!ordered) { result = MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED); goto failed; }
-        gpu->ordered = ordered; gpu->ordered_capacity = count;
-    }
-    for (size_t index = 0; index < count; ++index) {
-        maage_vulkan_mesh *geometry = meshes[index]->platform;
-        result = maage_vulkan_sort(renderer, geometry, matrix, slot);
+    for (size_t index = 0; index < plan->ordered_count; ++index) {
+        if (plan->ordered[index].instance) continue;
+        result = maage_vulkan_sort(renderer, plan->ordered[index].mesh, plan->world.matrix, slot);
         if (maage_status_failed(result)) goto failed;
-        if (!geometry->geometry.translucent_count) continue;
-        gpu->ordered[translucent].mesh = meshes[index]; gpu->ordered[translucent].order = index;
-        gpu->ordered[translucent++].depth = maage_render_depth(geometry->geometry.center, matrix, origin, perspective);
     }
-    if (translucent > 1) qsort(gpu->ordered, translucent, sizeof(*gpu->ordered), maage_render_mesh_order);
-    if (plan.foreground) {
-        result = maage_vulkan_sort(renderer, plan.foreground->platform, renderer->foreground_matrix, slot);
+    if (plan->foreground) {
+        result = maage_vulkan_sort(renderer, plan->foreground, plan->hand.matrix, slot);
         if (maage_status_failed(result)) goto failed;
     }
     maage_vulkan_transition(native, flight->command, frame->scene.image, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -841,17 +818,13 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
         memcpy(clear.clearValue.color.float32, renderer->clear, sizeof(renderer->clear));
         vkCmdClearAttachments(flight->command, 1, &clear, 1, &rect);
     }
-    maage_vulkan_ui_draw(native, flight->command, frame, 0, plan.layers[0], 0,
-        plan.layers[0] ? plan.layers[0]->index_count : 0, 0);
-    if (matrix) memcpy(push.matrix, matrix, sizeof(push.matrix));
-    push.lighting[0] = renderer->sky_light; push.parameters[0] = renderer->animation_tick;
-    for (size_t index = 0; index < count; ++index) maage_vulkan_mesh_draw(native, flight->command, meshes[index], 0, slot, &push);
-    for (size_t index = 0; index < translucent; ++index) maage_vulkan_mesh_draw(native, flight->command, gpu->ordered[index].mesh, 1, slot, &push);
-    for (size_t index = 0; index < count; ++index) maage_vulkan_mesh_draw(native, flight->command, meshes[index], 2, slot, &push);
-    if (plan.panorama_count) {
+    maage_vulkan_ui_draw(native, flight->command, frame, 0, plan->layers[0], 0,
+        plan->layers[0] ? plan->layers[0]->index_count : 0, 0);
+    maage_vulkan_mesh_passes(native, flight->command, plan, 0, slot);
+    if (plan->panorama_count) {
         vkCmdEndRenderPass(flight->command);
         maage_vulkan_pass_begin(renderer, flight->command, gpu->color_pass, frame->panorama_framebuffer[0]);
-        maage_vulkan_ui_draw(native, flight->command, frame, 2, plan.layers[2], 0, plan.panorama_count, 1);
+        maage_vulkan_ui_draw(native, flight->command, frame, 2, plan->layers[2], 0, plan->panorama_count, 1);
         vkCmdEndRenderPass(flight->command);
         maage_vulkan_pass_begin(renderer, flight->command, gpu->color_pass, frame->panorama_framebuffer[1]);
         maage_vulkan_fullscreen(native, flight->command, gpu->blur, &frame->panorama[0], 1.0f / native->extent.width, 0, 1);
@@ -862,20 +835,17 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
         maage_vulkan_pass_begin(renderer, flight->command, gpu->scene_pass, frame->scene_framebuffer);
         maage_vulkan_fullscreen(native, flight->command, gpu->scene_composite, &frame->panorama[0], 0, 0, 0);
     }
-    maage_vulkan_ui_draw(native, flight->command, frame, 1, plan.layers[1], 0,
-        plan.layers[1] ? plan.layers[1]->index_count : 0, 0);
-    if (plan.foreground) {
+    maage_vulkan_ui_draw(native, flight->command, frame, 1, plan->layers[1], 0,
+        plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
+    if (plan->foreground) {
         VkClearAttachment clear = {0};
         VkClearRect rect = {{{0, 0}, native->extent}, 0, 1};
         clear.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT; clear.clearValue.depthStencil.depth = 1.0f;
         vkCmdClearAttachments(flight->command, 1, &clear, 1, &rect);
-        memcpy(push.matrix, renderer->foreground_matrix, sizeof(push.matrix));
-        push.lighting[1] = renderer->foreground_light[0]; push.lighting[2] = renderer->foreground_light[1]; push.lighting[3] = 1;
-        for (unsigned int layer = 0; layer < 3; ++layer)
-            maage_vulkan_mesh_draw(native, flight->command, plan.foreground, layer, slot, &push);
+        maage_vulkan_mesh_passes(native, flight->command, plan, 1, slot);
     }
-    maage_vulkan_ui_draw(native, flight->command, frame, 2, plan.layers[2], plan.panorama_count,
-        plan.layers[2] ? plan.layers[2]->index_count - plan.panorama_count : 0, 0);
+    maage_vulkan_ui_draw(native, flight->command, frame, 2, plan->layers[2], plan->panorama_count,
+        plan->layers[2] ? plan->layers[2]->index_count - plan->panorama_count : 0, 0);
     vkCmdEndRenderPass(flight->command);
     maage_vulkan_transition(native, flight->command, frame->scene.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -909,9 +879,8 @@ static maage_status maage_vulkan_create(maage_renderer *renderer)
     maage_status result = maage_vulkan_platform_create(renderer);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     native = renderer->platform;
-    if (sizeof(unsigned int) != 4 || sizeof(maage_mesh_vertex) != MAAGE_RENDER_MESH_VERTEX_BYTES ||
-        sizeof(maage_render_ui_vertex) != MAAGE_RENDER_UI_VERTEX_BYTES ||
-        native->properties.limits.maxPushConstantsSize < sizeof(maage_vulkan_push) ||
+    if (!maage_render_gpu_layout_supported() ||
+        native->properties.limits.maxPushConstantsSize < sizeof(maage_render_uniforms) ||
         native->properties.limits.maxVertexInputAttributes < 7 ||
         native->properties.limits.maxVertexInputBindingStride < sizeof(maage_mesh_vertex))
         return MAAGE_VULKAN_ERROR(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED);
@@ -925,7 +894,7 @@ static maage_status maage_vulkan_create(maage_renderer *renderer)
     MAAGE_VULKAN_TRY(maage_vulkan_result(vkCreateDescriptorSetLayout(native->device,
         &descriptors, NULL, &gpu->descriptors)));
     constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    constants.size = sizeof(maage_vulkan_push);
+    constants.size = sizeof(maage_render_uniforms);
     layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layout.setLayoutCount = 1; layout.pSetLayouts = &gpu->descriptors;
     layout.pushConstantRangeCount = 1; layout.pPushConstantRanges = &constants;
@@ -984,7 +953,7 @@ static maage_status maage_vulkan_destroy(maage_renderer *renderer)
         if (gpu->linear) vkDestroySampler(native->device, gpu->linear, NULL);
         if (gpu->layout) vkDestroyPipelineLayout(native->device, gpu->layout, NULL);
         if (gpu->descriptors) vkDestroyDescriptorSetLayout(native->device, gpu->descriptors, NULL);
-        free(gpu->ordered); free(gpu); native->rendering = NULL;
+        free(gpu); native->rendering = NULL;
     }
     released = maage_vulkan_platform_destroy(renderer);
     return maage_status_failed(result) ? result : released;
@@ -1006,7 +975,7 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer,
     mesh->platform = geometry;
     MAAGE_VULKAN_TRY(maage_vulkan_staging(renderer, vertex_bytes + index_bytes, &staging));
     memcpy(staging->buffer.mapped, data->vertices, vertex_bytes);
-    MAAGE_VULKAN_TRY(maage_render_geometry_prepare(&geometry->geometry, data,
+    MAAGE_VULKAN_TRY(maage_render_geometry_prepare(&mesh->geometry, data,
         (unsigned int *)((unsigned char *)staging->buffer.mapped + vertex_bytes)));
     MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &staging->buffer));
     MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, vertex_bytes,
@@ -1029,7 +998,6 @@ static void maage_vulkan_destroy_mesh(maage_render_mesh *mesh)
     if (geometry->indices.buffer) maage_vulkan_retire(mesh->renderer, &geometry->indices, NULL);
     for (unsigned int slot = 0; slot < MAAGE_VULKAN_FRAME_SLOTS; ++slot)
         if (geometry->sorted[slot].buffer) maage_vulkan_retire(mesh->renderer, &geometry->sorted[slot], NULL);
-    maage_render_geometry_dispose(&geometry->geometry);
     free(geometry); mesh->platform = NULL;
 }
 static maage_status maage_vulkan_create_texture(maage_renderer *renderer,
@@ -1086,26 +1054,6 @@ static void maage_vulkan_destroy_texture(maage_render_texture *texture)
     if (image->image || image->descriptor) maage_vulkan_retire(texture->renderer, NULL, image);
     free(image); texture->platform = NULL;
 }
-static maage_status maage_vulkan_present(maage_renderer *renderer, const maage_window_state *state)
-{
-    return maage_vulkan_render_frame(renderer, state, 0, NULL, 0, NULL, NULL);
-}
-static maage_status maage_vulkan_prepare_frame(maage_renderer *renderer, const maage_window_state *state)
-{
-    return maage_vulkan_render_frame(renderer, state, 1, NULL, 0, NULL, NULL);
-}
-static maage_status maage_vulkan_draw_meshes(maage_renderer *renderer,
-    const maage_render_mesh *const *meshes, size_t count,
-    const maage_window_state *state, const float view_projection[16])
-{
-    return maage_vulkan_render_frame(renderer, state, 0, meshes, count, view_projection, NULL);
-}
-static maage_status maage_vulkan_draw_frame(maage_renderer *renderer,
-    const maage_render_mesh *const *meshes, size_t count,
-    const maage_window_state *state, const float view_projection[16], const maage_render_ui_data *ui)
-{
-    return maage_vulkan_render_frame(renderer, state, 0, meshes, count, view_projection, ui);
-}
 static maage_status maage_vulkan_set_vsync(maage_renderer *renderer, int enabled)
 {
     maage_vulkan_renderer *native = renderer->platform;
@@ -1115,8 +1063,8 @@ static maage_status maage_vulkan_set_vsync(maage_renderer *renderer, int enabled
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 const maage_render_backend_api maage_render_vulkan_api = {
-    MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy, maage_vulkan_present,
-    MAAGE_RENDER_CAPABILITIES_VERSION, maage_vulkan_prepare_frame, maage_vulkan_upload_geometry,
-    maage_vulkan_destroy_mesh, maage_vulkan_draw_meshes, maage_vulkan_create_texture,
-    maage_vulkan_destroy_texture, maage_vulkan_draw_frame, maage_vulkan_set_vsync
+    MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy,
+    MAAGE_RENDER_CAPABILITIES_VERSION, NULL, maage_vulkan_render_frame, maage_vulkan_upload_geometry,
+    maage_vulkan_destroy_mesh, maage_vulkan_create_texture,
+    maage_vulkan_destroy_texture, maage_vulkan_set_vsync
 };

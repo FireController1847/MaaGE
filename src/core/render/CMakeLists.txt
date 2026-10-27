@@ -124,7 +124,7 @@ if((MAAGE_PLATFORM_WINDOWS OR MAAGE_PLATFORM_LINUX OR MAAGE_PLATFORM_MACOS) AND 
             COMMAND ${MAAGE_SHADER_COMMAND} "-I${PROJECT_SOURCE_DIR}/include"
                 "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/${MAAGE_SHADER}"
                 -o "${MAAGE_SHADER_OUTPUT}"
-            DEPENDS "vulkan/shaders/${MAAGE_SHADER}" render_shader_common.h render_shader_defs.h
+            DEPENDS "vulkan/shaders/${MAAGE_SHADER}" vulkan/shaders/common.glsl render_shader_common.h render_shader_defs.h
                 "${PROJECT_SOURCE_DIR}/include/maage/geometry_materials.h" VERBATIM)
         list(APPEND MAAGE_VULKAN_SPIRV "${MAAGE_SHADER_OUTPUT}")
     endforeach()

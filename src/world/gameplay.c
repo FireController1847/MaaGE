@@ -1,4 +1,5 @@
 #include "maage/gameplay.h"
+#include "maage/entities.h"
 #include "maage/session_protocol.h"
 #include <math.h>
 #include <stdlib.h>
@@ -220,17 +221,13 @@ maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
 maage_status maage_gameplay_destroy(maage_gameplay *game)
 {
     if (!game) return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_DESTROY, 0);
-    free(game->overflow_pickups);
-    game->overflow_pickups = NULL;
-    game->overflow_count = game->overflow_capacity = 0;
+    memset(game, 0, sizeof(*game));
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_status maage_gameplay_save_clear(maage_gameplay_save *save)
 {
     if (!save) return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_DESTROY, 0);
-    free(save->overflow_pickups);
-    save->overflow_pickups = NULL;
-    save->overflow_count = 0;
+    memset(save, 0, sizeof(*save));
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save)
@@ -241,122 +238,28 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
     save->health = game->health; save->hunger = game->hunger;
     save->saturation = game->saturation; save->exhaustion = game->exhaustion;
     save->fall_distance = game->fall_distance; save->flying = game->flying;
-    memcpy(save->pickups, game->pickups, sizeof(save->pickups));
-    if (game->overflow_count) {
-        if (!game->overflow_pickups ||
-            game->overflow_count > (size_t)-1 / sizeof(*save->overflow_pickups))
-            return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
-        save->overflow_pickups = (maage_gameplay_pickup *)malloc(
-            game->overflow_count * sizeof(*save->overflow_pickups));
-        if (!save->overflow_pickups) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
-        memcpy(save->overflow_pickups, game->overflow_pickups,
-            game->overflow_count * sizeof(*save->overflow_pickups));
-        save->overflow_count = game->overflow_count;
-    }
-    return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
 maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
     const maage_gameplay_save *save)
 {
-    unsigned int i, axis;
-    size_t j;
-    maage_gameplay_pickup *overflow = NULL;
+    unsigned int i;
     if (!game || !maage_item_registry_is_finalized(items) || !save || save->mode > MAAGE_GAME_MODE_CREATIVE ||
         save->health > 20 || save->hunger > 20 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
         !(save->exhaustion >= 0 && save->exhaustion <= 4) ||
         !(save->fall_distance >= 0 && save->fall_distance < MAAGE_WORLD_LIMIT) ||
         (save->flying != 0 && save->flying != 1) ||
-        (save->mode == MAAGE_GAME_MODE_SURVIVAL && save->flying) ||
-        (save->overflow_count && (!save->overflow_pickups ||
-         save->overflow_count > (size_t)-1 / sizeof(*overflow)))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
+        (save->mode == MAAGE_GAME_MODE_SURVIVAL && save->flying)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
         if (!maage_item_stack_valid(items, &save->inventory.slots[i])) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
     if (!maage_item_stack_valid(items, &save->inventory.cursor)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) {
-        if (!maage_item_stack_valid(items, &save->pickups[i].stack)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-        for (axis = 0; axis < 3; ++axis)
-            if (!(save->pickups[i].position[axis] > -MAAGE_WORLD_LIMIT &&
-                save->pickups[i].position[axis] < MAAGE_WORLD_LIMIT)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-        if (save->pickups[i].stack.count && !(save->pickups[i].position[1] >= 0 &&
-            save->pickups[i].position[1] <= MAAGE_WORLD_HEIGHT)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-    }
-    for (j = 0; j < save->overflow_count; ++j) {
-        const maage_gameplay_pickup *pickup = &save->overflow_pickups[j];
-        if (!maage_item_stack_valid(items, &pickup->stack)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-        for (axis = 0; axis < 3; ++axis)
-            if (!(pickup->position[axis] > -MAAGE_WORLD_LIMIT &&
-                pickup->position[axis] < MAAGE_WORLD_LIMIT)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-        if (pickup->stack.count && !(pickup->position[1] >= 0 &&
-            pickup->position[1] <= MAAGE_WORLD_HEIGHT)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-    }
-    if (save->overflow_count) {
-        overflow = (maage_gameplay_pickup *)malloc(
-            save->overflow_count * sizeof(*overflow));
-        if (!overflow) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-        memcpy(overflow, save->overflow_pickups, save->overflow_count * sizeof(*overflow));
-    }
-    /* Caller initializes game before restore; this also supports repeated
-     * restores without leaking an earlier overflow allocation. */
-    maage_gameplay_destroy(game);
     memset(game, 0, sizeof(*game));
     game->inventory = save->inventory; game->mode = save->mode;
     game->health = save->health; game->hunger = save->hunger;
     game->saturation = save->saturation; game->exhaustion = save->exhaustion;
     game->fall_distance = save->fall_distance; game->flying = save->flying;
-    memcpy(game->pickups, save->pickups, sizeof(game->pickups));
-    game->overflow_pickups = overflow;
-    game->overflow_count = game->overflow_capacity = save->overflow_count;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
-}
-static maage_status maage_gameplay_drop_slot(maage_gameplay *game, maage_gameplay_pickup **output)
-{
-    size_t i, count;
-    maage_gameplay_pickup *buffer;
-    *output = NULL;
-    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i)
-        if (!game->pickups[i].stack.count) { *output = &game->pickups[i]; return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ACQUIRE, 0); }
-    for (i = 0; i < game->overflow_count; ++i)
-        if (!game->overflow_pickups[i].stack.count) { *output = &game->overflow_pickups[i]; return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ACQUIRE, 0); }
-    if (game->overflow_count == game->overflow_capacity) {
-        count = game->overflow_capacity ? game->overflow_capacity : 16;
-        if (count <= game->overflow_count) {
-            if (count > ((size_t)-1 / sizeof(*buffer)) / 2) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_ACQUIRE, 0);
-            count *= 2;
-        }
-        if (count > (size_t)-1 / sizeof(*buffer)) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_ACQUIRE, 0);
-        buffer = (maage_gameplay_pickup *)realloc(game->overflow_pickups,
-            count * sizeof(*buffer));
-        if (!buffer) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_ACQUIRE, 0);
-        game->overflow_pickups = buffer;
-        game->overflow_capacity = count;
-    }
-    buffer = &game->overflow_pickups[game->overflow_count++];
-    memset(buffer, 0, sizeof(*buffer));
-    *output = buffer;
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ACQUIRE, 0);
-}
-static maage_status maage_gameplay_collect_drop(maage_gameplay *game,
-    const maage_player *player, const maage_item_registry *items,
-    maage_gameplay_pickup *pickup, maage_gameplay_sound_sink *sink)
-{
-    double dx, dy, dz;
-    unsigned int remaining;
-    maage_status result;
-    if (!pickup->stack.count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
-    dx = player->position[0] - pickup->position[0];
-    dy = player->position[1] + 0.8 - pickup->position[1];
-    dz = player->position[2] - pickup->position[2];
-    if (dx*dx + dy*dy + dz*dz > 4) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
-    result = maage_inventory_add(&game->inventory, items, &pickup->stack, &remaining);
-    if (maage_status_failed(result)) return result;
-    if (remaining < pickup->stack.count)
-        maage_gameplay_sound(sink, MAAGE_SOUND_ITEM_PICKUP, MAAGE_MATERIAL_DEFAULT,
-            player->position[0], player->position[1], player->position[2],
-            0.2, maage_gameplay_sound_pitch(game, 0.7) * 2.0);
-    pickup->stack.count = remaining;
-    if (!remaining) memset(pickup, 0, sizeof(*pickup));
-    return result;
 }
 maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player,
     const maage_world *world, double yaw, double pitch)
@@ -388,10 +291,12 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
 {
     const maage_block_definition *block;
     const maage_item_definition *tool;
-    maage_item_stack *held, drop;
-    maage_inventory inventory;
-    unsigned int remaining = 0;
-    maage_gameplay_pickup *pickup = NULL;
+    maage_item_stack *held;
+    maage_item_drops drops;
+    maage_entities *entities = maage_world_entities(world);
+    unsigned long random;
+    size_t i;
+    double position[3], velocity[3];
     double speed = 1, progress;
     int harvest, starting;
     maage_status result;
@@ -408,33 +313,38 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     if (!block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     held = &game->inventory.slots[game->inventory.selected];
     tool = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
-    harvest = !block->required_tool_level || (tool && tool->tool_class == block->required_tool &&
-        tool->tool_level >= block->required_tool_level);
+    harvest = maage_item_can_harvest(tool, block);
     starting = !game->breaking_active || !maage_gameplay_same_target(&game->breaking, &game->target) ||
         game->breaking_item != (held->count ? held->item_id : 0) ||
-        game->breaking_metadata != (held->count ? held->metadata : 0);
+        game->breaking_metadata != (held->count ? held->metadata : 0) ||
+        game->breaking_damage != (held->count ? held->damage : 0);
     if (starting) {
         game->breaking = game->target; game->breaking_active = 1; game->break_progress = 0;
         game->dig_ticks = 0;
         game->breaking_item = held->count ? held->item_id : 0;
         game->breaking_metadata = held->count ? held->metadata : 0;
+        game->breaking_damage = held->count ? held->damage : 0;
     }
     if (game->mode == MAAGE_GAME_MODE_CREATIVE || block->hardness == 0)
         progress = 1;
     else if (block->hardness < 0) progress = 0;
     else {
-        if (tool && tool->tool_class == block->required_tool) speed = tool->mining_speed;
+        speed = maage_item_mining_speed(tool, block);
         if (!player->grounded) speed /= 5;
-        if (maage_world_get(world, (int)floor(player->position[0]),
-            (int)floor(player->position[1] + MAAGE_PLAYER_EYE_HEIGHT),
-            (int)floor(player->position[2])) == MAAGE_STATE_WATER) speed /= 5;
+        {
+            const maage_block_state_definition *eye = maage_block_registry_state(maage_world_registry(world),
+                maage_world_get(world, (int)floor(player->position[0]),
+                (int)floor(player->position[1]+MAAGE_PLAYER_EYE_HEIGHT), (int)floor(player->position[2])));
+            if (eye && eye->fluid_kind == MAAGE_FLUID_WATER) speed /= 5;
+        }
         progress = speed / (block->hardness * (harvest ? 30 : 100));
     }
     /* A changed held target initializes before the following damage updates
      * advance both crack progression and dig cadence. */
-    if (starting && game->attack_held && progress < 1)
+    if (starting && progress < 1)
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     game->break_progress += progress;
+    if (game->break_progress > 1) game->break_progress = 1;
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && !(starting && progress >= 1)) {
         if (game->dig_ticks == 0)
             maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_DIG,
@@ -443,24 +353,16 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
                 game->target.z + 0.5, 1.0, 1.0);
         game->dig_ticks = (game->dig_ticks + 1U) % 4U;
     }
-    if (game->break_progress < 1)
+    if (game->break_progress < 1.0 - 1e-12)
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    memset(&drop, 0, sizeof(drop)); inventory = game->inventory;
-    if (game->mode == MAAGE_GAME_MODE_SURVIVAL && harvest && block->drop_count) {
-        drop.item_id = block->drop_item_id; drop.count = block->drop_count;
-        if (block->id == MAAGE_BLOCK_LOG) {
-            const maage_block_state_definition *broken = maage_block_registry_state(
-                maage_world_registry(world), game->target.state_id);
-            if (broken) drop.metadata = broken->metadata & 3U;
-        }
-        if (!maage_item_stack_valid(items, &drop)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-        result = maage_inventory_add(&inventory, items, &drop, &remaining);
+    memset(&drops, 0, sizeof(drops));
+    random = maage_entities_random(entities);
+    if (game->mode == MAAGE_GAME_MODE_SURVIVAL && harvest) {
+        result = maage_item_generate_drops(maage_world_registry(world), items,
+            game->target.state_id, tool, &random, &drops);
         if (maage_status_failed(result)) return result;
-        if (remaining) {
-            /* Allocation failure is explicit backpressure; never lose a drop. */
-            result = maage_gameplay_drop_slot(game, &pickup);
-            if (maage_status_failed(result)) return result;
-        }
+        result = maage_entities_reserve(entities, drops.count);
+        if (maage_status_failed(result)) return result;
     }
     result = maage_world_set(world, game->target.x, game->target.y, game->target.z,
         game->target.state_id, MAAGE_STATE_AIR);
@@ -469,17 +371,24 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
         maage_gameplay_material(block->id),
         game->target.x + 0.5, game->target.y + 0.5,
         game->target.z + 0.5, 1.0, 1.0);
-    game->inventory = inventory;
-    held = &game->inventory.slots[game->inventory.selected];
-    if (remaining) {
-        pickup->stack = drop; pickup->stack.count = remaining;
-        pickup->position[0] = game->target.x + 0.5;
-        pickup->position[1] = game->target.y + 0.5;
-        pickup->position[2] = game->target.z + 0.5;
+    for (i = 0; i < drops.count; ++i) {
+        position[0] = game->target.x + 0.5; position[1] = game->target.y + 0.375;
+        position[2] = game->target.z + 0.5;
+        random = (random * 1664525UL + 1013904223UL) & 4294967295UL;
+        velocity[0] = ((double)(random & 65535UL) / 65536.0 - 0.5) * 0.2;
+        random = (random * 1664525UL + 1013904223UL) & 4294967295UL;
+        velocity[2] = ((double)(random & 65535UL) / 65536.0 - 0.5) * 0.2;
+        velocity[1] = 0.2;
+        result = maage_entities_spawn(entities, items, &drops.stacks[i], position, velocity, 10);
+        if (maage_status_failed(result)) return result;
     }
+    maage_entities_set_random(entities, random);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->exhaustion += 0.025;
-        if (tool && tool->durability && ++held->damage >= tool->durability) {
+        if (tool && tool->durability && (tool->tool_class == MAAGE_TOOL_SHEARS ?
+            (block->id == MAAGE_BLOCK_LEAVES || block->id == MAAGE_BLOCK_TALL_GRASS ||
+             block->id == MAAGE_BLOCK_DEAD_BUSH) : block->hardness != 0) &&
+            ++held->damage >= tool->durability) {
             memset(held, 0, sizeof(*held));
             maage_gameplay_sound(sink, MAAGE_SOUND_ITEM_BREAK, MAAGE_MATERIAL_DEFAULT,
                 player->position[0], player->position[1], player->position[2],
@@ -641,6 +550,7 @@ static maage_status maage_gameplay_action_result(maage_status result,
     if (!maage_status_failed(result)) return result;
     MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE);
     if (!maage_world_failed(world) && (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED ||
+        maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW ||
         maage_status_code(result) == MAAGE_STATUS_NOT_FOUND ||
         (maage_status_code(result) == MAAGE_STATUS_INTERRUPTED && maage_status_detail(result) == MAAGE_DETAIL_STALE))) {
         maage_status_trace_recover(trace, maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0),
@@ -659,8 +569,6 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     const maage_block_state_definition *surface;
     int in_water;
     maage_gameplay_sound_sink sink;
-    unsigned int i;
-    size_t j;
     int grounded;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_TICK, 0);
     if (written) *written = 0;
@@ -739,20 +647,6 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
         return maage_gameplay_sound_result(maage_status_make(MAAGE_STATUS_NOOP,
             MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0), &sink, written, trace);
     }
-    for (i = 0; i < MAAGE_GAMEPLAY_PICKUPS; ++i) {
-        result = maage_gameplay_collect_drop(game, player, items, &game->pickups[i], &sink);
-        if (maage_status_failed(result))
-            return maage_gameplay_sound_result(MAAGE_STATUS_PROPAGATE(trace,
-                result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK),
-                &sink, written, trace);
-    }
-    for (j = 0; j < game->overflow_count; ++j) {
-        result = maage_gameplay_collect_drop(game, player, items, &game->overflow_pickups[j], &sink);
-        if (maage_status_failed(result))
-            return maage_gameplay_sound_result(MAAGE_STATUS_PROPAGATE(trace,
-                result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK),
-                &sink, written, trace);
-    }
     result = maage_gameplay_target(game,player,world,intent->movement.yaw,intent->pitch);
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND)
         return maage_gameplay_sound_result(result, &sink, written, trace);
@@ -791,4 +685,32 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
         outcome = MAAGE_STATUS_PROPAGATE(trace, maage_world_status(world),
             MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
     return maage_gameplay_sound_result(outcome, &sink, written, trace);
+}
+
+maage_status maage_gameplay_drop(maage_gameplay *game, const maage_player *player,
+    maage_world *world, const maage_item_registry *items, double yaw, double pitch,
+    unsigned int slot, int whole)
+{
+    maage_item_stack *source, stack;
+    maage_entities *entities = maage_world_entities(world);
+    double position[3], velocity[3];
+    maage_status result;
+    if (!game || !player || !entities || slot > MAAGE_INVENTORY_SLOTS ||
+        (whole != 0 && whole != 1) || !(yaw >= -1e9 && yaw <= 1e9) || !(pitch >= -1.6 && pitch <= 1.6))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    source = slot == MAAGE_INVENTORY_SLOTS ? &game->inventory.cursor : &game->inventory.slots[slot];
+    if (!source->count || !game->health) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (!maage_item_stack_valid(items, source)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION,
+        MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    result = maage_entities_reserve(entities, 1);
+    if (maage_status_failed(result)) return result;
+    stack = *source; if (!whole) stack.count = 1;
+    memcpy(position, player->position, sizeof(position)); position[1] += MAAGE_PLAYER_EYE_HEIGHT-0.3;
+    velocity[0] = sin(yaw)*cos(pitch)*0.3; velocity[2] = -cos(yaw)*cos(pitch)*0.3;
+    velocity[1] = -sin(pitch)*0.3+0.1;
+    result = maage_entities_spawn(entities, items, &stack, position, velocity, 40);
+    if (maage_status_failed(result)) return result;
+    source->count -= stack.count;
+    if (!source->count) memset(source, 0, sizeof(*source));
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }

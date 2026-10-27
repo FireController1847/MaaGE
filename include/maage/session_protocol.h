@@ -3,6 +3,7 @@
 
 #include "maage/environment.h"
 #include "maage/gameplay.h"
+#include "maage/entities.h"
 #include "maage/status.h"
 
 #ifdef __cplusplus
@@ -11,13 +12,13 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 3U
+#define MAAGE_SESSION_PROTOCOL_VERSION 4U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2, MAAGE_CMD_INVENTORY = 3,
     MAAGE_CMD_CREATIVE_PICK = 4, MAAGE_CMD_GAME_MODE = 5,
     MAAGE_CMD_RESPAWN = 6, MAAGE_CMD_PAUSE = 7, MAAGE_CMD_VIEW = 8,
-    MAAGE_CMD_DISCONNECT = 9
+    MAAGE_CMD_DISCONNECT = 9, MAAGE_CMD_DROP = 10
 } maage_session_command_kind;
 
 typedef enum maage_session_sound_id {
@@ -56,6 +57,7 @@ typedef struct maage_session_command {
     unsigned int inventory_slot;
     int secondary_click;
     maage_item_id item_id;
+    unsigned int item_metadata;
     unsigned int game_mode; /* Request; server validates and applies rules. */
     int paused; /* Request, not a write into authoritative simulation. */
     int render_radius;
@@ -107,6 +109,16 @@ typedef struct maage_session_snapshot {
     maage_session_audio_observation audio_observation;
     maage_world_stats world_stats;
 } maage_session_snapshot;
+
+/* Complete interest-set publication. Absence removes an entity. Independent of
+ * the player snapshot; immutable array ownership transfers through the local
+ * mailbox. Remote transport can fragment this same revision atomically. */
+typedef struct maage_session_entities {
+    unsigned int protocol_version;
+    unsigned long session_epoch, world_epoch, tick, sequence;
+    maage_entity *entities;
+    size_t count;
+} maage_session_entities;
 
 typedef enum maage_session_event_kind {
     MAAGE_EVENT_SOUND = 1, MAAGE_EVENT_STATUS = 2,

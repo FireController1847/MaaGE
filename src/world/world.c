@@ -1,4 +1,5 @@
 #include "world_internal.h"
+#include "maage/entities.h"
 #include "maage/world_store.h"
 #include "maage/log.h"
 #include "maage/time.h"
@@ -75,6 +76,7 @@ struct maage_world {
     maage_status reported_failures[5]; /* One retained identity per task kind. */
     maage_status_trace trace, last_job_trace;
     maage_environment *environment;
+    maage_entities *entities;
     maage_world_slot *edits, *update_head, *update_cursor;
     unsigned edit_depth, update_columns;
 };
@@ -818,35 +820,37 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
         (size_t)job_limit > (size_t)-1 / sizeof(unsigned)) goto overflow;
     world = (maage_world *)calloc(1, sizeof(*world));
     if (!world) goto allocation_failed;
+    result = maage_entities_create(&world->entities);
+    if (maage_status_failed(result)) { maage_entities_destroy(world->entities); free(world); return result; }
     world->config = *config; world->config.generation_policy = policy;
     world->leaves_mode = MAAGE_LEAVES_FANCY;
     world->cache_limit = cache_limit; world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
     if (config->new_world &&
         maage_status_failed(maage_generation_spawn(config->seed, config->biomes, &policy,
-            world->spawn))) { free(world); goto invalid_spawn; }
+            world->spawn))) { maage_entities_destroy(world->entities); free(world); goto invalid_spawn; }
     for (axis = 0; axis < 3; ++axis)
-        if (!(world->spawn[axis] > -MAAGE_WORLD_LIMIT && world->spawn[axis] < MAAGE_WORLD_LIMIT)) { free(world); goto invalid_spawn; }
-    if (!(world->spawn[1] >= 0 && world->spawn[1] < MAAGE_WORLD_LIMIT)) { free(world); goto invalid_spawn; }
+        if (!(world->spawn[axis] > -MAAGE_WORLD_LIMIT && world->spawn[axis] < MAAGE_WORLD_LIMIT)) { maage_entities_destroy(world->entities); free(world); goto invalid_spawn; }
+    if (!(world->spawn[1] >= 0 && world->spawn[1] < MAAGE_WORLD_LIMIT)) { maage_entities_destroy(world->entities); free(world); goto invalid_spawn; }
     world->center_x = maage_world_chunk_coordinate((int)floor(world->spawn[0]));
     world->center_z = maage_world_chunk_coordinate((int)floor(world->spawn[2]));
     world->tasks = (maage_world_task *)calloc(job_limit, sizeof(*world->tasks));
     world->observations = (maage_job_observation *)malloc((size_t)job_limit * sizeof(*world->observations));
     world->free_tasks = (unsigned *)malloc((size_t)job_limit * sizeof(*world->free_tasks));
     if (!world->tasks || !world->observations || !world->free_tasks) {
-        free(world->free_tasks); free(world->observations); free(world->tasks); free(world); goto allocation_failed;
+        free(world->free_tasks); free(world->observations); free(world->tasks); maage_entities_destroy(world->entities); free(world); goto allocation_failed;
     }
     for (index = 0; index < job_limit; ++index) world->free_tasks[index] = index;
     world->free_count = job_limit;
     result = maage_jobs_create(workers, job_limit, &world->jobs, trace);
     if (maage_status_failed(result)) {
-        free(world->free_tasks); free(world->observations); free(world->tasks); free(world);
+        free(world->free_tasks); free(world->observations); free(world->tasks); maage_entities_destroy(world->entities); free(world);
         return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     }
     result = maage_environment_create(config->seed, config->initial_environment, &world->environment);
     if (maage_status_failed(result)) {
         maage_jobs_destroy(world->jobs, NULL);
-        free(world->free_tasks); free(world->observations); free(world->tasks); free(world);
+        free(world->free_tasks); free(world->observations); free(world->tasks); maage_entities_destroy(world->entities); free(world);
         return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     }
     world->config.initial_environment = NULL;
@@ -1358,6 +1362,9 @@ maage_status maage_world_destroy(maage_world *world)
     }
     free(world->buckets); free(world->free_tasks);
     maage_environment_destroy(world->environment);
+    maage_entities_destroy(world->entities);
     free(world->observations); free(world->tasks); free(world);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
+
+maage_entities *maage_world_entities(const maage_world *world) { return world ? world->entities : NULL; }

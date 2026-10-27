@@ -1,4 +1,5 @@
 #include "interaction.h"
+#include "item_models.h"
 #include "maage/log.h"
 #include <math.h>
 #include <string.h>
@@ -84,101 +85,6 @@ static void maage_first_person_scale(float matrix[16], float scale)
     transform[0] = transform[5] = transform[10] = scale;
     maage_first_person_multiply(matrix, matrix, transform);
 }
-static void maage_first_person_quad(maage_mesh_vertex *vertices, unsigned int *indices,
-    size_t *faces, const float positions[4][3], const float uv[4],
-    const float tint[4], float shade, float material, const float *animation)
-{
-    static const unsigned int offsets[6] = {0,1,2,0,2,3};
-    maage_mesh_vertex *vertex;
-    float edge[2][3], normal[3], length;
-    unsigned int corner, axis, base = (unsigned int)(*faces * 4);
-    for (axis = 0; axis < 3; ++axis) {
-        edge[0][axis] = positions[1][axis] - positions[0][axis];
-        edge[1][axis] = positions[2][axis] - positions[0][axis];
-    }
-    for (axis = 0; axis < 3; ++axis)
-        normal[axis] = edge[0][(axis+1)%3]*edge[1][(axis+2)%3] -
-            edge[0][(axis+2)%3]*edge[1][(axis+1)%3];
-    length = (float)sqrt(normal[0]*normal[0] + normal[1]*normal[1] + normal[2]*normal[2]);
-    for (corner = 0; corner < 4; ++corner) {
-        vertex = &vertices[base + corner];
-        memset(vertex, 0, sizeof(*vertex));
-        for (axis = 0; axis < 3; ++axis) {
-            vertex->position[axis] = positions[corner][axis];
-            vertex->normal[axis] = length > 0 ? normal[axis] / length : 0;
-            vertex->color[axis] = tint[axis] * shade;
-            if (animation) vertex->animation[axis] = animation[axis];
-        }
-        vertex->color[3] = tint[3]; vertex->material = material;
-        vertex->light[0] = 1;
-        vertex->uv[0] = uv[corner == 1 || corner == 2 ? 2 : 0];
-        vertex->uv[1] = uv[corner < 2 ? 3 : 1];
-    }
-    for (corner = 0; corner < 6; ++corner)
-        indices[*faces * 6 + corner] = base + offsets[corner];
-    ++*faces;
-}
-static void maage_first_person_box(maage_client_first_person *visual,
-    maage_mesh_vertex *vertices, unsigned int *indices, size_t *faces,
-    const double minimum[3], const double maximum[3],
-    const maage_block_state_definition *state, float material)
-{
-    static const float shade[6] = {0.6f,0.6f,0.5f,1,0.8f,0.8f};
-    float positions[4][3], tint[4];
-    const maage_block_face_definition *definition;
-    unsigned int face, corner, axis;
-    for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
-        definition = &state->faces[face];
-        for (corner = 0; corner < 4; ++corner) for (axis = 0; axis < 3; ++axis)
-            positions[corner][axis] = (float)(maage_interaction_corners[face][corner][axis] ?
-                maximum[axis] : minimum[axis]);
-        maage_client_item_face_tint(visual->grass_color, definition, definition->tint_mode, tint);
-        maage_first_person_quad(vertices, indices, faces, positions, definition->uv,
-            tint, shade[face], material, definition->animation);
-        if (definition->overlay_uv[2] > definition->overlay_uv[0]) {
-            /* Separate biased layer retains dirt RGB below the colored fringe. */
-            axis = face / 2;
-            for (corner = 0; corner < 4; ++corner)
-                positions[corner][axis] += face % 2 ? 0.0002f : -0.0002f;
-            maage_client_item_face_tint(visual->grass_color, definition, definition->overlay_tint_mode, tint);
-            maage_first_person_quad(vertices, indices, faces, positions,
-                definition->overlay_uv, tint, shade[face], MAAGE_MESH_MATERIAL_CUTOUT, NULL);
-        }
-    }
-}
-static void maage_first_person_sprite(maage_mesh_vertex *vertices, unsigned int *indices,
-    size_t *faces, const float uv[4], const float tint[4])
-{
-    float positions[4][3], rectangle[4], coordinate, sample;
-    unsigned int face, corner, axis, pixel;
-    /* Front/back plus one texture-sampled edge per pixel row/column, matching
-     * the recognizable thin item silhouette without turning plants into cubes. */
-    for (face = 4; face < 6; ++face) {
-        for (corner = 0; corner < 4; ++corner) {
-            for (axis = 0; axis < 3; ++axis)
-                positions[corner][axis] = (float)maage_interaction_corners[face][corner][axis];
-            positions[corner][2] = face == 4 ? -0.0625f : 0;
-        }
-        maage_first_person_quad(vertices, indices, faces, positions, uv, tint,
-            face == 4 ? 0.8f : 1.0f, MAAGE_MESH_MATERIAL_CUTOUT, NULL);
-    }
-    for (face = 0; face < 4; ++face) for (pixel = 0; pixel < 16; ++pixel) {
-        axis = face / 2;
-        coordinate = (float)(pixel + face % 2) / 16;
-        sample = ((float)pixel + 0.5f) / 16;
-        memcpy(rectangle, uv, sizeof(rectangle));
-        if (axis == 0) rectangle[0] = rectangle[2] = uv[0] + (uv[2]-uv[0])*sample;
-        else rectangle[1] = rectangle[3] = uv[3] + (uv[1]-uv[3])*sample;
-        for (corner = 0; corner < 4; ++corner) {
-            positions[corner][0] = (float)maage_interaction_corners[face][corner][0];
-            positions[corner][1] = (float)maage_interaction_corners[face][corner][1];
-            positions[corner][2] = maage_interaction_corners[face][corner][2] ? 0 : -0.0625f;
-            positions[corner][axis] = coordinate;
-        }
-        maage_first_person_quad(vertices, indices, faces, positions, rectangle,
-            tint, 0.75f, MAAGE_MESH_MATERIAL_CUTOUT, NULL);
-    }
-}
 static maage_status maage_first_person_upload(maage_client_first_person *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
     const maage_item_registry *items, const maage_block_registry *blocks,
@@ -189,12 +95,10 @@ static maage_status maage_first_person_upload(maage_client_first_person *visual,
     maage_mesh_data data;
     maage_block_state_definition arm;
     const maage_item_definition *item;
-    const maage_block_definition *block;
-    const maage_block_state_definition *state;
     maage_render_mesh *replacement = NULL;
     maage_status result;
     double minimum[3], maximum[3];
-    float tint[4], material, temporary;
+    float temporary;
     size_t faces = 0;
     unsigned int face, axis;
     visual->sprite = 0;
@@ -218,39 +122,17 @@ static maage_status maage_first_person_upload(maage_client_first_person *visual,
         }
         minimum[0] = -3.0/16; minimum[1] = minimum[2] = -2.0/16;
         maximum[0] = 1.0/16; maximum[1] = 10.0/16; maximum[2] = 2.0/16;
-        maage_first_person_box(visual, vertices, indices, &faces, minimum, maximum,
+        maage_client_item_box(visual->grass_color, vertices, indices, &faces, minimum, maximum,
             &arm, MAAGE_MESH_MATERIAL_OPAQUE);
     } else {
+        maage_item_stack stack;
+        stack.item_id = visual->item_id; stack.metadata = visual->metadata; stack.count = 1; stack.damage = 0;
         item = maage_item_registry_get(items, visual->item_id);
-        if (!item) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(
-            MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0),
-            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP);
-        state = item->has_block ? maage_client_item_icon_state(blocks, item, visual->metadata) : NULL;
-        block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-        if (item->has_block && (!state || !block)) return MAAGE_STATUS_PROPAGATE(trace,
-            maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT,
-                MAAGE_OPERATION_LOOKUP, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP);
-        if (!block || block->mesh_shape == MAAGE_BLOCK_MESH_CROSS ||
-            block->mesh_shape == MAAGE_BLOCK_MESH_TORCH) {
-            if (item->texture_id >= MAAGE_CONTENT_TEXTURE_COUNT) return MAAGE_STATUS_PROPAGATE(trace,
-                maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT,
-                    MAAGE_OPERATION_LOOKUP, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP);
-            for (axis = 0; axis < 4; ++axis) tint[axis] = 1;
-            if (state) maage_client_item_face_tint(visual->grass_color, &state->faces[MAAGE_FACE_POSITIVE_Z],
-                state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
-            maage_first_person_sprite(vertices, indices, &faces,
-                visual->item_uv[item->texture_id], tint);
-            visual->sprite = 1;
-        } else {
-            for (axis = 0; axis < 3; ++axis) {
-                minimum[axis] = block->selection_shape.minimum[axis] - 0.5;
-                maximum[axis] = block->selection_shape.maximum[axis] - 0.5;
-            }
-            material = block->opaque ? MAAGE_MESH_MATERIAL_OPAQUE : MAAGE_MESH_MATERIAL_CUTOUT;
-            if (block->id == MAAGE_BLOCK_ICE || state->fluid_kind == MAAGE_FLUID_WATER)
-                material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
-            maage_first_person_box(visual, vertices, indices, &faces, minimum, maximum, state, material);
-        }
+        if (!item) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
+        visual->sprite = item->model == MAAGE_ITEM_MODEL_SPRITE;
+        result = maage_client_item_model(visual->resources, items, blocks, &stack, vertices, indices, &data);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPLOAD);
+        faces = data.index_count / 6;
     }
     data.vertices = vertices; data.vertex_count = faces * 4;
     data.indices = indices; data.index_count = faces * 6;
@@ -266,8 +148,8 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual,
     if (!visual || !resources) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
         MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE, 0);
     memset(visual, 0, sizeof(*visual));
+    visual->resources = resources;
     memcpy(visual->arm_uv, resources->arm_uv, sizeof(visual->arm_uv));
-    memcpy(visual->item_uv, resources->uv, sizeof(visual->item_uv));
     memcpy(visual->grass_color, resources->inventory_grass_color, sizeof(visual->grass_color));
     maage_first_person_identity(visual->camera_bob);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
@@ -398,7 +280,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
             maage_first_person_scale(matrix, 1.5f);
             maage_first_person_rotate(matrix, 1, 50);
             maage_first_person_rotate(matrix, 2, -25);
-            maage_first_person_translate(matrix, -0.9375, -0.0625, 0);
+            maage_first_person_translate(matrix, -0.4375, 0.4375, 0);
         } else maage_first_person_rotate(matrix, 1, 90);
     } else {
         maage_first_person_rotate(matrix, 1, root_wave*70);
@@ -470,7 +352,7 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
         return result;
     }
     if (snapshot->player.breaking_active && snapshot->player.break_progress > 0) {
-        stage = (int)(snapshot->player.break_progress * MAAGE_CLIENT_BREAK_STAGES);
+        stage = (int)(snapshot->player.break_progress * MAAGE_CLIENT_BREAK_STAGES) - 1;
         if (stage >= MAAGE_CLIENT_BREAK_STAGES) stage = MAAGE_CLIENT_BREAK_STAGES - 1;
     }
     if (visual->visible && visual->session_epoch == snapshot->session_epoch &&

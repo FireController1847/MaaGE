@@ -12,6 +12,7 @@ typedef struct maage_client_interaction_visual {
     float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][4], white_uv[4];
 } maage_client_interaction_visual;
 typedef struct maage_client_first_person {
+    const maage_client_resources *resources;
     maage_render_mesh *mesh;
     maage_item_id item_id;
     unsigned int metadata;
@@ -20,7 +21,7 @@ typedef struct maage_client_first_person {
     double equipped, walk_distance, walk_amount, arm_yaw, arm_pitch;
     double last_position[3];
     float arm_uv[MAAGE_FACE_COUNT][4];
-    float item_uv[MAAGE_CONTENT_TEXTURE_COUNT][4], grass_color[3];
+    float grass_color[3];
     float camera_bob[16];
     maage_status last_result;
 } maage_client_first_person;

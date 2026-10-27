@@ -22,10 +22,6 @@
 #endif
 
 #define MAAGE_VULKAN_FRAME_SLOTS 2
-typedef struct maage_vulkan_ui_vertex {
-    maage_render_ui_vertex vertex;
-    float depth;
-} maage_vulkan_ui_vertex;
 typedef struct maage_vulkan_frame {
     VkCommandBuffer command;
     VkFence fence;

@@ -224,7 +224,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Store worlds under instances/<instance-uuid>/worlds/<world-uuid>/,
   separate from shared Minecraft resources. World IDs are canonical UUIDs.
   Maintain one current metadata encoding and one current chunk encoding, with
-  private format identifiers for strict rejection. Inventories/pickups use
+  private format identifiers for strict rejection. Inventories/item entities use
   namespaced item identities; chunk-local palettes use namespaced biome/block
   identities plus state metadata. No legacy numeric mappings, fallback writers,
   historical readers or generator/blockset compatibility fields. Validate current
@@ -332,8 +332,17 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 
 - `MaaGE::World` owns portable item/inventory and Creative/Survival rules alongside
   movement. Owner-thread 20 TPS intents control breaking, placement, vitals and
-  pickups; Client owns native input, camera, GUI and visual feedback. Pickups use
-  64 inline records plus a growable owned overflow array, not a 64-pickup ceiling.
+  item entities; Client owns native input, camera, GUI and visual feedback.
+  World owns growable typed entity records with distinct instance IDs, swept
+  collision, velocity, age and pickup delay. Unloaded columns freeze retained
+  entities; one atomic World checkpoint persists active/dormant entities with
+  player state, independently of column jobs. Never give mined drops directly
+  to inventory or discard quantities on allocation/capacity failure.
+- Item definitions drive numeric model/texture/metadata presentation in GUI,
+  hand and world. Share cached item geometry and primary-backend transformed
+  mesh traversal; no per-entity GPU mesh uploads on movement. Complete revisioned
+  entity interest sets use a separate latest-publication mailbox, never arrays
+  embedded in player snapshots. Epoch changes invalidate presentation.
 - Shape-aware numeric DDA stops at unavailable terrain. Definitions resolve
   hardness, tool requirements, drops and separate selection/collision AABBs before
   gameplay. Placement-state callbacks consume numeric metadata and face inputs.
@@ -342,7 +351,7 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   jobs/uploads. Retain asynchronous saves and dirty-eviction protection; never
   mutate worker-borrowed storage or introduce a global World lock.
 - Maintain one current player/chunk metadata representation with named item
-  identities, extensible pickups, simulation state and generation configuration.
+  identities, typed item entities, simulation state and generation configuration.
   Historical schemas, numeric mappings and chunk decoders are not supported.
   Server saves final player metadata after rendering stops and World flush succeeds.
   Respawn retains inventory at session-start position; full death/entity/food
@@ -609,10 +618,13 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
 - The indexed textured-mesh commands use neutral CPU geometry, shared owned RGBA8
   atlas resources, batched presentation and column-major transforms (clip depth
   0..1). Metal and Vulkan consume shared material grouping, camera/depth ordering,
-  translucent triangle preparation/sorting, frame plans and transient-buffer
-  growth under `src/core/render/`. Keep only native GPU ownership, upload and
-  encoding in each adapter; do not restore duplicate CPU algorithms.
-  Material IDs, vertex layouts, animation, alpha and nonlinear lighting equations
+  translucent triangle preparation/sorting, frame submission/plans, material-pass
+  traversal and transient-buffer growth under `src/core/render/`. Common mesh
+  handles own CPU preparation; adapters own retired-frame GPU copies. Share
+  pipeline depth/cull/blend rules, uniform packets and packed UI/projective-depth
+  uploads. Keep native GPU ownership, synchronization and encoding in each adapter;
+  do not restore duplicate CPU algorithms.
+  Material IDs, vertex/uniform layouts, animation, alpha and nonlinear lighting equations
   have authoritative shared definitions. Native MSL is embedded at build time
   and compiled by Metal; native GLSL compiles to embedded SPIR-V using a host
   `glslc` or `glslangValidator`. Missing shader tools fail configuration. Windows

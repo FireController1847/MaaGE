@@ -1,6 +1,7 @@
 #ifndef MAAGE_CLIENT_UI_INTERNAL_H
 #define MAAGE_CLIENT_UI_INTERNAL_H
 #include "ui.h"
+#include "maage/content.h"
 #include "maage/image.h"
 #include "maage/internal/registry_pages.h"
 
@@ -55,6 +56,9 @@ struct maage_client_ui {
     maage_client_ui_click_callback click;
     void *click_context;
     unsigned int creative_page;
+    maage_item_stack *creative_items;
+    size_t creative_count;
+    float item_uv[MAAGE_CONTENT_TEXTURE_COUNT][4];
     maage_client_ui_resources resources;
     maage_client_ui_debug_cache debug_cache;
     maage_render_ui_vertex *vertices;

@@ -2,8 +2,9 @@
 
 This document records content refinements against Minecraft Java Edition 1.7.10
 and the shared Metal/Vulkan rendering architecture. The original fidelity pass
-compiled on macOS; the subsequent renderer consolidation has not been compiled
-or executed. In-game appearance remains unverified. No applications, tests,
+and subsequent renderer consolidation/item foundation compiled on macOS ARM64
+in Debug and Release with Metal and Vulkan/MoltenVK. In-game appearance remains
+unverified. No applications, tests,
 benchmarks or GitHub Actions were executed.
 
 ## Reference Evidence
@@ -101,11 +102,16 @@ Metal and Vulkan consume the same indexed world, UI, scene, foreground and
 animation contracts. Shared portable C groups solid/cutout, translucent and
 multiply indices, prepares triangle centers, derives camera origin, and orders
 transparent meshes/triangles. Sorting updates after half a block of camera
-travel; each backend owns retired-frame index copies. Frame planning and
-transient capacity growth are shared; native command encoding remains separate.
+travel; common mesh handles own CPU preparation and each backend owns retired-frame
+index copies. One submission path handles visibility, hidden-window priming,
+failure propagation and frame planning. The shared material iterator selects
+solid, sorted translucent and multiply draws for both world and foreground.
+Pipeline depth/culling/blending rules, uniform packets, packed UI/projective-depth
+uploads and transient capacity growth are shared; native command encoding remains separate.
 
-Native MSL and GLSL include authoritative material IDs, animation and nonlinear
-lighting equations. Metal embeds MSL for native compilation. Vulkan builds
+Native MSL and GLSL include authoritative vertex/uniform field lists, material IDs,
+animation, cutout/multiply/lighting equations, projective UI coordinates and fullscreen
+triangle coordinates. Metal embeds MSL for native compilation. Vulkan builds
 SPIR-V with a host `glslc` or `glslangValidator` and embeds it into the executable;
 no external shader files are required at runtime. Windows vcpkg provisions host
 glslang tools; Linux requires shader tools alongside Vulkan headers/loader.
@@ -127,15 +133,30 @@ in proving terminal presentation completion through queue idle alone. Ordinary r
 the surface format is unchanged. UI copies and sorted indices belong to retired
 frame slots; immutable texture/mesh destruction defers GPU release until completion.
 
+## Item Presentation
+
+Item definitions choose block or sprite models and metadata-resolved atlas tiles.
+The existing first-person box/extruded-sprite generator also builds cached dropped
+item models. GUI icons project three shaded block faces, including tinted grass
+side overlays, into existing 16x16 slots; ordinary items remain nearest-sampled
+sprites. Counts, cursor stacks, hover names and durability bars share this path.
+Creative pages include tools and all registered metadata variants.
+
+The shared material iterator accepts repeated immutable meshes with model
+transforms and sampled light. Metal copies uniform bytes and Vulkan pushes the
+same packets. Transformed translucent item triangles are sorted in shared C and
+draw immutable index ranges; no moving entity uploads mesh/index data. Both retain
+scene depth, foreground depth and UI composition. See [item entities](item-entities.md)
+for behavior and the programmer-owned verification checklist.
+
 ## Build Results and Remaining Limits
 
 macOS ARM64 Debug and Release Client/Server compile and link successfully.
 A separate Release headless Server builds with Client, Launcher, Window and
-Render disabled. These results predate the shared renderer changes. Compiled
-macOS OpenGL/software adapters retain their existing capabilities. The current
-Metal/Vulkan changes have not been configured or compiled on any platform;
-Windows/Linux and Vulkan remain uncompiled here. Existing historical unused
-helper/initializer and duplicate-library warnings were not rechecked.
+Render disabled. Both primary native adapters compile, including Vulkan linked
+against the static MoltenVK archive. macOS OpenGL/software adapters retain their
+existing capabilities. Windows/Linux remain uncompiled locally. The Client link
+reports existing duplicate-library warnings.
 
 The shader source is embedded by the build. Standalone `xcrun metal` compilation
 could not run because the optional Metal Toolchain is absent; native shader

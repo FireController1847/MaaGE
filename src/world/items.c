@@ -1,4 +1,6 @@
 #include "maage/items.h"
+#include "maage/content.h"
+#include <stdio.h>
 #include "maage/internal/registry_pages.h"
 #include <stdlib.h>
 #include <string.h>
@@ -218,7 +220,9 @@ static maage_status maage_item_oriented_placement(const maage_item_definition *i
         species = metadata & 3U;
         if (species > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-        if (face / 2 == 0) *state = MAAGE_STATE_LOG_X_BASE + species;
+        if (item->block_id == MAAGE_BLOCK_LEAVES)
+            *state = species ? MAAGE_STATE_SPRUCE_LEAVES + species - 1 : MAAGE_STATE_LEAVES;
+        else if (face / 2 == 0) *state = MAAGE_STATE_LOG_X_BASE + species;
         else if (face / 2 == 2) *state = MAAGE_STATE_LOG_Z_BASE + species;
         else *state = species ? MAAGE_STATE_SPRUCE_LOG + species - 1 : MAAGE_STATE_LOG;
     }
@@ -254,10 +258,51 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
         item.placement_state_id = item.icon_state_id = ids[i]; item.max_stack = 64;
         item.mining_speed = 1; item.texture_id = state->faces[MAAGE_FACE_POSITIVE_Z].texture_id;
         item.display_name = displays[i];
-        if (item.block_id == MAAGE_BLOCK_TORCH || item.block_id == MAAGE_BLOCK_LOG)
+        if (ids[i] == MAAGE_BLOCK_LOG || ids[i] == MAAGE_BLOCK_LEAVES) item.max_metadata = 2;
+        item.model = maage_block_registry_block(blocks, ids[i])->mesh_shape == MAAGE_BLOCK_MESH_CUBE ?
+            MAAGE_ITEM_MODEL_BLOCK : MAAGE_ITEM_MODEL_SPRITE;
+        if (item.block_id == MAAGE_BLOCK_TORCH || item.block_id == MAAGE_BLOCK_LOG || item.block_id == MAAGE_BLOCK_LEAVES)
             item.placement = maage_item_oriented_placement;
         result = maage_item_registry_register(registry, names[i], &item);
         if (maage_status_failed(result)) goto failed;
+    }
+    {
+        static const char *const tier[] = {"wooden", "stone", "iron", "diamond", "golden"};
+        static const char *const title[] = {"Wooden", "Stone", "Iron", "Diamond", "Golden"};
+        static const char *const family[] = {"pickaxe", "shovel", "axe"};
+        static const char *const label[] = {"Pickaxe", "Shovel", "Axe"};
+        static const unsigned int durability[] = {59, 131, 250, 1561, 32};
+        static const unsigned int level[] = {0, 1, 2, 3, 0};
+        static const double speed[] = {2, 4, 6, 8, 12};
+        static const char *const resource[] = {"shears", "coal", "diamond", "redstone", "lapis_lazuli",
+            "emerald", "flint", "apple", "sapling", "snowball", "wheat_seeds"};
+        static const char *const resource_title[] = {"Shears", "Coal", "Diamond", "Redstone Dust", "Lapis Lazuli",
+            "Emerald", "Flint", "Apple", "Oak Sapling", "Snowball", "Seeds"};
+        char name[80], display[80];
+        unsigned int t, f;
+        for (t = 0; t < 5; ++t) for (f = 0; f < 3; ++f) {
+            memset(&item, 0, sizeof(item));
+            item.id = MAAGE_ITEM_TOOL_BASE + t * 3 + f;
+            item.max_stack = 1; item.durability = durability[t];
+            item.tool_class = f + 1; item.tool_level = level[t]; item.mining_speed = speed[t];
+            item.model = MAAGE_ITEM_MODEL_SPRITE; item.texture_index = t * 3 + f;
+            item.texture_id = MAAGE_CONTENT_TEXTURE_ITEMS + item.texture_index;
+            sprintf(name, "minecraft:%s_%s", tier[t], family[f]);
+            sprintf(display, "%s %s", title[t], label[f]); item.display_name = display;
+            result = maage_item_registry_register(registry, name, &item);
+            if (maage_status_failed(result)) goto failed;
+        }
+        for (t = 0; t < 11; ++t) {
+            memset(&item, 0, sizeof(item)); item.id = MAAGE_ITEM_SHEARS + t;
+            item.max_stack = t == 0 ? 1 : (t == 9 ? 16 : 64); item.mining_speed = 1;
+            if (!t) { item.durability = 238; item.tool_class = MAAGE_TOOL_SHEARS; }
+            if (item.id == MAAGE_ITEM_SAPLING) item.max_metadata = 2;
+            item.model = MAAGE_ITEM_MODEL_SPRITE; item.texture_index = 15 + t;
+            item.texture_id = MAAGE_CONTENT_TEXTURE_ITEMS + item.texture_index;
+            sprintf(name, "minecraft:%s", resource[t]); item.display_name = resource_title[t];
+            result = maage_item_registry_register(registry, name, &item);
+            if (maage_status_failed(result)) goto failed;
+        }
     }
     result = maage_item_registry_finalize(registry);
     if (!maage_status_failed(result)) { *output = registry; return result; }
@@ -270,7 +315,7 @@ int maage_item_stack_valid(const maage_item_registry *registry, const maage_item
     if (!stack) return 0;
     if (!stack->count) return !stack->item_id && !stack->metadata && !stack->damage;
     item = maage_item_registry_get(registry, stack->item_id);
-    return item && stack->count <= item->max_stack &&
+    return item && stack->count <= item->max_stack && stack->metadata <= item->max_metadata &&
         stack->damage <= item->durability && (!item->durability || stack->damage < item->durability);
 }
 const maage_item_stack *maage_inventory_selected(const maage_inventory *inventory)
@@ -335,12 +380,12 @@ maage_status maage_inventory_click(maage_inventory *inventory,
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
 maage_status maage_inventory_creative(maage_inventory *inventory,
-    const maage_item_registry *registry, maage_item_id id)
+    const maage_item_registry *registry, maage_item_id id, unsigned int metadata)
 {
     const maage_item_definition *item = maage_item_registry_get(registry, id);
-    if (!inventory || !item) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    if (!inventory || !item || metadata > item->max_metadata) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
     memset(&inventory->cursor, 0, sizeof(inventory->cursor));
-    inventory->cursor.item_id = id; inventory->cursor.count = item->max_stack;
+    inventory->cursor.item_id = id; inventory->cursor.count = item->max_stack; inventory->cursor.metadata = metadata;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
 maage_status maage_item_placement_state(const maage_item_definition *item,
@@ -368,4 +413,74 @@ maage_status maage_item_registry_resolve_name(
     if (!found) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     *id = registry->ordered[registry->name_buckets[bucket] - 1];
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+}
+
+int maage_item_can_harvest(const maage_item_definition *tool,
+    const maage_block_definition *block)
+{
+    return block && (!block->harvest_requires_tool || (tool &&
+        tool->tool_class == block->required_tool && tool->tool_level >= block->required_tool_level));
+}
+double maage_item_mining_speed(const maage_item_definition *tool,
+    const maage_block_definition *block)
+{
+    if (!tool || !block) return 1;
+    if (tool->tool_class == MAAGE_TOOL_SHEARS && block->id == MAAGE_BLOCK_LEAVES) return 15;
+    return tool->tool_class == block->required_tool && tool->tool_class != MAAGE_TOOL_NONE ? tool->mining_speed : 1;
+}
+static unsigned long maage_drop_random(unsigned long *random, unsigned long range)
+{
+    *random = (*random * 1664525UL + 1013904223UL) & 4294967295UL;
+    return (*random >> 8) % range;
+}
+maage_status maage_item_generate_drops(const maage_block_registry *blocks,
+    const maage_item_registry *items, maage_block_state_id id,
+    const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops)
+{
+    const maage_block_state_definition *state = maage_block_registry_state(blocks, id);
+    const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    maage_item_stack *stack;
+    size_t i;
+    if (!block || !random || !drops) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
+        MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    memset(drops, 0, sizeof(*drops));
+    if (!maage_item_can_harvest(tool, block)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESOLVE, 0);
+    stack = &drops->stacks[0]; stack->item_id = block->drop_item_id; stack->count = block->drop_count;
+    switch (block->id) {
+    case MAAGE_BLOCK_STONE: stack->item_id = MAAGE_BLOCK_COBBLESTONE; break;
+    case MAAGE_BLOCK_COAL_ORE: stack->item_id = MAAGE_ITEM_COAL; break;
+    case MAAGE_BLOCK_DIAMOND_ORE: stack->item_id = MAAGE_ITEM_DIAMOND; break;
+    case MAAGE_BLOCK_EMERALD_ORE: stack->item_id = MAAGE_ITEM_EMERALD; break;
+    case MAAGE_BLOCK_REDSTONE_ORE: stack->item_id = MAAGE_ITEM_REDSTONE; stack->count = 4 + (unsigned int)maage_drop_random(random, 2); break;
+    case MAAGE_BLOCK_LAPIS_ORE: stack->item_id = MAAGE_ITEM_LAPIS; stack->count = 4 + (unsigned int)maage_drop_random(random, 5); break;
+    case MAAGE_BLOCK_GRAVEL: if (!maage_drop_random(random, 10)) stack->item_id = MAAGE_ITEM_FLINT; break;
+    case MAAGE_BLOCK_LOG: stack->metadata = state->metadata & 3U; break;
+    case MAAGE_BLOCK_LEAVES:
+        if (tool && tool->tool_class == MAAGE_TOOL_SHEARS) {
+            stack->item_id = MAAGE_BLOCK_LEAVES; stack->count = 1; stack->metadata = state->metadata & 3U;
+        } else {
+            stack->item_id = MAAGE_ITEM_SAPLING; stack->metadata = state->metadata & 3U;
+            stack->count = maage_drop_random(random, 20) == 0 ? 1U : 0U;
+            if (!(state->metadata & 3U) && !maage_drop_random(random, 200)) {
+                drops->stacks[1].item_id = MAAGE_ITEM_APPLE; drops->stacks[1].count = 1;
+            }
+        }
+        break;
+    case MAAGE_BLOCK_TALL_GRASS:
+        stack->item_id = tool && tool->tool_class == MAAGE_TOOL_SHEARS ? MAAGE_BLOCK_TALL_GRASS : MAAGE_ITEM_SEEDS;
+        stack->count = stack->item_id == MAAGE_BLOCK_TALL_GRASS || !maage_drop_random(random, 8) ? 1U : 0U;
+        break;
+    case MAAGE_BLOCK_DEAD_BUSH:
+        stack->count = tool && tool->tool_class == MAAGE_TOOL_SHEARS ? 1U : 0U; break;
+    case MAAGE_BLOCK_SNOW: stack->item_id = MAAGE_ITEM_SNOWBALL; stack->count = 1; break;
+    case MAAGE_BLOCK_ICE: stack->count = 0; break;
+    default: break;
+    }
+    for (i = 0; i < MAAGE_DROP_STACKS; ++i) {
+        if (!drops->stacks[i].count) continue;
+        if (!maage_item_stack_valid(items, &drops->stacks[i])) return maage_status_make(
+            MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+        drops->stacks[drops->count++] = drops->stacks[i];
+    }
+    return maage_status_make(drops->count ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESOLVE, 0);
 }

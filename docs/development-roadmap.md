@@ -51,9 +51,10 @@ The player bounds, eye height, acceleration/drag/jump values and camera tuning
 remain provisional pending programmer fidelity verification.
 
 Metal and Vulkan now implement the same textured-mesh/UI/scene API in source.
-Shared C90 preparation groups materials and sorts translucent geometry; native
-backends own GPU resources, command encoding and presentation. Native GLSL and
-MSL consume shared animation/lighting equations and numeric definitions. Vulkan
+Shared C90 code owns frame submission/planning, CPU geometry, material traversal,
+translucent sorting, UI packing and pipeline rules; native backends own GPU resources,
+command encoding and presentation. Native GLSL and MSL consume shared vertex/uniform
+layouts, shading/animation equations and screen-coordinate calculations. Vulkan
 shader builds require host `glslc` or `glslangValidator` and embed SPIR-V; Metal
 requires neither Vulkan tooling nor runtime shader files. Compilation and visual
 parity remain unverified after this consolidation. OpenGL and Software preserve
@@ -172,7 +173,7 @@ selection and lifetime world locks prevent concurrent writers.
 Data lives beneath `instances/<instance-uuid>/worlds/<world-uuid>/`: `world.bin`
 metadata and `chunks/<signed-x>_<signed-z>.chunk`. One current metadata encoding
 stores UUID/name, signed seed, creation UTC, generation configuration, position/
-orientation, inventory, pickups, vitals and clock/weather. Item stacks use stable
+orientation, inventory, typed item entities, vitals and clock/weather. Item stacks use stable
 namespaced identities. One current chunk encoding stores namespaced block plus
 state-metadata and biome palettes, lighting, generation-stage/feature counts,
 relative scheduled-update delays and numeric block entities with checked payloads.
@@ -373,13 +374,14 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   Space/Shift ascends/descends. Survival tracks health, hunger, saturation,
   exhaustion, fall damage, slow regeneration and starvation. Death opens Pause
   with Respawn, retaining inventory at the session-start position.
-- **Drops:** ordinary successful harvests enter inventory immediately. Pickups use
-  64 inline numeric position/stack records plus a growable owned overflow array;
-  allocation failure remains explicit rather than imposing a 64-record limit.
-  Collection occurs within two blocks. Records persist without rendered item
-  entities, movement or despawn yet.
+- **Drops and entities:** successful Survival harvests create World-owned item
+  entities with distinct numeric instance IDs, velocity, swept collision, age,
+  pickup delay, bounded spatial merge searches and partial inventory collection.
+  Dormant entities remain owned across column eviction. The Client consumes
+  separate complete, revisioned interest sets and caches block/sprite meshes.
+  See [item entities](item-entities.md) for rules, limits and manual verification.
 - **Persistence:** the sole CRC-protected metadata representation stores named item
-  identities and all inventory/cursor/pickup records. Chunk-local namespaced
+  identities and all inventory/cursor/entity records. Chunk-local namespaced
   block/state/biome palettes resolve at import. Old schemas and numeric mappings
   are rejected. Server writes final player metadata after rendering stops and
   World flush succeeds.
@@ -388,17 +390,14 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   diagnostics through bounded owner snapshots.
 
 This is an independent 1.7.10-style foundation, not gameplay or visual parity.
-Tools are defined by the API but none are registered yet, so bare-hand mining
-cannot harvest stone/sandstone. Drops are simplified (Phase 4 adds cobblestone, but no gravel
-flint chance or item-entity simulation). Hunger uses provisional walking/jump/
-mining costs, 80-tick regeneration/starvation and a one-health starvation floor;
-food, difficulty selection, armor, combat and crafting remain deferred. Respawn
-has no persistent bed/spawn point or death drops. Held blocks are perspective UI
-quads with fixed idle positioning, without an arm, equip animation or models.
-Cracks use opaque precompositing rather than vanilla's dedicated blend pass.
-Phase 4 extends content with shaped decoration and scheduled fluids below.
+Fifteen tiered pickaxes/shovels/axes and shears now have numeric definitions,
+correct harvest eligibility, mining speeds and durability. Drops include resource
+items and metadata variants. GUI icons use shaded isometric blocks or sprites;
+hand and world models reuse the same geometry generator and atlas. Food,
+difficulty selection, armor, combat and crafting remain deferred; respawn retains
+inventory. Hunger still uses provisional walking/jump/mining costs and regeneration.
 
-macOS ARM64 Debug/Release Client (native Metal) and portable headless Release
+macOS ARM64 Debug/Release Client (Metal and Vulkan/MoltenVK) and portable headless Release
 World/Server compilation passed. No application, test, benchmark, UI/runtime
 validation or GitHub Actions run was performed. Windows/Linux input source
 changes remain uncompiled locally; Wayland gameplay input remains unsupported.
@@ -704,7 +703,7 @@ unverified. The following requirements remain the acceptance criteria:
   successful destruction/placement sounds and supported damage, fall, splash,
   swimming, pickup and tool-break events. Ordinary jumps, landings and inventory
   slot changes are silent. UI buttons click on press; volume sliders preview on
-  release. Protocol 3 carries explicit input edges, coherent sound identities,
+  release. Protocol 4 retains explicit input edges, coherent sound identities,
   local emission timestamps, pause and owner-sampled soundscape observations.
 - Cave sounds require authoritative dark-air samples and bounded cooldowns. Rain
   uses actual precipitation surfaces; water/lava use conditional display trials,

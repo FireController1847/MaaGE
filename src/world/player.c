@@ -1,4 +1,5 @@
 #include <maage/player.h>
+#include "maage/entities.h"
 
 #include <math.h>
 #include <string.h>
@@ -54,8 +55,8 @@ static int maage_player_plane_solid(const maage_world *world,
     return collided;
 }
 
-static int maage_player_sweep(maage_player *player, const maage_world *world,
-    int axis, double displacement)
+int maage_world_sweep_body(const maage_world *world, double position[3],
+    double velocity[3], double width, double height, int axis, double displacement)
 {
     double minimum[3];
     double maximum[3];
@@ -63,12 +64,12 @@ static int maage_player_sweep(maage_player *player, const maage_world *world,
     int cell;
     int last;
     int collided;
-    minimum[0] = player->position[0] - MAAGE_PLAYER_WIDTH * 0.5;
-    maximum[0] = player->position[0] + MAAGE_PLAYER_WIDTH * 0.5;
-    minimum[1] = player->position[1];
-    maximum[1] = player->position[1] + MAAGE_PLAYER_HEIGHT;
-    minimum[2] = player->position[2] - MAAGE_PLAYER_WIDTH * 0.5;
-    maximum[2] = player->position[2] + MAAGE_PLAYER_WIDTH * 0.5;
+    minimum[0] = position[0] - width * 0.5;
+    maximum[0] = position[0] + width * 0.5;
+    minimum[1] = position[1];
+    maximum[1] = position[1] + height;
+    minimum[2] = position[2] - width * 0.5;
+    maximum[2] = position[2] + width * 0.5;
     allowed = displacement;
     collided = 0;
     if (displacement > 0.0) {
@@ -94,8 +95,8 @@ static int maage_player_sweep(maage_player *player, const maage_world *world,
             }
         }
     }
-    player->position[axis] += allowed;
-    if (collided) player->velocity[axis] = 0.0;
+    position[axis] += allowed;
+    if (collided) velocity[axis] = 0.0;
     return collided;
 }
 
@@ -145,10 +146,10 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world,
     if (input->flying) player->velocity[1] = ((input->jump ? 1 : 0) -
         (input->descend ? 1 : 0)) * 0.3;
     vertical = player->velocity[1];
-    hit_vertical = maage_player_sweep(player, world, 1, vertical);
+    hit_vertical = maage_world_sweep_body(world, player->position, player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 1, vertical);
     player->grounded = hit_vertical && vertical < 0.0;
-    maage_player_sweep(player, world, 0, player->velocity[0]);
-    maage_player_sweep(player, world, 2, player->velocity[2]);
+    maage_world_sweep_body(world, player->position, player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 0, player->velocity[0]);
+    maage_world_sweep_body(world, player->position, player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 2, player->velocity[2]);
     player->velocity[1] = (player->velocity[1] - MAAGE_PLAYER_GRAVITY_PER_TICK) *
         MAAGE_PLAYER_VERTICAL_DRAG;
     if (input->flying) player->velocity[1] = 0;

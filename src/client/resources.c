@@ -70,12 +70,41 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/entity/steve.png",
     "minecraft/textures/blocks/grass_side_snowed.png",
     "minecraft/textures/blocks/water_flow.png",
-    "minecraft/textures/blocks/lava_flow.png"
+    "minecraft/textures/blocks/lava_flow.png",
+    "minecraft/textures/items/wood_pickaxe.png",
+    "minecraft/textures/items/wood_shovel.png",
+    "minecraft/textures/items/wood_axe.png",
+    "minecraft/textures/items/stone_pickaxe.png",
+    "minecraft/textures/items/stone_shovel.png",
+    "minecraft/textures/items/stone_axe.png",
+    "minecraft/textures/items/iron_pickaxe.png",
+    "minecraft/textures/items/iron_shovel.png",
+    "minecraft/textures/items/iron_axe.png",
+    "minecraft/textures/items/diamond_pickaxe.png",
+    "minecraft/textures/items/diamond_shovel.png",
+    "minecraft/textures/items/diamond_axe.png",
+    "minecraft/textures/items/gold_pickaxe.png",
+    "minecraft/textures/items/gold_shovel.png",
+    "minecraft/textures/items/gold_axe.png",
+    "minecraft/textures/items/shears.png",
+    "minecraft/textures/items/coal.png",
+    "minecraft/textures/items/diamond.png",
+    "minecraft/textures/items/redstone_dust.png",
+    "minecraft/textures/items/dye_powder_blue.png",
+    "minecraft/textures/items/emerald.png",
+    "minecraft/textures/items/flint.png",
+    "minecraft/textures/items/apple.png",
+    "minecraft/textures/blocks/sapling_oak.png",
+    "minecraft/textures/items/snowball.png",
+    "minecraft/textures/items/seeds_wheat.png",
+    "minecraft/textures/blocks/sapling_spruce.png",
+    "minecraft/textures/blocks/sapling_birch.png"
 };
 
 static int maage_client_texture_source(int texture)
 {
     static const int base[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};
+    if (texture >= MAAGE_CONTENT_TEXTURE_ITEMS) return 64 + texture - MAAGE_CONTENT_TEXTURE_ITEMS;
     if (texture == MAAGE_CONTENT_TEXTURE_MISSING) return -1;
     if (texture == MAAGE_CONTENT_TEXTURE_GRASS_SIDE_OVERLAY) return 4;
     if (texture == MAAGE_CONTENT_TEXTURE_GRASS_SIDE_SNOW) return 61;
@@ -269,7 +298,8 @@ maage_status maage_client_resources_load(const char *application_data,
     }
     /* Every failed visual resolves to the same canonical tile in the shared
      * renderer-owned atlas; registration never publishes a missing handle. */
-    for (i = 0; i < MAAGE_CONTENT_TEXTURE_MISSING; ++i) {
+    for (i = 0; i < MAAGE_CONTENT_TEXTURE_COUNT; ++i) {
+        if (i == MAAGE_CONTENT_TEXTURE_MISSING) continue;
         source_index = maage_client_texture_source(i);
         if (sources[source_index].pixels) continue;
         if (i >= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_OAK && i <= MAAGE_CONTENT_TEXTURE_LEAVES_OPAQUE_BIRCH &&
@@ -450,8 +480,10 @@ const maage_block_state_definition *maage_client_item_icon_state(
     unsigned int species = metadata & 3;
     if (!item) return NULL;
     state = maage_block_registry_state(blocks, item->icon_state_id);
-    if (state && state->block_id == MAAGE_BLOCK_LOG && (species == 1 || species == 2))
-        state = maage_block_registry_state(blocks, MAAGE_STATE_SPRUCE_LOG + species - 1);
+    if (state && (state->block_id == MAAGE_BLOCK_LOG || state->block_id == MAAGE_BLOCK_LEAVES) &&
+        (species == 1 || species == 2))
+        state = maage_block_registry_state(blocks, (state->block_id == MAAGE_BLOCK_LOG ?
+            MAAGE_STATE_SPRUCE_LOG : MAAGE_STATE_SPRUCE_LEAVES) + species - 1);
     return state;
 }
 
@@ -461,4 +493,27 @@ maage_status maage_client_resources_destroy(maage_client_resources *resources)
     maage_image_destroy(&resources->image);
     memset(resources, 0, sizeof(*resources));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+}
+
+maage_texture_id maage_client_item_texture(const maage_item_definition *item, unsigned int metadata)
+{
+    if (!item) return MAAGE_CONTENT_TEXTURE_MISSING;
+    if (item->id == MAAGE_ITEM_SAPLING && (metadata == 1 || metadata == 2))
+        return MAAGE_CONTENT_TEXTURE_ITEMS + 25 + metadata;
+    return item->texture_id;
+}
+
+const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack)
+{
+    static const char *const logs[] = {"Oak Log", "Spruce Log", "Birch Log"};
+    static const char *const leaves[] = {"Oak Leaves", "Spruce Leaves", "Birch Leaves"};
+    static const char *const saplings[] = {"Oak Sapling", "Spruce Sapling", "Birch Sapling"};
+    const maage_item_definition *item = stack ? maage_item_registry_get(items, stack->item_id) : NULL;
+    if (!item) return "";
+    if (stack->metadata <= 2) {
+        if (item->has_block && item->block_id == MAAGE_BLOCK_LOG) return logs[stack->metadata];
+        if (item->has_block && item->block_id == MAAGE_BLOCK_LEAVES) return leaves[stack->metadata];
+        if (item->id == MAAGE_ITEM_SAPLING) return saplings[stack->metadata];
+    }
+    return item->display_name;
 }

@@ -566,6 +566,8 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
         if (type == NSEventTypeFlagsChanged) {
             maage_window_input_key(window, MAAGE_INPUT_KEY_SHIFT,
                 ([event modifierFlags] & NSEventModifierFlagShift) != 0);
+            maage_window_input_key(window, MAAGE_INPUT_KEY_CONTROL,
+                ([event modifierFlags] & NSEventModifierFlagControl) != 0);
         }
         if (type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
             if (type == NSEventTypeKeyDown && ([event modifierFlags] & NSEventModifierFlagCommand)) return 0;
@@ -595,6 +597,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
             case 123: key = MAAGE_INPUT_KEY_LEFT; break;
             case 124: key = MAAGE_INPUT_KEY_RIGHT; break;
             case 14: key = MAAGE_INPUT_KEY_E; break;
+            case 12: key = MAAGE_INPUT_KEY_Q; break;
             case 18: key = MAAGE_INPUT_KEY_1; break;
             case 19: key = MAAGE_INPUT_KEY_2; break;
             case 20: key = MAAGE_INPUT_KEY_3; break;

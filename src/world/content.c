@@ -76,7 +76,7 @@ static maage_status maage_content_blocks_create(
     static const maage_block_id ids[] = {0, 1, 2, 3, 7, 9, 12, 13, 24};
     static const int textures[] = {0, 0, 2, 1, 4, 5, 6, 7, 8};
     static const double hardness[] = {0, 1.5, 0.6, 0.5, -1, 100, 0.5, 0.6, 0.8};
-    static const unsigned long drops[] = {0, 1, 3, 3, 0, 0, 12, 13, 24};
+    static const unsigned long drops[] = {0, 4, 3, 3, 0, 0, 12, 13, 24};
     maage_block_registry *registry = NULL;
     maage_status result;
     maage_block_definition block;
@@ -99,7 +99,7 @@ static maage_status maage_content_blocks_create(
         block.hardness = hardness[i];
         block.drop_item_id = drops[i]; block.drop_count = drops[i] ? 1U : 0U;
         if (ids[i] == MAAGE_BLOCK_STONE || ids[i] == MAAGE_BLOCK_SANDSTONE) {
-            block.required_tool = MAAGE_TOOL_PICKAXE; block.required_tool_level = 1;
+            block.required_tool = MAAGE_TOOL_PICKAXE; block.required_tool_level = 0; block.harvest_requires_tool = 1;
         } else if (ids[i] == MAAGE_BLOCK_GRASS || ids[i] == MAAGE_BLOCK_DIRT ||
             ids[i] == MAAGE_BLOCK_SAND || ids[i] == MAAGE_BLOCK_GRAVEL)
             block.required_tool = MAAGE_TOOL_SHOVEL;
@@ -175,8 +175,16 @@ static maage_status maage_content_blocks_create(
             if (block.id == MAAGE_BLOCK_LOG || block.id == MAAGE_BLOCK_PLANKS) block.required_tool = MAAGE_TOOL_AXE;
             else if (block.solid && block.id != MAAGE_BLOCK_LEAVES && block.id != MAAGE_BLOCK_SNOW &&
                 block.id != MAAGE_BLOCK_ICE && block.id != MAAGE_BLOCK_CACTUS) {
-                block.required_tool = MAAGE_TOOL_PICKAXE; block.required_tool_level = block.id == MAAGE_BLOCK_OBSIDIAN ? 3U : 1U;
+                block.required_tool = MAAGE_TOOL_PICKAXE; block.harvest_requires_tool = 1;
+                block.required_tool_level = block.id == MAAGE_BLOCK_OBSIDIAN ? 3U :
+                    (block.id == MAAGE_BLOCK_GOLD_ORE || block.id == MAAGE_BLOCK_DIAMOND_ORE ||
+                     block.id == MAAGE_BLOCK_REDSTONE_ORE || block.id == MAAGE_BLOCK_EMERALD_ORE ? 2U :
+                     (block.id == MAAGE_BLOCK_IRON_ORE || block.id == MAAGE_BLOCK_LAPIS_ORE ? 1U : 0U));
             }
+            if (block.id == MAAGE_BLOCK_SNOW) { block.required_tool = MAAGE_TOOL_SHOVEL; block.harvest_requires_tool = 1; }
+            if (block.id == MAAGE_BLOCK_ICE) block.required_tool = MAAGE_TOOL_PICKAXE;
+            if (block.mesh_shape == MAAGE_BLOCK_MESH_CROSS)
+                block.required_tool = MAAGE_TOOL_AXE;
             strcpy(name, "minecraft:"); strcat(name, content[entry].name);
             if (maage_status_failed(result = maage_block_registry_register_block(registry, name, &block)) ||
                 maage_status_failed(result = maage_content_register_state(registry, config, block.id, block.id,

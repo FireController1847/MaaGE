@@ -49,6 +49,14 @@ maage_status maage_local_session_offer_mesh(maage_local_session *session,
     maage_local_mesh_update *mesh_update);
 maage_status maage_local_session_take_mesh(maage_local_session *session,
     maage_local_mesh_update *mesh_update);
+/* One latest complete entity publication, with bounded queue depth. Offer
+ * consumes array on SUCCESS only; take transfers it to the Client. Pointer
+ * swaps under the mailbox mutex never copy an unbounded array under a lock.
+ * No Server/World-owned memory is exposed. Caller frees taken arrays. */
+maage_status maage_local_session_offer_entities(maage_local_session *session,
+    maage_session_entities *entities);
+maage_status maage_local_session_take_entities(maage_local_session *session,
+    maage_session_entities *entities);
 /* Close rejects new writes, broadcasts wakeups and preserves queued data for
  * draining. Empty reads after close return INVALID_STATE, not NOOP. */
 maage_status maage_local_session_close(maage_local_session *session);

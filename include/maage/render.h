@@ -135,6 +135,18 @@ maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
 maage_status maage_renderer_set_foreground(maage_renderer *renderer,
     const maage_render_mesh *mesh, const float view_projection[16],
     float sky_light, float block_light);
+/* Repeated immutable geometry with lightweight model transforms and copied
+ * light. Borrowed through draw_frame; both primary backends encode the same
+ * shared material/depth order and copy uniforms into their command resources.
+ * Clear the array before destroying any referenced mesh; draw_frame needs a
+ * world view-projection matrix while instances are installed. */
+typedef struct maage_render_instance {
+    const maage_render_mesh *mesh;
+    float transform[16];
+    float sky_light, block_light;
+} maage_render_instance;
+maage_status maage_renderer_set_instances(maage_renderer *renderer,
+    const maage_render_instance *instances, size_t count);
 /* Presentation clock in 20 Hz ticks; caller may wrap at a common animation
  * period. No texture uploads or mesh invalidation are needed to advance it. */
 maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float tick);

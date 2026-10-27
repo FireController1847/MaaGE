@@ -3,6 +3,7 @@
 #include "maage/world.h"
 #include "maage/gameplay.h"
 #include "maage/environment.h"
+#include "maage/entities.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +15,7 @@ typedef struct maage_world_record {
     double position[3], yaw, pitch;
     int new_world; /* pending initial spawn; persists until first player save */
     maage_gameplay_save gameplay;
+    maage_entity_save entities;
 } maage_world_record;
 /* Menu/admin I/O boundary: copied display metadata, never live gameplay data.
  * List owns a growable array released with free(); corrupt entries retain their
@@ -39,7 +41,7 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
  * generation_policy supplies creation defaults only; resumed worlds always use
  * their saved policy. An explicit existing id requires NULL policy.
  * Borrows finalized item definitions until close. Owns an exclusive world lock
- * until close. Returned record copies borrow the store's initial gameplay save.
+ * until close. Returned records borrow the store's initial entity array.
  * Errors are static, credential-free text (256 bytes); optional traces are
  * caller-owned. Only the current metadata/chunk encodings are accepted. */
 maage_status maage_world_store_open(const char *instance_root, const char *id,
@@ -48,10 +50,10 @@ maage_status maage_world_store_open(const char *instance_root, const char *id,
     maage_world_store **store, maage_world_record *record, char error[256], maage_status_trace *trace);
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
  * independent chunk files may be written concurrently. Player inventories and
- * pickups use stable namespaced item identities; no numeric mapping is persisted.
+ * World entities use stable namespaced item identities; no numeric mapping is persisted.
  * Environment and generation settings share the same atomic metadata replacement. */
 maage_status maage_world_store_save(maage_world_store *store,
-    const double position[3], double yaw, double pitch, const maage_gameplay *game,
+    const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world,
     const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);

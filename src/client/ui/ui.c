@@ -167,6 +167,7 @@ maage_status maage_client_ui_destroy(maage_client_ui *ui)
 {
     if (!ui) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_render_texture_destroy(ui->resources.texture);
+    free(ui->creative_items);
     free(ui->debug_cache.vertices);
     free(ui->vertices); free(ui->indices);
     maage_registry_pages_destroy(&ui->navigation.screens, free);

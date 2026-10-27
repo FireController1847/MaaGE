@@ -40,6 +40,8 @@ static int maage_win32_key(LPARAM code)
     case 0x4b: return MAAGE_INPUT_KEY_LEFT;
     case 0x4d: return MAAGE_INPUT_KEY_RIGHT;
     case 0x12: return MAAGE_INPUT_KEY_E;
+    case 0x10: return MAAGE_INPUT_KEY_Q;
+    case 0x1d: return MAAGE_INPUT_KEY_CONTROL;
     case 0x02: return MAAGE_INPUT_KEY_1;
     case 0x03: return MAAGE_INPUT_KEY_2;
     case 0x04: return MAAGE_INPUT_KEY_3;

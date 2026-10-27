@@ -18,6 +18,7 @@
 #include "ui/ui.h"
 #include "debug.h"
 #include "interaction.h"
+#include "item_entities.h"
 #include "environment.h"
 #include "storage_context.h"
 #include "options.h"
@@ -521,6 +522,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_options video_options, saved_video_options, current_options;
     maage_client_interaction_visual interaction;
     maage_client_first_person first_person;
+    maage_client_item_entities *item_entities = NULL;
     maage_client_debug debug;
     maage_client_mesh_stats mesh_stats;
     maage_client_ui_input ui_input;
@@ -633,12 +635,15 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_interaction_init(&interaction, &resources);
     if (maage_status_failed(operation)) goto done;
+    operation = maage_client_item_entities_create(renderer, atlas, &resources, items, blocks, &item_entities, trace);
+    if (maage_status_failed(operation)) goto done;
     operation = maage_client_first_person_init(&first_person, &resources);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_create(renderer, window, directory, &resources.atlas, &ui, trace);
-    (void)maage_client_resources_destroy(&resources);
+    (void)maage_image_destroy(&resources.image);
+    resources.atlas.pixels = NULL;
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_set_content(ui, items, blocks, first_person.grass_color);
+    operation = maage_client_ui_set_content(ui, items, blocks, first_person.grass_color, resources.uv);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_frontend_create(ui, instance, items, &frontend, trace);
     if (maage_status_failed(operation)) goto done;
@@ -960,6 +965,13 @@ choose_world:
                     maage_client_ui_notify(ui, operation, now);
                 else queued_hotbar = selected_hotbar;
             }
+            if (input.pressed[MAAGE_INPUT_KEY_Q]) {
+                memset(&command, 0, sizeof(command)); command.kind = MAAGE_CMD_DROP;
+                command.inventory_slot = (unsigned int)selected_hotbar;
+                command.secondary_click = input.keys[MAAGE_INPUT_KEY_CONTROL] != 0;
+                operation = maage_client_outbox_queue(&outbox, &command);
+                if (maage_status_failed(operation)) maage_client_ui_notify(ui, operation, now);
+            }
         } else wheel = 0.0;
         if (active) {
             if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_latched = 1;
@@ -1171,6 +1183,9 @@ choose_world:
             maage_client_camera(matrix, eye, render_yaw, render_pitch,
                 (double)state.framebuffer_width / state.framebuffer_height,
                 options.radius, maage_client_ui_fov_radians(ui), first_person.camera_bob);
+            rendered = maage_client_item_entities_update(item_entities, session, &latest, alpha, eye, now, trace);
+            if (maage_status_failed(rendered)) goto done;
+            if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_renderer_draw_frame(renderer, cache.draws,
                 draw_count, matrix, ui_draw, trace);
             if (maage_status_failed(rendered)) goto done;
@@ -1238,6 +1253,8 @@ return_to_title:
     rendered = maage_renderer_set_foreground(renderer, NULL, NULL, 0, 0);
     if (maage_status_failed(rendered)) goto done;
     first_person.initialized = 0;
+    operation = maage_client_item_entities_clear(item_entities);
+    if (maage_status_failed(operation)) goto done;
     goto choose_world;
 
 clock_failed:
@@ -1282,6 +1299,8 @@ done:
     maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache),
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_environment_destroy(environment_view),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_item_entities_destroy(item_entities),
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_render_mesh_destroy(interaction.mesh),
         &outcome, &cleanup_trace, trace);

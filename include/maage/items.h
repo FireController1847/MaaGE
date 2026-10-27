@@ -5,7 +5,16 @@
 #define MAAGE_INVENTORY_SLOTS 36U
 #define MAAGE_HOTBAR_SLOTS 9U
 typedef unsigned long maage_item_id;
-enum { MAAGE_TOOL_NONE = 0, MAAGE_TOOL_PICKAXE, MAAGE_TOOL_SHOVEL, MAAGE_TOOL_AXE };
+enum { MAAGE_TOOL_NONE = 0, MAAGE_TOOL_PICKAXE, MAAGE_TOOL_SHOVEL, MAAGE_TOOL_AXE, MAAGE_TOOL_SHEARS };
+enum { MAAGE_ITEM_MODEL_BLOCK = 0, MAAGE_ITEM_MODEL_SPRITE = 1 };
+/* Item identities are independent of the block/state domains. */
+enum {
+    MAAGE_ITEM_TOOL_BASE = 1024, MAAGE_ITEM_SHEARS = 1039,
+    MAAGE_ITEM_COAL = 1040, MAAGE_ITEM_DIAMOND, MAAGE_ITEM_REDSTONE,
+    MAAGE_ITEM_LAPIS, MAAGE_ITEM_EMERALD, MAAGE_ITEM_FLINT, MAAGE_ITEM_APPLE,
+    MAAGE_ITEM_SAPLING, MAAGE_ITEM_SNOWBALL, MAAGE_ITEM_SEEDS
+};
+#define MAAGE_ITEM_TEXTURE_COUNT 28U
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item,
     unsigned int metadata, maage_block_face face, double yaw,
@@ -15,8 +24,10 @@ typedef struct maage_item_definition {
     int has_block;
     maage_block_id block_id;
     maage_block_state_id placement_state_id, icon_state_id;
-    unsigned int max_stack, durability, tool_class, tool_level;
+    unsigned int max_stack, durability, tool_class, tool_level, max_metadata;
     double mining_speed;
+    unsigned int model; /* Shared numeric presentation category. */
+    unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;
     const char *display_name;
     maage_item_placement placement; /* NULL uses placement_state_id, metadata 0. */
@@ -62,8 +73,18 @@ maage_status maage_inventory_add(maage_inventory *inventory,
 maage_status maage_inventory_click(maage_inventory *inventory,
     const maage_item_registry *registry, unsigned int slot, int secondary);
 maage_status maage_inventory_creative(maage_inventory *inventory,
-    const maage_item_registry *registry, maage_item_id item);
+    const maage_item_registry *registry, maage_item_id item, unsigned int metadata);
 maage_status maage_item_placement_state(const maage_item_definition *item,
     unsigned int metadata, maage_block_face face, double yaw,
     maage_block_state_id *state);
+/* Pure numeric rules; randomness is caller-owned and committed with mutation. */
+int maage_item_can_harvest(const maage_item_definition *tool,
+    const maage_block_definition *block);
+double maage_item_mining_speed(const maage_item_definition *tool,
+    const maage_block_definition *block);
+#define MAAGE_DROP_STACKS 2U
+typedef struct maage_item_drops { maage_item_stack stacks[MAAGE_DROP_STACKS]; size_t count; } maage_item_drops;
+maage_status maage_item_generate_drops(const maage_block_registry *blocks,
+    const maage_item_registry *items, maage_block_state_id state,
+    const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops);
 #endif

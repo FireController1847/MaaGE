@@ -143,6 +143,7 @@ typedef struct maage_block_definition {
     unsigned int mesh_shape; /* Numeric cube, crossed plant or narrow torch. */
     double hardness; /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
+    int harvest_requires_tool; /* Effectiveness and harvest eligibility differ. */
     unsigned long drop_item_id; /* Item domain, resolved at registration. */
     unsigned int drop_count;
     maage_block_shape collision_shape, selection_shape;

@@ -19,6 +19,8 @@ struct maage_local_session {
     int has_mesh_epoch;
     maage_session_snapshot snapshot;
     int has_snapshot;
+    maage_session_entities entities;
+    int has_entities;
     int closed;
 };
 
@@ -47,13 +49,16 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size)
 static int session_command_valid(const maage_session_command *command)
 {
     if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_DISCONNECT)
+        command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_DROP)
         return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
     case MAAGE_CMD_INVENTORY:
         return command->inventory_slot < MAAGE_INVENTORY_SLOTS &&
+            (command->secondary_click == 0 || command->secondary_click == 1);
+    case MAAGE_CMD_DROP:
+        return command->inventory_slot <= MAAGE_INVENTORY_SLOTS &&
             (command->secondary_click == 0 || command->secondary_click == 1);
     case MAAGE_CMD_GAME_MODE:
         return command->game_mode == MAAGE_GAME_MODE_SURVIVAL ||
@@ -391,9 +396,51 @@ maage_status maage_local_session_destroy(maage_local_session *session)
     session->mutex = NULL;
     for (i = 0; i < session->mesh_count; ++i)
         (void)maage_world_mesh_destroy(session->meshes[i].mesh);
+    free(session->entities.entities);
     free(session->meshes);
     free(session->events);
     free(session->commands);
     free(session);
     return session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
+}
+
+maage_status maage_local_session_offer_entities(maage_local_session *session,
+    maage_session_entities *view)
+{
+    maage_entity *retired = NULL;
+    maage_status result;
+    if (!session || !view || view->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+        !view->session_epoch || !view->world_epoch || !view->sequence ||
+        view->count > (size_t)-1 / sizeof(*view->entities) || (view->count && !view->entities))
+        return session_argument(MAAGE_OPERATION_SUBMIT, 1);
+    maage_mutex_lock(session->mutex);
+    if (session->closed) result = session_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_SUBMIT);
+    else if (session->entities.sequence &&
+        (view->session_epoch < session->entities.session_epoch ||
+         (view->session_epoch == session->entities.session_epoch &&
+          (view->world_epoch < session->entities.world_epoch ||
+           (view->world_epoch == session->entities.world_epoch &&
+            (view->tick < session->entities.tick || view->sequence <= session->entities.sequence))))))
+        result = session_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
+    else {
+        retired = session->entities.entities; session->entities = *view;
+        view->entities = NULL; view->count = 0; session->has_entities = 1;
+        result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
+    }
+    maage_mutex_unlock(session->mutex);
+    free(retired);
+    return result;
+}
+maage_status maage_local_session_take_entities(maage_local_session *session,
+    maage_session_entities *view)
+{
+    maage_status result;
+    if (!session || !view) return session_argument(MAAGE_OPERATION_READ, 1);
+    maage_mutex_lock(session->mutex);
+    if (session->has_entities) {
+        *view = session->entities; session->entities.entities = NULL;
+        session->has_entities = 0; result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
+    } else result = session_status(session->closed ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);
+    maage_mutex_unlock(session->mutex);
+    return result;
 }
