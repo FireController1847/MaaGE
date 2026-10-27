@@ -133,7 +133,7 @@ maage_status maage_client_environment_destroy(maage_client_environment *view)
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 static void maage_client_environment_body(maage_client_environment *view, const double direction[3],
-    const double forward[3], const double right[3], const double up[3], float focal,
+    const float view_projection[16],
     float width, float height, int moon, unsigned int phase, float alpha)
 {
     const maage_client_environment_resource *resource = &maage_client_environment_resources[moon ? 1 : 0];
@@ -156,9 +156,14 @@ static void maage_client_environment_body(maage_client_environment *view, const 
         for (component = 0; component < 3; ++component)
             position[component] = direction[component] * 100 + tangent[component] * vertical * half;
         position[2] += horizontal * half;
-        points[corner][0] = position[0] * right[0] + position[1] * right[1] + position[2] * right[2];
-        points[corner][1] = position[0] * up[0] + position[1] * up[1] + position[2] * up[2];
-        points[corner][2] = position[0] * forward[0] + position[1] * forward[1] + position[2] * forward[2];
+        /* Homogeneous directions (w=0) share the world's current projection
+         * and camera rotation, including bob, without eye-position parallax. */
+        points[corner][0] = points[corner][1] = points[corner][2] = 0;
+        for (component = 0; component < 3; ++component) {
+            points[corner][0] += view_projection[component * 4] * position[component];
+            points[corner][1] += view_projection[component * 4 + 1] * position[component];
+            points[corner][2] += view_projection[component * 4 + 3] * position[component];
+        }
         points[corner][3] = u + ((moon ? -horizontal : horizontal) + 1) * 0.5 * uv_width;
         points[corner][4] = v + ((moon ? -vertical : vertical) + 1) * 0.5 * uv_height;
     }
@@ -178,8 +183,8 @@ static void maage_client_environment_body(maage_client_environment *view, const 
     for (corner = 0; corner < count; ++corner) {
         view->sky_depth[view->sky.vertex_count] = (float)clipped[corner][2];
         vertex = &view->sky_vertices[view->sky.vertex_count++];
-        vertex->position[0] = width * 0.5f + focal * (float)(clipped[corner][0] / clipped[corner][2]);
-        vertex->position[1] = height * 0.5f - focal * (float)(clipped[corner][1] / clipped[corner][2]);
+        vertex->position[0] = width * 0.5f * (1 + (float)(clipped[corner][0] / clipped[corner][2]));
+        vertex->position[1] = height * 0.5f * (1 - (float)(clipped[corner][1] / clipped[corner][2]));
         vertex->uv[0] = (float)clipped[corner][3]; vertex->uv[1] = (float)clipped[corner][4];
         vertex->color[0] = vertex->color[1] = vertex->color[2] = 1;
         vertex->color[3] = alpha;
@@ -218,25 +223,21 @@ static void maage_client_sky_color(double temperature, double brightness,
 }
 maage_status maage_client_environment_update(maage_client_environment *view,
     maage_renderer *renderer, const maage_session_snapshot *snapshot,
-    float width, float height, double vertical_fov)
+    float width, float height, const float view_projection[16])
 {
     const maage_client_environment_resource *resource;
     const maage_environment_state *state;
-    double yaw, pitch;
-    double forward[3], right[3], up[3], sun[3], angle, phase, sunlight, rain, sky_brightness;
-    float focal, x, y, size, alpha;
+    double sun[3], angle, phase, sunlight, rain, sky_brightness;
+    float x, y, size, alpha;
     float sky_color[3];
     unsigned int i, hash;
     int cold = 0, precipitation = 0;
     maage_status result;
-    if (!view || !renderer || !snapshot ||
-        snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        !(vertical_fov > 0 && vertical_fov < 3.14)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
+    if (!view || !renderer || !snapshot || !view_projection ||
+        snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
     if (width <= 0 || height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     if (!(width > 0 && height > 0)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
     state = &snapshot->environment;
-    yaw = snapshot->player.yaw;
-    pitch = snapshot->player.pitch;
     view->sky.vertex_count = view->sky.index_count = view->weather.vertex_count = view->weather.index_count = 0;
     view->sky.logical_width = view->weather.logical_width = width;
     view->sky.logical_height = view->weather.logical_height = height;
@@ -251,14 +252,10 @@ maage_status maage_client_environment_update(maage_client_environment *view,
         sky_brightness, rain, state->thunder_intensity, sky_color);
     result = maage_renderer_set_clear_color(renderer, sky_color[0], sky_color[1], sky_color[2], 1);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    forward[0] = sin(yaw) * cos(pitch); forward[1] = -sin(pitch); forward[2] = -cos(yaw) * cos(pitch);
-    right[0] = cos(yaw); right[1] = 0; right[2] = sin(yaw);
-    up[0] = sin(yaw) * sin(pitch); up[1] = cos(pitch); up[2] = -cos(yaw) * sin(pitch);
     sun[0] = -sin(angle); sun[1] = cos(angle); sun[2] = 0;
-    focal = height * 0.5f / (float)tan(vertical_fov * 0.5);
-    if (view->available[0]) maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 0, 0, (float)(1 - rain));
+    if (view->available[0]) maage_client_environment_body(view, sun, view_projection, width, height, 0, 0, (float)(1 - rain));
     for (i = 0; i < 3; ++i) sun[i] = -sun[i];
-    if (view->available[1]) maage_client_environment_body(view, sun, forward, right, up, focal, width, height, 1,
+    if (view->available[1]) maage_client_environment_body(view, sun, view_projection, width, height, 1,
         (unsigned int)(state->day_low & 7), (float)(1 - rain));
     /* Server sampled the player's sky/climate. No client World access. */
     if (snapshot->has_observation) {

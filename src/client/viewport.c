@@ -1174,10 +1174,6 @@ choose_world:
             atlas, blocks, &latest, trace);
         if (maage_status_failed(rendered)) goto done;
         effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed);
-        rendered = maage_client_environment_update(environment_view,
-            renderer, &latest, maage_client_ui_width(ui),
-            maage_client_ui_height(ui), effective_fov);
-        if (maage_status_failed(rendered)) goto done;
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;
@@ -1221,6 +1217,10 @@ choose_world:
             maage_client_camera(matrix, eye, render_yaw, render_pitch,
                 (double)state.framebuffer_width / state.framebuffer_height,
                 options.radius, effective_fov, first_person.camera_bob);
+            rendered = maage_client_environment_update(environment_view,
+                renderer, &latest, maage_client_ui_width(ui),
+                maage_client_ui_height(ui), matrix);
+            if (maage_status_failed(rendered)) goto done;
             rendered = maage_client_item_entities_update(item_entities, session, &latest, alpha, eye, now, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);

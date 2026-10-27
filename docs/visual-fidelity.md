@@ -42,6 +42,12 @@ behavior and are not Java/Forge compatibility features implemented by this pass.
   blending now preserves the original black texels as zero light contribution,
   without color-keying or altering source pixels. Celestial planes use the eased
   orbit, reference proportions/orientation, moon phases and rain attenuation.
+  Each rendered frame projects sky directions through the same current world
+  camera matrix, including local mouse-look, view-bob rotation, effective FOV
+  and framebuffer aspect. Translation is excluded for the distant sky. Logical
+  drawing coordinates do not change that perspective. Server snapshots still
+  supply celestial time, weather and moon phase; camera-plane clipping and
+  projective UVs preserve sprites at screen edges on both Metal and Vulkan.
 - **Grass/foliage:** removed biome-baked atlas variants. Grass tops and separate
   side overlays receive one numeric biome tint; dirt bottoms/base sides remain
   untinted. Mesh workers average a 3x3 biome neighborhood across chunk boundaries.

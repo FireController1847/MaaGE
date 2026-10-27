@@ -641,6 +641,8 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
   PNGs have opaque black backgrounds), never black-key pixel replacement.
   First-person hand/items use a separate camera-local perspective/depth pass
   before GUI, with copied authoritative swing/light observations.
+  Sky projection shares the current world presentation-camera matrix each frame
+  (rotation/FOV/aspect, excluding translation); celestial time/weather stay Server-owned.
 - Grass base/overlay and foliage use neutral atlas pixels and initialization-resolved
   numeric tint modes. Smooth World meshing samples a retained eight-column
   neighbor halo for corner light, AO, biome colors and fluid heights; validate
