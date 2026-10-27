@@ -343,6 +343,11 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   mesh traversal; no per-entity GPU mesh uploads on movement. Complete revisioned
   entity interest sets use a separate latest-publication mailbox, never arrays
   embedded in player snapshots. Epoch changes invalidate presentation.
+- Server gameplay owns sprint eligibility/tap timers and Player owns its movement
+  multiplier, jump impulse and collision cancellation. Client sends requests and
+  presents copied sprint state. Keep dynamic world/environment FOV separate from
+  the saved base FOV and the fixed first-person projection; duplicate snapshots
+  must not restart presentation smoothing.
 - Shape-aware numeric DDA stops at unavailable terrain. Definitions resolve
   hardness, tool requirements, drops and separate selection/collision AABBs before
   gameplay. Placement-state callbacks consume numeric metadata and face inputs.

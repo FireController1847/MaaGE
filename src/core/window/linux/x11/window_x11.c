@@ -58,7 +58,7 @@ static maage_status maage_x11_init(maage_window_system *system)
     static const char names[MAAGE_INPUT_KEY_COUNT][5] = {
         "AD02", "AC01", "AC02", "AC03", "SPCE", "ESC",
         "FK03", "RTRN", "TAB", "UP", "DOWN", "LEFT", "RGHT", "AD03",
-        "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "LFSH", "FK11", "AD01", "LCTL"
+        "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "LFSH", "FK11", "AD01", "LCTL", "LCTL"
     };
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     system->platform = native;

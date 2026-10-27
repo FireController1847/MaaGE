@@ -364,7 +364,9 @@ Implemented foundations extend the existing World, scheduler, input and Client U
   3 provides the classic storage layout and a paged Creative catalogue, reusing
   reconstructed GUI textures and the prepared block atlas.
 - **Controls and HUD:** mouse buttons break/place; 1–9 and wheel select hotbar
-  slots; E opens/closes inventory; Escape pops the screen stack. Existing GUI
+  slots; E opens/closes inventory; Escape pops the screen stack. Left Control or
+  grounded double-tap forward requests authoritative sprinting, with hunger, sneak
+  and collision cancellation, sprint jumping and distinct exhaustion costs. Existing GUI
   scaling, capture/focus behavior, crosshair and F3 remain. The hotbar shows actual
   selection/icons/counts; Survival displays hearts and hunger. A shaded three-face
   held-block presentation with a basic swing uses the existing UI batch.
@@ -395,7 +397,8 @@ correct harvest eligibility, mining speeds and durability. Drops include resourc
 items and metadata variants. GUI icons use shaded isometric blocks or sprites;
 hand and world models reuse the same geometry generator and atlas. Food,
 difficulty selection, armor, combat and crafting remain deferred; respawn retains
-inventory. Hunger still uses provisional walking/jump/mining costs and regeneration.
+inventory. Sprint travel/jump costs follow the reference; hunger regeneration and the broader
+food model remain provisional.
 
 macOS ARM64 Debug/Release Client (Metal and Vulkan/MoltenVK) and portable headless Release
 World/Server compilation passed. No application, test, benchmark, UI/runtime
@@ -703,7 +706,7 @@ unverified. The following requirements remain the acceptance criteria:
   successful destruction/placement sounds and supported damage, fall, splash,
   swimming, pickup and tool-break events. Ordinary jumps, landings and inventory
   slot changes are silent. UI buttons click on press; volume sliders preview on
-  release. Protocol 4 retains explicit input edges, coherent sound identities,
+  release. Protocol 5 retains explicit input edges, coherent sound identities,
   local emission timestamps, pause and owner-sampled soundscape observations.
 - Cave sounds require authoritative dark-air samples and bounded cooldowns. Rain
   uses actual precipitation surfaces; water/lava use conditional display trials,

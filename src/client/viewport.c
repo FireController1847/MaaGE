@@ -373,6 +373,33 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
         MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
 }
 
+typedef struct maage_client_fov {
+    double multiplier;
+    unsigned long session_epoch, world_epoch;
+    int initialized;
+} maage_client_fov;
+
+static double maage_client_fov_update(maage_client_fov *view,
+    const maage_session_snapshot *snapshot, double elapsed)
+{
+    double target = snapshot->player.player.sprinting ?
+        (MAAGE_PLAYER_SPRINT_SPEED + 1.0) * 0.5 : 1.0;
+    if (snapshot->player.flying) target *= 1.1;
+    if (!view->initialized || view->session_epoch != snapshot->session_epoch ||
+        view->world_epoch != snapshot->world_epoch) {
+        view->multiplier = target; view->initialized = 1;
+        view->session_epoch = snapshot->session_epoch; view->world_epoch = snapshot->world_epoch;
+    } else if (!snapshot->paused && elapsed > 0) {
+        /* Half the remaining difference per reference 20 Hz tick, expressed
+         * continuously so rendering FPS and duplicate snapshots cannot reset it.
+         * A newly observed target never fast-forwards across a long frame stall. */
+        if (elapsed > 0.1) elapsed = 0.1;
+        view->multiplier += (target-view->multiplier) *
+            (1.0-pow(0.5, elapsed/MAAGE_PLAYER_TICK_SECONDS));
+    }
+    return view->multiplier;
+}
+
 static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch,
     double aspect, int radius, double fov, const float bob[16])
 {
@@ -426,7 +453,7 @@ static int maage_client_input_coalescible(const maage_session_command *command)
      * Coalesce only when held action levels have not changed, so rapid
      * click/release transitions cannot be swallowed by frame-rate sampling. */
     return command->kind == MAAGE_CMD_INPUT && !command->intent.jump_pressed &&
-        !command->intent.attack_pressed && !command->intent.use_pressed;
+        !command->intent.attack_pressed && !command->intent.use_pressed && !command->intent.forward_pressed;
 }
 
 static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
@@ -443,7 +470,11 @@ static maage_status maage_client_outbox_queue(maage_client_outbox *outbox,
         if (maage_client_input_coalescible(&outbox->commands[previous]) &&
             outbox->commands[previous].intent.attack == command.intent.attack &&
             outbox->commands[previous].intent.use == command.intent.use &&
-            outbox->commands[previous].intent.movement.jump == command.intent.movement.jump) {
+            outbox->commands[previous].intent.movement.jump == command.intent.movement.jump &&
+            outbox->commands[previous].intent.movement.forward == command.intent.movement.forward &&
+            outbox->commands[previous].intent.movement.strafe == command.intent.movement.strafe &&
+            outbox->commands[previous].intent.movement.sprint == command.intent.movement.sprint &&
+            outbox->commands[previous].intent.descend == command.intent.descend) {
             /* Keep the original FIFO sequence; the last held-only input wins.
              * No edge-triggered or authoritative command is overwritten. */
             command.sequence = outbox->commands[previous].sequence;
@@ -546,6 +577,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
     double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
     maage_client_pacing pacing = {0, 0.0};
+    maage_client_fov fov = {0.0, 0, 0, 0};
+    double effective_fov;
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
     double render_yaw = 0.0, render_pitch = 0.0, yaw_arc = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
@@ -558,7 +591,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps = -1, logged_vsync = -1, paused_command = -1;
     int selected_hotbar = 0, queued_hotbar = -1, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
-    int jump_latched = 0, attack_latched = 0, use_latched = 0, respawn_latched = 0;
+    int jump_latched = 0, attack_latched = 0, use_latched = 0, respawn_latched = 0, forward_latched = 0;
     unsigned int ui_actions = 0, event_budget;
     memset(&resources, 0, sizeof(resources));
     memset(&cache, 0, sizeof(cache));
@@ -679,6 +712,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) goto done;
     options_ready = 1;
 choose_world:
+    fov.initialized = 0;
     if (!direct_world) {
         operation = maage_client_frontend_run(frontend, system, audio, &choice, trace);
         if (maage_status_code(operation) == MAAGE_STATUS_NOOP) { ok = 1; goto done; }
@@ -701,7 +735,7 @@ choose_world:
     world_epoch = last_sound_sequence = last_seen_tick = sound_epoch = sound_world_epoch = 0;
     active = was_active = was_modal = was_focused = was_changing_mode = 0;
     paused_command = -1; view_sent = disconnected = 0; initial_capture = 1;
-    jump_latched = attack_latched = use_latched = respawn_latched = 0;
+    jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = 0;
     pacing.deadline = 0; pacing.fps = 0;
     operation = maage_client_frontend_loading(frontend, trace);
     if (maage_status_failed(operation)) goto done;
@@ -975,10 +1009,11 @@ choose_world:
         } else wheel = 0.0;
         if (active) {
             if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_latched = 1;
+            if (input.pressed[MAAGE_INPUT_KEY_W] && !input.keys[MAAGE_INPUT_KEY_S]) forward_latched = 1;
             if (input.primary_pressed) attack_latched = 1;
             if (input.secondary_pressed) use_latched = 1;
         } else {
-            jump_latched = attack_latched = use_latched = 0;
+            jump_latched = attack_latched = use_latched = forward_latched = 0;
         }
         if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
             memset(&command, 0, sizeof(command));
@@ -991,6 +1026,8 @@ choose_world:
                 command.intent.movement.strafe =
                     (double)(input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
                 command.intent.movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE];
+                command.intent.movement.sprint = input.keys[MAAGE_INPUT_KEY_LEFT_CONTROL];
+                command.intent.forward_pressed = forward_latched;
                 command.intent.jump_pressed = jump_latched;
                 command.intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
                 command.intent.attack = input.primary_down || attack_latched;
@@ -1001,7 +1038,7 @@ choose_world:
             operation = maage_client_outbox_queue(&outbox, &command);
             if (maage_status_failed(operation))
                 maage_client_ui_notify(ui, operation, now);
-            else jump_latched = attack_latched = use_latched = 0;
+            else jump_latched = attack_latched = use_latched = forward_latched = 0;
         } else {
             /* The input edge latches above are retained until an ordered
              * command can be queued; never acknowledge an unsent click. */
@@ -1028,7 +1065,7 @@ choose_world:
                 if (maage_status_failed(operation)) goto done;
                 yaw = incoming.player.yaw; pitch = incoming.player.pitch;
                 selected_hotbar = queued_hotbar = (int)incoming.player.inventory.selected;
-                jump_latched = attack_latched = use_latched = respawn_latched = 0;
+                jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = 0;
             } else previous = latest;
             latest = incoming;
             received_time = now;
@@ -1136,9 +1173,10 @@ choose_world:
         rendered = maage_client_interaction_update(&interaction, renderer,
             atlas, blocks, &latest, trace);
         if (maage_status_failed(rendered)) goto done;
+        effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed);
         rendered = maage_client_environment_update(environment_view,
             renderer, &latest, maage_client_ui_width(ui),
-            maage_client_ui_height(ui), maage_client_ui_fov_radians(ui));
+            maage_client_ui_height(ui), effective_fov);
         if (maage_status_failed(rendered)) goto done;
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
@@ -1182,7 +1220,7 @@ choose_world:
             if (maage_status_failed(rendered)) goto done;
             maage_client_camera(matrix, eye, render_yaw, render_pitch,
                 (double)state.framebuffer_width / state.framebuffer_height,
-                options.radius, maage_client_ui_fov_radians(ui), first_person.camera_bob);
+                options.radius, effective_fov, first_person.camera_bob);
             rendered = maage_client_item_entities_update(item_entities, session, &latest, alpha, eye, now, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);

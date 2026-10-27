@@ -31,6 +31,7 @@ typedef enum maage_input_key {
     MAAGE_INPUT_KEY_F11,
     MAAGE_INPUT_KEY_Q,
     MAAGE_INPUT_KEY_CONTROL,
+    MAAGE_INPUT_KEY_LEFT_CONTROL,
     MAAGE_INPUT_KEY_COUNT
 } maage_input_key;
 

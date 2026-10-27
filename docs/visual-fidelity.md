@@ -149,6 +149,72 @@ draw immutable index ranges; no moving entity uploads mesh/index data. Both reta
 scene depth, foreground depth and UI composition. See [item entities](item-entities.md)
 for behavior and the programmer-owned verification checklist.
 
+## Sprinting, FOV and Inventory Projection Refinement
+
+Server-owned sprinting starts with forward plus Left Control or a grounded second
+forward tap within seven simulation ticks. It needs forward input at least 0.8
+and Survival hunger above six; Creative bypasses the hunger restriction. Stopping
+forward movement, sneaking, horizontal collision, death, mode changes or modal
+pause cancels it. The reference 600-tick sprint timer expires unless a held sprint
+request reactivates it. Requests/forward edges travel through protocol 5 and the
+existing bounded command channel; snapshots copy authoritative sprint state.
+
+Walking/sprinting use the same 20 TPS collision path. Sprint adds the reference
+30 percent ground/air acceleration and 0.2 forward jump impulse, with diagonal
+normalization after input damping. Sneak scales horizontal input by 0.3. Sprint
+does not multiply Creative flight or fluid movement. Survival ground travel costs
+0.1 exhaustion per rounded meter while sprinting versus 0.01 walking, and sprint
+jumps cost 0.8 versus 0.2. Creative does not accumulate these costs. Existing fluid
+movement and sneak ledge behavior remain provisional; blindness and item-use
+slowdowns are outside the implemented gameplay systems.
+
+The Client computes the sprint FOV target as `(1.3 + 1) / 2 = 1.15` and applies the
+reference additional 1.1 factor for flight. A continuous form of the reference
+half-difference-per-20-Hz-tick filter smooths rendered frames without resetting
+on repeat snapshots; pause freezes it and world changes reset its state. Catch-up
+is limited after long presentation stalls. The same effective FOV drives world
+and environmental perspective with their existing aspect ratios. The saved base
+FOV remains unchanged, and the hand keeps its reference fixed 70-degree projection.
+
+GUI block icons now use the reference orthographic scale 10 and 210-degree X /
+45-degree Y orientation, including the internal block-item rotation. Visible faces
+are top, negative X and positive Z. Their bounds fit the 16x16 slot; top and side
+UVs follow block coordinates so partial shapes crop instead of stretching full
+textures. Lighting uses the GUI ambient/diffuse rig, retaining grass side overlays,
+biome/species tint, original alpha and ordinary flat-item sprites. Hotbar,
+Survival/Creative inventory and cursor stacks consume this same shared C helper.
+World/hand model geometry and native shaders were not changed to compensate.
+
+Behavioral references inspected in the local 1.7.10 source: `GameSettings` sprint
+binding; `EntityPlayerSP.onLivingUpdate/setSprinting/getFOVMultiplier`;
+`MovementInputFromOptions.updatePlayerMoveState`; `Entity.moveFlying`;
+`EntityLivingBase.setSprinting/jump/moveEntityWithHeading`;
+`EntityPlayer.jump/addMovementStat`; `EntityRenderer.updateFovModifierHand/
+getFOVModifier`; `RenderItem.renderItemIntoGUI`; `RenderBlocks.renderBlockAsItem`
+and its face UV routines; `RenderHelper.enableGUIStandardItemLighting`; and
+`GuiContainer.drawScreen` lighting/composition.
+
+Programmer verification, **not performed by the agent**:
+
+- On each backend (`--renderer=metal`, then `--renderer=vulkan`), walk forward,
+  hold/release Left Control, and double-tap forward. Expect sprint activation,
+  continued sprint after releasing Control while forward remains held, and no
+  sprint from pure strafe/backward motion. Try forward diagonals and jumping.
+- Stop, sneak, hit a wall, pause/resume and respawn. Expect appropriate sprint
+  cancellation. In Survival, expend food down to six and confirm sprint refusal;
+  Creative should remain eligible without hunger drain. Sprinting/jump travel
+  should exhaust food sooner than equivalent walking.
+- At base FOV 70, expect a smooth transition toward 80.5 degrees during ground
+  sprint and back after cancellation. Change base FOV, FPS cap and window size;
+  expect consistent timing/aspect and unchanged saved FOV after reloading Options.
+  Check flight, sky/environment alignment and stable hand framing.
+- Compare grass, ores, logs/species, leaves, ice, snow and cactus in hotbar,
+  Survival/Creative pages and cursor stacks. Expect correctly oriented miniature
+  blocks, readable top/bark/side textures, cropped partial-shape UVs, tint/alpha,
+  and no neighboring-slot clipping. Check counts, durability and flat tools/plants.
+- Compare Metal and Vulkan appearance under the same settings. Rendering, sound,
+  movement, timing and parity remain unverified until these manual checks run.
+
 ## Build Results and Remaining Limits
 
 macOS ARM64 Debug and Release Client/Server compile and link successfully.

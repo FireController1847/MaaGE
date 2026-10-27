@@ -23,12 +23,16 @@ extern "C" {
 #define MAAGE_PLAYER_GROUND_DRAG 0.546
 #define MAAGE_PLAYER_AIR_DRAG 0.91
 #define MAAGE_PLAYER_INPUT_DAMPING 0.98
+#define MAAGE_PLAYER_SPRINT_SPEED 1.3
+#define MAAGE_PLAYER_SPRINT_JUMP 0.2
+#define MAAGE_PLAYER_SNEAK_INPUT 0.3
 
 typedef struct maage_player {
     double position[3];
     /* Velocity is blocks per simulation tick, following classic tick semantics. */
     double velocity[3];
-    int grounded;
+    int grounded, collided_horizontally;
+    int sprinting; /* Authoritative state; gameplay resolves requests/eligibility. */
 } maage_player;
 
 typedef struct maage_player_input {
@@ -37,9 +41,12 @@ typedef struct maage_player_input {
     /* yaw=0 faces -Z; forward=(sin(yaw),0,-cos(yaw)). */
     double yaw;
     int jump;
+    int sprint; /* Held request, never an authoritative speed override. */
     int flying, descend;
 } maage_player_input;
 
+/* Owner-thread contracted body observation, shared by movement and gameplay. */
+unsigned int maage_player_fluid(const maage_player *player, const maage_world *world);
 maage_status maage_player_spawn(maage_player *player, const maage_world *world);
 /* Exactly one 20 TPS tick. Caller accumulates wall time and caps catch-up work.
  * Raw platform input and camera interpolation remain outside simulation. The

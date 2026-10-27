@@ -19,6 +19,8 @@ typedef struct maage_gameplay {
     unsigned int mode, health, hunger;
     double saturation, exhaustion, fall_distance;
     int flying;
+    unsigned int sprint_window, sprint_ticks;
+    int forward_down;
     maage_world_target target, breaking;
     int has_target, breaking_active;
     double break_progress, swing, reach;
@@ -36,6 +38,7 @@ typedef struct maage_gameplay_intent {
     maage_player_input movement;
     double pitch;
     int attack, use, jump_pressed, descend;
+    int forward_pressed; /* Latched forward rising edge; Server owns tap timing. */
     int attack_pressed, use_pressed; /* Latched input edges, consumed once. */
 } maage_gameplay_intent;
 

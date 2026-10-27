@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <IOKit/hidsystem/IOLLEvent.h>
 #include "../window_internal.h"
 #include "maage/log.h"
 #include <stdlib.h>
@@ -568,6 +569,8 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
                 ([event modifierFlags] & NSEventModifierFlagShift) != 0);
             maage_window_input_key(window, MAAGE_INPUT_KEY_CONTROL,
                 ([event modifierFlags] & NSEventModifierFlagControl) != 0);
+            maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL,
+                ([event modifierFlags] & NX_DEVICELCTLKEYMASK) != 0);
         }
         if (type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
             if (type == NSEventTypeKeyDown && ([event modifierFlags] & NSEventModifierFlagCommand)) return 0;

@@ -157,8 +157,10 @@ size_t maage_client_item_icon(const maage_item_registry *items,
     const float grass[3], const float textures[MAAGE_CONTENT_TEXTURE_COUNT][4],
     maage_render_ui_vertex vertices[24])
 {
-    static const unsigned int visible[3] = {MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_POSITIVE_X, MAAGE_FACE_POSITIVE_Y};
-    static const float shade[3] = {0.8f,0.6f,1};
+    static const unsigned int visible[3] = {MAAGE_FACE_NEGATIVE_X, MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_POSITIVE_Y};
+    /* Reference GUI light rig: ambient 0.4 plus two diffuse 0.6 lights,
+     * evaluated for the orthographic item transform's visible face normals. */
+    static const float shade[3] = {0.637f,0.435f,1};
     const maage_item_definition *item = maage_item_registry_get(items, stack->item_id);
     const maage_block_state_definition *state;
     const maage_block_definition *block;
@@ -166,7 +168,7 @@ size_t maage_client_item_icon(const maage_item_registry *items,
     maage_render_ui_vertex *vertex;
     const float *uv;
     float tint[4];
-    double position[3];
+    double position[3], sample_u, sample_v;
     size_t faces = 0;
     unsigned int i, corner, axis, layer;
     maage_texture_id texture;
@@ -202,10 +204,19 @@ size_t maage_client_item_icon(const maage_item_registry *items,
                 for (axis = 0; axis < 3; ++axis)
                     position[axis] = (maage_interaction_corners[visible[i]][corner][axis] ?
                         block->selection_shape.maximum[axis] : block->selection_shape.minimum[axis]) - 0.5;
-                vertex->position[0] = (float)((position[0]-position[2])*6.5+8);
-                vertex->position[1] = (float)((position[0]+position[2])*3.25-position[1]*6.5+8);
-                vertex->uv[0] = uv[corner == 1 || corner == 2 ? 2 : 0];
-                vertex->uv[1] = uv[corner < 2 ? 3 : 1];
+                /* RenderItem's scale 10, X=210 / Y=45 rotations and centered
+                 * RenderBlocks item bounds, flattened into GUI coordinates.
+                 * Full cubes occupy x=0.929..15.071, y=0.134..15.866. */
+                vertex->position[0] = (float)((position[0]+position[2])*7.071067812+8);
+                vertex->position[1] = (float)((position[2]-position[0])*3.535533906-position[1]*8.660254038+8);
+                if (visible[i] == MAAGE_FACE_POSITIVE_Y) {
+                    sample_u = position[0]+0.5; sample_v = position[2]+0.5;
+                } else {
+                    sample_u = position[visible[i] == MAAGE_FACE_NEGATIVE_X ? 2 : 0]+0.5;
+                    sample_v = 0.5-position[1];
+                }
+                vertex->uv[0] = (float)(uv[0]+(uv[2]-uv[0])*sample_u);
+                vertex->uv[1] = (float)(uv[1]+(uv[3]-uv[1])*sample_v);
                 for (axis = 0; axis < 3; ++axis) vertex->color[axis] = tint[axis]*shade[i];
                 vertex->color[3] = tint[3];
             }

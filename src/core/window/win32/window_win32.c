@@ -82,6 +82,8 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
             break;
         case WM_KEYDOWN: case WM_KEYUP:
             maage_window_input_key(window, (maage_input_key)maage_win32_key(lp), message == WM_KEYDOWN);
+            if ((((unsigned long)lp >> 16) & 255UL) == 0x1d && !(lp & 0x01000000L))
+                maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL, message == WM_KEYDOWN);
             break;
         case WM_MOUSEMOVE: case WM_LBUTTONDOWN: case WM_LBUTTONUP:
         case WM_RBUTTONDOWN: case WM_RBUTTONUP:

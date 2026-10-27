@@ -133,33 +133,6 @@ static const maage_block_state_definition *maage_gameplay_underfoot(
         maage_world_get(world,x,y+1,z)) : NULL;
     return above && above->block_id == MAAGE_BLOCK_SNOW ? above : state;
 }
-static int maage_gameplay_in_water(const maage_world *world,
-    const maage_player *player)
-{
-    const maage_block_registry *registry = maage_world_registry(world);
-    const maage_block_state_definition *state;
-    int x, y, z;
-    int min_x = (int)floor(player->position[0] - MAAGE_PLAYER_WIDTH * 0.5 + 0.001);
-    int max_x = (int)floor(player->position[0] + MAAGE_PLAYER_WIDTH * 0.5 - 0.001);
-    int min_z = (int)floor(player->position[2] - MAAGE_PLAYER_WIDTH * 0.5 + 0.001);
-    int max_z = (int)floor(player->position[2] + MAAGE_PLAYER_WIDTH * 0.5 - 0.001);
-    int min_y = (int)floor(player->position[1] + 0.401);
-    int max_y = (int)floor(player->position[1] + MAAGE_PLAYER_HEIGHT - 0.401);
-    /* Contract the body rather than sampling the camera. Fluid movement
-     * remains part of the provisional player physics. */
-    for (z = min_z; z <= max_z; ++z)
-        for (x = min_x; x <= max_x; ++x)
-            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x),
-                maage_world_chunk_coordinate(z))) return 0;
-    for (z = min_z; z <= max_z; ++z)
-        for (x = min_x; x <= max_x; ++x) {
-            for (y = min_y; y <= max_y; ++y) {
-                state = maage_block_registry_state(registry, maage_world_get(world,x,y,z));
-                if (state && state->fluid_kind == MAAGE_FLUID_WATER) return 1;
-            }
-        }
-    return 0;
-}
 static maage_status maage_gameplay_sound_result(maage_status outcome,
     const maage_gameplay_sound_sink *sink, size_t *written,
     maage_status_trace *trace)
@@ -197,6 +170,7 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode)
     game->dig_ticks = game->attack_miss_delay = 0;
     game->attack_held = game->use_held = 0;
     game->fall_distance = 0; game->jump_window = 0;
+    game->sprint_window = game->sprint_ticks = 0; game->forward_down = 0;
     game->footstep_distance = 0;
     game->audio_initialized = 0;
     if (mode == MAAGE_GAME_MODE_SURVIVAL) game->flying = 0;
@@ -216,6 +190,7 @@ maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
     game->attack_held = game->use_held = 0;
     game->breaking_active = game->has_target = 0; game->break_progress = 0;
     game->hunger_ticks = game->jump_window = 0;
+    game->sprint_window = game->sprint_ticks = 0; game->forward_down = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
 }
 maage_status maage_gameplay_destroy(maage_gameplay *game)
@@ -491,11 +466,12 @@ static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player
 }
 static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *player,
     const maage_world *world, const double previous[3], int was_grounded,
-    int jumped, int in_water, maage_gameplay_sound_sink *sink)
+    int jumped, int sprint_jump, int in_water, maage_gameplay_sound_sink *sink)
 {
     double dx = player->position[0] - previous[0], dz = player->position[2] - previous[2];
     const maage_block_state_definition *surface;
     unsigned int damage;
+    double distance;
     if (game->mode != MAAGE_GAME_MODE_SURVIVAL) { game->fall_distance = 0; return; }
     if (in_water) game->fall_distance = 0;
     else if (!was_grounded && player->position[1] < previous[1])
@@ -519,8 +495,10 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
         }
         game->fall_distance = 0;
     }
-    game->exhaustion += sqrt(dx*dx+dz*dz) * 0.01;
-    if (jumped && was_grounded) game->exhaustion += 0.2;
+    distance = floor(sqrt(dx*dx+dz*dz)*100.0+0.5)*0.01;
+    if (in_water) game->exhaustion += distance * 0.015;
+    else if (player->grounded) game->exhaustion += distance * (player->sprinting ? 0.1 : 0.01);
+    if (jumped && was_grounded) game->exhaustion += sprint_jump ? 0.8 : 0.2;
     while (game->exhaustion > 4) {
         game->exhaustion -= 4;
         if (game->saturation > 0) {
@@ -559,6 +537,30 @@ static maage_status maage_gameplay_action_result(maage_status result,
     }
     return result;
 }
+static void maage_gameplay_sprint(maage_gameplay *game, maage_player *player,
+    const maage_gameplay_intent *intent)
+{
+    int forward = intent->movement.forward * (intent->descend ? MAAGE_PLAYER_SNEAK_INPUT : 1.0) >= 0.8;
+    int allowed = game->health && (game->mode == MAAGE_GAME_MODE_CREATIVE || game->hunger > 6);
+    if (game->sprint_window) --game->sprint_window;
+    if (game->sprint_ticks && !--game->sprint_ticks) player->sprinting = 0;
+    if (!allowed || !forward || player->collided_horizontally) {
+        player->sprinting = 0; game->sprint_ticks = 0;
+    } else if (!player->sprinting) {
+        if (intent->movement.sprint || (player->grounded &&
+            (!game->forward_down || intent->forward_pressed) && game->sprint_window)) {
+            player->sprinting = 1; game->sprint_ticks = 600;
+        } else if (player->grounded && (!game->forward_down || intent->forward_pressed))
+            game->sprint_window = 7;
+    }
+    /* Retain a short forward tap even if its release reached the mailbox
+     * before this fixed step; only sustained forward input can start sprint. */
+    if (!forward && intent->forward_pressed && player->grounded && allowed &&
+        !intent->descend && !player->collided_horizontally) game->sprint_window = 7;
+    if (intent->descend || !allowed) game->sprint_window = 0;
+    game->forward_down = forward;
+}
+
 maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
     const maage_gameplay_intent *intent, maage_sound_event *events,
@@ -569,7 +571,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     const maage_block_state_definition *surface;
     int in_water;
     maage_gameplay_sound_sink sink;
-    int grounded;
+    int grounded, sprint_jump, jumped;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_TICK, 0);
     if (written) *written = 0;
     if ((capacity && (!events || !written)) || (events && !written) ||
@@ -586,6 +588,8 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     if (game->attack_miss_delay) --game->attack_miss_delay;
     if (game->jump_window) --game->jump_window;
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
+        player->sprinting = 0; game->sprint_window = game->sprint_ticks = 0;
+        game->forward_down = 0;
         game->breaking_active = 0; game->break_progress = 0; return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
     }
     if (game->mode == MAAGE_GAME_MODE_CREATIVE && intent->jump_pressed) {
@@ -593,6 +597,9 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
         else game->jump_window = 7;
     }
     movement = intent->movement; movement.flying = game->flying; movement.descend = intent->descend;
+    maage_gameplay_sprint(game, player, intent);
+    sprint_jump = player->sprinting;
+    jumped = movement.jump && !movement.flying && maage_player_fluid(player, world) == MAAGE_FLUID_NONE;
     memcpy(previous, player->position, sizeof(previous)); grounded = player->grounded;
     memcpy(velocity, player->velocity, sizeof(velocity));
     result = maage_player_tick(player, world, &movement);
@@ -602,7 +609,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     dy = player->position[1] - previous[1];
     dz = player->position[2] - previous[2];
     travel = sqrt(dx * dx + dz * dz);
-    in_water = maage_gameplay_in_water(world, player);
+    in_water = maage_player_fluid(player, world) == MAAGE_FLUID_WATER;
     if (in_water && !game->in_water && game->audio_initialized) {
         strength = sqrt((velocity[0] * velocity[0] + velocity[2] * velocity[2]) *
             0.2 + velocity[1] * velocity[1]) * 0.2;
@@ -612,8 +619,11 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
             player->position[2], strength, maage_gameplay_sound_pitch(game, 0.4));
     }
     game->in_water = in_water; game->audio_initialized = 1;
-    maage_gameplay_vitals(game,player,world,previous,grounded,movement.jump,
-        in_water,&sink);
+    maage_gameplay_vitals(game,player,world,previous,grounded,jumped,
+        sprint_jump,in_water,&sink);
+    if (!game->health || (game->mode == MAAGE_GAME_MODE_SURVIVAL && game->hunger <= 6)) {
+        player->sprinting = 0; game->sprint_ticks = 0;
+    }
     /* Accumulate 0.6 * displacement and cross successive
      * integer thresholds. Keep the fractional phase across stops and jumps.
      * Shift is the current crouch intent; flying disables walking triggers. */

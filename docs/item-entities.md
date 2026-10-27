@@ -115,7 +115,7 @@ increasing unique IDs and finite coordinate/velocity ranges are checked before
 restoring World ownership. No native structure layout or pointers are serialized.
 The encoding has an explicit 32-bit file/identity bound and reports overflow.
 
-Protocol 4 carries a separate complete near-player entity interest set, independent
+Protocol 5 carries a separate complete near-player entity interest set, independent
 of the fixed player snapshot. It contains epoch, tick and sequence identities;
 absence removes an entity. The local mailbox holds at most one pending immutable
 publication, transfers detached array ownership and swaps pointers under its short
@@ -159,7 +159,7 @@ features they do not implement.
 - macOS ARM64 Release: the same affected applications and primary adapters compile/link.
 - Separate headless Release: Server compiles with Client, Launcher, Window and
   Render disabled.
-- Client is `0.1.0-alpha.41`; Server is `1.0.0-alpha.13`. Launcher release is unchanged.
+- Client is `0.1.0-alpha.42`; Server is `1.0.0-alpha.14`. Launcher release is unchanged.
 - Client linking retains duplicate-library warnings. Windows/Linux native adapters
   are source-updated where needed but were not compiled here. Wayland gameplay
   input remains unsupported.

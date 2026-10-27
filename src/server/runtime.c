@@ -39,7 +39,7 @@ struct maage_server_runtime {
     int game_ready, player_ready;
     double yaw, pitch;
     maage_gameplay_intent sampled;
-    int pending_jump, pending_attack, pending_use;
+    int pending_jump, pending_attack, pending_use, pending_forward;
     unsigned long tick, publication_sequence, event_sequence;
     maage_status entity_publication_failure;
     unsigned long last_command_sequence, overloads, dropped_sound_events;
@@ -296,15 +296,18 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
             (command->intent.use_pressed != 0 && command->intent.use_pressed != 1) ||
             (command->intent.jump_pressed != 0 && command->intent.jump_pressed != 1) ||
             (command->intent.movement.jump != 0 && command->intent.movement.jump != 1) ||
+            (command->intent.movement.sprint != 0 && command->intent.movement.sprint != 1) ||
+            (command->intent.forward_pressed != 0 && command->intent.forward_pressed != 1) ||
             (command->intent.descend != 0 && command->intent.descend != 1))
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
         runtime->pending_jump |= command->intent.jump_pressed;
+        runtime->pending_forward |= command->intent.forward_pressed;
         runtime->pending_attack |= command->intent.attack_pressed;
         runtime->pending_use |= command->intent.use_pressed;
         runtime->sampled = command->intent;
         /* jump_pressed is an edge, unlike held movement.jump/attack/use.
          * Only the pending latch may survive to the next simulation step. */
-        runtime->sampled.jump_pressed = 0;
+        runtime->sampled.jump_pressed = runtime->sampled.forward_pressed = 0;
         runtime->sampled.attack_pressed = runtime->sampled.use_pressed = 0;
         runtime->yaw = command->intent.movement.yaw;
         runtime->pitch = command->intent.pitch;
@@ -335,10 +338,11 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
             command->game_mode != MAAGE_GAME_MODE_CREATIVE)
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);
         result = maage_gameplay_set_mode(&runtime->game, command->game_mode);
+        runtime->player.sprinting = 0; runtime->pending_forward = 0;
         break;
     case MAAGE_CMD_RESPAWN:
         result = maage_gameplay_respawn(&runtime->game, &runtime->player, runtime->world);
-        runtime->pending_jump = runtime->pending_attack = runtime->pending_use = 0;
+        runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
         break;
     case MAAGE_CMD_PAUSE:
         if (runtime->config.execution_mode != MAAGE_SERVER_INTEGRATED)
@@ -346,9 +350,12 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
         if (command->paused != 0 && command->paused != 1)
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
         runtime->paused = command->paused;
+        runtime->player.sprinting = 0;
+        runtime->game.sprint_window = runtime->game.sprint_ticks = 0;
+        runtime->game.forward_down = 0;
         /* Modal input is not allowed to reappear as an action on resume. */
         memset(&runtime->sampled, 0, sizeof(runtime->sampled));
-        runtime->pending_jump = runtime->pending_attack = runtime->pending_use = 0;
+        runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
     case MAAGE_CMD_VIEW:
         if (command->render_radius < 1 ||
@@ -669,6 +676,7 @@ static maage_status server_tick(maage_server_runtime *runtime,
     /* A pulse sampled between steps survives latest-state replacement, but
      * every pulse is consumed once. Held attack/use continue per tick. */
     intent.jump_pressed |= runtime->pending_jump;
+    intent.forward_pressed |= runtime->pending_forward;
     intent.movement.jump |= runtime->pending_jump;
     intent.attack |= runtime->pending_attack;
     intent.use |= runtime->pending_use;
@@ -676,7 +684,7 @@ static maage_status server_tick(maage_server_runtime *runtime,
     intent.use_pressed |= runtime->pending_use;
     intent.movement.yaw = runtime->yaw;
     intent.pitch = runtime->pitch;
-    runtime->pending_jump = runtime->pending_attack = runtime->pending_use = 0;
+    runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
     result = maage_gameplay_tick(&runtime->game, &runtime->player,
         runtime->world, maage_content_items(runtime->content), &intent,
         sounds, sizeof(sounds) / sizeof(sounds[0]), &sound_count, trace);
