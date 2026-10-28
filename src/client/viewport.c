@@ -858,6 +858,7 @@ choose_world:
             ui_input.primary_pressed = input.primary_pressed;
             ui_input.secondary_pressed = input.secondary_pressed;
             ui_input.inventory = input.pressed[MAAGE_INPUT_KEY_E];
+            ui_input.shift = input.keys[MAAGE_INPUT_KEY_SHIFT];
         }
         ui_input.mouse_x = (float)input.mouse_x;
         ui_input.mouse_y = (float)input.mouse_y;
@@ -951,6 +952,7 @@ choose_world:
                 maage_client_ui_notify(ui, operation, now);
                 break;
             }
+            maage_client_ui_command_submitted(ui, &command, outbox.next_sequence);
         }
         if (paused_command != (maage_client_ui_modal(ui) ? 1 : 0) &&
             outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
@@ -1069,8 +1071,10 @@ choose_world:
             } else previous = latest;
             latest = incoming;
             received_time = now;
+            was_modal = maage_client_ui_modal(ui);
             operation = maage_client_ui_set_snapshot(ui, &latest);
             if (maage_status_failed(operation)) goto done;
+            if (was_modal && !maage_client_ui_modal(ui)) initial_capture = 1;
             if (!latest.player.health &&
                 latest.player.game_mode == MAAGE_GAME_MODE_SURVIVAL &&
                 !maage_client_ui_modal(ui))

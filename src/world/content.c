@@ -41,6 +41,13 @@ static maage_status maage_content_register_state(maage_block_registry *registry,
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_CONTENT_TEXTURE_SANDSTONE_TOP;
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_CONTENT_TEXTURE_SANDSTONE_BOTTOM;
         }
+        if (block == MAAGE_BLOCK_CRAFTING_TABLE) {
+            selected = face == MAAGE_FACE_POSITIVE_Y ? MAAGE_CONTENT_TEXTURE_CRAFTING_TOP :
+                (face == MAAGE_FACE_NEGATIVE_Y ? MAAGE_CONTENT_TEXTURE_EXTRA + 1 :
+                ((face == MAAGE_FACE_NEGATIVE_X || face == MAAGE_FACE_NEGATIVE_Z) ? MAAGE_CONTENT_TEXTURE_CRAFTING_FRONT : MAAGE_CONTENT_TEXTURE_CRAFTING_SIDE));
+        }
+        if (block == MAAGE_BLOCK_PLANKS && metadata)
+            selected = metadata == 1 ? MAAGE_CONTENT_TEXTURE_SPRUCE_PLANKS : MAAGE_CONTENT_TEXTURE_BIRCH_PLANKS;
         if (block == MAAGE_BLOCK_LOG) {
             species = metadata & 3;
             selected = MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 26 : (species == 2 ? 29 : 6));
@@ -117,6 +124,15 @@ static maage_status maage_content_blocks_create(
             unsigned int emission;
         } content[] = {
             {4,"cobblestone",0,1,1,0,2,0}, {5,"planks",1,1,1,0,2,0},
+            {MAAGE_BLOCK_CRAFTING_TABLE,"crafting_table",0,1,1,0,2.5,0},
+            {MAAGE_BLOCK_GOLD_BLOCK,"gold_block",MAAGE_CONTENT_TEXTURE_STORAGE - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,3,0},
+            {MAAGE_BLOCK_IRON_BLOCK,"iron_block",MAAGE_CONTENT_TEXTURE_STORAGE + 1 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,5,0},
+            {MAAGE_BLOCK_DIAMOND_BLOCK,"diamond_block",MAAGE_CONTENT_TEXTURE_STORAGE + 2 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,5,0},
+            {MAAGE_BLOCK_LAPIS_BLOCK,"lapis_block",MAAGE_CONTENT_TEXTURE_STORAGE + 3 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,3,0},
+            {MAAGE_BLOCK_EMERALD_BLOCK,"emerald_block",MAAGE_CONTENT_TEXTURE_STORAGE + 4 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,5,0},
+            {MAAGE_BLOCK_REDSTONE_BLOCK,"redstone_block",MAAGE_CONTENT_TEXTURE_STORAGE + 5 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,5,0},
+            {MAAGE_BLOCK_COAL_BLOCK,"coal_block",MAAGE_CONTENT_TEXTURE_STORAGE + 6 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,5,0},
+            {MAAGE_BLOCK_SNOW_BLOCK,"snow_block",MAAGE_CONTENT_TEXTURE_STORAGE + 7 - MAAGE_CONTENT_TEXTURE_EXTRA,1,1,0,0.2,0},
             {11,"lava",2,0,0,0,100,15}, {14,"gold_ore",3,1,1,0,3,0},
             {15,"iron_ore",4,1,1,0,3,0}, {16,"coal_ore",5,1,1,0,3,0},
             {17,"log",6,1,1,0,2,0}, {18,"leaves",8,1,0,0,0.2,0},
@@ -172,16 +188,19 @@ static maage_status maage_content_blocks_create(
                 block.selection_shape = block.collision_shape;
                 block.collision_shape.maximum[1] = 0.9375;
             }
-            if (block.id == MAAGE_BLOCK_LOG || block.id == MAAGE_BLOCK_PLANKS) block.required_tool = MAAGE_TOOL_AXE;
+            if (block.id == MAAGE_BLOCK_LOG || block.id == MAAGE_BLOCK_PLANKS || block.id == MAAGE_BLOCK_CRAFTING_TABLE) block.required_tool = MAAGE_TOOL_AXE;
             else if (block.solid && block.id != MAAGE_BLOCK_LEAVES && block.id != MAAGE_BLOCK_SNOW &&
                 block.id != MAAGE_BLOCK_ICE && block.id != MAAGE_BLOCK_CACTUS) {
                 block.required_tool = MAAGE_TOOL_PICKAXE; block.harvest_requires_tool = 1;
                 block.required_tool_level = block.id == MAAGE_BLOCK_OBSIDIAN ? 3U :
-                    (block.id == MAAGE_BLOCK_GOLD_ORE || block.id == MAAGE_BLOCK_DIAMOND_ORE ||
+                    (block.id == MAAGE_BLOCK_GOLD_BLOCK ||
+                     block.id == MAAGE_BLOCK_DIAMOND_BLOCK || block.id == MAAGE_BLOCK_EMERALD_BLOCK ||
+                     block.id == MAAGE_BLOCK_GOLD_ORE || block.id == MAAGE_BLOCK_DIAMOND_ORE ||
                      block.id == MAAGE_BLOCK_REDSTONE_ORE || block.id == MAAGE_BLOCK_EMERALD_ORE ? 2U :
-                     (block.id == MAAGE_BLOCK_IRON_ORE || block.id == MAAGE_BLOCK_LAPIS_ORE ? 1U : 0U));
+                     (block.id == MAAGE_BLOCK_IRON_BLOCK || block.id == MAAGE_BLOCK_LAPIS_BLOCK || block.id == MAAGE_BLOCK_IRON_ORE || block.id == MAAGE_BLOCK_LAPIS_ORE ? 1U : 0U));
             }
-            if (block.id == MAAGE_BLOCK_SNOW) { block.required_tool = MAAGE_TOOL_SHOVEL; block.harvest_requires_tool = 1; }
+            if (block.id == MAAGE_BLOCK_SNOW_BLOCK) { block.drop_item_id = MAAGE_ITEM_SNOWBALL; block.drop_count = 4; }
+            if (block.id == MAAGE_BLOCK_SNOW || block.id == MAAGE_BLOCK_SNOW_BLOCK) { block.required_tool = MAAGE_TOOL_SHOVEL; block.harvest_requires_tool = 1; }
             if (block.id == MAAGE_BLOCK_ICE) block.required_tool = MAAGE_TOOL_PICKAXE;
             if (block.mesh_shape == MAAGE_BLOCK_MESH_CROSS)
                 block.required_tool = MAAGE_TOOL_AXE;
@@ -195,6 +214,9 @@ static maage_status maage_content_blocks_create(
             maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LOG, MAAGE_BLOCK_LOG, 2, 0)) ||
             maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_BLOCK_LEAVES, 1, 0)) ||
             maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LEAVES, MAAGE_BLOCK_LEAVES, 2, 0))) goto failed;
+        for (i = 1; i <= 2; ++i)
+            if (maage_status_failed(result = maage_content_register_state(registry, config,
+                MAAGE_STATE_SPRUCE_PLANKS + i - 1, MAAGE_BLOCK_PLANKS, (unsigned int)i, 0))) goto failed;
         for (i = 0; i < 4; ++i)
             if (maage_status_failed(result = maage_content_register_state(registry, config,
                 MAAGE_STATE_TORCH_NEGATIVE_X + i, MAAGE_BLOCK_TORCH, (unsigned int)i + 1,
@@ -230,6 +252,7 @@ struct maage_content {
     maage_biome_registry biomes;
     maage_block_registry *blocks;
     maage_item_registry *items;
+    maage_recipe_registry *recipes;
 };
 
 maage_status maage_content_create(const maage_content_config *config,
@@ -269,6 +292,8 @@ maage_status maage_content_create(const maage_content_config *config,
     if (maage_status_failed(result)) goto failed;
     result = maage_item_registry_create_builtin(content->blocks, &content->items);
     if (maage_status_failed(result)) goto failed;
+    result = maage_recipe_registry_create_builtin(content->items, &content->recipes);
+    if (maage_status_failed(result)) goto failed;
     *output = content;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 failed:
@@ -292,11 +317,17 @@ const maage_item_registry *maage_content_items(const maage_content *content)
     return content ? content->items : NULL;
 }
 
+const maage_recipe_registry *maage_content_recipes(const maage_content *content)
+{
+    return content ? content->recipes : NULL;
+}
+
 maage_status maage_content_destroy(maage_content *content)
 {
     if (!content) return maage_status_make(MAAGE_STATUS_NOOP, 0,
         MAAGE_OPERATION_DESTROY, 0);
     /* No borrowed World/job/gameplay readers may remain at this boundary. */
+    maage_recipe_registry_destroy(content->recipes);
     maage_item_registry_destroy(content->items);
     maage_block_registry_destroy(content->blocks);
     maage_biome_registry_destroy(&content->biomes);

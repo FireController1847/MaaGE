@@ -98,12 +98,34 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/items/snowball.png",
     "minecraft/textures/items/seeds_wheat.png",
     "minecraft/textures/blocks/sapling_spruce.png",
-    "minecraft/textures/blocks/sapling_birch.png"
+    "minecraft/textures/blocks/sapling_birch.png",
+    "minecraft/textures/items/stick.png",
+    "minecraft/textures/items/iron_ingot.png",
+    "minecraft/textures/items/gold_ingot.png",
+    "minecraft/textures/items/gold_nugget.png",
+    "minecraft/textures/items/bowl.png",
+    "minecraft/textures/items/mushroom_stew.png",
+    "minecraft/textures/items/charcoal.png",
+    "minecraft/textures/blocks/crafting_table_top.png",
+    "minecraft/textures/blocks/crafting_table_side.png",
+    "minecraft/textures/blocks/crafting_table_front.png",
+    "minecraft/textures/blocks/planks_spruce.png",
+    "minecraft/textures/blocks/planks_birch.png",
+    "minecraft/textures/blocks/gold_block.png",
+    "minecraft/textures/blocks/iron_block.png",
+    "minecraft/textures/blocks/diamond_block.png",
+    "minecraft/textures/blocks/lapis_block.png",
+    "minecraft/textures/blocks/emerald_block.png",
+    "minecraft/textures/blocks/redstone_block.png",
+    "minecraft/textures/blocks/coal_block.png",
+    "minecraft/textures/blocks/snow.png"
 };
 
 static int maage_client_texture_source(int texture)
 {
     static const int base[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};
+    if (texture >= MAAGE_CONTENT_TEXTURE_CRAFTING_TOP && texture < MAAGE_CONTENT_TEXTURE_ITEMS)
+        return 64 + MAAGE_ITEM_TEXTURE_COUNT + texture - MAAGE_CONTENT_TEXTURE_CRAFTING_TOP;
     if (texture >= MAAGE_CONTENT_TEXTURE_ITEMS) return 64 + texture - MAAGE_CONTENT_TEXTURE_ITEMS;
     if (texture == MAAGE_CONTENT_TEXTURE_MISSING) return -1;
     if (texture == MAAGE_CONTENT_TEXTURE_GRASS_SIDE_OVERLAY) return 4;
@@ -484,6 +506,8 @@ const maage_block_state_definition *maage_client_item_icon_state(
         (species == 1 || species == 2))
         state = maage_block_registry_state(blocks, (state->block_id == MAAGE_BLOCK_LOG ?
             MAAGE_STATE_SPRUCE_LOG : MAAGE_STATE_SPRUCE_LEAVES) + species - 1);
+    if (state && state->block_id == MAAGE_BLOCK_PLANKS && (species == 1 || species == 2))
+        state = maage_block_registry_state(blocks, MAAGE_STATE_SPRUCE_PLANKS + species - 1);
     return state;
 }
 
@@ -500,6 +524,7 @@ maage_texture_id maage_client_item_texture(const maage_item_definition *item, un
     if (!item) return MAAGE_CONTENT_TEXTURE_MISSING;
     if (item->id == MAAGE_ITEM_SAPLING && (metadata == 1 || metadata == 2))
         return MAAGE_CONTENT_TEXTURE_ITEMS + 25 + metadata;
+    if (item->id == MAAGE_ITEM_COAL && metadata == 1) return MAAGE_CONTENT_TEXTURE_ITEMS + 34;
     return item->texture_id;
 }
 
@@ -507,12 +532,15 @@ const char *maage_client_item_name(const maage_item_registry *items, const maage
 {
     static const char *const logs[] = {"Oak Log", "Spruce Log", "Birch Log"};
     static const char *const leaves[] = {"Oak Leaves", "Spruce Leaves", "Birch Leaves"};
+    static const char *const planks[] = {"Oak Planks", "Spruce Planks", "Birch Planks"};
     static const char *const saplings[] = {"Oak Sapling", "Spruce Sapling", "Birch Sapling"};
     const maage_item_definition *item = stack ? maage_item_registry_get(items, stack->item_id) : NULL;
     if (!item) return "";
     if (stack->metadata <= 2) {
         if (item->has_block && item->block_id == MAAGE_BLOCK_LOG) return logs[stack->metadata];
         if (item->has_block && item->block_id == MAAGE_BLOCK_LEAVES) return leaves[stack->metadata];
+        if (item->has_block && item->block_id == MAAGE_BLOCK_PLANKS) return planks[stack->metadata];
+        if (item->id == MAAGE_ITEM_COAL && stack->metadata == 1) return "Charcoal";
         if (item->id == MAAGE_ITEM_SAPLING) return saplings[stack->metadata];
     }
     return item->display_name;

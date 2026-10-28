@@ -24,7 +24,7 @@ typedef struct maage_client_ui_resources {
     unsigned char glyph_width[256];
     int atlas_edge, block_atlas_width, block_atlas_height;
     maage_status load_status, recovery_status;
-    maage_status source_results[4];
+    maage_status source_results[5];
     unsigned int failed_resources;
     unsigned char title_available[7];
     int menu_background_available;
@@ -50,7 +50,8 @@ struct maage_client_ui {
     const maage_block_registry *blocks;
     float inventory_grass_color[3];
     maage_session_snapshot snapshot; /* Value-only, no World pointers. */
-    int has_snapshot;
+    int has_snapshot, container_command_pending, container_close_requested;
+    unsigned long container_command_sequence;
     maage_session_command commands[MAAGE_CLIENT_UI_COMMAND_CAPACITY];
     unsigned int command_read, command_write, command_count;
     maage_client_ui_click_callback click;

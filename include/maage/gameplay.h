@@ -1,6 +1,7 @@
 #ifndef MAAGE_GAMEPLAY_H
 #define MAAGE_GAMEPLAY_H
 #include "maage/items.h"
+#include "maage/crafting.h"
 #include "maage/player.h"
 
 /* Forward declaration avoids a cycle: session_protocol.h includes gameplay.h. */
@@ -10,12 +11,14 @@ enum { MAAGE_GAME_MODE_SURVIVAL = 0, MAAGE_GAME_MODE_CREATIVE = 1 };
 /* Owned player checkpoint; storage resolves item identities at the I/O boundary. */
 typedef struct maage_gameplay_save {
     maage_inventory inventory;
+    maage_item_stack crafting_inputs[MAAGE_CRAFTING_CELLS]; /* Unreturned inputs only; no saved container. */
     unsigned int mode, health, hunger;
     double saturation, exhaustion, fall_distance;
     int flying;
 } maage_gameplay_save;
 typedef struct maage_gameplay {
     maage_inventory inventory;
+    maage_crafting_container crafting;
     unsigned int mode, health, hunger;
     double saturation, exhaustion, fall_distance;
     int flying;

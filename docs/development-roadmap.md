@@ -396,7 +396,7 @@ Fifteen tiered pickaxes/shovels/axes and shears now have numeric definitions,
 correct harvest eligibility, mining speeds and durability. Drops include resource
 items and metadata variants. GUI icons use shaded isometric blocks or sprites;
 hand and world models reuse the same geometry generator and atlas. Food,
-difficulty selection, armor, combat and crafting remain deferred; respawn retains
+difficulty selection, armor and combat remain deferred; respawn retains
 inventory. Sprint travel/jump costs follow the reference; hunger regeneration and the broader
 food model remain provisional.
 
@@ -811,6 +811,14 @@ substantially closer to the intended 1.7.10 experience without major inconsisten
 effects or visual regressions. Correct texture sampling alone is insufficient.
 
 ## Phase 10 — Core Gameplay Completion
+
+The source now includes [Server-authoritative crafting](crafting.md): finalized
+numeric shaped/shapeless recipes, player 2x2 and table 3x3 containers, transactional
+output/remainders, bounded shift crafting, and return/drop closure. The initial
+catalog supports the wooden/stone tool chain and recipes for registered higher
+tiers. Smelting and full Survival progression remain deferred. Runtime/visual
+completion requires programmer verification; the current `MGWORLD4` metadata
+rejects previous development worlds.
 
 Build a coherent Survival gameplay loop through Phase 7's **authoritative Server
 runtime**, not Client-owned special cases.

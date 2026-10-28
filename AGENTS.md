@@ -246,8 +246,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Client-owned `src/client/ui/` remains separate from native Launcher widgets.
   Register screens before finalization through numeric IDs and direct O(1)
   indexing; gameplay/HUD is ID 0, Pause 1, Options 2, Inventory 3, Title 4, Worlds 5,
-  Create World 6, Delete confirmation 7, Rename 8 and Loading 9. Navigation uses a numeric
-  stack: submenus push and Back/Escape pops; the gameplay root resumes play,
+  Create World 6, Delete confirmation 7, Rename 8, Loading 9, Video 10, Sound 11
+  and Crafting Table 12. Navigation uses a numeric stack: submenus push and Back/Escape pops; the gameplay root resumes play,
   while Title remains the frontend root.
   Unknown IDs and navigation cycles fail explicitly. No runtime name lookup.
 - Default Client startup opens Title before creating a Server. Singleplayer lists
@@ -343,6 +343,15 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   mesh traversal; no per-entity GPU mesh uploads on movement. Complete revisioned
   entity interest sets use a separate latest-publication mailbox, never arrays
   embedded in player snapshots. Epoch changes invalidate presentation.
+- Finalized content owns one growable numeric recipe registry shared by player
+  2x2 and table 3x3 crafting. Gameplay owns one temporary container and the existing
+  inventory cursor; Server validates identity, result revision, health, loaded
+  table presence and range. Matching allocates nothing. Result/remainder capacity
+  is preflighted before ingredient consumption; bounded shift crafting stops on
+  recipe/capacity changes. Closing returns inputs/cursor to inventory, then reserved
+  item-entity overflow. Current checkpoints retain unreturned inputs on allocation
+  failure without restoring an open table or persisting a derived result. No table
+  storage/block entity, recipe book or smelting is implied.
 - Server gameplay owns sprint eligibility/tap timers and Player owns its movement
   multiplier, jump impulse and collision cancellation. Client sends requests and
   presents copied sprint state. Keep dynamic world/environment FOV separate from

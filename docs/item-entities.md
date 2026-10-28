@@ -99,15 +99,18 @@ allocation leaves the block intact. Drops never enter inventory directly.
 
 The added resources are coal, diamond, redstone, lapis, emerald, flint, apple,
 oak/spruce/birch saplings, snowball and seeds. Sapling growth/placement, crops,
-eating, thrown projectiles, enchantments, XP orbs, fire/lava item damage, crafting,
+eating, thrown projectiles, enchantments, XP orbs, fire/lava item damage,
 smelting, mobs and combat are not implemented by this foundation.
+[Crafting](crafting.md) consumes these registered resources through Server-owned containers.
 
 ## Storage and publication
 
-The sole metadata encoding is `MGWORLD3`; earlier development worlds are rejected
+The sole metadata encoding is `MGWORLD4`; earlier development worlds are rejected
 and must be recreated. Files are never deleted or converted automatically.
 `world.bin` atomically checkpoints player/inventory, environment and all active
-or dormant item entities after successful World flush. Entity fields are explicitly
+or dormant item entities after successful World flush. Unreturned temporary
+crafting inputs share that checkpoint only when closure cannot complete; see
+[Crafting](crafting.md) for ownership and lifecycle. Entity fields are explicitly
 encoded: instance ID/type, namespaced item name, quantity, metadata, damage,
 position, velocity, age, pickup delay and grounded state. The next instance ID
 and drop random state persist. CRC, actual byte lengths, stack validity,
@@ -115,7 +118,7 @@ increasing unique IDs and finite coordinate/velocity ranges are checked before
 restoring World ownership. No native structure layout or pointers are serialized.
 The encoding has an explicit 32-bit file/identity bound and reports overflow.
 
-Protocol 5 carries a separate complete near-player entity interest set, independent
+Protocol 6 carries a separate complete near-player entity interest set, independent
 of the fixed player snapshot. It contains epoch, tick and sequence identities;
 absence removes an entity. The local mailbox holds at most one pending immutable
 publication, transfers detached array ownership and swaps pointers under its short

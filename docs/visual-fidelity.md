@@ -162,7 +162,7 @@ forward tap within seven simulation ticks. It needs forward input at least 0.8
 and Survival hunger above six; Creative bypasses the hunger restriction. Stopping
 forward movement, sneaking, horizontal collision, death, mode changes or modal
 pause cancels it. The reference 600-tick sprint timer expires unless a held sprint
-request reactivates it. Requests/forward edges travel through protocol 5 and the
+request reactivates it. Requests/forward edges travel through protocol 6 and the
 existing bounded command channel; snapshots copy authoritative sprint state.
 
 Walking/sprinting use the same 20 TPS collision path. Sprint adds the reference

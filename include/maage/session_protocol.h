@@ -12,13 +12,15 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 5U
+#define MAAGE_SESSION_PROTOCOL_VERSION 6U
 
 typedef enum maage_session_command_kind {
-    MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2, MAAGE_CMD_INVENTORY = 3,
+    MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2,
     MAAGE_CMD_CREATIVE_PICK = 4, MAAGE_CMD_GAME_MODE = 5,
     MAAGE_CMD_RESPAWN = 6, MAAGE_CMD_PAUSE = 7, MAAGE_CMD_VIEW = 8,
-    MAAGE_CMD_DISCONNECT = 9, MAAGE_CMD_DROP = 10
+    MAAGE_CMD_DISCONNECT = 9, MAAGE_CMD_DROP = 10,
+    MAAGE_CMD_CONTAINER_OPEN = 11, MAAGE_CMD_CONTAINER_CLOSE = 12,
+    MAAGE_CMD_CONTAINER_SLOT = 13
 } maage_session_command_kind;
 
 typedef enum maage_session_sound_id {
@@ -55,6 +57,11 @@ typedef struct maage_session_command {
     maage_gameplay_intent intent;
     unsigned int hotbar_slot;
     unsigned int inventory_slot;
+    /* OPEN requests the player container only; tables open from authoritative
+     * use/raycast. CLOSE/SLOT require the current nonzero container identity.
+     * RESULT also requires the published revision. No Client stacks/recipes. */
+    unsigned long container_identity, container_revision;
+    unsigned int slot_group, container_slot, slot_action;
     int secondary_click;
     maage_item_id item_id;
     unsigned int item_metadata;
@@ -79,6 +86,7 @@ typedef struct maage_session_player_view {
     maage_player player;
     double yaw, pitch;
     maage_inventory inventory;
+    maage_crafting_container crafting; /* Copied authoritative temporary state. */
     unsigned int game_mode, health, hunger;
     double saturation;
     int flying;
@@ -101,6 +109,7 @@ typedef struct maage_session_snapshot {
     unsigned int protocol_version;
     unsigned long session_epoch, world_epoch;
     unsigned long tick, sequence; /* Increasing within a session/world epoch. */
+    unsigned long applied_command_sequence; /* Acknowledges accepted or rejected FIFO actions. */
     int paused; /* Integrated owner pause; presentation may continue. */
     maage_session_player_view player;
     maage_environment_state environment;

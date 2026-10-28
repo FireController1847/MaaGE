@@ -218,14 +218,22 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         (maage_client_window_choice)(ui->window_mode ? MAAGE_CLIENT_WINDOWED : ui->last_nonwindowed_mode));
     if(input->escape && (maage_client_ui_current(ui)<MAAGE_CLIENT_UI_TITLE ||
         maage_client_ui_current(ui)==MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
-        maage_client_ui_current(ui)==MAAGE_CLIENT_UI_SOUND_SETTINGS)) {
+        maage_client_ui_current(ui)==MAAGE_CLIENT_UI_SOUND_SETTINGS ||
+        maage_client_ui_current(ui)==MAAGE_CLIENT_UI_CRAFTING_TABLE)) {
         ui->dragging_fps=0;ui->dragging_volume=0;ui->dragging_fov=0;
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
     if (input->inventory && ui->has_snapshot) {
-        if (id == MAAGE_CLIENT_UI_INVENTORY) return maage_client_ui_back(ui);
-        if (!id) return maage_client_ui_open(ui, MAAGE_CLIENT_UI_INVENTORY);
+        if (id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE) return maage_client_ui_back(ui);
+        if (!id && !ui->container_command_pending) {
+            maage_session_command command;
+            maage_status result;
+            memset(&command, 0, sizeof(command)); command.kind = MAAGE_CMD_CONTAINER_OPEN;
+            result = maage_client_ui_queue_command(ui, &command);
+            if (maage_status_failed(result)) return result;
+            return maage_client_ui_open(ui, MAAGE_CLIENT_UI_INVENTORY);
+        }
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     }
     if (id) {
@@ -545,6 +553,7 @@ maage_status maage_client_ui_open_root(maage_client_ui *ui,maage_client_ui_scree
     ui->navigation.depth=0;ui->selected=0;
     if(id==MAAGE_CLIENT_UI_TITLE) {
         ui->has_snapshot=0;
+        ui->container_command_pending=0;ui->container_command_sequence=0;ui->container_close_requested=0;
         ui->command_read=ui->command_write=ui->command_count=0;
     }
     return maage_client_ui_open(ui,id);

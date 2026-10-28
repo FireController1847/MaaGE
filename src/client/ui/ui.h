@@ -19,6 +19,7 @@ typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_LOADING 9U
 #define MAAGE_CLIENT_UI_VIDEO_SETTINGS 10U
 #define MAAGE_CLIENT_UI_SOUND_SETTINGS 11U
+#define MAAGE_CLIENT_UI_CRAFTING_TABLE 12U
 #define MAAGE_CLIENT_UI_EXIT 1U
 #define MAAGE_CLIENT_UI_RESPAWN 2U
 #define MAAGE_CLIENT_UI_DEBUG_LINES 32
@@ -26,7 +27,7 @@ typedef unsigned int maage_client_ui_screen_id;
 
 typedef struct maage_client_ui_input {
     int escape, f3, f11, accept, previous, next, left, right, primary_pressed, primary_down, secondary_pressed, inventory;
-    int list_up, list_down;
+    int list_up, list_down, shift;
     const char *text;
     double scroll;
     float mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
@@ -64,6 +65,8 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,
     const maage_session_snapshot *snapshot);
 /* NOOP when empty. FIFO of authoritative commands; a full queue returns
  * BUFFER_OVERFLOW and retains the unconsumed request for caller feedback. */
+void maage_client_ui_command_submitted(maage_client_ui *ui, const maage_session_command *command,
+    unsigned long sequence);
 maage_status maage_client_ui_take_command(maage_client_ui *ui,
     maage_session_command *command);
 /* On local transport BUFFER_OVERFLOW, restore the just-taken command at the

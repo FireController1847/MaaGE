@@ -12,9 +12,11 @@ enum {
     MAAGE_ITEM_TOOL_BASE = 1024, MAAGE_ITEM_SHEARS = 1039,
     MAAGE_ITEM_COAL = 1040, MAAGE_ITEM_DIAMOND, MAAGE_ITEM_REDSTONE,
     MAAGE_ITEM_LAPIS, MAAGE_ITEM_EMERALD, MAAGE_ITEM_FLINT, MAAGE_ITEM_APPLE,
-    MAAGE_ITEM_SAPLING, MAAGE_ITEM_SNOWBALL, MAAGE_ITEM_SEEDS
+    MAAGE_ITEM_SAPLING, MAAGE_ITEM_SNOWBALL, MAAGE_ITEM_SEEDS,
+    MAAGE_ITEM_STICK, MAAGE_ITEM_IRON_INGOT, MAAGE_ITEM_GOLD_INGOT,
+    MAAGE_ITEM_GOLD_NUGGET, MAAGE_ITEM_BOWL, MAAGE_ITEM_MUSHROOM_STEW
 };
-#define MAAGE_ITEM_TEXTURE_COUNT 28U
+#define MAAGE_ITEM_TEXTURE_COUNT 35U
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item,
     unsigned int metadata, maage_block_face face, double yaw,
@@ -69,6 +71,8 @@ const maage_item_stack *maage_inventory_selected(const maage_inventory *inventor
 maage_status maage_inventory_add(maage_inventory *inventory,
     const maage_item_registry *registry, const maage_item_stack *stack,
     unsigned int *remaining);
+maage_status maage_item_stack_click(maage_item_stack *source, maage_item_stack *cursor,
+    const maage_item_registry *registry, int secondary);
 /* Primary picks up/merges/swaps; secondary picks up half or places one. */
 maage_status maage_inventory_click(maage_inventory *inventory,
     const maage_item_registry *registry, unsigned int slot, int secondary);

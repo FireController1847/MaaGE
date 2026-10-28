@@ -4,6 +4,7 @@
 #include "maage/blocks.h"
 #include "maage/biome.h"
 #include "maage/items.h"
+#include "maage/crafting.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +30,13 @@ extern "C" {
 #define MAAGE_CONTENT_TEXTURE_GRASS_SIDE_OVERLAY (MAAGE_CONTENT_TEXTURE_EXTRA + 36)
 #define MAAGE_CONTENT_TEXTURE_GRASS_SIDE_SNOW (MAAGE_CONTENT_TEXTURE_EXTRA + 37)
 #define MAAGE_CONTENT_TEXTURE_MISSING (MAAGE_CONTENT_TEXTURE_EXTRA + 38)
-#define MAAGE_CONTENT_TEXTURE_ITEMS (MAAGE_CONTENT_TEXTURE_MISSING + 1)
+#define MAAGE_CONTENT_TEXTURE_CRAFTING_TOP (MAAGE_CONTENT_TEXTURE_MISSING + 1)
+#define MAAGE_CONTENT_TEXTURE_CRAFTING_SIDE (MAAGE_CONTENT_TEXTURE_MISSING + 2)
+#define MAAGE_CONTENT_TEXTURE_CRAFTING_FRONT (MAAGE_CONTENT_TEXTURE_MISSING + 3)
+#define MAAGE_CONTENT_TEXTURE_SPRUCE_PLANKS (MAAGE_CONTENT_TEXTURE_MISSING + 4)
+#define MAAGE_CONTENT_TEXTURE_BIRCH_PLANKS (MAAGE_CONTENT_TEXTURE_MISSING + 5)
+#define MAAGE_CONTENT_TEXTURE_STORAGE (MAAGE_CONTENT_TEXTURE_MISSING + 6)
+#define MAAGE_CONTENT_TEXTURE_ITEMS (MAAGE_CONTENT_TEXTURE_STORAGE + 8)
 #define MAAGE_CONTENT_TEXTURE_COUNT (MAAGE_CONTENT_TEXTURE_ITEMS + MAAGE_ITEM_TEXTURE_COUNT)
 
 typedef struct maage_content maage_content;
@@ -63,6 +70,7 @@ maage_status maage_content_create(const maage_content_config *config,
 const maage_block_registry *maage_content_blocks(const maage_content *content);
 const maage_biome_registry *maage_content_biomes(const maage_content *content);
 const maage_item_registry *maage_content_items(const maage_content *content);
+const maage_recipe_registry *maage_content_recipes(const maage_content *content);
 maage_status maage_content_destroy(maage_content *content);
 
 #ifdef __cplusplus

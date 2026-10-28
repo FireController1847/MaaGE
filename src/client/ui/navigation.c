@@ -81,6 +81,19 @@ maage_status maage_client_ui_back(maage_client_ui *ui)
 {
     if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     if (!ui->navigation.depth) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_NAVIGATE, 0);
+    if ((maage_client_ui_current(ui) == MAAGE_CLIENT_UI_INVENTORY ||
+        maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CRAFTING_TABLE) && ui->container_command_pending) {
+        ui->container_close_requested = 1;
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_NAVIGATE, 0);
+    }
+    if ((maage_client_ui_current(ui) == MAAGE_CLIENT_UI_INVENTORY ||
+        maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CRAFTING_TABLE) &&
+        ui->has_snapshot && ui->snapshot.player.crafting.kind) {
+        maage_session_command command;
+        memset(&command, 0, sizeof(command)); command.kind = MAAGE_CMD_CONTAINER_CLOSE;
+        command.container_identity = ui->snapshot.player.crafting.identity;
+        return maage_client_ui_queue_command(ui, &command);
+    }
     --ui->navigation.depth; ui->selected = 0;
     ui->selected_keyboard = 0;
     ui->dragging_fov = ui->dragging_fps = ui->dragging_volume = 0;

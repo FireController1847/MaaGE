@@ -275,6 +275,8 @@ static int maage_store_gameplay_valid(const maage_gameplay_save *save,
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
         if (!maage_item_stack_valid(items, &save->inventory.slots[i])) return 0;
     if (!maage_item_stack_valid(items, &save->inventory.cursor)) return 0;
+    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
+        if (!maage_item_stack_valid(items, &save->crafting_inputs[i])) return 0;
     return 1;
 }
 /* Persist complete stable item names rather than transient numeric IDs.
@@ -338,6 +340,8 @@ static void maage_store_gameplay_put(maage_store_bytes *bytes,
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
         maage_store_stack_put(bytes, &save->inventory.slots[i], items);
     maage_store_stack_put(bytes, &save->inventory.cursor, items);
+    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
+        maage_store_stack_put(bytes, &save->crafting_inputs[i], items);
 }
 static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_save *save,
     const maage_item_registry *items)
@@ -352,6 +356,8 @@ static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_sa
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
         maage_store_stack_get(bytes, &save->inventory.slots[i], items);
     maage_store_stack_get(bytes, &save->inventory.cursor, items);
+    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
+        maage_store_stack_get(bytes, &save->crafting_inputs[i], items);
     if (!maage_store_gameplay_valid(save, items)) bytes->failed = 1;
 }
 static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entity_save *save,
@@ -437,7 +443,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store,
     data = (unsigned char *)malloc(capacity);
     if (!data) return maage_store_fail(error, "Not enough memory to encode player metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
     bytes.data = data; bytes.length = capacity; bytes.position = 0; bytes.failed = 0; bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD3", 8);
+    maage_store_text_put(&bytes, "MGWORLD4", 8);
     maage_store_put(&bytes, record->seed.low, 4); maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1); maage_store_put(&bytes, strlen(record->name), 1);
     maage_store_put(&bytes, strlen(record->created_utc), 1); maage_store_put(&bytes, record->new_world ? 1 : 0, 1);
@@ -493,7 +499,7 @@ static maage_status maage_store_metadata_load(const maage_world_store *store,
     result = maage_store_read(path, MAAGE_STORE_METADATA_MAX, &bytes.data, &bytes.length, error, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     bytes.position = 0; bytes.failed = 0; bytes.failure = 0;
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD3");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD4");
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4); record->seed.high = maage_store_get(&bytes, 4);
         for (i = 0; i < 3; ++i) lengths[i] = maage_store_get(&bytes, 1);

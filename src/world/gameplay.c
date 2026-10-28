@@ -19,8 +19,9 @@ static unsigned int maage_gameplay_material(maage_block_id id)
     case MAAGE_BLOCK_EMERALD_ORE: return MAAGE_MATERIAL_STONE;
     case MAAGE_BLOCK_GRASS: return MAAGE_MATERIAL_GRASS;
     case MAAGE_BLOCK_DIRT: return MAAGE_MATERIAL_DIRT;
+    case MAAGE_BLOCK_CRAFTING_TABLE:
     case MAAGE_BLOCK_PLANKS: case MAAGE_BLOCK_LOG: case MAAGE_BLOCK_TORCH:
-    case 47UL: case 53UL: case 54UL: case 58UL: case 85UL:
+    case 47UL: case 53UL: case 54UL: case 85UL:
     case 107UL: case 134UL: case 135UL: case 136UL: case 162UL:
         return MAAGE_MATERIAL_WOOD;
     case MAAGE_BLOCK_SAND: return MAAGE_MATERIAL_SAND;
@@ -209,6 +210,7 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
 {
     if (!game || !save) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     memset(save, 0, sizeof(*save));
+    memcpy(save->crafting_inputs, game->crafting.inputs, sizeof(save->crafting_inputs));
     save->inventory = game->inventory; save->mode = game->mode;
     save->health = game->health; save->hunger = game->hunger;
     save->saturation = game->saturation; save->exhaustion = game->exhaustion;
@@ -229,7 +231,13 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
         if (!maage_item_stack_valid(items, &save->inventory.slots[i])) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
     if (!maage_item_stack_valid(items, &save->inventory.cursor)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
+    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
+        if (!maage_item_stack_valid(items, &save->crafting_inputs[i]))
+            return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
     memset(game, 0, sizeof(*game));
+    memcpy(game->crafting.inputs, save->crafting_inputs, sizeof(game->crafting.inputs));
+    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
+        if (game->crafting.inputs[i].count) game->crafting.closing = 1;
     game->inventory = save->inventory; game->mode = save->mode;
     game->health = save->health; game->hunger = save->hunger;
     game->saturation = save->saturation; game->exhaustion = save->exhaustion;
@@ -409,6 +417,9 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     game->use_delay = 4;
     if (!game->has_target) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     if (maage_world_get(world, game->target.x, game->target.y, game->target.z) != game->target.state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    if (game->target.block_id == MAAGE_BLOCK_CRAFTING_TABLE)
+        return maage_crafting_open(&game->crafting, MAAGE_CONTAINER_TABLE,
+            game->target.x, game->target.y, game->target.z);
     held = &game->inventory.slots[game->inventory.selected];
     item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
     if (!item || !item->has_block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);

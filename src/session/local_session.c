@@ -49,14 +49,22 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size)
 static int session_command_valid(const maage_session_command *command)
 {
     if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_DROP)
+        command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CONTAINER_SLOT)
         return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
-    case MAAGE_CMD_INVENTORY:
-        return command->inventory_slot < MAAGE_INVENTORY_SLOTS &&
-            (command->secondary_click == 0 || command->secondary_click == 1);
+    case MAAGE_CMD_CONTAINER_OPEN:
+        return 1;
+    case MAAGE_CMD_CONTAINER_CLOSE:
+        return command->container_identity != 0 && command->container_identity <= 4294967295UL;
+    case MAAGE_CMD_CONTAINER_SLOT:
+        return command->container_identity != 0 && command->container_identity <= 4294967295UL &&
+            command->container_revision <= 4294967295UL &&
+            command->slot_action >= MAAGE_SLOT_PRIMARY && command->slot_action <= MAAGE_SLOT_QUICK_MOVE &&
+            ((command->slot_group == MAAGE_SLOT_INVENTORY && command->container_slot < MAAGE_INVENTORY_SLOTS) ||
+             (command->slot_group == MAAGE_SLOT_CRAFT_INPUT && command->container_slot < MAAGE_CRAFTING_CELLS) ||
+             (command->slot_group == MAAGE_SLOT_CRAFT_RESULT && command->container_slot == 0));
     case MAAGE_CMD_DROP:
         return command->inventory_slot <= MAAGE_INVENTORY_SLOTS &&
             (command->secondary_click == 0 || command->secondary_click == 1);
@@ -69,8 +77,11 @@ static int session_command_valid(const maage_session_command *command)
         return command->render_radius > 0 &&
             command->render_radius <= MAAGE_WORLD_MAX_RADIUS &&
             command->leaves_mode <= MAAGE_LEAVES_FANCY;
-    default:
+    case MAAGE_CMD_INPUT: case MAAGE_CMD_CREATIVE_PICK: case MAAGE_CMD_RESPAWN:
+    case MAAGE_CMD_DISCONNECT:
         return 1;
+    default:
+        return 0;
     }
 }
 

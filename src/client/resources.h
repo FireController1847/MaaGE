@@ -3,7 +3,7 @@
 #include "maage/image.h"
 #include "maage/pixels.h"
 #include "maage/content.h"
-#define MAAGE_CLIENT_SOURCE_COUNT (64 + MAAGE_ITEM_TEXTURE_COUNT)
+#define MAAGE_CLIENT_SOURCE_COUNT (64 + MAAGE_ITEM_TEXTURE_COUNT + 13)
 #define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
     maage_image image;
