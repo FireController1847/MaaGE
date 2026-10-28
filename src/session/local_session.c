@@ -49,11 +49,13 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size)
 static int session_command_valid(const maage_session_command *command)
 {
     if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CONTAINER_SLOT)
+        command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_BREAK_PREVIEW)
         return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
+    case MAAGE_CMD_BREAK_PREVIEW:
+        return command->prediction != 0 && command->prediction <= 4294967295UL;
     case MAAGE_CMD_CONTAINER_OPEN:
         return 1;
     case MAAGE_CMD_CONTAINER_CLOSE:
@@ -88,9 +90,10 @@ static int session_command_valid(const maage_session_command *command)
 static int session_event_valid(const maage_session_event *event)
 {
     if (event->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_DISCONNECTED ||
+        event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_BLOCK_ACTION ||
         (event->has_trace != 0 && event->has_trace != 1)) return 0;
-    if (event->kind == MAAGE_EVENT_SOUND)
+    if (event->kind == MAAGE_EVENT_PICKUP && (!event->pickup_count || event->pickup_count > 32)) return 0;
+    if (event->kind == MAAGE_EVENT_SOUND || event->kind == MAAGE_EVENT_PICKUP)
         return event->sound.event_id >= MAAGE_SOUND_FOOTSTEP &&
             event->sound.event_id <= MAAGE_SOUND_MAX &&
             event->sound.material <= MAAGE_MATERIAL_MAX &&

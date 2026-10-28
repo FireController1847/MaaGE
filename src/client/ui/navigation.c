@@ -104,3 +104,10 @@ int maage_client_ui_modal(const maage_client_ui *ui)
 {
     return ui && ui->navigation.depth != 0;
 }
+
+int maage_client_ui_pauses_game(const maage_client_ui *ui)
+{
+    maage_client_ui_screen_id id = maage_client_ui_current(ui);
+    return maage_client_ui_modal(ui) && id != MAAGE_CLIENT_UI_INVENTORY &&
+        id != MAAGE_CLIENT_UI_CRAFTING_TABLE;
+}

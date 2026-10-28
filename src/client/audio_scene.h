@@ -90,6 +90,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
     double now, maage_status_trace *trace);
 maage_status maage_client_audio_scene_pause(maage_client_audio_scene *scene, int paused);
 /* False avoids loading/playing music when its category is disabled. */
+maage_status maage_client_audio_scene_music_pause(maage_client_audio_scene *scene, int paused);
 maage_status maage_client_audio_scene_music_enabled(maage_client_audio_scene *scene,
     int enabled);
 maage_status maage_client_audio_scene_destroy(maage_client_audio_scene *scene);

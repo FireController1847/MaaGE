@@ -270,7 +270,7 @@ static int maage_gameplay_same_target(const maage_world_target *a, const maage_w
 }
 static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *player,
     maage_world *world, const maage_item_registry *items,
-    maage_gameplay_sound_sink *sink)
+    maage_gameplay_sound_sink *sink, int pressed)
 {
     const maage_block_definition *block;
     const maage_item_definition *tool;
@@ -280,12 +280,11 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     unsigned long random;
     size_t i;
     double position[3], velocity[3];
-    double speed = 1, progress;
+    double progress;
     int harvest, starting;
     maage_status result;
     if (!game->has_target) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    if (game->mode == MAAGE_GAME_MODE_CREATIVE && !game->attack_held)
-        game->break_delay = 0;
+    if (pressed) game->break_delay = 0;
     if (game->break_delay) {
         --game->break_delay;
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
@@ -312,19 +311,15 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
         progress = 1;
     else if (block->hardness < 0) progress = 0;
     else {
-        speed = maage_item_mining_speed(tool, block);
-        if (!player->grounded) speed /= 5;
-        {
-            const maage_block_state_definition *eye = maage_block_registry_state(maage_world_registry(world),
-                maage_world_get(world, (int)floor(player->position[0]),
+        const maage_block_state_definition *eye = maage_block_registry_state(maage_world_registry(world),
+            maage_world_get(world, (int)floor(player->position[0]),
                 (int)floor(player->position[1]+MAAGE_PLAYER_EYE_HEIGHT), (int)floor(player->position[2])));
-            if (eye && eye->fluid_kind == MAAGE_FLUID_WATER) speed /= 5;
-        }
-        progress = speed / (block->hardness * (harvest ? 30 : 100));
+        progress = maage_item_mining_damage(tool, block, player->grounded,
+            eye && eye->fluid_kind == MAAGE_FLUID_WATER);
     }
     /* A changed held target initializes before the following damage updates
      * advance both crack progression and dig cadence. */
-    if (starting && progress < 1)
+    if (starting && progress < 1 && !pressed)
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     game->break_progress += progress;
     if (game->break_progress > 1) game->break_progress = 1;
@@ -378,6 +373,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
                 0.8, 0.8 + maage_gameplay_sound_random(game) * 0.4);
         }
     }
+    game->last_break = game->target;
     ++game->blocks_broken; game->breaking_active = 0; game->break_progress = 0;
     game->dig_ticks = 0;
     game->break_delay = game->mode == MAAGE_GAME_MODE_CREATIVE ?
@@ -682,7 +678,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
             game->mode == MAAGE_GAME_MODE_SURVIVAL) game->attack_miss_delay = 10;
         if (game->swing <= 0) game->swing = 1;
         if (!game->attack_miss_delay) {
-            result = maage_gameplay_action_result(maage_gameplay_break(game,player,world,items,&sink), world, trace);
+            result = maage_gameplay_action_result(maage_gameplay_break(game,player,world,items,&sink,intent->attack_pressed), world, trace);
             if (maage_status_failed(result))
                 return maage_gameplay_sound_result(result, &sink, written, trace);
             if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;

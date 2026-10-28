@@ -86,7 +86,9 @@ static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *i
                 positions[corner][axis] = (float)maage_interaction_corners[face][corner][axis];
             positions[corner][2] = face == 4 ? -0.0625f : 0;
         }
-        maage_item_model_quad(vertices, indices, faces, positions, uv, tint,
+        memcpy(rectangle, uv, sizeof(rectangle));
+        if (face == MAAGE_FACE_POSITIVE_Z) { rectangle[0] = uv[2]; rectangle[2] = uv[0]; }
+        maage_item_model_quad(vertices, indices, faces, positions, rectangle, tint,
             face == 4 ? 0.8f : 1.0f, MAAGE_MESH_MATERIAL_CUTOUT, NULL);
     }
     for (face = 0; face < 4; ++face) for (pixel = 0; pixel < 16; ++pixel) {
@@ -94,8 +96,11 @@ static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *i
         coordinate = (float)(pixel + face % 2) / 16;
         sample = ((float)pixel + 0.5f) / 16;
         memcpy(rectangle, uv, sizeof(rectangle));
-        if (axis == 0) rectangle[0] = rectangle[2] = uv[0] + (uv[2]-uv[0])*sample;
-        else rectangle[1] = rectangle[3] = uv[3] + (uv[1]-uv[3])*sample;
+        if (axis == 0) rectangle[0] = rectangle[2] = uv[2] + (uv[0]-uv[2])*sample;
+        else {
+            rectangle[1] = rectangle[3] = uv[3] + (uv[1]-uv[3])*sample;
+            rectangle[0] = uv[2]; rectangle[2] = uv[0];
+        }
         for (corner = 0; corner < 4; ++corner) {
             positions[corner][0] = (float)maage_interaction_corners[face][corner][0];
             positions[corner][1] = (float)maage_interaction_corners[face][corner][1];

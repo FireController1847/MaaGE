@@ -124,6 +124,30 @@ typedef struct maage_world_target {
     double distance;
     maage_block_shape bounds; /* Local selection shape. */
 } maage_world_target;
+typedef struct maage_block_position { int x, y, z; } maage_block_position;
+/* A copied 3x3x3 presentation neighborhood. Index x+3*z+9*y uses offsets
+ * -1..1; revisions use x+3*z; the 5x5 biome halo uses x+5*z with offsets -2..2. No borrowed World storage crosses threads. */
+typedef struct maage_world_neighborhood {
+    int valid, x, y, z;
+    unsigned long revisions[9];
+    maage_block_state_id states[27];
+    unsigned char light[27];
+    maage_biome_id biomes[25];
+} maage_world_neighborhood;
+unsigned long maage_world_column_revision(const maage_world *world, int x, int z);
+maage_status maage_world_sample_neighborhood(const maage_world *world,
+    int x, int y, int z, maage_world_neighborhood *sample);
+/* Source quads retain numeric voxel ownership. Filtering produces only owned
+ * scratch indices; vertices remain borrowed from the immutable source mesh. */
+maage_status maage_world_mesh_filter(const maage_world_mesh *mesh,
+    const maage_block_position *removed, size_t count, maage_mesh_data *data,
+    unsigned int **indices);
+/* Up to twelve quads expose the old opaque cell's neighbors with the shared
+ * face/UV/light/AO machinery. Call only with a validated copied neighborhood. */
+maage_status maage_world_mesh_reveal(const maage_block_registry *blocks,
+    const maage_biome_registry *biomes, const maage_world_neighborhood *sample,
+    const maage_block_position *removed, size_t count, unsigned int supplied_faces, maage_leaves_mode leaves,
+    maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data);
 /* Floor division/positive modulo, including negative world coordinates. */
 int maage_world_chunk_coordinate(int coordinate);
 int maage_world_local_coordinate(int coordinate);

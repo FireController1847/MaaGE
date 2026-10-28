@@ -24,7 +24,7 @@ typedef struct maage_gameplay {
     int flying;
     unsigned int sprint_window, sprint_ticks;
     int forward_down;
-    maage_world_target target, breaking;
+    maage_world_target target, breaking, last_break;
     int has_target, breaking_active;
     double break_progress, swing, reach;
     unsigned int use_delay, break_delay, attack_miss_delay, jump_window, hunger_ticks;

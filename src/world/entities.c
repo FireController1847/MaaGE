@@ -142,7 +142,8 @@ static void entity_move(maage_entity *entity, const maage_world *world)
 }
 maage_status maage_entities_tick(maage_entities *entities, const maage_world *world,
     const maage_item_registry *items, const maage_player *player,
-    maage_inventory *inventory, int collect, unsigned int *collected)
+    maage_inventory *inventory, int collect, unsigned int *collected,
+    maage_entity_pickup *pickups, size_t capacity, size_t *written)
 {
     size_t i, j, step, bucket, output = 0;
     int x, y, z, dx, dy, dz;
@@ -150,9 +151,9 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
     maage_entity *entity, *other;
     const maage_item_definition *item;
     maage_status result;
-    if (!entities || !world || !items || !player || !inventory || !collected)
+    if (!entities || !world || !items || !player || !inventory || !collected || !written || (capacity && !pickups))
         return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
-    *collected = 0;
+    *collected = 0; *written = 0;
     if (!entities->count) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
     for (i = 0; i < entities->buckets; ++i) entities->heads[i] = (size_t)-1;
     entities->merge_phase %= entities->count;
@@ -200,13 +201,23 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
                 other->payload.item.count = 0;
             }
         }
-        if (collect && !entity->pickup_delay &&
+        /* EntityPlayer expands its body by (1, .5, 1), then intersects the
+         * item's .25-wide AABB. No pre-collection magnetic force exists. */
+        if (collect && *written < capacity && !entity->pickup_delay &&
             fabs(player->position[0]-entity->position[0]) < MAAGE_PLAYER_WIDTH*0.5+1.125 &&
             fabs(player->position[2]-entity->position[2]) < MAAGE_PLAYER_WIDTH*0.5+1.125 &&
             entity->position[1]+0.25 > player->position[1]-0.5 && entity->position[1] < player->position[1]+MAAGE_PLAYER_HEIGHT+0.5) {
             result = maage_inventory_add(inventory, items, &entity->payload.item, &remaining);
             if (maage_status_failed(result)) return result;
-            *collected += entity->payload.item.count - remaining; entity->payload.item.count = remaining;
+            if (remaining != entity->payload.item.count) {
+                maage_entity_pickup *pickup = &pickups[(*written)++];
+                pickup->entity = entity->id; pickup->stack = entity->payload.item;
+                pickup->stack.count -= remaining;
+                memcpy(pickup->position, entity->position, sizeof(pickup->position));
+                pickup->light = entity->light; pickup->age = entity->age;
+                *collected += pickup->stack.count;
+                entity->payload.item.count = remaining;
+            }
         }
     }
     /* Preserve increasing identity order for binary search in presentation. */

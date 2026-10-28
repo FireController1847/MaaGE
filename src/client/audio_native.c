@@ -870,6 +870,9 @@ static maage_status mn_scene_update(void *handle, const maage_session_snapshot *
         if (maage_status_failed(result)) return result;
         scene->paused = paused;
     }
+    result = maage_client_audio_scene_music_pause(scene->scene,
+        paused && snapshot->player.crafting.kind == MAAGE_CONTAINER_CLOSED);
+    if (maage_status_failed(result)) return result;
     return maage_client_audio_scene_update(scene->scene, snapshot, position, now, trace);
 }
 static maage_status mn_scene_stop(void *handle, maage_status_trace *trace)

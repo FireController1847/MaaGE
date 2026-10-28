@@ -10,6 +10,8 @@ maage_status maage_client_item_entities_create(maage_renderer *renderer,
 maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     maage_local_session *session, const maage_session_snapshot *snapshot,
     double interpolation, const double eye[3], double now, maage_status_trace *trace);
+maage_status maage_client_item_entities_pickup(maage_client_item_entities *view,
+    const maage_session_event *event, double now);
 maage_status maage_client_item_entities_clear(maage_client_item_entities *view);
 maage_status maage_client_item_entities_destroy(maage_client_item_entities *view);
 #endif

@@ -86,6 +86,8 @@ int maage_item_can_harvest(const maage_item_definition *tool,
     const maage_block_definition *block);
 double maage_item_mining_speed(const maage_item_definition *tool,
     const maage_block_definition *block);
+double maage_item_mining_damage(const maage_item_definition *tool,
+    const maage_block_definition *block, int grounded, int submerged);
 #define MAAGE_DROP_STACKS 2U
 typedef struct maage_item_drops { maage_item_stack stacks[MAAGE_DROP_STACKS]; size_t count; } maage_item_drops;
 maage_status maage_item_generate_drops(const maage_block_registry *blocks,

@@ -24,7 +24,7 @@ typedef struct maage_client_ui_resources {
     unsigned char glyph_width[256];
     int atlas_edge, block_atlas_width, block_atlas_height;
     maage_status load_status, recovery_status;
-    maage_status source_results[5];
+    maage_status source_results[6];
     unsigned int failed_resources;
     unsigned char title_available[7];
     int menu_background_available;
@@ -107,6 +107,7 @@ maage_status maage_client_ui_queue_command(maage_client_ui *ui,
     const maage_session_command *command);
 void maage_client_ui_queue_game_mode(maage_client_ui *ui);
 void maage_client_ui_queue_respawn(maage_client_ui *ui);
+void maage_client_ui_player_preview(maage_client_ui *ui, maage_client_ui_rect frame);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
 /* Appends already-clipped quads, rebasing indices into the current frame. */
 int maage_client_ui_append_quads(maage_client_ui *ui,

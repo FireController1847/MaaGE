@@ -73,10 +73,10 @@ struct maage_client_audio_scene {
     maage_client_audio_scene_voice music_voice;
     void *music_pcm;
     size_t music_bytes;
-    int music_index, music_enabled;
+    int music_index, music_enabled, music_paused;
     int bound, paused, clock_ready, failure_logged, music_mode, has_world;
     unsigned long failure_count;
-    double last_now, paused_since, next_music;
+    double last_now, next_music, music_paused_since;
     unsigned long session_epoch, world_epoch, observation_tick;
     unsigned int rain_counter;
 };
@@ -231,6 +231,7 @@ static void sc_music_update(maage_client_audio_scene *scene, double now,
     size_t bytes = 0;
     maage_status r;
     int selected, begin, end;
+    if (scene->music_paused) return;
     if (!scene->music_enabled) {
         if (scene->music_voice && maage_status_failed(sc_stop_music(scene)))
             sc_record_device_failure(scene, sc_result(MAAGE_STATUS_ERROR, MAAGE_OPERATION_STOP), trace);
@@ -348,7 +349,6 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
     for (i = 0; i < 3; ++i)
         if (!sc_valid_coordinate(listener_position[i]))
             return sc_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
-    if (scene->paused) return sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     failures_before = scene->failure_count;
     if (!scene->clock_ready) {
         scene->clock_ready = 1; scene->last_now = now;
@@ -359,8 +359,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
         return MAAGE_STATUS_PROPAGATE(trace, sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_UPDATE),
             MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     scene->last_now = now;
-    /* Options/Pause retain the music context; world replacement and context
-     * changes can stop the current track. */
+    /* Options/Pause and replacement worlds retain a matching music context. */
     music_mode = !snapshot ? SC_MUSIC_MENU :
         (snapshot->player.game_mode == MAAGE_GAME_MODE_CREATIVE ?
             SC_MUSIC_CREATIVE : SC_MUSIC_GAME);
@@ -379,13 +378,6 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
             r = sc_stop_channel(scene, (int)i);
             if (maage_status_failed(r)) return r;
         }
-        /* World replacement stops the track before scheduling the next gap. */
-        if (scene->music_voice) {
-            r = sc_stop_music(scene);
-            if (maage_status_failed(r)) return r;
-            scene->next_music = now + sc_music_delay(scene,
-                sc_music_minimum(scene), sc_music_maximum(scene));
-        }
         scene->has_world = 0;
         scene->rain_counter = 0;
     }
@@ -403,7 +395,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
     /* Ambient display opportunities follow copied 20 TPS observations once.
      * Coalesced snapshots intentionally omit obsolete opportunities. There is
      * no fabricated cave/thunder timer: the Server owns those world events. */
-    if (scene->observation_tick != snapshot->tick) {
+    if (!scene->paused && scene->observation_tick != snapshot->tick) {
         scene->observation_tick = snapshot->tick;
         memset(&obs, 0, sizeof(obs));
         r = scene->ports.read_snapshot(scene->context, snapshot, listener_position, &obs);
@@ -443,30 +435,36 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
 }
 maage_status maage_client_audio_scene_pause(maage_client_audio_scene *scene, int paused)
 {
-    double now, shift;
     unsigned int i;
     maage_status r, first = sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
     if (!scene) return sc_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);
     paused = paused != 0;
     if (paused == scene->paused) return sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
-    now = maage_time_monotonic_seconds();
-    if (paused) scene->paused_since = now >= 0.0 ? now : scene->last_now;
-    else if (scene->clock_ready) {
-        shift = now >= scene->paused_since ? now - scene->paused_since : 0.0;
-        scene->next_music += shift;
-    }
     scene->paused = paused;
     if (scene->bound) {
         for (i = 0; i < SC_CHANNEL_COUNT; ++i) if (scene->channels[i].voice) {
             r = scene->ports.voice_pause(scene->context, scene->audio, scene->channels[i].voice, paused);
             if (maage_status_failed(r) && !maage_status_failed(first)) first = r;
         }
-        if (scene->music_voice) {
-            r = scene->ports.voice_pause(scene->context, scene->audio, scene->music_voice, paused);
-            if (maage_status_failed(r) && !maage_status_failed(first)) first = r;
-        }
     }
     return first;
+}
+maage_status maage_client_audio_scene_music_pause(maage_client_audio_scene *scene, int paused)
+{
+    double now;
+    maage_status result = sc_result(MAAGE_STATUS_SUCCESS,MAAGE_OPERATION_SET);
+    if (!scene) return sc_result(MAAGE_STATUS_INVALID_ARGUMENT,MAAGE_OPERATION_SET);
+    paused = paused != 0;
+    if (paused == scene->music_paused) return sc_result(MAAGE_STATUS_NOOP,MAAGE_OPERATION_SET);
+    if (scene->bound && scene->music_voice) {
+        result = scene->ports.voice_pause(scene->context,scene->audio,scene->music_voice,paused);
+        if (maage_status_failed(result)) return result;
+    }
+    now = maage_time_monotonic_seconds();
+    if (paused) scene->music_paused_since = now >= 0 ? now : scene->last_now;
+    else if (scene->clock_ready && now >= scene->music_paused_since) scene->next_music += now-scene->music_paused_since;
+    scene->music_paused = paused;
+    return result;
 }
 maage_status maage_client_audio_scene_music_enabled(maage_client_audio_scene *scene,
     int enabled)

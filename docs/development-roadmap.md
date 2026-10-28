@@ -305,8 +305,9 @@ AppKit/Win32/GTK controls:
   independently toggled F3 overlay. Escape opens Pause, whose actions resume,
   open Options or exit through normal Client shutdown. Options now persists
   supported video/window/audio settings and retains Back navigation. Mouse controls
-  and keyboard selection use native input snapshots; menus release capture and
-  pause fixed-step player updates. Rendering, native events and bounded World
+  and keyboard selection use native input snapshots; menus release capture.
+  Pause/Options pause fixed-step updates; inventory and Crafting Tables keep
+  gameplay and music running. Rendering, native events and bounded World
   completion/scheduling continue while paused. Closing menus restores gameplay
   capture when focus permits; focus loss still releases capture and held keys.
   Visible UI and input update every rendered frame without artificial menu delays.
@@ -557,7 +558,8 @@ Implemented foundation in Client **0.1.0-alpha.6** and portable `MaaGE::World`:
   thirty. Placement/removal wakes nearby fluids through the same mutation path.
   Private lighting jobs handle emission, caves, edits and cross-column propagation.
 - **Time/weather/rendering:** a persisted two-word clock advances a 24,000-tick day.
-  Modal/focus pauses stop simulation while streaming continues. Seeded clear/rain/
+  Pause/Options/focus pauses stop simulation while streaming continues; containers
+  remain live. Seeded clear/rain/
   thunder timers and intensity transitions advance on simulation ticks. Cold/wet
   observations select snow and deserts suppress precipitation. Primary GPU shaders combine static
   sky/block light channels with a frame sky factor, preserving emitted light at night
@@ -745,6 +747,13 @@ persistence on its authoritative thread in both entry points:
 - After rendering stops, Server shutdown drains/flushes World work and saves the
   complete current-format player/environment checkpoint. Clean join precedes
   releasing borrowed content/transport; lifecycle failures retain needed resources.
+- Protocol 7 adds bounded block-break presentation requests/results and copied
+  neighborhoods, retaining Server decisions and immutable mesh handoffs. Client
+  voxel filtering/exposed faces reconcile by action identity, epoch and column
+  revision. Pickup animation batches share the existing pickup cue.
+- The [gameplay parity pass](gameplay-parity.md) also adds the interactive inventory
+  biped, shared sprite UV corrections and reference-aligned creation/selection.
+  Neighbor support rules and loading-screen redesign remain deferred.
 - Remote multiplayer, a network protocol, administration GUI and Launcher Server
   management are deferred. Transport-independent local contracts establish the
   authority boundary without implementing these features.

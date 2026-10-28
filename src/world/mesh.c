@@ -3,11 +3,13 @@
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct maage_world_mesh {
     maage_mesh_data data;
     maage_mesh_vertex *vertices;
     unsigned int *indices;
+    maage_block_position *owners;
 };
 
 static const int maage_face_neighbor[MAAGE_FACE_COUNT][3] = {
@@ -338,7 +340,7 @@ static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry,
 static size_t maage_mesh_generate(const maage_block_registry *registry,
     const maage_biome_registry *biomes, const maage_chunk *chunk,
     const maage_chunk *neighbors[8], maage_mesh_vertex *vertices,
-    unsigned int *indices, maage_leaves_mode mode,
+    unsigned int *indices, maage_block_position *owners, maage_leaves_mode mode,
     const maage_job_token *token, unsigned int *failure)
 {
     const maage_block_state_definition *state, *neighbor, *above;
@@ -463,6 +465,13 @@ static size_t maage_mesh_generate(const maage_block_registry *registry,
                         if (reverse) maage_mesh_reverse_face(vertices, indices, face_count,
                             face_count + 1 + (overlay ? 1 : 0));
                     }
+                    if (owners) {
+                        size_t owner, end = face_count + 1 + (overlay ? 1 : 0) + (reverse ? 1 : 0);
+                        for (owner = face_count; owner < end; ++owner) {
+                            owners[owner].x = chunk->x * 16 + x; owners[owner].y = y;
+                            owners[owner].z = chunk->z * 16 + z;
+                        }
+                    }
                     face_count += 1 + (overlay ? 1 : 0) + (reverse ? 1 : 0);
                 }
             }
@@ -493,11 +502,11 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD,
             MAAGE_OPERATION_MESH, !blocks ? 0 : (!biomes ? 1 : (!chunk ? 2 : 3))), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
     }
-    faces = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, mode, token, &failure);
+    faces = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, token, &failure);
     if (faces == maximum) return maage_mesh_failure(trace, failure);
     if (faces > UINT_MAX / 4 ||
         faces > maximum / (4 * sizeof(maage_mesh_vertex)) ||
-        faces > maximum / (6 * sizeof(unsigned int)))
+        faces > maximum / (6 * sizeof(unsigned int)) || faces > maximum / sizeof(maage_block_position))
         return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
     if (token && maage_job_cancelled(token)) return maage_mesh_failure(trace, MAAGE_STATUS_INTERRUPTED);
     mesh = (maage_world_mesh *)calloc(1, sizeof(*mesh));
@@ -505,12 +514,13 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
     if (faces) {
         mesh->vertices = (maage_mesh_vertex *)malloc(faces * 4 * sizeof(*mesh->vertices));
         mesh->indices = (unsigned int *)malloc(faces * 6 * sizeof(*mesh->indices));
-        if (!mesh->vertices || !mesh->indices) {
+        mesh->owners = (maage_block_position *)malloc(faces * sizeof(*mesh->owners));
+        if (!mesh->vertices || !mesh->indices || !mesh->owners) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
         }
         written = maage_mesh_generate(blocks, biomes, chunk, neighbors, mesh->vertices,
-            mesh->indices, mode, token, &failure);
+            mesh->indices, mesh->owners, mode, token, &failure);
         if (written != faces) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, failure);
@@ -531,8 +541,153 @@ const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh)
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh)
 {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    free(mesh->owners);
     free(mesh->indices);
     free(mesh->vertices);
     free(mesh);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+}
+
+static int maage_mesh_removed(const maage_block_position *removed, size_t count, int x, int y, int z)
+{
+    size_t i;
+    for (i = 0; i < count; ++i) if (removed[i].x == x && removed[i].y == y && removed[i].z == z) return 1;
+    return 0;
+}
+maage_status maage_world_mesh_filter(const maage_world_mesh *mesh,
+    const maage_block_position *removed, size_t count, maage_mesh_data *data, unsigned int **indices)
+{
+    size_t face, written = 0;
+    if (!mesh || !data || !indices || (count && !removed))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
+    *indices = NULL; *data = mesh->data;
+    if (mesh->data.index_count) {
+        *indices = (unsigned int *)malloc(mesh->data.index_count * sizeof(**indices));
+        if (!*indices) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
+    }
+    for (face = 0; face < mesh->data.index_count / 6; ++face) {
+        if (maage_mesh_removed(removed, count, mesh->owners[face].x, mesh->owners[face].y, mesh->owners[face].z)) continue;
+        memcpy(*indices + written, mesh->indices + face * 6, 6 * sizeof(**indices)); written += 6;
+    }
+    data->indices = *indices; data->index_count = written;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
+static int maage_reveal_index(int x, int y, int z) { return x + 1 + 3 * (z + 1) + 9 * (y + 1); }
+static unsigned char maage_reveal_sample(const maage_block_registry *blocks,
+    const maage_world_neighborhood *sample, const int cell[3], int *opaque)
+{
+    int i = maage_reveal_index(cell[0], cell[1], cell[2]);
+    const maage_block_state_definition *state = maage_block_registry_state(blocks, sample->states[i]);
+    const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    *opaque = block && block->opaque;
+    return sample->light[i];
+}
+maage_status maage_world_mesh_reveal(const maage_block_registry *blocks,
+    const maage_biome_registry *biomes, const maage_world_neighborhood *sample,
+    const maage_block_position *removed, size_t count, unsigned int supplied_faces, maage_leaves_mode leaves,
+    maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data)
+{
+    const maage_block_state_definition *old, *state, *above;
+    const maage_block_definition *block;
+    const maage_block_face_definition *definition;
+    const maage_biome_definition *biome;
+    const float *uv;
+    maage_block_shape shape;
+    maage_mesh_illumination illumination;
+    float color[3], material, ao;
+    unsigned char base, a, b, diagonal;
+    unsigned int direction, face, corner, channel, layer;
+    size_t faces = 0;
+    int x, y, z, axis, u, v, i, ca, cb, cc, cd, bx, bz, snowed;
+    unsigned int sky = 0, emission = 0, neighbor_light;
+    maage_world_neighborhood visible;
+    int center[3] = {0,0,0}, first[3], second[3], last[3];
+    if (!blocks || !biomes || !sample || !sample->valid || !data || !vertices || !indices || (count && !removed))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
+    data->vertices = vertices; data->indices = indices; data->vertex_count = data->index_count = 0;
+    old = maage_block_registry_state(blocks, sample->states[13]);
+    block = old ? maage_block_registry_block(blocks, old->block_id) : NULL;
+    if (!block || !block->opaque) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
+    visible = *sample;
+    for (i = 0; i < 27; ++i) if (i != 13 && maage_mesh_removed(removed,count,
+        sample->x+i%3-1,sample->y+i/9-1,sample->z+(i/3)%3-1)) visible.states[i] = MAAGE_STATE_AIR;
+    sample = &visible;
+    for (direction = 0; direction < 6; ++direction) {
+        i = maage_reveal_index(maage_face_neighbor[direction][0],maage_face_neighbor[direction][1],maage_face_neighbor[direction][2]);
+        neighbor_light = sample->light[i] >> 4;
+        if (neighbor_light && direction != MAAGE_FACE_POSITIVE_Y) --neighbor_light;
+        if (neighbor_light > sky) sky = neighbor_light;
+        neighbor_light = sample->light[i] & 15;
+        if (neighbor_light) --neighbor_light;
+        if (neighbor_light > emission) emission = neighbor_light;
+    }
+    visible.light[13] = (unsigned char)(sky*16+emission);
+    for (direction = 0; direction < 6; ++direction) {
+        x = maage_face_neighbor[direction][0]; y = maage_face_neighbor[direction][1]; z = maage_face_neighbor[direction][2];
+        if ((supplied_faces & (1U << direction)) ||
+            maage_mesh_removed(removed, count, sample->x+x, sample->y+y, sample->z+z)) continue;
+        state = maage_block_registry_state(blocks, sample->states[maage_reveal_index(x,y,z)]);
+        block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+        if (!block || !block->solid || block->mesh_shape != MAAGE_BLOCK_MESH_CUBE || state->fluid_kind) continue;
+        face = direction ^ 1U; axis = face / 2; u = (axis+1)%3; v = (axis+2)%3;
+        if ((face & 1) ? block->selection_shape.maximum[axis] != 1 : block->selection_shape.minimum[axis] != 0) continue;
+        definition = &state->faces[face]; shape = block->selection_shape;
+        if (block->id == MAAGE_BLOCK_CACTUS && axis != 1)
+            shape.minimum[axis] = shape.maximum[axis] = face & 1 ? 0.9375 : 0.0625;
+        above = y < 1 ? maage_block_registry_state(blocks,sample->states[maage_reveal_index(x,y+1,z)]) : NULL;
+        snowed = above && above->block_id == MAAGE_BLOCK_SNOW;
+        base = maage_reveal_sample(blocks, sample, center, &ca);
+        if ((base & 15) < block->emitted_light) base = (unsigned char)((base & 240) | block->emitted_light);
+        for (corner = 0; corner < 4; ++corner) {
+            a = b = diagonal = base; ao = 1;
+            if (!block->emitted_light && block->id != MAAGE_BLOCK_CACTUS) {
+                memcpy(first, center, sizeof(first)); memcpy(second, center, sizeof(second)); memcpy(last, center, sizeof(last));
+                first[u] = maage_face_corners[face][corner][u] ? 1 : -1;
+                second[v] = maage_face_corners[face][corner][v] ? 1 : -1;
+                last[u] = first[u]; last[v] = second[v];
+                a = maage_reveal_sample(blocks, sample, first, &cb);
+                b = maage_reveal_sample(blocks, sample, second, &cc);
+                if (cb && cc) { diagonal = a; cd = 1; }
+                else diagonal = maage_reveal_sample(blocks, sample, last, &cd);
+                /* The predicted center is air; surrounding AO stays sampled. */
+                ao = 1 - 0.2f * (cb + cc + cd);
+                if (!a) a = base; if (!b) b = base; if (!diagonal) diagonal = base;
+            }
+            illumination.light[corner][0] = ((base>>4)+(a>>4)+(b>>4)+(diagonal>>4))/60.0f;
+            illumination.light[corner][1] = ((base&15)+(a&15)+(b&15)+(diagonal&15))/60.0f;
+            illumination.occlusion[corner] = ao;
+        }
+        material = MAAGE_MESH_MATERIAL_OPAQUE;
+        if (block->id == MAAGE_BLOCK_CACTUS || (block->id == MAAGE_BLOCK_LEAVES && leaves != MAAGE_LEAVES_FAST))
+            material = MAAGE_MESH_MATERIAL_CUTOUT;
+        if (block->id == MAAGE_BLOCK_ICE) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
+        for (layer = 0; layer < 2; ++layer) {
+            unsigned int tint = layer ? definition->overlay_tint_mode : definition->tint_mode;
+            if (layer && (snowed || definition->overlay_uv[2] <= definition->overlay_uv[0])) continue;
+            uv = layer ? definition->overlay_uv : definition->uv;
+            if (!layer && snowed && definition->snow_uv[2] > definition->snow_uv[0]) {
+                uv = definition->snow_uv; tint = MAAGE_BLOCK_TINT_NONE;
+            }
+            if (!layer && block->id == MAAGE_BLOCK_LEAVES && leaves == MAAGE_LEAVES_FAST &&
+                state->leaf_fast_uv[2] > state->leaf_fast_uv[0]) uv = state->leaf_fast_uv;
+            for (channel = 0; channel < 3; ++channel) color[channel] = tint ? 0 : 1;
+            if (tint == MAAGE_BLOCK_TINT_GRASS_LOCAL) {
+                biome = maage_biome_registry_get(biomes,sample->biomes[x+2+5*(z+2)]);
+                for (channel = 0; channel < 3; ++channel) color[channel] = biome ? biome->grass_color[channel] : 1;
+            } else if (tint) for (bz = -1; bz <= 1; ++bz) for (bx = -1; bx <= 1; ++bx) {
+                biome = maage_biome_registry_get(biomes,sample->biomes[x+bx+2+5*(z+bz+2)]);
+                for (channel = 0; channel < 3; ++channel)
+                    color[channel] += !biome ? 1.0f/9 :
+                        (tint == MAAGE_BLOCK_TINT_FOLIAGE ? biome->foliage_color[channel] : biome->grass_color[channel])/9;
+            }
+            maage_mesh_face(vertices, indices, faces, sample->x+x, sample->y+y, sample->z+z, face,
+                definition, uv, &shape,
+                MAAGE_BLOCK_MESH_CUBE, state->metadata,
+                state->block_id == MAAGE_BLOCK_LOG ? ((state->metadata & 12) == 4 ? 0 : ((state->metadata & 12) == 8 ? 2 : 1)) : -1,
+                layer ? MAAGE_MESH_MATERIAL_CUTOUT : material, color, definition->animation, NULL, NULL, &illumination);
+            ++faces;
+        }
+    }
+    data->vertex_count = faces*4; data->index_count = faces*6;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }

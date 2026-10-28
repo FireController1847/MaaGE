@@ -16,6 +16,13 @@ typedef struct maage_entity {
     union { maage_item_stack item; } payload;
     unsigned char light; /* Copied presentation observation; not persistent. */
 } maage_entity;
+typedef struct maage_entity_pickup {
+    maage_entity_id entity;
+    maage_item_stack stack; /* Copied presentation outcome, never inventory ownership. */
+    double position[3];
+    unsigned long age;
+    unsigned char light;
+} maage_entity_pickup;
 typedef struct maage_entity_save {
     maage_entity *entities;
     size_t count;
@@ -35,7 +42,8 @@ maage_status maage_entities_spawn(maage_entities *entities, const maage_item_reg
     unsigned int delay);
 maage_status maage_entities_tick(maage_entities *entities, const maage_world *world,
     const maage_item_registry *items, const maage_player *player,
-    maage_inventory *inventory, int collect, unsigned int *collected);
+    maage_inventory *inventory, int collect, unsigned int *collected,
+    maage_entity_pickup *pickups, size_t capacity, size_t *written);
 unsigned long maage_entities_random(const maage_entities *entities);
 maage_status maage_entities_set_random(maage_entities *entities, unsigned long random);
 size_t maage_entities_count(const maage_entities *entities);

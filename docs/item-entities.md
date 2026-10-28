@@ -25,7 +25,14 @@ drops its stack with a forty-tick delay. Clicking outside the inventory drops th
 cursor stack; right click drops one. All use the existing numeric command queue
 and authoritative inventory. Collection uses expanded player bounds, fills
 compatible stacks before empty slots, and leaves any remainder in the entity.
-A successful collection emits one aggregate pickup sound for that tick.
+Collection intersects the body expanded by (1, 0.5, 1) with the item's AABB;
+its horizontal center limit is player half-width + 1.125 blocks. There is no
+pre-collection magnetic force. A successful step emits one aggregate pickup cue
+with a bounded batch of up to 32 copied transfer records. Further transfers wait
+for the next step; quantities stay authoritative. The Client interpolates confirmed
+transfers toward player feet + 0.5 over 0.15 seconds using a squared phase, with
+at most 32 simultaneous decorations. Partial pickups leave the residual entity.
+No ownership mutation depends on successful animation or sound playback.
 
 Compatible nearby stacks merge only if their complete combined quantity fits the
 item's stack limit. Metadata and damage must match. The survivor keeps the younger
@@ -118,7 +125,7 @@ increasing unique IDs and finite coordinate/velocity ranges are checked before
 restoring World ownership. No native structure layout or pointers are serialized.
 The encoding has an explicit 32-bit file/identity bound and reports overflow.
 
-Protocol 6 carries a separate complete near-player entity interest set, independent
+Protocol 7 carries a separate complete near-player entity interest set, independent
 of the fixed player snapshot. It contains epoch, tick and sequence identities;
 absence removes an entity. The local mailbox holds at most one pending immutable
 publication, transfers detached array ownership and swaps pointers under its short
@@ -273,3 +280,6 @@ blocks/tools in Creative, then switch to Survival through Options.
   removed items, disappearing unrelated geometry, growing retained GPU resources,
   invalid synchronization or UI/foreground corruption. Report backend-specific
   artifacts separately; these scenarios have not been run by the agent.
+
+The subsequent [gameplay parity pass](gameplay-parity.md) adds bounded pickup
+presentation, shared sprite UV corrections and reconciled visual block breaking.

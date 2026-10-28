@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 6U
+#define MAAGE_SESSION_PROTOCOL_VERSION 7U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2,
@@ -20,7 +20,7 @@ typedef enum maage_session_command_kind {
     MAAGE_CMD_RESPAWN = 6, MAAGE_CMD_PAUSE = 7, MAAGE_CMD_VIEW = 8,
     MAAGE_CMD_DISCONNECT = 9, MAAGE_CMD_DROP = 10,
     MAAGE_CMD_CONTAINER_OPEN = 11, MAAGE_CMD_CONTAINER_CLOSE = 12,
-    MAAGE_CMD_CONTAINER_SLOT = 13
+    MAAGE_CMD_CONTAINER_SLOT = 13, MAAGE_CMD_BREAK_PREVIEW = 14
 } maage_session_command_kind;
 
 typedef enum maage_session_sound_id {
@@ -62,6 +62,8 @@ typedef struct maage_session_command {
      * RESULT also requires the published revision. No Client stacks/recipes. */
     unsigned long container_identity, container_revision;
     unsigned int slot_group, container_slot, slot_action;
+    unsigned long prediction;
+    maage_world_target predicted_target; /* Request only; never a claimed mutation. */
     int secondary_click;
     maage_item_id item_id;
     unsigned int item_metadata;
@@ -90,7 +92,10 @@ typedef struct maage_session_player_view {
     unsigned int game_mode, health, hunger;
     double saturation;
     int flying;
-    int has_target, breaking_active;
+    int has_target, breaking_active, submerged;
+    double reach;
+    unsigned int break_delay, attack_miss_delay;
+    maage_world_neighborhood mining;
     maage_world_target target, breaking;
     double break_progress;
     double swing; /* Authoritative remaining six-tick arm swing, normalized 0..1. */
@@ -131,7 +136,8 @@ typedef struct maage_session_entities {
 
 typedef enum maage_session_event_kind {
     MAAGE_EVENT_SOUND = 1, MAAGE_EVENT_STATUS = 2,
-    MAAGE_EVENT_MESH_REMOVE = 3, MAAGE_EVENT_DISCONNECTED = 4
+    MAAGE_EVENT_MESH_REMOVE = 3, MAAGE_EVENT_DISCONNECTED = 4,
+    MAAGE_EVENT_PICKUP = 5, MAAGE_EVENT_BLOCK_ACTION = 6
 } maage_session_event_kind;
 
 typedef struct maage_session_event {
@@ -140,7 +146,13 @@ typedef struct maage_session_event {
     unsigned long session_epoch, world_epoch;
     unsigned long tick, sequence;
     double emitted_at; /* Local monotonic seconds; remote clocks need translation. */
-    maage_sound_event sound; /* Only for MAAGE_EVENT_SOUND. */
+    maage_sound_event sound; /* SOUND/PICKUP. */
+    unsigned long prediction;
+    int accepted;
+    maage_block_position block;
+    unsigned long column_revisions[9];
+    unsigned int pickup_count;
+    maage_entity_pickup pickups[32]; /* PICKUP: one bounded batch per owner step. */
     maage_status status; /* STATUS or DISCONNECTED outcome. */
     int has_trace;
     maage_status_trace trace; /* Copied by value; frame file names are static. */

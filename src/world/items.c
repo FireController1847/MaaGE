@@ -452,6 +452,17 @@ double maage_item_mining_speed(const maage_item_definition *tool,
     if (tool->tool_class == MAAGE_TOOL_SHEARS && block->id == MAAGE_BLOCK_LEAVES) return 15;
     return tool->tool_class == block->required_tool && tool->tool_class != MAAGE_TOOL_NONE ? tool->mining_speed : 1;
 }
+double maage_item_mining_damage(const maage_item_definition *tool,
+    const maage_block_definition *block, int grounded, int submerged)
+{
+    double speed;
+    if (!block || block->hardness < 0) return 0;
+    if (block->hardness == 0) return 1;
+    speed = maage_item_mining_speed(tool, block);
+    if (!grounded) speed /= 5;
+    if (submerged) speed /= 5;
+    return speed / (block->hardness * (maage_item_can_harvest(tool, block) ? 30 : 100));
+}
 static unsigned long maage_drop_random(unsigned long *random, unsigned long range)
 {
     *random = (*random * 1664525UL + 1013904223UL) & 4294967295UL;

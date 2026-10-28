@@ -85,6 +85,7 @@ maage_status maage_client_ui_open_root(maage_client_ui *ui,maage_client_ui_scree
 maage_renderer *maage_client_ui_renderer(const maage_client_ui *ui);
 maage_window *maage_client_ui_window(const maage_client_ui *ui);
 int maage_client_ui_modal(const maage_client_ui *ui);
+int maage_client_ui_pauses_game(const maage_client_ui *ui);
 int maage_client_ui_debug_visible(const maage_client_ui *ui);
 /* Insets are window logical units. Only GUI content avoids these obstructions;
  * the world and crosshair retain the full drawable rectangle. */

@@ -3,6 +3,7 @@
 #include "maage/session_protocol.h"
 #include "maage/render.h"
 #include "resources.h"
+struct maage_client_prediction;
 typedef struct maage_client_interaction_visual {
     maage_render_mesh *mesh;
     maage_world_target target;
@@ -32,7 +33,7 @@ maage_status maage_client_interaction_init(maage_client_interaction_visual *visu
 maage_status maage_client_interaction_update(maage_client_interaction_visual *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
     const maage_block_registry *blocks, const maage_session_snapshot *snapshot,
-    maage_status_trace *trace);
+    const struct maage_client_prediction *prediction, maage_status_trace *trace);
 maage_status maage_client_first_person_init(maage_client_first_person *visual,
     const maage_client_resources *resources);
 /* Geometry is cached across frames. Only item/metadata changes upload it;

@@ -17,11 +17,16 @@ static maage_client_ui_rect front_button_rect(maage_client_ui_frontend *f, unsig
 {
     float w = f->ui->content.width, h = f->ui->content.height;
     unsigned int screen = maage_client_ui_current(f->ui);
-    if (screen == MAAGE_CLIENT_UI_WORLDS)
-        return front_rect(f, w/2-150+(n%2)*152, h-76+(n/2)*24, 148, 20);
-    if (screen == MAAGE_CLIENT_UI_CREATE_WORLD && n == 2)
-        return front_rect(f, w/2-100, 120, 200, 20);
-    return front_rect(f, w/2-150+n*152, h-30, 148, 20);
+    if (screen == MAAGE_CLIENT_UI_WORLDS) {
+        if (n < 2) return front_rect(f,w/2-154+(float)n*158,h-52,150,20);
+        return front_rect(f,w/2-154+(float)(n-2)*78,h-28,72,20);
+    }
+    if (screen == MAAGE_CLIENT_UI_CREATE_WORLD) {
+        if (n == 2) return front_rect(f,w/2-75,115,150,20);
+        if (n == 5) return front_rect(f,w/2-75,187,150,20);
+        if (n >= 6) return front_rect(f,w/2-155+(float)((n-6)%2)*160,n < 8 ? 100 : 151,150,20);
+    }
+    return front_rect(f,w/2-155+(float)n*160,h-28,150,20);
 }
 static void front_button(maage_client_ui_frontend *f, unsigned int n, const char *text, int enabled)
 {
@@ -33,8 +38,8 @@ static void front_button(maage_client_ui_frontend *f, unsigned int n, const char
 }
 static size_t front_rows(maage_client_ui_frontend *f)
 {
-    float available = f->ui->content.height-120;
-    return available >= 40 ? (size_t)(available/40) : 1;
+    float available = f->ui->content.height-96;
+    return available >= 36 ? (size_t)(available/36) : 1;
 }
 static void front_center(maage_client_ui_frontend *f, const char *text, float y, float r,float g,float b)
 {
@@ -58,6 +63,16 @@ static void front_field(maage_client_ui_frontend *f, const char *text, float y, 
             r.y+5, MAAGE_CLIENT_UI_LEFT, 1, 1, 1);
     ui->clip = ui->content;
 }
+static int front_name_valid(const char *name)
+{
+    while (*name) { if (*name != ' ' && *name != '\t') return 1; ++name; }
+    return 0;
+}
+static int front_seed_valid(const char *seed)
+{
+    maage_world_seed parsed;
+    return !*seed || maage_status_is_success(maage_world_seed_parse(seed,&parsed));
+}
 static void front_draw(maage_client_ui *ui, void *context)
 {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *)context;
@@ -73,19 +88,24 @@ static void front_draw(maage_client_ui *ui, void *context)
         return;
     }
     if(screen == MAAGE_CLIENT_UI_WORLDS) {
-        front_center(f,"Select World",14,1,1,1);
-        r=front_rect(f,0,36,w,h-116);maage_client_ui_panel(ui,r,0.04f,0.04f,0.04f,0.8f);
+        float list_width = w < 240 ? w-16 : 220;
+        front_center(f,"Select World",20,1,1,1);
+        r=front_rect(f,0,32,w,h-96);maage_client_ui_panel(ui,r,0,0,0,0.65f);
         end=f->first+front_rows(f);if(end>f->count)end=f->count;
         for(i=f->first;i<end;++i) {
-            y=40+(float)(i-f->first)*40;
-            r=front_rect(f,8,y,w-16,38);
-            if(i==f->selected)maage_client_ui_panel(ui,r,0.42f,0.42f,0.42f,1);
-            r.x+=1;r.y+=1;r.width-=2;r.height-=2;maage_client_ui_panel(ui,r,0.09f,0.09f,0.09f,1);
-            ui->clip=r;
-            maage_client_ui_text(ui,f->entries[i].name,r.x+5,r.y+3,MAAGE_CLIENT_UI_LEFT,1,1,1);
-            sprintf(line,"%.20s | %s",f->entries[i].created_utc,
-                maage_status_failed(f->entries[i].status)?"Unreadable / unsupported":f->entries[i].game_mode?"Creative":"Survival");
-            maage_client_ui_text(ui,line,r.x+5,r.y+15,MAAGE_CLIENT_UI_LEFT,0.65f,0.65f,0.65f);
+            y=36+(float)(i-f->first)*36;
+            r=front_rect(f,(w-list_width)/2-2,y-2,list_width+4,36);
+            if(i==f->selected) {
+                maage_client_ui_panel(ui,r,0.5f,0.5f,0.5f,1);
+                r.x+=1;r.y+=1;r.width-=2;r.height-=2;maage_client_ui_panel(ui,r,0,0,0,1);
+            }
+            ui->clip=front_rect(f,(w-list_width)/2,y,list_width,32);
+            maage_client_ui_text(ui,f->entries[i].name,ui->clip.x,ui->clip.y,MAAGE_CLIENT_UI_LEFT,1,1,1);
+            sprintf(line,"Created %.10s",f->entries[i].created_utc);
+            maage_client_ui_text(ui,line,ui->clip.x,ui->clip.y+11,MAAGE_CLIENT_UI_LEFT,0.5f,0.5f,0.5f);
+            maage_client_ui_text(ui,maage_status_failed(f->entries[i].status)?"Unreadable / unsupported":
+                f->entries[i].game_mode?"Creative Mode":"Survival Mode",ui->clip.x,ui->clip.y+22,
+                MAAGE_CLIENT_UI_LEFT,0.5f,0.5f,0.5f);
             ui->clip=ui->content;
         }
         if(!f->count)front_center(f,f->busy?"Reading worlds...":"No worlds yet. Create your first world!",65,0.8f,0.8f,0.8f);
@@ -95,15 +115,30 @@ static void front_draw(maage_client_ui *ui, void *context)
         front_button(f,3,"Delete",!f->busy&&f->selected<f->count);
         front_button(f,4,"Refresh",!f->busy);front_button(f,5,"Cancel",1);
     } else if(screen==MAAGE_CLIENT_UI_CREATE_WORLD || screen==MAAGE_CLIENT_UI_RENAME_WORLD) {
-        front_center(f,screen==MAAGE_CLIENT_UI_CREATE_WORLD?"Create New World":"Rename World",16,1,1,1);
-        front_center(f,"World Name",42,0.7f,0.7f,0.7f);
-        front_field(f,f->name,56,3);
-        if(screen==MAAGE_CLIENT_UI_CREATE_WORLD) {
-            front_center(f,"Seed (blank for random)",80,0.7f,0.7f,0.7f);
-            front_field(f,f->seed,94,4);
-            front_button(f,2,f->mode?"Game Mode: Creative":"Game Mode: Survival",1);
+        front_center(f,screen==MAAGE_CLIENT_UI_CREATE_WORLD?"Create New World":"Rename World",20,1,1,1);
+        if(screen==MAAGE_CLIENT_UI_RENAME_WORLD || !f->more) {
+            maage_client_ui_text(ui,"World Name",ui->content.x+w/2-100,ui->content.y+47,MAAGE_CLIENT_UI_LEFT,0.63f,0.63f,0.63f);
+            front_field(f,f->name,60,3);
         }
-        front_button(f,0,screen==MAAGE_CLIENT_UI_CREATE_WORLD?"Create New World":"Save Name",!f->busy&&f->name[0]);front_button(f,1,"Cancel",!f->busy);
+        if(screen==MAAGE_CLIENT_UI_CREATE_WORLD) {
+            if (!f->more) {
+                front_button(f,2,f->mode?"Game Mode: Creative":"Game Mode: Survival",!f->busy);
+                front_center(f,f->mode?"Unlimited resources, free flying and":"Search for resources, craft and survive,",140,0.63f,0.63f,0.63f);
+                front_center(f,f->mode?"destroy blocks instantly":"health and hunger",152,0.63f,0.63f,0.63f);
+            } else {
+                maage_client_ui_text(ui,"Seed for the World Generator",ui->content.x+w/2-100,ui->content.y+47,
+                    MAAGE_CLIENT_UI_LEFT,0.63f,0.63f,0.63f);
+                front_field(f,f->seed,60,4);
+                front_center(f,front_seed_valid(f->seed)?"Leave blank for a random seed":"Enter a signed 64-bit integer seed",85,0.63f,0.63f,0.63f);
+                front_button(f,6,"Structures: On",0);
+                front_button(f,7,"World Type: Default",0);
+                front_button(f,8,"Allow Cheats: Unavailable",0);
+                front_button(f,9,"Bonus Chest: Unavailable",0);
+            }
+            front_button(f,5,f->more?"Done":"More World Options...",!f->busy);
+        }
+        front_button(f,0,screen==MAAGE_CLIENT_UI_CREATE_WORLD?"Create New World":"Save Name",!f->busy&&front_name_valid(f->name)&&(screen!=MAAGE_CLIENT_UI_CREATE_WORLD||front_seed_valid(f->seed)));
+        front_button(f,1,"Cancel",!f->busy);
     } else {
         front_center(f,"Delete this world permanently?",48,1,1,1);
         if(f->selected<f->count)front_center(f,f->entries[f->selected].name,72,1,0.8f,0.3f);
@@ -120,81 +155,94 @@ static void front_edit(char *text, size_t capacity, const maage_client_ui_input 
         else if(length+1<capacity) { text[length++]=input->text[i];text[length]=0; }
     }
 }
+static int front_focus_enabled(const maage_client_ui_frontend *f, unsigned int screen, unsigned int focus)
+{
+    if (screen == MAAGE_CLIENT_UI_CREATE_WORLD)
+        return focus < 2 || focus == 5 || (f->more ? focus == 4 : focus == 2 || focus == 3);
+    return screen != MAAGE_CLIENT_UI_RENAME_WORLD || focus != 2;
+}
 static unsigned int front_input(maage_client_ui *ui,const maage_client_ui_input *input,void *context)
 {
     maage_client_ui_frontend *f=(maage_client_ui_frontend *)context;
-    unsigned int screen=maage_client_ui_current(ui),n,count=screen==MAAGE_CLIENT_UI_WORLDS?6:screen==MAAGE_CLIENT_UI_CREATE_WORLD?5:screen==MAAGE_CLIENT_UI_RENAME_WORLD?4:2;
+    unsigned int screen=maage_client_ui_current(ui),n,count=screen==MAAGE_CLIENT_UI_WORLDS?6:screen==MAAGE_CLIENT_UI_CREATE_WORLD?6:screen==MAAGE_CLIENT_UI_RENAME_WORLD?4:2;
     int hover=-1,text_submit=0;
-    float w=ui->content.width;
+    float w=ui->content.width, list_width=w<240?w-16:220;
     size_t row;
     if(screen==MAAGE_CLIENT_UI_LOADING)return 0;
-    if(input->escape) { if(!f->busy&&screen!=MAAGE_CLIENT_UI_TITLE)ui->route_result=maage_client_ui_back(ui);return 0; }
-    if(ui->mouse_x!=ui->previous_mouse_x||ui->mouse_y!=ui->previous_mouse_y||
-        input->primary_pressed)f->focus_keyboard=0;
-    if(input->previous){f->focus=(f->focus+count-1)%count;f->focus_keyboard=1;}
-    if(input->next){f->focus=(f->focus+1)%count;f->focus_keyboard=1;}
-    if(screen==MAAGE_CLIENT_UI_RENAME_WORLD&&f->focus==2)f->focus=input->previous?1:3;
-    for(n=0;n<(screen==MAAGE_CLIENT_UI_CREATE_WORLD?3:screen==MAAGE_CLIENT_UI_RENAME_WORLD?2:count);++n)
-        if(front_hit(f,front_button_rect(f,n)))hover=(int)n;
-    if(hover>=0 && (input->primary_pressed || ui->mouse_x!=ui->previous_mouse_x || ui->mouse_y!=ui->previous_mouse_y))f->focus=(unsigned int)hover;
+    if(input->escape) {
+        if(!f->busy&&screen!=MAAGE_CLIENT_UI_TITLE) {
+            if(screen==MAAGE_CLIENT_UI_CREATE_WORLD&&f->more){f->more=0;f->focus=5;}
+            else ui->route_result=maage_client_ui_back(ui);
+        }
+        return 0;
+    }
+    if(ui->mouse_x!=ui->previous_mouse_x||ui->mouse_y!=ui->previous_mouse_y||input->primary_pressed)f->focus_keyboard=0;
+    if(input->previous||input->next) {
+        do { f->focus=(f->focus+(input->previous?count-1:1))%count; }
+        while(!front_focus_enabled(f,screen,f->focus));
+        f->focus_keyboard=1;
+    }
+    for(n=0;n<count;++n) {
+        if(!front_focus_enabled(f,screen,n)||
+            ((screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&n==3)||
+            (n==4&&screen==MAAGE_CLIENT_UI_CREATE_WORLD))continue;
+        if(screen==MAAGE_CLIENT_UI_RENAME_WORLD&&n>=2)continue;
+        if(screen==MAAGE_CLIENT_UI_WORLDS||n<3||n==5)
+            if(front_hit(f,front_button_rect(f,n)))hover=(int)n;
+    }
     if(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD) {
-        if(front_hit(f,front_rect(f,w/2-100,56,200,20)))hover=3;
-        if(screen==MAAGE_CLIENT_UI_CREATE_WORLD&&front_hit(f,front_rect(f,w/2-100,94,200,20)))hover=4;
-        if(input->primary_pressed&&hover>=0)f->focus=(unsigned int)hover;
+        if(front_hit(f,front_rect(f,w/2-100,60,200,20)))hover=screen==MAAGE_CLIENT_UI_CREATE_WORLD&&f->more?4:3;
+    }
+    if(hover>=0&&input->primary_pressed)f->focus=(unsigned int)hover;
+    if(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD) {
         if(f->focus==3)front_edit(f->name,sizeof(f->name),input);
         if(f->focus==4)front_edit(f->seed,sizeof(f->seed),input);
     }
     if(screen==MAAGE_CLIENT_UI_WORLDS) {
-        if((input->list_up||input->left)&&f->selected) --f->selected;
-        if((input->list_down||input->right)&&f->selected+1<f->count) ++f->selected;
+        if((input->list_up||input->left)&&f->selected)--f->selected;
+        if((input->list_down||input->right)&&f->selected+1<f->count)++f->selected;
         if(input->list_up||input->list_down||input->left||input->right) {
             if(f->selected<f->first)f->first=f->selected;
             if(f->selected>=f->first+front_rows(f))f->first=f->selected-front_rows(f)+1;
         }
-        if(input->scroll>0&&f->first) --f->first;
+        if(input->scroll>0&&f->first)--f->first;
         if(input->scroll<0&&f->first+front_rows(f)<f->count)++f->first;
-        if(input->primary_pressed&&front_hit(f,front_rect(f,8,40,w-16,(float)front_rows(f)*40))) {
-            row=f->first+(size_t)((ui->mouse_y-ui->content.y-40)/40);
+        if(input->primary_pressed&&front_hit(f,front_rect(f,(w-list_width)/2,34,list_width,(float)front_rows(f)*36))) {
+            row=f->first+(size_t)((ui->mouse_y-ui->content.y-34)/36);
             if(row<f->count) {
-                if(row==f->last_row&&ui->notice_now-f->last_click<0.3&&!f->busy&&!maage_status_failed(f->entries[row].status)) { f->selected=row;f->play=1; }
+                if(row==f->last_row&&ui->notice_now-f->last_click<0.3&&!f->busy&&!maage_status_failed(f->entries[row].status)){f->selected=row;f->play=1;}
                 f->selected=row;f->last_row=row;f->last_click=ui->notice_now;
             }
         }
     }
     if(!(input->accept||(input->primary_pressed&&hover>=0)))return 0;
-    if(input->primary_pressed&&hover>=0)f->focus=(unsigned int)hover;
     n=f->focus;if(f->busy)return 0;
     if(screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD) {
-        if(input->primary_pressed&&hover>=3)return 0;
-        /* Text-field Enter submits directly without a button activation. */
-        if(input->accept&&n>=3){n=0;text_submit=1;}
+        if(input->primary_pressed&&hover>=3&&hover!=5)return 0;
+        if(input->accept&&(n==3||n==4)){n=0;text_submit=1;}
     }
-    /* Text fields are not buttons. Invalid/disabled actions make no sound. */
     if(screen==MAAGE_CLIENT_UI_WORLDS) {
-        if(n==0&&!(f->selected<f->count&&
-            !maage_status_failed(f->entries[f->selected].status)))return 0;
-        if(n==2&&!(f->selected<f->count&&
-            !maage_status_failed(f->entries[f->selected].status)))return 0;
+        if((n==0||n==2)&&!(f->selected<f->count&&!maage_status_failed(f->entries[f->selected].status)))return 0;
         if(n==3&&f->selected>=f->count)return 0;
     }
-    if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||
-        screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&n==0&&!f->name[0])return 0;
+    if((screen==MAAGE_CLIENT_UI_CREATE_WORLD||screen==MAAGE_CLIENT_UI_RENAME_WORLD)&&n==0&&(!front_name_valid(f->name)||(screen==MAAGE_CLIENT_UI_CREATE_WORLD&&!front_seed_valid(f->seed))))return 0;
     if(!text_submit&&ui->click)ui->click(ui->click_context);
     if(screen==MAAGE_CLIENT_UI_WORLDS) {
-        if(n==0&&f->selected<f->count&&!maage_status_failed(f->entries[f->selected].status))f->play=1;
-        if(n==1) { strcpy(f->name,"New World");f->seed[0]=0;f->mode=1;f->focus=3;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_CREATE_WORLD); }
-        if(n==2&&f->selected<f->count&&!maage_status_failed(f->entries[f->selected].status)) { strcpy(f->name,f->entries[f->selected].name);f->focus=3;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_RENAME_WORLD); }
-        if(n==3&&f->selected<f->count) { f->focus=0;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_DELETE_WORLD); }
+        if(n==0)f->play=1;
+        if(n==1){strcpy(f->name,"New World");f->seed[0]=0;f->mode=0;f->more=0;f->focus=3;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_CREATE_WORLD);}
+        if(n==2){strcpy(f->name,f->entries[f->selected].name);f->focus=3;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_RENAME_WORLD);}
+        if(n==3){f->focus=0;ui->route_result=maage_client_ui_open(ui,MAAGE_CLIENT_UI_DELETE_WORLD);}
         if(n==4)f->action=1;
         if(n==5)ui->route_result=maage_client_ui_back(ui);
     } else if(screen==MAAGE_CLIENT_UI_CREATE_WORLD) {
         if(n==2)f->mode=!f->mode;
-        if(n==0&&f->name[0])f->play=2;
+        if(n==5){f->more=!f->more;f->focus=f->more?4:5;}
+        if(n==0)f->play=2;
         if(n==1)ui->route_result=maage_client_ui_back(ui);
     } else if(screen==MAAGE_CLIENT_UI_RENAME_WORLD) {
-        if(n==0&&f->name[0])f->action=2;
+        if(n==0)f->action=2;
         if(n==1)ui->route_result=maage_client_ui_back(ui);
-    } else { if(n==0)f->action=3;if(n==1)ui->route_result=maage_client_ui_back(ui); }
+    } else {if(n==0)f->action=3;if(n==1)ui->route_result=maage_client_ui_back(ui);}
     return 0;
 }
 

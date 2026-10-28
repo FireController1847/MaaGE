@@ -162,7 +162,7 @@ forward tap within seven simulation ticks. It needs forward input at least 0.8
 and Survival hunger above six; Creative bypasses the hunger restriction. Stopping
 forward movement, sneaking, horizontal collision, death, mode changes or modal
 pause cancels it. The reference 600-tick sprint timer expires unless a held sprint
-request reactivates it. Requests/forward edges travel through protocol 6 and the
+request reactivates it. Requests/forward edges travel through protocol 7 and the
 existing bounded command channel; snapshots copy authoritative sprint state.
 
 Walking/sprinting use the same 20 TPS collision path. Sprint adds the reference
@@ -259,3 +259,13 @@ These requested steps were not executed:
    cycles, ice against terrain and overlapping translucent surfaces while moving.
 7. Break lit and biome-tinted blocks in Survival; confirm cracks darken the
    existing surface and selection edges follow the authoritative target bounds.
+
+
+## Inventory and interaction parity follow-up
+
+The [gameplay parity pass](gameplay-parity.md) corrects extruded sprite front/edge
+UV orientation in shared item geometry, adds a mouse-following textured biped in
+the existing GUI batch, and predicts selected block removals over retained meshes.
+Metal and Vulkan consume the same geometry; no native shader or vertex ABI changes
+were needed. Both implementations compile on macOS; runtime appearance remains
+unverified.

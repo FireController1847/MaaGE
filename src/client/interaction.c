@@ -1,4 +1,5 @@
 #include "interaction.h"
+#include "prediction.h"
 #include "item_models.h"
 #include "maage/log.h"
 #include <math.h>
@@ -331,7 +332,7 @@ maage_status maage_client_interaction_init(maage_client_interaction_visual *visu
 maage_status maage_client_interaction_update(maage_client_interaction_visual *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
     const maage_block_registry *blocks, const maage_session_snapshot *snapshot,
-    maage_status_trace *trace)
+    const maage_client_prediction *prediction, maage_status_trace *trace)
 {
     maage_mesh_vertex vertices[13 * 24];
     unsigned int indices[13 * 36];
@@ -346,7 +347,8 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
         snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION)
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
-    if (!snapshot->player.has_target) {
+    if (!snapshot->player.has_target || (prediction && maage_client_prediction_hides(prediction,
+        snapshot->player.target.x,snapshot->player.target.y,snapshot->player.target.z))) {
         result = maage_status_make(visual->visible ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
         maage_render_mesh_destroy(visual->mesh); visual->mesh = NULL; visual->visible = 0;
         return result;

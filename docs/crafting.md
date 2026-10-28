@@ -15,8 +15,9 @@ backend. Runtime and visual verification remain programmer-owned.
 - `src/world/crafting.c` owns container operations. `src/world/gameplay.c` owns the
   active container alongside the existing player inventory. There is one cursor
   and one authoritative owner for every input stack.
-- `src/server/runtime.c` validates commands, services container invalidation even
-  while integrated gameplay is paused, and publishes copied container state.
+- `src/server/runtime.c` validates commands, services container invalidation
+  even during Escape pause, and publishes copied container state. Inventory and
+  tables release mouse capture without pausing simulation or background music.
 - `src/client/ui/gameplay.c` shares inventory, slot, icon, count, tooltip and cursor
   drawing between player inventory and the registered Crafting Table screen.
   Existing GUI scaling, safe area, clipping and shared Metal/Vulkan batches apply.
@@ -92,8 +93,7 @@ is performed. Chunk encoding is unchanged.
 
 ## Session contract
 
-Protocol 6 replaces the old inventory-click command with explicit container
-commands: open player inventory, close an identified container, and act on an
+Protocol 7 carries explicit container commands: open player inventory, close an identified container, and act on an
 identified slot. Slot groups are inventory, crafting input and crafting result;
 actions are primary, secondary and quick move. Group bounds, action values,
 container identity, result revision and Server state are checked independently.
@@ -155,7 +155,9 @@ have Metal and Vulkan/MoltenVK enabled and reuse their unchanged renderer
 implementations. The linker reports duplicate-library warnings. No applications,
 tests, CTest, benchmarks, gameplay scripts or GitHub Actions were executed.
 Windows/Linux compilation and both renderers' runtime behavior remain unverified.
-Client is `0.1.0-alpha.43`; Server is `1.0.0-alpha.15`.
+Client is `0.1.0-alpha.45`; Server is `1.0.0-alpha.16`. See
+[the gameplay parity pass](gameplay-parity.md) for the subsequent presentation,
+container pause and session changes.
 
 ## Programmer verification checklist
 

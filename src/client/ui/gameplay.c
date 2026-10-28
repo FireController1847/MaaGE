@@ -286,8 +286,9 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context)
         const maage_item_stack *source;
         maage_client_ui_text(ui, "Crafting", frame.x + (table ? 28 : 86), frame.y + (table ? 6 : 16),
             MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
-        maage_client_ui_text(ui, "Inventory", frame.x + 8, frame.y + 72,
+        if (table) maage_client_ui_text(ui, "Inventory", frame.x + 8, frame.y + 72,
             MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
+        else maage_client_ui_player_preview(ui, frame);
         for (slot = 0; slot <= (table ? 9U : 4U); ++slot) {
             int result = slot == (table ? 9U : 4U);
             rectangle = maage_client_ui_crafting_slot(frame, table, result ? 0 : slot, result);

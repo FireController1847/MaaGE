@@ -8,7 +8,7 @@ struct maage_client_ui_frontend {
     size_t count, selected, first, last_row;
     unsigned int action, focus;
     int focus_keyboard;
-    int busy, quit, play, mode;
+    int busy, quit, play, mode, more;
     char name[128], seed[64], message[256];
     double last_click;
 };

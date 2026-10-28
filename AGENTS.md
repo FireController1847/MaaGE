@@ -308,8 +308,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Unsupported platform operations return explicit status instead of silently
   relabeling modes. Reconcile native transitions, saved mode, F11, geometry
   and input capture.
-- Modal screens release capture and pause fixed-step gameplay; closing them
-  restores gameplay capture appropriately. Keep rendering/events and the safe
+- Modal screens release capture; Pause/Options stop fixed-step gameplay, while
+  player inventory and Crafting Tables keep simulation and music running. Closing
+  them restores gameplay capture appropriately. Music has its own pause contract;
+  Escape pause freezes playback/scheduling. Keep rendering/events and the safe
   World completion/scheduling pump alive while paused. HUD/F3 is not a modal.
 - Enabled GUI buttons/sliders show a native pointer on actual mouse hover,
   an arrow while the primary button is held, and restore hover on release.
@@ -360,6 +362,15 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - Shape-aware numeric DDA stops at unavailable terrain. Definitions resolve
   hardness, tool requirements, drops and separate selection/collision AABBs before
   gameplay. Placement-state callbacks consume numeric metadata and face inputs.
+- Block-break prediction is bounded Client presentation over copied numeric
+  neighborhoods and owned immutable CPU meshes. Retain original GPU geometry for
+  rollback, filter only the predicted voxel and reconstruct exposed faces through
+  shared meshing rules. Server results identify actions and required revisions;
+  reject stale epochs and retain necessary acknowledgements under backpressure.
+  Never predict inventory, drops or sounds, or query/mutate World from the Client.
+- Pickup collection uses expanded player/item bounds on the Server. One bounded
+  transfer batch accompanies the pickup cue; Client-only 0.15-second interpolation
+  presents confirmed transfers without adding a magnetic gameplay force.
 - All block changes use owner-thread expected-state mutations that publish copied
   immutable columns, invalidate lighting/neighbor mesh revisions and reject stale
   jobs/uploads. Retain asynchronous saves and dirty-eviction protection; never
