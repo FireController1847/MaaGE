@@ -89,9 +89,10 @@ remain ten/forty ticks, and unavailable terrain still freezes retained entities.
 
 ## Inventory, rendering and frontend
 
-The preview builds classic 64x32-skin head, torso, arms, legs and transparent hat
-cuboids entirely on the Client. The verified installation's Steve texture loads
-once into the existing atlas. Independent head/body mouse rotations use the
+The preview builds textured player cuboids entirely on the Client. The subsequent
+[authenticated skin integration](player-skins.md) extends its original Steve
+appearance with classic/slim geometry, modern independent limbs and outer layers,
+using the same normalized atlas resource as first-person arms. Independent head/body mouse rotations use the
 reference `atan(delta/40)` and 20/40-degree factors, converted to MaaGE coordinates.
 Shared face lighting, backface culling, depth sorting and polygon clipping produce
 textured 3D quads in the existing GUI batch; no black offscreen surface, private
@@ -133,8 +134,8 @@ controls retain the existing resource/error contracts.
 - The Client linker retains existing duplicate-library warnings. No applications,
   tests, CTest, fixtures, benchmarks, synthetic harnesses or GitHub Actions ran.
 - Windows/Linux compilation, runtime shaders, visual/audio behavior and the manual
-  scenarios below remain unverified. The preview uses the available classic Steve
-  skin; account skins, equipment rendering and player animation are not added.
+  scenarios below remain unverified. Authenticated account skins are covered by the
+  [skin integration](player-skins.md); equipment and player animation remain absent.
 - Prediction has the conservative coverage and temporary lighting limits above.
   Remote transport/serialization is future work; C layouts are not a wire format.
 - Supporting-block/neighbor-update propagation remains deferred: a flower can

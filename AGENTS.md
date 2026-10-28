@@ -278,6 +278,15 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Capped pacing carries monotonic deadlines forward, rebasing after stalls or
   cap changes. Use native event waits for whole milliseconds and a bounded final
   sub-millisecond clock wait; never round every fractional remainder up to 1 ms.
+- Launcher resolves authenticated local-player skins from the selected verified
+  Java UUID's profile response. Cache validated PNGs by UUID/texture identity in
+  shared `minecraft/skins/`, with atomic metadata publication and same-profile
+  known-good/default fallback. Skin failure never changes access verification.
+  Client receives only a versioned nonsecret appearance reference; reserve its
+  `--player-appearance` argument against instance overrides. No Client/Server skin
+  downloads or tokens. Normalize once into the shared Client atlas and use common
+  classic/slim cuboid UVs for first-person arms and inventory, including modern
+  independent limbs/outer layers and classic legacy conversion. No per-frame I/O.
 - Register all 1.7.10 music tracks by numeric asset ID; decode and upload only a
   selected track when music playback begins, and release its Audio buffer after
   playback stops. Memory bounds constrain decoded clips, not the number of
@@ -711,7 +720,7 @@ in Launcher-owned modules, independent of game UI/rendering; use `config/launche
 for nonsecret global preferences and UUID instance references; each instance manifest
 owns its name, Client association, optional Client CLI arguments and folder mappings.
 Native installation editors persist the arguments and pass parsed values directly
-to the Client without a shell; Launcher-managed instance/data-directory flags cannot be overridden. Persist instance/account selections and supported appearance
+to the Client without a shell; Launcher-managed instance/data-directory/appearance flags cannot be overridden. Persist instance/account selections and supported appearance
 preferences; default appearance follows the system. Reuse existing account/setup
 services for management and repair. Play starts the exact selected available Client
 after access/resource prerequisites; show an empty News state until a real source exists. Do not introduce
@@ -1067,7 +1076,7 @@ Client builds embed immutable version/build/platform metadata through a C90 API;
 `--version` and schema-1 `--version-json` bypass logging and game initialization.
 CMake produces standalone Client executables in versioned package directories
 and an adjacent SHA-256-bound `maage-client.json`
-development descriptor; importing never executes selected code. The descriptor
+development descriptor requiring `instance_storage: 1` and `player_appearance: 1`; importing never executes selected code. The descriptor
 is not a remote-distribution signature. Explicit releases control Client SemVer;
 do not bump it automatically for builds or commits.
 

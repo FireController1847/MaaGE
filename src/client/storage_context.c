@@ -31,12 +31,17 @@ static maage_status maage_client_storage_map(maage_instance *instance, const cha
         MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SET);
 }
 
+static maage_skin_reference maage_client_player;
+static int maage_client_has_player;
+const maage_skin_reference *maage_client_storage_player(void)
+{ return maage_client_has_player ? &maage_client_player : NULL; }
+
 maage_instance *maage_client_storage_instance(void) { return maage_client_active_instance; }
 const char *maage_client_storage_data_root(void) { return maage_client_data_root; }
 
 maage_status maage_application_configure_log(int argc, char *const argv[], maage_log_config *config)
 {
-    const char *root = NULL, *id = NULL, *mapping = NULL;
+    const char *root = NULL, *id = NULL, *mapping = NULL, *appearance = NULL;
     char error[256];
     maage_status result;
     maage_status_trace trace;
@@ -45,7 +50,10 @@ maage_status maage_application_configure_log(int argc, char *const argv[], maage
     MAAGE_STATUS_TRACE(&trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     error[0] = 0;
     for (i = 1; i < argc; ++i) {
-        if (!strncmp(argv[i], "--data-directory=", 17)) {
+        if (!strncmp(argv[i],"--player-appearance=",20)) {
+            if (appearance) goto arguments;
+            appearance=argv[i]+20;
+        } else if (!strncmp(argv[i], "--data-directory=", 17)) {
             if (root) goto arguments;
             root = argv[i] + 17;
         } else if (!strncmp(argv[i], "--instance=", 11)) {
@@ -55,7 +63,13 @@ maage_status maage_application_configure_log(int argc, char *const argv[], maage
             if (mapping) goto arguments;
             mapping = argv[i] + 13;
         } else if (!strcmp(argv[i], "--instance") || !strcmp(argv[i], "--data-directory") ||
-            !strcmp(argv[i], "--map-folder")) goto arguments;
+            !strcmp(argv[i], "--map-folder") || !strcmp(argv[i],"--player-appearance")) goto arguments;
+    }
+    maage_client_has_player=0;
+    if (appearance) {
+        result=maage_skin_reference_parse(appearance,&maage_client_player);
+        if (maage_status_failed(result)) goto arguments;
+        maage_client_has_player=1;
     }
     if (root) {
         if (!*root || strlen(root) >= sizeof(maage_client_data_root)) goto arguments;

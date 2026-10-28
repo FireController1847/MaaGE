@@ -473,7 +473,8 @@ without resetting configuration. Installed Client packages remain independent
 and can serve several instances. Play validates the manifest/build pair on its
 existing worker and passes `--instance=<uuid>` plus the shared data root. The
 Client holds its own instance lease after Launcher exit.
-Client metadata/descriptors require numeric `instance_storage: 1` and the current
+Client metadata/descriptors require numeric `instance_storage: 1`,
+`player_appearance: 1` and the current
 standalone-executable package layout. Missing/unsupported descriptors and package
 registry schemas are rejected, with no legacy bundle/default conversion. Import
 and verification never execute selected code. No network protocol is implied.
@@ -762,6 +763,12 @@ persistence on its authoritative thread in both entry points:
 authoritative Server, while the dedicated Server hosts the same simulation
 headlessly, without Client windowing, rendering or GUI dependencies. Launching a
 Server executable without moving actual gameplay authority does not qualify.
+
+The [authenticated local-player skin implementation](player-skins.md) keeps
+acquisition/caching on the Launcher access worker and sends only selected public
+identity/model/texture references to the Client. One normalized atlas appearance
+and common classic/slim cuboids serve arms and inventory, including outer layers.
+This does not add remote skin synchronization or change access verification.
 
 ## Phase 8 — Client GUI & Menu Completion
 

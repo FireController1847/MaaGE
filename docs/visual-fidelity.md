@@ -237,7 +237,7 @@ compilation and rendered results require programmer verification.
 Remaining limits include exact vanilla lightmap/gamma/flicker parity, altitude/noise
 biome-color variation, randomized plant offsets, torch support-loss drops and
 particles, underwater fog/overlays, clouds/stars and unsupported item effects
-(maps, bows, eating, enchantment). The arm uses the default skin. Breaking geometry
+(maps, bows, eating, enchantment). The arm uses the selected [authenticated skin](player-skins.md), with original Steve fallback. Breaking geometry
 uses target bounds for special shapes. Translucency sorts within meshes and by
 mesh distance, so intersecting surfaces across meshes remain an approximation.
 

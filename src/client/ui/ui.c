@@ -98,7 +98,7 @@ static void pause_draw(maage_client_ui *ui,void *context)
 }
 
 maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *window,
-    const char *application_data, const maage_pixel_buffer *block_atlas,
+    const char *application_data, const maage_client_resources *game_resources,
     maage_client_ui **output, maage_status_trace *trace)
 {
     maage_client_ui *ui;
@@ -124,7 +124,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->vsync_supported = maage_status_is_success(maage_renderer_set_vsync(renderer, 1));
     ui->content.width = 320; ui->content.height = 240;
     ui->mouse_x = ui->mouse_y = ui->previous_mouse_x = ui->previous_mouse_y = -1;
-    result = maage_client_ui_resources_load(&ui->resources, renderer, application_data, block_atlas, trace);
+    result = maage_client_ui_resources_load(&ui->resources, renderer, application_data, game_resources, trace);
     if (maage_status_failed(result)) {
         result = maage_status_failed(ui->resources.recovery_status) ? ui->resources.recovery_status :
             maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);

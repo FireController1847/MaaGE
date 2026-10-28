@@ -1,4 +1,5 @@
 #include "verify.h"
+#include "skin_cache.h"
 #include "maage/log.h"
 #include <curl/curl.h>
 #include <string.h>
@@ -59,7 +60,7 @@ static int maage_access_java_items(struct json_object *response, int license)
 }
 maage_status maage_access_verify(const char *token, char uuid[33],
     char name[17], char detail[256], int (*cancelled)(void *), void *context,
-    maage_access_state *output_state, maage_status_trace *trace)
+    maage_access_state *output_state, maage_skin_reference *skin, int *skin_resolved, maage_status_trace *trace)
 {
     maage_auth_observer observer;
     struct json_object *profile = NULL, *entitlements = NULL, *license = NULL;
@@ -71,7 +72,8 @@ maage_status maage_access_verify(const char *token, char uuid[33],
     int game = 0, licensed = 0, profile_valid = 0;
     maage_status outcome;
     if (output_state) *output_state = MAAGE_ACCESS_FAILED;
-    if (!token || !uuid || !name || !detail || !cancelled || !output_state)
+    if (skin_resolved) *skin_resolved = 0;
+    if (!token || !uuid || !name || !detail || !cancelled || !output_state || !skin || !skin_resolved)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
     memset(&observer, 0, sizeof(observer)); observer.cancelled = cancelled; observer.context = context;
     observer.trace = trace;
@@ -108,6 +110,12 @@ maage_status maage_access_verify(const char *token, char uuid[33],
     maage_log_verbose("maage.launcher.access.verify", "License entitlement check: explicit Java entitlement %s.", licensed ? "present" : "not confirmed");
     if (game || licensed) {
         strcpy(uuid, normalized); state = MAAGE_ACCESS_VERIFIED;
+        {
+            maage_status skin_result = maage_launcher_skin_profile(profile,normalized,name,skin);
+            *skin_resolved = maage_status_is_success(skin_result);
+            if (!*skin_resolved) maage_log_status(MAAGE_LOG_WARNING,"maage.launcher.skins",skin_result,
+                "Authenticated skin metadata unavailable; retaining this profile's cached appearance.");
+        }
         strcpy(detail, "Minecraft Java Edition access verified. These services do not conclusively establish permanent purchase versus subscription access.");
     } else if (status == 200 && license) strcpy(detail, "Minecraft Java Edition access could not be confirmed. A valid Java profile and explicit Java entitlement are required; empty lists and Bedrock-only access do not qualify.");
     else {

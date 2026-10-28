@@ -61,19 +61,23 @@ static maage_status maage_client_json(const char *path, size_t limit,
     free(data);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
 }
-static maage_status maage_client_storage_contract(struct json_object *o, maage_status_trace *trace)
+static maage_status maage_client_launch_contract(struct json_object *o, maage_status_trace *trace)
 {
     struct json_object *value;
     if (!json_object_object_get_ex(o, "instance_storage", &value) ||
         !json_object_is_type(value, json_type_int) || json_object_get_int(value) != 1)
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
             MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    if (!json_object_object_get_ex(o,"player_appearance",&value) ||
+        !json_object_is_type(value,json_type_int) || json_object_get_int(value)!=1)
+        return MAAGE_STATUS_TRACE(trace,maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
+            MAAGE_CONTEXT_RESOURCE,MAAGE_OPERATION_VALIDATE,0),MAAGE_CONTEXT_RESOURCE,MAAGE_OPERATION_VALIDATE);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VALIDATE, 0);
 }
 static maage_status maage_client_fields(struct json_object *o, maage_client_build *b, maage_status_trace *trace)
 {
     maage_status child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
-    { maage_status result = maage_status_make((((!maage_status_failed(child_result = maage_client_storage_contract(o, trace))) && (!maage_status_failed(child_result = maage_client_text(o,"version",b->version,sizeof(b->version),0, trace))) && maage_semver_valid(b->version) &&
+    { maage_status result = maage_status_make((((!maage_status_failed(child_result = maage_client_launch_contract(o, trace))) && (!maage_status_failed(child_result = maage_client_text(o,"version",b->version,sizeof(b->version),0, trace))) && maage_semver_valid(b->version) &&
         (!maage_status_failed(child_result = maage_client_text(o,"build",b->build,sizeof(b->build),1, trace))) &&
         (!maage_status_failed(child_result = maage_client_text(o,"build_type",b->build_type,sizeof(b->build_type),0, trace))) &&
         (!maage_status_failed(child_result = maage_client_text(o,"platform",b->platform,sizeof(b->platform),0, trace))) &&
@@ -131,7 +135,7 @@ static maage_status maage_client_inspect(const char *package, maage_client_build
     /* No network protocol has been implemented; do not claim compatibility. */
     if (ok && json_object_object_get_ex(o,"protocol",&v) && v) ok = json_object_is_type(v,json_type_null);
     if (o) json_object_put(o);
-    if (!ok || !maage_client_compatible(b)) { strcpy(error,"Select a MaaGE Client package for this platform and architecture with a valid schema-1 manifest and instance_storage 1. Network protocol must be undefined."); return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE); }
+    if (!ok || !maage_client_compatible(b)) { strcpy(error,"Select a MaaGE Client package for this platform and architecture with a valid schema-1 manifest, instance_storage 1 and player_appearance 1. Network protocol must be undefined."); return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE); }
     if (maage_status_failed(child_result = maage_client_executable(package,b,path, trace)) || !maage_client_executable_file(path) || !(f=maage_storage_open(path,"rb"))) goto failed;
     ok = fread(magic,1,4,f)==4; fclose(f);
 #ifdef __APPLE__
@@ -219,6 +223,11 @@ static maage_status maage_client_save(maage_client_registry *r, maage_status_tra
         number = json_object_new_int(1);
         if (!number) { json_object_put(b); goto failed; }
         if (json_object_object_add(b,"instance_storage",number)) {
+            json_object_put(number); json_object_put(b); goto failed;
+        }
+        number = json_object_new_int(1);
+        if (!number) { json_object_put(b); goto failed; }
+        if (json_object_object_add(b,"player_appearance",number)) {
             json_object_put(number); json_object_put(b); goto failed;
         }
         number = json_object_new_double(item->imported);

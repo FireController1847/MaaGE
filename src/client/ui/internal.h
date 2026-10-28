@@ -24,7 +24,9 @@ typedef struct maage_client_ui_resources {
     unsigned char glyph_width[256];
     int atlas_edge, block_atlas_width, block_atlas_height;
     maage_status load_status, recovery_status;
-    maage_status source_results[6];
+    maage_status source_results[5];
+    unsigned int skin_model;
+    float skin_uv[4];
     unsigned int failed_resources;
     unsigned char title_available[7];
     int menu_background_available;
@@ -84,7 +86,7 @@ struct maage_client_ui {
     char notice_text[64];
 };
 maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources,
-    maage_renderer *renderer, const char *application_data, const maage_pixel_buffer *block_atlas, maage_status_trace *trace);
+    maage_renderer *renderer, const char *application_data, const maage_client_resources *game_resources, maage_status_trace *trace);
 maage_status maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
 maage_status maage_client_ui_font_fallback(maage_image *font);
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);

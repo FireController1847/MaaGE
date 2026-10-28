@@ -2,6 +2,7 @@
 #define MAAGE_LAUNCHER_ACCESS_H
 #include <stddef.h>
 #include "maage/status.h"
+#include "maage/skin.h"
 typedef enum maage_access_state {
     MAAGE_ACCESS_DETECTED, MAAGE_ACCESS_CONNECTED, MAAGE_ACCESS_VERIFYING,
     MAAGE_ACCESS_VERIFIED, MAAGE_ACCESS_EXPIRED, MAAGE_ACCESS_UNSUPPORTED,
@@ -36,6 +37,9 @@ maage_status maage_access_disconnect(maage_access *access, const char *uuid);
 maage_status maage_access_snapshot_get(maage_access *access, maage_access_snapshot *snapshot);
 maage_status maage_access_snapshot_release(maage_access_snapshot *snapshot);
 int maage_access_allowed(maage_access *access);
+/* Exact active selection only; never substitutes another verified account.
+ * Copies public identity. Skin cache resolution remains worker/startup I/O. */
+maage_status maage_access_player(maage_access *access, maage_skin_reference *player);
 /* NULL accepts any verified account for setup; selection restricts services. */
 maage_status maage_access_select(maage_access *access, const char *uuid);
 /* Operation cancellation permits retry; closing revokes all in-memory leases. */

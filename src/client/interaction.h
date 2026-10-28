@@ -21,8 +21,6 @@ typedef struct maage_client_first_person {
     int initialized, sprite;
     double equipped, walk_distance, walk_amount, arm_yaw, arm_pitch;
     double last_position[3];
-    float arm_uv[MAAGE_FACE_COUNT][4];
-    float grass_color[3];
     float camera_bob[16];
     maage_status last_result;
 } maage_client_first_person;

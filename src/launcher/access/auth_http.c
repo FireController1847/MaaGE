@@ -110,7 +110,7 @@ static const char *maage_auth_error(struct json_object *object)
     if (!strcmp(error, "NOT_FOUND")) return "Minecraft Java profile not found. Confirm Java Edition access and finish profile setup.";
     return "Service rejected the request (unrecognized details withheld). Retry or sign in again.";
 }
-maage_status maage_auth_request(const char *endpoint, const char *bearer,
+maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint, const char *bearer,
     const char *body, int form, const maage_auth_observer *observer,
     long *status, char detail[256], struct json_object **response)
 {
@@ -126,7 +126,7 @@ maage_status maage_auth_request(const char *endpoint, const char *bearer,
     maage_status outcome;
     unsigned char code;
     if (response) *response = NULL;
-    if (!endpoint || !observer || !observer->cancelled || !status || !detail || !response) {
+    if (timeout_seconds<1 || timeout_seconds>30 || !endpoint || !observer || !observer->cancelled || !status || !detail || !response) {
         free(http);
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
     }
@@ -152,8 +152,8 @@ maage_status maage_auth_request(const char *endpoint, const char *bearer,
     MAAGE_AUTH_CURL(CURLOPT_FOLLOWLOCATION, 0L);
     MAAGE_AUTH_CURL(CURLOPT_SSL_VERIFYPEER, 1L);
     MAAGE_AUTH_CURL(CURLOPT_SSL_VERIFYHOST, 2L);
-    MAAGE_AUTH_CURL(CURLOPT_CONNECTTIMEOUT, 10L);
-    MAAGE_AUTH_CURL(CURLOPT_TIMEOUT, 30L);
+    MAAGE_AUTH_CURL(CURLOPT_CONNECTTIMEOUT, timeout_seconds<10 ? timeout_seconds : 10L);
+    MAAGE_AUTH_CURL(CURLOPT_TIMEOUT, timeout_seconds);
     MAAGE_AUTH_CURL(CURLOPT_NOSIGNAL, 1L);
     MAAGE_AUTH_CURL(CURLOPT_USERAGENT, "MaaGE-Launcher");
     MAAGE_AUTH_CURL(CURLOPT_WRITEFUNCTION, maage_auth_write);
@@ -220,4 +220,11 @@ done:
     curl_slist_free_all(headers); maage_crypto_clear(http, sizeof(*http)); free(http);
     *response = json;
     return outcome;
+}
+
+maage_status maage_auth_request(const char *endpoint, const char *bearer,
+    const char *body, int form, const maage_auth_observer *observer,
+    long *status, char detail[256], struct json_object **response)
+{
+    return maage_auth_request_timed(30,endpoint,bearer,body,form,observer,status,detail,response);
 }

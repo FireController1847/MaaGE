@@ -24,6 +24,9 @@ maage_status maage_oauth_refresh(const char *root, maage_profile_session *sessio
 maage_status maage_auth_request(const char *endpoint, const char *bearer,
     const char *body, int form, const maage_auth_observer *observer,
     long *status, char detail[256], struct json_object **response);
+maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint, const char *bearer,
+    const char *body, int form, const maage_auth_observer *observer,
+    long *status, char detail[256], struct json_object **response);
 /* Returns a static allowlisted error name; never echoes untrusted input. */
 const char *maage_auth_error_name(const char *error);
 maage_status maage_auth_json_free(struct json_object *object);

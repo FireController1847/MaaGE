@@ -23,6 +23,7 @@ file(CONFIGURE OUTPUT "${MAAGE_MANIFEST}" CONTENT [=[
   "executable": "@MAAGE_FILENAME@",
   "sha256": "@MAAGE_SHA256@",
   "instance_storage": 1,
+  "player_appearance": 1,
   "protocol": null
 }
 ]=] @ONLY)

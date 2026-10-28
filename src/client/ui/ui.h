@@ -1,5 +1,6 @@
 #ifndef MAAGE_CLIENT_UI_H
 #define MAAGE_CLIENT_UI_H
+#include "../resources.h"
 #include "maage/render.h"
 #include "maage/session_protocol.h"
 #include "../options.h"
@@ -48,7 +49,7 @@ typedef unsigned int (*maage_client_ui_screen_input)(maage_client_ui *ui,
 /* Owns one GUI atlas and reusable CPU batch; destroy before the renderer.
  * Resources resolve only here, from the existing reconstructed installation. */
 maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *window,
-    const char *application_data, const maage_pixel_buffer *block_atlas,
+    const char *application_data, const maage_client_resources *game_resources,
     maage_client_ui **output, maage_status_trace *trace);
 /* Returns the first original resource failure, even after successful recovery. */
 maage_status maage_client_ui_resource_status(const maage_client_ui *ui);

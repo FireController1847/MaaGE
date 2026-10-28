@@ -1,7 +1,7 @@
 #ifndef MAAGE_DOWNLOAD_H
 #define MAAGE_DOWNLOAD_H
 #include "maage/status.h"
-/* Blocking worker-thread API. HTTPS only, verified TLS, no redirects.
+/* Blocking worker-thread API. HTTPS/HTTP 200 only, verified TLS, no redirects.
  * Caller owns and serializes destinations. Files are replaced atomically
  * only after size/hash verification. Concurrency is independent of count. */
 typedef struct maage_download_request {
@@ -18,6 +18,7 @@ typedef struct maage_download_observer {
 } maage_download_observer;
 typedef struct maage_download_options {
     unsigned int max_concurrent, max_attempts;
+    int private_diagnostics; /* Hide URLs, paths, digests and server error text. */
     long connect_timeout_seconds, timeout_seconds;
     long low_speed_bytes_per_second, low_speed_seconds;
 } maage_download_options;

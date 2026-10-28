@@ -652,7 +652,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     }
     operation = maage_biome_registry_init(biomes);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_resources_load(directory, &resources, biomes, trace);
+    operation = maage_client_resources_load(directory, &resources, biomes, maage_client_storage_player(), trace);
     if (maage_status_failed(operation)) goto done;
     resource_notice = resources.load_status;
     maage_status_trace_init(trace);
@@ -690,11 +690,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_first_person_init(&first_person, &resources);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_create(renderer, window, directory, &resources.atlas, &ui, trace);
+    operation = maage_client_ui_create(renderer, window, directory, &resources, &ui, trace);
     (void)maage_image_destroy(&resources.image);
     resources.atlas.pixels = NULL;
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_set_content(ui, items, blocks, first_person.grass_color, resources.uv);
+    operation = maage_client_ui_set_content(ui, items, blocks, resources.inventory_grass_color, resources.uv);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_frontend_create(ui, instance, items, &frontend, trace);
     if (maage_status_failed(operation)) goto done;

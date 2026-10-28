@@ -396,7 +396,7 @@ static maage_status maage_oauth_minecraft(maage_microsoft_session *ms, maage_pro
     stage = "Minecraft Java profile and entitlement verification";
     o->status(o->context, "Verifying Minecraft Java Edition profile and entitlement...");
     result = maage_access_verify(s->minecraft_token, s->uuid, s->name, detail,
-        o->cancelled, o->context, &verification_state, o->trace);
+        o->cancelled, o->context, &verification_state, &s->appearance, &s->skin_resolved, o->trace);
     ok = !maage_status_failed(result) && verification_state == MAAGE_ACCESS_VERIFIED;
     if (ok) {
         s->verified_at = maage_auth_wall(); s->verified_until = s->verified_at + 3600;

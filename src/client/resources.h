@@ -1,6 +1,7 @@
 #ifndef MAAGE_CLIENT_RESOURCES_H
 #define MAAGE_CLIENT_RESOURCES_H
 #include "maage/image.h"
+#include "maage/skin.h"
 #include "maage/pixels.h"
 #include "maage/content.h"
 #define MAAGE_CLIENT_SOURCE_COUNT (64 + MAAGE_ITEM_TEXTURE_COUNT + 13)
@@ -10,8 +11,10 @@ typedef struct maage_client_resources {
     maage_pixel_buffer atlas;
     float uv[MAAGE_CONTENT_TEXTURE_COUNT][4];
     float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][4];
-    /* Original default skin arm faces, resolved into the same shared atlas. */
-    float arm_uv[MAAGE_FACE_COUNT][4];
+    /* One normalized local-player skin in the shared atlas. */
+    float skin_uv[4];
+    unsigned int skin_model;
+    maage_status skin_status;
     float inventory_grass_color[3];
     float fluid_animation[2][3];
     float fluid_flow_uv[2][4], fluid_flow_animation[2][3];
@@ -26,7 +29,8 @@ typedef struct maage_client_resources {
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
 maage_status maage_client_resources_load(const char *application_data,
-    maage_client_resources *resources, maage_biome_registry *biomes, maage_status_trace *trace);
+    maage_client_resources *resources, maage_biome_registry *biomes,
+    const maage_skin_reference *player, maage_status_trace *trace);
 /* Construct one owning finalized registry set, for integrated Client/Server use.
  * Call after loading the atlas/biome colormaps and finalizing those biomes. */
 maage_status maage_client_content_create(const maage_client_resources *resources,

@@ -1,6 +1,7 @@
 #include "launch.h"
 #include "maage/log.h"
 #include "maage/instance.h"
+#include "../access/skin_cache.h"
 #include <stdlib.h>
 #include <string.h>
 /* One quoting grammar for every native editor; this never invokes a shell.
@@ -37,11 +38,13 @@ static maage_status maage_client_arguments_parse(const char *text, char *storage
         }
         if (quote) { strcpy(error, "Close the quoted value in Client arguments."); goto invalid; }
         *out++ = 0;
-        if (!strcmp(argv[*count - 1], "--instance") ||
+        if (!strcmp(argv[*count - 1], "--player-appearance") ||
+            !strncmp(argv[*count - 1], "--player-appearance=", 20) ||
+            !strcmp(argv[*count - 1], "--instance") ||
             !strncmp(argv[*count - 1], "--instance=", 11) ||
             !strcmp(argv[*count - 1], "--data-directory") ||
             !strncmp(argv[*count - 1], "--data-directory=", 17)) {
-            strcpy(error, "The Launcher supplies --instance and --data-directory automatically."); goto invalid;
+            strcpy(error, "The Launcher supplies --instance, --data-directory and --player-appearance automatically."); goto invalid;
         }
     }
     argv[*count] = NULL;
@@ -65,7 +68,11 @@ maage_status maage_client_launch(const char *root, const char *id,
     char executable[MAAGE_PATH_CAPACITY], directory[MAAGE_PATH_CAPACITY], logs[MAAGE_PATH_CAPACITY];
     char log[MAAGE_PATH_CAPACITY], data_argument[MAAGE_PATH_CAPACITY + 18], instance_argument[48];
     char arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY];
-    const char *argv[MAAGE_CLIENT_ARGUMENT_COUNT + 3];
+    char appearance[MAAGE_SKIN_ARGUMENT_CAPACITY], appearance_argument[MAAGE_SKIN_ARGUMENT_CAPACITY+24];
+    maage_skin_reference player, selected;
+    maage_status skin_result;
+    maage_status_trace skin_trace;
+    const char *argv[MAAGE_CLIENT_ARGUMENT_COUNT + 4];
     unsigned argument_count;
     maage_instance *instance = NULL;
     maage_status result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
@@ -77,6 +84,8 @@ maage_status maage_client_launch(const char *root, const char *id,
         strcpy(error, "Verify the selected Minecraft account before starting a Client.");
         result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0); goto done;
     }
+    result = maage_access_player(access,&player);
+    if (maage_status_failed(result)) { strcpy(error,"Select a verified Minecraft account before starting a Client."); goto done; }
     registry = (maage_client_registry *)calloc(1, sizeof(*registry));
     if (!registry) { result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_LOAD, 0); goto done; }
     result = maage_clients_load(registry, root, error, trace);
@@ -97,12 +106,26 @@ maage_status maage_client_launch(const char *root, const char *id,
     result = maage_storage_join(log, sizeof(log), logs, "client.log");
     if (maage_status_failed(result)) goto done;
     if (!maage_access_allowed(access)) { result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0); goto done; }
+    maage_status_trace_init(&skin_trace);
+    skin_result = maage_launcher_skin_cached(root,player.uuid,player.name,&selected,&skin_trace);
+    if (!maage_status_failed(skin_result)) player = selected;
+    else if (maage_status_code(skin_result)!=MAAGE_STATUS_NOT_FOUND)
+        maage_log_trace_status(MAAGE_LOG_WARNING,"maage.launcher.skins",skin_result,&skin_trace,
+            "Selected skin cache unavailable; starting with the original default appearance.");
+    result = maage_skin_reference_format(&player,appearance);
+    if (maage_status_failed(result)) goto done;
+    sprintf(appearance_argument,"--player-appearance=%s",appearance);
     sprintf(data_argument, "--data-directory=%s", root);
     sprintf(instance_argument, "--instance=%s", instance_id);
-    argv[0] = executable; argv[1] = data_argument; argv[2] = instance_argument;
+    argv[0] = executable; argv[1] = data_argument; argv[2] = instance_argument; argv[3] = appearance_argument;
     result = maage_client_arguments_parse(maage_instance_get_info(instance)->client_arguments,
-        arguments, argv + 3, &argument_count, error, trace);
+        arguments, argv + 4, &argument_count, error, trace);
     if (maage_status_failed(result)) goto done;
+    result = maage_access_player(access,&selected);
+    if (maage_status_failed(result) || strcmp(player.uuid,selected.uuid)) {
+        result=maage_status_make(MAAGE_STATUS_ACCESS_DENIED,MAAGE_CONTEXT_AUTH,MAAGE_OPERATION_SELECT,0);
+        strcpy(error,"Minecraft account selection or verification changed before launch. Retry Play."); goto done;
+    }
     result = maage_process_start(executable, argv, directory, log, log, process, error, trace);
     if (!maage_status_failed(result)) maage_log_info("maage.launcher.clients",
         "Starting selected Client %.12s directly; combined live log=%s.", id, log);

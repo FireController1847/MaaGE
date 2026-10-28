@@ -1,6 +1,7 @@
 #include "interaction.h"
 #include "prediction.h"
 #include "item_models.h"
+#include "player_model.h"
 #include "maage/log.h"
 #include <math.h>
 #include <string.h>
@@ -94,37 +95,14 @@ static maage_status maage_first_person_upload(maage_client_first_person *visual,
     maage_mesh_vertex vertices[66 * 4];
     unsigned int indices[66 * 6];
     maage_mesh_data data;
-    maage_block_state_definition arm;
     const maage_item_definition *item;
     maage_render_mesh *replacement = NULL;
     maage_status result;
-    double minimum[3], maximum[3];
-    float temporary;
     size_t faces = 0;
-    unsigned int face, axis;
     visual->sprite = 0;
     if (!visual->item_id) {
-        memset(&arm, 0, sizeof(arm));
-        for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
-            memcpy(arm.faces[face].uv, visual->arm_uv[face], sizeof(arm.faces[face].uv));
-            /* ModelBox's skin coordinates use +Y toward the hand. Its four
-             * sides reverse both axes relative to world block face mapping. */
-            if (face / 2 != 1) {
-                temporary = arm.faces[face].uv[0];
-                arm.faces[face].uv[0] = arm.faces[face].uv[2];
-                arm.faces[face].uv[2] = temporary;
-            }
-            if (face != MAAGE_FACE_NEGATIVE_Y) {
-                temporary = arm.faces[face].uv[1];
-                arm.faces[face].uv[1] = arm.faces[face].uv[3];
-                arm.faces[face].uv[3] = temporary;
-            }
-            for (axis = 0; axis < 4; ++axis) arm.faces[face].tint[axis] = 1;
-        }
-        minimum[0] = -3.0/16; minimum[1] = minimum[2] = -2.0/16;
-        maximum[0] = 1.0/16; maximum[1] = 10.0/16; maximum[2] = 2.0/16;
-        maage_client_item_box(visual->grass_color, vertices, indices, &faces, minimum, maximum,
-            &arm, MAAGE_MESH_MATERIAL_OPAQUE);
+        maage_player_arm_geometry(visual->resources->skin_model,visual->resources->skin_uv,vertices,indices,&data);
+        faces=data.index_count/6;
     } else {
         maage_item_stack stack;
         stack.item_id = visual->item_id; stack.metadata = visual->metadata; stack.count = 1; stack.damage = 0;
@@ -150,8 +128,6 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual,
         MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE, 0);
     memset(visual, 0, sizeof(*visual));
     visual->resources = resources;
-    memcpy(visual->arm_uv, resources->arm_uv, sizeof(visual->arm_uv));
-    memcpy(visual->grass_color, resources->inventory_grass_color, sizeof(visual->grass_color));
     maage_first_person_identity(visual->camera_bob);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }

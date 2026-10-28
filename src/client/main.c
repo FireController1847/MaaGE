@@ -22,7 +22,7 @@ int maage_application_query(int argc, char *const argv[], int *result)
     capacity = strlen(m->version) + strlen(m->build) + strlen(m->build_type) + strlen(m->platform) + strlen(m->architecture) + 256;
     output = (char *)malloc(capacity);
     if (!output) { *result = 1; return 1; }
-    if (json) sprintf(output, "{\"schema\":1,\"application\":\"maage-client\",\"version\":\"%s\",\"build\":\"%s\",\"build_type\":\"%s\",\"platform\":\"%s\",\"architecture\":\"%s\",\"instance_storage\":1,\"protocol\":null}\n",
+    if (json) sprintf(output, "{\"schema\":1,\"application\":\"maage-client\",\"version\":\"%s\",\"build\":\"%s\",\"build_type\":\"%s\",\"platform\":\"%s\",\"architecture\":\"%s\",\"instance_storage\":1,\"player_appearance\":1,\"protocol\":null}\n",
         m->version, m->build, m->build_type, m->platform, m->architecture);
     else sprintf(output, "MaaGE Client %s+%s (%s; %s %s)\n", m->version, m->build, m->build_type, m->platform, m->architecture);
 #ifdef _WIN32

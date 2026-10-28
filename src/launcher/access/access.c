@@ -3,6 +3,7 @@
 #include "verify.h"
 #include "profile_store.h"
 #include "oauth.h"
+#include "skin_cache.h"
 #include "maage/storage.h"
 #include "maage/time.h"
 #include "maage/log.h"
@@ -62,6 +63,7 @@ static maage_status maage_access_reserve(maage_access *a, unsigned wanted)
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);
 }
 static maage_status maage_access_begin(maage_access *a, int operation, const char *uuid);
+static int maage_access_cancelled(void *context);
 static void maage_access_lock(maage_access *a)
 {
 #ifdef _WIN32
@@ -137,6 +139,36 @@ int maage_access_allowed(maage_access *a)
     maage_access_lock(a); allowed = maage_access_policy(a); maage_access_renewal(a, renew); maage_access_unlock(a);
     if (*renew) maage_access_begin(a, 4, renew);
     return allowed;
+}
+maage_status maage_access_player(maage_access *a, maage_skin_reference *player)
+{
+    unsigned i;
+    maage_status result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED,MAAGE_CONTEXT_AUTH,MAAGE_OPERATION_SELECT,0);
+    if (!a || !player) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,MAAGE_CONTEXT_AUTH,MAAGE_OPERATION_SELECT,0);
+    memset(player,0,sizeof(*player));
+    maage_access_lock(a); maage_access_policy(a);
+    i = maage_access_find(a,a->active);
+    if (*a->active && i<a->view.count && a->view.profiles[i].state==MAAGE_ACCESS_VERIFIED && a->view.profiles[i].connected) {
+        strcpy(player->uuid,a->view.profiles[i].uuid); strcpy(player->name,a->view.profiles[i].name);
+        result = maage_status_make(MAAGE_STATUS_SUCCESS,0,MAAGE_OPERATION_SELECT,0);
+    }
+    maage_access_unlock(a); return result;
+}
+/* Skin failures never change account authorization or enter credential traces. */
+static maage_status maage_access_skin_cache(maage_access *a, const maage_profile_session *session, int restore)
+{
+    maage_auth_observer observer;
+    maage_status_trace trace;
+    maage_status result;
+    maage_status_trace_init(&trace); memset(&observer,0,sizeof(observer));
+    observer.cancelled=maage_access_cancelled; observer.context=a; observer.trace=&trace;
+    result=restore ? maage_launcher_skin_restore(a->root,session,&observer) :
+        (session->skin_resolved ? maage_launcher_skin_publish(a->root,&session->appearance,&observer) :
+            maage_status_make(MAAGE_STATUS_NOOP,0,MAAGE_OPERATION_SAVE,0));
+    if (maage_status_failed(result) && maage_status_code(result)!=MAAGE_STATUS_INTERRUPTED)
+        maage_log_trace_status(MAAGE_LOG_WARNING,"maage.launcher.skins",result,&trace,
+            "Skin refresh unavailable; preserving the selected profile's known-good cache or default skin.");
+    return result;
 }
 maage_status maage_access_select(maage_access *a, const char *uuid)
 {
@@ -400,7 +432,10 @@ static maage_status maage_access_authenticate(maage_access *a, int operation)
     if (ok && !maage_access_cancelled(a)) {
         result = maage_profile_store_save(a->root, s, &trace); saved = !maage_status_failed(result); ok = saved;
         if (!saved) { maage_log_verbose("maage.launcher.access", "Account encryption/atomic persistence failed after Java verification; access denied."); strcpy(detail, "Java access verified, but MaaGE could not encrypt/save the account. Check data-folder permissions and retry."); }
-        else maage_log_info("maage.launcher.access", "Verified OAuth account encrypted and saved.");
+        else {
+            maage_log_info("maage.launcher.access", "Verified OAuth account encrypted and saved.");
+            (void)maage_access_skin_cache(a,s,0);
+        }
     } else ok = 0;
 done:
     maage_access_lock(a);
@@ -452,6 +487,8 @@ static maage_status maage_access_restore_worker(maage_access *a)
         maage_access_lock(a); strcpy(uuid, a->view.profiles[i].uuid); maage_access_unlock(a);
         child = maage_profile_store_load(a->root, uuid, s, &a->trace);
         if (!maage_status_failed(child)) {
+            double wall=maage_access_wall();
+            if (wall>=s->verified_at && wall<s->verified_until && wall<s->expires_at) (void)maage_access_skin_cache(a,s,1);
             maage_access_lock(a); maage_access_apply(a, i, s); ++restored;
             if (a->view.profiles[i].state == MAAGE_ACCESS_VERIFIED) ++leases;
             maage_access_unlock(a);

@@ -35,17 +35,17 @@ static maage_status maage_client_ui_decoration_fallback(maage_image *image, int 
 }
 
 maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources,
-    maage_renderer *renderer, const char *application_data, const maage_pixel_buffer *block_atlas, maage_status_trace *trace)
+    maage_renderer *renderer, const char *application_data, const maage_client_resources *game_resources, maage_status_trace *trace)
 {
-    static const char *const names[6] = {
+    static const char *const names[5] = {
         "minecraft/textures/gui/icons.png", "minecraft/textures/gui/widgets.png",
         "minecraft/textures/font/ascii.png", "minecraft/textures/gui/container/inventory.png",
-        "minecraft/textures/gui/container/crafting_table.png",
-        "minecraft/textures/entity/steve.png"
+        "minecraft/textures/gui/container/crafting_table.png"
     };
-    static const int origins[6][2] = {{0, 0}, {256, 0}, {0, 256}, {256, 256}, {1536, 256}, {1536, 0}};
-    maage_image sources[6], title_images[7], menu_image, atlas;
+    static const int origins[5][2] = {{0, 0}, {256, 0}, {0, 256}, {256, 256}, {1536, 256}};
+    maage_image sources[5], title_images[7], menu_image, atlas;
     maage_pixel_buffer pixels;
+    const maage_pixel_buffer *block_atlas = game_resources ? &game_resources->atlas : NULL;
     maage_status result;
     maage_status status;
     maage_status_trace source_trace, recovered_trace;
@@ -91,16 +91,21 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     resources->atlas_edge = edge;
     resources->block_atlas_width = block_atlas->width;
     resources->block_atlas_height = block_atlas->height;
+    resources->skin_model=game_resources->skin_model;
+    resources->skin_uv[0]=game_resources->skin_uv[0]*block_atlas->width/edge;
+    resources->skin_uv[1]=(MAAGE_CLIENT_UI_BLOCK_ATLAS_Y+game_resources->skin_uv[1]*block_atlas->height)/edge;
+    resources->skin_uv[2]=game_resources->skin_uv[2]*block_atlas->width/edge;
+    resources->skin_uv[3]=(MAAGE_CLIENT_UI_BLOCK_ATLAS_Y+game_resources->skin_uv[3]*block_atlas->height)/edge;
     memset(sources, 0, sizeof(sources)); memset(title_images,0,sizeof(title_images));
     memset(&menu_image, 0, sizeof(menu_image)); memset(&atlas, 0, sizeof(atlas));
-    for (i = 0; i < 6; ++i) {
+    for (i = 0; i < 5; ++i) {
         maage_status_trace_init(&source_trace);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS);
-        expected = i == 5 ? 64 : (i == 2 ? 128 : 256);
+        expected = i == 2 ? 128 : 256;
         status = maage_minecraft_asset_path(application_data, names[i], path, sizeof(path), &source_trace);
         if (!maage_status_failed(status)) status = maage_image_load_png(path, &sources[i], &source_trace);
-        if (!maage_status_failed(status) && (sources[i].width != expected || sources[i].height != (i == 5 ? 32 : expected)))
+        if (!maage_status_failed(status) && (sources[i].width != expected || sources[i].height != expected))
             status = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD_TEXTURE, 0);
         resources->source_results[i] = status;
         if (maage_status_failed(status)) {
@@ -177,7 +182,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
         resources->recovery_status = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
         goto done;
     }
-    for (i = 0; i < 6; ++i) for (y = 0; y < sources[i].height; ++y)
+    for (i = 0; i < 5; ++i) for (y = 0; y < sources[i].height; ++y)
         memcpy(atlas.pixels + (size_t)(origins[i][1] + y) * atlas.stride + (size_t)origins[i][0] * 4,
             sources[i].pixels + (size_t)y * sources[i].stride, (size_t)sources[i].width * 4);
     for (y = 0; y < block_atlas->height; ++y)
@@ -207,7 +212,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     maage_log_info("maage.client.ui", "Resolved inventory, HUD, font and borrowed block images into one GUI atlas.");
     ok = 1;
 done:
-    for (i = 0; i < 6; ++i) maage_image_destroy(&sources[i]);
+    for (i = 0; i < 5; ++i) maage_image_destroy(&sources[i]);
     for(i=0;i<7;++i)maage_image_destroy(&title_images[i]);
     maage_image_destroy(&menu_image);
     maage_image_destroy(&atlas);
