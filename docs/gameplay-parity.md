@@ -1,8 +1,8 @@
 # Gameplay and presentation parity pass
 
 This pass implements the requested pickup, mining, presentation, container audio,
-inventory and frontend corrections. Client is `0.1.0-alpha.45`, Server is
-`1.0.0-alpha.16`, and the local session contract is version 7. World metadata
+inventory and frontend corrections. Client is `0.1.0-alpha.47`, Server is
+`1.0.0-alpha.17`, and the local session contract is version 8. World metadata
 remains `MGWORLD4`; this pass adds no save reader or migration.
 
 ## Reference inspection

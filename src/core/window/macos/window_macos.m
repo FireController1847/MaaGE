@@ -591,6 +591,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event)
             case 2: key = MAAGE_INPUT_KEY_D; break;
             case 49: key = MAAGE_INPUT_KEY_SPACE; break;
             case 53: key = MAAGE_INPUT_KEY_ESCAPE; break;
+            case 96: key = MAAGE_INPUT_KEY_F5; break;
             case 99: key = MAAGE_INPUT_KEY_F3; break;
             case 103: key = MAAGE_INPUT_KEY_F11; break;
             case 36: case 76: key = MAAGE_INPUT_KEY_ENTER; break;

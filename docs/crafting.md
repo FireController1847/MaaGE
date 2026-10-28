@@ -93,7 +93,7 @@ is performed. Chunk encoding is unchanged.
 
 ## Session contract
 
-Protocol 7 carries explicit container commands: open player inventory, close an identified container, and act on an
+Protocol 8 carries explicit container commands: open player inventory, close an identified container, and act on an
 identified slot. Slot groups are inventory, crafting input and crafting result;
 actions are primary, secondary and quick move. Group bounds, action values,
 container identity, result revision and Server state are checked independently.
@@ -155,7 +155,7 @@ have Metal and Vulkan/MoltenVK enabled and reuse their unchanged renderer
 implementations. The linker reports duplicate-library warnings. No applications,
 tests, CTest, benchmarks, gameplay scripts or GitHub Actions were executed.
 Windows/Linux compilation and both renderers' runtime behavior remain unverified.
-Client is `0.1.0-alpha.45`; Server is `1.0.0-alpha.16`. See
+Client is `0.1.0-alpha.47`; Server is `1.0.0-alpha.17`. See
 [the gameplay parity pass](gameplay-parity.md) for the subsequent presentation,
 container pause and session changes.
 

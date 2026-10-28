@@ -748,6 +748,9 @@ persistence on its authoritative thread in both entry points:
 - After rendering stops, Server shutdown drains/flushes World work and saves the
   complete current-format player/environment checkpoint. Clean join precedes
   releasing borrowed content/transport; lifecycle failures retain needed resources.
+- Protocol 8 publishes resolved crouching plus a separate revisioned bounded
+  camera collision volume. Client F5, animated skin parts and hand-held cached
+  item instances share native rendering; [third-person contract](third-person.md).
 - Protocol 7 adds bounded block-break presentation requests/results and copied
   neighborhoods, retaining Server decisions and immutable mesh handoffs. Client
   voxel filtering/exposed faces reconcile by action identity, epoch and column

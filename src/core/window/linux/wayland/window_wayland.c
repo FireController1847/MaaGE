@@ -14,6 +14,11 @@
 #include "../../window_internal.h"
 
 typedef struct maage_wayland_system {
+    maage_window_system *owner;
+    maage_window *keyboard_focus;
+    struct wl_seat *seat;
+    struct wl_keyboard *keyboard;
+    uint32_t seat_name;
     struct wl_display *display;
     struct wl_registry *registry;
     struct wl_compositor *compositor;
@@ -131,11 +136,105 @@ static void maage_wayland_ping(void *data, struct xdg_wm_base *shell, uint32_t s
 static const struct xdg_wm_base_listener maage_wayland_shell_listener = {
     .ping = maage_wayland_ping
 };
+/* Physical evdev positions, independent of text layout. The adapter still
+ * reports unsupported mouse capture until relative-pointer support exists. */
+static int maage_wayland_key_code(uint32_t code)
+{
+    static const uint32_t codes[MAAGE_INPUT_KEY_COUNT] = {
+        17,30,31,32,57,1,61,28,15,103,108,105,106,18,
+        2,3,4,5,6,7,8,9,10,42,87,16,29,29,63
+    };
+    unsigned int i;
+    for (i=0;i<MAAGE_INPUT_KEY_COUNT;++i) if (codes[i]==code) return (int)i;
+    if (code==54) return MAAGE_INPUT_KEY_SHIFT;
+    if (code==97) return MAAGE_INPUT_KEY_CONTROL;
+    return -1;
+}
+static void maage_wayland_keymap(void *data, struct wl_keyboard *keyboard,
+    uint32_t format, int32_t fd, uint32_t size)
+{
+    (void)data; (void)keyboard; (void)format; (void)size; close(fd);
+}
+static void maage_wayland_key_enter(void *data, struct wl_keyboard *keyboard,
+    uint32_t serial, struct wl_surface *surface, struct wl_array *keys)
+{
+    maage_wayland_system *native=data;
+    maage_window *window;
+    uint32_t *code;
+    int key;
+    (void)keyboard; (void)serial;
+    if (native->keyboard_focus) maage_window_input_focus(native->keyboard_focus,0);
+    native->keyboard_focus=NULL;
+    for (window=native->owner->windows;window;window=window->next)
+        if (((maage_wayland_window *)window->platform)->surface==surface) {
+            native->keyboard_focus=window; maage_window_input_focus(window,1);
+            wl_array_for_each(code,keys) {
+                key=maage_wayland_key_code(*code);
+                if (key>=0) window->input.keys[key]=1; /* Held keys are not new presses. */
+                if (*code==29) window->input.keys[MAAGE_INPUT_KEY_LEFT_CONTROL]=1;
+            }
+            break;
+        }
+}
+static void maage_wayland_key_leave(void *data, struct wl_keyboard *keyboard,
+    uint32_t serial, struct wl_surface *surface)
+{
+    maage_wayland_system *native=data;
+    (void)keyboard; (void)serial; (void)surface;
+    if (native->keyboard_focus) maage_window_input_focus(native->keyboard_focus,0);
+    native->keyboard_focus=NULL;
+}
+static void maage_wayland_key(void *data, struct wl_keyboard *keyboard,
+    uint32_t serial, uint32_t time, uint32_t code, uint32_t state)
+{
+    maage_wayland_system *native=data;
+    int key=maage_wayland_key_code(code);
+    (void)keyboard; (void)serial; (void)time;
+    if (!native->keyboard_focus || key<0) return;
+    maage_window_input_key(native->keyboard_focus,(maage_input_key)key,state==WL_KEYBOARD_KEY_STATE_PRESSED);
+    if (code==29) maage_window_input_key(native->keyboard_focus,MAAGE_INPUT_KEY_LEFT_CONTROL,state==WL_KEYBOARD_KEY_STATE_PRESSED);
+}
+static void maage_wayland_modifiers(void *data, struct wl_keyboard *keyboard,
+    uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
+{ (void)data; (void)keyboard; (void)serial; (void)depressed; (void)latched; (void)locked; (void)group; }
+static void maage_wayland_repeat(void *data, struct wl_keyboard *keyboard, int32_t rate, int32_t delay)
+{ (void)data; (void)keyboard; (void)rate; (void)delay; }
+static const struct wl_keyboard_listener maage_wayland_keyboard_listener = {
+    .keymap=maage_wayland_keymap, .enter=maage_wayland_key_enter, .leave=maage_wayland_key_leave,
+    .key=maage_wayland_key, .modifiers=maage_wayland_modifiers, .repeat_info=maage_wayland_repeat
+};
+static void maage_wayland_keyboard_free(maage_wayland_system *native)
+{
+    if (!native->keyboard) return;
+    if (wl_proxy_get_version((struct wl_proxy *)native->keyboard)>=3) wl_keyboard_release(native->keyboard);
+    else wl_keyboard_destroy(native->keyboard);
+    native->keyboard=NULL;
+}
+static void maage_wayland_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities)
+{
+    maage_wayland_system *native=data;
+    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && !native->keyboard) {
+        native->keyboard=wl_seat_get_keyboard(seat);
+        if (native->keyboard) wl_keyboard_add_listener(native->keyboard,&maage_wayland_keyboard_listener,native);
+    } else if (!(capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && native->keyboard) {
+        maage_wayland_key_leave(native,native->keyboard,0,NULL);
+        maage_wayland_keyboard_free(native);
+    }
+}
+static void maage_wayland_seat_name(void *data, struct wl_seat *seat, const char *name)
+{ (void)data; (void)seat; (void)name; }
+static const struct wl_seat_listener maage_wayland_seat_listener = {
+    .capabilities=maage_wayland_capabilities, .name=maage_wayland_seat_name
+};
 static void maage_wayland_global(void *data, struct wl_registry *registry,
     uint32_t name, const char *interface, uint32_t version)
 {
     maage_wayland_system *native = data;
-    if (!strcmp(interface, "wl_compositor")) {
+    if (!strcmp(interface, "wl_seat") && !native->seat) {
+        native->seat=wl_registry_bind(registry,name,&wl_seat_interface,version<4 ? version : 4);
+        native->seat_name=name;
+        if (native->seat) wl_seat_add_listener(native->seat,&maage_wayland_seat_listener,native);
+    } else if (!strcmp(interface, "wl_compositor")) {
         native->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, version < 3 ? version : 3);
         native->compositor_name = name;
     } else if (!strcmp(interface, "wl_shm")) {
@@ -152,6 +251,11 @@ static void maage_wayland_global_remove(void *data, struct wl_registry *registry
 {
     maage_wayland_system *native = data;
     (void)registry;
+    if (native->seat && name==native->seat_name) {
+        maage_wayland_key_leave(native,native->keyboard,0,NULL);
+        maage_wayland_keyboard_free(native);
+        wl_seat_destroy(native->seat); native->seat=NULL;
+    }
     if (name == native->compositor_name || name == native->shm_name || name == native->shell_name)
         native->disconnected = 1;
 }
@@ -163,6 +267,7 @@ static maage_status maage_wayland_init(maage_window_system *system)
     maage_wayland_system *native = calloc(1, sizeof(*native));
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     system->platform = native;
+    native->owner=system;
     native->display = wl_display_connect(NULL);
     if (!native->display) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     native->registry = wl_display_get_registry(native->display);
@@ -176,6 +281,8 @@ static void maage_wayland_shutdown(maage_window_system *system)
 {
     maage_wayland_system *native = system->platform;
     if (!native) return;
+    maage_wayland_keyboard_free(native);
+    if (native->seat) wl_seat_destroy(native->seat);
     if (native->decorations) zxdg_decoration_manager_v1_destroy(native->decorations);
     if (native->shell) xdg_wm_base_destroy(native->shell);
     if (native->shm) wl_shm_destroy(native->shm);
@@ -323,7 +430,9 @@ static void maage_wayland_destroy(maage_window *window)
 {
     maage_wayland_window *native = window->platform;
     maage_wayland_buffer *next;
+    maage_wayland_system *system=window->system->platform;
     if (!native) return;
+    if (system->keyboard_focus==window) maage_wayland_key_leave(system,system->keyboard,0,NULL);
     if (native->decoration) zxdg_toplevel_decoration_v1_destroy(native->decoration);
     if (native->toplevel) xdg_toplevel_destroy(native->toplevel);
     if (native->xdg_surface) xdg_surface_destroy(native->xdg_surface);

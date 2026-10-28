@@ -134,6 +134,18 @@ typedef struct maage_world_neighborhood {
     unsigned char light[27];
     maage_biome_id biomes[25];
 } maage_world_neighborhood;
+/* Bounded owner-sampled camera collision volume. Zero column revisions mean
+ * unavailable terrain, never confirmed air. No borrowed World storage. */
+#define MAAGE_CAMERA_RADIUS 5
+#define MAAGE_CAMERA_EDGE 11
+#define MAAGE_CAMERA_CELLS 1331
+typedef struct maage_world_camera_sample {
+    int valid, x, y, z;
+    unsigned long revisions[4];
+    maage_block_state_id states[MAAGE_CAMERA_CELLS];
+} maage_world_camera_sample;
+maage_status maage_world_sample_camera(const maage_world *world,
+    int x, int y, int z, maage_world_camera_sample *sample);
 unsigned long maage_world_column_revision(const maage_world *world, int x, int z);
 maage_status maage_world_sample_neighborhood(const maage_world *world,
     int x, int y, int z, maage_world_neighborhood *sample);

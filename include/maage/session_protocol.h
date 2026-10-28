@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 7U
+#define MAAGE_SESSION_PROTOCOL_VERSION 8U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2,
@@ -91,7 +91,7 @@ typedef struct maage_session_player_view {
     maage_crafting_container crafting; /* Copied authoritative temporary state. */
     unsigned int game_mode, health, hunger;
     double saturation;
-    int flying;
+    int flying, sneaking;
     int has_target, breaking_active, submerged;
     double reach;
     unsigned int break_delay, attack_miss_delay;
@@ -133,6 +133,14 @@ typedef struct maage_session_entities {
     maage_entity *entities;
     size_t count;
 } maage_session_entities;
+
+/* Latest collision publication replaces its predecessor only when the sampled
+ * cell or footprint column revisions change, independently of camera mode. */
+typedef struct maage_session_collision {
+    unsigned int protocol_version;
+    unsigned long session_epoch, world_epoch, sequence;
+    maage_world_camera_sample sample;
+} maage_session_collision;
 
 typedef enum maage_session_event_kind {
     MAAGE_EVENT_SOUND = 1, MAAGE_EVENT_STATUS = 2,

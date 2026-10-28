@@ -1051,6 +1051,35 @@ unsigned long maage_world_column_revision(const maage_world *world, int x, int z
     maage_world_slot *slot = world ? maage_world_find(world, x, z) : NULL;
     return maage_world_complete(slot) ? slot->revision : 0;
 }
+maage_status maage_world_sample_camera(const maage_world *world,
+    int x, int y, int z, maage_world_camera_sample *sample)
+{
+    unsigned long revisions[4];
+    int dx, dy, dz, i, changed;
+    if (!world || !sample || x < -MAAGE_WORLD_LIMIT+5 || x > MAAGE_WORLD_LIMIT-5 ||
+        z < -MAAGE_WORLD_LIMIT+5 || z > MAAGE_WORLD_LIMIT-5 ||
+        y < -MAAGE_WORLD_LIMIT+5 || y > MAAGE_WORLD_LIMIT-5)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+    changed = !sample->valid || sample->x != x || sample->y != y || sample->z != z;
+    for (i = 0; i < 4; ++i) {
+        revisions[i] = maage_world_column_revision(world,
+            maage_world_chunk_coordinate(x + (i%2 ? 5 : -5)),
+            maage_world_chunk_coordinate(z + (i/2 ? 5 : -5)));
+        if (revisions[i] != sample->revisions[i]) changed = 1;
+    }
+    if (!changed) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SNAPSHOT, 0);
+    memset(sample, 0, sizeof(*sample));
+    sample->valid = 1; sample->x = x; sample->y = y; sample->z = z;
+    memcpy(sample->revisions, revisions, sizeof(revisions));
+    for (dy = -5; dy <= 5; ++dy) for (dz = -5; dz <= 5; ++dz) for (dx = -5; dx <= 5; ++dx) {
+        i = dx+5 + 11*(dz+5) + 121*(dy+5);
+        if (y+dy < 0) sample->states[i] = MAAGE_STATE_BEDROCK;
+        else if (y+dy < MAAGE_WORLD_HEIGHT)
+            sample->states[i] = maage_world_get(world, x+dx, y+dy, z+dz);
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
+}
+
 maage_status maage_world_sample_neighborhood(const maage_world *world,
     int x, int y, int z, maage_world_neighborhood *sample)
 {

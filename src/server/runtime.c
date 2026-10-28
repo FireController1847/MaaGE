@@ -48,6 +48,8 @@ struct maage_server_runtime {
     maage_status last_world_notice, crafting_failure;
     int publication_dirty;
     maage_world_neighborhood mining;
+    maage_session_collision collision;
+    int sneaking;
     unsigned long last_prediction;
     struct {
         int active, resolved;
@@ -601,6 +603,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     snapshot.player.hunger = runtime->game.hunger;
     snapshot.player.saturation = runtime->game.saturation;
     snapshot.player.flying = runtime->game.flying;
+    snapshot.player.sneaking = runtime->sneaking;
     snapshot.player.has_target = runtime->game.has_target;
     snapshot.player.breaking_active = runtime->game.breaking_active;
     snapshot.player.reach = runtime->game.reach > 0 ? runtime->game.reach :
@@ -635,6 +638,18 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     }
     snapshot.world_stats = runtime->stats;
     snapshot.audio_observation = runtime->audio_observation;
+    {
+        maage_status result = maage_world_sample_camera(runtime->world,
+            cell_x, cell_y, cell_z, &runtime->collision.sample);
+        if (maage_status_failed(result)) server_status_event(runtime, result, NULL);
+        else if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+            runtime->collision.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
+            runtime->collision.session_epoch = runtime->collision.world_epoch = 1UL;
+            ++runtime->collision.sequence;
+            result = maage_local_session_publish_collision(runtime->config.session, &runtime->collision);
+            if (maage_status_failed(result)) server_status_event(runtime, result, NULL);
+        }
+    }
     (void)maage_local_session_publish_snapshot(runtime->config.session, &snapshot);
     {
         maage_session_entities view;
@@ -873,6 +888,7 @@ static maage_status server_tick(maage_server_runtime *runtime,
     result = maage_gameplay_tick(&runtime->game, &runtime->player,
         runtime->world, maage_content_items(runtime->content), &intent,
         sounds, sizeof(sounds) / sizeof(sounds[0]), &sound_count, trace);
+    runtime->sneaking = intent.movement.descend && !runtime->game.flying && runtime->game.health != 0;
     /* Effects describe outcomes already resolved by authoritative gameplay.
      * Transport saturation may omit a sound, never roll back block mutations. */
     for (i = 0; i < sound_count; ++i) {

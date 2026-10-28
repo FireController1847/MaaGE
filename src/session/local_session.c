@@ -21,6 +21,8 @@ struct maage_local_session {
     int has_snapshot;
     maage_session_entities entities;
     int has_entities;
+    maage_session_collision collision;
+    int has_collision;
     int closed;
 };
 
@@ -454,6 +456,42 @@ maage_status maage_local_session_take_entities(maage_local_session *session,
     if (session->has_entities) {
         *view = session->entities; session->entities.entities = NULL;
         session->has_entities = 0; result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
+    } else result = session_status(session->closed ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);
+    maage_mutex_unlock(session->mutex);
+    return result;
+}
+
+maage_status maage_local_session_publish_collision(maage_local_session *session,
+    const maage_session_collision *view)
+{
+    maage_status result;
+    if (!session || !view || view->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+        !view->session_epoch || !view->world_epoch || !view->sequence || !view->sample.valid)
+        return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
+    maage_mutex_lock(session->mutex);
+    if (session->closed) result = session_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_SNAPSHOT);
+    else if (session->collision.sequence &&
+        (view->session_epoch < session->collision.session_epoch ||
+         (view->session_epoch == session->collision.session_epoch &&
+          (view->world_epoch < session->collision.world_epoch ||
+           (view->world_epoch == session->collision.world_epoch && view->sequence <= session->collision.sequence)))))
+        result = session_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SNAPSHOT);
+    else {
+        session->collision = *view; session->has_collision = 1;
+        result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
+    }
+    maage_mutex_unlock(session->mutex);
+    return result;
+}
+maage_status maage_local_session_take_collision(maage_local_session *session,
+    maage_session_collision *view)
+{
+    maage_status result;
+    if (!session || !view) return session_argument(MAAGE_OPERATION_READ, 0);
+    maage_mutex_lock(session->mutex);
+    if (session->has_collision) {
+        *view = session->collision; session->has_collision = 0;
+        result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
     } else result = session_status(session->closed ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);
     maage_mutex_unlock(session->mutex);
     return result;

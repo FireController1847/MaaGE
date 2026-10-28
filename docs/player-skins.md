@@ -1,8 +1,8 @@
 # Authenticated Local-Player Skins
 
-Launcher `1.0.0-alpha.40` and Client `0.1.0-alpha.46` share one nonsecret
-appearance contract. Server behavior, world storage and session protocol are
-unchanged. Runtime behavior remains programmer-owned and unverified.
+Launcher `1.0.0-alpha.40` and Client `0.1.0-alpha.47` share one nonsecret
+appearance contract. [Third-person presentation](third-person.md) reuses it.
+Runtime behavior remains programmer-owned and unverified.
 
 ## Profile and Acquisition
 
@@ -115,8 +115,9 @@ No texture upload, file lookup or skin download occurs per frame or world entry.
 
 Metal and Vulkan consume the same geometry, nearest sampling, materials and GUI
 vertices through their existing APIs. Their native shaders, pipeline contracts and
-vertex layouts did not need modification. No third-person gameplay renderer,
-equipment/capes, skin editor/uploader or multiplayer synchronization was added.
+vertex layouts did not need modification. [Third-person rendering](third-person.md) now consumes those same cuboids and
+UVs through cached part instances. Armor/capes, a skin editor/uploader and
+multiplayer synchronization remain outside this appearance contract.
 
 ## Failure Behavior and Compilation
 

@@ -125,7 +125,7 @@ increasing unique IDs and finite coordinate/velocity ranges are checked before
 restoring World ownership. No native structure layout or pointers are serialized.
 The encoding has an explicit 32-bit file/identity bound and reports overflow.
 
-Protocol 7 carries a separate complete near-player entity interest set, independent
+Protocol 8 carries a separate complete near-player entity interest set, independent
 of the fixed player snapshot. It contains epoch, tick and sequence identities;
 absence removes an entity. The local mailbox holds at most one pending immutable
 publication, transfers detached array ownership and swaps pointers under its short

@@ -1,5 +1,6 @@
 #include "player_model.h"
 #include <string.h>
+#include <math.h>
 
 static const int maage_player_corners[6][4][3] = {
     {{0,0,0},{0,0,1},{0,1,1},{0,1,0}},{{1,0,1},{1,0,0},{1,1,0},{1,1,1}},
@@ -71,6 +72,120 @@ void maage_player_arm_geometry(unsigned int model, const float skin_uv[4],
             vertex->light[1]=1;
         }
         for(corner=0;corner<6;++corner) indices[(layer*6+face)*6+corner]=base+offsets[corner];
+    }
+    data->vertices=vertices; data->indices=indices; data->vertex_count=48; data->index_count=72;
+}
+
+void maage_player_matrix_identity(float matrix[16])
+{
+    unsigned int i;
+    memset(matrix,0,16*sizeof(float));
+    for (i=0;i<4;++i) matrix[i*5]=1;
+}
+void maage_player_matrix_multiply(float output[16], const float a[16], const float b[16])
+{
+    float value[16];
+    unsigned int row, column, k;
+    for (column=0;column<4;++column) for (row=0;row<4;++row) {
+        value[column*4+row]=0;
+        for (k=0;k<4;++k) value[column*4+row]+=a[k*4+row]*b[column*4+k];
+    }
+    memcpy(output,value,sizeof(value));
+}
+void maage_player_matrix_translate(float matrix[16], double x, double y, double z)
+{
+    float value[16];
+    maage_player_matrix_identity(value); value[12]=(float)x; value[13]=(float)y; value[14]=(float)z;
+    maage_player_matrix_multiply(matrix,matrix,value);
+}
+void maage_player_matrix_scale(float matrix[16], double x, double y, double z)
+{
+    unsigned int i;
+    for (i=0;i<4;++i) { matrix[i]*=(float)x; matrix[4+i]*=(float)y; matrix[8+i]*=(float)z; }
+}
+void maage_player_matrix_rotate(float matrix[16], unsigned int axis, double radians)
+{
+    float value[16];
+    unsigned int a=(axis+1)%3, b=(axis+2)%3;
+    maage_player_matrix_identity(value);
+    value[a*4+a]=value[b*4+b]=(float)cos(radians);
+    value[a*4+b]=(float)sin(radians); value[b*4+a]=(float)-sin(radians);
+    maage_player_matrix_multiply(matrix,matrix,value);
+}
+void maage_player_part_matrix(float matrix[16], const maage_player_pose *pose, unsigned int part)
+{
+    maage_player_matrix_identity(matrix);
+    maage_player_matrix_translate(matrix,pose->pivot[part][0],pose->pivot[part][1],pose->pivot[part][2]);
+    maage_player_matrix_rotate(matrix,2,pose->rotation[part][2]);
+    maage_player_matrix_rotate(matrix,1,pose->rotation[part][1]);
+    maage_player_matrix_rotate(matrix,0,pose->rotation[part][0]);
+}
+void maage_player_pose_calculate(unsigned int model, double phase, double amount,
+    double age, double head_yaw, double pitch, double swing, int held, int sneaking,
+    maage_player_pose *pose)
+{
+    static const double pivots[6][3]={{0,24,0},{0,24,0},{5,22,0},{-5,22,0},{1.9,12,0.1},{-1.9,12,0.1}};
+    double torso, eased, wave, head_wave;
+    unsigned int part;
+    memset(pose,0,sizeof(*pose)); memcpy(pose->pivot,pivots,sizeof(pivots));
+    if (model==MAAGE_SKIN_SLIM) { pose->pivot[2][1]-=0.5; pose->pivot[3][1]-=0.5; }
+    pose->rotation[0][0]=-pitch; pose->rotation[0][1]=-head_yaw;
+    pose->rotation[2][0]=-cos(phase*0.6662+3.141592653589793)*amount;
+    pose->rotation[3][0]=-cos(phase*0.6662)*amount;
+    pose->rotation[4][0]=-cos(phase*0.6662)*1.4*amount;
+    pose->rotation[5][0]=-cos(phase*0.6662+3.141592653589793)*1.4*amount;
+    if (held) pose->rotation[2][0]=pose->rotation[2][0]*0.5+3.141592653589793/10;
+    if (swing>0 && swing<1) {
+        torso=sin(sqrt(swing)*6.283185307179586)*0.2;
+        pose->rotation[1][1]=-torso;
+        pose->pivot[2][0]=cos(torso)*5; pose->pivot[2][2]=sin(torso)*5;
+        pose->pivot[3][0]=-cos(torso)*5; pose->pivot[3][2]=-sin(torso)*5;
+        pose->rotation[2][1]-=torso*3; pose->rotation[3][1]-=torso;
+        pose->rotation[3][0]-=torso;
+        eased=1-swing; eased=1-eased*eased*eased*eased;
+        wave=sin(eased*3.141592653589793);
+        head_wave=sin(swing*3.141592653589793)*-(pitch-0.7)*0.75;
+        pose->rotation[2][0]+=wave*1.2+head_wave;
+        pose->rotation[2][2]=sin(swing*3.141592653589793)*-0.4;
+    }
+    if (sneaking) {
+        pose->rotation[1][0]=-0.5;
+        pose->rotation[2][0]-=0.4; pose->rotation[3][0]-=0.4;
+        for (part=4;part<6;++part) { pose->pivot[part][1]=15; pose->pivot[part][2]=4; }
+        pose->pivot[0][1]-=1;
+    }
+    wave=cos(age*0.09)*0.05+0.05; head_wave=sin(age*0.067)*0.05;
+    pose->rotation[2][2]+=wave; pose->rotation[3][2]-=wave;
+    pose->rotation[2][0]-=head_wave; pose->rotation[3][0]+=head_wave;
+}
+void maage_player_part_geometry(unsigned int model, unsigned int part,
+    const float skin_uv[4], maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data)
+{
+    static const unsigned int offsets[6]={0,1,2,0,2,3};
+    static const float shades[6]={0.75f,0.75f,0.6f,1.0f,0.85f,0.85f};
+    maage_player_box boxes[MAAGE_PLAYER_BOX_COUNT];
+    maage_player_pose pose;
+    double points[4][3];
+    float pixels[4][2];
+    unsigned int layer,face,corner,source,base,axis;
+    maage_mesh_vertex *vertex;
+    maage_player_model_boxes(model,boxes);
+    maage_player_pose_calculate(model,0,0,0,0,0,0,0,0,&pose);
+    for (layer=0;layer<2;++layer) for (face=0;face<6;++face) {
+        maage_player_box_face(&boxes[part+layer*6],face,points,pixels); base=(layer*6+face)*4;
+        for (corner=0;corner<4;++corner) {
+            source=3-corner; vertex=&vertices[base+corner]; memset(vertex,0,sizeof(*vertex));
+            vertex->position[0]=(float)(-points[source][0]-pose.pivot[part][0]);
+            vertex->position[1]=(float)(points[source][1]-pose.pivot[part][1]);
+            vertex->position[2]=(float)(points[source][2]-pose.pivot[part][2]);
+            for (axis=0;axis<2;++axis) vertex->uv[axis]=skin_uv[axis]+pixels[source][axis]/64*(skin_uv[axis+2]-skin_uv[axis]);
+            for (axis=0;axis<4;++axis) vertex->color[axis]=1;
+            for (axis=0;axis<3;++axis) vertex->color[axis]=shades[face];
+            vertex->normal[face/2]=(face&1 ? 1.0f : -1.0f)*(face/2==0 ? -1.0f : 1.0f);
+            vertex->material=layer ? MAAGE_MESH_MATERIAL_TRANSLUCENT : MAAGE_MESH_MATERIAL_OPAQUE;
+            vertex->light[0]=1;
+        }
+        for (corner=0;corner<6;++corner) indices[(layer*6+face)*6+corner]=base+offsets[corner];
     }
     data->vertices=vertices; data->indices=indices; data->vertex_count=48; data->index_count=72;
 }

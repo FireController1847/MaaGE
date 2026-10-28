@@ -285,8 +285,18 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   Client receives only a versioned nonsecret appearance reference; reserve its
   `--player-appearance` argument against instance overrides. No Client/Server skin
   downloads or tokens. Normalize once into the shared Client atlas and use common
-  classic/slim cuboid UVs for first-person arms and inventory, including modern
-  independent limbs/outer layers and classic legacy conversion. No per-frame I/O.
+  classic/slim cuboid UVs for first-person arms, inventory and world characters,
+  including independent limbs/outer layers and classic legacy conversion. No per-frame I/O.
+- F5 is transient Client-only First/Back/Front state, cycled on captured gameplay
+  press edges. Third-person uses the same interpolated feet/look and a four-block
+  obstruction-limited boom; targeting/audio remain at the authoritative eye.
+  Owner-sampled 11x11x11 numeric collision volumes replace a separate bounded
+  latest Session mailbox on cell/column-revision changes. Unknown terrain blocks
+  camera travel; no live World access or per-frame camera commands. Final camera
+  matrices drive sky projection. Shared cuboids/UVs/poses feed inventory and six
+  cached world part meshes; the animated hand borrows existing cached item meshes.
+  Compose player and item instances once through the shared Metal/Vulkan traversal;
+  clear borrowed instances before destroying meshes. Never rebuild on an F5 press.
 - Register all 1.7.10 music tracks by numeric asset ID; decode and upload only a
   selected track when music playback begins, and release its Audio buffer after
   playback stops. Memory bounds constrain decoded clips, not the number of

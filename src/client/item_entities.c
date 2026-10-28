@@ -90,6 +90,14 @@ static maage_status item_entities_model(maage_client_item_entities *view,
     *mesh = models->variants[stack->metadata];
     return item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOOKUP);
 }
+maage_status maage_client_item_entities_mesh(maage_client_item_entities *view,
+    const maage_item_stack *stack, const maage_render_mesh **mesh, maage_status_trace *trace)
+{
+    int notice;
+    if (!view || !stack || !mesh) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT,MAAGE_OPERATION_LOOKUP);
+    *mesh=NULL;
+    return item_entities_model(view,stack,mesh,&notice,trace);
+}
 maage_status maage_client_item_entities_clear(maage_client_item_entities *view)
 {
     if (!view) return item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
@@ -121,7 +129,8 @@ maage_status maage_client_item_entities_pickup(maage_client_item_entities *view,
 
 maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     maage_local_session *session, const maage_session_snapshot *snapshot,
-    double interpolation, const double eye[3], double now, maage_status_trace *trace)
+    double interpolation, const double eye[3], double now,
+    const maage_render_instance *additional, size_t additional_count, maage_status_trace *trace)
 {
     maage_session_entities incoming;
     maage_render_instance *draws, *draw;
@@ -135,7 +144,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     int notice;
     unsigned long random;
     double position[3], phase, rotation, scale, offset[3], dx, dy, dz, age, sine, cosine, alpha;
-    if (!view || !session || !snapshot || !eye) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    if (!view || !session || !snapshot || !eye || (additional_count && !additional)) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     result = maage_local_session_take_entities(session, &incoming);
     if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
         if (incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION &&
@@ -148,10 +157,11 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         } else free(incoming.entities);
     } else if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_INVALID_STATE) return result;
     if (view->current.session_epoch != snapshot->session_epoch || view->current.world_epoch != snapshot->world_epoch)
-        return maage_client_item_entities_clear(view);
-    if (view->current.count > ((size_t)-1 / sizeof(*draws) - 32) / 5)
+        (void)maage_client_item_entities_clear(view);
+    if (additional_count > (size_t)-1 / sizeof(*draws)-32 ||
+        view->current.count > ((size_t)-1 / sizeof(*draws) - 32-additional_count) / 5)
         return item_entities_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
-    needed = view->current.count*5 + 32;
+    needed = view->current.count*5 + 32 + additional_count;
     if (needed > view->capacity) {
         draws = (maage_render_instance *)realloc(view->draws, needed*sizeof(*draws));
         if (!draws) return item_entities_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_UPDATE);
@@ -258,6 +268,8 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         draw->block_light = (float)(view->pickups[animation].pickup.light & 15) / 15;
     }
     (void)interpolation;
+    if (additional_count) memcpy(view->draws+count,additional,additional_count*sizeof(*additional));
+    count+=additional_count;
     result = maage_renderer_set_instances(view->renderer, view->draws, count);
     return maage_status_failed(result) || !outcome ? result : outcome;
 }
