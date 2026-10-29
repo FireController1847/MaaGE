@@ -79,7 +79,7 @@ struct maage_world {
     maage_job_observation *observations;
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
-    unsigned scan_step;
+    unsigned scan_step, schedule_turn, mesh_turn, column_turn;
     int scan_ring, save_turn;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
@@ -418,8 +418,6 @@ static void maage_world_commit_edits(maage_world *world) {
             maage_world_invalidate_neighbors(world, slot->x, slot->z, 15U);
             maage_world_cancel(world, slot->work);
             slot->work = NULL;
-            world->scan_ring = 0;
-            world->scan_step = 0;
         }
         if (slot->edit_states && !slot->edit_blocks) slot->block_revision = maage_world_revision(world);
         slot->edit_states = slot->edit_blocks = slot->edit_light = 0;
@@ -878,16 +876,16 @@ static int maage_world_make_room(maage_world *world) {
 /* Walk concentric square rings incrementally. A single pump examines at
  * most a workload-derived budget, never rescanning the entire grid per job.
  * On movement the cursor restarts at the nearest column. */
-static void maage_world_scan_next(maage_world *world, int *dx, int *dz) {
-    int ring = world->scan_ring;
+static void maage_world_scan_next(int *scan_ring, unsigned *scan_step, int *dx, int *dz) {
+    int ring = *scan_ring;
     unsigned step, span;
     if (!ring) {
         *dx = *dz = 0;
-        world->scan_ring = 1;
-        world->scan_step = 0;
+        *scan_ring = 1;
+        *scan_step = 0;
         return;
     }
-    step = world->scan_step++;
+    step = (*scan_step)++;
     span = (unsigned) ring * 2U + 1U;
     if (step < span) {
         *dx = (int) step - ring;
@@ -902,9 +900,9 @@ static void maage_world_scan_next(maage_world *world, int *dx, int *dz) {
         *dx = -ring;
         *dz = ring - 1 - (int) (step - span - (unsigned) ring * 4U);
     }
-    if (world->scan_step == (unsigned) ring * 8U) {
-        ++world->scan_ring;
-        world->scan_step = 0;
+    if (*scan_step == (unsigned) ring * 8U) {
+        ++*scan_ring;
+        *scan_step = 0;
     }
 }
 static maage_status maage_world_schedule_saves(maage_world *world, unsigned reserve) {
@@ -933,7 +931,8 @@ static maage_status maage_world_schedule_saves(maage_world *world, unsigned rese
 static maage_status maage_world_schedule(maage_world *world) {
     maage_world_slot *slot;
     int radius = maage_world_resident_radius(world) + 1;
-    int dx, dz, x, z, kind, ring, no_room = 0;
+    int dx, dz, x, z, kind, ring, no_room = 0, near_ring = 0;
+    unsigned near_step = 0;
     size_t span = (size_t) radius * 2U + 1U;
     unsigned limit, reserve, work_limit, budget, examined;
     unsigned priority;
@@ -959,12 +958,17 @@ static maage_status maage_world_schedule(maage_world *world) {
     if (world->config.presentation_only && budget > 64U) budget = 64U;
     forward_x = sin(world->yaw);
     forward_z = -cos(world->yaw);
+    ++world->schedule_turn;
     for (examined = 0; examined < budget && world->active - world->saves_active < work_limit && world->active < world->task_limit; ++examined) {
         if (world->scan_ring > radius) {
             world->scan_ring = 0;
             world->scan_step = 0;
         }
-        maage_world_scan_next(world, &dx, &dz);
+        /* A small near-player pass cannot reset the progressing outer scan.
+         * Every eighth pump admits background work first under saturation. */
+        if (examined < 25U && world->schedule_turn % 8U) maage_world_scan_next(&near_ring, &near_step, &dx, &dz);
+        else maage_world_scan_next(&world->scan_ring, &world->scan_step, &dx, &dz);
+        if (abs(dx) > radius || abs(dz) > radius) continue;
         x = world->center_x + dx;
         z = world->center_z + dz;
         if (abs(x) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1 || abs(z) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1) continue;
@@ -1172,6 +1176,16 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     world->yaw = yaw;
     maage_world_collect(world);
     if (cx != old_x || cz != old_z) {
+        unsigned index;
+        for (index = 0; index < world->task_limit; ++index) {
+            maage_world_task *task = &world->tasks[index];
+            int dx, dz, distance;
+            if (!task->used || task->kind == MAAGE_JOB_SAVE || task->cancel_requested) continue;
+            dx = abs(task->x - cx);
+            dz = abs(task->z - cz);
+            distance = dx > dz ? dx : dz;
+            (void) maage_jobs_set_priority(world->jobs, task->id, (unsigned) distance * 16U + (task->kind <= MAAGE_JOB_GENERATE ? 4U : (task->kind == MAAGE_JOB_MESH ? 1U : 0U)));
+        }
         world->scan_ring = 0;
         world->scan_step = 0;
     }
@@ -1491,23 +1505,41 @@ int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned lo
     return maage_world_complete(slot) && slot->revision == revision && (world->config.presentation_only || !slot->light_dirty) && !slot->mesh_dirty && maage_world_distance(world, slot) <= world->config.render_distance;
 }
 maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update) {
-    maage_world_slot *slot, *chosen = NULL;
+    maage_world_slot *slot, *chosen = NULL, *previous = NULL, **link;
+    int distance, best = INT_MAX, fair;
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
-    while (world->mesh_head) {
-        slot = world->mesh_head;
-        world->mesh_head = slot->mesh_next;
-        if (!world->mesh_head) world->mesh_tail = NULL;
-        slot->mesh_linked = 0;
-        slot->mesh_next = NULL;
-        if (slot->pending_mesh && maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {
-            chosen = slot;
-            break;
+    fair = ++world->mesh_turn % 8U == 0;
+    link = &world->mesh_head;
+    while ((slot = *link) != NULL) {
+        if (!slot->pending_mesh || !maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {
+            *link = slot->mesh_next;
+            if (world->mesh_tail == slot) world->mesh_tail = previous;
+            slot->mesh_linked = 0;
+            slot->mesh_next = NULL;
+            maage_world_mesh_destroy(slot->pending_mesh);
+            slot->pending_mesh = NULL;
+            continue;
         }
-        maage_world_mesh_destroy(slot->pending_mesh);
-        slot->pending_mesh = NULL;
+        distance = maage_world_distance(world, slot);
+        if (!chosen || (!fair && distance < best)) {
+            chosen = slot;
+            best = distance;
+        }
+        previous = slot;
+        link = &slot->mesh_next;
     }
     if (chosen) {
+        previous = NULL;
+        link = &world->mesh_head;
+        while (*link != chosen) {
+            previous = *link;
+            link = &(*link)->mesh_next;
+        }
+        *link = chosen->mesh_next;
+        if (world->mesh_tail == chosen) world->mesh_tail = previous;
+        chosen->mesh_linked = 0;
+        chosen->mesh_next = NULL;
         update->x = chosen->x;
         update->z = chosen->z;
         update->revision = chosen->mesh_revision;
@@ -1866,13 +1898,14 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     maage_column_update *update;
     const maage_chunk *chunk, *before;
     size_t count = 0, index = 0;
-    int x, y, z, sy, best = INT_MAX, distance;
+    int x, y, z, sy, best = INT_MAX, distance, fair;
     maage_block_state_id state;
     if (output) *output = NULL;
     if (!world || !output || world->config.presentation_only) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+    fair = ++world->column_turn % 8U == 0;
     for (slot = world->chunks; slot; slot = slot->next) {
         distance = maage_world_distance(world, slot);
-        if (maage_world_complete(slot) && distance <= world->config.render_distance + 1 && slot->block_revision != slot->sent_revision && distance < best) {
+        if (maage_world_complete(slot) && distance <= world->config.render_distance + 1 && slot->block_revision != slot->sent_revision && (!chosen || (fair ? slot->block_revision < chosen->block_revision : distance < best))) {
             chosen = slot;
             best = distance;
         }
@@ -1936,8 +1969,6 @@ static void maage_world_visual_changed(maage_world *world, maage_world_slot *slo
     slot->data_epoch = slot->revision;
     maage_world_invalidate_neighbors(world, slot->x, slot->z, 15U);
     maage_world_cancel(world, slot->work);
-    world->scan_ring = 0;
-    world->scan_step = 0;
 }
 static maage_status maage_world_visual_cell(const maage_world *world, maage_world_slot *slot, maage_chunk *chunk, unsigned int cell, maage_block_state_id state) {
     maage_status result;

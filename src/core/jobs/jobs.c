@@ -32,7 +32,7 @@ struct maage_jobs {
     maage_thread **threads;
     maage_job_record *records;
     unsigned *heap, *free_slots, *ready_slots;
-    unsigned logical_processors, capacity, workers, free_count, queued, running, ready, ready_head;
+    unsigned logical_processors, capacity, workers, free_count, queued, running, ready, ready_head, dispatch_turn;
     int stopped, ids_wrapped;
     maage_job_id next_id;
     unsigned long order_high, order_low, completed, cancelled, started;
@@ -103,7 +103,7 @@ static void maage_jobs_worker(void *context) {
     maage_jobs *jobs;
     maage_job_record *record;
     maage_job_token token;
-    unsigned slot;
+    unsigned slot, index, selected;
     double now, latency;
     jobs = (maage_jobs *) context;
     maage_mutex_lock(jobs->mutex);
@@ -111,9 +111,18 @@ static void maage_jobs_worker(void *context) {
         while (!jobs->queued && !jobs->stopped)
             maage_condition_wait(jobs->work, jobs->mutex);
         if (jobs->stopped) break;
-        slot = jobs->heap[0];
+        selected = 0;
+        /* An occasional oldest admission preserves progress for accepted
+         * background jobs under a continuing stream of urgent work. */
+        if (++jobs->dispatch_turn % 8U == 0)
+            for (index = 1; index < jobs->queued; ++index) {
+                const maage_job_record *a = &jobs->records[jobs->heap[index]];
+                const maage_job_record *b = &jobs->records[jobs->heap[selected]];
+                if (a->order_high < b->order_high || (a->order_high == b->order_high && a->order_low < b->order_low)) selected = index;
+            }
+        slot = jobs->heap[selected];
         record = &jobs->records[slot];
-        maage_jobs_heap_remove(jobs, 0);
+        maage_jobs_heap_remove(jobs, selected);
         record->state = MAAGE_JOB_RUNNING;
         ++jobs->running;
         record->result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_JOB, 0);
@@ -434,4 +443,25 @@ maage_status maage_jobs_destroy(maage_jobs *jobs, void (*dispose)(void *context)
     free(jobs->records);
     free(jobs);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+}
+
+maage_status maage_jobs_set_priority(maage_jobs *jobs, maage_job_id id, unsigned priority) {
+    unsigned index, slot;
+    maage_status result = maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SET, 0);
+    if (!jobs || !id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SET, 0);
+    maage_mutex_lock(jobs->mutex);
+    for (index = 0; index < jobs->capacity; ++index)
+        if (jobs->records[index].state != MAAGE_JOB_FREE && jobs->records[index].id == id) {
+            result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
+            if (jobs->records[index].state == MAAGE_JOB_QUEUED && jobs->records[index].priority != priority) {
+                slot = jobs->records[index].heap_index;
+                maage_jobs_heap_remove(jobs, slot);
+                jobs->records[index].priority = priority;
+                maage_jobs_heap_up(jobs, jobs->queued++, index);
+                result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+            }
+            break;
+        }
+    maage_mutex_unlock(jobs->mutex);
+    return result;
 }

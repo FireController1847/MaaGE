@@ -1,5 +1,6 @@
 #include "maage/local_session.h"
 #include "maage/thread.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,6 +16,7 @@ struct maage_local_session {
     size_t command_head, command_count;
     size_t event_head, event_count;
     size_t column_count;
+    unsigned column_turn;
     maage_session_snapshot snapshot;
     int has_snapshot;
     maage_session_entities entities;
@@ -267,15 +269,29 @@ maage_status maage_local_session_offer_column(maage_local_session *session, maag
     return result;
 }
 
-maage_status maage_local_session_take_column(maage_local_session *session, maage_local_column_update *update) {
+maage_status maage_local_session_take_column(maage_local_session *session, int center_x, int center_z, maage_local_column_update *update) {
     maage_status result;
+    size_t i, selected = 0;
+    int dx, dz, distance, best = INT_MAX;
     if (!session) return session_argument(MAAGE_OPERATION_READ, 0);
-    if (!update) return session_argument(MAAGE_OPERATION_READ, 1);
+    if (!update || center_x < -MAAGE_WORLD_MAX_RADIUS || center_x > MAAGE_WORLD_MAX_RADIUS || center_z < -MAAGE_WORLD_MAX_RADIUS || center_z > MAAGE_WORLD_MAX_RADIUS) return session_argument(MAAGE_OPERATION_READ, 1);
     maage_mutex_lock(session->mutex);
     if (session->column_count) {
-        *update = session->columns[0];
+        if (++session->column_turn % 8U)
+            for (i = 0; i < session->column_count; ++i) {
+                dx = abs(session->columns[i].x - center_x);
+                dz = abs(session->columns[i].z - center_z);
+                distance = dx > dz ? dx : dz;
+                /* Strict comparison preserves the earliest packet for each
+                 * coordinate and therefore every required delta baseline. */
+                if (distance < best) {
+                    selected = i;
+                    best = distance;
+                }
+            }
+        *update = session->columns[selected];
         --session->column_count;
-        if (session->column_count) memmove(session->columns, session->columns + 1, session->column_count * sizeof(*session->columns));
+        if (selected < session->column_count) memmove(session->columns + selected, session->columns + selected + 1, (session->column_count - selected) * sizeof(*session->columns));
         memset(&session->columns[session->column_count], 0, sizeof(*session->columns));
         maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);

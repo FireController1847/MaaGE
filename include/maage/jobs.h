@@ -53,7 +53,8 @@ unsigned maage_jobs_resolve_workers(unsigned requested);
 maage_status maage_jobs_create(unsigned workers, unsigned capacity, maage_jobs **output, maage_status_trace *trace);
 
 /* Thread-safe and nonblocking apart from brief queue synchronization. Lower
- * numeric priority runs first, FIFO within a priority. Returns INVALID_STATE on saturation
+ * numeric priority normally runs first, FIFO within a priority; periodic oldest
+ * dispatch prevents starvation of accepted background work. Returns INVALID_STATE on saturation
  * or shutdown; the caller retains context on failure. On success the worker
  * exclusively owns context until poll transfers it back. No automatic freeing.
  * Inputs borrowed by context must remain immutable/alive through completion.
@@ -64,6 +65,9 @@ maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_ru
  * callbacks cooperate by querying their temporary token at useful boundaries.
  * Cancellation may win after run returns, so discard results marked cancelled. */
 maage_status maage_jobs_cancel(maage_jobs *jobs, maage_job_id id);
+/* Changes queued priority without cancellation or changing FIFO identity.
+ * Running/ready work returns NOOP and retains ownership. */
+maage_status maage_jobs_set_priority(maage_jobs *jobs, maage_job_id id, unsigned priority);
 int maage_job_cancelled(const maage_job_token *token);
 /* Optional coarse stage transition. Uses the existing brief scheduler lock;
  * publish only at stage boundaries, never from an inner workload loop. */

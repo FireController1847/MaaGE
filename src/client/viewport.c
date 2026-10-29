@@ -1159,7 +1159,7 @@ choose_world:
             double receive_begin = maage_time_monotonic_seconds();
             while (received++ < 16U) {
                 memset(&column_update, 0, sizeof(column_update));
-                operation = maage_local_session_take_column(session, &column_update);
+                operation = maage_local_session_take_column(session, cx, cz, &column_update);
                 if (maage_status_code(operation) == MAAGE_STATUS_NOOP || maage_status_code(operation) == MAAGE_STATUS_INVALID_STATE) break;
                 if (maage_status_failed(operation)) goto done;
                 if (column_update.world_epoch == world_epoch) operation = maage_world_apply_column(visual_world, column_update.column);

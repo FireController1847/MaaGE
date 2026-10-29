@@ -15,7 +15,8 @@ typedef struct maage_local_session_backlog {
 /* Bounded counters only; no borrowed queue data or allocations. */
 maage_status maage_local_session_get_backlog(maage_local_session *session, maage_local_session_backlog *backlog);
 
-/* Ordered owned block-state packets. Offer consumes column on SUCCESS only.
+/* Per-column ordered owned block-state packets. Reception selects the nearest
+ * available column; revisions of the same column always retain FIFO order. Offer consumes column on SUCCESS only.
  * Deltas are never overwritten/coalesced across their base revision. */
 typedef struct maage_local_column_update {
     int x, z;
@@ -39,7 +40,7 @@ maage_status maage_local_session_read_snapshot(maage_local_session *session, maa
 maage_status maage_local_session_publish_event(maage_local_session *session, const maage_session_event *event);
 maage_status maage_local_session_take_event(maage_local_session *session, maage_session_event *event);
 maage_status maage_local_session_offer_column(maage_local_session *session, maage_local_column_update *column_update);
-maage_status maage_local_session_take_column(maage_local_session *session, maage_local_column_update *column_update);
+maage_status maage_local_session_take_column(maage_local_session *session, int center_x, int center_z, maage_local_column_update *column_update);
 /* One latest complete entity publication, with bounded queue depth. Offer
  * consumes array on SUCCESS only; take transfers it to the Client. Pointer
  * swaps under the mailbox mutex never copy an unbounded array under a lock.

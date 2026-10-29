@@ -44,7 +44,7 @@ Modal screens release capture, and closure restores it when appropriate.
 ## State Transfer and Visual Lighting
 
 The Server publishes owned numeric block/biome columns initially, then changed
-cells against exact acknowledged block revisions. The FIFO never coalesces away
+cells against exact acknowledged block revisions. Per-column FIFO never coalesces away
 a required delta base; backpressure retains unsent state. Leaving interest releases
 the Server's delta base so reentry receives a complete publication. Packets contain
 no lighting arrays, scheduled work or visual meshes. Remote encoding is not implemented.
@@ -75,6 +75,13 @@ Approximations never enter propagation buffers, and calculated zero remains zero
 Only changes in numeric opacity/emission dirty visual light.
 Day/night scales sky brightness in frame uniforms without relighting.
 
+Nearby admission, state reception, mesh selection and GPU upload use square-ring
+priority. A progressing outer scan survives individual arrivals/edits; a bounded
+near-player pass gives urgent resident work another opportunity each pump. Movement
+reprioritizes queued jobs without cancellation. Periodic oldest-work turns preserve
+background progress at admission, worker dispatch, reception and upload. Reordering
+between columns never reorders a column's own state packets.
+
 ## Optional Pipeline Diagnostics
 
 `MAAGE_WORLD_DIAGNOSTICS=1` enables bounded records under `maage.world.latency`,
@@ -87,7 +94,7 @@ Local transport durations use one process monotonic clock; remote adapters must 
 untranslated timestamps unavailable and report peer-local durations separately.
 
 The remaining scheduling gates are a single active visual-light transaction,
-whole-halo epoch validation and completion-order uploads.
+whole-halo epoch validation.
 These can postpone or reject usable geometry independently of Server block authority.
 Optional diagnostics expose those queues/dispositions; runtime latency remains unmeasured.
 
