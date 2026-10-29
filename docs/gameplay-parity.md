@@ -55,14 +55,22 @@ mutate through the authoritative setter or save. Separate authoritative copies
 anchor expected-state prediction overlays. Block revisions are independent of
 light/mesh epochs, so relighting creates no state traffic.
 
-Visual relighting uses one bounded asynchronous 3x3 column transaction plus a
-retained outer halo. Deduplicated changed-cell queues solve light increases and
-removal; direct-sky caches recompute only affected X/Z shafts, including all Y
-levels affected by opening/closing roofs. Unknown columns contribute no light.
-All input epochs must remain current before publication; cardinal and diagonal
-mesh dependencies are invalidated. Independent mesh jobs use the existing GPU
-upload budget. Previous complete GPU presentation remains until replacements arrive.
-There is no render-loop job wait, global World lock or full-world relight.
+Visual lighting has one exclusive output column per job and immutable facing
+boundary inputs. Multiple columns and their mesh jobs run independently on the
+existing bounded Jobs pool. Dirty-cell bitsets and four boundary masks coalesce
+work; direct-sky caches restrict rescans to affected X/Z shafts. Both channels
+retain the attenuating removal/addition fixed point. Missing boundaries contribute
+no numerical light and are revisited when membership changes.
+
+Owner publication validates incarnation, merges only light into any newer block
+snapshot and preserves edits queued during execution. Changed facing boundaries
+request another pass; they do not discard completed work. Geometry epochs are
+separate from light epochs: correct geometry with older illumination can upload
+while refinement stays pending. Block/membership changes still reject obsolete
+geometry. Cardinal and diagonal AO meshes refresh after relevant boundary changes.
+No worker mutates published buffers, and no render-loop wait or global World lock
+is needed. Prior GPU data remains usable until replacement, with local edit patches
+covering interactions immediately.
 
 The Server independently schedules the same numerical solver for gameplay light.
 Growth, melting and survival defer when that cache is unavailable/stale. The Client
@@ -93,10 +101,9 @@ history. Prediction geometry timing ends at upload/submission, not display scano
 Local transport durations use one process monotonic clock; remote adapters must mark
 untranslated timestamps unavailable and report peer-local durations separately.
 
-The remaining scheduling gates are a single active visual-light transaction,
-whole-halo epoch validation.
-These can postpone or reject usable geometry independently of Server block authority.
-Optional diagnostics expose those queues/dispositions; runtime latency remains unmeasured.
+Diagnostics distinguish block availability, light initialization/refinement, mesh
+work, upload readiness and stale/cancelled dispositions. Runtime latency remains
+unmeasured; submitted geometry timing does not establish display latency.
 
 ## Break Prediction and Swing
 

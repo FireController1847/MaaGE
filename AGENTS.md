@@ -194,10 +194,12 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Server gameplay light and Client visual light use one numerical solver with separate
   state/schedules. Transfer initial blocks/biomes, then FIFO deltas against acknowledged
   block revisions, never light arrays or Server meshes. Backpressure retains unsent
-  states/bases. Prediction overlays require matching copied authority; rejection restores
-  geometry and light. Client 3x3 relight transactions retain outer halos, use changed-cell
-  removal/addition and cached direct-sky shafts, validate all epochs and invalidate
-  diagonal meshes. Keep previous GPU presentation until complete replacements arrive.
+  states/bases. Expected-state prediction uses immediate bounded cell geometry; rejection
+  rebuilds effective state. Independent light jobs own one output column and immutable
+  facing boundary inputs, with dirty-cell removal/addition and cached direct-sky shafts.
+  Rebase light onto newer blocks, retain pending work and requeue changed boundaries;
+  separate geometry validity from light refinement and invalidate diagonal AO meshes.
+  Keep previous GPU presentation until replacements arrive; local patches cover edits.
 - Saves use coherent immutable snapshots asynchronously, one writer per column file.
   Clear dirty only if the saved revision remains current; never evict unsaved dirty data.
   Shutdown cancels obsolete CPU work, drains/joins Jobs and flushes outside rendering;

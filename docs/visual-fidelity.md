@@ -74,6 +74,33 @@ alpha, partial-shape UVs, counts, durability and cursor handling serve all inven
 Cached world items use shared material traversal and transforms, without geometry
 uploads on movement. See [Item Entities](item-entities.md).
 
+## Column Lighting Ownership
+
+Each light task clones one column and borrows four immutable neighboring snapshots.
+Its queue holds at most 65,536 deduplicated cells, with an 8,192-byte membership
+bitset; accepted-job capacity bounds concurrent memory. Existing direct-sky data
+is retained. Dirty bytes select changed cells and shafts, while changed boundary
+masks seed only the necessary faces. Sky and emission solve the same attenuating
+fixed point, including removal. Boundary passes converge after inputs stabilize;
+intermediate retained values are explicitly pending presentation data.
+
+Light output and mesh work have separate owner slots. The owner rebases numerical
+output onto current blocks/auxiliary state when edits arrived during execution,
+then retains newer dirty work. Incarnation protects unload/reload. Facing boundary
+epochs detect arrivals, removals and changed input; follow-up passes replace broad
+halo cancellation. Geometry tokens reject changed blocks but allow older lighting
+until a budgeted refinement mesh replaces it. There is one solver with independent
+Server gameplay and Client visual caches; neither publishes light across Session.
+
+Architectural references reviewed before choosing this independent design:
+[Lumi's batching](https://github.com/GTMEGA/Lumi),
+[Starlight's propagation and section discussion](https://github.com/PaperMC/Starlight/blob/fabric/TECHNICAL_DETAILS.md),
+[Angelica's threaded terrain](https://github.com/GTNewHorizons/Angelica),
+[FalseTweaks' AO/boundary fixes](https://github.com/FalsePattern/FalseTweaks), and
+[Sodium's worker queue/context ownership](https://github.com/CaffeineMC/sodium/blob/dev/common/src/main/java/net/caffeinemc/mods/sodium/client/render/chunk/compile/executor/ChunkBuilder.java).
+Their implementations are not included or translated. Their performance claims
+are not MaaGE measurements; no runtime improvement has been measured here.
+
 ## Player Presentation and Sprinting
 
 First-person blocks, extruded icons and the selected skin arm use a separate

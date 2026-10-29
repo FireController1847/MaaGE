@@ -40,7 +40,7 @@ struct maage_chunk {
     unsigned long generation_features[8];
 };
 maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output);
-maage_status maage_light_region_job(maage_chunk *columns[9], const maage_chunk *halo[25], const unsigned char dirty[9][8192], const maage_block_registry *blocks, const maage_job_token *token, maage_status_trace *trace);
+maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neighbors[4], const unsigned char dirty[8192], unsigned boundaries, const maage_block_registry *blocks, const maage_job_token *token, maage_status_trace *trace);
 maage_status maage_chunk_create(int x, int z, maage_chunk **output);
 maage_status maage_chunk_destroy(maage_chunk *chunk);
 size_t maage_chunk_cell(int x, int y, int z);
@@ -117,12 +117,9 @@ maage_status maage_generation_vegetation(maage_generation_context *context);
 maage_status maage_generation_structures(maage_generation_context *context);
 int maage_generation_spawn_clear(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z);
 int maage_generation_spawn_floor(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y);
-/* Neighbors are -X,+X,-Z,+Z, read-only. Newly needed air sections transfer via
- * added, including on failure; attach to the private result or destroy them. */
 /* All inputs are pinned immutable snapshots. Client retains copied CPU/GPU
  * geometry, never borrowed columns. Cancellation leaves partial output private. */
 maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace);
-maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks, const maage_chunk *neighbors[4], maage_section *added[16], const maage_job_token *token, maage_status_trace *trace);
 /* Owner-thread borrowed effective inputs for bounded presentation patches. */
 int maage_world_present_inputs(const maage_world *world, int x, int z, const maage_chunk **chunk, const maage_chunk *neighbors[8], const maage_block_registry **blocks, const maage_biome_registry **biomes);
 #endif
