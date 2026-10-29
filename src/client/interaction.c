@@ -307,7 +307,10 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
         visual->visible = 0;
         return result;
     }
-    if (snapshot->player.breaking_active && snapshot->player.break_progress > 0) {
+    if (prediction && prediction->targeting && prediction->progress > 0 && prediction->target.x == snapshot->player.target.x && prediction->target.y == snapshot->player.target.y && prediction->target.z == snapshot->player.target.z && prediction->target.state_id == snapshot->player.target.state_id) {
+        stage = (int) (prediction->progress * MAAGE_CLIENT_BREAK_STAGES) - 1;
+        if (stage >= MAAGE_CLIENT_BREAK_STAGES) stage = MAAGE_CLIENT_BREAK_STAGES - 1;
+    } else if (snapshot->player.breaking_active && snapshot->player.break_progress > 0) {
         stage = (int) (snapshot->player.break_progress * MAAGE_CLIENT_BREAK_STAGES) - 1;
         if (stage >= MAAGE_CLIENT_BREAK_STAGES) stage = MAAGE_CLIENT_BREAK_STAGES - 1;
     }

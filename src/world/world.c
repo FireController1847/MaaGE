@@ -1463,49 +1463,6 @@ maage_status maage_world_sample_camera(const maage_world *world, int x, int y, i
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
 
-maage_status maage_world_sample_neighborhood(const maage_world *world, int x, int y, int z, maage_world_neighborhood *sample) {
-    maage_world_observation observation;
-    unsigned long revisions[9];
-    int dx, dy, dz, i, changed;
-    if (!world || !sample || y < 0 || y >= MAAGE_WORLD_HEIGHT || x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
-    changed = !sample->valid || sample->x != x || sample->y != y || sample->z != z;
-    for (dz = -1; dz <= 1; ++dz)
-        for (dx = -1; dx <= 1; ++dx) {
-            i = dx + 1 + 3 * (dz + 1);
-            revisions[i] = maage_world_column_revision(world, maage_world_chunk_coordinate(x + dx), maage_world_chunk_coordinate(z + dz));
-            if (!revisions[i] || revisions[i] != sample->revisions[i]) changed = 1;
-        }
-    if (!changed) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SNAPSHOT, 0);
-    memset(sample, 0, sizeof(*sample));
-    sample->x = x;
-    sample->y = y;
-    sample->z = z;
-    memcpy(sample->revisions, revisions, sizeof(revisions));
-    sample->valid = 1;
-    for (dy = -1; dy <= 1; ++dy)
-        for (dz = -1; dz <= 1; ++dz)
-            for (dx = -1; dx <= 1; ++dx) {
-                i = dx + 1 + 3 * (dz + 1) + 9 * (dy + 1);
-                if (y + dy < 0) {
-                    sample->states[i] = MAAGE_STATE_BEDROCK;
-                    continue;
-                }
-                if (y + dy >= MAAGE_WORLD_HEIGHT) {
-                    sample->light[i] = 240;
-                    continue;
-                }
-                if (!maage_world_observe(world, x + dx, y + dy, z + dz, &observation) || !observation.light_available) sample->valid = 0;
-                sample->states[i] = maage_world_get(world, x + dx, y + dy, z + dz);
-                sample->light[i] = observation.light;
-            }
-    for (dz = -2; dz <= 2; ++dz)
-        for (dx = -2; dx <= 2; ++dx) {
-            if (!maage_world_observe(world, x + dx, y, z + dz, &observation)) (void) maage_world_observe(world, x, y, z, &observation);
-            sample->biomes[dx + 2 + 5 * (dz + 2)] = observation.biome_id;
-        }
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
-}
-
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision) {
     maage_world_slot *slot;
     if (!world) return 0;
@@ -2117,4 +2074,22 @@ maage_status maage_world_present_predictions(maage_world *world, const maage_blo
         memcpy(world->prediction_states, expected, count * sizeof(*expected));
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+}
+
+unsigned long maage_world_presentation_revision(const maage_world *world) {
+    return world ? world->clock : 0;
+}
+int maage_world_present_inputs(const maage_world *world, int x, int z, const maage_chunk **chunk, const maage_chunk *neighbors[8], const maage_block_registry **blocks, const maage_biome_registry **biomes) {
+    maage_world_slot *slot, *adjacent[8];
+    int side;
+    if (!world || !world->config.presentation_only) return 0;
+    slot = maage_world_find(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
+    if (!maage_world_complete(slot)) return 0;
+    *chunk = slot->data->chunk;
+    *blocks = world->config.registry;
+    *biomes = world->config.biomes;
+    maage_world_neighbors(world, slot->x, slot->z, adjacent);
+    for (side = 0; side < 8; ++side)
+        neighbors[side] = adjacent[side] ? adjacent[side]->data->chunk : NULL;
+    return 1;
 }

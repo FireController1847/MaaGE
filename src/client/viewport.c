@@ -158,8 +158,6 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
     for (i = 0; i < cache->capacity; ++i) {
         maage_render_mesh_destroy(cache->slots[i].prediction);
         maage_world_mesh_destroy(cache->slots[i].source);
-        maage_render_mesh_destroy(cache->slots[i].rollback);
-        maage_world_mesh_destroy(cache->slots[i].rollback_source);
         maage_render_mesh_destroy(cache->slots[i].mesh);
     }
     free(cache->slots);
@@ -234,8 +232,6 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
         if (cache->slots[i].used && (abs(cache->slots[i].x - center_x) > options->radius || abs(cache->slots[i].z - center_z) > options->radius)) {
             maage_render_mesh_destroy(cache->slots[i].prediction);
             maage_world_mesh_destroy(cache->slots[i].source);
-            maage_render_mesh_destroy(cache->slots[i].rollback);
-            maage_world_mesh_destroy(cache->slots[i].rollback_source);
             maage_render_mesh_destroy(cache->slots[i].mesh);
             memset(&cache->slots[i], 0, sizeof(cache->slots[i]));
             ++cache->generation;
@@ -310,14 +306,6 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
             }
         }
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-            if (update.predicted && !cache->slots[selected].rollback && cache->slots[selected].mesh) {
-                cache->slots[selected].rollback = cache->slots[selected].mesh;
-                cache->slots[selected].rollback_source = cache->slots[selected].source;
-                cache->slots[selected].rollback_revision = cache->slots[selected].revision;
-                cache->slots[selected].rollback_visual_revision = cache->slots[selected].visual_revision;
-                cache->slots[selected].mesh = NULL;
-                cache->slots[selected].source = NULL;
-            }
             maage_render_mesh_destroy(cache->slots[selected].mesh);
             cache->slots[selected].mesh = replacement;
             cache->slots[selected].used = 1;
@@ -1202,7 +1190,7 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, renderer, atlas, items, blocks, maage_content_biomes(content), visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, &command, trace);
+            operation = maage_client_prediction_update(&prediction, renderer, atlas, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, &command, trace);
             if (maage_status_failed(operation)) {
                 unsigned int prediction_index;
                 if (maage_status_is_fatal(operation) ||
@@ -1223,7 +1211,6 @@ choose_world:
                 maage_render_mesh_destroy(prediction.reveal);
                 prediction.reveal = NULL;
                 prediction.suspended = 1;
-                prediction.rollback_requested = 1;
                 prediction.targeting = 0;
                 ++prediction.generation;
                 operation = maage_world_present_predictions(visual_world, NULL, NULL, 0, prediction.generation);

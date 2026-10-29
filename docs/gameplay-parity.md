@@ -80,28 +80,30 @@ history. Prediction geometry timing ends at upload/submission, not display scano
 Local transport durations use one process monotonic clock; remote adapters must mark
 untranslated timestamps unavailable and report peer-local durations separately.
 
-The current critical gates are neighborhood light validity during prediction,
-neighbor mesh revision equality, light readiness before meshing, a single active
+The remaining scheduling gates are light readiness before meshing, a single active
 visual-light transaction, whole-halo epoch validation and completion-order uploads.
 These can postpone or reject usable geometry independently of Server block authority.
 Optional diagnostics expose those queues/dispositions; runtime latency remains unmeasured.
 
 ## Break Prediction and Swing
 
-Prediction is bounded Client presentation over copied numeric neighborhoods and
-owned meshes. It filters removed voxels and reconstructs exposed faces through
-shared meshing rules. It never predicts inventory, drops or sounds. Immediate
+Prediction is bounded Client presentation over expected numeric states and owned
+meshes. A deduplicated patch regenerates the affected 3x3x3 cells through the same
+face generator as ordinary meshes; old owner-cell geometry is filtered immediately.
+Block availability, rather than light readiness or neighboring GPU revisions, gates
+prediction. Leaves, ice and fluid neighbors use ordinary material/height rules. It never predicts inventory, drops or sounds. Immediate
 local overlays also invalidate visual light inputs. Confirmation retires overlays
 only after required authoritative revisions reach presentation; rejection restores
-correct inputs and retained geometry. Later authority supersedes an obsolete
-rollback base. Leaves, ice, opaque breaks beside fluids and unavailable/unlit
-neighborhoods retain conservative prediction exclusions.
+correct effective inputs and rebuilds the local patch immediately. Stable action IDs,
+ordered authority and presentation generations prevent old acknowledgments from
+retiring newer geometry. Unknown terrain remains obstructing; no authoritative
+inventory, drops or persistent world mutation is predicted.
 
 One Client timeline drives first- and third-person swings: six ticks long, eligible
 restart after three. Presses respond immediately; held mining requests follow
 20 TPS cadence, misses do not repeatedly punch air, and release lets the active
 swing finish. Attack echoes do not restart it. Successful placement has its own
-Server action observation. Mining progress remains authoritative; crack stages are
+Server action observation. Mining rules remain authoritative; local progress drives crack stages, which are
 `floor(progress * 10) - 1` and clear locally on release/target change. See
 [Visual Rendering](visual-fidelity.md) for hand projection and material behavior.
 
