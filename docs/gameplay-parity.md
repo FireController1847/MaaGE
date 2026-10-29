@@ -67,6 +67,12 @@ There is no render-loop job wait, global World lock or full-world relight.
 The Server independently schedules the same numerical solver for gameplay light.
 Growth, melting and survival defer when that cache is unavailable/stale. The Client
 samples its own light for player, hand, item entities, pickup effects and F3.
+Block, first-geometry, light-initialization, pending-light and GPU-ready states
+are separate. First geometry uses a roof-aware sky approximation until numerical
+light exists. Light queries distinguish calculated, retained/approximate and
+unavailable values; pending actor samples may use adjacent cached illumination.
+Approximations never enter propagation buffers, and calculated zero remains zero.
+Only changes in numeric opacity/emission dirty visual light.
 Day/night scales sky brightness in frame uniforms without relighting.
 
 ## Optional Pipeline Diagnostics
@@ -80,8 +86,8 @@ history. Prediction geometry timing ends at upload/submission, not display scano
 Local transport durations use one process monotonic clock; remote adapters must mark
 untranslated timestamps unavailable and report peer-local durations separately.
 
-The remaining scheduling gates are light readiness before meshing, a single active
-visual-light transaction, whole-halo epoch validation and completion-order uploads.
+The remaining scheduling gates are a single active visual-light transaction,
+whole-halo epoch validation and completion-order uploads.
 These can postpone or reject usable geometry independently of Server block authority.
 Optional diagnostics expose those queues/dispositions; runtime latency remains unmeasured.
 

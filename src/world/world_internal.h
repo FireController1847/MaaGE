@@ -47,6 +47,8 @@ size_t maage_chunk_cell(int x, int y, int z);
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z);
 maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_block_state_id state);
 unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z);
+/* Presentation-only approximation until a numerical cache exists. */
+unsigned char maage_chunk_presentation_light(const maage_chunk *chunk, const maage_block_registry *blocks, int x, int y, int z);
 /* Private/owner-edit columns only. Queue entries are unique per (kind,cell),
  * ordered by due time; the finite voxel domain bounds fluid pending work. */
 maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_scheduled_update *update);

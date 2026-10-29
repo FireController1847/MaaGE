@@ -43,6 +43,9 @@ The [Client replica](gameplay-parity.md) calculates visual skylight/emission and
 meshes. The mesher retains eight neighbor columns for smooth corner light, AO,
 biome colors and fluid heights; result tokens validate cardinal/diagonal revisions.
 There is no per-face allocation, name resolution or graphics dependency in World jobs.
+First geometry does not wait for final light. Meshes and actor samples share a
+roof-aware presentation approximation until numerical light is initialized;
+calculated darkness is distinct from missing/pending data.
 Nonlinear light response and warm emission are shared shader behavior. Plants and
 torches preserve direct sky; leaves attenuate by 1 and water/ice by 3. Day/night
 brightness changes do not trigger relighting or remeshing.

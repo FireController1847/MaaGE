@@ -65,7 +65,7 @@ static unsigned char maage_mesh_sample(const maage_block_registry *registry, con
     state = maage_block_registry_state(registry, maage_chunk_get(sample, x, y, z));
     block = state ? maage_block_registry_block(registry, state->block_id) : NULL;
     *occludes = block && block->opaque;
-    return maage_chunk_light(sample, x, y, z);
+    return maage_chunk_presentation_light(sample, registry, x, y, z);
 }
 
 static void maage_mesh_lighting(const maage_block_registry *registry, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int y, int z, unsigned int face, int boundary, int smooth, unsigned int emission, maage_mesh_illumination *output) {
@@ -73,7 +73,7 @@ static void maage_mesh_lighting(const maage_block_registry *registry, const maag
     int n[3], first[3], second[3], corner[3], axis, u, v, i, j;
     int center_opaque, side_a, side_b, diagonal_opaque;
     float ao;
-    own = maage_chunk_light(chunk, x, y, z);
+    own = maage_chunk_presentation_light(chunk, registry, x, y, z);
     n[0] = x;
     n[1] = y;
     n[2] = z;

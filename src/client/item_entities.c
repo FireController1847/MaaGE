@@ -135,7 +135,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     unsigned int copy, copies, axis, animation;
     int collected;
     int notice;
-    unsigned char light = 240;
+    unsigned char light = 64;
     unsigned long random;
     double position[3], phase, rotation, scale, offset[3], dx, dy, dz, age, sine, cosine, alpha;
     if (!view || !session || !snapshot || !eye || (additional_count && !additional)) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
@@ -222,8 +222,8 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
             draw->transform[15] = 1;
             for (axis = 0; axis < 3; ++axis)
                 draw->transform[12 + axis] = (float) (position[axis] + offset[axis]);
-            light = 240;
-            maage_world_present_light(visual_world, (int) floor(position[0]), (int) floor(position[1]), (int) floor(position[2]), &light);
+            light = snapshot->observation.light_available ? snapshot->observation.light : 64;
+            (void) maage_world_present_light(visual_world, (int) floor(position[0]), (int) floor(position[1]), (int) floor(position[2]), &light);
             draw->sky_light = (float) (light >> 4) / 15;
             draw->block_light = (float) (light & 15) / 15;
         }
@@ -267,8 +267,8 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
             if (axis == 1) source += 0.1 + sin(rotation + (double) view->pickups[animation].pickup.age / 20) * 0.1 + (item->model == MAAGE_ITEM_MODEL_BLOCK ? 0.125 : 0.25);
             draw->transform[12 + axis] = (float) (source + (target - source) * phase);
         }
-        light = 240;
-        maage_world_present_light(visual_world, (int) floor(draw->transform[12]), (int) floor(draw->transform[13]), (int) floor(draw->transform[14]), &light);
+        light = snapshot->observation.light_available ? snapshot->observation.light : 64;
+        (void) maage_world_present_light(visual_world, (int) floor(draw->transform[12]), (int) floor(draw->transform[13]), (int) floor(draw->transform[14]), &light);
         draw->sky_light = (float) (light >> 4) / 15;
         draw->block_light = (float) (light & 15) / 15;
     }

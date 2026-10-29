@@ -102,3 +102,16 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
+
+unsigned char maage_chunk_presentation_light(const maage_chunk *chunk, const maage_block_registry *blocks, int x, int y, int z) {
+    const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    if (y >= 256) return 240;
+    if (y < 0) return 0;
+    if (chunk->direct_sky) return maage_chunk_light(chunk, x, y, z);
+    state = maage_block_registry_state(blocks, maage_chunk_get(chunk, x, y, z));
+    block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    /* This is never stored in numerical light buffers. Roofed terrain has a
+     * modest sky approximation; calculated cave darkness is left untouched. */
+    return (unsigned char) ((y >= chunk->heightmap[z * 16 + x] ? 240 : 64) | (block ? block->emitted_light : 0));
+}

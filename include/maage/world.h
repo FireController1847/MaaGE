@@ -222,6 +222,8 @@ maage_status maage_world_tick(maage_world *world);
 maage_status maage_world_set_random_tick_speed(maage_world *world, unsigned int speed);
 /* Replica presentation query retains its last initialized visual light while
  * a replacement is running. Initial/unavailable columns return NOOP. */
+/* SUCCESS: calculated; PARTIAL: retained/approximate pending light; NOOP:
+ * unavailable terrain (output unchanged). Approximation never enters solver data. */
 maage_status maage_world_present_light(const maage_world *world, int x, int y, int z, unsigned char *light);
 /* Allocation-free gameplay query. NOOP means unavailable/currently relighting;
  * never interpret it as darkness. Y>=256 clamps to 255. */

@@ -1271,9 +1271,11 @@ choose_world:
             visual_snapshot.player.target.z != latest.player.breaking.z)
             visual_snapshot.player.breaking_active = 0;
         {
-            unsigned char visual_light = 240;
+            unsigned char visual_light = 64;
+            maage_status light_result;
             visual_snapshot.observation.light_available = 0;
-            if (maage_status_code(maage_world_present_light(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &visual_light)) == MAAGE_STATUS_SUCCESS) {
+            light_result = maage_world_present_light(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &visual_light);
+            if (maage_status_code(light_result) == MAAGE_STATUS_SUCCESS || maage_status_code(light_result) == MAAGE_STATUS_PARTIAL) {
                 visual_snapshot.observation.light = visual_light;
                 visual_snapshot.observation.light_available = 1;
                 visual_snapshot.has_observation = 1;
@@ -1331,7 +1333,7 @@ choose_world:
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_client_environment_update(environment_view, renderer, &latest, maage_client_ui_width(ui), maage_client_ui_height(ui), matrix);
             if (maage_status_failed(rendered)) goto done;
-            rendered = maage_client_item_entities_update(item_entities, session, visual_world, &latest, alpha, eye, now, player_view.draws, player_view.count, trace);
+            rendered = maage_client_item_entities_update(item_entities, session, visual_world, &visual_snapshot, alpha, eye, now, player_view.draws, player_view.count, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_renderer_draw_frame(renderer, cache.draws, draw_count, matrix, ui_draw, trace);
