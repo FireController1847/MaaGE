@@ -110,7 +110,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Headless Server requires no Client, GUI, display, windowing, audio device or graphics.
   A future administration GUI is a frontend inside that same executable; defer it.
 - Client owns input, UI, camera, audio and visual presentation. It consumes copied
-  snapshots/events, separate entity/collision mailboxes and revisioned block packets.
+  snapshots/events, an entity mailbox and revisioned block packets.
   Its presentation-only World replica reuses shared chunks/light/meshing/Jobs and cannot
   generate, simulate or save. It never reads or mutates the live Server World.
 
@@ -193,8 +193,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Unload invalidates requests; cancellation is cooperative. Preserve fixed-step ordering.
 - Server gameplay light and Client visual light use one numerical solver with separate
   state/schedules. Transfer initial blocks/biomes, then FIFO deltas against acknowledged
-  block revisions, never light arrays or Server meshes. Backpressure retains unsent
-  states/bases. Expected-state prediction uses immediate bounded cell geometry; rejection
+  block revisions, never light arrays or Server meshes. Dirty-cell transfer masks and
+  backpressure retain unsent states/bases. Ordered interest removals release replica
+  baselines only after all earlier packets; account for bounded in-flight residency. Expected-state prediction uses immediate bounded cell geometry; rejection
   rebuilds effective state. Independent light jobs own one output column and immutable
   facing boundary inputs, with dirty-cell removal/addition and cached direct-sky shafts.
   Rebase light onto newer blocks, retain pending work and requeue changed boundaries;
@@ -277,12 +278,14 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   local activation audio before blocking world teardown. Ordinary jumps, landings and
   slot changes are silent; sound events distinguish steps/mining/destruction/placement.
   Thunder requires lightning; preserve bounded expiry and epoch/sequence rejection.
+  Ambient display sampling belongs to the Client replica on a bounded local cadence;
+  cave effects require calculated darkness, while gameplay sounds stay Server-owned.
 - Register all music IDs; decode/upload only the selected track when starting and release
   after stop. Decoded-memory bounds must not limit registration or masquerade as NOT_FOUND.
 - F5 transiently cycles First/Back/Front on captured press edges. Share interpolated feet,
   skin cuboids/UVs/poses and a four-block obstruction-limited boom. Targeting/audio remain
-  at the authoritative eye. Copied 11x11x11 collision volumes update on cell/revision
-  changes, never per-frame Server requests; unknown terrain obstructs. Borrow cached part/
+  at the authoritative eye. Client replica 11x11x11 camera samples update on cell/geometry-epoch
+  changes, including predictions; unknown terrain obstructs. Borrow cached part/
   item meshes, clear instances before destruction and never rebuild on F5. One Client
   six-tick swing timeline, restart eligible at three, serves both perspectives without
   attack-echo restarts. See [perspectives](docs/third-person.md).

@@ -11,7 +11,7 @@ extern "C" {
 
 /*
  * Presentation-thread environmental audio. Catalog and device are borrowed;
- * destroy the scene before either. Snapshot reads must copy Server-owned data.
+ * destroy the scene before either. World observations read only the Client-owned replica during update.
  */
 typedef struct maage_client_audio_scene maage_client_audio_scene;
 
@@ -23,7 +23,7 @@ enum {
     MAAGE_AUDIO_SCENE_BLOCKS = 4
 };
 
-/* Bounded source candidates copied from the owner-thread world sampler.
+/* Bounded source candidates sampled from the Client replica.
  * Flowing water requires metadata 1..7; lava requires an exposed air surface.
  * These are observations, never Client-authoritative world mutations. */
 typedef struct maage_client_audio_scene_observation {
@@ -50,7 +50,7 @@ typedef unsigned long maage_client_audio_scene_voice;
  * The Audio service owns final category/mute settings.
  */
 typedef struct maage_client_audio_scene_ports {
-    maage_status (*read_snapshot)(void *context, const maage_session_snapshot *snapshot, const double listener[3], maage_client_audio_scene_observation *observation);
+    maage_status (*play_event)(void *catalog, void *audio, const maage_sound_event *event, maage_status_trace *trace);
     maage_status (*resolve_sound)(void *context, const void *catalog, const char *logical_asset_path, maage_client_audio_scene_sound_id *sound);
     int (*sound_can_loop)(void *context, const void *catalog, maage_client_audio_scene_sound_id sound);
     maage_status (*play_sound)(void *context, void *audio, maage_client_audio_scene_sound_id sound, unsigned int category, const double *position, double gain, double pitch, int loop, maage_client_audio_scene_voice *voice);
@@ -68,7 +68,7 @@ typedef struct maage_client_audio_scene_ports {
 maage_status maage_client_audio_scene_create(const void *catalog, void *audio, maage_client_audio_scene **output, maage_status_trace *trace);
 /* Resolves logical 1.7.10 assets without decoding them. Exactly once. */
 maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene, const maage_client_audio_scene_ports *ports, void *context, maage_status_trace *trace);
-maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, const maage_session_snapshot *snapshot, const double listener_position[3], double now, maage_status_trace *trace);
+maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, const maage_session_snapshot *snapshot, const maage_world *visual, const double listener_position[3], double now, maage_status_trace *trace);
 maage_status maage_client_audio_scene_pause(maage_client_audio_scene *scene, int paused);
 /* False avoids loading/playing music when its category is disabled. */
 maage_status maage_client_audio_scene_music_pause(maage_client_audio_scene *scene, int paused);

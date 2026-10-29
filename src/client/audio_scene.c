@@ -85,7 +85,8 @@ struct maage_client_audio_scene {
     int bound, paused, clock_ready, failure_logged, music_mode, has_world;
     unsigned long failure_count;
     double last_now, next_music, music_paused_since;
-    unsigned long session_epoch, world_epoch, observation_tick;
+    unsigned long session_epoch, world_epoch, cave_ticks, effect_sequence;
+    double next_observation;
     unsigned int rain_counter;
 };
 
@@ -294,7 +295,7 @@ maage_status maage_client_audio_scene_create(const void *catalog, void *audio, m
 maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene, const maage_client_audio_scene_ports *ports, void *context, maage_status_trace *trace) {
     maage_status r, first = sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
     int i, missing = 0;
-    if (!scene || !ports || !ports->read_snapshot || !ports->resolve_sound ||
+    if (!scene || !ports || !ports->play_event || !ports->resolve_sound ||
         !ports->play_sound || !ports->music_prepare || !ports->music_play ||
         !ports->music_release || !ports->voice_running || !ports->voice_gain ||
         !ports->voice_pause || !ports->voice_stop)
@@ -320,7 +321,112 @@ maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene, cons
     }
     return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_INITIALIZE);
 }
-maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, const maage_session_snapshot *snapshot, const double listener_position[3], double now, maage_status_trace *trace) {
+static maage_status sc_observe(maage_client_audio_scene *scene, const maage_world *visual, const maage_session_snapshot *snapshot, const double listener[3], maage_client_audio_scene_observation *audio, maage_status_trace *trace) {
+    const maage_block_registry *registry = maage_world_registry(visual);
+    const maage_block_state_definition *state, *above;
+    const maage_block_definition *block;
+    maage_world_observation observation, local;
+    maage_environment_state environment;
+    maage_sound_event sound;
+    double position[3], dx, dy, dz, rain;
+    int px, py, pz, x, y, z, cx, cz, i, samples;
+    unsigned long water_count = 0, lava_count = 0, rain_count = 0;
+    memset(audio, 0, sizeof(*audio));
+    if (!visual) return sc_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SNAPSHOT);
+    px = (int) floor(listener[0]);
+    py = (int) floor(listener[1] - MAAGE_PLAYER_EYE_HEIGHT);
+    pz = (int) floor(listener[2]);
+    /* Copy bounded local display trial counts and reservoir-selected
+     * environmental positions for Client playback. */
+    for (i = 0; i < 1000; ++i) {
+        x = px + (int) sc_bounded(scene, 16) - (int) sc_bounded(scene, 16);
+        y = py + (int) sc_bounded(scene, 16) - (int) sc_bounded(scene, 16);
+        z = pz + (int) sc_bounded(scene, 16) - (int) sc_bounded(scene, 16);
+        if (y < 0 || y >= MAAGE_WORLD_HEIGHT) continue;
+        state = maage_block_registry_state(registry, maage_world_get(visual, x, y, z));
+        if (!state) continue;
+        if (state->fluid_kind == MAAGE_FLUID_WATER && state->fluid_level > 0 && state->fluid_level < 8) {
+            if (sc_bounded(scene, ++water_count) == 0) {
+                audio->flowing_water_available = 1;
+                audio->water_position[0] = x + 0.5;
+                audio->water_position[1] = y + 0.5;
+                audio->water_position[2] = z + 0.5;
+            }
+        } else if (state->fluid_kind == MAAGE_FLUID_LAVA) {
+            above = maage_block_registry_state(registry, maage_world_get(visual, x, y + 1, z));
+            if (above && above->block_id == MAAGE_BLOCK_AIR && sc_bounded(scene, ++lava_count) == 0) {
+                audio->lava_available = 1;
+                audio->lava_position[0] = x;
+                audio->lava_position[1] = y;
+                audio->lava_position[2] = z;
+            }
+        }
+    }
+    audio->water_samples = (unsigned int) water_count;
+    audio->lava_samples = (unsigned int) lava_count;
+    environment = snapshot->environment;
+    audio->rain_intensity = environment.rain_intensity;
+    rain = environment.rain_intensity;
+    samples = (int) (100.0 * rain * rain);
+    memset(&local, 0, sizeof(local));
+    (void) maage_world_observe(visual, px, py, pz, &local);
+    /* Sample real precipitation surfaces,
+     * reject snow/desert/lava/air, and reservoir-select one impact. */
+    for (i = 0; i < samples; ++i) {
+        x = px + (int) sc_bounded(scene, 10) - (int) sc_bounded(scene, 10);
+        z = pz + (int) sc_bounded(scene, 10) - (int) sc_bounded(scene, 10);
+        if (!maage_world_observe(visual, x, py, z, &observation)) continue;
+        y = observation.precipitation_height;
+        if (y < 1 || y >= MAAGE_WORLD_HEIGHT || y < py - 10 || y > py + 10) continue;
+        if (!maage_world_observe(visual, x, y, z, &observation) || observation.rainfall <= 0.0 || observation.temperature < 0.15) continue;
+        state = maage_block_registry_state(registry, maage_world_get(visual, x, y - 1, z));
+        block = state ? maage_block_registry_block(registry, state->block_id) : NULL;
+        if (!block || state->block_id == MAAGE_BLOCK_AIR || state->fluid_kind == MAAGE_FLUID_LAVA) continue;
+        if (sc_bounded(scene, ++rain_count) != 0) continue;
+        audio->rain_available = 1;
+        audio->rain_position[0] = x + sc_bounded(scene, 65536) / 65536.0;
+        audio->rain_position[1] = y + 0.1 - block->selection_shape.minimum[1];
+        audio->rain_position[2] = z + sc_bounded(scene, 65536) / 65536.0;
+    }
+    audio->rain_above = audio->rain_available && audio->rain_position[1] > listener[1] - MAAGE_PLAYER_EYE_HEIGHT + 1.0 && local.precipitation_height > py;
+    /* Cave ambience requires real dark air, 2..8 blocks from the
+     * player, and a 6000..17999 tick cooldown. Only nearby columns can pass
+     * that distance predicate, so no scan of all loaded World columns. */
+    if (scene->cave_ticks) {
+        --scene->cave_ticks;
+        return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
+    }
+    for (cx = -1; cx <= 1; ++cx)
+        for (cz = -1; cz <= 1; ++cz) {
+            x = (maage_world_chunk_coordinate(px) + cx) * 16 + (int) sc_bounded(scene, 16);
+            y = (int) sc_bounded(scene, 256);
+            z = (maage_world_chunk_coordinate(pz) + cz) * 16 + (int) sc_bounded(scene, 16);
+            position[0] = x + 0.5;
+            position[1] = y + 0.5;
+            position[2] = z + 0.5;
+            dx = position[0] - listener[0];
+            dy = position[1] - listener[1];
+            dz = position[2] - listener[2];
+            if (dx * dx + dy * dy + dz * dz <= 4.0 || dx * dx + dy * dy + dz * dz > 64.0) continue;
+            if (maage_world_get(visual, x, y, z) != MAAGE_STATE_AIR ||
+                !maage_world_observe(visual, x, y, z, &observation) ||
+                maage_status_code(maage_world_present_light(visual, x, y, z, &observation.light)) != MAAGE_STATUS_SUCCESS || (observation.light >> 4) != 0 ||
+                (observation.light & 15) > sc_bounded(scene, 8)) continue;
+            memset(&sound, 0, sizeof(sound));
+            sound.event_id = MAAGE_SOUND_CAVE_AMBIENT;
+            sound.material = MAAGE_MATERIAL_DEFAULT;
+            sound.tick = snapshot->tick;
+            sound.sequence = ++scene->effect_sequence;
+            memcpy(sound.position, position, sizeof(position));
+            sound.intensity = 1;
+            sound.pitch = 0.8 + sc_bounded(scene, 65536) / 65536.0 * 0.2;
+            scene->cave_ticks = 6000UL + sc_bounded(scene, 12000);
+            return scene->ports.play_event((void *) scene->catalog, scene->audio, &sound, trace);
+        }
+    return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
+}
+
+maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, const maage_session_snapshot *snapshot, const maage_world *visual, const double listener_position[3], double now, maage_status_trace *trace) {
     maage_client_audio_scene_observation obs;
     maage_status r;
     int music_mode, above;
@@ -367,16 +473,15 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, co
     if (!scene->has_world) {
         scene->session_epoch = snapshot->session_epoch;
         scene->world_epoch = snapshot->world_epoch;
-        scene->observation_tick = snapshot->tick - 1UL;
+        scene->next_observation = now;
+        scene->cave_ticks = sc_bounded(scene, 12000);
         scene->has_world = 1;
     }
-    /* Ambient display opportunities follow copied 20 TPS observations once.
-     * Coalesced snapshots intentionally omit obsolete opportunities. There is
-     * no fabricated cave/thunder timer: the Server owns those world events. */
-    if (!scene->paused && scene->observation_tick != snapshot->tick) {
-        scene->observation_tick = snapshot->tick;
-        memset(&obs, 0, sizeof(obs));
-        r = scene->ports.read_snapshot(scene->context, snapshot, listener_position, &obs);
+    /* Cosmetic opportunities use a bounded local cadence, independently of
+     * coalesced Server snapshots. Pause never accumulates catch-up work. */
+    if (!scene->paused && now >= scene->next_observation) {
+        scene->next_observation = now + 0.05;
+        r = sc_observe(scene, visual, snapshot, listener_position, &obs, trace);
         if (maage_status_failed(r)) return MAAGE_STATUS_PROPAGATE(trace, r, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SNAPSHOT);
         if (obs.water_samples > 1000U || obs.lava_samples > 1000U) return sc_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SNAPSHOT);
         if (obs.rain_available && obs.rain_intensity > 0.0 && sc_bounded(scene, 3UL) < scene->rain_counter++) {
@@ -385,8 +490,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, co
             sc_effect(scene, SC_RAIN_BEGIN, SC_RAIN_END, MAAGE_AUDIO_SCENE_WEATHER,
                       above ? 0.1 : 0.2, above ? 0.5 : 1.0, obs.rain_position, trace);
         }
-        /* Each sampled block has an independent trial. The Server aggregates
-         * positions and counts without adding per-event transport. */
+        /* Each sampled block has an independent local display trial. */
         if (obs.flowing_water_available)
             for (sample = 0; sample < obs.water_samples; ++sample) {
                 if (sc_bounded(scene, 64UL) == 0) sc_effect(scene, SC_WATER, SC_WATER + 1, MAAGE_AUDIO_SCENE_BLOCKS, sc_span(scene, 0.75, 1.0), sc_span(scene, 0.5, 1.5), obs.water_position, trace);

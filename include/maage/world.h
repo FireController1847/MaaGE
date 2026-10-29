@@ -155,7 +155,7 @@ typedef struct maage_world_target {
 typedef struct maage_block_position {
     int x, y, z;
 } maage_block_position;
-/* Bounded owner-sampled camera collision volume. Zero column revisions mean
+/* Bounded replica-owner camera collision volume. Zero column revisions mean
  * unavailable terrain, never confirmed air. No borrowed World storage. */
 #define MAAGE_CAMERA_RADIUS 5
 #define MAAGE_CAMERA_EDGE 11
@@ -177,6 +177,7 @@ maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_b
 maage_status maage_world_mesh_patch(const maage_world *replica, const maage_block_position *centers, size_t count, maage_leaves_mode leaves, maage_world_mesh **output, maage_status_trace *trace);
 unsigned long maage_world_presentation_revision(const maage_world *replica);
 /* Owned numeric state transfer; no light, scheduling, entities or file data.
+ * Ordered unloads retire an exact base after all preceding packets.
  * base_revision==0 replaces a complete column (unlisted cells are air).
  * Otherwise cells are deltas against exactly base_revision. */
 typedef struct maage_column_cell {
@@ -186,12 +187,14 @@ typedef struct maage_column_cell {
 typedef struct maage_column_update {
     int x, z;
     unsigned long revision, base_revision;
+    int unload; /* Ordered interest removal; no cells/biomes, exact acknowledged base. */
     size_t count;
     maage_column_cell *cells;
     maage_biome_id *biomes; /* 256 entries on complete publications only */
 } maage_column_update;
 maage_status maage_world_next_column(maage_world *world, maage_column_update **output);
-maage_status maage_world_ack_column(maage_world *world, int x, int z, unsigned long revision);
+/* Called after ownership transfer; reads copied identity fields only. */
+maage_status maage_world_ack_column(maage_world *world, const maage_column_update *update);
 maage_status maage_column_update_destroy(maage_column_update *update);
 maage_status maage_world_apply_column(maage_world *replica, const maage_column_update *update);
 /* Presentation overlay over the replica's independently retained authority.

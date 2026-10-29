@@ -326,7 +326,7 @@ maage_status maage_client_audio_service_reset_world(maage_client_audio_service *
     return first_failure;
 }
 
-maage_status maage_client_audio_service_update(maage_client_audio_service *service, const maage_session_snapshot *session_snapshot, const double listener_position[3], const double listener_forward[3], double now, maage_status_trace *trace) {
+maage_status maage_client_audio_service_update(maage_client_audio_service *service, const maage_session_snapshot *session_snapshot, const maage_world *visual, const double listener_position[3], const double listener_forward[3], double now, maage_status_trace *trace) {
     unsigned int processed;
     maage_sound_event event;
     maage_status result, first_failure;
@@ -350,7 +350,7 @@ maage_status maage_client_audio_service_update(maage_client_audio_service *servi
         }
     }
     if (service->scene && service->api.scene_update) {
-        result = service->api.scene_update(service->scene, session_snapshot, listener_position, listener_forward, now, trace);
+        result = service->api.scene_update(service->scene, session_snapshot, visual, listener_position, listener_forward, now, trace);
         if (maage_status_failed(result)) {
             if (!maage_status_failed(first_failure)) first_failure = result;
             maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_UPDATE, result, trace, "Environmental sound update failed; ordinary sounds continue.");

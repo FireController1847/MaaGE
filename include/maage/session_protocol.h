@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 11U
+#define MAAGE_SESSION_PROTOCOL_VERSION 12U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -126,15 +126,6 @@ typedef struct maage_session_player_view {
     double swing; /* Authoritative remaining six-tick arm swing, normalized 0..1. */
 } maage_session_player_view;
 
-/* Owner-sampled soundscape candidates. No Client reads of live World data. */
-typedef struct maage_session_audio_observation {
-    int rain_available, rain_above;
-    double rain_position[3];
-    int flowing_water_available, lava_available;
-    unsigned int water_samples, lava_samples; /* Matching trials among 1000 display samples. */
-    double water_position[3], lava_position[3];
-} maage_session_audio_observation;
-
 typedef struct maage_session_snapshot {
     unsigned int protocol_version;
     unsigned long session_epoch, world_epoch;
@@ -145,7 +136,6 @@ typedef struct maage_session_snapshot {
     maage_environment_state environment;
     int has_observation;
     maage_world_observation observation;
-    maage_session_audio_observation audio_observation;
     maage_world_stats world_stats;
 } maage_session_snapshot;
 
@@ -158,14 +148,6 @@ typedef struct maage_session_entities {
     maage_entity *entities;
     size_t count;
 } maage_session_entities;
-
-/* Latest collision publication replaces its predecessor only when the sampled
- * cell or footprint column revisions change, independently of camera mode. */
-typedef struct maage_session_collision {
-    unsigned int protocol_version;
-    unsigned long session_epoch, world_epoch, sequence;
-    maage_world_camera_sample sample;
-} maage_session_collision;
 
 typedef enum maage_session_event_kind {
     MAAGE_EVENT_SOUND = 1,

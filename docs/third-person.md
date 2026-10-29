@@ -26,14 +26,13 @@ The final camera matrix drives the world and environment/sky in the same frame.
 Targeting, mining prediction, reach and positional audio retain the player's eye
 and look. A distant camera cannot mine around a wall.
 
-## Collision publication
+## Local Collision Samples
 
-World samples an 11x11x11 block-state volume around the owner's eye cell and the
-four footprint column revisions. Only a changed center or revision refreshes it.
-A separate latest-value Session mailbox copies this bounded volume; the Client
-retains it and rejects stale sequence/epoch data. No World pointer, worker buffer,
-render-loop I/O, global World lock or frame-driven Server request is involved.
-The sampler also runs during the existing paused publication pump.
+The Client samples an 11x11x11 block-state volume from its effective replica around
+the interpolated eye cell. Four footprint geometry epochs include predictions and
+corrections; only a changed center or epoch refreshes it. This presentation cache
+uses neither a Session collision mailbox nor any Server sampling. It continues
+while paused as replica updates arrive, without I/O, worker waits or a World lock.
 
 Local DDA traversal checks immutable numeric definitions' solid collision AABBs.
 A center ray and eight corner rays shorten either camera boom.

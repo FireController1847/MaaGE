@@ -147,7 +147,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (audio) {
             maage_client_ui_get_options(ui, &options);
             (void) maage_client_audio_service_apply_options(audio, &options);
-            (void) maage_client_audio_service_update(audio, NULL, menu_listener, menu_forward, start, NULL);
+            (void) maage_client_audio_service_update(audio, NULL, NULL, menu_listener, menu_forward, start, NULL);
         }
         if (f->busy && maage_status_code(maage_jobs_poll(f->jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
             f->busy = 0;

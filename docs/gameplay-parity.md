@@ -45,9 +45,15 @@ Modal screens release capture, and closure restores it when appropriate.
 
 The Server publishes owned numeric block/biome columns initially, then changed
 cells against exact acknowledged block revisions. Per-column FIFO never coalesces away
-a required delta base; backpressure retains unsent state. Leaving interest releases
-the Server's delta base so reentry receives a complete publication. Packets contain
-no lighting arrays, scheduled work or visual meshes. Remote encoding is not implemented.
+a required delta base; backpressure retains unsent state and changed-cell bits.
+Subsequent packets enumerate deduplicated mutated cells rather than comparing every
+section. A successful queue transfer advances the producer base only after the
+packet owns all necessary state. Ordered unload packets close an interest lifetime;
+the replica retains bases until that removal arrives. Reentry starts with a complete
+column. Initial local capacity covers Server residency plus bounded packets in flight;
+remote transports must negotiate an equivalent bound. Packets contain no light arrays,
+scheduled work, camera samples, ambient candidates or visual meshes. Protocol is 12;
+remote encoding is not implemented.
 
 The presentation-only World replica reuses numeric chunks, immutable snapshots,
 registries, Jobs, light propagation and CPU meshing. It cannot generate, simulate,
@@ -104,6 +110,13 @@ untranslated timestamps unavailable and report peer-local durations separately.
 Diagnostics distinguish block availability, light initialization/refinement, mesh
 work, upload readiness and stale/cancelled dispositions. Runtime latency remains
 unmeasured; submitted geometry timing does not establish display latency.
+
+Camera obstruction samples come from the effective Client replica and refresh
+only on eye-cell or geometry-epoch changes. Environmental water/lava/rain and cave
+sound opportunities also sample that replica on a bounded local 20 Hz cadence;
+paused presentation accumulates no catch-up work. Missing data is skipped, and cave
+ambience requires calculated darkness. Gameplay impacts, pickups, damage and thunder
+remain authoritative events. No cosmetic World scan runs on the Server owner.
 
 ## Break Prediction and Swing
 

@@ -118,6 +118,10 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         ++prediction->generation;
     }
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i) {
+        if (prediction->entries[i].active && !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(prediction->entries[i].target.x), maage_world_chunk_coordinate(prediction->entries[i].target.z))) {
+            prediction->entries[i].active = 0;
+            ++prediction->generation;
+        }
         if (prediction->entries[i].active && prediction->entries[i].confirmed) {
             ready = 1;
             for (dz = -1; dz <= 1; ++dz)
@@ -127,7 +131,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                     index = (unsigned int) (dx + 1 + 3 * (dz + 1));
                     if (prediction->entries[i].confirmed > 0 && maage_world_column_revision(visual, x, z) < prediction->entries[i].revisions[index]) ready = 0;
                     column = maage_prediction_column(meshes, capacity, x, z);
-                    if (column && (column->presentation_generation < prediction->entries[i].generation || (prediction->entries[i].confirmed > 0 && column->revision < prediction->entries[i].revisions[index]))) ready = 0;
+                    if (column && column->presentation_generation < prediction->entries[i].generation) ready = 0;
                 }
             for (dz = maage_world_chunk_coordinate(prediction->entries[i].target.z - 3); dz <= maage_world_chunk_coordinate(prediction->entries[i].target.z + 3); ++dz)
                 for (dx = maage_world_chunk_coordinate(prediction->entries[i].target.x - 3); dx <= maage_world_chunk_coordinate(prediction->entries[i].target.x + 3); ++dx) {

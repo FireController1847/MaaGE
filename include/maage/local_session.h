@@ -10,7 +10,7 @@ extern "C" {
 typedef struct maage_local_session maage_local_session;
 
 typedef struct maage_local_session_backlog {
-    size_t commands, events, columns;
+    size_t commands, events, columns, column_capacity;
 } maage_local_session_backlog;
 /* Bounded counters only; no borrowed queue data or allocations. */
 maage_status maage_local_session_get_backlog(maage_local_session *session, maage_local_session_backlog *backlog);
@@ -47,10 +47,6 @@ maage_status maage_local_session_take_column(maage_local_session *session, int c
  * No Server/World-owned memory is exposed. Caller frees taken arrays. */
 maage_status maage_local_session_offer_entities(maage_local_session *session, maage_session_entities *entities);
 maage_status maage_local_session_take_entities(maage_local_session *session, maage_session_entities *entities);
-/* Fixed-size latest mailbox. Take copies a publication once; the Client keeps
- * it until a newer epoch/revision arrives. Never a per-frame Server request. */
-maage_status maage_local_session_publish_collision(maage_local_session *session, const maage_session_collision *collision);
-maage_status maage_local_session_take_collision(maage_local_session *session, maage_session_collision *collision);
 /* Close rejects new writes, broadcasts wakeups and preserves queued data for
  * draining. Empty reads after close return INVALID_STATE, not NOOP. */
 maage_status maage_local_session_close(maage_local_session *session);
