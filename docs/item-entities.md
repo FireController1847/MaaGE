@@ -10,7 +10,7 @@ test, benchmark, runtime validation or GitHub Actions was executed.
 monotonic 32-bit identities, separate from entity type IDs and item/block IDs.
 Records carry a numeric type, typed item-stack payload, feet position, previous
 authoritative position, velocity in blocks/tick, grounded contact, active age,
-pickup delay and copied light. The current entity type is an item; mobs and AI
+pickup delay. Presentation light is sampled from the Client replica. The current entity type is an item; mobs and AI
 are outside this change.
 
 The Server advances entities once per unpaused 20 TPS step. The player and items

@@ -229,7 +229,8 @@ static maage_status maage_metal_compile_pipeline(maage_renderer *renderer,
     NSError *error = nil;
     static const MTLBlendFactor factors[] = {
         MTLBlendFactorOne, MTLBlendFactorSourceAlpha, MTLBlendFactorOneMinusSourceAlpha,
-        MTLBlendFactorSourceColor, MTLBlendFactorDestinationColor
+        MTLBlendFactorSourceColor, MTLBlendFactorDestinationColor,
+        MTLBlendFactorOneMinusSourceColor,MTLBlendFactorOneMinusDestinationColor
     };
     const maage_render_pipeline_state *state = &maage_render_pipeline_states[mode];
     int ui = state->ui || state->fullscreen;
@@ -528,18 +529,23 @@ static void maage_metal_draw_ui(maage_metal_renderer *native,
     const maage_render_ui_data *batch, size_t first, size_t count, int panorama)
 {
     maage_render_uniforms uniforms;
+    maage_render_ui_segment segments[3];
+    unsigned int n,segment_count;
     if (!batch || !count) return;
+    segment_count=maage_render_ui_segments(batch,first,count,segments);
     maage_render_ui_uniforms(batch, &uniforms);
-    [encoder setRenderPipelineState:native->pipelines[panorama ? MAAGE_RENDER_UI :
-        MAAGE_RENDER_UI + batch->blend]];
     [encoder setDepthStencilState:nil];
     [encoder setCullMode:MTLCullModeNone];
     [encoder setVertexBuffer:native->ui_vertices[slot][layer] offset:0 atIndex:0];
     [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
     [encoder setFragmentTexture:(id<MTLTexture>)batch->texture->platform atIndex:0];
-    [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:count
-        indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][layer]
-        indexBufferOffset:first * sizeof(unsigned int)];
+    for(n=0;n<segment_count;++n) {
+        [encoder setRenderPipelineState:native->pipelines[MAAGE_RENDER_UI+
+            (panorama?MAAGE_RENDER_BLEND_ALPHA:segments[n].blend)]];
+        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:segments[n].count
+            indexType:MTLIndexTypeUInt32 indexBuffer:native->ui_indices[slot][layer]
+            indexBufferOffset:segments[n].first*sizeof(unsigned int)];
+    }
 }
 static maage_status maage_metal_frame(maage_renderer *renderer, const maage_window_state *state,
     const maage_render_frame_plan *plan)

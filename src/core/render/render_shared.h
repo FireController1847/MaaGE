@@ -25,14 +25,18 @@ typedef struct maage_render_ordered_mesh {
 } maage_render_ordered_mesh;
 enum {
     MAAGE_RENDER_SOLID, MAAGE_RENDER_TRANSLUCENT, MAAGE_RENDER_MULTIPLY,
-    MAAGE_RENDER_UI, MAAGE_RENDER_ADDITIVE, MAAGE_RENDER_FULLSCREEN,
+    MAAGE_RENDER_UI, MAAGE_RENDER_ADDITIVE, MAAGE_RENDER_INVERT, MAAGE_RENDER_FULLSCREEN,
     MAAGE_RENDER_PIPELINE_COUNT
 };
 enum {
     MAAGE_RENDER_FACTOR_ONE, MAAGE_RENDER_FACTOR_SOURCE_ALPHA,
     MAAGE_RENDER_FACTOR_INVERSE_ALPHA, MAAGE_RENDER_FACTOR_SOURCE_COLOR,
-    MAAGE_RENDER_FACTOR_DESTINATION_COLOR
+    MAAGE_RENDER_FACTOR_DESTINATION_COLOR, MAAGE_RENDER_FACTOR_INVERSE_SOURCE_COLOR,
+    MAAGE_RENDER_FACTOR_INVERSE_DESTINATION_COLOR
 };
+typedef struct maage_render_ui_segment {size_t first,count;unsigned int blend;} maage_render_ui_segment;
+unsigned int maage_render_ui_segments(const maage_render_ui_data *batch,size_t first,size_t count,
+    maage_render_ui_segment segments[3]);
 typedef struct maage_render_pipeline_state {
     int ui, fullscreen, depth_test, depth_write, cull, blend;
     int source_rgb, destination_rgb;

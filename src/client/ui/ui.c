@@ -27,7 +27,8 @@ static maage_client_ui_rect pause_rect(const maage_client_ui *ui,unsigned int n)
     if(r.width<20.0f)r.width=20.0f;
     r.height=20.0f;
     r.x=(float)(int)(ui->content.x+(ui->content.width-r.width)*0.5f);
-    r.y=(float)(int)(ui->content.y+ui->content.height*0.5f)-18.0f+n*24.0f;
+    r.y=ui->content.y+(float)(int)(ui->content.height/4.0f)+
+        (n==0U?8.0f:(n==1U?80.0f:104.0f));
     return r;
 }
 static int pause_hit(const maage_client_ui *ui,maage_client_ui_rect r)
@@ -82,13 +83,13 @@ static unsigned int pause_input(maage_client_ui *ui,const maage_client_ui_input 
 }
 static void pause_draw(maage_client_ui *ui,void *context)
 {
-    static const char *const labels[3]={"Resume Game","Options...","Save and Quit to Title"};
+    static const char *const labels[3]={"Back to Game","Options...","Save and Quit to Title"};
     unsigned int n;
     maage_client_ui_rect r;
     float cx=ui->content.x+ui->content.width*0.5f;
-    float cy=ui->content.y+ui->content.height*0.5f;
+
     (void)context;
-    maage_client_ui_text(ui,"Game Menu",cx,cy-54.0f,MAAGE_CLIENT_UI_CENTER,1,1,1);
+    maage_client_ui_text_shadow(ui,"Game Menu",cx,ui->content.y+40.0f,MAAGE_CLIENT_UI_CENTER,1,1,1);
     for(n=0;n<3U;++n) {
         r=pause_rect(ui,n);
         maage_client_ui_button(ui,r,n==0&&ui->has_snapshot&&
@@ -194,8 +195,8 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     if (scale < 1) scale = 1;
     if (ui->requested_scale && scale > ui->requested_scale) scale = ui->requested_scale;
     ui->gui_scale = scale;
-    ui->width = (float)framebuffer_width / scale;
-    ui->height = (float)framebuffer_height / scale;
+    ui->width = (float)((framebuffer_width+scale-1)/scale);
+    ui->height = (float)((framebuffer_height+scale-1)/scale);
     x_scale = (float)framebuffer_width / (float)window_width / scale;
     y_scale = (float)framebuffer_height / (float)window_height / scale;
     ui->content.x = ui->safe_area.left > 0 ? (float)ui->safe_area.left * x_scale : 0;
@@ -489,16 +490,19 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     ui->batch.vertex_count = ui->batch.index_count = 0;
     ui->pointer_hover = 0;
     ui->batch.gaussian_background_indices = 0;
+    ui->batch.invert_first_index=ui->batch.invert_index_count=0;
     ui->draw_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     ui->batch.logical_width = ui->width; ui->batch.logical_height = ui->height;
     ui->clip.x = ui->clip.y = 0; ui->clip.width = ui->width; ui->clip.height = ui->height;
     if (ui->has_snapshot) maage_client_ui_gameplay_draw(ui);
     if (ui->has_snapshot && !maage_client_ui_modal(ui)) {
-        rectangle.x = ui->width * 0.5f - 7.5f;
-        rectangle.y = ui->height * 0.5f - 7.5f;
-        rectangle.width = rectangle.height = 15;
+        ui->batch.invert_first_index=ui->batch.index_count;
+        rectangle.x = (float)(int)(ui->width * 0.5f) - 7.0f;
+        rectangle.y = (float)(int)(ui->height * 0.5f) - 7.0f;
+        rectangle.width = rectangle.height = 16;
         maage_client_ui_rectangle(ui, rectangle, 0, 0,
-            15.0f / ui->resources.atlas_edge, 15.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+            16.0f / ui->resources.atlas_edge, 16.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+        ui->batch.invert_index_count=ui->batch.index_count-ui->batch.invert_first_index;
     }
     if (ui->debug && debug) {
         maage_client_ui_debug_column(ui, debug->left, debug->left_count, 0);
@@ -508,11 +512,11 @@ maage_status maage_client_ui_draw(maage_client_ui *ui,
     id = maage_client_ui_current(ui);
     if (id) {
         rectangle = ui->clip;
-        if (id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
+        if (ui->has_snapshot)
+            maage_client_ui_gradient(ui,rectangle,0xC0101010UL,0xD0101010UL);
+        else if (id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
             id == MAAGE_CLIENT_UI_SOUND_SETTINGS)
             maage_client_ui_menu_background(ui);
-        else if (id < MAAGE_CLIENT_UI_TITLE)
-            maage_client_ui_panel(ui, rectangle, 0.03f, 0.03f, 0.04f, 0.68f);
         /* Only interactive content is kept within safe-area bounds; the title
          * panorama and its darkening layer must fill even the notch region. */
         ui->clip = id == MAAGE_CLIENT_UI_TITLE ? rectangle : ui->content;

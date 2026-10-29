@@ -37,6 +37,7 @@ maage_status maage_chunk_destroy(maage_chunk *chunk)
         for (i = 0; i < chunk->entity_count; ++i) free(chunk->entities[i].data);
     }
     free(chunk->entities); free(chunk->updates); free(chunk->update_index);
+    free(chunk->direct_sky);
     free(chunk);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
@@ -49,6 +50,7 @@ maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int
 maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_block_state_id state)
 {
     maage_section *section;
+    size_t cell;
     if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0 || y >= 256)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     section = chunk->sections[y / 16];
@@ -56,6 +58,8 @@ maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_bloc
     if (!section) {
         section = (maage_section *)calloc(1, sizeof(*section));
         if (!section) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+        if(chunk->direct_sky)for(cell=0;cell<4096;++cell)section->light[cell]=
+            (unsigned char)(chunk->direct_sky[(size_t)(y/16)*4096+cell]<<4);
         chunk->sections[y / 16] = section;
     }
     if (section->states[maage_chunk_cell(x, y, z)] == state) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
@@ -67,6 +71,7 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z)
     if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0) return 0;
     if (y >= 256) return 0xf0;
     if (chunk->sections[y / 16]) return chunk->sections[y / 16]->light[maage_chunk_cell(x, y, z)];
+    if(chunk->direct_sky)return (unsigned char)(chunk->direct_sky[(size_t)(y*16+z)*16+x]<<4);
     return y >= chunk->heightmap[z * 16 + x] ? 0xf0 : 0;
 }
 

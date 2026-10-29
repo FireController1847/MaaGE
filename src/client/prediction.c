@@ -20,9 +20,8 @@ int maage_client_prediction_hides(const maage_client_prediction *prediction, int
     return 0;
 }
 static int maage_prediction_target(const maage_client_prediction *prediction, const maage_session_snapshot *snapshot,
-    const maage_block_registry *blocks, const double eye[3], double yaw, double pitch, maage_world_target *target)
+    const maage_block_registry *blocks, const maage_world_neighborhood *sample, const double eye[3], double yaw, double pitch, maage_world_target *target)
 {
-    const maage_world_neighborhood *sample = &snapshot->player.mining;
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     double direction[3], nearest = snapshot->player.reach, low, high, a, b, temporary;
@@ -63,7 +62,7 @@ void maage_client_prediction_confirm(maage_client_prediction *prediction, const 
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i) if (prediction->entries[i].active && prediction->entries[i].id == event->prediction) {
         if (event->block.x != prediction->entries[i].sample.x || event->block.y != prediction->entries[i].sample.y ||
             event->block.z != prediction->entries[i].sample.z) return;
-        if (!event->accepted) prediction->entries[i].active = 0;
+        if (!event->accepted) {prediction->entries[i].active = 0;prediction->rollback_requested=1;}
         else {
             prediction->entries[i].confirmed = 1;
             memcpy(prediction->entries[i].revisions, event->column_revisions, sizeof(event->column_revisions));
@@ -86,7 +85,7 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
         removed[count].x = prediction->entries[i].sample.x; removed[count].y = prediction->entries[i].sample.y;
         removed[count++].z = prediction->entries[i].sample.z;
     }
-    if (prediction->applied_generation != prediction->generation) {
+    if (prediction->dirty || prediction->applied_generation != prediction->generation) {
         for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i) if (prediction->entries[i].active) {
             result = maage_world_mesh_reveal(blocks,biomes,&prediction->entries[i].sample,removed,count,prediction->entries[i].supplied_faces,prediction->leaves,
                 prediction->vertices+faces*4,prediction->indices+faces*6,&patch);
@@ -110,7 +109,7 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
             maage_render_mesh_destroy(meshes[column].prediction); meshes[column].prediction = NULL; meshes[column].filtered = 0; continue;
         }
         if (!meshes[column].source || (meshes[column].filtered &&
-            meshes[column].filtered_revision == meshes[column].revision &&
+            meshes[column].filtered_revision == meshes[column].visual_revision &&
             meshes[column].filtered_generation == prediction->generation)) continue;
         result = maage_world_mesh_filter(meshes[column].source,removed,count,&data,&indices);
         if (maage_status_failed(result)) return result;
@@ -120,7 +119,7 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
         if (maage_status_failed(result)) return result;
         maage_render_mesh_destroy(meshes[column].prediction);
         meshes[column].prediction = replacement; meshes[column].filtered = 1;
-        meshes[column].filtered_revision = meshes[column].revision;
+        meshes[column].filtered_revision = meshes[column].visual_revision;
         meshes[column].filtered_generation = prediction->generation;
     }
     prediction->applied_generation = prediction->generation; prediction->dirty = 0;
@@ -129,11 +128,17 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
 maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     maage_renderer *renderer, maage_render_texture *atlas,
     const maage_item_registry *items, const maage_block_registry *blocks,
-    const maage_biome_registry *biomes, const maage_session_snapshot *snapshot,
+    const maage_biome_registry *biomes, maage_world *visual, const maage_session_snapshot *snapshot,
     maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3],
     double yaw, double pitch, double elapsed, maage_leaves_mode leaves, int active, int held, int pressed,
     maage_session_command *command, maage_status_trace *trace)
 {
+    maage_world_neighborhood mining;
+    maage_world_target local_target;
+    double direction_vector[3];
+    maage_block_position positions[MAAGE_CLIENT_PREDICTIONS];
+    maage_block_state_id expected[MAAGE_CLIENT_PREDICTIONS];
+    size_t prediction_count=0;
     const maage_item_stack *stack;
     const maage_item_definition *tool;
     const maage_block_definition *block;
@@ -146,6 +151,11 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     int dx, dz, ready, predictable, pending = 0;
     const maage_block_state_definition *neighbor;
     memset(command,0,sizeof(*command));
+    memset(&mining,0,sizeof(mining));
+    direction_vector[0]=sin(yaw)*cos(pitch);direction_vector[1]=-sin(pitch);direction_vector[2]=-cos(yaw)*cos(pitch);
+    result=maage_world_raycast(visual,eye,direction_vector,snapshot->player.reach,&local_target);
+    if(maage_status_code(result)==MAAGE_STATUS_SUCCESS)
+        maage_world_sample_neighborhood(visual,local_target.x,local_target.y,local_target.z,&mining);
     if (prediction->session != snapshot->session_epoch || prediction->world != snapshot->world_epoch) {
         maage_client_prediction_destroy(prediction);
         prediction->session = snapshot->session_epoch; prediction->world = snapshot->world_epoch;
@@ -153,8 +163,20 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     }
     if (prediction->leaves != leaves) { prediction->leaves = leaves; ++prediction->generation; }
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i) {
+        if(prediction->entries[i].active) {
+            supplied=0;
+            for(direction=0;direction<6;++direction) {
+                dx=neighbors[direction][0];dz=neighbors[direction][1];
+                column=maage_prediction_column(meshes,capacity,
+                    maage_world_chunk_coordinate(prediction->entries[i].sample.x+dx),
+                    maage_world_chunk_coordinate(prediction->entries[i].sample.z+dz));
+                if(column&&column->presentation_generation>=prediction->entries[i].generation)
+                    supplied|=1U<<direction;
+            }
+            if(supplied!=prediction->entries[i].supplied_faces) {prediction->entries[i].supplied_faces=supplied;prediction->dirty=1;}
+        }
         if (prediction->entries[i].active && prediction->entries[i].confirmed) {
-            supplied = 0;
+            supplied = prediction->entries[i].supplied_faces;
             for (direction = 0; direction < 6; ++direction) {
                 dx = neighbors[direction][0]; dz = neighbors[direction][1];
                 column = maage_prediction_column(meshes,capacity,
@@ -180,7 +202,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         else pending = 1;
     }
     if (prediction->suspended) {
-        if (pending || !pressed) return maage_prediction_status(MAAGE_STATUS_NOOP,MAAGE_OPERATION_UPDATE);
+        if (pending || !pressed) goto reconcile;
         prediction->suspended = 0;
     }
     if (snapshot->tick != prediction->observed_tick) {
@@ -192,7 +214,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     if (elapsed > 0.25) elapsed = 0.25;
     if (prediction->delay > 0) prediction->delay -= elapsed;
     if (pressed) prediction->delay = 0;
-    if (!active || !held || !snapshot->player.health || !maage_prediction_target(prediction,snapshot,blocks,eye,yaw,pitch,&target)) {
+    if (!active || !held || !snapshot->player.health || !maage_prediction_target(prediction,snapshot,blocks,&mining,eye,yaw,pitch,&target)) {
         prediction->targeting = 0; prediction->progress = 0;
     } else {
         stack = maage_inventory_selected(&snapshot->player.inventory);
@@ -214,25 +236,25 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
             if (damage >= 1) prediction->progress = 1;
             if (prediction->progress >= 1 && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
                 column = maage_prediction_column(meshes,capacity,maage_world_chunk_coordinate(target.x),maage_world_chunk_coordinate(target.z));
-                predictable = target.x == snapshot->player.mining.x && target.y == snapshot->player.mining.y && target.z == snapshot->player.mining.z;
+                predictable = target.x == mining.x && target.y == mining.y && target.z == mining.z;
                 if (!block->opaque) predictable = 1; /* No newly occluded faces to reconstruct. */
                 if (block->id == MAAGE_BLOCK_LEAVES || block->id == MAAGE_BLOCK_ICE) predictable = 0;
                 if (block->opaque) for (index = 0; index < 27; ++index) {
-                    neighbor = maage_block_registry_state(blocks,snapshot->player.mining.states[index]);
+                    neighbor = maage_block_registry_state(blocks,mining.states[index]);
                     if (neighbor && neighbor->fluid_kind) predictable = 0;
                 }
-                if (predictable && target.x == snapshot->player.mining.x && target.y == snapshot->player.mining.y && target.z == snapshot->player.mining.z)
+                if (predictable && target.x == mining.x && target.y == mining.y && target.z == mining.z)
                     for (dz = -1; dz <= 1; ++dz) for (dx = -1; dx <= 1; ++dx) {
                         maage_client_chunk_mesh *neighbor_column = maage_prediction_column(meshes,capacity,
                             maage_world_chunk_coordinate(target.x+dx),maage_world_chunk_coordinate(target.z+dz));
-                        if (!neighbor_column || neighbor_column->revision != snapshot->player.mining.revisions[dx+1+3*(dz+1)]) predictable = 0;
+                        if (!neighbor_column || neighbor_column->revision != mining.revisions[dx+1+3*(dz+1)]) predictable = 0;
                     }
                 if (column && column->source && predictable) {
                     prediction->entries[vacant].active = 1; prediction->entries[vacant].confirmed = 0;
                     prediction->entries[vacant].supplied_faces = 0;
                     prediction->entries[vacant].id = ++prediction->next_id;
-                    if (target.x == snapshot->player.mining.x && target.y == snapshot->player.mining.y && target.z == snapshot->player.mining.z)
-                        prediction->entries[vacant].sample = snapshot->player.mining;
+                    if (target.x == mining.x && target.y == mining.y && target.z == mining.z)
+                        prediction->entries[vacant].sample = mining;
                     else {
                         memset(&prediction->entries[vacant].sample,0,sizeof(prediction->entries[vacant].sample));
                         prediction->entries[vacant].sample.valid = 1;
@@ -245,8 +267,40 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                     prediction->progress = 0; prediction->targeting = 0;
                     prediction->delay = snapshot->player.game_mode == MAAGE_GAME_MODE_CREATIVE || damage < 1 ? 0.25 : 0.05;
                     ++prediction->generation;
+                    prediction->entries[vacant].generation=prediction->generation;
                 }
             }
+        }
+    }
+reconcile:
+    for(i=0;i<MAAGE_CLIENT_PREDICTIONS;++i)if(prediction->entries[i].active&&!prediction->suspended) {
+        positions[prediction_count].x=prediction->entries[i].sample.x;
+        positions[prediction_count].y=prediction->entries[i].sample.y;
+        positions[prediction_count].z=prediction->entries[i].sample.z;
+        expected[prediction_count++]=prediction->entries[i].sample.states[13];
+    }
+    result=maage_world_present_predictions(visual,positions,expected,prediction_count,prediction->generation);
+    if(maage_status_failed(result))return result;
+    if(prediction->rollback_requested) {
+        size_t column_index;
+        for(column_index=0;column_index<capacity;++column_index)if(meshes[column_index].rollback&&meshes[column_index].rollback_revision==
+            maage_world_column_revision(visual,meshes[column_index].x,meshes[column_index].z)) {
+            maage_client_chunk_mesh *cached=&meshes[column_index];
+            maage_render_mesh_destroy(cached->mesh);maage_world_mesh_destroy(cached->source);
+            cached->mesh=cached->rollback;cached->source=cached->rollback_source;
+            cached->rollback=NULL;cached->rollback_source=NULL;
+            cached->revision=cached->rollback_revision;cached->visual_revision=cached->rollback_visual_revision;
+            cached->presentation_generation=0;
+            if(cached->source) {const maage_mesh_data *data=maage_world_mesh_data(cached->source);
+                cached->vertices=data->vertex_count;cached->indices=data->index_count;}
+        }
+        prediction->rollback_requested=0;prediction->dirty=1;
+    }
+    if(!prediction_count) {
+        size_t column_index;
+        for(column_index=0;column_index<capacity;++column_index) {
+            maage_render_mesh_destroy(meshes[column_index].rollback);maage_world_mesh_destroy(meshes[column_index].rollback_source);
+            meshes[column_index].rollback=NULL;meshes[column_index].rollback_source=NULL;
         }
     }
     if (prediction->dirty || prediction->generation != prediction->applied_generation) {

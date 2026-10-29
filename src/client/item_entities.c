@@ -128,7 +128,7 @@ maage_status maage_client_item_entities_pickup(maage_client_item_entities *view,
 }
 
 maage_status maage_client_item_entities_update(maage_client_item_entities *view,
-    maage_local_session *session, const maage_session_snapshot *snapshot,
+    maage_local_session *session, maage_world *visual_world,const maage_session_snapshot *snapshot,
     double interpolation, const double eye[3], double now,
     const maage_render_instance *additional, size_t additional_count, maage_status_trace *trace)
 {
@@ -142,6 +142,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     unsigned int copy, copies, axis, animation;
     int collected;
     int notice;
+    unsigned char light=240;
     unsigned long random;
     double position[3], phase, rotation, scale, offset[3], dx, dy, dz, age, sine, cosine, alpha;
     if (!view || !session || !snapshot || !eye || (additional_count && !additional)) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
@@ -222,8 +223,9 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
             draw->transform[5] = (float)scale; draw->transform[8] = (float)(sine*scale);
             draw->transform[10] = (float)(cosine*scale); draw->transform[15] = 1;
             for (axis = 0; axis < 3; ++axis) draw->transform[12+axis] = (float)(position[axis]+offset[axis]);
-            draw->sky_light = (float)(entity->light>>4)/15;
-            draw->block_light = (float)(entity->light&15)/15;
+            light=240;
+            maage_world_present_light(visual_world,(int)floor(position[0]),(int)floor(position[1]),(int)floor(position[2]),&light);
+            draw->sky_light = (float)(light>>4)/15;draw->block_light = (float)(light&15)/15;
         }
     }
     for (animation = 0; animation < 32; ++animation) {
@@ -264,8 +266,9 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
                 (item->model == MAAGE_ITEM_MODEL_BLOCK ? 0.125 : 0.25);
             draw->transform[12+axis] = (float)(source + (target-source)*phase);
         }
-        draw->sky_light = (float)(view->pickups[animation].pickup.light >> 4) / 15;
-        draw->block_light = (float)(view->pickups[animation].pickup.light & 15) / 15;
+        light=240;
+        maage_world_present_light(visual_world,(int)floor(draw->transform[12]),(int)floor(draw->transform[13]),(int)floor(draw->transform[14]),&light);
+        draw->sky_light=(float)(light>>4)/15;draw->block_light=(float)(light&15)/15;
     }
     (void)interpolation;
     if (additional_count) memcpy(view->draws+count,additional,additional_count*sizeof(*additional));

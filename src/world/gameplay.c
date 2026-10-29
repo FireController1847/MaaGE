@@ -264,6 +264,12 @@ maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *pla
     }
     return result;
 }
+static void maage_gameplay_swing(maage_gameplay *game,unsigned int kind)
+{
+    if(game->swing<=0.500001) {
+        game->swing=1;game->swing_tick=game->ticks;game->swing_kind=kind;
+    }
+}
 static int maage_gameplay_same_target(const maage_world_target *a, const maage_world_target *b)
 {
     return a->x == b->x && a->y == b->y && a->z == b->z && a->state_id == b->state_id;
@@ -406,7 +412,7 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     const maage_block_state_definition *state, *old_state;
     const maage_block_definition *block, *old_block;
     maage_block_state_id placed, old;
-    int x, y, z;
+    int x, y, z, valid;
     maage_status result;
     if (game->use_delay) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     /* Failed use also arms the held-input repeat timer. */
@@ -436,29 +442,16 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
     if (!old_block || !old_block->replaceable ||
         (block->solid && maage_gameplay_player_overlap(player,x,y,z,&block->collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    if (block->mesh_shape == MAAGE_BLOCK_MESH_TORCH) {
-        int support_x, support_y, support_z;
-        static const int supports[6][3] = {
-            {0,-1,0}, {-1,0,0}, {1,0,0}, {0,0,-1}, {0,0,1}, {0,-1,0}
-        };
-        if (state->metadata < 1 || state->metadata > 5)
-            return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-        support_x = x + supports[state->metadata][0];
-        support_y = y + supports[state->metadata][1];
-        support_z = z + supports[state->metadata][2];
-        old_state = maage_block_registry_state(maage_world_registry(world),
-            maage_world_get(world, support_x, support_y, support_z));
-        old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
-        if (!old_block || !old_block->solid || !old_block->opaque)
-            return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    }
+    result=maage_world_can_survive(world,x,y,z,placed,&valid);
+    if(maage_status_code(result)!=MAAGE_STATUS_SUCCESS)return result;
+    if(!valid)return maage_status_make(MAAGE_STATUS_NOOP,0,MAAGE_OPERATION_MUTATE,0);
     result = maage_world_set(world,x,y,z,old,placed);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE,
         maage_gameplay_state_material(world, placed),
         x + 0.5, y + 0.5, z + 0.5, 1.0, 1.0);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && --held->count == 0) memset(held,0,sizeof(*held));
-    ++game->blocks_placed; game->swing = 1;
+    ++game->blocks_placed; maage_gameplay_swing(game,2U);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
 static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player,
@@ -676,7 +669,8 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
         /* A missed Survival press temporarily suppresses held attacks. */
         if (!game->attack_held && !game->has_target &&
             game->mode == MAAGE_GAME_MODE_SURVIVAL) game->attack_miss_delay = 10;
-        if (game->swing <= 0) game->swing = 1;
+        if(intent->attack_pressed||(game->has_target&&!game->attack_miss_delay))
+            maage_gameplay_swing(game,1U);
         if (!game->attack_miss_delay) {
             result = maage_gameplay_action_result(maage_gameplay_break(game,player,world,items,&sink,intent->attack_pressed), world, trace);
             if (maage_status_failed(result))
@@ -690,7 +684,6 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
     game->attack_held = intent->attack;
     if (intent->use) {
         if (intent->use_pressed || !game->use_held) game->use_delay = 0;
-        if (game->swing <= 0) game->swing = 1;
         result = maage_gameplay_action_result(maage_gameplay_place(game,player,world,items,intent->movement.yaw,&sink), world, trace);
         if (maage_status_failed(result))
             return maage_gameplay_sound_result(result, &sink, written, trace);

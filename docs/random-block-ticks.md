@@ -63,9 +63,10 @@ when lighting is unavailable or an earlier opacity/emission edit invalidates it;
 missing light is never treated as darkness. Cross-column destinations and all
 required neighborhoods must be loaded. No sample triggers synchronous relighting.
 
-Immediate plant/cactus support reactions after arbitrary neighbor edits, crops/sapling growth, lava fire ignition,
-weather-driven snow accumulation/freezing, and Nether-specific ice behavior remain
-unsupported. Mycelium and podzol are absent from the catalog, so their mushroom
+Immediate plant/cactus support reactions now use the persistent neighbor-update
+queue described in [Client Parity](gameplay-parity.md). Crops/sapling growth, lava
+fire ignition, weather-driven snow accumulation/freezing and Nether-specific ice
+behavior remain unsupported. Mycelium and podzol are absent from the catalog, so their mushroom
 light exceptions do not apply. Dirt and full snow blocks have no random callback.
 Lava, flowing water and oriented torches retain reference-derived sampling
 eligibility even where the callback is absent. Lava lacks fire, fluid flow

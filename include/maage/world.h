@@ -70,6 +70,8 @@ typedef struct maage_world_config {
     /* Attempts per eligible 16^3 section per 20 TPS tick. Explicit 0 disables.
      * Initialize with maage_world_config_init for the default of 3. */
     unsigned int random_tick_speed;
+    int presentation_only; /* Replica: imported states only, no generation/simulation/save. */
+    int build_meshes; /* Initialized to 1; authoritative Server sets 0. */
     int new_world;
     double position[3];
     /* 0 derives a bounded default from the streaming footprint and workers.
@@ -128,6 +130,8 @@ typedef struct maage_world_observation {
 typedef struct maage_world_mesh_update {
     int x, z;
     unsigned long revision;
+    unsigned long state_revision, presentation_generation;
+    int predicted;
     maage_world_mesh *mesh; /* ownership transfers to caller */
 } maage_world_mesh_update;
 typedef struct maage_world_target {
@@ -174,6 +178,26 @@ maage_status maage_world_mesh_reveal(const maage_block_registry *blocks,
     const maage_biome_registry *biomes, const maage_world_neighborhood *sample,
     const maage_block_position *removed, size_t count, unsigned int supplied_faces, maage_leaves_mode leaves,
     maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data);
+/* Owned numeric state transfer; no light, scheduling, entities or file data.
+ * base_revision==0 replaces a complete column (unlisted cells are air).
+ * Otherwise cells are deltas against exactly base_revision. */
+typedef struct maage_column_cell { unsigned int cell; maage_block_state_id state; } maage_column_cell;
+typedef struct maage_column_update {
+    int x,z;
+    unsigned long revision,base_revision;
+    size_t count;
+    maage_column_cell *cells;
+    maage_biome_id *biomes; /* 256 entries on complete publications only */
+} maage_column_update;
+maage_status maage_world_next_column(maage_world *world,maage_column_update **output);
+maage_status maage_world_ack_column(maage_world *world,int x,int z,unsigned long revision);
+maage_status maage_column_update_destroy(maage_column_update *update);
+maage_status maage_world_apply_column(maage_world *replica,const maage_column_update *update);
+/* Presentation overlay over the replica's independently retained authority.
+ * Expected states prevent a preview from concealing a different Server block. */
+maage_status maage_world_present_predictions(maage_world *replica,
+    const maage_block_position *positions,const maage_block_state_id *expected,
+    size_t count,unsigned long generation);
 /* Floor division/positive modulo, including negative world coordinates. */
 int maage_world_chunk_coordinate(int coordinate);
 int maage_world_local_coordinate(int coordinate);
@@ -199,9 +223,11 @@ maage_status maage_world_tick(maage_world *world);
 /* Owner thread only; validates aggregate sampling work against unsigned-int
  * capacity. No change to weather, fixed-step timing or scheduled updates. */
 maage_status maage_world_set_random_tick_speed(maage_world *world, unsigned int speed);
-/* Allocation-free saved sky/block light query for simulation. NOOP means
- * lighting is not current; never interpret that as darkness. Y>=256 clamps to
- * 255 as in the reference light query. Missing terrain returns NOOP. */
+/* Replica presentation query retains its last initialized visual light while
+ * a replacement is running. Initial/unavailable columns return NOOP. */
+maage_status maage_world_present_light(const maage_world *world,int x,int y,int z,unsigned char *light);
+/* Allocation-free gameplay query. NOOP means unavailable/currently relighting;
+ * never interpret it as darkness. Y>=256 clamps to 255. */
 maage_status maage_world_sample_light(const maage_world *world,
     int x, int y, int z, unsigned char *light);
 /* Cheap owner status; full diagnostic snapshots may be sampled less often. */
@@ -240,6 +266,10 @@ int maage_world_solid(const maage_world *world, int x, int y, int z);
  * NOT_FOUND, never permit targeting through unavailable terrain. SUCCESS hit, NOOP miss. */
 maage_status maage_world_raycast(const maage_world *world, const double origin[3],
     const double direction[3], double range, maage_world_target *target);
+/* Shared placement/survival query. NOOP defers unknown terrain/current light;
+ * SUCCESS writes validity. Ordinary solid blocks have no support requirement. */
+maage_status maage_world_can_survive(const maage_world *world,int x,int y,int z,
+    maage_block_state_id state,int *valid);
 /* Owner simulation phase only. Compare expected numeric state, then publish a
  * private copy; workers retain their old immutable snapshots. Invalidates
  * lighting/meshes and obsolete jobs without waiting. No filesystem work. */

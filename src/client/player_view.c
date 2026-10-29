@@ -75,7 +75,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
     const maage_item_registry *items, maage_client_item_entities *models,
     const maage_session_snapshot *previous, const maage_session_snapshot *snapshot,
     double interpolation, const double eye[3], double yaw, double pitch,
-    double elapsed, double now, int visible, double camera_distance, maage_status_trace *trace)
+    double elapsed, double now, double swing_progress, int visible, double camera_distance, maage_status_trace *trace)
 {
     const maage_item_stack *held;
     const maage_item_definition *item;
@@ -83,7 +83,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
     maage_player_pose pose;
     maage_render_instance *draw;
     maage_status result, outcome=player_status(MAAGE_STATUS_SUCCESS,MAAGE_OPERATION_UPDATE);
-    double dx, dz, target, heading, relative, ticks, phase, amount, remaining, swing, age, death;
+    double dx, dz, target, heading, relative, ticks, phase, amount, swing, age, death;
     float root[16], part_matrix[16], hand[16], sky=1, light=0;
     unsigned int part;
     int changed;
@@ -139,10 +139,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
     item=held && held->count ? maage_item_registry_get(items,held->item_id) : NULL;
     phase=view->previous_phase+(view->phase-view->previous_phase)*interpolation;
     amount=view->previous_amount+(view->amount-view->previous_amount)*interpolation;
-    remaining=previous->player.swing;
-    if (snapshot->player.swing>remaining || changed) remaining=snapshot->player.swing;
-    remaining+=(snapshot->player.swing-remaining)*interpolation;
-    swing=remaining>0.00001 ? 1-remaining : 0;
+    swing=swing_progress;
     age=(double)previous->tick+((double)snapshot->tick-previous->tick)*interpolation;
     relative=player_arc(yaw-view->body_yaw);
     if (relative>1.308996938995747) relative=1.308996938995747;

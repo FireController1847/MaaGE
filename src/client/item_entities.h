@@ -8,7 +8,7 @@ maage_status maage_client_item_entities_create(maage_renderer *renderer,
     const maage_item_registry *items, const maage_block_registry *blocks,
     maage_client_item_entities **output, maage_status_trace *trace);
 maage_status maage_client_item_entities_update(maage_client_item_entities *view,
-    maage_local_session *session, const maage_session_snapshot *snapshot,
+    maage_local_session *session, maage_world *visual_world,const maage_session_snapshot *snapshot,
     double interpolation, const double eye[3], double now,
     const maage_render_instance *additional, size_t additional_count, maage_status_trace *trace);
 /* Borrow the same immutable cached geometry used by dropped item instances. */

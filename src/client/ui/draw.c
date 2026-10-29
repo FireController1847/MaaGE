@@ -148,6 +148,23 @@ void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle,
     maage_client_ui_rectangle(ui, rectangle, white, white, white, white, red, green, blue, alpha);
 }
 
+void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangle,
+    unsigned long top, unsigned long bottom)
+{
+    size_t first=ui->batch.vertex_count,i,c;
+    unsigned long color;
+    float t;
+    maage_client_ui_panel(ui,rectangle,1,1,1,1);
+    for(i=first;i<ui->batch.vertex_count;++i) {
+        t=(ui->vertices[i].position[1]-rectangle.y)/rectangle.height;
+        for(c=0;c<4;++c) {
+            color=c==3?24UL:(2UL-c)*8UL;
+            ui->vertices[i].color[c]=((1.0f-t)*(float)((top>>color)&255UL)+
+                t*(float)((bottom>>color)&255UL))/255.0f;
+        }
+    }
+}
+
 void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float y,
     maage_client_ui_alignment alignment, float red, float green, float blue)
 {
@@ -157,6 +174,13 @@ void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float 
     if (alignment == MAAGE_CLIENT_UI_CENTER) x -= width * 0.5f;
     else if (alignment == MAAGE_CLIENT_UI_RIGHT) x -= width;
     maage_client_ui_font_draw(ui, text, x, y, red, green, blue);
+}
+
+void maage_client_ui_text_shadow(maage_client_ui *ui,const char *text,float x,float y,
+    maage_client_ui_alignment alignment,float red,float green,float blue)
+{
+    maage_client_ui_text(ui,text,x+1,y+1,alignment,red*0.25f,green*0.25f,blue*0.25f);
+    maage_client_ui_text(ui,text,x,y,alignment,red,green,blue);
 }
 
 void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle)
@@ -173,44 +197,17 @@ void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rect
     const char *label, maage_client_ui_button_visual state)
 {
     maage_client_ui_rect part;
-    float v, center, tint, cap;
-    float tx[4], uv[4], y0[3], ty[3];
-    int col, row;
-    if (!ui || !label || state < MAAGE_CLIENT_UI_BUTTON_DISABLED ||
-        state > MAAGE_CLIENT_UI_BUTTON_HOVER ||
-        rectangle.width <= 0.0f || rectangle.height <= 0.0f) return;
-    if (state != MAAGE_CLIENT_UI_BUTTON_DISABLED) maage_client_ui_pointer(ui, rectangle);
-    /* Six-slice the 200x20 widgets.png button (3 columns x 2 rows).
-     * Native-size endcaps preserve borders and corners on half-width buttons.
-     * Only the long middle section is stretched. */
-    cap = rectangle.width < 4.0f ? rectangle.width * 0.25f : 2.0f;
-    v = 46.0f + (float)state * 20.0f;
-    tx[0] = rectangle.x;
-    tx[1] = tx[0] + cap;
-    tx[2] = rectangle.x + rectangle.width - cap;
-    tx[3] = rectangle.x + rectangle.width;
-    uv[0] = 0.0f;
-    uv[1] = cap;
-    uv[2] = 200.0f - cap;
-    uv[3] = 200.0f;
-    /* The middle is a single stretchable region. Only its interior scales;
-     * corner pixels are never stretched. */
-    y0[0] = rectangle.y;
-    y0[1] = rectangle.y + rectangle.height * 0.5f;
-    y0[2] = rectangle.y + rectangle.height;
-    ty[0] = v; ty[1] = v + 10.0f; ty[2] = v + 20.0f;
-    for (row = 0; row < 2; ++row) {
-        for (col = 0; col < 3; ++col) {
-            part.x = tx[col]; part.y = y0[row];
-            part.width = tx[col+1]-tx[col];
-            part.height = y0[row+1]-y0[row];
-            maage_client_ui_rectangle(ui,part,
-                (256.0f+uv[col])/ui->resources.atlas_edge,
-                ty[row]/ui->resources.atlas_edge,
-                (256.0f+uv[col+1])/ui->resources.atlas_edge,
-                ty[row+1]/ui->resources.atlas_edge,1,1,1,1);
-        }
-    }
+    float v, center, tint,half;
+    if(!ui||!label||state<MAAGE_CLIENT_UI_BUTTON_DISABLED||state>MAAGE_CLIENT_UI_BUTTON_HOVER||rectangle.width<=0||rectangle.height<=0)return;
+    if(state!=MAAGE_CLIENT_UI_BUTTON_DISABLED)maage_client_ui_pointer(ui,rectangle);
+    /* GuiButton uses two unscaled horizontal halves of widgets.png. */
+    half=(float)(int)(rectangle.width*0.5f);v=46.0f+(float)state*20.0f;
+    part=rectangle;part.width=half;
+    maage_client_ui_rectangle(ui,part,256.0f/ui->resources.atlas_edge,v/ui->resources.atlas_edge,
+        (256.0f+half)/ui->resources.atlas_edge,(v+20)/ui->resources.atlas_edge,1,1,1,1);
+    part.x+=half;part.width=rectangle.width-half;
+    maage_client_ui_rectangle(ui,part,(456.0f-part.width)/ui->resources.atlas_edge,v/ui->resources.atlas_edge,
+        456.0f/ui->resources.atlas_edge,(v+20)/ui->resources.atlas_edge,1,1,1,1);
     center=rectangle.x+rectangle.width*0.5f;
     maage_client_ui_text(ui,label,center+1,rectangle.y+7,
         MAAGE_CLIENT_UI_CENTER,0.22f,0.22f,0.22f);

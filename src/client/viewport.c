@@ -153,6 +153,7 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
     for (i = 0; i < cache->capacity; ++i) {
         maage_render_mesh_destroy(cache->slots[i].prediction);
         maage_world_mesh_destroy(cache->slots[i].source);
+        maage_render_mesh_destroy(cache->slots[i].rollback);maage_world_mesh_destroy(cache->slots[i].rollback_source);
         maage_render_mesh_destroy(cache->slots[i].mesh);
     }
     free(cache->slots); free(cache->draws);
@@ -216,30 +217,14 @@ static void maage_client_mesh_rates(maage_client_mesh_activity *activity, double
  * budget. The first attempt ensures progress even after an expensive frame;
  * later attempts predict cost to avoid repeatedly overrunning frame pacing.
  * No CPU mesh or render handle survives a failed/stale transfer. */
-/* Only the Server takes World meshes. The bounded session mailbox transfers
- * detached CPU ownership; GPU objects and revision keys remain Client-owned. */
-static void maage_client_mesh_cache_remove(maage_client_mesh_cache *cache,
-    int x, int z, unsigned long revision)
-{
-    size_t i;
-    for (i = 0; i < cache->capacity; ++i) {
-        maage_client_chunk_mesh *slot = &cache->slots[i];
-        if (slot->used && slot->x == x && slot->z == z &&
-            slot->revision <= revision) {
-            maage_render_mesh_destroy(slot->prediction); maage_world_mesh_destroy(slot->source);
-            maage_render_mesh_destroy(slot->mesh);
-            memset(slot, 0, sizeof(*slot)); ++cache->generation;
-        }
-    }
-}
-
-static maage_status maage_client_stream_meshes(maage_local_session *session,
+/* Client replica jobs transfer detached CPU ownership to the GPU cache. */
+static maage_status maage_client_stream_meshes(maage_world *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
     maage_client_mesh_cache *cache, maage_client_mesh_activity *activity,
     const maage_client_world_options *options, const maage_client_debug *debug,
-    unsigned long world_epoch, int center_x, int center_z)
+    int center_x, int center_z)
 {
-    maage_local_mesh_update update;
+    maage_world_mesh_update update;
     const maage_mesh_data *geometry;
     maage_render_mesh *replacement;
     maage_status result;
@@ -255,6 +240,7 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
             (abs(cache->slots[i].x - center_x) > options->radius ||
              abs(cache->slots[i].z - center_z) > options->radius)) {
             maage_render_mesh_destroy(cache->slots[i].prediction); maage_world_mesh_destroy(cache->slots[i].source);
+            maage_render_mesh_destroy(cache->slots[i].rollback);maage_world_mesh_destroy(cache->slots[i].rollback_source);
             maage_render_mesh_destroy(cache->slots[i].mesh);
             memset(&cache->slots[i], 0, sizeof(cache->slots[i])); ++cache->generation;
         }
@@ -269,23 +255,14 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
         if (processed && ((current - begin) * 1000.0 >= budget_ms ||
             (current - begin) * 1000.0 + activity->expected_upload_ms > budget_ms)) break;
         memset(&update, 0, sizeof(update));
-        result = maage_local_session_take_mesh(session, &update);
+        result = maage_world_take_mesh(visual, &update);
         if (maage_status_code(result) == MAAGE_STATUS_NOOP ||
             maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) break;
         if (maage_status_failed(result)) return result;
         ++processed;
-        if (update.removed) {
-            if (update.world_epoch == world_epoch)
-                maage_client_mesh_cache_remove(cache, update.x, update.z, update.revision);
-            if (update.mesh) maage_world_mesh_destroy(update.mesh);
-            continue;
-        }
-        if (!update.mesh || update.world_epoch != world_epoch ||
-            abs(update.x - center_x) > options->radius ||
-            abs(update.z - center_z) > options->radius) {
-            ++activity->status.rejected;
-            maage_world_mesh_destroy(update.mesh);
-            continue;
+        if (!update.mesh || !maage_world_mesh_current(visual,update.x,update.z,update.revision) ||
+            abs(update.x - center_x) > options->radius || abs(update.z - center_z) > options->radius) {
+            ++activity->status.rejected;maage_world_mesh_destroy(update.mesh);continue;
         }
         selected = vacant = cache->capacity;
         for (i = 0; i < cache->capacity; ++i) {
@@ -294,7 +271,7 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
             if (!cache->slots[i].used && vacant == cache->capacity) vacant = i;
         }
         if (selected != cache->capacity &&
-            cache->slots[selected].revision >= update.revision) {
+            cache->slots[selected].visual_revision >= update.revision) {
             ++activity->status.rejected;
             maage_world_mesh_destroy(update.mesh);
             continue;
@@ -342,12 +319,21 @@ static maage_status maage_client_stream_meshes(maage_local_session *session,
             }
         }
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+            if(update.predicted&&!cache->slots[selected].rollback&&cache->slots[selected].mesh) {
+                cache->slots[selected].rollback=cache->slots[selected].mesh;
+                cache->slots[selected].rollback_source=cache->slots[selected].source;
+                cache->slots[selected].rollback_revision=cache->slots[selected].revision;
+                cache->slots[selected].rollback_visual_revision=cache->slots[selected].visual_revision;
+                cache->slots[selected].mesh=NULL;cache->slots[selected].source=NULL;
+            }
             maage_render_mesh_destroy(cache->slots[selected].mesh);
             cache->slots[selected].mesh = replacement;
             cache->slots[selected].used = 1;
             cache->slots[selected].x = update.x;
             cache->slots[selected].z = update.z;
-            cache->slots[selected].revision = update.revision;
+            cache->slots[selected].visual_revision = update.revision;
+            cache->slots[selected].revision=update.state_revision;
+            cache->slots[selected].presentation_generation=update.presentation_generation;
             cache->slots[selected].vertices = geometry ? geometry->vertex_count : 0;
             cache->slots[selected].indices = geometry ? geometry->index_count : 0;
             maage_world_mesh_destroy(cache->slots[selected].source);
@@ -540,9 +526,8 @@ static void maage_client_audio_click(void *context)
     if (audio) (void)maage_client_audio_service_ui_click(audio, NULL);
 }
 
-/* The presentation thread never owns a World or a mutable gameplay instance.
- * It sends commands to the same reusable Server runtime as dedicated hosting,
- * consumes copied snapshots, and owns only GUI/audio/GPU presentation state. */
+/* The Client owns a presentation-only World replica and immutable CPU/GPU
+ * visuals. Only the reusable Server runtime owns simulation and persistence. */
 maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *trace)
 {
     maage_window_system *system = NULL;
@@ -558,6 +543,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_audio_service *audio = NULL;
     maage_local_session *session = NULL;
     maage_server_runtime *server = NULL;
+    maage_world *visual_world=NULL;
+    maage_world_config visual_config;
+    maage_world_stats visual_stats;
+    double visual_stats_time=-1;
+    maage_local_column_update column_update;
     maage_content *content = NULL;
     maage_biome_registry *biomes = NULL;
     const maage_block_registry *blocks = NULL;
@@ -574,6 +564,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_options video_options, saved_video_options, current_options;
     maage_client_interaction_visual interaction;
     maage_client_first_person first_person;
+    maage_client_swing local_swing;
+    maage_session_snapshot visual_snapshot;
+    double swing_progress=0;
     maage_client_player_view player_view;
     maage_session_collision collision, incoming_collision;
     unsigned int camera_mode = MAAGE_CAMERA_FIRST;
@@ -622,6 +615,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     memset(&splash, 0, sizeof(splash));
     memset(&cache, 0, sizeof(cache));
     memset(&prediction, 0, sizeof(prediction));
+    memset(&local_swing,0,sizeof(local_swing));
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&interaction, 0, sizeof(interaction));
     memset(&first_person, 0, sizeof(first_person));
@@ -857,6 +851,17 @@ choose_world:
         result = maage_window_wait_events(system, 1);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
     }
+    memset(&local_swing,0,sizeof(local_swing));
+    memset(&visual_stats,0,sizeof(visual_stats));visual_stats_time=-1;
+    maage_world_config_init(&visual_config);
+    visual_config.registry=blocks;visual_config.items=items;
+    visual_config.biomes=maage_content_biomes(content);
+    visual_config.presentation_only=1;visual_config.simulation_distance=0;
+    visual_config.random_tick_speed=0;visual_config.worker_count=options.workers;
+    visual_config.render_distance=options.radius;
+    memcpy(visual_config.position,latest.player.player.position,sizeof(visual_config.position));
+    operation=maage_world_create(&visual_config,&visual_world,trace);
+    if(maage_status_failed(operation))goto done;
     while (maage_client_ui_modal(ui)) (void)maage_client_ui_back(ui);
     operation = maage_client_ui_set_snapshot(ui, &latest);
     if (maage_status_failed(operation)) goto done;
@@ -1018,16 +1023,14 @@ choose_world:
             operation = maage_client_outbox_queue(&outbox, &command);
             if (!maage_status_failed(operation)) paused_command = command.paused;
         }
-        if (!view_sent || maage_client_ui_leaves_mode(ui) != video_options.leaves) {
+        if (!view_sent) {
             if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
                 memset(&command, 0, sizeof(command));
                 command.kind = MAAGE_CMD_VIEW;
                 command.render_radius = options.radius;
-                command.leaves_mode = maage_client_ui_leaves_mode(ui);
                 command.view_yaw = yaw;
                 operation = maage_client_outbox_queue(&outbox, &command);
                 if (!maage_status_failed(operation)) {
-                    video_options.leaves = maage_client_ui_leaves_mode(ui);
                     view_sent = 1;
                 }
             }
@@ -1196,9 +1199,6 @@ choose_world:
                     maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.server",
                         event.status, event.has_trace ? &event.trace : NULL,
                         "Authoritative Server reported an operation failure.");
-            } else if (event.kind == MAAGE_EVENT_MESH_REMOVE) {
-                maage_client_mesh_cache_remove(&cache,
-                    event.column_x, event.column_z, event.mesh_revision);
             }
         }
         if (disconnected) break;
@@ -1212,8 +1212,29 @@ choose_world:
         }
         cx = maage_world_chunk_coordinate((int)floor(latest.player.player.position[0]));
         cz = maage_world_chunk_coordinate((int)floor(latest.player.player.position[2]));
-        rendered = maage_client_stream_meshes(session, renderer, atlas, &cache,
-            &mesh_activity, &options, &debug, world_epoch, cx, cz);
+        {
+            unsigned int received=0;
+            double receive_begin=maage_time_monotonic_seconds();
+            while(received++<16U) {
+                memset(&column_update,0,sizeof(column_update));
+                operation=maage_local_session_take_column(session,&column_update);
+                if(maage_status_code(operation)==MAAGE_STATUS_NOOP||maage_status_code(operation)==MAAGE_STATUS_INVALID_STATE)break;
+                if(maage_status_failed(operation))goto done;
+                if(column_update.world_epoch==world_epoch)
+                    operation=maage_world_apply_column(visual_world,column_update.column);
+                maage_column_update_destroy(column_update.column);
+                if(maage_status_failed(operation))goto done;
+                if((maage_time_monotonic_seconds()-receive_begin)*1000.0>=2.0)break;
+            }
+            video_options.leaves=maage_client_ui_leaves_mode(ui);
+            operation=maage_world_set_leaves_mode(visual_world,video_options.leaves);
+            if(maage_status_failed(operation))goto done;
+            operation=maage_world_stream(visual_world,latest.player.player.position[0],
+                latest.player.player.position[2],yaw,trace);
+            if(maage_status_failed(operation))goto done;
+        }
+        rendered = maage_client_stream_meshes(visual_world, renderer, atlas, &cache,
+            &mesh_activity, &options, &debug, cx, cz);
         if (maage_status_failed(rendered)) goto done;
         {
             double prediction_eye[3];
@@ -1223,7 +1244,7 @@ choose_world:
                 prediction_mesh_generation = cache.generation; prediction.dirty = 1;
             }
             operation = maage_client_prediction_update(&prediction,renderer,atlas,items,blocks,
-                maage_content_biomes(content),&latest,cache.slots,cache.capacity,prediction_eye,yaw,pitch,
+                maage_content_biomes(content),visual_world,&latest,cache.slots,cache.capacity,prediction_eye,yaw,pitch,
                 raw_elapsed,video_options.leaves,active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY,
                 input.primary_down || input.primary_pressed,input.primary_pressed,&command,trace);
             if (maage_status_failed(operation)) {
@@ -1244,7 +1265,9 @@ choose_world:
                     if (command.kind == MAAGE_CMD_BREAK_PREVIEW && prediction.entries[prediction_index].id == command.prediction)
                         prediction.entries[prediction_index].active = 0; /* This request was never sent. */
                 maage_render_mesh_destroy(prediction.reveal); prediction.reveal = NULL;
-                prediction.suspended = 1; prediction.targeting = 0; ++prediction.generation;
+                prediction.suspended = 1;prediction.rollback_requested=1;prediction.targeting = 0; ++prediction.generation;
+                operation=maage_world_present_predictions(visual_world,NULL,NULL,0,prediction.generation);
+                if(maage_status_failed(operation))goto done;
                 maage_status_trace_recover(trace,maage_status_make(MAAGE_STATUS_NOOP,0,MAAGE_OPERATION_PRESENT,0),
                     MAAGE_CONTEXT_CLIENT,MAAGE_OPERATION_PRESENT,__FILE__,__LINE__);
             } else if (command.kind) {
@@ -1291,8 +1314,33 @@ choose_world:
             (void)maage_client_audio_service_update(audio, &latest,
                 eye, forward, now, trace);
         }
+        if(visual_stats_time<0||now-visual_stats_time>=0.25) {
+            maage_world_get_stats(visual_world,&visual_stats);visual_stats_time=now;
+        }
+        visual_snapshot=latest;
+        visual_snapshot.world_stats.worker_count+=visual_stats.worker_count;
+        visual_snapshot.world_stats.running_jobs+=visual_stats.running_jobs;
+        visual_snapshot.world_stats.meshing_queued+=visual_stats.meshing_queued;
+        visual_snapshot.world_stats.lighting_queued+=visual_stats.lighting_queued;
+        visual_snapshot.player.has_target=maage_status_code(maage_world_raycast(visual_world,eye,forward,
+            latest.player.reach,&visual_snapshot.player.target))==MAAGE_STATUS_SUCCESS;
+        if(!active||(!input.primary_down&&!input.primary_pressed)||
+            visual_snapshot.player.target.x!=latest.player.breaking.x||
+            visual_snapshot.player.target.y!=latest.player.breaking.y||
+            visual_snapshot.player.target.z!=latest.player.breaking.z)
+            visual_snapshot.player.breaking_active=0;
+        {
+            unsigned char visual_light=240;
+            visual_snapshot.observation.light_available=0;
+            if(maage_status_code(maage_world_present_light(visual_world,(int)floor(eye[0]),(int)floor(eye[1]),(int)floor(eye[2]),&visual_light))==MAAGE_STATUS_SUCCESS) {
+                visual_snapshot.observation.light=visual_light;
+                visual_snapshot.observation.light_available=1;visual_snapshot.has_observation=1;
+            }
+        }
+        swing_progress=maage_client_swing_update(&local_swing,&latest,raw_elapsed,active,
+            input.primary_down||input.primary_pressed,input.primary_pressed,visual_snapshot.player.has_target);
         rendered = maage_client_interaction_update(&interaction, renderer,
-            atlas, blocks, &latest, &prediction, trace);
+            atlas, blocks, &visual_snapshot, &prediction, trace);
         if (maage_status_failed(rendered)) goto done;
         effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed);
         if (state.resized) {
@@ -1330,15 +1378,15 @@ choose_world:
             cache.draws[draw_count++] = interaction.mesh;
         }
         debug_text = maage_client_ui_debug_visible(ui) ?
-            maage_client_debug_collect(&debug, now, &latest, options.radius,
+            maage_client_debug_collect(&debug, now, &visual_snapshot, options.radius,
                 !active, renderer, &mesh_stats) : NULL;
         maage_client_ui_notice_time(ui, now);
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
             rendered = maage_client_first_person_update(&first_person, renderer, atlas,
-                items, blocks, &previous, &latest, alpha, eye, render_yaw, render_pitch,
-                raw_elapsed, (double)state.framebuffer_width / state.framebuffer_height,
+                items, blocks, &visual_snapshot, eye, render_yaw, render_pitch,
+                raw_elapsed, (double)state.framebuffer_width / state.framebuffer_height,swing_progress,
                 camera_mode == MAAGE_CAMERA_FIRST && !maage_client_ui_modal(ui), trace);
             if (maage_status_failed(rendered)) goto done;
             camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch,
@@ -1350,15 +1398,15 @@ choose_world:
                 (double)state.framebuffer_width / state.framebuffer_height,
                 options.radius, effective_fov, camera_bob);
             rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources,
-                items, item_entities, &previous, &latest, alpha, eye, render_yaw, render_pitch,
-                raw_elapsed, now, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
+                items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch,
+                raw_elapsed, now,swing_progress, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_client_environment_update(environment_view,
                 renderer, &latest, maage_client_ui_width(ui),
                 maage_client_ui_height(ui), matrix);
             if (maage_status_failed(rendered)) goto done;
-            rendered = maage_client_item_entities_update(item_entities, session, &latest, alpha, eye, now,
+            rendered = maage_client_item_entities_update(item_entities, session, visual_world,&latest, alpha, eye, now,
                 player_view.draws, player_view.count, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
@@ -1421,6 +1469,7 @@ return_to_title:
     operation = maage_local_session_destroy(session);
     if (maage_status_failed(operation)) goto done;
     session = NULL;
+    operation=maage_world_destroy(visual_world);if(maage_status_failed(operation))goto done;visual_world=NULL;
     maage_client_prediction_destroy(&prediction);
     operation = maage_client_mesh_cache_clear(&cache);
     if (maage_status_failed(operation)) goto done;
@@ -1476,6 +1525,7 @@ done:
     if (ui) maage_client_ui_set_click_callback(ui, NULL, NULL);
     maage_client_cleanup_result(maage_client_audio_service_destroy(audio, &cleanup_trace),
         &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_world_destroy(visual_world),&outcome,&cleanup_trace,trace);
     maage_client_cleanup_result(maage_client_prediction_destroy(&prediction), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache),
         &outcome, &cleanup_trace, trace);

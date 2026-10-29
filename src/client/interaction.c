@@ -135,18 +135,18 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual,
 maage_status maage_client_first_person_update(maage_client_first_person *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
     const maage_item_registry *items, const maage_block_registry *blocks,
-    const maage_session_snapshot *previous, const maage_session_snapshot *snapshot,
-    double interpolation, const double position[3], double yaw, double pitch,
-    double elapsed, double aspect, int visible, maage_status_trace *trace)
+    const maage_session_snapshot *snapshot,
+    const double position[3], double yaw, double pitch,
+    double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace)
 {
     const maage_item_stack *selected;
     maage_item_id item_id;
     maage_status result;
     float matrix[16], projection[16], sky = 1, emission = 0;
-    double target, amount, distance, dx, dz, speed, lag, arc, remaining, swing, wave, root_wave, square_wave;
+    double target, amount, distance, dx, dz, speed, lag, arc, swing, wave, root_wave, square_wave;
     unsigned int metadata;
     int changed = 0;
-    if (!visual || !renderer || !atlas || !items || !blocks || !previous || !snapshot ||
+    if (!visual || !renderer || !atlas || !items || !blocks || !snapshot ||
         !position || !(aspect > 0) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION)
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
             MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
@@ -232,10 +232,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     lag = 1 - exp(-elapsed * 13.862943611);
     visual->arm_yaw = yaw - arc*(1-lag);
     visual->arm_pitch += (pitch-visual->arm_pitch)*lag;
-    remaining = previous->player.swing;
-    if (snapshot->player.swing > remaining || changed) remaining = snapshot->player.swing;
-    remaining += (snapshot->player.swing-remaining)*interpolation;
-    swing = remaining > 0.00001 ? 1-remaining : 0;
+    swing=swing_progress;
     if (swing < 0) swing = 0;
     if (swing > 1) swing = 1;
     wave = sin(swing*3.141592653589793);
@@ -391,4 +388,40 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
     visual->visible = 1; visual->target = snapshot->player.target; visual->stage = stage;
         visual->session_epoch = snapshot->session_epoch; visual->world_epoch = snapshot->world_epoch;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+}
+
+
+double maage_client_swing_update(maage_client_swing *swing,const maage_session_snapshot *snapshot,
+    double elapsed,int active,int held,int pressed,int has_target)
+{
+    int request;
+    if(swing->session!=snapshot->session_epoch||swing->world!=snapshot->world_epoch) {
+        memset(swing,0,sizeof(*swing));swing->session=snapshot->session_epoch;swing->world=snapshot->world_epoch;
+        swing->placement_tick=snapshot->player.swing_tick;
+    }
+    if(elapsed<0)elapsed=0;if(elapsed>0.25)elapsed=0.25;
+    if(!snapshot->paused) {
+        swing->clock+=elapsed*20.0;
+        if(swing->running) {swing->age+=elapsed*20.0;if(swing->age>=6.0)swing->running=0;}
+    }
+    request=0;
+    if(active&&snapshot->player.health) {
+        if(pressed) {
+            request=1;swing->miss_until=0;
+            if(!has_target&&snapshot->player.game_mode==MAAGE_GAME_MODE_SURVIVAL)
+                swing->miss_until=swing->clock+10;
+            swing->next_tick=swing->clock+1;
+        }else if(held&&has_target&&swing->clock>=swing->next_tick&&swing->clock>=swing->miss_until) {
+            request=1;swing->next_tick+=floor(swing->clock-swing->next_tick)+1;
+        }
+        if(!held)swing->miss_until=0;
+    }
+    /* Attack echoes never restart an immediate local swing. Successful use
+     * arrives as a distinct authoritative action, never a guessed placement. */
+    if(snapshot->player.swing_tick!=swing->placement_tick) {
+        swing->placement_tick=snapshot->player.swing_tick;
+        if(snapshot->player.swing_kind==2U)request=1;
+    }
+    if(request&&(!swing->running||swing->age>=3.0)) {swing->running=1;swing->age=0;}
+    return swing->running?swing->age/6.0:0;
 }

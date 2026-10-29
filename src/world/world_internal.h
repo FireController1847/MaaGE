@@ -9,7 +9,8 @@
 #define MAAGE_SECTION_VOLUME 4096
 
 /* All block/light arrays are numeric and owned by their column. Empty sections
- * are NULL; implicit air above the heightmap has skylight 15. */
+ * are NULL; implicit light uses cached direct sky when initialized, otherwise
+ * the initial heightmap sky seed. */
 typedef struct maage_section {
     maage_block_state_id states[MAAGE_SECTION_VOLUME];
     unsigned char light[MAAGE_SECTION_VOLUME];
@@ -20,6 +21,7 @@ typedef struct maage_update_index {
 } maage_update_index;
 struct maage_chunk {
     int x, z;
+    unsigned char *direct_sky; /* Client light cache; absent from persistence. */
     maage_section *sections[16];
     maage_biome_id biomes[256];
     unsigned short heightmap[256]; /* first air Y, 0..256 */
@@ -37,6 +39,10 @@ struct maage_chunk {
     unsigned int generation_stages;
     unsigned long generation_features[8];
 };
+maage_status maage_chunk_clone(const maage_chunk *source,maage_chunk **output);
+maage_status maage_light_region_job(maage_chunk *columns[9],const maage_chunk *halo[25],
+    const unsigned char dirty[9][8192],const maage_block_registry *blocks,
+    const maage_job_token *token,maage_status_trace *trace);
 maage_status maage_chunk_create(int x, int z, maage_chunk **output);
 maage_status maage_chunk_destroy(maage_chunk *chunk);
 size_t maage_chunk_cell(int x, int y, int z);
@@ -62,6 +68,12 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z,
 struct maage_item_stack;
 maage_status maage_random_tick_spawn_drop(maage_world *world, int x, int y, int z,
     const struct maage_item_stack *drop, maage_random_tick_context *context);
+maage_status maage_support_rule(const maage_world *world,int x,int y,int z,
+    const maage_block_state_definition *state,int *valid);
+maage_status maage_support_changed(maage_world *world,int x,int y,int z,maage_block_state_id replacement);
+maage_status maage_support_update(maage_world *world,int x,int y,int z);
+maage_status maage_chunk_support_initialize(maage_chunk *chunk,const maage_block_registry *blocks,
+    unsigned long low,unsigned long high);
 maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z,
     const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z,

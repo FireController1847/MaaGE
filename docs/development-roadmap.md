@@ -742,8 +742,9 @@ persistence on its authoritative thread in both entry points:
   continues while integrated gameplay is paused. Borrowed registries, stores and
   local transport outlive every worker that uses them.
 - A bounded local session carries numeric sequenced commands, copied snapshots,
-  events and Operation Status traces. Owned CPU meshes transfer to Client GPU
-  presentation; neither side exposes worker-private columns or borrowed stack data.
+  events and Operation Status traces. Owned revisioned numeric block-state packets
+  transfer to a Client World replica; neither side exposes worker-private columns
+  or borrowed stack data. Client Jobs calculate visual light and meshes locally.
 - Client handles native input, UI, camera/interpolation, rendering, audio and
   optional presentation prediction. Inventory, movement and block outcomes remain
   Server decisions. Server sound notifications use the same numeric event contract.
@@ -759,7 +760,9 @@ persistence on its authoritative thread in both entry points:
   revision. Pickup animation batches share the existing pickup cue.
 - The [gameplay parity pass](gameplay-parity.md) also adds the interactive inventory
   biped, shared sprite UV corrections and reference-aligned creation/selection.
-  Neighbor support rules and loading-screen redesign remain deferred.
+  The current pass adds Client visual lighting, six/three-tick swing timing, all-screen
+  GUI corrections and persistent neighbor support validation; runtime fidelity is
+  pending programmer verification.
 - Remote multiplayer, a network protocol, administration GUI and Launcher Server
   management are deferred. Transport-independent local contracts establish the
   authority boundary without implementing these features.

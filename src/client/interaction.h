@@ -4,6 +4,15 @@
 #include "maage/render.h"
 #include "resources.h"
 struct maage_client_prediction;
+typedef struct maage_client_swing {
+    unsigned long session,world,placement_tick;
+    double age,clock,next_tick,miss_until;
+    int running;
+} maage_client_swing;
+/* One Client-local action timeline shared by first and third person. */
+double maage_client_swing_update(maage_client_swing *swing,const maage_session_snapshot *snapshot,
+    double elapsed,int active,int held,int pressed,int has_target);
+
 typedef struct maage_client_interaction_visual {
     maage_render_mesh *mesh;
     maage_world_target target;
@@ -40,9 +49,9 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual,
 maage_status maage_client_first_person_update(maage_client_first_person *visual,
     maage_renderer *renderer, maage_render_texture *atlas,
     const maage_item_registry *items, const maage_block_registry *blocks,
-    const maage_session_snapshot *previous, const maage_session_snapshot *snapshot,
-    double interpolation, const double position[3], double yaw, double pitch,
-    double elapsed, double aspect, int visible, maage_status_trace *trace);
+    const maage_session_snapshot *snapshot,
+    const double position[3], double yaw, double pitch,
+    double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace);
 maage_status maage_client_first_person_destroy(maage_client_first_person *visual,
     maage_renderer *renderer);
 #endif

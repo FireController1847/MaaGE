@@ -12,8 +12,9 @@ typedef struct title_camera {
 } title_camera;
 static void title_ray(const title_camera *camera,float x,float y,double ray[3])
 {
-    double dx=(x-camera->width*0.5f)*2.0/camera->height;
-    double dy=(y-camera->height*0.5f)*2.0/camera->height;
+    double edge=camera->width>camera->height?camera->width:camera->height;
+    double dx=(x-camera->width*0.5f)*3.46410161514/edge;
+    double dy=(y-camera->height*0.5f)*3.46410161514/edge;
     double z=camera->cy-dx*camera->sy;
     ray[0]=dx*camera->cy+camera->sy;
     ray[1]=dy*camera->cp-z*camera->sp;
@@ -62,8 +63,8 @@ static void title_panorama(maage_client_ui *ui)
     const int step = 3;
     for (i = 1; i <= 6; ++i)
         if (!ui->resources.title_available[i]) return;
-    yaw = ui->notice_now * 0.004;
-    pitch = 0.16 + sin(ui->notice_now * 0.012) * 0.06;
+    yaw = ui->notice_now * 0.03490658504;
+    pitch = (20.0 + sin(ui->notice_now/20.0)*25.0)*0.01745329252;
     camera.cy = cos(yaw); camera.sy = sin(yaw);
     camera.cp = cos(pitch); camera.sp = sin(pitch);
     camera.width = ui->width; camera.height = ui->height;
@@ -101,7 +102,7 @@ static maage_client_ui_rect title_button(const maage_client_ui *ui,unsigned int 
     maage_client_ui_rect r;
     float cx=ui->content.x+ui->content.width*0.5f;
     float y=ui->content.y+(float)(int)(ui->content.height/4)+48;
-    r.y=y+(id<3?24*(float)id:96);r.height=20;
+    r.y=y+(id<3?24*(float)id:84);r.height=20;
     r.width=id==3?20:(id<3?200:98);
     r.x=id==3?cx-124:(id==4?cx-100:(id==5?cx+2:cx-100));
     return r;
@@ -120,15 +121,16 @@ static void title_logo(maage_client_ui *ui)
     r.x=cx-137;r.y=ui->content.y+30;r.width=155;r.height=44;
     maage_client_ui_rectangle(ui,r,u,0,u+155.0f/ui->resources.atlas_edge,
         44.0f/ui->resources.atlas_edge,1,1,1,1);
-    r.x+=155;r.width=119;
+    r.x+=155;r.width=155;
     maage_client_ui_rectangle(ui,r,u,45.0f/ui->resources.atlas_edge,
-        u+119.0f/ui->resources.atlas_edge,89.0f/ui->resources.atlas_edge,1,1,1,1);
+        u+155.0f/ui->resources.atlas_edge,89.0f/ui->resources.atlas_edge,1,1,1,1);
 }
 static void title_splash(maage_client_ui *ui)
 {
     size_t first=ui->batch.vertex_count,i;
     double radians=-0.3490658504,c=cos(radians),s=sin(radians);
-    double scale=1.8-fabs(sin(ui->notice_now*5.0)*0.1);
+    double scale=(1.8-fabs(sin(ui->notice_now*6.28318530718)*0.1))*
+        100.0/(maage_client_ui_text_width(ui,"Engage!")+32);
     float x=ui->content.x+ui->content.width*0.5f+90,y=ui->content.y+70;
     maage_client_ui_text(ui,"Engage!",x+1,y+1,MAAGE_CLIENT_UI_CENTER,0.18f,0.18f,0);
     maage_client_ui_text(ui,"Engage!",x,y,MAAGE_CLIENT_UI_CENTER,1,1,0);
@@ -153,11 +155,10 @@ void maage_client_ui_title_draw(maage_client_ui *ui,void *context)
     /* The 1.7.10 language globe is in widgets.png at (0,106/126),
      * not a separate language.png resource. */
     r=title_button(ui,3);
-    maage_client_ui_pointer(ui,r);
     maage_client_ui_rectangle(ui,r,256.0f/ui->resources.atlas_edge,
-        (title_hit(ui,r)?126.0f:106.0f)/ui->resources.atlas_edge,
+        106.0f/ui->resources.atlas_edge,
         276.0f/ui->resources.atlas_edge,
-        (title_hit(ui,r)?146.0f:126.0f)/ui->resources.atlas_edge,1,1,1,1);
+        126.0f/ui->resources.atlas_edge,1,1,1,1);
     r=title_button(ui,4);maage_client_ui_button(ui,r,"Options...",
         (f->focus_keyboard?f->focus==4:title_hit(ui,r)));
     r=title_button(ui,5);maage_client_ui_button(ui,r,"Quit Game",

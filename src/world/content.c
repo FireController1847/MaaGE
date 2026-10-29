@@ -175,6 +175,11 @@ static maage_status maage_content_blocks_create(
             if (block.id == MAAGE_BLOCK_TALL_GRASS || block.id == MAAGE_BLOCK_DEAD_BUSH ||
                 block.id == MAAGE_BLOCK_DANDELION || block.id == MAAGE_BLOCK_POPPY)
                 block.random_tick = maage_random_tick_bush;
+            if(block.id==MAAGE_BLOCK_TALL_GRASS||block.id==MAAGE_BLOCK_DEAD_BUSH||
+                block.id==MAAGE_BLOCK_DANDELION||block.id==MAAGE_BLOCK_POPPY||
+                block.id==MAAGE_BLOCK_TORCH||block.id==MAAGE_BLOCK_CACTUS||
+                block.id==MAAGE_BLOCK_SNOW||block.id==MAAGE_BLOCK_BROWN_MUSHROOM||
+                block.id==MAAGE_BLOCK_RED_MUSHROOM)block.survives=maage_support_rule;
             if (block.id == MAAGE_BLOCK_SNOW) block.random_tick = maage_random_tick_snow;
             if (block.id == MAAGE_BLOCK_ICE) block.random_tick = maage_random_tick_ice;
             block.mesh_shape = content[entry].cross ? MAAGE_BLOCK_MESH_CROSS : MAAGE_BLOCK_MESH_CUBE;

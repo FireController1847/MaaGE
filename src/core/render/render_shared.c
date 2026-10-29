@@ -254,6 +254,7 @@ const maage_render_pipeline_state maage_render_pipeline_states[MAAGE_RENDER_PIPE
     {0, 0, 1, 0, 1, 1, MAAGE_RENDER_FACTOR_DESTINATION_COLOR, MAAGE_RENDER_FACTOR_SOURCE_COLOR},
     {1, 0, 0, 0, 0, 1, MAAGE_RENDER_FACTOR_SOURCE_ALPHA, MAAGE_RENDER_FACTOR_INVERSE_ALPHA},
     {1, 0, 0, 0, 0, 1, MAAGE_RENDER_FACTOR_SOURCE_ALPHA, MAAGE_RENDER_FACTOR_ONE},
+    {1, 0, 0, 0, 0, 1, MAAGE_RENDER_FACTOR_INVERSE_DESTINATION_COLOR, MAAGE_RENDER_FACTOR_INVERSE_SOURCE_COLOR},
     {0, 1, 0, 0, 0, 0, MAAGE_RENDER_FACTOR_SOURCE_ALPHA, MAAGE_RENDER_FACTOR_INVERSE_ALPHA}
 };
 
@@ -275,6 +276,20 @@ size_t maage_render_geometry_range(const maage_render_geometry *geometry,
     *first = layer == MAAGE_RENDER_MULTIPLY ? geometry->solid_count + geometry->translucent_count : 0;
     return layer == MAAGE_RENDER_SOLID ? geometry->solid_count :
         (layer == MAAGE_RENDER_TRANSLUCENT ? geometry->translucent_count : geometry->multiply_count);
+}
+unsigned int maage_render_ui_segments(const maage_render_ui_data *batch,size_t first,size_t count,
+    maage_render_ui_segment segments[3])
+{
+    size_t end=first+count,low=batch->invert_first_index,high=low+batch->invert_index_count;
+    unsigned int n=0;
+    if(low<first)low=first;if(high>end)high=end;
+    if(!batch->invert_index_count||low>=high) {
+        segments[0].first=first;segments[0].count=count;segments[0].blend=batch->blend;return count?1U:0U;
+    }
+    if(first<low) {segments[n].first=first;segments[n].count=low-first;segments[n++].blend=batch->blend;}
+    segments[n].first=low;segments[n].count=high-low;segments[n++].blend=MAAGE_RENDER_BLEND_INVERT;
+    if(high<end) {segments[n].first=high;segments[n].count=end-high;segments[n++].blend=batch->blend;}
+    return n;
 }
 void maage_render_ui_uniforms(const maage_render_ui_data *batch, maage_render_uniforms *uniforms)
 {
@@ -382,7 +397,9 @@ static maage_status maage_render_ui_validate(const maage_renderer *renderer,
     size_t index;
     if (!batch || !batch->index_count)
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
-    if (batch->blend > MAAGE_RENDER_BLEND_ADDITIVE ||
+    if (batch->blend > MAAGE_RENDER_BLEND_INVERT ||
+        batch->invert_first_index>batch->index_count||batch->invert_first_index%3||
+        batch->invert_index_count>batch->index_count-batch->invert_first_index||batch->invert_index_count%3||
         !batch->texture || batch->texture->renderer != renderer || !batch->texture->owned ||
         !batch->vertices || !batch->indices || !batch->vertex_count || batch->index_count % 3 ||
         batch->vertex_count > UINT_MAX ||

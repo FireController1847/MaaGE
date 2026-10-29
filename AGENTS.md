@@ -163,7 +163,10 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   The reusable `MaaGE::Server` runtime owns World, player, gameplay, environment
   and persistence on its authoritative thread in both integrated and dedicated
   sessions, without graphical dependencies. Client consumes copied snapshots,
-  numeric events and owned mesh handoffs for input/camera/presentation.
+  numeric events and owned revisioned block-state publications for input/camera/
+  presentation. The Client owns a presentation-only World replica using the same
+  numeric chunks, light solver, CPU mesher and Jobs; it never accesses the live
+  authoritative World. Replica mode cannot generate, tick simulation or save.
 
 ### World architecture and persistence
 
@@ -193,7 +196,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
 - One owner thread controls World membership, published immutable columns,
   simulation and deferred result commits. Workers own their output buffers and
   borrow immutable inputs/registries until completion. Independent column load,
-  generation, lighting, CPU mesh and save tasks may overlap. No worker mutates
+  generation, gameplay-light and save tasks may overlap; Client replica lighting
+  and CPU mesh jobs run independently. No worker mutates
   published columns or authoritative gameplay state. Keep fixed-step player updates
   ordered; parallelize existing gameplay only when workloads are independent.
 - Localize and justify synchronization: brief scheduler queue/token handoffs and
@@ -202,11 +206,21 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   prohibited. `maage_world_stream` polls commits and schedules bounded near-player
   work on the owner. Snapshot/column/neighbor revisions reject obsolete results;
   unloading invalidates requests, and cancellation remains cooperative.
-- Lighting writes private snapshots and propagates through staged neighbor
-  boundaries. Commit only when required revisions still match. Graphics owns
-  copied meshes and the shared atlas on its rendering thread; validate result
-  tokens before uploads, invalidate affected neighbor boundaries and preserve
-  unchanged GPU resources. No graphical types belong in portable World tasks.
+- Server light remains an authoritative gameplay cache, using the shared portable
+  solver without building visual meshes. The Client independently owns visual
+  sky/emitted light, smooth sampling, AO and CPU meshing. Transfer complete numeric
+  block/biome columns initially, then ordered deltas against acknowledged block
+  revisions; never send light arrays or Server visual meshes. Transport backpressure
+  retains unsent state and never overwrites a required delta base.
+- Visual light jobs operate on immutable 3x3 column transactions plus a retained
+  outer halo. Changed-cell queues retract and add light; cached direct-sky shafts
+  recompute only for affected X/Z positions. Unknown columns contribute no light.
+  One bounded relight transaction runs at a time; independent mesh jobs use Jobs.
+  Validate all input epochs before publishing and invalidate diagonal mesh
+  dependencies. Prediction overlays apply only over matching copied authoritative
+  states; rejection restores both geometry and locally calculated light. Preserve
+  the last usable GPU presentation until complete replacement meshes arrive.
+  No graphical types belong in portable World tasks.
 - Save coherent immutable snapshots asynchronously, with at most one writer per
   column file. Clear dirty state only if the saved revision is still current;
   never evict unsaved dirty data. Shutdown cancels obsolete CPU work, drains and
@@ -238,14 +252,25 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   load/generation outputs recheck natural leaves, catching missed unloaded edits.
   Flag-only edits preserve visual epochs and merge into lighting results. Decay
   reserves ordinary item drops before removal; placed leaves are persistent.
-  Immediate general plant neighbor reactions remain unimplemented.
+  Support-dependent blocks use numeric survival callbacks for both placement and
+  neighbor validation. Expected-state mutations preflight deduplicated persistent
+  support work before changing blocks. The owner processes bounded iterative
+  cascades through the existing scheduled-update heap; exhausted budgets retain
+  work. Unknown neighbors or stale gameplay light retry without assuming air.
+  Import schedules supported-block validation to catch unloaded edits. Flowers/
+  tall grass require grass or dirt; dead bushes sand or dirt; torches their actual
+  supporting face; cactus sand/cactus and nonsolid sides; snow valid opaque ground
+  or leaves (never ice); mushrooms opaque ground and full light below 13. Reserve
+  ordinary item drops before automatic removal; snow support loss drops nothing.
+  Leaves retain their separate natural/persistent flags and random decay.
   Random-tick checkpoints are World-owned, separate from environment state;
   seed domains initialize them only for new state, never on resume. Weather's
   initialization/draws remain unchanged. `MGWORLD6` is the sole metadata format;
   reject incompatible development worlds explicitly without migration/deletion.
 - Store worlds under instances/<instance-uuid>/worlds/<world-uuid>/,
   separate from shared Minecraft resources. World IDs are canonical UUIDs.
-  Maintain one current metadata encoding and one current chunk encoding, with
+  Maintain `MGWORLD6` metadata and `MGCHNK5` chunks (including fluid/support
+  update kinds); rejected older development worlds must be recreated. Keep
   private format identifiers for strict rejection. Inventories/item entities use
   namespaced item identities; chunk-local palettes use namespaced biome/block
   identities plus state metadata. No legacy numeric mappings, fallback writers,
@@ -300,8 +325,8 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   never substitute for leaf coverage; leaf faces touching opaque blocks still cull.
   Fancy (default) uses cutout textures and preserves all internal leaf faces. Smart
   must meaningfully reduce geometry without Fast's hollow-canopy appearance.
-  Mode changes invalidate only World meshes and rebuild through Jobs, preserving
-  lighting and simulation.
+  Mode changes invalidate only Client replica meshes and rebuild through Jobs,
+  preserving lighting and authoritative simulation.
 - New Client configurations default to 240 FPS; 0 remains Unlimited, with GPU/display backpressure rather than an artificial FPS ceiling. Preserve explicit saved preferences.
   Capped pacing carries monotonic deadlines forward, rebasing after stalls or
   cap changes. Use native event waits for whole milliseconds and a bounded final
@@ -707,7 +732,10 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
   alpha; emission sprites use explicit additive blending (the original sun/moon
   PNGs have opaque black backgrounds), never black-key pixel replacement.
   First-person hand/items use a separate camera-local perspective/depth pass
-  before GUI, with copied authoritative swing/light observations.
+  before GUI. One immediate Client action timeline drives both first/third-person
+  swings: six ticks, eligible restart at three; attack echoes never restart it.
+  Successful placement is observed separately. Player, hand and item-entity light
+  samples come from the Client replica, never Server presentation-light fields.
   Sky projection shares the current world presentation-camera matrix each frame
   (rotation/FOV/aspect, excluding translation); celestial time/weather stay Server-owned.
 - Grass base/overlay and foliage use neutral atlas pixels and initialization-resolved
@@ -718,8 +746,9 @@ Keep native GPU logic isolated and avoid speculative legacy interfaces.
 - Indexed UI batches use backend-neutral logical positions, atlas UVs and RGBA,
   drawn after world geometry with alpha blending and depth disabled, then one
   presentation. Metal/Vulkan share world, UI and scene contracts, including
-  projective panorama sampling, Gaussian blur, foreground depth and additive
-  environmental sprites. OpenGL/Software retain their existing clear/presentation
+  projective panorama sampling, Gaussian blur, foreground depth, additive
+  environmental sprites and triangle-range destination inversion for the 16x16
+  crosshair. Shared segment planning/pipeline factors govern Metal and Vulkan. OpenGL/Software retain their existing clear/presentation
   commands and reject unsupported gameplay/UI requests. The consolidated primary
   backends require programmer compilation and runtime/visual verification; source
   integration alone does not establish parity.
@@ -1180,7 +1209,7 @@ visual or audio completion.
 - **Phase 7 — Authoritative Simulation & Integrated Server (source-integrated;
   macOS compiled):** integrated Client and headless dedicated executable
   use one reusable Server runtime owning the 20 TPS simulation and persistence,
-  with bounded local commands, copied snapshots/events and owned mesh handoff.
+  with bounded local commands, copied snapshots/events and owned block-state handoff.
   Debug/Release Launcher, Client and Server and a separate headless Release
   Server compile/link on macOS ARM64. Runtime/visual/audio behavior and Windows/
   Linux compilation remain unverified; no applications, tests or Actions ran.

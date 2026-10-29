@@ -1,193 +1,245 @@
-# Gameplay and presentation parity pass
+# Client GUI, Lighting, Mining, and Block Support
 
-This pass implements the requested pickup, mining, presentation, container audio,
-inventory and frontend corrections. Client is `0.1.0-alpha.47`, Server is
-`1.0.0-alpha.17`, and the local session contract is version 10. World metadata
-now uses `MGWORLD6`; [random block ticks](random-block-ticks.md) add independent
-simulation RNG checkpoints without an older-format reader or migration.
+The current pass uses Client `0.1.0-alpha.48`, Server `1.0.0-alpha.18`, and
+local Session contract 11. The Server owns authoritative blocks and gameplay;
+the Client owns visual lighting and meshing over a presentation-only World
+replica. There is one simulation, shared by integrated and dedicated hosting.
 
-## Reference inspection
+`MGWORLD6` metadata remains current. `MGCHNK5` is the sole chunk encoding and
+includes both fluid and support update kinds. Older development chunks are
+rejected and their worlds must be recreated. No migration or automatic deletion
+is provided, and this implementation did not modify local development data.
 
-The supplied local Forge 1.7.10 `unpacked` directory was inspected directly. Its
-contents are Forge/FML sources; the corresponding vanilla classes were read from
-the adjacent `forgeSrc-1.7.10-10.13.4.1614-1.7.10-sources.jar`. The original
-reconstructed resource installation supplied `sounds.json` and GUI/skin textures.
-No Java runtime, compatibility layer or downloaded replacement resource is used.
+## Reference Inspection
 
-| Issue | Original classes and methods consulted | Confirmed discrepancy and change |
+The supplied Forge 1.7.10 `unpacked` directory contains Forge/FML sources.
+Vanilla classes were inspected directly in the adjacent
+`forgeSrc-1.7.10-10.13.4.1614-1.7.10-sources.jar`. This is read-only source
+reference; MaaGE neither executes Java nor embeds its implementation or assets.
+
+The examined GUI classes include `GuiIngame`, `GuiIngameMenu`, `GuiOptions`,
+`GuiVideoSettings`, `GuiOptionsRowList`, `GuiScreenOptionsSounds`, `GuiMainMenu`,
+`GuiSelectWorld`, `GuiSlot`, `GuiCreateWorld`, `GuiRenameWorld`, `GuiYesNo`,
+`GuiInventory`, `GuiCrafting`, `GuiContainer`, `GuiContainerCreative`,
+`ContainerPlayer`, `ContainerWorkbench`, `GuiButton`, `GuiScreen`,
+`ScaledResolution`, `LoadingScreenRenderer`, and `GuiDownloadTerrain`.
+
+Lighting references are `World.computeLightValue/updateLightByType`,
+`Chunk.generateSkylightMap`, block opacity registration, and
+`RenderBlocks.getAoBrightness/mixAoBrightness`. Mining references are
+`Minecraft.func_147115_a/func_147116_af` (held attack/click),
+`PlayerControllerMP.clickBlock/onPlayerDamageBlock/resetBlockRemoving`,
+`EntityLivingBase.swingItem/updateArmSwingProgress`,
+`ItemRenderer.renderItem/renderItemInFirstPerson`, `ModelBiped.setRotationAngles`,
+and `RenderGlobal` damage overlays. Support references are `World` neighbor
+notifications and `BlockBush`, `BlockTallGrass`, `BlockFlower`, `BlockDeadBush`,
+`BlockTorch`, `BlockCactus`, `BlockSnow`, `BlockMushroom`, and `BlockLeaves` survival,
+neighbor, drop, and decay methods. Forge hooks were distinguished from the
+underlying vanilla rules; OptiFine menus are not the GUI reference.
+
+## GUI Audit
+
+All 13 registered Client screens were audited, including the Creative catalog
+within Inventory. Shared button halves, menu shadows, scaled integer dimensions,
+and world-overlay gradients apply across screens. Drawing and input use the
+same layout helpers; native fullscreen safe areas remain the content bounds.
+
+| Screen | Reference | Finding and correction |
 | --- | --- | --- |
-| 3: pickup | `EntityPlayer.onLivingUpdate`, `EntityItem.onCollideWithPlayer`, `EntityPickupFX.onUpdate/renderParticle` | Existing expanded collection bounds already matched. The missing element was the three-tick post-collection flight. Confirmed transfers now animate over 0.15 seconds with squared interpolation toward feet + 0.5. No speculative pre-pickup magnet was added. |
-| 4: tools | `ItemRenderer.renderItemIn2D/renderItemInFirstPerson`, `RenderItem.doRender/renderItemIntoGUI`, item/tool definitions | The extruded sprite front and pixel-edge samples disagreed horizontally. Shared UVs now match the reference. Flat GUI/hotbar sprites and existing centered first-person transforms were already appropriate and remain shared. |
-| 5: breaking | `Minecraft.clickMouse/sendClickBlockToController`, `PlayerControllerMP.clickBlock/onPlayerDamageBlock`, block selection/relative-hardness methods | Display waited for authoritative mutation, lighting, mesh jobs, mailbox delivery and budgeted GPU upload. There was no local predicted removal. A bounded presentation layer now filters the voxel and reconstructs newly exposed faces, then reconciles Server results/revisions. |
-| 6: container music | `GuiContainer.doesGuiPauseGame`, `GuiScreen.doesGuiPauseGame`, `Minecraft.displayInGameMenu/runTick`, `MusicTicker.update`, sound pause methods | Every modal sent the same simulation pause, which also paused music. Inventory/table screens now release capture while simulation and music continue. Effects and music have separate pause controls; true Escape pause still freezes music. |
-| 7: mining | `PlayerControllerMP.clickBlock/onPlayerDamageBlock`, `Block.getPlayerRelativeBlockHardness`, `EntityPlayer.getBreakSpeed`, `BlockFlower` | Fresh Survival clicks inherited a previous charged-break delay, and target initialization discarded initial charged progress. Fresh presses now clear the retained controller delay and contribute that tick's damage. Zero hardness explicitly returns immediate damage. |
-| 8: inventory | `GuiInventory.drawGuiContainerBackgroundLayer/func_147046_a`, `GuiContainer`, `RenderPlayer`, `RenderManager`, `ModelBiped`, `ModelBox`, `RenderHelper` | The 176x166 panel and existing crafting/grid slots were retained. The player preview was absent and an extra Inventory heading crossed the texture layout. Added a textured biped at (51,75), scale 30, with mouse-dependent head/body rotation and corrected heading visibility. |
-| 9: menus | `GuiCreateWorld.initGui/drawScreen/actionPerformed`, `GuiSelectWorld.initGui/drawScreen`, `GuiSlot` | Creation combined name/seed in a customized layout and defaulted to Creative. It now defaults to Survival, separates More World Options and uses the original button/field hierarchy. Selection uses centered 36-pixel rows and the original two-row action layout while preserving Refresh. |
-| 10: menu music | `MusicTicker` constructor/update/context delays, `Minecraft.func_147109_W`, original `sounds.json` | Menu category and the initial 100-tick equivalent (five seconds) were already correct. World replacement unnecessarily stopped/rearmed a track even when its category matched. That reset was removed; category transitions retain their own scheduling. |
+| Gameplay HUD | `GuiIngame` | Corrected the 24x22 hotbar selection, health/hunger Y to height−39, count alignment, 16x16 inverted crosshair, and held-name position/two-second duration/final half-second fade. Existing hotbar item centers and status sprite coordinates needed no change. |
+| Pause | `GuiIngameMenu` | Corrected title Y=40 and quarter-height button rows. Unsupported vanilla categories remain omitted; supported Resume, Options and Save/Quit retain actual actions. |
+| Options | `GuiOptions` | Existing two-column coordinates, FOV range and Done position needed no change. Added reference FOV endpoint labels, shadows and the in-world gradient. Unsupported categories remain disabled. |
+| Inventory | `GuiInventory`, `ContainerPlayer`, `GuiContainer` | The 176x166 panel, player preview at (51,75), 2x2 inputs, output, inventory and hotbar slot coordinates needed no change. Corrected count alignment, slot highlight opacity, tooltip positioning/border/clipping and shared background. Carried stacks and authoritative commands remain intact. |
+| Creative catalog | `GuiContainerCreative` | Replaced the invented three-row panel with the original 195x136 item background, five rows of nine items, hotbar at (9,112), and wheel/draggable scrollbar. The implemented single catalog remains; unsupported categories/search are not fabricated. |
+| Title | `GuiMainMenu` | Corrected bottom-row offset, full second logo slice, panorama angular timing/projection and splash pulse/scale. Unavailable language control no longer advertises active pointer behavior. Existing Singleplayer/Options/Quit actions remain. |
+| World selection | `GuiSelectWorld`, `GuiSlot` | Corrected row selection/text bounds, lower-button offsets and dark list shading. Added half-row wheel scrolling, clipped partial rows, edge gradients and draggable scrollbar; selection, keyboard scrolling and double-click hitboxes share the same offset. Refresh remains MaaGE-specific. |
+| Create World | `GuiCreateWorld` | Name/seed fields and main button coordinates already matched. Corrected mode-help text Y=137/149; retained Survival default, More/Done, numeric seed rules and disabled unavailable settings. UUID storage replaces the vanilla folder-name hint. |
+| Delete confirmation | `GuiYesNo`, `GuiSelectWorld` | Corrected message Y=70/90 and buttons to height/6+96. Permanent deletion remains a real explicit confirmation. |
+| Rename | `GuiRenameWorld` | Corrected stacked 200x20 actions to height/4+108/132. Name field/title coordinates already matched. Text cursor now blinks. |
+| Loading | `LoadingScreenRenderer`, `GuiDownloadTerrain` | Corrected the two local-world loading lines to center−20/+4; retained dirt background and truthful preparation text, without invented progress. |
+| Video Settings | `GuiVideoSettings`, `GuiOptionsRowList` | Removed OptiFine-style categories; restored vanilla option order, list start/25-pixel rows, title Y=5 and Done at height−27. Existing functional FPS, GUI scale, window modes, VSync, Leaves and game-mode control remain in the original conventions. Wheel/keyboard scrolling keeps controls visible. |
+| Sound Settings | `GuiScreenOptionsSounds` | Corrected Master to 310 pixels and Done to height/6+168. Existing 150-pixel category sliders, 24-pixel spacing, drag capture and release preview behavior needed no change. MaaGE's implemented buses remain. |
+| Crafting Table | `GuiCrafting`, `ContainerWorkbench` | The 176x166 texture, 3x3 inputs at (30,17), result at (124,35), headings and inventory slots needed no coordinate change. Shared slot highlights, counts, tooltips and backdrop were corrected. |
 
-The reported transparent-world flash was not reproduced because runtime execution
-was prohibited. Source inspection showed that normal mesh replacement already
-retains the old GPU mesh until a complete replacement uploads. It did establish
-the full-mesh delay. This pass does not claim a runtime diagnosis of every possible
-flash; the new path never substitutes an empty whole column for one removal.
+The crosshair is one triangle-aligned inversion range in the existing UI batch.
+Shared segment planning and pipeline factors select inverse-destination and
+inverse-source color on both Metal and Vulkan. The derived GUI atlas makes
+transparent crosshair pixels neutral; source artwork is unchanged. No second UI
+framework or backend-specific layout was introduced.
 
-## Prediction, authority and ownership
+## Lighting and State Ownership
 
-The Server copies a revision-keyed 3x3x3 neighborhood around its target, packed
-light, a 5x5 biome halo, reach, mining conditions and controller delays into its
-existing snapshot. The neighborhood is resampled only when its center/relevant
-column revisions change or the previous sample was unusable. All accesses remain
-on the World owner; the Client never borrows columns or calls live World queries.
+The old dependency chain was mutation → Server lighting/boundary jobs → Server
+CPU mesh → Session mesh mailbox → Client upload budget. Prediction could remove
+geometry before that chain supplied nearby light. The Server no longer builds or
+publishes visual meshes. Its separately scheduled light cache still supplies
+random ticks, mushrooms, grass, melting, and other authoritative light queries.
+An unavailable or stale gameplay-light query explicitly defers behavior.
 
-The Client ray-tests the copied numeric shapes and shares the portable damage
-calculation with authoritative gameplay. When enough consistent mesh/neighborhood
-information exists, it records one of at most 32 pending actions. Immutable CPU
-mesh handoffs retain a numeric voxel owner per quad. A temporary GPU view removes
-only that voxel's indices; original CPU/GPU geometry remains available for rollback.
-New neighboring boundary faces use the existing face emitter, UVs, log orientation,
-materials, biome colors, overlays and copied light/AO samples. Lighting in the
-opened cell is a local estimate; authoritative light propagation still runs on
-the Server and replaces it with the final mesh.
+Initial state packets contain numeric blocks and biomes, without lighting,
+entities or scheduled-update payloads. Later packets contain changed cells and an
+exact acknowledged base revision. A full transport queue retains the Server's
+unsent revision; deltas are FIFO and cannot overwrite their required base. Block
+revisions are independent of light/mesh epochs, so relighting sends no packets.
+A column leaving the transfer interest radius releases its old delta base; a
+later entry receives a complete publication. Remote serialization is not added.
 
-Prediction is conservative when information is insufficient. Leaves/ice removals
-and opaque removals beside fluids wait for authoritative geometry, as do missing,
-stale or unlit neighborhoods. This avoids guessing fluid surfaces or distant Smart
-leaf coverage from a small sample. Other instant plants/torches need no newly
-occluded faces reconstructed. Rapid actions can coexist in the bounded cache.
+The Client reuses portable World chunks, immutable snapshot ownership, numeric
+registries, Jobs, light propagation and CPU meshing. Replica mode cannot generate,
+run simulation, mutate through the authoritative setter or save. It retains
+separate authoritative block copies and bounded expected-state break overlays.
+Prediction changes its local light inputs immediately, without waiting for the
+Server result. Rejection removes the overlay; confirmation retires it when the
+required state revisions reach presentation. Valid original CPU/GPU presentations
+are retained for rollback; later authority supersedes an obsolete rollback base.
 
-A numeric preview request carries an action ID and expected target alongside the
-existing held-input stream. The Server independently raycasts, checks attack,
-health/container/pause state and records the expected target. It never accepts
-Client hardness, progress, inventory or a claimed mutation. Actual gameplay
-mutations resolve the request; rejection restores the retained presentation.
-Confirmation carries required column revisions. Temporary faces retire as each
-authoritative neighboring mesh catches up, and the hole retires once the affected
-resident columns are current. Session/world epochs and monotonic IDs isolate old
-actions. Sounds, drops, particles and inventory are never predicted or duplicated.
+Visual relighting runs asynchronously as one bounded 3x3 column transaction with
+a retained outer halo. Changed-cell queues solve both increases and decreases.
+Cached direct-sky shafts are recomputed only at changed X/Z positions, including
+all affected Y levels when a roof opens or closes. Unchanged light is reused;
+unknown neighbors contribute no light. All input epochs are checked before
+publication, and affected cardinal/diagonal mesh dependencies are invalidated.
+Independent mesh jobs run through Jobs and upload through the existing measured
+GPU budget. The last complete presentation stays visible until replacement.
+No render-loop job wait, global World lock, full-world relight, or empty-column
+placeholder was added. Initial regions and large batches can take multiple frames.
 
-Resolved results remain in the bounded Server action records when the event queue
-is full. Optional prediction allocation/upload failure restores authoritative
-geometry and suspends new predictions until existing results drain and a fresh press retries. GPU handles
-are replaced/destroyed through the existing renderer ownership path. CPU sources
-live only with resident render columns; unload/world teardown releases both views.
-No global World lock, render-loop Server wait or second world simulation is added.
+The same numerical solver serves Server and Client schedules. Smooth sampling,
+AO, biome tinting and shader light response remain shared with the existing
+mesher/renderers. Day/night changes scale sky brightness in frame uniforms;
+they do not trigger relighting. Player, hand, dropped-item and pickup visuals
+sample Client light. There are no dedicated lighting-update messages or repeated
+light arrays, including in item-entity publications.
 
-## Communication and pickup behavior
+## Mining and Punching
 
-Unchanged held input is no longer sent each rendered frame. Changed levels/view
-and fresh edges still enter the ordered bounded outbox; unsent edges stay latched.
-Each predicted completed break adds one request and one necessary result. Copied
-neighborhoods enlarge the existing snapshot; there are no per-frame state queries,
-additional state-query round trips or separate rejection polling.
+The reference swing lasts six ticks and can restart after three. The prior Server
+loop restarted only after the entire swing ended and Client presentation waited
+for a copied swing observation. One immediate Client action timeline now supplies
+both first- and third-person progress. Presses swing immediately; held mining
+requests restart at reference tick cadence; a miss does not continuously punch
+air. Releasing stops new requests but lets an existing swing finish. Attack echoes
+and prediction confirmations do not restart it. Successful placement has a
+separate authoritative action identity. The Server's own action timing follows
+the same six/three rule.
 
-Pickup remains a Server inventory transaction. The existing aggregate pickup cue
-now carries up to 32 numeric transfer records in one event per owner step, rather
-than one extra message per item. Capacity/partial transfers preserve quantities;
-additional eligible transfers wait until the next step. The Client keeps at most
-32 short animations and uses cached shared item meshes. Optional visual overflow
-may omit decoration; it cannot create, lose or recollect items. Mined/Q-drop delays
-remain ten/forty ticks, and unavailable terrain still freezes retained entities.
+The existing hand/tool swing arc, sprite transforms, equip speed, fixed 70-degree
+foreground projection, bob/lag interaction and shared biped pose already follow
+the examined transforms and were preserved. Crack stages already used
+floor(progress×10)−1 and multiplicative overlays; those rules remain. The local
+raycast now clears cracks immediately on release/target change while progress
+continues to come from authoritative mining. No second authoritative mining
+simulation, predicted inventory, drops or sounds was added.
 
-## Inventory, rendering and frontend
+## Neighbor Support
 
-The preview builds textured player cuboids entirely on the Client. The subsequent
-[authenticated skin integration](player-skins.md) extends its original Steve
-appearance with classic/slim geometry, modern independent limbs and outer layers,
-using the same normalized atlas resource as first-person arms. Independent head/body mouse rotations use the
-reference `atan(delta/40)` and 20/40-degree factors, converted to MaaGE coordinates.
-Shared face lighting, backface culling, depth sorting and polygon clipping produce
-textured 3D quads in the existing GUI batch; no black offscreen surface, private
-depth buffer, second GUI renderer or native 3D-in-GUI API is introduced. The panel
-retains its crafting, result, main inventory and hotbar coordinates and scale.
+Immutable numeric block definitions register survival callbacks shared by
+placement and neighbor validation. Every ordinary expected-state mutation queues
+the affected supported cell and six neighbors before changing the block. Queue
+allocation is preflighted; duplicates require no allocation. The existing heap
+is unique by (kind,cell) and processes at most 128 scheduled updates per owner
+phase, retaining the rest. Cascades are iterative, not recursive. Missing support
+or stale gameplay light retries on a later tick. Loading/generation schedules
+support validation, so edits missed while a neighbor was absent are revisited.
+Queues and remaining delays persist in `MGCHNK5`.
 
-Tool extrusion, prediction geometry and preview calculations are shared C code.
-Metal and Vulkan consume the existing mesh/UI contracts, transformed-item path,
-nearest atlas sampling and alpha rules. Neither gets a private rendering algorithm;
-native shaders and GPU vertex layouts are unchanged. Compilation confirms native
-integration only, not matching images or shader runtime behavior.
+| Block | Current survival rule | Automatic support-loss drop |
+| --- | --- | --- |
+| Dandelion, poppy, tall grass | Grass block or dirt below | Flowers drop themselves; tall grass uses the existing 1/8 seed rule. |
+| Dead bush | Sand or dirt below | None without shears. |
+| Floor/wall torch | Actual metadata-selected full solid support face | Torch, metadata normalized by the existing item-drop rules. |
+| Cactus | Sand/cactus below and no solid-material horizontal neighbor | Cactus; stacked support loss cascades. |
+| Snow layer | Valid opaque solid ground, leaves, or full snow layer; ice excluded | None, matching the neighbor callback rather than tool harvesting. |
+| Brown/red mushroom | Opaque substrate and full sky/block light below 13 | Matching mushroom. Current content has no mycelium/podzol exception. |
+| Leaves | Existing natural/persistent flags, log marking and random decay | Existing ordinary leaf-drop rules; no immediate leaf removal. |
 
-Creation separates the basic name/mode page from seed/options. Structures and
-default world type are shown disabled at their implemented fixed settings; cheats
-and bonus chest are explicitly unavailable. No unsupported generation mode is
-enabled. Name/seed editing, signed 64-bit parsing, blank random seeds, existing
-storage/jobs and lifecycle remain intact. Empty/whitespace names and invalid numeric
-seeds cannot submit. Tab/focus/Enter/Escape follow visible controls. Selection
-preserves play, create, rename, confirmed deletion, refresh and cancel operations.
+Ordinary grass blocks do not acquire a plant support requirement. Automatic loss
+is environmental, including when Creative removes the support; direct Creative
+mining still follows its existing no-drop rule. Drops use existing item generation
+and pre-reserved item entities, never inventory insertion. Duplicate notifications
+observe the already changed numeric state and cannot drop the block twice.
 
-## Music timing
+## Shared Interfaces and Source Changes
 
-Music uses monotonic seconds independently of FPS and Server ticks. Menu music
-selects the four original menu tracks. First eligibility remains five seconds;
-normal post-track menu gaps are 1–30 seconds, Survival 600–1200 seconds and Creative
-60–180 seconds. Creative includes the original game pool plus its six additional
-tracks. A playing track changes category by stopping and scheduling within zero
-to half the new minimum gap. Matching contexts, inventory and table transitions
-do not restart it. Escape pause freezes playback and the music deadline; simulation
-effects retain their deliberate pause behavior. Asset failure/retry and volume
-controls retain the existing resource/error contracts.
+- `include/maage/{world,blocks}.h`: replica configuration, owned state packets,
+  independent state/presentation revisions, local light queries and survival hooks.
+- `include/maage/{local_session,session_protocol}.h`: ordered column transport,
+  protocol 11 and separate swing action observations; obsolete mesh transport removed.
+- `include/maage/{entities,gameplay,environment}.h`: presentation light removed from
+  authoritative entities, swing identity, and persistent support update kind.
+- `include/maage/render.h`, shared renderer and Metal/Vulkan adapters: UI inversion
+  ranges, common segment planning, blend factors and native pipelines. Shader
+  source and GPU vertex layouts did not change.
+- `src/world/`: shared incremental solver, replica imports/prediction overlays,
+  state deltas, retained immutable snapshots, ready-mesh queue, support callbacks,
+  queue persistence, placement preflight and Server swing cadence. Existing leaf
+  decay and random sampling remain in place.
+- `src/client/`: replica lifecycle/Jobs/uploads, prediction rollback, common swing,
+  local player/entity light and all existing screen implementations/resources.
+- `src/server/runtime.c`, `src/session/local_session.c`: state publication and
+  backpressure replace visual mesh publication.
+- `AGENTS.md`, application versions and related architecture documentation were
+  reconciled. Launcher, README, Java source and local worlds were not edited.
 
-## Compilation and remaining limits
+### Modified File Inventory
 
-- macOS ARM64 Debug Client/Server compile and link successfully.
-- macOS ARM64 Release Client/Server compile and link successfully, including fresh
-  Metal Objective-C and Vulkan/MoltenVK implementation compilation.
-- The independent headless Release Server compiles and links successfully.
-- The Client linker retains existing duplicate-library warnings. No applications,
-  tests, CTest, fixtures, benchmarks, synthetic harnesses or GitHub Actions ran.
-- Windows/Linux compilation, runtime shaders, visual/audio behavior and the manual
-  scenarios below remain unverified. Authenticated account skins are covered by the
-  [skin integration](player-skins.md); equipment and player animation remain absent.
-- Prediction has the conservative coverage and temporary lighting limits above.
-  Remote transport/serialization is future work; C layouts are not a wire format.
-- Supporting-block/neighbor-update propagation remains deferred: a flower can
-  remain after its supporting block disappears. Loading-screen redesign is also
-  deferred. Neither subsystem was expanded in this pass.
+- Project: `AGENTS.md`, `CMakeVersions.cmake`.
+- Documentation: `docs/development-roadmap.md`, `docs/gameplay-parity.md`,
+  `docs/item-entities.md`, `docs/random-block-ticks.md`, `docs/visual-fidelity.md`.
+- Public contracts: `include/maage/blocks.h`, `include/maage/entities.h`,
+  `include/maage/environment.h`, `include/maage/gameplay.h`,
+  `include/maage/local_session.h`, `include/maage/render.h`,
+  `include/maage/session_protocol.h`, `include/maage/world.h`.
+- Client presentation: `src/client/interaction.c`, `src/client/interaction.h`,
+  `src/client/item_entities.c`, `src/client/item_entities.h`,
+  `src/client/player_view.c`, `src/client/player_view.h`,
+  `src/client/prediction.c`, `src/client/prediction.h`, `src/client/viewport.c`.
+- Client UI: `src/client/ui/draw.c`, `src/client/ui/front.c`,
+  `src/client/ui/front_internal.h`, `src/client/ui/gameplay.c`,
+  `src/client/ui/internal.h`, `src/client/ui/options.c`,
+  `src/client/ui/resources.c`, `src/client/ui/title.c`, `src/client/ui/ui.c`.
+- Rendering: `src/core/render/render_shared.c`, `src/core/render/render_shared.h`,
+  `src/core/render/metal/render_metal.m`, `src/core/render/vulkan/render_vulkan.c`.
+- Authority/transport: `src/server/runtime.c`, `src/session/local_session.c`.
+- World: `src/world/CMakeLists.txt`, `src/world/chunk.c`, `src/world/content.c`,
+  `src/world/entities.c`, `src/world/environment.c`, `src/world/gameplay.c`,
+  `src/world/lighting.c`, `src/world/random_ticks.c`, `src/world/store.c`,
+  `src/world/world.c`, `src/world/world_internal.h`, and new `src/world/support.c`.
 
-## Programmer verification checklist
+## Compilation and Limits
 
-These are pending manual scenarios and expected results, not completed checks.
-Repeat the visual groups with Metal and Vulkan at several GUI scales.
+macOS ARM64 Debug and Release Client/Server compile and link with Metal and
+Vulkan/MoltenVK enabled. The independent headless Release Server compiles and
+links with rendering disabled. Affected portable C sources also compile with
+`-std=c90 -pedantic-errors`. The existing Client duplicate-library linker warnings
+remain. No applications, tests, CTest, harnesses, benchmarks or Actions ran.
+Compilation does not establish visual fidelity or imperceptible update latency.
+Windows/Linux compilation and all runtime/manual scenarios remain unverified.
 
-- **Pickup:** Walk within expanded bounds of mined/Q-dropped stacks after their
-  delays; observe collection and short flight without precise rendered contact.
-  Repeat with a full inventory, one partially available stack and a dense pile;
-  confirm residual quantities, one pickup cue per collecting step and no duplicate
-  entity after reopening the world.
-- **Mining:** Fresh-click flowers, tall grass, torches and consecutive plants in
-  Survival. Try fresh presses immediately after a charged stone break, held mining
-  while changing targets, Creative repeats, missed presses and changed tools.
-  Instant objects should break on the initial authoritative action; deliberate
-  charged/Creative held-controller delays should remain. Compare airborne/water
-  mining and authoritative sound/tool durability timing.
-- **Prediction:** Break ordinary opaque blocks rapidly, including column seams
-  and tinted/log surfaces. Observe immediate local holes with neighboring faces,
-  stable surrounding terrain and no duplicate sound/drop. Turn away, release
-  attack, change tool, open a container or leave a world during pending actions;
-  rejected/stale results must restore/retire correctly. Observe the conservative
-  fluid/leaf/ice cases and compare final lighting once authoritative meshes arrive.
-- **Tools:** Inspect each existing pickaxe/axe/shovel in main inventory, hotbar,
-  first person and world drops. Compare handed orientation, edge colors, transparent
-  pixels, sprite thickness, transforms, lighting and nearest pixel sampling.
-- **Containers and audio:** Open/close inventory and tables during a playing track
-  and a scheduled gap. Music and gameplay should continue with volumes intact;
-  Escape pause should freeze them deliberately. Craft, move/split stacks, close
-  with items pending, and save/reopen to check authoritative quantities.
-- **Inventory preview:** Compare the 176x166 layout with 1.7.10. Move the cursor
-  above/below and side to side; head/body should follow smoothly, skin/hat should
-  remain transparent where intended, and geometry must stay inside the preview
-  region without a black rectangle or depth artifact. Check all slots/tooltips.
-- **World screens:** Compare Select World row/button spacing, keyboard selection,
-  scrolling, double-click play, rename, confirmed deletion and Refresh. Create
-  Survival/Creative worlds, switch More/Done, enter negative/large/blank seeds,
-  reject invalid seeds/names and verify persistence of supported settings. Disabled
-  controls must never claim to change generation or enable cheats/bonus chests.
-- **Music contexts:** From a fresh title session, allow the intentional initial
-  five-second eligibility delay. Verify menu tracks, subsequent gaps and transitions
-  into/out of Survival/Creative without an extra reset gap or incorrect pool.
-- **Renderer comparison:** Repeat prediction, tools, preview, alpha edges and GUI
-  scaling on both primary backends; inspect resizing/fullscreen and world teardown
-  for stale geometry or resource lifetime faults.
+Prediction retains its existing conservative exclusions for leaves, ice, opaque
+breaks beside fluids, and unavailable/unlit neighborhoods. Those changes still
+reach the Client through authoritative state deltas and use local visual lighting.
+Creative is the implemented single catalog, not a fabricated full category/search
+system. Unsupported controls/content remain disabled or absent. Large initial
+light/mesh batches remain asynchronous and must be judged manually.
 
-Git attribution follows the repository convention; the completion response gives
-the commit ID. Concurrent Launcher/window/icon edits and the pre-existing
-`.DS_Store` change are outside this parity commit.
+## Pending Programmer Verification
+
+No scenario below is marked as passed. Repeat visual checks with both renderers.
+
+- **GUI:** Compare every screen above with 1.7.10 at multiple GUI scales and window
+  sizes. Inspect text, textures, button bounds/disabled/hover, pointer behavior,
+  inventory/crafting slots, carried counts/tooltips, Creative scrolling, world-list
+  partial rows/double clicks, navigation, Pause and fullscreen notch-safe content.
+- **Lighting:** Break/place a torch in a dark cave; open and close a daylight hole;
+  break opaque blocks beside a torch; rapidly break adjacent blocks; repeat across
+  chunk seams and with missing neighbors. Inspect source removal, day/night,
+  prediction rejection, retained geometry, and absence of black flashes/empty chunks.
+- **Mining:** Punch empty-handed; use each tool; hold/release halfway; change target;
+  instant-break flowers; break consecutive blocks; compare first/third-person
+  cadence, tool/equip/bob/FOV, cracks, cancellation, and confirmation/rejection.
+- **Support:** Remove flower/tall-grass/dead-bush ground, floor/wall torch supports,
+  cactus bases and side clearance, mushroom terrain, and snow supports. Inspect
+  cascades, correct metadata/chance/quantity and no duplicate drops. Remove logs;
+  natural leaves must retain random decay and placed leaves must remain persistent.
+  Repeat near unloaded boundaries, after saving/reopening, and in Creative.

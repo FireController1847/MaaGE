@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 10U
+#define MAAGE_SESSION_PROTOCOL_VERSION 11U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2,
@@ -70,7 +70,6 @@ typedef struct maage_session_command {
     unsigned int game_mode; /* Request; server validates and applies rules. */
     int paused; /* Request, not a write into authoritative simulation. */
     int render_radius;
-    unsigned int leaves_mode;
     double view_yaw;
 } maage_session_command;
 
@@ -95,9 +94,10 @@ typedef struct maage_session_player_view {
     int has_target, breaking_active, submerged;
     double reach;
     unsigned int break_delay, attack_miss_delay;
-    maage_world_neighborhood mining;
     maage_world_target target, breaking;
     double break_progress;
+    unsigned long swing_tick;
+    unsigned int swing_kind;
     double swing; /* Authoritative remaining six-tick arm swing, normalized 0..1. */
 } maage_session_player_view;
 
@@ -144,7 +144,7 @@ typedef struct maage_session_collision {
 
 typedef enum maage_session_event_kind {
     MAAGE_EVENT_SOUND = 1, MAAGE_EVENT_STATUS = 2,
-    MAAGE_EVENT_MESH_REMOVE = 3, MAAGE_EVENT_DISCONNECTED = 4,
+    MAAGE_EVENT_DISCONNECTED = 4,
     MAAGE_EVENT_PICKUP = 5, MAAGE_EVENT_BLOCK_ACTION = 6
 } maage_session_event_kind;
 
@@ -164,8 +164,6 @@ typedef struct maage_session_event {
     maage_status status; /* STATUS or DISCONNECTED outcome. */
     int has_trace;
     maage_status_trace trace; /* Copied by value; frame file names are static. */
-    int column_x, column_z; /* MESH_REMOVE column, without CPU mesh pointer. */
-    unsigned long mesh_revision;
 } maage_session_event;
 
 #ifdef __cplusplus

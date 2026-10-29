@@ -53,7 +53,7 @@ typedef struct maage_vulkan_rendering {
     VkPipelineLayout layout;
     VkSampler nearest, linear;
     VkRenderPass scene_pass, color_pass, present_pass;
-    VkPipeline mesh[3], ui[2], panorama_ui[2], blur, scene_composite, composite;
+    VkPipeline mesh[3], ui[3], panorama_ui[3], blur, scene_composite, composite;
     VkFramebuffer *present_framebuffers;
     VkCommandPool upload_pool;
     VkCommandBuffer upload;
@@ -419,7 +419,8 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
     VkSpecializationInfo specialization = {1, &entry, sizeof(srgb), &srgb};
     static const VkBlendFactor factors[] = {
         VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        VK_BLEND_FACTOR_SRC_COLOR, VK_BLEND_FACTOR_DST_COLOR
+        VK_BLEND_FACTOR_SRC_COLOR, VK_BLEND_FACTOR_DST_COLOR,
+        VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
     };
     const maage_render_pipeline_state *state = &maage_render_pipeline_states[mode];
     int ui = state->ui, fullscreen = state->fullscreen;
@@ -536,7 +537,7 @@ static void maage_vulkan_pipelines_destroy(maage_vulkan_renderer *native)
         if (gpu->mesh[index]) vkDestroyPipeline(native->device, gpu->mesh[index], NULL);
         gpu->mesh[index] = VK_NULL_HANDLE;
     }
-    for (unsigned int index = 0; index < 2; ++index) {
+    for (unsigned int index = 0; index < 3; ++index) {
         if (gpu->ui[index]) vkDestroyPipeline(native->device, gpu->ui[index], NULL);
         if (gpu->panorama_ui[index]) vkDestroyPipeline(native->device, gpu->panorama_ui[index], NULL);
         gpu->ui[index] = gpu->panorama_ui[index] = VK_NULL_HANDLE;
@@ -565,7 +566,7 @@ static maage_status maage_vulkan_targets_create(maage_renderer *renderer)
         MAAGE_VULKAN_TRY(maage_vulkan_render_pass(renderer, native->format, 0, 1, &gpu->present_pass));
         for (unsigned int index = 0; index < 3; ++index)
             MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, index, 0, &gpu->mesh[index]));
-        for (unsigned int index = 0; index < 2; ++index) {
+        for (unsigned int index = 0; index < 3; ++index) {
             MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->scene_pass, index + MAAGE_RENDER_UI, 0, &gpu->ui[index]));
             MAAGE_VULKAN_TRY(maage_vulkan_pipeline(renderer, gpu->color_pass, index + MAAGE_RENDER_UI, 0, &gpu->panorama_ui[index]));
         }
@@ -737,12 +738,17 @@ static void maage_vulkan_ui_draw(maage_vulkan_renderer *native, VkCommandBuffer 
     maage_render_uniforms push = {0};
     VkDeviceSize offset = 0;
     maage_vulkan_image *texture;
+    maage_render_ui_segment segments[3];
+    unsigned int n,segment_count;
     if (!batch || !count) return;
+    segment_count=maage_render_ui_segments(batch,first,count,segments);
     texture = batch->texture->platform;
     maage_render_ui_uniforms(batch, &push);
-    maage_vulkan_bind(native, command, panorama ? gpu->panorama_ui[MAAGE_RENDER_BLEND_ALPHA] : gpu->ui[batch->blend], texture->descriptor, &push);
     vkCmdBindVertexBuffers(command, 0, 1, &frame->vertices[layer].buffer, &offset);
-    maage_vulkan_indices(native, command, frame->indices[layer].buffer, first, count);
+    for(n=0;n<segment_count;++n) {
+        maage_vulkan_bind(native,command,panorama?gpu->panorama_ui[MAAGE_RENDER_BLEND_ALPHA]:gpu->ui[segments[n].blend],texture->descriptor,&push);
+        maage_vulkan_indices(native,command,frame->indices[layer].buffer,segments[n].first,segments[n].count);
+    }
 }
 static void maage_vulkan_fullscreen(maage_vulkan_renderer *native, VkCommandBuffer command,
     VkPipeline pipeline, maage_vulkan_image *source, float x, float y, int blur)

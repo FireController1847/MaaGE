@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int maage_client_ui_creative_catalog(const maage_client_ui *ui);
+
 static void maage_client_ui_block_uv(const maage_client_ui *ui,
     const float source[4], float uv[4])
 {
@@ -48,8 +50,8 @@ static void maage_client_ui_stack(maage_client_ui *ui,
     }
     if (stack->count > 1) {
         sprintf(count, "%u", stack->count);
-        maage_client_ui_text(ui, count, x + 17, y + 10, MAAGE_CLIENT_UI_RIGHT, 0.18f, 0.18f, 0.18f);
-        maage_client_ui_text(ui, count, x + 16, y + 9, MAAGE_CLIENT_UI_RIGHT, 1, 1, 1);
+        maage_client_ui_text(ui, count, x + 18, y + 10, MAAGE_CLIENT_UI_RIGHT, 0.18f, 0.18f, 0.18f);
+        maage_client_ui_text(ui, count, x + 17, y + 9, MAAGE_CLIENT_UI_RIGHT, 1, 1, 1);
     }
 }
 
@@ -89,29 +91,39 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui)
     maage_client_ui_rectangle(ui, rectangle, 256.0f / ui->resources.atlas_edge, 0,
         438.0f / ui->resources.atlas_edge, 22.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     rectangle.x = x - 1 + (float)ui->snapshot.player.inventory.selected * 20;
-    rectangle.y = y - 1; rectangle.width = rectangle.height = 24;
+    rectangle.y = y - 1; rectangle.width = 24; rectangle.height = 22;
     maage_client_ui_rectangle(ui, rectangle, 256.0f / ui->resources.atlas_edge,
         22.0f / ui->resources.atlas_edge, 280.0f / ui->resources.atlas_edge,
-        46.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+        44.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     for (i = 0; i < MAAGE_HOTBAR_SLOTS; ++i)
         maage_client_ui_stack(ui, &ui->snapshot.player.inventory.slots[i], x + 3 + (float)i * 20, y + 3);
     if (ui->snapshot.player.game_mode == MAAGE_GAME_MODE_SURVIVAL) {
-        maage_client_ui_status(ui, x, y - 13, ui->snapshot.player.health, 0);
-        maage_client_ui_status(ui, x + 173, y - 13, ui->snapshot.player.hunger, 1);
+        maage_client_ui_status(ui, x, y - 17, ui->snapshot.player.health, 0);
+        maage_client_ui_status(ui, x + 173, y - 17, ui->snapshot.player.hunger, 1);
     }
     selected = maage_inventory_selected(&ui->snapshot.player.inventory);
     item = selected && selected->count ? maage_item_registry_get(ui->items, selected->item_id) : NULL;
-    if (item && !maage_client_ui_modal(ui))
-        maage_client_ui_text(ui, maage_client_item_name(ui->items, selected), x + 91, y - 26,
-            MAAGE_CLIENT_UI_CENTER, 1, 1, 1);
+    if (item && !maage_client_ui_modal(ui) && ui->highlight_until>ui->notice_now) {
+        size_t first=ui->batch.vertex_count,n;
+        float alpha=(float)((ui->highlight_until-ui->notice_now)*2.0);
+        float name_y=ui->content.y+ui->content.height-59+
+            (ui->snapshot.player.game_mode==MAAGE_GAME_MODE_CREATIVE?14:0);
+        if(alpha>1.0f)alpha=1.0f;
+        maage_client_ui_text(ui,maage_client_item_name(ui->items,selected),x+92,name_y+1,
+            MAAGE_CLIENT_UI_CENTER,0.25f,0.25f,0.25f);
+        maage_client_ui_text(ui,maage_client_item_name(ui->items,selected),x+91,name_y,
+            MAAGE_CLIENT_UI_CENTER,1,1,1);
+        for(n=first;n<ui->batch.vertex_count;++n)ui->vertices[n].color[3]*=alpha;
+    }
 }
 
 static maage_client_ui_rect maage_client_ui_inventory_frame(const maage_client_ui *ui)
 {
     maage_client_ui_rect rectangle;
-    rectangle.width = 176; rectangle.height = 166;
-    rectangle.x = (float)(int)(ui->content.x + (ui->content.width - 176) * 0.5f);
-    rectangle.y = (float)(int)(ui->content.y + (ui->content.height - 166) * 0.5f);
+    rectangle.width = maage_client_ui_creative_catalog(ui)?195:176;
+    rectangle.height = maage_client_ui_creative_catalog(ui)?136:166;
+    rectangle.x = (float)(int)(ui->content.x + (ui->content.width - rectangle.width) * 0.5f);
+    rectangle.y = (float)(int)(ui->content.y + (ui->content.height - rectangle.height) * 0.5f);
     return rectangle;
 }
 
@@ -120,8 +132,8 @@ static maage_client_ui_rect maage_client_ui_inventory_slot(maage_client_ui_rect 
 {
     maage_client_ui_rect rectangle;
     rectangle.width = rectangle.height = 16;
-    rectangle.x = frame.x + 8 + (float)(slot % 9) * 18;
-    rectangle.y = frame.y + (slot < 9 ? 142 : 84 + (float)((slot - 9) / 9) * 18);
+    rectangle.x = frame.x + (frame.width==195?9:8) + (float)(slot % 9) * 18;
+    rectangle.y = frame.y + (frame.width==195?112:(slot < 9 ? 142 : 84 + (float)((slot - 9) / 9) * 18));
     return rectangle;
 }
 
@@ -171,11 +183,25 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui,
     (void)context;
     /* GuiContainer/GuiContainerCreative slot operations are silent; an
      * inventory command is not a local menu-button activation. */
+    if(ui->has_snapshot&&maage_client_ui_creative_catalog(ui)) {
+        unsigned int rows=(unsigned int)((ui->creative_count+8)/9),maximum=rows>5?rows-5:0;
+        maage_client_ui_rect r=maage_client_ui_inventory_frame(ui);
+        if(input->scroll>0&&ui->creative_page)--ui->creative_page;
+        if(input->scroll<0&&ui->creative_page<maximum)++ui->creative_page;
+        r.x+=175;r.y+=18;r.width=12;r.height=112;
+        if(input->primary_pressed&&maage_client_ui_slot_contains(ui,r))ui->creative_dragging=1;
+        if(!input->primary_down)ui->creative_dragging=0;
+        if(ui->creative_dragging) {
+            float fraction=(ui->mouse_y-r.y-7.5f)/(r.height-15);
+            if(fraction<0)fraction=0;if(fraction>1)fraction=1;
+            ui->creative_page=(unsigned int)(fraction*maximum+0.5f);
+        }
+    }
     if (!ui->has_snapshot || !ui->items || ui->container_close_requested ||
         !ui->snapshot.player.crafting.kind || ui->snapshot.player.crafting.closing ||
         (!input->primary_pressed && !input->secondary_pressed)) return 0;
     frame = maage_client_ui_inventory_frame(ui);
-    for (slot = 0; slot < MAAGE_INVENTORY_SLOTS; ++slot) {
+    for (slot = 0; slot < (maage_client_ui_creative_catalog(ui)?9U:MAAGE_INVENTORY_SLOTS); ++slot) {
         rectangle = maage_client_ui_inventory_slot(frame, slot);
         if (maage_client_ui_slot_contains(ui, rectangle)) {
             maage_client_ui_container_slot(ui, input, MAAGE_SLOT_INVENTORY, slot);
@@ -209,9 +235,9 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui,
     }
     if (maage_client_ui_creative_catalog(ui)) {
         count = ui->creative_count;
-        first = (size_t)ui->creative_page * 27;
-        for (slot = 0; slot < 27 && first + slot < count; ++slot) {
-            rectangle.x = frame.x + 8 + (float)(slot % 9) * 18;
+        first = (size_t)ui->creative_page * 9;
+        for (slot = 0; slot < 45 && first + slot < count; ++slot) {
+            rectangle.x = frame.x + 9 + (float)(slot % 9) * 18;
             rectangle.y = frame.y + 18 + (float)(slot / 9) * 18;
             rectangle.width = rectangle.height = 16;
             if (maage_client_ui_slot_contains(ui, rectangle)) {
@@ -228,11 +254,7 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui,
                 return 0;
             }
         }
-        rectangle.x = frame.x + 116; rectangle.y = frame.y + 5;
-        rectangle.width = 22; rectangle.height = 10;
-        if (maage_client_ui_slot_contains(ui, rectangle) && ui->creative_page) --ui->creative_page;
-        rectangle.x += 26;
-        if (maage_client_ui_slot_contains(ui, rectangle) && first + 27 < count) ++ui->creative_page;
+
     }
     return 0;
 }
@@ -245,41 +267,39 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context)
     const char *hover = NULL;
     size_t count, first;
     unsigned int slot;
-    char label[48];
     (void)context;
     if (!ui->has_snapshot || !ui->items) return;
     frame = maage_client_ui_inventory_frame(ui);
     {
-        float atlas_x = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE ? 1536.0f : 256.0f;
+        float atlas_x = maage_client_ui_creative_catalog(ui)?1792.0f:
+            (ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE ? 1536.0f : 256.0f);
         maage_client_ui_rectangle(ui, frame, atlas_x / ui->resources.atlas_edge,
-            256.0f / ui->resources.atlas_edge, (atlas_x + 176) / ui->resources.atlas_edge,
-            422.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+            256.0f / ui->resources.atlas_edge, (atlas_x + frame.width) / ui->resources.atlas_edge,
+            (256.0f+frame.height) / ui->resources.atlas_edge, 1, 1, 1, 1);
     }
     if (maage_client_ui_creative_catalog(ui)) {
-        rectangle = frame; rectangle.x += 5; rectangle.y += 5;
-        rectangle.width = 166; rectangle.height = 75;
-        maage_client_ui_panel(ui, rectangle, 0.78f, 0.78f, 0.78f, 1);
-        maage_client_ui_text(ui, "Creative", frame.x + 8, frame.y + 6,
-            MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
+        maage_client_ui_text(ui,"Items",frame.x+8,frame.y+6,MAAGE_CLIENT_UI_LEFT,0.25f,0.25f,0.25f);
         count = ui->creative_count;
-        first = (size_t)ui->creative_page * 27;
-        for (slot = 0; slot < 27 && first + slot < count; ++slot) {
+        first = (size_t)ui->creative_page * 9;
+        for (slot = 0; slot < 45 && first + slot < count; ++slot) {
             item = maage_item_registry_get(ui->items, ui->creative_items[first + slot].item_id);
-            rectangle.x = frame.x + 7 + (float)(slot % 9) * 18;
-            rectangle.y = frame.y + 17 + (float)(slot / 9) * 18;
-            rectangle.width = rectangle.height = 18;
-            maage_client_ui_rectangle(ui, rectangle, 263.0f / ui->resources.atlas_edge,
-                339.0f / ui->resources.atlas_edge, 281.0f / ui->resources.atlas_edge,
-                357.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+            rectangle.x = frame.x + 9 + (float)(slot % 9) * 18;
+            rectangle.y = frame.y + 18 + (float)(slot / 9) * 18;
+            rectangle.width = rectangle.height = 16;
             if (!item) continue;
             stack = ui->creative_items[first + slot];
-            maage_client_ui_stack(ui, &stack, rectangle.x + 1, rectangle.y + 1);
-            if (maage_client_ui_slot_contains(ui, rectangle)) hover = maage_client_item_name(ui->items, &stack);
+            maage_client_ui_stack(ui, &stack, rectangle.x, rectangle.y);
+            if (maage_client_ui_slot_contains(ui, rectangle)) {
+                maage_client_ui_panel(ui,rectangle,1,1,1,0.5f);hover=maage_client_item_name(ui->items,&stack);
+            }
         }
-        if (count > 27) {
-            sprintf(label, "<   %u   >", ui->creative_page + 1);
-            maage_client_ui_text(ui, label, frame.x + 145, frame.y + 6,
-                MAAGE_CLIENT_UI_CENTER, 0.25f, 0.25f, 0.25f);
+        {
+            unsigned int rows=(unsigned int)((count+8)/9),maximum=rows>5?rows-5:0;
+            float u=1792.0f+(maximum?232.0f:244.0f);
+            rectangle.x=frame.x+175;rectangle.y=frame.y+18+(maximum?(float)(int)(97.0f*ui->creative_page/maximum):0);
+            rectangle.width=12;rectangle.height=15;
+            maage_client_ui_rectangle(ui,rectangle,u/ui->resources.atlas_edge,0,
+                (u+12)/ui->resources.atlas_edge,15.0f/ui->resources.atlas_edge,1,1,1,1);
         }
     } else {
         int table = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE;
@@ -296,28 +316,45 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context)
             if (!result || !ui->container_command_pending)
                 maage_client_ui_stack(ui, source, rectangle.x, rectangle.y);
             if (maage_client_ui_slot_contains(ui, rectangle)) {
-                maage_client_ui_panel(ui, rectangle, 1, 1, 1, 0.28f);
+                maage_client_ui_panel(ui, rectangle, 1, 1, 1, 0.5f);
                 if (source->count && (!result || !ui->container_command_pending))
                     hover = maage_client_item_name(ui->items, source);
             }
         }
     }
-    for (slot = 0; slot < MAAGE_INVENTORY_SLOTS; ++slot) {
+    for (slot = 0; slot < (maage_client_ui_creative_catalog(ui)?9U:MAAGE_INVENTORY_SLOTS); ++slot) {
         rectangle = maage_client_ui_inventory_slot(frame, slot);
         maage_client_ui_stack(ui, &ui->snapshot.player.inventory.slots[slot], rectangle.x, rectangle.y);
         if (maage_client_ui_slot_contains(ui, rectangle)) {
-            maage_client_ui_panel(ui, rectangle, 1, 1, 1, 0.28f);
+            maage_client_ui_panel(ui, rectangle, 1, 1, 1, 0.5f);
             if (ui->snapshot.player.inventory.slots[slot].count)
                 hover = maage_client_item_name(ui->items, &ui->snapshot.player.inventory.slots[slot]);
         }
     }
     if (!ui->snapshot.player.inventory.cursor.count && hover) {
-        rectangle.x = ui->mouse_x + 10; rectangle.y = ui->mouse_y - 12;
-        rectangle.width = maage_client_ui_text_width(ui, hover) + 8;
-        rectangle.height = 16;
-        if (rectangle.x + rectangle.width > ui->width) rectangle.x = ui->width - rectangle.width;
-        maage_client_ui_panel(ui, rectangle, 0.08f, 0.02f, 0.12f, 0.96f);
-        maage_client_ui_text(ui, hover, rectangle.x + 4, rectangle.y + 4,
+        rectangle.x = ui->mouse_x + 12; rectangle.y = ui->mouse_y - 12;
+        rectangle.width = maage_client_ui_text_width(ui, hover);
+        rectangle.height = 8;
+        if (rectangle.x + rectangle.width > ui->content.x+ui->content.width)
+            rectangle.x -= 28+rectangle.width;
+        if(rectangle.y+14>ui->content.y+ui->content.height)
+            rectangle.y=ui->content.y+ui->content.height-14;
+        {
+            maage_client_ui_rect panel=rectangle;
+            panel.x-=4;panel.y-=4;panel.width+=8;panel.height+=8;
+            maage_client_ui_panel(ui,panel,0.0627f,0,0.0627f,0.94f);
+            panel.x+=1;panel.y+=1;panel.width-=2;panel.height=1;
+            maage_client_ui_gradient(ui,panel,0x505000FFUL,0x505000FFUL);
+            panel.y+=13;
+            maage_client_ui_gradient(ui,panel,0x5028007FUL,0x5028007FUL);
+            panel.y-=12;panel.width=1;panel.height=12;
+            maage_client_ui_gradient(ui,panel,0x505000FFUL,0x5028007FUL);
+            panel.x+=rectangle.width+5;
+            maage_client_ui_gradient(ui,panel,0x505000FFUL,0x5028007FUL);
+        }
+        maage_client_ui_text(ui, hover, rectangle.x+1, rectangle.y+1,
+            MAAGE_CLIENT_UI_LEFT,0.25f,0.25f,0.25f);
+        maage_client_ui_text(ui, hover, rectangle.x, rectangle.y,
             MAAGE_CLIENT_UI_LEFT, 1, 1, 1);
     }
     maage_client_ui_stack(ui, &ui->snapshot.player.inventory.cursor, ui->mouse_x - 8, ui->mouse_y - 8);
@@ -377,6 +414,16 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,
             MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
     respawned = ui->has_snapshot && ui->snapshot.player.health == 0 &&
         snapshot->player.health != 0;
+    {
+        const maage_item_stack *selected=maage_inventory_selected(&snapshot->player.inventory);
+        const maage_item_definition *definition=selected&&ui->items?
+            maage_item_registry_get(ui->items,selected->item_id):NULL;
+        if(!selected||!selected->count)ui->highlight_until=0;
+        else if(!ui->has_snapshot||selected->item_id!=ui->highlighted_item.item_id||
+            ((!definition||!definition->durability)&&selected->metadata!=ui->highlighted_item.metadata))
+            ui->highlight_until=ui->notice_now+2.0;
+        if(selected)ui->highlighted_item=*selected;
+    }
     ui->snapshot = *snapshot;
     ui->has_snapshot = 1;
     if (ui->container_command_pending && ui->container_command_sequence &&

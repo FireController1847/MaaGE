@@ -72,7 +72,7 @@ typedef struct maage_render_ui_vertex {
     float uv[2];
     float color[4];
 } maage_render_ui_vertex;
-enum { MAAGE_RENDER_BLEND_ALPHA = 0, MAAGE_RENDER_BLEND_ADDITIVE = 1 };
+enum { MAAGE_RENDER_BLEND_ALPHA = 0, MAAGE_RENDER_BLEND_ADDITIVE = 1, MAAGE_RENDER_BLEND_INVERT = 2 };
 typedef struct maage_render_ui_data {
     const maage_render_ui_vertex *vertices;
     size_t vertex_count;
@@ -85,7 +85,9 @@ typedef struct maage_render_ui_data {
      * Gaussian-blur their completed render target before drawing the remaining
      * indices at native resolution. Others simply render the batch unchanged. */
     size_t gaussian_background_indices;
-    unsigned int blend; /* Straight alpha, or source-alpha additive emission. */
+    /* Optional triangle-aligned range uses destination-color inversion. */
+    size_t invert_first_index,invert_index_count;
+    unsigned int blend; /* Straight alpha, source-alpha emission, or color inversion. */
     /* Optional positive camera depths, one per vertex. NULL keeps ordinary
      * screen-space interpolation; supplied depths preserve projective UVs.
      * Borrowed with vertices through draw_frame, then copied by the backend. */

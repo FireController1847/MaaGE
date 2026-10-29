@@ -24,7 +24,7 @@ typedef struct maage_client_ui_resources {
     unsigned char glyph_width[256];
     int atlas_edge, block_atlas_width, block_atlas_height;
     maage_status load_status, recovery_status;
-    maage_status source_results[5];
+    maage_status source_results[7];
     unsigned int skin_model;
     float skin_uv[4];
     unsigned int failed_resources;
@@ -52,6 +52,8 @@ struct maage_client_ui {
     const maage_block_registry *blocks;
     float inventory_grass_color[3];
     maage_session_snapshot snapshot; /* Value-only, no World pointers. */
+    maage_item_stack highlighted_item;
+    double highlight_until;
     int has_snapshot, container_command_pending, container_close_requested;
     unsigned long container_command_sequence;
     maage_session_command commands[MAAGE_CLIENT_UI_COMMAND_CAPACITY];
@@ -59,6 +61,7 @@ struct maage_client_ui {
     maage_client_ui_click_callback click;
     void *click_context;
     unsigned int creative_page;
+    int creative_dragging;
     maage_item_stack *creative_items;
     size_t creative_count;
     float item_uv[MAAGE_CONTENT_TEXTURE_COUNT][4];
@@ -93,6 +96,8 @@ float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 /* Vanilla 1.7.10 tiled options background over the entire drawable,
  * restoring the previous clipping region before returning. */
 void maage_client_ui_menu_background(maage_client_ui *ui);
+void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangle,
+    unsigned long top, unsigned long bottom);
 void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect rectangle,
     const char *label,float value,int highlighted);
 /* Shared cursor feedback for standard and custom-drawn controls. */
@@ -101,6 +106,8 @@ maage_status maage_client_ui_options_register(maage_client_ui *ui);
 void maage_client_ui_request_window_mode(maage_client_ui *ui,maage_client_window_choice choice);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
     float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
+void maage_client_ui_text_shadow(maage_client_ui *ui,const char *text,float x,float y,
+    maage_client_ui_alignment alignment,float red,float green,float blue);
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
     float x, float y, float red, float green, float blue);
 maage_status maage_client_ui_inventory_register(maage_client_ui *ui);

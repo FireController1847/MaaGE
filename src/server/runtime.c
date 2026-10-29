@@ -16,7 +16,7 @@
 #define MAAGE_SERVER_STEP_SECONDS 0.05
 #define MAAGE_SERVER_MAX_CATCHUP 4U
 #define MAAGE_SERVER_COMMAND_BUDGET 64U
-#define MAAGE_SERVER_MESH_BUDGET 16U
+#define MAAGE_SERVER_COLUMN_BUDGET 16U
 #define MAAGE_SERVER_WAIT_MS 25UL
 
 struct maage_server_runtime {
@@ -47,7 +47,6 @@ struct maage_server_runtime {
     maage_session_audio_observation audio_observation;
     maage_status last_world_notice, crafting_failure;
     int publication_dirty;
-    maage_world_neighborhood mining;
     maage_session_collision collision;
     int sneaking;
     unsigned long last_prediction;
@@ -519,7 +518,6 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
     case MAAGE_CMD_VIEW:
         if (command->render_radius < 1 ||
             command->render_radius > MAAGE_WORLD_MAX_RADIUS ||
-            command->leaves_mode > MAAGE_LEAVES_FANCY ||
             !server_finite(command->view_yaw) ||
             fabs(command->view_yaw) > 1000000000.0)
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
@@ -527,8 +525,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime,
          * claim a changed radius took effect until World exposes its setter. */
         if (command->render_radius != runtime->config.render_distance)
             return server_reject(runtime, MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_OPERATION_SET);
-        result = maage_world_set_leaves_mode(runtime->world,
-            (maage_leaves_mode)command->leaves_mode);
+        result = server_status(MAAGE_STATUS_SUCCESS,MAAGE_OPERATION_SET);
         if (!maage_status_failed(result)) runtime->yaw = command->view_yaw;
         break;
     case MAAGE_CMD_DISCONNECT:
@@ -610,10 +607,6 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
         (runtime->game.mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5);
     snapshot.player.break_delay = runtime->game.break_delay;
     snapshot.player.attack_miss_delay = runtime->game.attack_miss_delay;
-    if (runtime->game.target.y >= 0 && runtime->game.target.y < MAAGE_WORLD_HEIGHT)
-        (void)maage_world_sample_neighborhood(runtime->world, runtime->game.target.x,
-            runtime->game.target.y, runtime->game.target.z, &runtime->mining);
-    snapshot.player.mining = runtime->mining;
     {
         const maage_block_state_definition *eye_state = maage_block_registry_state(maage_content_blocks(runtime->content),
             maage_world_get(runtime->world, (int)floor(runtime->player.position[0]),
@@ -624,6 +617,8 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     snapshot.player.breaking = runtime->game.breaking;
     snapshot.player.break_progress = runtime->game.break_progress;
     snapshot.player.swing = runtime->game.swing;
+    snapshot.player.swing_tick=runtime->game.swing_tick;
+    snapshot.player.swing_kind=runtime->game.swing_kind;
     maage_world_environment(runtime->world, &snapshot.environment);
     cell_x = (int)floor(runtime->player.position[0]);
     cell_y = (int)floor(runtime->player.position[1] + MAAGE_PLAYER_EYE_HEIGHT);
@@ -631,6 +626,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     if (cell_y >= 0 && cell_y < MAAGE_WORLD_HEIGHT)
         snapshot.has_observation = maage_world_observe(runtime->world,
             cell_x, cell_y, cell_z, &snapshot.observation);
+    snapshot.observation.light=0;snapshot.observation.light_available=0;
     if (runtime->last_stats_time == 0.0 ||
         now - runtime->last_stats_time >= 0.25) {
         maage_world_get_stats(runtime->world, &runtime->stats);
@@ -684,38 +680,28 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now)
     }
 }
 
-static void server_offer_meshes(maage_server_runtime *runtime)
+static void server_offer_columns(maage_server_runtime *runtime)
 {
     unsigned int n;
-    maage_world_mesh_update update;
-    maage_local_mesh_update outgoing;
+    maage_column_update *update;
+    maage_local_column_update outgoing;
     maage_status result;
-    if (!runtime->world) return;
-    for (n = 0; n < MAAGE_SERVER_MESH_BUDGET; ++n) {
-        memset(&update, 0, sizeof(update));
-        result = maage_world_take_mesh(runtime->world, &update);
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP) return;
-        if (maage_status_failed(result)) {
-            server_capture_failure(runtime, result, maage_world_trace(runtime->world));
-            return;
+    if(!runtime->world||!runtime->config.session)return;
+    for(n=0;n<MAAGE_SERVER_COLUMN_BUDGET;++n) {
+        result=maage_world_next_column(runtime->world,&update);
+        if(maage_status_code(result)==MAAGE_STATUS_NOOP)return;
+        if(maage_status_failed(result)) {server_capture_failure(runtime,result,maage_world_trace(runtime->world));return;}
+        memset(&outgoing,0,sizeof(outgoing));outgoing.x=update->x;outgoing.z=update->z;
+        outgoing.revision=update->revision;outgoing.world_epoch=1UL;outgoing.column=update;
+        result=maage_local_session_offer_column(runtime->config.session,&outgoing);
+        if(maage_status_code(result)==MAAGE_STATUS_SUCCESS)
+            result=maage_world_ack_column(runtime->world,outgoing.x,outgoing.z,outgoing.revision);
+        maage_column_update_destroy(outgoing.column);
+        if(maage_status_failed(result)) {
+            if(maage_status_code(result)!=MAAGE_STATUS_BUFFER_OVERFLOW&&maage_status_code(result)!=MAAGE_STATUS_INVALID_STATE)
+                server_capture_failure(runtime,result,NULL);
+            return; /* Retain the unsent revision and retry after backpressure. */
         }
-        if (!maage_world_mesh_current(runtime->world, update.x, update.z,
-                update.revision) || !runtime->config.session) {
-            (void)maage_world_mesh_destroy(update.mesh);
-            continue;
-        }
-        memset(&outgoing, 0, sizeof(outgoing));
-        outgoing.x = update.x; outgoing.z = update.z;
-        outgoing.revision = update.revision; outgoing.world_epoch = 1UL;
-        outgoing.mesh = update.mesh;
-        result = maage_local_session_offer_mesh(runtime->config.session, &outgoing);
-        if (outgoing.mesh) (void)maage_world_mesh_destroy(outgoing.mesh);
-        /* Transport explicitly retains ownership on a full queue. Dropping
-         * the detached obsolete CPU mesh never blocks simulation. */
-        if (maage_status_failed(result) &&
-            maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW &&
-            maage_status_code(result) != MAAGE_STATUS_INVALID_STATE)
-            server_capture_failure(runtime, result, NULL);
     }
 }
 
@@ -758,6 +744,7 @@ static maage_status server_open_world(maage_server_runtime *runtime,
     runtime->audio_random = (runtime->record.seed.low ^ runtime->record.seed.high ^
         runtime->record.environment.ticks_low ^ 0x9e3779b9UL) & 0xffffffffUL;
     runtime->cave_ticks = server_audio_random(runtime, 12000);
+    world_config.build_meshes=0;
     world_config.store = runtime->store;
     world_config.worker_count = runtime->config.world_workers;
     world_config.render_distance = runtime->config.render_distance;
@@ -981,7 +968,7 @@ static void server_thread_entry(void *context)
             server_status_event(runtime, runtime->last_world_notice,
                 maage_world_trace(runtime->world));
         }
-        server_offer_meshes(runtime);
+        server_offer_columns(runtime);
         server_publish_status(runtime);
         if (maage_status_failed(runtime->result)) break;
         now = maage_time_monotonic_seconds();

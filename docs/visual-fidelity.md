@@ -60,9 +60,9 @@ behavior and are not Java/Forge compatibility features implemented by this pass.
   Logs resolve end faces and bark UV orientation by axis; drops preserve species.
 - **First person:** removed the fixed HUD cube. Cached block meshes, extruded
   plant/torch icons and the original default-skin arm use a separate 70-degree
-  perspective pass with independent depth. Copied authoritative swing/light
-  observations drive presentation; equip transitions, bob and camera lag remain
-  Client effects. Foreground state clears when returning to Title.
+  perspective pass with independent depth. The current shared Client swing
+  timeline and replica light drive presentation; equip transitions, bob and camera
+  lag remain Client effects. See [Client Parity](gameplay-parity.md). Foreground state clears when returning to Title.
 - **Lighting:** smooth corner sky/block samples, AO, partial-face interpolation
   and diagonal-aware triangulation replace flat face illumination. Nonlinear
   light response and warm emission replace a linear scalar floor. Numeric

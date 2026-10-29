@@ -156,6 +156,9 @@ typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *wor
     int x, int y, int z, const struct maage_block_state_definition *state,
     struct maage_random_tick_context *context);
 
+typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world,
+    int x,int y,int z,const struct maage_block_state_definition *state,int *valid);
+
 typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
@@ -175,6 +178,7 @@ typedef struct maage_block_definition {
     /* Called only on the World owner for eligible states. NULL retains sampling
      * eligibility without behavior when a required system is unimplemented. */
     maage_block_random_tick_callback random_tick;
+    maage_block_survival_callback survives;
 } maage_block_definition;
 
 typedef struct maage_block_state_definition {

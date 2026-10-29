@@ -101,7 +101,6 @@ static int entity_loaded(const maage_world *world, const maage_entity *entity)
 static void entity_move(maage_entity *entity, const maage_world *world)
 {
     const maage_block_state_definition *state;
-    maage_world_observation observation;
     int x = (int)floor(entity->position[0]), y = (int)floor(entity->position[1]), z = (int)floor(entity->position[2]);
     double vertical, drag;
     state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y, z));
@@ -136,9 +135,7 @@ static void entity_move(maage_entity *entity, const maage_world *world)
     entity->velocity[0] *= drag; entity->velocity[2] *= drag;
     if (fabs(entity->velocity[0]) < 0.0001) entity->velocity[0] = 0;
     if (fabs(entity->velocity[2]) < 0.0001) entity->velocity[2] = 0;
-    entity->light = maage_world_observe(world, (int)floor(entity->position[0]),
-        (int)floor(entity->position[1]+0.25), (int)floor(entity->position[2]), &observation) &&
-        observation.light_available ? observation.light : 0xf0;
+
 }
 maage_status maage_entities_tick(maage_entities *entities, const maage_world *world,
     const maage_item_registry *items, const maage_player *player,
@@ -214,7 +211,7 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
                 pickup->entity = entity->id; pickup->stack = entity->payload.item;
                 pickup->stack.count -= remaining;
                 memcpy(pickup->position, entity->position, sizeof(pickup->position));
-                pickup->light = entity->light; pickup->age = entity->age;
+                pickup->age = entity->age;
                 *collected += pickup->stack.count;
                 entity->payload.item.count = remaining;
             }

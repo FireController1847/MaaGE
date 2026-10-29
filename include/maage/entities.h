@@ -14,14 +14,12 @@ typedef struct maage_entity {
     unsigned int pickup_delay;
     int grounded;
     union { maage_item_stack item; } payload;
-    unsigned char light; /* Copied presentation observation; not persistent. */
 } maage_entity;
 typedef struct maage_entity_pickup {
     maage_entity_id entity;
     maage_item_stack stack; /* Copied presentation outcome, never inventory ownership. */
     double position[3];
     unsigned long age;
-    unsigned char light;
 } maage_entity_pickup;
 typedef struct maage_entity_save {
     maage_entity *entities;

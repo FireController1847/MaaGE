@@ -27,6 +27,8 @@ typedef struct maage_gameplay {
     maage_world_target target, breaking, last_break;
     int has_target, breaking_active;
     double break_progress, swing, reach;
+    unsigned long swing_tick;
+    unsigned int swing_kind; /* 1 attack, 2 successful placement */
     unsigned int use_delay, break_delay, attack_miss_delay, jump_window, hunger_ticks;
     unsigned long ticks, blocks_broken, blocks_placed;
     /* Ephemeral event identity and gait: deliberately excluded from saves. */

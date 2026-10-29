@@ -190,34 +190,8 @@ maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z,
 maage_status maage_random_tick_bush(maage_world *world, int x, int y, int z,
     const maage_block_state_definition *state, maage_random_tick_context *context)
 {
-    const maage_block_state_definition *support;
-    const maage_block_definition *block;
-    maage_item_stack drop;
-    maage_status result;
-    result = maage_random_block(world, x, y - 1, z, &support, &block);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (state->block_id == MAAGE_BLOCK_DEAD_BUSH) {
-        if (support->block_id == MAAGE_BLOCK_SAND || support->block_id == MAAGE_BLOCK_DIRT) return maage_random_noop();
-    } else if (support->block_id == MAAGE_BLOCK_GRASS || support->block_id == MAAGE_BLOCK_DIRT) return maage_random_noop();
-    /* BlockBush/BlockTallGrass in 1.7.10 check substrate here, without a light
-     * threshold. Hardened clay and farmland are absent from the catalog. */
-    memset(&drop, 0, sizeof(drop));
-    if (state->block_id == MAAGE_BLOCK_TALL_GRASS) {
-        if (!maage_random_tick_next(context, 8)) { drop.item_id = MAAGE_ITEM_SEEDS; drop.count = 1; }
-    } else if (state->block_id != MAAGE_BLOCK_DEAD_BUSH) {
-        block = maage_block_registry_block(maage_world_registry(world), state->block_id);
-        if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-        drop.item_id = block->drop_item_id; drop.count = block->drop_count;
-    }
-    if (drop.count) {
-        if (!maage_item_stack_valid(maage_world_item_registry(world), &drop))
-            return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-        result = maage_entities_reserve(maage_world_entities(world), 1);
-        if (maage_status_failed(result)) return result;
-    }
-    result = maage_world_set(world, x, y, z, state->id, MAAGE_STATE_AIR);
-    if (maage_status_failed(result) || !drop.count) return result;
-    return maage_random_tick_spawn_drop(world, x, y, z, &drop, context);
+    (void)state;(void)context;
+    return maage_support_update(world,x,y,z);
 }
 
 static maage_status maage_random_mushroom_site(const maage_world *world,

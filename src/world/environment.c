@@ -141,9 +141,11 @@ maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_schedul
     maage_scheduled_update *grown;
     size_t capacity, bucket, position, parent;
     int found;
-    if (!chunk || !update || update->kind != MAAGE_BLOCK_UPDATE_FLUID || update->cell > 65535U ||
+    if (!chunk || !update || (update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_SUPPORT) || update->cell > 65535U ||
         update->due_low > MAAGE_ENVIRONMENT_WORD || update->due_high > MAAGE_ENVIRONMENT_WORD) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SUBMIT, 0);
-    if (!chunk->update_index_capacity || chunk->update_index_used+1 >= chunk->update_index_capacity/2) {
+    found=0;
+    if(chunk->update_index_capacity)maage_update_bucket(chunk,update->kind,update->cell,&found);
+    if (!found&&(!chunk->update_index_capacity || chunk->update_index_used+1 >= chunk->update_index_capacity/2)) {
         capacity = chunk->update_index_capacity ? chunk->update_index_capacity : 16;
         if (chunk->update_count >= capacity/4) {
             if (capacity > (size_t)-1/2) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SUBMIT, 0);
@@ -167,7 +169,7 @@ maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_schedul
         position = chunk->update_count++; chunk->updates[position] = *update;
         if (!chunk->update_index[bucket].heap_index) ++chunk->update_index_used;
         chunk->update_index[bucket].kind = update->kind; chunk->update_index[bucket].cell = update->cell;
-        chunk->update_index[bucket].heap_index = position+1; ++chunk->fluid_update_count;
+        chunk->update_index[bucket].heap_index = position+1; if(update->kind==MAAGE_BLOCK_UPDATE_FLUID)++chunk->fluid_update_count;
     }
     while (position) {
         parent = (position-1)/2;
@@ -188,7 +190,7 @@ maage_status maage_chunk_take_update(maage_chunk *chunk, unsigned long low, unsi
     *update = chunk->updates[0];
     bucket = maage_update_bucket(chunk,update->kind,update->cell,&found);
     chunk->update_index[bucket].heap_index = (size_t)-1;
-    --chunk->update_count; --chunk->fluid_update_count;
+    --chunk->update_count; if(update->kind==MAAGE_BLOCK_UPDATE_FLUID)--chunk->fluid_update_count;
     if (!chunk->update_count) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_POLL, 0);
     chunk->updates[0] = chunk->updates[chunk->update_count]; maage_update_position(chunk,0);
     while (position < chunk->update_count/2) {
@@ -537,7 +539,10 @@ maage_status maage_environment_tick(maage_environment *environment, maage_world 
         result = maage_world_take_update(world,state->ticks_low,state->ticks_high,&x,&z,&update);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) break;
-        result = maage_environment_fluid_update(environment,world,x*16+(int)(update.cell%16),
+        if(update.kind==MAAGE_BLOCK_UPDATE_SUPPORT)
+            result=maage_support_update(world,x*16+(int)(update.cell%16),
+                (int)(update.cell/256),z*16+(int)((update.cell/16)%16));
+        else result = maage_environment_fluid_update(environment,world,x*16+(int)(update.cell%16),
             (int)(update.cell/256),z*16+(int)((update.cell/16)%16));
         if (maage_status_failed(result)) return result;
     }
