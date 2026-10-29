@@ -31,7 +31,9 @@ independently of framebuffer size; native safe areas bound application controls.
 Buttons use unscaled horizontal texture halves. Slider tracks stay dark while
 interactive, with enabled handles. Hovering enabled controls requests the pointer;
 primary hold uses an arrow. Disabled controls and keyboard focus do not request it.
-Tooltips clip to the viewport; carried items, counts and half-opacity slot highlights
+World-list clicks share the drawn row bounds, and keyboard navigation skips
+disabled actions while catalog work runs. Tooltips keep their padded bounds inside
+the safe viewport; carried items, counts and half-opacity slot highlights
 share the inventory path. Text entry is ASCII with backspace and blinking cursor.
 Unsupported controls remain disabled or absent. There is one Creative catalog,
 without fabricated category/search functionality.
@@ -170,6 +172,11 @@ persist fluid/support kinds and remaining delays. Incompatible development world
 are rejected without conversion or automatic deletion.
 
 ## Manual Review
+
+Static review covers the thirteen registered HUD/menu/container layouts above,
+shared draw/hit bounds, font advances, texture origins, scaling and navigation.
+It does not establish visual parity. Title/logo appearance, exact text rasterization,
+texture alignment and every screen at different scales still need visual comparison.
 
 Checks below are pending; repeat presentation work on Metal and Vulkan.
 

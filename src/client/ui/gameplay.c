@@ -311,13 +311,17 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context) {
             if (ui->snapshot.player.inventory.slots[slot].count) hover = maage_client_item_name(ui->items, &ui->snapshot.player.inventory.slots[slot]);
         }
     }
-    if (!ui->snapshot.player.inventory.cursor.count && hover) {
+    if (!ui->snapshot.player.inventory.cursor.count && hover && ui->content.width > 8 && ui->content.height > 16) {
         rectangle.x = ui->mouse_x + 12;
         rectangle.y = ui->mouse_y - 12;
         rectangle.width = maage_client_ui_text_width(ui, hover);
         rectangle.height = 8;
-        if (rectangle.x + rectangle.width > ui->content.x + ui->content.width) rectangle.x -= 28 + rectangle.width;
-        if (rectangle.y + 14 > ui->content.y + ui->content.height) rectangle.y = ui->content.y + ui->content.height - 14;
+        if (rectangle.width > ui->content.width - 8) rectangle.width = ui->content.width - 8;
+        if (rectangle.x + rectangle.width + 4 > ui->content.x + ui->content.width) rectangle.x -= 28 + rectangle.width;
+        if (rectangle.x < ui->content.x + 4) rectangle.x = ui->content.x + 4;
+        if (rectangle.x + rectangle.width + 4 > ui->content.x + ui->content.width) rectangle.x = ui->content.x + ui->content.width - rectangle.width - 4;
+        if (rectangle.y < ui->content.y + 4) rectangle.y = ui->content.y + 4;
+        if (rectangle.y + rectangle.height + 4 > ui->content.y + ui->content.height) rectangle.y = ui->content.y + ui->content.height - rectangle.height - 4;
         {
             maage_client_ui_rect panel = rectangle;
             panel.x -= 4;
@@ -339,8 +343,15 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context) {
             panel.x += rectangle.width + 5;
             maage_client_ui_gradient(ui, panel, 0x505000FFUL, 0x5028007FUL);
         }
-        maage_client_ui_text(ui, hover, rectangle.x + 1, rectangle.y + 1, MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
-        maage_client_ui_text(ui, hover, rectangle.x, rectangle.y, MAAGE_CLIENT_UI_LEFT, 1, 1, 1);
+        {
+            maage_client_ui_rect previous_clip = ui->clip;
+            ui->clip = rectangle;
+            ui->clip.width += 1;
+            ui->clip.height += 1;
+            maage_client_ui_text(ui, hover, rectangle.x + 1, rectangle.y + 1, MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
+            maage_client_ui_text(ui, hover, rectangle.x, rectangle.y, MAAGE_CLIENT_UI_LEFT, 1, 1, 1);
+            ui->clip = previous_clip;
+        }
     }
     maage_client_ui_stack(ui, &ui->snapshot.player.inventory.cursor, ui->mouse_x - 8, ui->mouse_y - 8);
 }

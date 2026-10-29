@@ -194,8 +194,18 @@ static void front_edit(char *text, size_t capacity, const maage_client_ui_input 
     }
 }
 static int front_focus_enabled(const maage_client_ui_frontend *f, unsigned int screen, unsigned int focus) {
-    if (screen == MAAGE_CLIENT_UI_CREATE_WORLD) return focus < 2 || focus == 5 || (f->more ? focus == 4 : focus == 2 || focus == 3);
-    return screen != MAAGE_CLIENT_UI_RENAME_WORLD || focus != 2;
+    if (f->busy) return screen == MAAGE_CLIENT_UI_WORLDS && focus == 5;
+    if (screen == MAAGE_CLIENT_UI_WORLDS) {
+        if (focus == 0 || focus == 2) return f->selected < f->count && !maage_status_failed(f->entries[f->selected].status);
+        if (focus == 3) return f->selected < f->count;
+        return focus < 6;
+    }
+    if (screen == MAAGE_CLIENT_UI_CREATE_WORLD) {
+        if (focus == 0) return front_name_valid(f->name) && front_seed_valid(f->seed);
+        return focus == 1 || focus == 5 || (f->more ? focus == 4 : focus == 2 || focus == 3);
+    }
+    if (screen == MAAGE_CLIENT_UI_RENAME_WORLD) return focus == 1 || focus == 3 || (focus == 0 && front_name_valid(f->name));
+    return focus < 2;
 }
 static unsigned int front_input(maage_client_ui *ui, const maage_client_ui_input *input, void *context) {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *) context;
@@ -205,9 +215,9 @@ static unsigned int front_input(maage_client_ui *ui, const maage_client_ui_input
     int hover = -1, text_submit = 0;
     float w = ui->content.width, list_width = w < 240 ? w - 16 : 220;
     size_t row;
-    if (screen == MAAGE_CLIENT_UI_LOADING) return 0;
+    if (screen == MAAGE_CLIENT_UI_LOADING || (f->busy && screen != MAAGE_CLIENT_UI_WORLDS)) return 0;
     if (input->escape) {
-        if (!f->busy && screen != MAAGE_CLIENT_UI_TITLE) {
+        if ((!f->busy || screen == MAAGE_CLIENT_UI_WORLDS) && screen != MAAGE_CLIENT_UI_TITLE) {
             if (screen == MAAGE_CLIENT_UI_CREATE_WORLD && f->more) {
                 f->more = 0;
                 f->focus = 5;
@@ -259,7 +269,7 @@ static unsigned int front_input(maage_client_ui *ui, const maage_client_ui_input
         if (f->scroll < 0) f->scroll = 0;
         if (f->scroll > maage_front_scroll_max(f)) f->scroll = maage_front_scroll_max(f);
         if (input->primary_pressed && front_hit(f, front_rect(f, (w - list_width) / 2, 32, list_width, ui->content.height - 96))) {
-            float offset = ui->mouse_y - ui->content.y - 36 + f->scroll;
+            float offset = ui->mouse_y - ui->content.y - 34 + f->scroll;
             row = offset < 0 ? f->count : (size_t) (offset / 36);
             if (row < f->count) {
                 if (row == f->last_row && ui->notice_now - f->last_click < 0.3 && !f->busy && !maage_status_failed(f->entries[row].status)) {
@@ -274,7 +284,7 @@ static unsigned int front_input(maage_client_ui *ui, const maage_client_ui_input
     }
     if (!(input->accept || (input->primary_pressed && hover >= 0))) return 0;
     n = f->focus;
-    if (f->busy) return 0;
+    if (!front_focus_enabled(f, screen, n)) return 0;
     if (screen == MAAGE_CLIENT_UI_CREATE_WORLD || screen == MAAGE_CLIENT_UI_RENAME_WORLD) {
         if (input->primary_pressed && hover >= 3 && hover != 5) return 0;
         if (input->accept && (n == 3 || n == 4)) {
