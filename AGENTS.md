@@ -243,6 +243,12 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   widget, navigation or rendering system. Load title artwork exclusively from
   the programmer's verified original Minecraft resource installation.
 
+- Startup primes the original 256x256 Mojang PNG on white before revealing the
+  Client, through shared Metal/Vulkan GUI presentation. Pump window events during
+  resource initialization; no minimum display delay. This startup-only splash is
+  separate from world/terrain loading. Missing artwork logs its original Status
+  and uses white; never acquire assets from Client or package Mojang artwork.
+
 - Client-owned `src/client/ui/` remains separate from native Launcher widgets.
   Register screens before finalization through numeric IDs and direct O(1)
   indexing; gameplay/HUD is ID 0, Pause 1, Options 2, Inventory 3, Title 4, Worlds 5,

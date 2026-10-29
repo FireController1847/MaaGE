@@ -6,7 +6,7 @@ maage_client_target_architecture(MAAGE_CLIENT_ARCH)
 set(MAAGE_CLIENT_ARTIFACT "MaaGE-Client-${MAAGE_CLIENT_RELEASE}")
 add_executable(maage_client main.c metadata.c viewport.c frontend.c pacing.c storage_context.c options.c resources.c debug.c interaction.c camera.c player_model.c player_view.c prediction.c item_models.c item_entities.c environment.c
     audio_service.c audio_scene.c audio_native.c
-    ui/ui.c ui/gameplay.c ui/player_preview.c ui/navigation.c ui/resources.c ui/font.c ui/draw.c ui/front.c ui/title.c ui/options.c)
+    ui/ui.c ui/gameplay.c ui/player_preview.c ui/navigation.c ui/resources.c ui/font.c ui/draw.c ui/front.c ui/title.c ui/options.c ui/splash.c)
 add_dependencies(maage_client maage_versions)
 maage_configure_portable_target(maage_client)
 maage_configure_gui_application(maage_client client LAUNCHER_MANAGED)

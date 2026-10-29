@@ -28,9 +28,11 @@ typedef struct maage_client_resources {
     unsigned int failed_resources;
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
+typedef maage_status (*maage_client_resource_checkpoint)(void *context, maage_status_trace *trace);
 maage_status maage_client_resources_load(const char *application_data,
     maage_client_resources *resources, maage_biome_registry *biomes,
-    const maage_skin_reference *player, maage_status_trace *trace);
+    const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint,
+    void *context, maage_status_trace *trace);
 /* Construct one owning finalized registry set, for integrated Client/Server use.
  * Call after loading the atlas/biome colormaps and finalizing those biomes. */
 maage_status maage_client_content_create(const maage_client_resources *resources,

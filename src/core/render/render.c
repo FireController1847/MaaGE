@@ -332,6 +332,11 @@ maage_status maage_renderer_prepare_frame(maage_renderer *renderer, maage_status
 {
     return maage_render_submit(renderer, 1, NULL, 0, NULL, NULL, trace);
 }
+maage_status maage_renderer_prepare_ui_frame(maage_renderer *renderer,
+    const maage_render_ui_data *ui, maage_status_trace *trace)
+{
+    return maage_render_submit(renderer, 1, NULL, 0, NULL, ui, trace);
+}
 maage_status maage_renderer_present(maage_renderer *renderer, maage_status_trace *trace)
 {
     return maage_render_submit(renderer, 0, NULL, 0, NULL, NULL, trace);

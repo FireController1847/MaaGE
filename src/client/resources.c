@@ -166,7 +166,8 @@ static void maage_client_resource_failure(maage_client_resources *resources,
 
 maage_status maage_client_resources_load(const char *application_data,
     maage_client_resources *resources, maage_biome_registry *biomes,
-    const maage_skin_reference *player, maage_status_trace *trace)
+    const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint,
+    void *context, maage_status_trace *trace)
 {
     static const float default_grass[3] = {0.50f, 0.72f, 0.35f};
     static const float default_foliage[3] = {0.35f, 0.66f, 0.30f};
@@ -192,6 +193,10 @@ maage_status maage_client_resources_load(const char *application_data,
     /* External names are consumed here only; mesh faces retain numeric UVs.
      * Each result is cached once for this immutable resource generation. */
     for (i = 0; i < MAAGE_CLIENT_SOURCE_COUNT; ++i) {
+        if (checkpoint) {
+            result = checkpoint(context, trace);
+            if (maage_status_failed(result)) { resources->recovery_status = result; goto done; }
+        }
         maage_status_trace_init(&source_trace);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE);

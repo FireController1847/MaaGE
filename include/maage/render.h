@@ -154,6 +154,10 @@ maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float t
  * Vulkan support this; UNSUPPORTED leaves others unchanged. SKIPPED means no drawable
  * yet. Does not change window visibility; normal present still skips hidden windows. */
 maage_status maage_renderer_prepare_frame(maage_renderer *renderer, maage_status_trace *trace);
+/* Prime a complete GUI frame while hidden, with initial-presentation sync.
+ * Borrows the batch only through this call. */
+maage_status maage_renderer_prepare_ui_frame(maage_renderer *renderer,
+    const maage_render_ui_data *ui, maage_status_trace *trace);
 /* Presents a cleared frame; automatically observes framebuffer size changes.
  * SKIPPED is nonfatal (hidden/minimized/unconfigured, no drawable, or a pending
  * swapchain rebuild). Keep processing events and use a bounded event wait.

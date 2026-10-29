@@ -16,6 +16,7 @@
 #include "maage/log.h"
 #include "resources.h"
 #include "ui/ui.h"
+#include "ui/splash.h"
 #include "debug.h"
 #include "interaction.h"
 #include "prediction.h"
@@ -549,6 +550,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_renderer *renderer = NULL;
     maage_render_texture *atlas = NULL;
     maage_client_ui *ui = NULL;
+    maage_client_splash splash;
     maage_client_frontend *frontend = NULL;
     maage_client_world_choice choice;
     int direct_world = 0;
@@ -617,6 +619,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int jump_latched = 0, attack_latched = 0, use_latched = 0, respawn_latched = 0, forward_latched = 0;
     unsigned int ui_actions = 0, event_budget;
     memset(&resources, 0, sizeof(resources));
+    memset(&splash, 0, sizeof(splash));
     memset(&cache, 0, sizeof(cache));
     memset(&prediction, 0, sizeof(prediction));
     memset(&mesh_activity, 0, sizeof(mesh_activity));
@@ -652,27 +655,6 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_log_info("maage.client.instance", "Instance: %s (%s).",
         maage_instance_get_info(instance)->name,
         maage_instance_get_info(instance)->id);
-    biomes = (maage_biome_registry *)calloc(1, sizeof(*biomes));
-    if (!biomes) {
-        operation = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
-        goto done;
-    }
-    operation = maage_biome_registry_init(biomes);
-    if (maage_status_failed(operation)) goto done;
-    operation = maage_client_resources_load(directory, &resources, biomes, maage_client_storage_player(), trace);
-    if (maage_status_failed(operation)) goto done;
-    resource_notice = resources.load_status;
-    maage_status_trace_init(trace);
-    operation = maage_biome_registry_finalize(biomes);
-    if (maage_status_failed(operation)) goto done;
-    operation = maage_client_content_create(&resources, biomes, &content, trace);
-    if (maage_status_failed(operation)) {
-        failure_message = "Shared immutable content registration failed.";
-        goto done;
-    }
-    blocks = maage_content_blocks(content);
-    items = maage_content_items(content);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system, trace);
     if (maage_status_failed(result)) goto window_failed;
     maage_window_config_init(&window_config);
@@ -690,6 +672,32 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
     rendered = maage_renderer_create(&render_config, &renderer, trace);
     if (maage_status_failed(rendered)) goto done;
+    operation = maage_client_splash_begin(&splash, system, window, renderer,
+        directory, video_options.gui_scale, trace);
+    if (maage_status_failed(operation)) goto done;
+    resource_notice = splash.resource_status;
+    biomes = (maage_biome_registry *)calloc(1, sizeof(*biomes));
+    if (!biomes) {
+        operation = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
+            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+        goto done;
+    }
+    operation = maage_biome_registry_init(biomes);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_resources_load(directory, &resources, biomes, maage_client_storage_player(),
+        maage_client_splash_update, &splash, trace);
+    if (maage_status_failed(operation)) goto done;
+    if (maage_status_is_success(resource_notice)) resource_notice = resources.load_status;
+    maage_status_trace_init(trace);
+    operation = maage_biome_registry_finalize(biomes);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_content_create(&resources, biomes, &content, trace);
+    if (maage_status_failed(operation)) {
+        failure_message = "Shared immutable content registration failed.";
+        goto done;
+    }
+    blocks = maage_content_blocks(content);
+    items = maage_content_items(content);
     rendered = maage_renderer_create_texture(renderer, &resources.atlas, &atlas, trace);
     if (maage_status_code(rendered) != MAAGE_STATUS_SUCCESS) goto done;
     operation = maage_client_interaction_init(&interaction, &resources);
@@ -697,6 +705,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_item_entities_create(renderer, atlas, &resources, items, blocks, &item_entities, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_first_person_init(&first_person, &resources);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_splash_update(&splash, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_create(renderer, window, directory, &resources, &ui, trace);
     (void)maage_image_destroy(&resources.image);
@@ -710,12 +720,16 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice))
         resource_notice = maage_client_ui_resource_status(ui);
+    operation = maage_client_splash_update(&splash, trace);
+    if (maage_status_failed(operation)) goto done;
     operation = maage_client_environment_create(renderer, directory, &environment_view, trace);
     if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice))
         resource_notice = maage_client_environment_resource_status(environment_view, NULL);
     /* The service remains valid in silent-device recovery. Rendering and the
      * authoritative Server must not depend on sound playback succeeding. */
+    operation = maage_client_splash_update(&splash, trace);
+    if (maage_status_failed(operation)) goto done;
     operation = maage_client_audio_native_install();
     if (maage_status_failed(operation)) {
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio", operation,
@@ -737,6 +751,12 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_ui_apply_options(ui, &video_options);
     if (maage_status_failed(operation)) goto done;
     options_ready = 1;
+    operation = maage_client_splash_update(&splash, trace);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_splash_destroy(&splash);
+    if (maage_status_failed(operation)) goto done;
+    rendered = maage_renderer_set_clear_color(renderer, 0, 0, 0, 1);
+    if (maage_status_failed(rendered)) goto done;
 choose_world:
     player_view.initialized = 0;
     memset(&collision, 0, sizeof(collision));
@@ -1419,6 +1439,7 @@ window_failed:
     outcome = MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     failure_message = "Native window/input cannot continue.";
 done:
+    if (splash.close_requested) ok = 1;
     if (options_ready && ui) {
         operation = maage_client_options_store(instance, ui, &saved_video_options, 1);
         if (maage_status_failed(operation))
@@ -1473,6 +1494,8 @@ done:
     maage_client_cleanup_result(maage_client_ui_destroy(ui),
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_render_texture_destroy(atlas),
+        &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_splash_destroy(&splash),
         &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_renderer_destroy(renderer, &cleanup_trace),
         &outcome, &cleanup_trace, trace);
