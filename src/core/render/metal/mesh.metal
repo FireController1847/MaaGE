@@ -26,9 +26,7 @@ struct maage_fragment {
     float2 light;
     float material [[flat]];
 };
-vertex maage_fragment maage_mesh_vertex_shader(uint index [[vertex_id]],
-                                               const device maage_vertex *vertices [[buffer(0)]],
-                                               constant maage_uniforms &uniforms [[buffer(1)]]) {
+vertex maage_fragment maage_mesh_vertex_shader(uint index [[vertex_id]], const device maage_vertex *vertices [[buffer(0)]], constant maage_uniforms &uniforms [[buffer(1)]]) {
     maage_fragment result;
     result.position = uniforms.matrix * float4(vertices[index].position, 1.0);
     result.uv = vertices[index].uv;
@@ -38,10 +36,8 @@ vertex maage_fragment maage_mesh_vertex_shader(uint index [[vertex_id]],
     result.material = vertices[index].material;
     return result;
 }
-fragment float4 maage_mesh_fragment_shader(maage_fragment input [[stage_in]],
-                                           texture2d<float> atlas [[texture(0)]], constant maage_uniforms &uniforms [[buffer(0)]]) {
-    constexpr sampler pixels(coord::normalized, address::clamp_to_edge,
-                             filter::nearest, mip_filter::none);
+fragment float4 maage_mesh_fragment_shader(maage_fragment input [[stage_in]], texture2d<float> atlas [[texture(0)]], constant maage_uniforms &uniforms [[buffer(0)]]) {
+    constexpr sampler pixels(coord::normalized, address::clamp_to_edge, filter::nearest, mip_filter::none);
     float4 texel = atlas.sample(pixels, input.uv);
     if (maage_shader_cutout(input.material, texel.a)) discard_fragment();
     return maage_shader_mesh_color(texel, input.color, input.light, input.material, uniforms.lighting);
@@ -52,9 +48,7 @@ struct maage_ui_vertex {
     float depth;
 };
 #undef MAAGE_VERTEX_FIELD
-vertex maage_fragment maage_ui_vertex_shader(uint index [[vertex_id]],
-                                             const device maage_ui_vertex *vertices [[buffer(0)]],
-                                             constant maage_uniforms &uniforms [[buffer(1)]]) {
+vertex maage_fragment maage_ui_vertex_shader(uint index [[vertex_id]], const device maage_ui_vertex *vertices [[buffer(0)]], constant maage_uniforms &uniforms [[buffer(1)]]) {
     maage_fragment result;
     result.position = maage_shader_ui_position(vertices[index].position, uniforms.parameters.yz, vertices[index].depth);
     result.uv = vertices[index].uv;
@@ -63,10 +57,8 @@ vertex maage_fragment maage_ui_vertex_shader(uint index [[vertex_id]],
     result.material = 0;
     return result;
 }
-fragment float4 maage_ui_fragment_shader(maage_fragment input [[stage_in]],
-                                         texture2d<float> atlas [[texture(0)]]) {
-    constexpr sampler pixels(coord::normalized, address::clamp_to_edge,
-                             filter::nearest, mip_filter::none);
+fragment float4 maage_ui_fragment_shader(maage_fragment input [[stage_in]], texture2d<float> atlas [[texture(0)]]) {
+    constexpr sampler pixels(coord::normalized, address::clamp_to_edge, filter::nearest, mip_filter::none);
     return atlas.sample(pixels, input.uv) * input.color;
 }
 vertex maage_fragment maage_fullscreen_vertex_shader(uint index [[vertex_id]]) {

@@ -41,8 +41,7 @@ typedef struct maage_launcher_win32 {
 } maage_launcher_win32;
 static void maage_ui_text(HWND control, const char *text) {
     wchar_t wide[MAAGE_PATH_CAPACITY];
-    if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, MAAGE_PATH_CAPACITY) &&
-        !maage_launcher_win32_same_text(control, wide)) SetWindowTextW(control, wide);
+    if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, MAAGE_PATH_CAPACITY) && !maage_launcher_win32_same_text(control, wide)) SetWindowTextW(control, wide);
 }
 static HWND maage_ui_control(maage_launcher_win32 *ui, int page, const wchar_t *klass, const wchar_t *title, DWORD style, int x, int y, int width, int height, int id) {
     return maage_launcher_win32_control(&ui->native, page, klass, title, style, x, y, width, height, id);
@@ -75,8 +74,7 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
             x = center - w / 2;
             y = height / 2 + c->y - 285;
         }
-        MoveWindow(c->handle, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y),
-                   maage_launcher_win32_scale(&ui->native, w), maage_launcher_win32_scale(&ui->native, h), TRUE);
+        MoveWindow(c->handle, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y), maage_launcher_win32_scale(&ui->native, w), maage_launcher_win32_scale(&ui->native, h), TRUE);
         ShowWindow(c->handle, c->page < 0 || c->page == (int) ui->state->page ? SW_SHOW : SW_HIDE);
     }
     for (i = 0; i < 5; ++i)
@@ -193,9 +191,7 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
         maage_client_build *b = &state->client_candidate.build;
         state->client_confirmation = 0;
         sprintf(message, "Client %s + %s\n%s | %s | %s\n%s\n\nImport copies the whole package. Only import code you trust. The original is preserved.%s", b->version, b->build, b->build_type, b->platform, b->architecture, state->client_candidate.source, *state->replacing_client ? "\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : "");
-        if (MultiByteToWideChar(CP_UTF8, 0, message, -1, wide, MAAGE_PATH_CAPACITY + 1024) &&
-            MessageBoxW(ui->window, wide, *state->replacing_client ? L"Replace Client?" : L"Import Local Client?", MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
-            maage_launcher_client_import(state);
+        if (MultiByteToWideChar(CP_UTF8, 0, message, -1, wide, MAAGE_PATH_CAPACITY + 1024) && MessageBoxW(ui->window, wide, *state->replacing_client ? L"Replace Client?" : L"Import Local Client?", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_client_import(state);
         else
             maage_launcher_client_cancel_import(state);
     }
@@ -219,9 +215,7 @@ static void maage_ui_open_installation(maage_launcher_win32 *ui) {
     char path[MAAGE_PATH_CAPACITY];
     wchar_t wide[MAAGE_PATH_CAPACITY];
     if (row < 0 || maage_status_failed(maage_launcher_installation_directory(ui->state, (unsigned) row, path))) return;
-    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, MAAGE_PATH_CAPACITY) ||
-        (INT_PTR) ShellExecuteW(ui->window, L"open", wide, NULL, NULL, SW_SHOWNORMAL) <= 32)
-        strcpy(ui->state->error, "Windows could not open the installation folder in File Explorer.");
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, MAAGE_PATH_CAPACITY) || (INT_PTR) ShellExecuteW(ui->window, L"open", wide, NULL, NULL, SW_SHOWNORMAL) <= 32) strcpy(ui->state->error, "Windows could not open the installation folder in File Explorer.");
 }
 static void maage_ui_installation_action(maage_launcher_win32 *ui, int id) {
     int row = maage_ui_selected(ui);
@@ -233,10 +227,8 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id) {
     LRESULT selected;
     if (id != MAAGE_UI_NEW && row < 0) return;
     if (id == MAAGE_UI_REMOVE) {
-        if (MessageBoxW(ui->window, L"Remove this MaaGE instance? Its gameplay folder will be archived, preserving worlds and private files. Shared resources and accounts are preserved.", L"Remove Installation", MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
-            maage_launcher_installation_remove(ui->state, (unsigned) row);
-    } else if (id == MAAGE_UI_DEFAULT)
-        maage_launcher_installation_default(ui->state, (unsigned) row);
+        if (MessageBoxW(ui->window, L"Remove this MaaGE instance? Its gameplay folder will be archived, preserving worlds and private files. Shared resources and accounts are preserved.", L"Remove Installation", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_installation_remove(ui->state, (unsigned) row);
+    } else if (id == MAAGE_UI_DEFAULT) maage_launcher_installation_default(ui->state, (unsigned) row);
     else {
         GetWindowTextW(ui->name, wide, 128);
         WideCharToMultiByte(CP_UTF8, 0, wide, -1, name, sizeof(name), NULL, NULL);
@@ -248,8 +240,7 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id) {
         if (selected > 0 && (unsigned) selected <= ui->state->clients->count) client = ui->state->clients->builds[selected - 1].id;
         if (id == MAAGE_UI_DUPLICATE && row >= 0) client = ui->state->installations[row].client;
         GetWindowTextW(ui->arguments, wide_arguments, MAAGE_INSTANCE_ARGUMENTS_CAPACITY);
-        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_arguments, -1,
-                                 arguments, sizeof(arguments), NULL, NULL)) {
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_arguments, -1, arguments, sizeof(arguments), NULL, NULL)) {
             strcpy(ui->state->error, "Client arguments must be valid UTF-8 within 4095 bytes.");
             maage_ui_refresh(ui);
             return;
@@ -279,13 +270,11 @@ static void maage_ui_client_import(maage_launcher_win32 *ui, int replacing) {
     picker.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&picker)) {
         if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, sizeof(path), NULL, NULL)) {
-            if (replacing)
-                maage_launcher_client_replace(ui->state, (unsigned) row, path);
+            if (replacing) maage_launcher_client_replace(ui->state, (unsigned) row, path);
             else
                 maage_launcher_client_probe(ui->state, path);
         }
-    } else if (CommDlgExtendedError())
-        strcpy(ui->state->error, "Windows could not open the Client executable picker.");
+    } else if (CommDlgExtendedError()) strcpy(ui->state->error, "Windows could not open the Client executable picker.");
 }
 #endif
 static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -324,8 +313,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
 #endif
         if (id == MAAGE_UI_CLIENT_REMOVE && !ui->state->client_job) {
             LRESULT selected = SendMessageW(ui->clients, CB_GETCURSEL, 0, 0);
-            if (selected >= 0 && MessageBoxW(window, L"Remove unused managed Client files? Shared Minecraft resources and developer originals are preserved.", L"Remove Client", MB_OKCANCEL | MB_ICONQUESTION) == IDOK)
-                maage_launcher_client_remove(ui->state, (unsigned) selected);
+            if (selected >= 0 && MessageBoxW(window, L"Remove unused managed Client files? Shared Minecraft resources and developer originals are preserved.", L"Remove Client", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_client_remove(ui->state, (unsigned) selected);
         }
         if (id == 150) maage_launcher_client_play(ui->state);
         if (id >= 100 && id < 105) {
@@ -346,22 +334,18 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         if (id == MAAGE_UI_ACCOUNT && event == CBN_SELCHANGE && !ui->updating) {
             LRESULT row = SendMessageW(ui->account, CB_GETCURSEL, 0, 0), index;
             index = SendMessageW(ui->account, CB_GETITEMDATA, row, 0);
-            if (index >= 0 && (unsigned) index < ui->state->accounts.count)
-                maage_launcher_account_select(ui->state, ui->state->accounts.profiles[index].uuid);
+            if (index >= 0 && (unsigned) index < ui->state->accounts.count) maage_launcher_account_select(ui->state, ui->state->accounts.profiles[index].uuid);
             else if (index == -2 && !ui->state->accounts.busy) {
                 ui->result = 1;
                 DestroyWindow(window);
                 return 0;
-            } else if (index == -3 && ui->state->account[0])
-                maage_access_verify_local(ui->state->access, ui->state->account);
+            } else if (index == -3 && ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
             else if (index == -4 && (!maage_status_failed(maage_access_sign_in(ui->state->access, 0)))) {
                 ui->result = 1;
                 DestroyWindow(window);
                 return 0;
-            } else if (index == -5 && ui->state->account[0])
-                maage_access_sign_out(ui->state->access, ui->state->account);
-            else if (index == -6 && ui->state->account[0])
-                maage_access_disconnect(ui->state->access, ui->state->account);
+            } else if (index == -5 && ui->state->account[0]) maage_access_sign_out(ui->state->access, ui->state->account);
+            else if (index == -6 && ui->state->account[0]) maage_access_disconnect(ui->state->access, ui->state->account);
             ui->revision = 0;
         }
         if (id == MAAGE_UI_INSTALLATION && event == CBN_SELCHANGE && !ui->updating) {
@@ -371,8 +355,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         if (id >= MAAGE_UI_NEW && id <= MAAGE_UI_DEFAULT) maage_ui_installation_action(ui, id);
         if (id == MAAGE_UI_OPEN_FOLDER) maage_ui_open_installation(ui);
         if (id == MAAGE_UI_VERIFY && ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
-        if (id == MAAGE_UI_PROJECT && (INT_PTR) ShellExecuteW(window, L"open", L"https://github.com/FireController1847/MaaGE", NULL, NULL, SW_SHOWNORMAL) <= 32)
-            strcpy(ui->state->error, "Windows could not open the project link in your browser.");
+        if (id == MAAGE_UI_PROJECT && (INT_PTR) ShellExecuteW(window, L"open", L"https://github.com/FireController1847/MaaGE", NULL, NULL, SW_SHOWNORMAL) <= 32) strcpy(ui->state->error, "Windows could not open the project link in your browser.");
         if ((id == MAAGE_UI_MANAGE || id == MAAGE_UI_REPAIR) && !ui->state->accounts.busy) {
             ui->result = id == MAAGE_UI_REPAIR && maage_access_allowed(ui->state->access) ? 2 : 1;
             DestroyWindow(window);

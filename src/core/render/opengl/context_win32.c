@@ -39,15 +39,12 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
         selected = ChoosePixelFormat(native->dc, &format);
         if (!selected || !SetPixelFormat(native->dc, selected, &format)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
-    if (!DescribePixelFormat(native->dc, selected, sizeof(format), &format) ||
-        (format.dwFlags & (PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER)) != (PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER))
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!DescribePixelFormat(native->dc, selected, sizeof(format), &format) || (format.dwFlags & (PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER)) != (PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     native->context = wglCreateContext(native->dc);
     if (!native->context || !wglMakeCurrent(native->dc, native->context)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     if (modern) {
         address = wglGetProcAddress("wglCreateContextAttribsARB");
-        if (!address || address == (PROC) 1 || address == (PROC) 2 || address == (PROC) 3 || address == (PROC) -1)
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
+        if (!address || address == (PROC) 1 || address == (PROC) 2 || address == (PROC) 3 || address == (PROC) -1) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
         create = (maage_wgl_create_context) address;
         context = create(native->dc, NULL, attributes);
         if (!context) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);

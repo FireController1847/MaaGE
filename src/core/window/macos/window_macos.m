@@ -150,8 +150,7 @@ static void maage_cocoa_presentation(maage_window_system *);
     /* User/OS initiated transitions also arrive here without set_mode(). */
     if (!native->transitioning) {
         native->entered_from_mode = owner->state.mode;
-        if (owner->state.mode == MAAGE_WINDOW_WINDOWED)
-            native->normal_frame = [native->handle frame];
+        if (owner->state.mode == MAAGE_WINDOW_WINDOWED) native->normal_frame = [native->handle frame];
         native->desired_mode = MAAGE_WINDOW_NATIVE_FULLSCREEN;
         native->transitioning = 1;
     }
@@ -187,8 +186,7 @@ static void maage_cocoa_presentation(maage_window_system *);
     result = maage_cocoa_restore_non_native(owner, target);
     if (maage_status_failed(result)) {
         owner->state.mode_result = result;
-        maage_log_status(MAAGE_LOG_WARNING, "maage.window.cocoa", result,
-                         "Native fullscreen Space exited, but the requested follow-up window mode failed.");
+        maage_log_status(MAAGE_LOG_WARNING, "maage.window.cocoa", result, "Native fullscreen Space exited, but the requested follow-up window mode failed.");
     }
     maage_cocoa_layout_viewport(owner);
     maage_cocoa_presentation(owner->system);
@@ -204,9 +202,7 @@ static void maage_cocoa_presentation(maage_window_system *);
      * including Borderless if this request came from the desktop Space. */
     owner->state.mode = MAAGE_WINDOW_WINDOWED;
     result = maage_cocoa_restore_non_native(owner, previous);
-    if (maage_status_failed(result))
-        maage_log_status(MAAGE_LOG_WARNING, "maage.window.cocoa", result,
-                         "Unable to restore the previous mode after fullscreen entry failed.");
+    if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.window.cocoa", result, "Unable to restore the previous mode after fullscreen entry failed.");
     maage_cocoa_transition_failure(owner, "AppKit failed to enter a native fullscreen Space.");
     maage_cocoa_layout_viewport(owner);
     maage_cocoa_presentation(owner->system);
@@ -230,13 +226,10 @@ static void maage_cocoa_presentation(maage_window_system *);
 @end
 
 static NSUInteger maage_cocoa_style(maage_window *window, int decorated) {
-    NSUInteger style = decorated ? (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                    NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
-                                 : NSWindowStyleMaskBorderless;
+    NSUInteger style = decorated ? (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable) : NSWindowStyleMaskBorderless;
     /* A normal titled window must reserve its native title bar. Only the
      * borderless surface may use the full display/notch region. */
-    if (window->full_display_content && !decorated)
-        style |= NSWindowStyleMaskFullSizeContentView;
+    if (window->full_display_content && !decorated) style |= NSWindowStyleMaskFullSizeContentView;
     return style;
 }
 
@@ -255,8 +248,7 @@ static void maage_cocoa_layout_viewport(maage_window *window) {
     root = [handle contentView];
     screen = [handle screen];
     target = [root bounds];
-    if (screen && (([handle styleMask] & NSWindowStyleMaskFullScreen) ||
-                   (native->transitioning && native->desired_mode == MAAGE_WINDOW_NATIVE_FULLSCREEN))) {
+    if (screen && (([handle styleMask] & NSWindowStyleMaskFullScreen) || (native->transitioning && native->desired_mode == MAAGE_WINDOW_NATIVE_FULLSCREEN))) {
         visible = [handle convertRectToScreen:[root convertRect:target toView:nil]];
         safe = [screen frame];
         if (@available(macOS 12.0, *)) {
@@ -269,8 +261,7 @@ static void maage_cocoa_layout_viewport(maage_window *window) {
         visible = NSIntersectionRect(visible, safe);
         if ([handle styleMask] & NSWindowStyleMaskFullScreen) {
             layout = [handle convertRectToScreen:[handle contentLayoutRect]];
-            if (!NSIsEmptyRect(layout))
-                visible = NSIntersectionRect(visible, layout);
+            if (!NSIsEmptyRect(layout)) visible = NSIntersectionRect(visible, layout);
         }
         if (!NSIsEmptyRect(visible)) {
             window_rect = [handle convertRectFromScreen:visible];
@@ -320,8 +311,7 @@ static maage_status maage_cocoa_restore_non_native(maage_window *window, maage_w
  * get_state(). Reporting a failed poll would terminate the current Client loop,
  * so record the outcome on state and log it once at the callback boundary. */
 static void maage_cocoa_transition_failure(maage_window *window, const char *message) {
-    window->state.mode_result = maage_status_make(MAAGE_STATUS_ERROR,
-                                                  MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    window->state.mode_result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     maage_log_status(MAAGE_LOG_WARNING, "maage.window.cocoa", window->state.mode_result, "%s", message);
 }
 
@@ -333,13 +323,11 @@ static void maage_cocoa_presentation(maage_window_system *system) {
     maage_cocoa_window *handle;
     for (window = system->windows; window; window = window->next) {
         handle = window->platform;
-        if (handle && (handle->transitioning || window->state.mode == MAAGE_WINDOW_NATIVE_FULLSCREEN))
-            return;
+        if (handle && (handle->transitioning || window->state.mode == MAAGE_WINDOW_NATIVE_FULLSCREEN)) return;
     }
     for (window = system->windows; window; window = window->next) {
         if (window->state.visible && window->state.mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN) {
-            [NSApp setPresentationOptions:NSApplicationPresentationAutoHideDock |
-                                          NSApplicationPresentationAutoHideMenuBar];
+            [NSApp setPresentationOptions:NSApplicationPresentationAutoHideDock | NSApplicationPresentationAutoHideMenuBar];
             return;
         }
     }
@@ -392,10 +380,8 @@ static maage_status maage_cocoa_icon(maage_window *window, const maage_window_ic
     NSImage *image;
     NSError *error = nil;
     maage_status result;
-    if (![NSThread isMainThread])
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
-    if (!icon->native_path)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
+    if (!icon->native_path) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     pool = [[NSAutoreleasePool alloc] init];
     path = [NSString stringWithUTF8String:icon->native_path];
     if (!path) {
@@ -440,24 +426,19 @@ static maage_status maage_cocoa_mode(maage_window *window, maage_window_mode mod
     maage_cocoa_system *system = window->system->platform;
     maage_status result;
     maage_window_mode previous = window->state.mode;
-    if (![NSThread isMainThread])
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
-    if (native->transitioning)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
+    if (native->transitioning) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     /* Creation expects SUCCESS even when the requested initial mode is already
      * Windowed. Preserve the existing synchronous no-change contract. */
-    if (mode == previous)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN && ![handle isVisible])
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode == previous) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN && ![handle isVisible]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (previous == MAAGE_WINDOW_NATIVE_FULLSCREEN) {
         native->desired_mode = mode;
         native->transitioning = 1;
         [handle toggleFullScreen:nil];
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     }
-    if (previous == MAAGE_WINDOW_WINDOWED)
-        native->normal_frame = [handle frame];
+    if (previous == MAAGE_WINDOW_WINDOWED) native->normal_frame = [handle frame];
     if (mode == MAAGE_WINDOW_NATIVE_FULLSCREEN) {
         native->entered_from_mode = previous;
         native->desired_mode = mode;
@@ -482,19 +463,14 @@ static maage_status maage_cocoa_create(maage_window *window, const maage_window_
     maage_status result;
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     window->platform = native;
-    native->handle = [[MaaGEPlatformWindow alloc] initWithContentRect:
-                                                      NSMakeRect(0, 0, config->width, config->height)
-                                                            styleMask:maage_cocoa_style(window, 1)
-                                                              backing:NSBackingStoreBuffered
-                                                                defer:NO];
+    native->handle = [[MaaGEPlatformWindow alloc] initWithContentRect:NSMakeRect(0, 0, config->width, config->height) styleMask:maage_cocoa_style(window, 1) backing:NSBackingStoreBuffered defer:NO];
     if (!native->handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     [native->handle setReleasedWhenClosed:NO];
     [native->handle setAcceptsMouseMovedEvents:YES];
     /* The NSWindow's root contentView may extend behind titlebar/notch areas.
      * The independently sized drawable subview remains stable for all modes. */
     native->viewport = [[MaaGEViewport alloc] initWithFrame:[[native->handle contentView] bounds]];
-    if (!native->viewport)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!native->viewport) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     [[native->handle contentView] addSubview:native->viewport];
     [native->viewport release];
     window->state.mode_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
@@ -531,8 +507,7 @@ static maage_status maage_cocoa_cursor(maage_window *window, maage_window_cursor
     view->cursor_shape = cursor;
     [native->handle invalidateCursorRectsForView:view];
     point = [view convertPoint:[native->handle mouseLocationOutsideOfEventStream] fromView:nil];
-    if (!window->input.captured && [native->handle isKeyWindow] && NSPointInRect(point, [view bounds]))
-        [(cursor == MAAGE_WINDOW_CURSOR_POINTER ? [NSCursor pointingHandCursor] : [NSCursor arrowCursor]) set];
+    if (!window->input.captured && [native->handle isKeyWindow] && NSPointInRect(point, [view bounds])) [(cursor == MAAGE_WINDOW_CURSOR_POINTER ? [NSCursor pointingHandCursor] : [NSCursor arrowCursor]) set];
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
 
@@ -548,8 +523,7 @@ static maage_status maage_cocoa_capture(maage_window *window, int capture) {
         if (![native->handle isKeyWindow] || ![NSApp isActive]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         for (other = window->system->windows; other; other = other->next)
             if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
-        if (CGAssociateMouseAndMouseCursorPosition(0) != kCGErrorSuccess)
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+        if (CGAssociateMouseAndMouseCursorPosition(0) != kCGErrorSuccess) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         /* Freeze the native cursor inside this viewport even when activation
          * happened through the Dock or keyboard with the pointer elsewhere. */
         view = native->viewport;
@@ -582,12 +556,9 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event) 
         native = window->platform;
         if (!native || native->handle != [event window]) continue;
         if (type == NSEventTypeFlagsChanged) {
-            maage_window_input_key(window, MAAGE_INPUT_KEY_SHIFT,
-                                   ([event modifierFlags] & NSEventModifierFlagShift) != 0);
-            maage_window_input_key(window, MAAGE_INPUT_KEY_CONTROL,
-                                   ([event modifierFlags] & NSEventModifierFlagControl) != 0);
-            maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL,
-                                   ([event modifierFlags] & NX_DEVICELCTLKEYMASK) != 0);
+            maage_window_input_key(window, MAAGE_INPUT_KEY_SHIFT, ([event modifierFlags] & NSEventModifierFlagShift) != 0);
+            maage_window_input_key(window, MAAGE_INPUT_KEY_CONTROL, ([event modifierFlags] & NSEventModifierFlagControl) != 0);
+            maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL, ([event modifierFlags] & NX_DEVICELCTLKEYMASK) != 0);
         }
         if (type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
             if (type == NSEventTypeKeyDown && ([event modifierFlags] & NSEventModifierFlagCommand)) return 0;
@@ -597,8 +568,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event) 
                 for (n = 0; n < [characters length]; ++n) {
                     unsigned int character = [characters characterAtIndex:n];
                     maage_window_input_character(window, character);
-                    if (character == 8 || character == 127 || (character >= 32 && character <= 126))
-                        text_event = 1;
+                    if (character == 8 || character == 127 || (character >= 32 && character <= 126)) text_event = 1;
                 }
             }
             switch ([event keyCode]) {
@@ -696,11 +666,9 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event) 
             NSRect bounds = [view bounds];
             window->input.mouse_x = point.x - NSMinX(bounds);
             window->input.mouse_y = [view isFlipped] ? point.y - NSMinY(bounds) : NSMaxY(bounds) - point.y;
-            if (type == NSEventTypeLeftMouseDown && NSPointInRect(point, bounds))
-                window->input.primary_pressed = window->input.primary_down = 1;
+            if (type == NSEventTypeLeftMouseDown && NSPointInRect(point, bounds)) window->input.primary_pressed = window->input.primary_down = 1;
             if (type == NSEventTypeLeftMouseUp) window->input.primary_down = 0;
-            if (type == NSEventTypeRightMouseDown && NSPointInRect(point, bounds))
-                window->input.secondary_pressed = window->input.secondary_down = 1;
+            if (type == NSEventTypeRightMouseDown && NSPointInRect(point, bounds)) window->input.secondary_pressed = window->input.secondary_down = 1;
             if (type == NSEventTypeRightMouseUp) window->input.secondary_down = 0;
         }
         if (type == NSEventTypeScrollWheel) window->input.scroll_y += [event scrollingDeltaY];
@@ -717,16 +685,10 @@ static maage_status maage_cocoa_poll(maage_window_system *system, int timeout_ms
     NSEvent *event;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, MAAGE_DETAIL_WRONG_THREAD);
     pool = [[NSAutoreleasePool alloc] init];
-    event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                               untilDate:timeout_ms < 0 ? [NSDate distantFuture] : [NSDate dateWithTimeIntervalSinceNow:(double) timeout_ms / 1000.0]
-                                  inMode:NSDefaultRunLoopMode
-                                 dequeue:YES];
+    event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:timeout_ms < 0 ? [NSDate distantFuture] : [NSDate dateWithTimeIntervalSinceNow:(double) timeout_ms / 1000.0] inMode:NSDefaultRunLoopMode dequeue:YES];
     while (event) {
         if (!maage_cocoa_input_event(system, event)) [NSApp sendEvent:event];
-        event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                   untilDate:[NSDate distantPast]
-                                      inMode:NSDefaultRunLoopMode
-                                     dequeue:YES];
+        event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast] inMode:NSDefaultRunLoopMode dequeue:YES];
     }
     [NSApp updateWindows];
     [pool drain];
@@ -816,17 +778,7 @@ static maage_status maage_cocoa_pixels(maage_window *window, const maage_pixel_b
     }
     pool = [[NSAutoreleasePool alloc] init];
     if (!view->image || [view->image pixelsWide] != buffer->width || [view->image pixelsHigh] != buffer->height) {
-        image = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-                                                        pixelsWide:buffer->width
-                                                        pixelsHigh:buffer->height
-                                                     bitsPerSample:8
-                                                   samplesPerPixel:4
-                                                          hasAlpha:YES
-                                                          isPlanar:NO
-                                                    colorSpaceName:NSDeviceRGBColorSpace
-                                                      bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
-                                                       bytesPerRow:0
-                                                      bitsPerPixel:32];
+        image = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:buffer->width pixelsHigh:buffer->height bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:0 bitsPerPixel:32];
         if (!image) {
             [pool drain];
             return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
@@ -835,8 +787,7 @@ static maage_status maage_cocoa_pixels(maage_window *window, const maage_pixel_b
         view->image = image;
     }
     for (row = 0; row < buffer->height; ++row)
-        memcpy([view->image bitmapData] + row * [view->image bytesPerRow],
-               buffer->pixels + (size_t) row * buffer->stride, (size_t) buffer->width * 4);
+        memcpy([view->image bitmapData] + row * [view->image bytesPerRow], buffer->pixels + (size_t) row * buffer->stride, (size_t) buffer->width * 4);
     [view setNeedsDisplay:YES];
     [view displayIfNeeded];
     [pool drain];

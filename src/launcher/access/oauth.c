@@ -67,16 +67,14 @@ static maage_status maage_oauth_tokens(struct json_object *json, maage_microsoft
     double expires = maage_auth_number(json, "expires_in");
     const char *refresh = maage_access_json_string(json, "refresh_token");
     const char *scope = maage_access_json_string(json, "scope");
-    if ((strcmp(maage_access_json_string(json, "token_type"), "Bearer") && strcmp(maage_access_json_string(json, "token_type"), "bearer")) || expires < 1 || expires > 86400 ||
-        !maage_oauth_scope(scope) || maage_status_failed(maage_auth_token(ms->access, sizeof(ms->access), json, "access_token"))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
+    if ((strcmp(maage_access_json_string(json, "token_type"), "Bearer") && strcmp(maage_access_json_string(json, "token_type"), "bearer")) || expires < 1 || expires > 86400 || !maage_oauth_scope(scope) || maage_status_failed(maage_auth_token(ms->access, sizeof(ms->access), json, "access_token"))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
     if (*refresh) maage_log_verbose("maage.launcher.access.oauth", "Microsoft supplied a replacement refresh credential; value withheld.");
     if (*refresh && maage_status_failed(maage_auth_token(s->microsoft_refresh, sizeof(s->microsoft_refresh), json, "refresh_token"))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
     if (!*s->microsoft_refresh) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
     ms->expires_at = maage_auth_wall() + expires;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
 }
-static maage_status maage_oauth_exchange(const char *grant, const char *credential, const char *verifier, const char *redirect,
-                                         maage_microsoft_session *ms, maage_profile_session *s, const maage_auth_observer *o, char detail[256]) {
+static maage_status maage_oauth_exchange(const char *grant, const char *credential, const char *verifier, const char *redirect, maage_microsoft_session *ms, maage_profile_session *s, const maage_auth_observer *o, char detail[256]) {
     char *body = maage_oauth_form(grant, credential, verifier, redirect);
     struct json_object *json;
     long status;
@@ -84,24 +82,19 @@ static maage_status maage_oauth_exchange(const char *grant, const char *credenti
     maage_status result;
     if (!body) {
         strcpy(detail, "Cannot allocate the OAuth request.");
-        return MAAGE_STATUS_TRACE(o->trace,
-                                  maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
+        return MAAGE_STATUS_TRACE(o->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
     }
     maage_log_info("maage.launcher.access.oauth", "Exchanging %s with Microsoft.", verifier ? "authorization code with PKCE" : "refresh credential");
-    if (verifier) maage_log_info("maage.launcher.access.oauth", "Authorization-code exchange configuration: endpoint=%s; client_id=%s; redirect_uri=%s.",
-                                 MAAGE_MICROSOFT_AUTHORITY "token", MAAGE_MICROSOFT_CLIENT_ID, redirect);
+    if (verifier) maage_log_info("maage.launcher.access.oauth", "Authorization-code exchange configuration: endpoint=%s; client_id=%s; redirect_uri=%s.", MAAGE_MICROSOFT_AUTHORITY "token", MAAGE_MICROSOFT_CLIENT_ID, redirect);
     result = maage_auth_request(MAAGE_MICROSOFT_AUTHORITY "token", NULL, body, 1, o, &status, detail, &json);
     maage_crypto_clear(body, strlen(body));
     free(body);
     ok = status == 200 && json && !maage_status_failed(result = maage_oauth_tokens(json, ms, s));
     if (status == 200 && !ok) strcpy(detail, "Microsoft returned incomplete OAuth credentials or missing Xbox Live permission. Sign in again.");
-    if (ok)
-        maage_log_info("maage.launcher.access.oauth", "Microsoft OAuth credentials validated.");
-    else if (status == 200)
-        maage_log_verbose("maage.launcher.access.oauth", "Microsoft OAuth response rejected: invalid token type, expiry, credentials, or Xbox scope.");
+    if (ok) maage_log_info("maage.launcher.access.oauth", "Microsoft OAuth credentials validated.");
+    else if (status == 200) maage_log_verbose("maage.launcher.access.oauth", "Microsoft OAuth response rejected: invalid token type, expiry, credentials, or Xbox scope.");
     maage_auth_json_free(json);
-    if (!ok && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
-                                                                        MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
+    if (!ok && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
     return MAAGE_STATUS_PROPAGATE(o->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
 }
 static int maage_oauth_hex(int c) {
@@ -147,8 +140,7 @@ static maage_status maage_oauth_callback(const char *query, const char *state, c
         /* Microsoft percent-encodes query components. A raw plus is a space. */
         key = maage_oauth_decode(curl, query, (size_t) (equals - query), &keysize);
         value = maage_oauth_decode(curl, equals + 1, (size_t) (end - equals - 1), &valuesize);
-        if (!key || !value)
-            ok = 0;
+        if (!key || !value) ok = 0;
         else {
             for (i = 0; i < keysize; ++i)
                 if ((unsigned char) key[i] <= 32 || (unsigned char) key[i] >= 127) ok = 0;
@@ -164,17 +156,14 @@ static maage_status maage_oauth_callback(const char *query, const char *state, c
                     ok = 0;
                 }
             } else if (!strcmp(key, "code")) {
-                if (found_code++ || !valuesize || (size_t) valuesize >= capacity)
-                    ok = 0;
+                if (found_code++ || !valuesize || (size_t) valuesize >= capacity) ok = 0;
                 else
                     memcpy(code, value, (size_t) valuesize + 1);
             } else if (!strcmp(key, "error")) {
-                if (found_error++ || !valuesize)
-                    ok = 0;
+                if (found_error++ || !valuesize) ok = 0;
                 else
                     *reason = maage_auth_error_name(value);
-            } else if (!strcmp(key, "access_token") || !strcmp(key, "id_token") || !strcmp(key, "refresh_token"))
-                ok = 0;
+            } else if (!strcmp(key, "access_token") || !strcmp(key, "id_token") || !strcmp(key, "refresh_token")) ok = 0;
         }
         if (key) curl_free(key);
         if (value) {
@@ -184,14 +173,11 @@ static maage_status maage_oauth_callback(const char *query, const char *state, c
         query = *end ? end + 1 : end;
     }
     curl_easy_cleanup(curl);
-    if (ok && !found_state)
-        *reason = "missing OAuth state";
-    else if (ok && found_code + found_error != 1)
-        *reason = "missing or conflicting OAuth result";
+    if (ok && !found_state) *reason = "missing OAuth state";
+    else if (ok && found_code + found_error != 1) *reason = "missing or conflicting OAuth result";
     return maage_status_make(ok && found_state == 1 && found_code + found_error == 1 ? (found_error ? MAAGE_STATUS_ACCESS_DENIED : MAAGE_STATUS_SUCCESS) : MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
 }
-static maage_status maage_oauth_browser_login(maage_microsoft_session *ms, maage_profile_session *s,
-                                              const maage_auth_observer *o, char detail[256], int *fallback) {
+static maage_status maage_oauth_browser_login(maage_microsoft_session *ms, maage_profile_session *s, const maage_auth_observer *o, char detail[256], int *fallback) {
     unsigned char random[32], digest[32];
     char verifier[65], challenge[48], state[65], redirect[64], url[1024], *query = NULL, *code = NULL, *encoded_redirect = NULL;
     unsigned port, i, rejected = 0;
@@ -242,8 +228,7 @@ static maage_status maage_oauth_browser_login(maage_microsoft_session *ms, maage
     sprintf(url, MAAGE_MICROSOFT_AUTHORITY "authorize?client_id=%s&response_type=code&response_mode=query&redirect_uri=%s&scope=XboxLive.signin%%20offline_access&code_challenge_method=S256&code_challenge=%s&state=%s&prompt=select_account", MAAGE_MICROSOFT_CLIENT_ID, encoded_redirect, challenge, state);
     setup = NULL;
     /* Configuration only: the full authorization URL contains state/PKCE data. */
-    maage_log_info("maage.launcher.access.oauth", "Browser authorization configuration: endpoint=%s; client_id=%s; registered_redirect_uri=%s; redirect_uri=%s.",
-                   MAAGE_MICROSOFT_AUTHORITY "authorize", MAAGE_MICROSOFT_CLIENT_ID, MAAGE_MICROSOFT_REDIRECT, redirect);
+    maage_log_info("maage.launcher.access.oauth", "Browser authorization configuration: endpoint=%s; client_id=%s; registered_redirect_uri=%s; redirect_uri=%s.", MAAGE_MICROSOFT_AUTHORITY "authorize", MAAGE_MICROSOFT_CLIENT_ID, MAAGE_MICROSOFT_REDIRECT, redirect);
     maage_log_info("maage.launcher.access.oauth", "Opening system-browser authorization (response_type=code; response_mode=query; scope=%s; PKCE=S256).", MAAGE_MICROSOFT_SCOPE);
     o->status(o->context, "Opening Microsoft sign-in in your system browser...");
     deadline = maage_time_monotonic_seconds() + 300;
@@ -286,8 +271,7 @@ static maage_status maage_oauth_browser_login(maage_microsoft_session *ms, maage
     if (o->cancelled(o->context)) {
         outcome = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
         strcpy(detail, "Microsoft sign-in cancelled. Retry when ready.");
-    } else if (transport_failed)
-        strcpy(detail, "The local Microsoft callback listener failed. Retry sign-in or use device code.");
+    } else if (transport_failed) strcpy(detail, "The local Microsoft callback listener failed. Retry sign-in or use device code.");
     else if (callback && maage_status_failed(callback_result)) {
         outcome = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
         strcpy(detail, "Microsoft authorization was declined or rejected. Retry sign-in or use device code.");
@@ -319,8 +303,7 @@ done:
     maage_crypto_clear(digest, sizeof(digest));
     return MAAGE_STATUS_PROPAGATE(o->trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
 }
-static maage_status maage_oauth_device_login(maage_microsoft_session *ms, maage_profile_session *s,
-                                             const maage_auth_observer *o, char detail[256]) {
+static maage_status maage_oauth_device_login(maage_microsoft_session *ms, maage_profile_session *s, const maage_auth_observer *o, char detail[256]) {
     struct json_object *json;
     char *device, *body, user[33], url[256];
     const char *error;
@@ -332,8 +315,7 @@ static maage_status maage_oauth_device_login(maage_microsoft_session *ms, maage_
     if (!device) return MAAGE_STATUS_TRACE(o->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
     maage_log_info("maage.launcher.access.oauth", "Requesting Microsoft device authorization.");
     o->status(o->context, "Requesting Microsoft device-code sign-in...");
-    result = maage_auth_request(MAAGE_MICROSOFT_AUTHORITY "devicecode", NULL,
-                                "client_id=" MAAGE_MICROSOFT_CLIENT_ID "&scope=XboxLive.signin%20offline_access", 1, o, &status, detail, &json);
+    result = maage_auth_request(MAAGE_MICROSOFT_AUTHORITY "devicecode", NULL, "client_id=" MAAGE_MICROSOFT_CLIENT_ID "&scope=XboxLive.signin%20offline_access", 1, o, &status, detail, &json);
     expires = maage_auth_number(json, "expires_in");
     interval = maage_auth_number(json, "interval");
     if (!json || status != 200 || expires < 1 || expires > 1800 || interval > 1800 ||
@@ -345,8 +327,7 @@ static maage_status maage_oauth_device_login(maage_microsoft_session *ms, maage_
         goto done;
     }
     /* Only official verification pages may be opened by the device-code UI. */
-    if (strcmp(url, "https://microsoft.com/devicelogin") && strcmp(url, "https://www.microsoft.com/link") &&
-        strcmp(url, "https://microsoft.com/link") && strcmp(url, "https://login.microsoftonline.com/common/oauth2/deviceauth")) {
+    if (strcmp(url, "https://microsoft.com/devicelogin") && strcmp(url, "https://www.microsoft.com/link") && strcmp(url, "https://microsoft.com/link") && strcmp(url, "https://login.microsoftonline.com/common/oauth2/deviceauth")) {
         maage_log_verbose("maage.launcher.access.oauth", "Device authorization rejected: verification URI is not allowlisted.");
         maage_auth_json_free(json);
         strcpy(detail, "Microsoft returned an unrecognized device verification URL.");
@@ -390,8 +371,7 @@ static maage_status maage_oauth_device_login(maage_microsoft_session *ms, maage_
         if (status == 200 && json) {
             result = maage_oauth_tokens(json, ms, s);
             ok = !maage_status_failed(result);
-            if (ok)
-                maage_log_info("maage.launcher.access.oauth", "Device authorization completed; Microsoft credentials validated.");
+            if (ok) maage_log_info("maage.launcher.access.oauth", "Device authorization completed; Microsoft credentials validated.");
             else {
                 maage_log_verbose("maage.launcher.access.oauth", "Device token response failed credential/scope validation.");
                 strcpy(detail, "Microsoft returned incomplete device-code credentials.");
@@ -418,20 +398,16 @@ done:
     o->device(o->context, "", "", 0);
     maage_crypto_clear(device, MAAGE_ACCESS_TOKEN_CAPACITY);
     free(device);
-    if (o->cancelled(o->context))
-        result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
-    else if (ok)
-        result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_AUTHENTICATE, 0);
-    else if (!maage_status_failed(result))
-        result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
+    if (o->cancelled(o->context)) result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
+    else if (ok) result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_AUTHENTICATE, 0);
+    else if (!maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
     return MAAGE_STATUS_PROPAGATE(o->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
 }
 static double maage_xbox_timestamp(const char *text) {
     int year, month, day, hour, minute, second, y, m, days, limit;
     const char *tail;
     static const int months[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    if (strlen(text) < 20 || sscanf(text, "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month, &day, &hour, &minute, &second) != 6 ||
-        year < 1970 || year > 2100 || month < 1 || month > 12 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return -1;
+    if (strlen(text) < 20 || sscanf(text, "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month, &day, &hour, &minute, &second) != 6 || year < 1970 || year > 2100 || month < 1 || month > 12 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return -1;
     limit = months[month - 1] + (month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
     if (day < 1 || day > limit) return -1;
     tail = text + 19;
@@ -467,19 +443,16 @@ static maage_status maage_xbox_parse(struct json_object *json, maage_xbox_sessio
     strcpy(session->hash, hash);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
 }
-static maage_status maage_auth_post_json(const char *endpoint, struct json_object *body,
-                                         const maage_auth_observer *o, long *status, char detail[256], struct json_object **response) {
+static maage_status maage_auth_post_json(const char *endpoint, struct json_object *body, const maage_auth_observer *o, long *status, char detail[256], struct json_object **response) {
     const char *serialized = body ? json_object_to_json_string_ext(body, JSON_C_TO_STRING_PLAIN) : NULL;
     *response = NULL;
     if (!serialized) {
         *status = 0;
-        return MAAGE_STATUS_TRACE(o->trace,
-                                  maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE);
+        return MAAGE_STATUS_TRACE(o->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE);
     }
     return maage_auth_request(endpoint, NULL, serialized, 0, o, status, detail, response);
 }
-static maage_status maage_oauth_minecraft(maage_microsoft_session *ms, maage_profile_session *s,
-                                          const maage_auth_observer *o, char detail[256]) {
+static maage_status maage_oauth_minecraft(maage_microsoft_session *ms, maage_profile_session *s, const maage_auth_observer *o, char detail[256]) {
     maage_xbox_session *live = NULL, *xsts = NULL;
     struct json_object *body = NULL, *properties, *tokens, *json = NULL;
     char *ticket = NULL;
@@ -569,8 +542,7 @@ static maage_status maage_oauth_minecraft(maage_microsoft_session *ms, maage_pro
     maage_crypto_clear(xsts, sizeof(*xsts));
     if (!json || status != 200) goto done;
     expires = maage_auth_number(json, "expires_in");
-    if (expires < 1 || expires > 86400 || maage_status_failed(maage_auth_token(s->minecraft_token, sizeof(s->minecraft_token), json, "access_token")) ||
-        strcmp(maage_access_json_string(json, "token_type"), "Bearer")) {
+    if (expires < 1 || expires > 86400 || maage_status_failed(maage_auth_token(s->minecraft_token, sizeof(s->minecraft_token), json, "access_token")) || strcmp(maage_access_json_string(json, "token_type"), "Bearer")) {
         maage_log_verbose("maage.launcher.access.oauth", "Minecraft Services returned incomplete session credentials.");
         strcpy(detail, "Minecraft Services returned incomplete session credentials.");
         goto done;
@@ -581,8 +553,7 @@ static maage_status maage_oauth_minecraft(maage_microsoft_session *ms, maage_pro
     maage_log_info("maage.launcher.access.oauth", "Minecraft session response validated.");
     stage = "Minecraft Java profile and entitlement verification";
     o->status(o->context, "Verifying Minecraft Java Edition profile and entitlement...");
-    result = maage_access_verify(s->minecraft_token, s->uuid, s->name, detail,
-                                 o->cancelled, o->context, &verification_state, &s->appearance, &s->skin_resolved, o->trace);
+    result = maage_access_verify(s->minecraft_token, s->uuid, s->name, detail, o->cancelled, o->context, &verification_state, &s->appearance, &s->skin_resolved, o->trace);
     ok = !maage_status_failed(result) && verification_state == MAAGE_ACCESS_VERIFIED;
     if (ok) {
         s->verified_at = maage_auth_wall();
@@ -606,25 +577,21 @@ done:
         maage_crypto_clear(xsts, sizeof(*xsts));
         free(xsts);
     }
-    if (o->cancelled(o->context))
-        result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
-    else if (!ok && !maage_status_failed(result))
-        result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
+    if (o->cancelled(o->context)) result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
+    else if (!ok && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
     return MAAGE_STATUS_PROPAGATE(o->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
 }
 maage_status maage_oauth_login(maage_profile_session *s, int device, const maage_auth_observer *o, char detail[256]) {
     maage_microsoft_session *ms = (maage_microsoft_session *) calloc(1, sizeof(*ms));
     maage_status result;
     int fallback = 0;
-    if (!ms) return MAAGE_STATUS_TRACE(o->trace,
-                                       maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
+    if (!ms) return MAAGE_STATUS_TRACE(o->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
     strcpy(detail, "Microsoft sign-in could not be initialized. Retry or use device-code sign-in.");
     result = device ? maage_oauth_device_login(ms, s, o, detail) : maage_oauth_browser_login(ms, s, o, detail, &fallback);
     if (!device && fallback) {
         maage_log_info("maage.launcher.access.oauth", "Browser callback flow unavailable; switching to device authorization.");
         result = maage_oauth_device_login(ms, s, o, detail);
-        maage_status_trace_recover(o->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE,
-                                   __FILE__, (unsigned long) __LINE__);
+        maage_status_trace_recover(o->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, __FILE__, (unsigned long) __LINE__);
     }
     if (!maage_status_failed(result)) result = maage_oauth_minecraft(ms, s, o, detail);
     maage_crypto_clear(ms, sizeof(*ms));
@@ -634,8 +601,7 @@ maage_status maage_oauth_login(maage_profile_session *s, int device, const maage
 maage_status maage_oauth_refresh(const char *root, maage_profile_session *s, const maage_auth_observer *o, char detail[256]) {
     maage_microsoft_session *ms = (maage_microsoft_session *) calloc(1, sizeof(*ms));
     maage_status result;
-    if (!ms) return MAAGE_STATUS_TRACE(o->trace,
-                                       maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
+    if (!ms) return MAAGE_STATUS_TRACE(o->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE);
     maage_log_info("maage.launcher.access.oauth", "Refreshing saved Microsoft authorization.");
     o->status(o->context, "Refreshing the saved Microsoft session securely...");
     s->verified_at = s->verified_until = 0;

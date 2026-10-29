@@ -55,8 +55,7 @@ static int maage_client_options_integer(const char *text, int minimum, int maxim
         if (!isdigit(*cursor)) return 0;
     errno = 0;
     number = strtol(text, &end, 10);
-    if (errno || *end || number < minimum || number > maximum || (step && number % step))
-        return 0;
+    if (errno || *end || number < minimum || number > maximum || (step && number % step)) return 0;
     *value = (int) number;
     return 1;
 }
@@ -85,40 +84,31 @@ static void maage_client_options_parse(maage_client_options *options, char *line
         for (bus = 0; bus < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++bus) {
             if (!strcmp(key, audio_keys[bus])) {
                 /* An invalid single value cannot invalidate the whole settings file. */
-                if (maage_client_options_integer(value, MAAGE_CLIENT_AUDIO_VOLUME_MIN,
-                                                 MAAGE_CLIENT_AUDIO_VOLUME_MAX, 1, &number))
-                    options->audio_volume[bus] = number;
+                if (maage_client_options_integer(value, MAAGE_CLIENT_AUDIO_VOLUME_MIN, MAAGE_CLIENT_AUDIO_VOLUME_MAX, 1, &number)) options->audio_volume[bus] = number;
                 break;
             }
         }
         return;
     }
     if (!strcmp(key, "fov_degrees")) {
-        if (maage_client_options_integer(value, 30, 110, 1, &number))
-            options->fov_degrees = number;
+        if (maage_client_options_integer(value, 30, 110, 1, &number)) options->fov_degrees = number;
     } else if (!strcmp(key, "max_fps")) {
         options->max_fps = maage_client_options_integer(value, 0, 260, 10, &number) ? number : 0;
     } else if (!strcmp(key, "vsync")) {
-        if (!strcmp(value, "true"))
-            options->vsync = 1;
-        else if (!strcmp(value, "false"))
-            options->vsync = 0;
+        if (!strcmp(value, "true")) options->vsync = 1;
+        else if (!strcmp(value, "false")) options->vsync = 0;
         else
             options->vsync = 1;
     } else if (!strcmp(key, "gui_scale")) {
         options->gui_scale = maage_client_options_integer(value, 0, 4, 1, &number) ? number : 0;
     } else if (!strcmp(key, "leaves")) {
-        if (!strcmp(value, "fast"))
-            options->leaves = MAAGE_LEAVES_FAST;
-        else if (!strcmp(value, "smart"))
-            options->leaves = MAAGE_LEAVES_SMART;
+        if (!strcmp(value, "fast")) options->leaves = MAAGE_LEAVES_FAST;
+        else if (!strcmp(value, "smart")) options->leaves = MAAGE_LEAVES_SMART;
         else
             options->leaves = MAAGE_LEAVES_FANCY;
     } else if (!strcmp(key, "window_mode")) {
-        if (!strcmp(value, "borderless"))
-            options->window_mode = MAAGE_CLIENT_BORDERLESS;
-        else if (!strcmp(value, "fullscreen"))
-            options->window_mode = MAAGE_CLIENT_FULLSCREEN;
+        if (!strcmp(value, "borderless")) options->window_mode = MAAGE_CLIENT_BORDERLESS;
+        else if (!strcmp(value, "fullscreen")) options->window_mode = MAAGE_CLIENT_FULLSCREEN;
         else
             options->window_mode = MAAGE_CLIENT_WINDOWED;
     } else if (!strcmp(key, "fullscreen_style")) {
@@ -131,16 +121,13 @@ maage_status maage_client_options_load(const maage_instance *instance, maage_cli
     FILE *file;
     maage_status result;
     int status, section = 0;
-    if (!instance || !options)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
+    if (!instance || !options) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
     maage_client_options_defaults(options);
-    result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG,
-                                         "options.ini", path, sizeof(path));
+    result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG, "options.ini", path, sizeof(path));
     if (maage_status_failed(result)) return result;
     status = maage_storage_status(path);
     if (!status) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
-    if (status != 1) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                              MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
+    if (status != 1) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
     file = maage_storage_open(path, "rb");
     if (!file) return maage_status_from_errno(errno, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD);
     while (fgets(line, sizeof(line), file)) {
@@ -154,8 +141,7 @@ maage_status maage_client_options_load(const maage_instance *instance, maage_cli
         maage_client_options_parse(options, line, &section);
     }
     result = ferror(file) ? maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_READ, 0) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
-    if (fclose(file) && !maage_status_failed(result))
-        result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CLOSE, 0);
+    if (fclose(file) && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CLOSE, 0);
     if (maage_status_failed(result)) maage_client_options_defaults(options);
     return result;
 }
@@ -177,20 +163,14 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
         options->fullscreen_style > MAAGE_CLIENT_FULLSCREEN)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
     for (bus = 0; bus < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++bus) {
-        if (options->audio_volume[bus] < MAAGE_CLIENT_AUDIO_VOLUME_MIN ||
-            options->audio_volume[bus] > MAAGE_CLIENT_AUDIO_VOLUME_MAX)
-            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                     MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
+        if (options->audio_volume[bus] < MAAGE_CLIENT_AUDIO_VOLUME_MIN || options->audio_volume[bus] > MAAGE_CLIENT_AUDIO_VOLUME_MAX) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
     }
-    result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG,
-                                         "options.ini", destination, sizeof(destination));
+    result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG, "options.ini", destination, sizeof(destination));
     if (maage_status_failed(result)) return result;
-    result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG,
-                                         "options.ini.tmp", temporary, sizeof(temporary));
+    result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG, "options.ini.tmp", temporary, sizeof(temporary));
     if (maage_status_failed(result)) return result;
     status = maage_storage_status(temporary);
-    if (status < 0 || status == 2) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                                            MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
+    if (status < 0 || status == 2) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
     file = maage_storage_open(temporary, "wb");
     if (!file) return maage_status_from_errno(errno, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE);
     if (fprintf(file, "[video]\nfov_degrees=%d\nmax_fps=%d\nvsync=%s\ngui_scale=%d\nleaves=%s\n"
@@ -209,8 +189,7 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
         result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_WRITE, 0);
     else
         result = maage_storage_sync(file);
-    if (fclose(file) && !maage_status_failed(result))
-        result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CLOSE, 0);
+    if (fclose(file) && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CLOSE, 0);
     if (!maage_status_failed(result)) result = maage_storage_replace(temporary, destination);
     if (maage_status_failed(result)) maage_storage_remove(temporary);
     return result;

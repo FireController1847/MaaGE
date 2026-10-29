@@ -108,16 +108,14 @@ typedef struct maage_vulkan_dispatch {
 } maage_vulkan_dispatch;
 
 #if defined(MAAGE_VULKAN_LOAD_IMPLEMENTATION)
-static maage_status maage_vulkan_load_win32(maage_renderer *renderer,
-                                            HMODULE *library, maage_vulkan_dispatch *dispatch) {
+static maage_status maage_vulkan_load_win32(maage_renderer *renderer, HMODULE *library, maage_vulkan_dispatch *dispatch) {
     DWORD error;
     maage_status result;
     *library = LoadLibraryExA("vulkan-1.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!*library) {
         error = GetLastError();
         result = error ? maage_status_from_win32(error, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_LOAD) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_LOAD, 0);
-        return maage_status_trace_record(renderer->operation_trace, result, MAAGE_CONTEXT_RENDER,
-                                         MAAGE_OPERATION_LOAD, __FILE__, __LINE__, (long) error);
+        return maage_status_trace_record(renderer->operation_trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_LOAD, __FILE__, __LINE__, (long) error);
     }
 #define MAAGE_VULKAN_LOAD(name)                                                                                                                                                                              \
     dispatch->name = (PFN_##name) GetProcAddress(*library, #name);                                                                                                                                           \

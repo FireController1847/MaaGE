@@ -9,8 +9,7 @@ static double player_arc(double angle) {
 static maage_status player_status(unsigned char code, unsigned char operation) {
     return maage_status_make(code, MAAGE_CONTEXT_CLIENT, operation, 0);
 }
-static maage_status player_geometry(maage_client_player_view *view, maage_renderer *renderer,
-                                    maage_render_texture *atlas, const maage_client_resources *resources, maage_status_trace *trace) {
+static maage_status player_geometry(maage_client_player_view *view, maage_renderer *renderer, maage_render_texture *atlas, const maage_client_resources *resources, maage_status_trace *trace) {
     maage_mesh_vertex vertices[48];
     unsigned int indices[72], part;
     maage_mesh_data data;
@@ -22,10 +21,8 @@ static maage_status player_geometry(maage_client_player_view *view, maage_render
         result = maage_renderer_upload_geometry(renderer, &data, atlas, &view->parts[part], trace);
         view->results[part] = result;
         if (maage_status_failed(result)) {
-            maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.player", result, trace,
-                                   "Player part unavailable; omitting it until resource reload.");
-            maage_status_trace_recover(trace, player_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_PRESENT),
-                                       MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
+            maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.player", result, trace, "Player part unavailable; omitting it until resource reload.");
+            maage_status_trace_recover(trace, player_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_PRESENT), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
             outcome = player_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_UPLOAD);
         }
     }
@@ -71,12 +68,7 @@ static void player_held_matrix(float matrix[16], const maage_item_definition *it
         }
     }
 }
-maage_status maage_client_player_view_update(maage_client_player_view *view,
-                                             maage_renderer *renderer, maage_render_texture *atlas, const maage_client_resources *resources,
-                                             const maage_item_registry *items, maage_client_item_entities *models,
-                                             const maage_session_snapshot *previous, const maage_session_snapshot *snapshot,
-                                             double interpolation, const double eye[3], double yaw, double pitch,
-                                             double elapsed, double now, double swing_progress, int visible, double camera_distance, maage_status_trace *trace) {
+maage_status maage_client_player_view_update(maage_client_player_view *view, maage_renderer *renderer, maage_render_texture *atlas, const maage_client_resources *resources, const maage_item_registry *items, maage_client_item_entities *models, const maage_session_snapshot *previous, const maage_session_snapshot *snapshot, double interpolation, const double eye[3], double yaw, double pitch, double elapsed, double now, double swing_progress, int visible, double camera_distance, maage_status_trace *trace) {
     const maage_item_stack *held;
     const maage_item_definition *item;
     const maage_render_mesh *mesh = NULL;
@@ -87,8 +79,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
     float root[16], part_matrix[16], hand[16], sky = 1, light = 0;
     unsigned int part;
     int changed;
-    if (!view || !renderer || !atlas || !resources || !items || !models || !previous || !snapshot || !eye)
-        return player_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    if (!view || !renderer || !atlas || !resources || !items || !models || !previous || !snapshot || !eye) return player_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     view->count = 0;
     changed = !view->initialized || view->session != snapshot->session_epoch || view->world != snapshot->world_epoch;
     if (changed) {
@@ -140,8 +131,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
     if (relative < -1.308996938995747) relative = -1.308996938995747;
     if (!snapshot->paused) {
         view->body_yaw += player_arc(yaw - relative - view->body_yaw) * (1 - pow(0.7, elapsed / 0.05));
-        if (fabs(relative) > 0.872664625997165)
-            view->body_yaw += relative * (1 - pow(0.8, elapsed / 0.05));
+        if (fabs(relative) > 0.872664625997165) view->body_yaw += relative * (1 - pow(0.8, elapsed / 0.05));
     }
     if (!visible || camera_distance < 0.35) return outcome;
     result = player_geometry(view, renderer, atlas, resources, trace);
@@ -155,8 +145,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
     relative = player_arc(yaw - view->body_yaw);
     if (relative > 1.308996938995747) relative = 1.308996938995747;
     if (relative < -1.308996938995747) relative = -1.308996938995747;
-    maage_player_pose_calculate(resources->skin_model, phase, amount * view->gait_sign, age,
-                                relative, pitch, swing, item != NULL, snapshot->player.sneaking, &pose);
+    maage_player_pose_calculate(resources->skin_model, phase, amount * view->gait_sign, age, relative, pitch, swing, item != NULL, snapshot->player.sneaking, &pose);
     maage_player_matrix_identity(root);
     maage_player_matrix_translate(root, eye[0], eye[1] - MAAGE_PLAYER_EYE_HEIGHT, eye[2]);
     if (snapshot->player.sneaking) maage_player_matrix_translate(root, 0, -3 * 0.9375 / 16, 0);
@@ -165,8 +154,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
         death = sqrt((now - view->died_at) * 1.6);
         if (death > 1) death = 1;
         maage_player_matrix_rotate(root, 2, death * 1.5707963267948966);
-    } else if (now < view->hurt_until)
-        maage_player_matrix_rotate(root, 2, sin((view->hurt_until - now) * 6.283185307179586) * 0.08);
+    } else if (now < view->hurt_until) maage_player_matrix_rotate(root, 2, sin((view->hurt_until - now) * 6.283185307179586) * 0.08);
     maage_player_matrix_scale(root, 0.9375 / 16, 0.9375 / 16, 0.9375 / 16);
     if (snapshot->has_observation && snapshot->observation.light_available) {
         sky = (float) (snapshot->observation.light >> 4) / 15;
@@ -189,13 +177,11 @@ maage_status maage_client_player_view_update(maage_client_player_view *view,
         result = maage_client_item_entities_mesh(models, held, &mesh, trace);
         if (maage_status_failed(result)) {
             if (result != view->item_failure) {
-                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.player", result, trace,
-                                       "Held item unavailable; omitting it until resource reload.");
+                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.player", result, trace, "Held item unavailable; omitting it until resource reload.");
                 view->item_failure = result;
                 outcome = player_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_PRESENT);
             }
-            maage_status_trace_recover(trace, player_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT),
-                                       MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
+            maage_status_trace_recover(trace, player_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
         } else {
             player_held_matrix(hand, item, resources->skin_model);
             draw = &view->draws[view->count++];

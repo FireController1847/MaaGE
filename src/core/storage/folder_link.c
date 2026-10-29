@@ -44,8 +44,7 @@ static wchar_t *maage_link_wide(const char *path) {
     return wide;
 }
 static int maage_link_missing_error(DWORD error) {
-    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ||
-           error == ERROR_CANT_RESOLVE_FILENAME;
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_CANT_RESOLVE_FILENAME;
 }
 #endif
 
@@ -60,8 +59,7 @@ maage_folder_link_kind maage_folder_link_status(const char *path) {
         HANDLE handle;
         int valid;
         if (!wide) return MAAGE_FOLDER_LINK_ERROR;
-        handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                             NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
         error = GetLastError();
         if (handle == INVALID_HANDLE_VALUE) {
             free(wide);
@@ -78,9 +76,7 @@ maage_folder_link_kind maage_folder_link_status(const char *path) {
             free(wide);
             return attributes & FILE_ATTRIBUTE_DIRECTORY ? MAAGE_FOLDER_LINK_DIRECTORY : MAAGE_FOLDER_LINK_FILE;
         }
-        valid = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT,
-                                NULL, 0, reparse, sizeof(reparse), &received, NULL) &&
-                received >= sizeof(tag);
+        valid = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0, reparse, sizeof(reparse), &received, NULL) && received >= sizeof(tag);
         CloseHandle(handle);
         if (!valid) {
             free(wide);
@@ -91,20 +87,17 @@ maage_folder_link_kind maage_folder_link_status(const char *path) {
             free(wide);
             return MAAGE_FOLDER_LINK_ERROR;
         }
-        handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                             NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
         error = GetLastError();
         free(wide);
-        if (handle == INVALID_HANDLE_VALUE)
-            return maage_link_missing_error(error) ? MAAGE_FOLDER_LINK_BROKEN : MAAGE_FOLDER_LINK_ERROR;
+        if (handle == INVALID_HANDLE_VALUE) return maage_link_missing_error(error) ? MAAGE_FOLDER_LINK_BROKEN : MAAGE_FOLDER_LINK_ERROR;
         CloseHandle(handle);
         return MAAGE_FOLDER_LINK_LINK;
     }
 #else
     {
         struct stat information;
-        if (lstat(path, &information))
-            return errno == ENOENT || errno == ENOTDIR ? MAAGE_FOLDER_LINK_MISSING : MAAGE_FOLDER_LINK_ERROR;
+        if (lstat(path, &information)) return errno == ENOENT || errno == ENOTDIR ? MAAGE_FOLDER_LINK_MISSING : MAAGE_FOLDER_LINK_ERROR;
         if (S_ISLNK(information.st_mode)) {
             if (!stat(path, &information)) return MAAGE_FOLDER_LINK_LINK;
             return errno == ENOENT || errno == ENOTDIR || errno == ELOOP ? MAAGE_FOLDER_LINK_BROKEN : MAAGE_FOLDER_LINK_ERROR;
@@ -138,8 +131,7 @@ static size_t maage_link_absolute(const char *path, char normalized[MAAGE_PATH_C
         while (normalized[index] && normalized[index] != '/')
             ++index;
         if (index == root) return 0;
-        if ((index - root == 1 && normalized[root] == '.') ||
-            (index - root == 2 && normalized[root] == '.' && normalized[root + 1] == '.')) return 0;
+        if ((index - root == 1 && normalized[root] == '.') || (index - root == 2 && normalized[root] == '.' && normalized[root + 1] == '.')) return 0;
         root = index;
     } else
         return 0;
@@ -152,8 +144,7 @@ static size_t maage_link_absolute(const char *path, char normalized[MAAGE_PATH_C
      * aliases before any lexical ancestry decision or filesystem operation. */
     for (index = 0; index < length; ++index) {
         if ((unsigned char) normalized[index] < 32 || strchr("<>\"|?*", normalized[index])) return 0;
-        if ((normalized[index] == '.' || normalized[index] == ' ') &&
-            (!normalized[index + 1] || normalized[index + 1] == '/')) return 0;
+        if ((normalized[index] == '.' || normalized[index] == ' ') && (!normalized[index + 1] || normalized[index + 1] == '/')) return 0;
     }
 #else
     (void) index;
@@ -177,9 +168,7 @@ maage_status maage_folder_link_canonical(const char *path, char *resolved, size_
         HANDLE handle;
         DWORD count;
         int converted;
-        handle = wide ? CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                    NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL)
-                      : INVALID_HANDLE_VALUE;
+        handle = wide ? CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL) : INVALID_HANDLE_VALUE;
         free(wide);
         if (handle == INVALID_HANDLE_VALUE) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
         count = GetFinalPathNameByHandleW(handle, canonical, MAAGE_PATH_CAPACITY, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
@@ -190,8 +179,7 @@ maage_status maage_folder_link_canonical(const char *path, char *resolved, size_
         if (!wcsncmp(start, L"\\\\?\\UNC\\", 8)) {
             start += 6;
             start[0] = L'\\';
-        } else if (!wcsncmp(start, L"\\\\?\\", 4))
-            start += 4;
+        } else if (!wcsncmp(start, L"\\\\?\\", 4)) start += 4;
         if (capacity > 2147483647UL) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
         converted = WideCharToMultiByte(CP_UTF8, 0, start, -1, resolved, (int) capacity, NULL, NULL);
         if (!converted || !maage_link_absolute(resolved, normalized)) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
@@ -203,8 +191,7 @@ maage_status maage_folder_link_canonical(const char *path, char *resolved, size_
         canonical = realpath(normalized, NULL);
         if (!canonical) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE);
         length = strlen(canonical);
-        if (length >= capacity || length >= sizeof(normalized) ||
-            stat(canonical, &information) || !S_ISDIR(information.st_mode)) {
+        if (length >= capacity || length >= sizeof(normalized) || stat(canonical, &information) || !S_ISDIR(information.st_mode)) {
             free(canonical);
             return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
         }
@@ -235,13 +222,11 @@ int maage_folder_link_managed_path(const char *path, int allow_leaf_link) {
         end = start;
         while (normalized[end] && normalized[end] != '/')
             ++end;
-        if (end == start || (end - start == 1 && normalized[start] == '.') ||
-            (end - start == 2 && normalized[start] == '.' && normalized[start + 1] == '.')) return 0;
+        if (end == start || (end - start == 1 && normalized[start] == '.') || (end - start == 2 && normalized[start] == '.' && normalized[start + 1] == '.')) return 0;
         memcpy(prefix, normalized, end);
         prefix[end] = '\0';
         kind = missing ? MAAGE_FOLDER_LINK_MISSING : maage_folder_link_status(prefix);
-        if (kind == MAAGE_FOLDER_LINK_MISSING)
-            missing = 1;
+        if (kind == MAAGE_FOLDER_LINK_MISSING) missing = 1;
         else if (kind != MAAGE_FOLDER_LINK_DIRECTORY &&
                  !(allow_leaf_link && end == length &&
                    (kind == MAAGE_FOLDER_LINK_LINK || kind == MAAGE_FOLDER_LINK_BROKEN)))
@@ -272,9 +257,7 @@ static int maage_link_contains(const char *root, const char *path) {
 }
 int maage_folder_link_within(const char *root, const char *path) {
     char canonical_root[MAAGE_PATH_CAPACITY], canonical_path[MAAGE_PATH_CAPACITY];
-    return !maage_status_failed(maage_folder_link_canonical(root, canonical_root, sizeof(canonical_root))) &&
-           !maage_status_failed(maage_folder_link_canonical(path, canonical_path, sizeof(canonical_path))) &&
-           maage_link_contains(canonical_root, canonical_path);
+    return !maage_status_failed(maage_folder_link_canonical(root, canonical_root, sizeof(canonical_root))) && !maage_status_failed(maage_folder_link_canonical(path, canonical_path, sizeof(canonical_path))) && maage_link_contains(canonical_root, canonical_path);
 }
 static int maage_link_lexical(const char *path, char normalized[MAAGE_PATH_CAPACITY]) {
     size_t start, end, length;
@@ -286,16 +269,14 @@ static int maage_link_lexical(const char *path, char normalized[MAAGE_PATH_CAPAC
         end = start;
         while (normalized[end] && normalized[end] != '/')
             ++end;
-        if (end == start || (end - start == 1 && normalized[start] == '.') ||
-            (end - start == 2 && normalized[start] == '.' && normalized[start + 1] == '.')) return 0;
+        if (end == start || (end - start == 1 && normalized[start] == '.') || (end - start == 2 && normalized[start] == '.' && normalized[start + 1] == '.')) return 0;
         start = end + 1;
     }
     return 1;
 }
 int maage_folder_link_path_within(const char *root, const char *path) {
     char normalized_root[MAAGE_PATH_CAPACITY], normalized_path[MAAGE_PATH_CAPACITY];
-    return maage_link_lexical(root, normalized_root) && maage_link_lexical(path, normalized_path) &&
-           maage_link_contains(normalized_root, normalized_path);
+    return maage_link_lexical(root, normalized_root) && maage_link_lexical(path, normalized_path) && maage_link_contains(normalized_root, normalized_path);
 }
 static int maage_link_raw_target(const char *path, char target[MAAGE_PATH_CAPACITY]) {
 #ifdef _WIN32
@@ -306,18 +287,14 @@ static int maage_link_raw_target(const char *path, char target[MAAGE_PATH_CAPACI
     size_t base;
     HANDLE handle;
     int ok;
-    handle = wide ? CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL)
-                  : INVALID_HANDLE_VALUE;
+    handle = wide ? CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL) : INVALID_HANDLE_VALUE;
     free(wide);
     if (handle == INVALID_HANDLE_VALUE) return 0;
-    ok = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0,
-                         reparse, sizeof(reparse), &received, NULL) != 0;
+    ok = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0, reparse, sizeof(reparse), &received, NULL) != 0;
     CloseHandle(handle);
     if (!ok || received < 16) return 0;
     memcpy(&tag, reparse, sizeof(tag));
-    if (tag == IO_REPARSE_TAG_MOUNT_POINT)
-        base = 16;
+    if (tag == IO_REPARSE_TAG_MOUNT_POINT) base = 16;
     else if (tag == IO_REPARSE_TAG_SYMLINK && received >= 20) {
         memcpy(&flags, reparse + 16, sizeof(flags));
         if (flags & 1) return 0;
@@ -326,21 +303,18 @@ static int maage_link_raw_target(const char *path, char target[MAAGE_PATH_CAPACI
         return 0;
     memcpy(&offset, reparse + 8, sizeof(offset));
     memcpy(&length, reparse + 10, sizeof(length));
-    if ((offset & 1) || (length & 1) || (size_t) length / sizeof(wchar_t) >= MAAGE_PATH_CAPACITY ||
-        base + offset + length > received) return 0;
+    if ((offset & 1) || (length & 1) || (size_t) length / sizeof(wchar_t) >= MAAGE_PATH_CAPACITY || base + offset + length > received) return 0;
     memcpy(native, reparse + base + offset, length);
     native[length / sizeof(wchar_t)] = L'\0';
     start = native;
     if (!wcsncmp(start, L"\\??\\UNC\\", 8)) {
         start += 6;
         start[0] = L'\\';
-    } else if (!wcsncmp(start, L"\\??\\", 4))
-        start += 4;
+    } else if (!wcsncmp(start, L"\\??\\", 4)) start += 4;
     else if (!wcsncmp(start, L"\\\\?\\UNC\\", 8)) {
         start += 6;
         start[0] = L'\\';
-    } else if (!wcsncmp(start, L"\\\\?\\", 4))
-        start += 4;
+    } else if (!wcsncmp(start, L"\\\\?\\", 4)) start += 4;
     return WideCharToMultiByte(CP_UTF8, 0, start, -1, target, MAAGE_PATH_CAPACITY, NULL, NULL) != 0;
 #else
     ssize_t length = readlink(path, target, MAAGE_PATH_CAPACITY - 1);
@@ -353,11 +327,9 @@ int maage_folder_link_matches(const char *path, const char *expected_target) {
     char actual[MAAGE_PATH_CAPACITY], expected[MAAGE_PATH_CAPACITY], raw[MAAGE_PATH_CAPACITY];
     maage_folder_link_kind kind = maage_folder_link_status(path);
     if (kind == MAAGE_FOLDER_LINK_LINK) {
-        if (maage_status_failed(maage_folder_link_canonical(path, actual, sizeof(actual))) ||
-            maage_status_failed(maage_folder_link_canonical(expected_target, expected, sizeof(expected)))) return 0;
+        if (maage_status_failed(maage_folder_link_canonical(path, actual, sizeof(actual))) || maage_status_failed(maage_folder_link_canonical(expected_target, expected, sizeof(expected)))) return 0;
     } else if (kind == MAAGE_FOLDER_LINK_BROKEN) {
-        if (!maage_link_raw_target(path, raw) || !maage_link_lexical(raw, actual) ||
-            !maage_link_lexical(expected_target, expected)) return 0;
+        if (!maage_link_raw_target(path, raw) || !maage_link_lexical(raw, actual) || !maage_link_lexical(expected_target, expected)) return 0;
     } else
         return 0;
     return maage_link_contains(actual, expected) && maage_link_contains(expected, actual);
@@ -365,13 +337,10 @@ int maage_folder_link_matches(const char *path, const char *expected_target) {
 static maage_status maage_link_parent(const char *path, char parent[MAAGE_PATH_CAPACITY]) {
     char normalized[MAAGE_PATH_CAPACITY], *separator;
     size_t root = maage_link_absolute(path, normalized);
-    if (!root || strlen(normalized) <= root) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                                                      MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
+    if (!root || strlen(normalized) <= root) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
     separator = strrchr(normalized, '/');
-    if (!separator) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                             MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
-    if ((size_t) (separator - normalized) < root)
-        normalized[root] = '\0';
+    if (!separator) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
+    if ((size_t) (separator - normalized) < root) normalized[root] = '\0';
     else
         *separator = '\0';
     return maage_folder_link_canonical(normalized, parent, MAAGE_PATH_CAPACITY);
@@ -380,15 +349,12 @@ static maage_status maage_link_parent(const char *path, char parent[MAAGE_PATH_C
 maage_status maage_folder_link_create(const char *path, const char *target) {
     char canonical[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY];
     maage_status result;
-    if (!maage_folder_link_managed_path(path, 0)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                                                           MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
-    if (maage_folder_link_status(path) != MAAGE_FOLDER_LINK_MISSING) return maage_status_make(MAAGE_STATUS_INVALID_STATE,
-                                                                                              MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
+    if (!maage_folder_link_managed_path(path, 0)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
+    if (maage_folder_link_status(path) != MAAGE_FOLDER_LINK_MISSING) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
     result = maage_folder_link_canonical(target, canonical, sizeof(canonical));
     if (!maage_status_failed(result)) result = maage_link_parent(path, parent);
     if (maage_status_failed(result)) return result;
-    if (maage_link_contains(canonical, parent)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                                                         MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
+    if (maage_link_contains(canonical, parent)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
 #ifdef _WIN32
     {
         typedef struct maage_mount_point {
@@ -444,8 +410,7 @@ maage_status maage_folder_link_create(const char *path, const char *target) {
         memcpy(point->paths + 4, wide, (characters + 1) * sizeof(wchar_t));
         memcpy(point->paths + substitute + 1, wide, (characters + 1) * sizeof(wchar_t));
         if (CreateDirectoryW(destination, NULL)) {
-            handle = CreateFileW(destination, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
-                                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            handle = CreateFileW(destination, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
             if (handle != INVALID_HANDLE_VALUE) {
                 ok = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, point, (DWORD) bytes, NULL, 0, &received, NULL) != 0;
                 CloseHandle(handle);
@@ -473,14 +438,12 @@ maage_status maage_folder_link_remove(const char *path) {
         HANDLE handle;
         int ok;
         if (!wide) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0);
-        handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                             NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (handle == INVALID_HANDLE_VALUE) {
             free(wide);
             return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0);
         }
-        ok = GetFileInformationByHandle(handle, &information) &&
-             (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT);
+        ok = GetFileInformationByHandle(handle, &information) && (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT);
         CloseHandle(handle);
         if (ok) ok = (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? RemoveDirectoryW(wide) : DeleteFileW(wide);
         free(wide);
@@ -493,16 +456,12 @@ maage_status maage_folder_link_remove(const char *path) {
 maage_status maage_folder_link_move(const char *source, const char *destination) {
     char canonical[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY];
     maage_status result;
-    if (!maage_folder_link_managed_path(source, 0) || !maage_folder_link_managed_path(destination, 0))
-        return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0);
-    if (maage_folder_link_status(source) != MAAGE_FOLDER_LINK_DIRECTORY ||
-        maage_folder_link_status(destination) != MAAGE_FOLDER_LINK_MISSING)
-        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0);
+    if (!maage_folder_link_managed_path(source, 0) || !maage_folder_link_managed_path(destination, 0)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0);
+    if (maage_folder_link_status(source) != MAAGE_FOLDER_LINK_DIRECTORY || maage_folder_link_status(destination) != MAAGE_FOLDER_LINK_MISSING) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0);
     result = maage_folder_link_canonical(source, canonical, sizeof(canonical));
     if (!maage_status_failed(result)) result = maage_link_parent(destination, parent);
     if (maage_status_failed(result)) return result;
-    if (maage_link_contains(canonical, parent)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                                                         MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0);
+    if (maage_link_contains(canonical, parent)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0);
 #ifdef _WIN32
     {
         wchar_t *left = maage_link_wide(source), *right = maage_link_wide(destination);
@@ -512,10 +471,7 @@ maage_status maage_folder_link_move(const char *source, const char *destination)
         free(left);
         free(right);
         if (ok) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RENAME, 0);
-        return error == ERROR_NOT_SAME_DEVICE || error == ERROR_NOT_SUPPORTED ||
-                       error == ERROR_INVALID_FUNCTION
-                   ? maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0)
-                   : maage_status_from_win32(error, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME);
+        return error == ERROR_NOT_SAME_DEVICE || error == ERROR_NOT_SUPPORTED || error == ERROR_INVALID_FUNCTION ? maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, 0) : maage_status_from_win32(error, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME);
     }
 #elif defined(__APPLE__)
     if (!renamex_np(source, destination, RENAME_EXCL)) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RENAME, 0);
@@ -532,10 +488,8 @@ maage_status maage_folder_link_list(const char *path, maage_folder_link_entry en
     char *child;
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
     maage_folder_link_kind kind;
-    if (!path || !entry) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                                  MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, !path ? 0 : 1);
-    if (!maage_folder_link_managed_path(path, 0)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                                                           MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
+    if (!path || !entry) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, !path ? 0 : 1);
+    if (!maage_folder_link_managed_path(path, 0)) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
     kind = maage_folder_link_status(path);
     if (kind != MAAGE_FOLDER_LINK_DIRECTORY) return maage_status_make(kind == MAAGE_FOLDER_LINK_MISSING ? MAAGE_STATUS_NOT_FOUND : MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
 #ifdef _WIN32
@@ -590,8 +544,7 @@ maage_status maage_folder_link_list(const char *path, maage_folder_link_entry en
                 break;
             }
         }
-        if (!FindClose(search) && !maage_status_failed(result))
-            result = maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
+        if (!FindClose(search) && !maage_status_failed(result)) result = maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
     }
 #else
     {
@@ -601,8 +554,7 @@ maage_status maage_folder_link_list(const char *path, maage_folder_link_entry en
         child = (char *) malloc(MAAGE_PATH_CAPACITY);
         if (!child) {
             closedir(directory);
-            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-                                     MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
         }
         for (;;) {
             errno = 0;
@@ -624,8 +576,7 @@ maage_status maage_folder_link_list(const char *path, maage_folder_link_entry en
                 break;
             }
         }
-        if (closedir(directory) && !maage_status_failed(result))
-            result = maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
+        if (closedir(directory) && !maage_status_failed(result)) result = maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
     }
 #endif
     free(child);

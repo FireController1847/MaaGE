@@ -15,18 +15,12 @@ typedef struct maage_auth_observer {
 } maage_auth_observer;
 /* Worker-only. Refresh persists rotated OAuth credentials before downstream
  * exchanges, even if Minecraft is temporarily unavailable. No token in snapshots. */
-maage_status maage_oauth_login(maage_profile_session *session, int device,
-                               const maage_auth_observer *observer, char detail[256]);
-maage_status maage_oauth_refresh(const char *root, maage_profile_session *session,
-                                 const maage_auth_observer *observer, char detail[256]);
+maage_status maage_oauth_login(maage_profile_session *session, int device, const maage_auth_observer *observer, char detail[256]);
+maage_status maage_oauth_refresh(const char *root, maage_profile_session *session, const maage_auth_observer *observer, char detail[256]);
 /* A valid JSON error response may be returned alongside an HTTP failure so
  * OAuth protocol fields remain inspectable. Always wipe/free *response. */
-maage_status maage_auth_request(const char *endpoint, const char *bearer,
-                                const char *body, int form, const maage_auth_observer *observer,
-                                long *status, char detail[256], struct json_object **response);
-maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint, const char *bearer,
-                                      const char *body, int form, const maage_auth_observer *observer,
-                                      long *status, char detail[256], struct json_object **response);
+maage_status maage_auth_request(const char *endpoint, const char *bearer, const char *body, int form, const maage_auth_observer *observer, long *status, char detail[256], struct json_object **response);
+maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint, const char *bearer, const char *body, int form, const maage_auth_observer *observer, long *status, char detail[256], struct json_object **response);
 /* Returns a static allowlisted error name; never echoes untrusted input. */
 const char *maage_auth_error_name(const char *error);
 maage_status maage_auth_json_free(struct json_object *object);
@@ -43,8 +37,7 @@ maage_status maage_auth_sleep(unsigned milliseconds);
  * reply: 1 authorization received, -1 validated OAuth error, 0 reject/keep waiting. */
 typedef struct maage_auth_listener maage_auth_listener;
 maage_status maage_auth_listen(unsigned *port, maage_auth_listener **output, maage_status_trace *trace);
-maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size_t capacity,
-                                const maage_auth_observer *observer);
+maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size_t capacity, const maage_auth_observer *observer);
 maage_status maage_auth_reply(maage_auth_listener *listener, int accepted);
 maage_status maage_auth_close(maage_auth_listener *listener);
 #endif

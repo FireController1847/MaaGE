@@ -39,8 +39,7 @@ static void maage_setup_gtk_next(GtkWidget *widget, gpointer context) {
     } else if (p.stage == MAAGE_SETUP_COMPLETE && maage_assets_access_allowed(ui->assets)) {
         ui->result = 1;
         gtk_main_quit();
-    } else if (p.stage == MAAGE_SETUP_FAILED)
-        maage_assets_retry(ui->assets);
+    } else if (p.stage == MAAGE_SETUP_FAILED) maage_assets_retry(ui->assets);
 }
 static gboolean maage_setup_gtk_tick(gpointer context) {
     maage_setup_gtk *ui = (maage_setup_gtk *) context;

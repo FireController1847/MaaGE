@@ -23,10 +23,8 @@ typedef struct maage_download_options {
     long low_speed_bytes_per_second, low_speed_seconds;
 } maage_download_options;
 maage_status maage_download_options_init(maage_download_options *options);
-maage_status maage_download_batch_with_options(const maage_download_request *requests, unsigned int count,
-                                               const maage_download_observer *observer, const maage_download_options *options, char error[512], maage_status_trace *trace);
+maage_status maage_download_batch_with_options(const maage_download_request *requests, unsigned int count, const maage_download_observer *observer, const maage_download_options *options, char error[512], maage_status_trace *trace);
 maage_status maage_download_initialize(void);
 maage_status maage_download_shutdown(void);
-maage_status maage_download_batch(const maage_download_request *requests, unsigned int count,
-                                  const maage_download_observer *observer, char error[512], maage_status_trace *trace);
+maage_status maage_download_batch(const maage_download_request *requests, unsigned int count, const maage_download_observer *observer, char error[512], maage_status_trace *trace);
 #endif

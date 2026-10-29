@@ -98,8 +98,7 @@ static void maage_ui_installation_open(GtkWidget *widget, gpointer context) {
     (void) widget;
     if (row < 0 || maage_status_failed(maage_launcher_installation_directory(ui->state, (unsigned) row, path))) return;
     uri = g_filename_to_uri(path, NULL, &error);
-    if (!uri || !gtk_show_uri_on_window(GTK_WINDOW(ui->window), uri, GDK_CURRENT_TIME, &error))
-        g_strlcpy(ui->state->error, error ? error->message : "Cannot open the installation folder.", sizeof(ui->state->error));
+    if (!uri || !gtk_show_uri_on_window(GTK_WINDOW(ui->window), uri, GDK_CURRENT_TIME, &error)) g_strlcpy(ui->state->error, error ? error->message : "Cannot open the installation folder.", sizeof(ui->state->error));
     if (error) g_error_free(error);
     g_free(uri);
 }
@@ -139,21 +138,16 @@ static void maage_ui_account_changed(GtkComboBox *box, gpointer context) {
     const char *uuid;
     if (ui->updating) return;
     uuid = gtk_combo_box_get_active_id(box);
-    if (uuid && !strcmp(uuid, "manage"))
-        maage_ui_manage(NULL, ui);
-    else if (uuid && !strcmp(uuid, "verify"))
-        maage_ui_verify(NULL, ui);
+    if (uuid && !strcmp(uuid, "manage")) maage_ui_manage(NULL, ui);
+    else if (uuid && !strcmp(uuid, "verify")) maage_ui_verify(NULL, ui);
     else if (uuid && !strcmp(uuid, "add")) {
         if ((!maage_status_failed(maage_access_sign_in(ui->state->access, 0)))) {
             ui->result = 1;
             gtk_main_quit();
         }
-    } else if (uuid && !strcmp(uuid, "signout"))
-        maage_access_sign_out(ui->state->access, ui->state->account);
-    else if (uuid && !strcmp(uuid, "remove"))
-        maage_access_disconnect(ui->state->access, ui->state->account);
-    else if (uuid)
-        maage_launcher_account_select(ui->state, uuid);
+    } else if (uuid && !strcmp(uuid, "signout")) maage_access_sign_out(ui->state->access, ui->state->account);
+    else if (uuid && !strcmp(uuid, "remove")) maage_access_disconnect(ui->state->access, ui->state->account);
+    else if (uuid) maage_launcher_account_select(ui->state, uuid);
     ui->revision = 0;
 }
 static void maage_ui_installation_action(GtkButton *button, gpointer context) {
@@ -216,9 +210,7 @@ static void maage_ui_installation_action(GtkButton *button, gpointer context) {
         gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
         gtk_widget_show_all(area);
         while (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
-            if (!maage_status_failed(maage_launcher_installation_write(ui->state, action == 1 ? row : -1,
-                                                                       gtk_entry_get_text(GTK_ENTRY(entry)), gtk_combo_box_get_active_id(GTK_COMBO_BOX(client)),
-                                                                       gtk_entry_get_text(GTK_ENTRY(arguments))))) break;
+            if (!maage_status_failed(maage_launcher_installation_write(ui->state, action == 1 ? row : -1, gtk_entry_get_text(GTK_ENTRY(entry)), gtk_combo_box_get_active_id(GTK_COMBO_BOX(client)), gtk_entry_get_text(GTK_ENTRY(arguments))))) break;
             gtk_label_set_text(GTK_LABEL(editor_error), ui->state->error);
         }
     }
@@ -226,8 +218,7 @@ static void maage_ui_installation_action(GtkButton *button, gpointer context) {
     maage_ui_installations_reload(ui);
 }
 static void maage_ui_appearance_apply(maage_launcher_gtk *ui) {
-    if (ui->state->appearance)
-        g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", ui->state->appearance == 2, NULL);
+    if (ui->state->appearance) g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", ui->state->appearance == 2, NULL);
     else
         gtk_settings_reset_property(gtk_settings_get_default(), "gtk-application-prefer-dark-theme");
 }
@@ -296,8 +287,7 @@ static gboolean maage_ui_tick(gpointer context) {
         state->client_confirmation = 0;
         dialog = gtk_message_dialog_new(GTK_WINDOW(ui->window), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL, "%s", *state->replacing_client ? "Replace Client?" : "Import Local Client?");
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s + %s\n%s · %s · %s\n%s\n\nOnly import code you trust. The whole package is copied and the original is preserved.%s", build->version, build->build, build->build_type, build->platform, build->architecture, state->client_candidate.source, *state->replacing_client ? "\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : "");
-        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
-            maage_launcher_client_import(state);
+        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_client_import(state);
         else
             maage_launcher_client_cancel_import(state);
         gtk_widget_destroy(dialog);
@@ -343,8 +333,7 @@ static void maage_ui_client_import(GtkWidget *widget, gpointer context) {
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
         char *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
         if (path) {
-            if (replacing)
-                maage_launcher_client_replace(ui->state, (unsigned) index, path);
+            if (replacing) maage_launcher_client_replace(ui->state, (unsigned) index, path);
             else
                 maage_launcher_client_probe(ui->state, path);
             g_free(path);

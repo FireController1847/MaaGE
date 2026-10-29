@@ -173,12 +173,9 @@ typedef struct maage_block_shape {
 struct maage_world;
 struct maage_random_tick_context;
 struct maage_block_state_definition;
-typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *world,
-                                                         int x, int y, int z, const struct maage_block_state_definition *state,
-                                                         struct maage_random_tick_context *context);
+typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, struct maage_random_tick_context *context);
 
-typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world,
-                                                      int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
+typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
 
 typedef struct maage_block_definition {
     maage_block_id id;
@@ -225,41 +222,28 @@ typedef struct maage_block_registry maage_block_registry;
  *
  * The caller owns the registry. Definitions are borrowed until its destruction;
  * after finalize they are immutable. Registration copies names and definitions. */
-maage_status maage_block_registry_create(size_t block_capacity,
-                                         size_t state_capacity, maage_block_registry **output);
+maage_status maage_block_registry_create(size_t block_capacity, size_t state_capacity, maage_block_registry **output);
 maage_status maage_block_registry_destroy(maage_block_registry *registry);
-maage_status maage_block_registry_register_block(
-    maage_block_registry *registry, const char *external_name,
-    const maage_block_definition *definition);
-maage_status maage_block_registry_register_state(
-    maage_block_registry *registry,
-    const maage_block_state_definition *definition);
-maage_status maage_block_registry_finalize(
-    maage_block_registry *registry);
+maage_status maage_block_registry_register_block(maage_block_registry *registry, const char *external_name, const maage_block_definition *definition);
+maage_status maage_block_registry_register_state(maage_block_registry *registry, const maage_block_state_definition *definition);
+maage_status maage_block_registry_finalize(maage_block_registry *registry);
 int maage_block_registry_is_finalized(const maage_block_registry *registry);
 size_t maage_block_registry_block_count(const maage_block_registry *registry);
 size_t maage_block_registry_state_count(const maage_block_registry *registry);
 
 /* Registration / explicit import boundary only. Open-addressed hashing gives
  * expected O(1) lookup with exact collision checks, not worst-case O(1). */
-maage_status maage_block_registry_resolve_name(
-    const maage_block_registry *registry, const char *external_name,
-    maage_block_id *block_id);
+maage_status maage_block_registry_resolve_name(const maage_block_registry *registry, const char *external_name, maage_block_id *block_id);
 
 /* Deterministic O(1), allocation-free runtime access. Unregistered/out-of-range
  * IDs return NULL; they never alias air or another valid definition. */
-const maage_block_definition *maage_block_registry_block(
-    const maage_block_registry *registry, maage_block_id id);
-const maage_block_state_definition *maage_block_registry_state(
-    const maage_block_registry *registry, maage_block_state_id id);
+const maage_block_definition *maage_block_registry_block(const maage_block_registry *registry, maage_block_id id);
+const maage_block_state_definition *maage_block_registry_state(const maage_block_registry *registry, maage_block_state_id id);
 /* Stable names and (block name, metadata) are persistence/import identities.
  * These functions are for registration and file I/O, never gameplay loops.
  * Within one block, state metadata must be unique. */
-const char *maage_block_registry_block_name(
-    const maage_block_registry *registry, maage_block_id id);
-maage_status maage_block_registry_resolve_state(
-    const maage_block_registry *registry, maage_block_id block,
-    unsigned int metadata, maage_block_state_id *id);
+const char *maage_block_registry_block_name(const maage_block_registry *registry, maage_block_id id);
+maage_status maage_block_registry_resolve_state(const maage_block_registry *registry, maage_block_id block, unsigned int metadata, maage_block_state_id *id);
 
 #ifdef __cplusplus
 }

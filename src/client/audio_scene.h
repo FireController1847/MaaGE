@@ -50,49 +50,29 @@ typedef unsigned long maage_client_audio_scene_voice;
  * The Audio service owns final category/mute settings.
  */
 typedef struct maage_client_audio_scene_ports {
-    maage_status (*read_snapshot)(void *context,
-                                  const maage_session_snapshot *snapshot, const double listener[3],
-                                  maage_client_audio_scene_observation *observation);
-    maage_status (*resolve_sound)(void *context, const void *catalog,
-                                  const char *logical_asset_path, maage_client_audio_scene_sound_id *sound);
-    int (*sound_can_loop)(void *context, const void *catalog,
-                          maage_client_audio_scene_sound_id sound);
-    maage_status (*play_sound)(void *context, void *audio,
-                               maage_client_audio_scene_sound_id sound, unsigned int category,
-                               const double *position, double gain, double pitch, int loop,
-                               maage_client_audio_scene_voice *voice);
-    maage_status (*music_prepare)(void *context, const void *catalog,
-                                  maage_client_audio_scene_sound_id sound, size_t max_bytes,
-                                  void **pcm, size_t *bytes);
-    maage_status (*music_play)(void *context, void *audio, void *pcm,
-                               double gain, maage_client_audio_scene_voice *voice);
+    maage_status (*read_snapshot)(void *context, const maage_session_snapshot *snapshot, const double listener[3], maage_client_audio_scene_observation *observation);
+    maage_status (*resolve_sound)(void *context, const void *catalog, const char *logical_asset_path, maage_client_audio_scene_sound_id *sound);
+    int (*sound_can_loop)(void *context, const void *catalog, maage_client_audio_scene_sound_id sound);
+    maage_status (*play_sound)(void *context, void *audio, maage_client_audio_scene_sound_id sound, unsigned int category, const double *position, double gain, double pitch, int loop, maage_client_audio_scene_voice *voice);
+    maage_status (*music_prepare)(void *context, const void *catalog, maage_client_audio_scene_sound_id sound, size_t max_bytes, void **pcm, size_t *bytes);
+    maage_status (*music_play)(void *context, void *audio, void *pcm, double gain, maage_client_audio_scene_voice *voice);
     void (*music_release)(void *context, void *pcm);
-    int (*voice_running)(void *context, void *audio,
-                         maage_client_audio_scene_voice voice);
-    maage_status (*voice_gain)(void *context, void *audio,
-                               maage_client_audio_scene_voice voice, double gain);
-    maage_status (*voice_pause)(void *context, void *audio,
-                                maage_client_audio_scene_voice voice, int paused);
-    maage_status (*voice_stop)(void *context, void *audio,
-                               maage_client_audio_scene_voice voice);
+    int (*voice_running)(void *context, void *audio, maage_client_audio_scene_voice voice);
+    maage_status (*voice_gain)(void *context, void *audio, maage_client_audio_scene_voice voice, double gain);
+    maage_status (*voice_pause)(void *context, void *audio, maage_client_audio_scene_voice voice, int paused);
+    maage_status (*voice_stop)(void *context, void *audio, maage_client_audio_scene_voice voice);
 } maage_client_audio_scene_ports;
 
 #define MAAGE_AUDIO_SCENE_MAX_PCM_BYTES ((size_t) 96U * 1024U * 1024U)
 
-maage_status maage_client_audio_scene_create(const void *catalog, void *audio,
-                                             maage_client_audio_scene **output, maage_status_trace *trace);
+maage_status maage_client_audio_scene_create(const void *catalog, void *audio, maage_client_audio_scene **output, maage_status_trace *trace);
 /* Resolves logical 1.7.10 assets without decoding them. Exactly once. */
-maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene,
-                                           const maage_client_audio_scene_ports *ports, void *context,
-                                           maage_status_trace *trace);
-maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene,
-                                             const maage_session_snapshot *snapshot, const double listener_position[3],
-                                             double now, maage_status_trace *trace);
+maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene, const maage_client_audio_scene_ports *ports, void *context, maage_status_trace *trace);
+maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, const maage_session_snapshot *snapshot, const double listener_position[3], double now, maage_status_trace *trace);
 maage_status maage_client_audio_scene_pause(maage_client_audio_scene *scene, int paused);
 /* False avoids loading/playing music when its category is disabled. */
 maage_status maage_client_audio_scene_music_pause(maage_client_audio_scene *scene, int paused);
-maage_status maage_client_audio_scene_music_enabled(maage_client_audio_scene *scene,
-                                                    int enabled);
+maage_status maage_client_audio_scene_music_enabled(maage_client_audio_scene *scene, int enabled);
 maage_status maage_client_audio_scene_destroy(maage_client_audio_scene *scene);
 
 #ifdef __cplusplus

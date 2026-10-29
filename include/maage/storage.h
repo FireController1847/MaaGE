@@ -32,8 +32,7 @@ maage_status maage_storage_replace(const char *temporary, const char *destinatio
  * Sets kind to 1 for a hard link, 2 for a copy, zero on failure/cancellation. Caller
  * verifies staged content and atomically promotes it with storage_replace.
  * Staging path must be private to the caller; any abandoned file is removed. */
-maage_status maage_storage_clone(const char *source, const char *staging,
-                                 int (*cancel)(void *), void *context, int *kind, maage_status_trace *trace);
+maage_status maage_storage_clone(const char *source, const char *staging, int (*cancel)(void *), void *context, int *kind, maage_status_trace *trace);
 int maage_storage_same_file(const char *left, const char *right);
 /* Removes only empty directories; never removes their contents. */
 maage_status maage_storage_remove_directory(const char *path);
@@ -45,7 +44,6 @@ maage_status maage_storage_sha1(const char *path, char hash[41], int (*cancel)(v
 typedef struct maage_storage_lock maage_storage_lock;
 /* Exclusive writer ownership of the lock object. Reads and directory moves may
  * proceed while held; callers serialize changes to its containing namespace. */
-maage_status maage_storage_acquire(const char *path, maage_storage_lock **output,
-                                   maage_status_trace *trace);
+maage_status maage_storage_acquire(const char *path, maage_storage_lock **output, maage_status_trace *trace);
 maage_status maage_storage_release(maage_storage_lock *lock);
 #endif

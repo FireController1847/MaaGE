@@ -81,8 +81,7 @@ static maage_status maage_wayland_backing(maage_window *window, const maage_pixe
     int x, y, pending = 0;
     const unsigned char *source;
     uint32_t *target;
-    if ((window->surface_owned && !pixels) || !native->visible || !native->configured)
-        return pixels ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
+    if ((window->surface_owned && !pixels) || !native->visible || !native->configured) return pixels ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     if (pixels) {
         for (buffer = native->buffers; buffer; buffer = buffer->next)
             ++pending;
@@ -163,16 +162,14 @@ static int maage_wayland_key_code(uint32_t code) {
     if (code == 97) return MAAGE_INPUT_KEY_CONTROL;
     return -1;
 }
-static void maage_wayland_keymap(void *data, struct wl_keyboard *keyboard,
-                                 uint32_t format, int32_t fd, uint32_t size) {
+static void maage_wayland_keymap(void *data, struct wl_keyboard *keyboard, uint32_t format, int32_t fd, uint32_t size) {
     (void) data;
     (void) keyboard;
     (void) format;
     (void) size;
     close(fd);
 }
-static void maage_wayland_key_enter(void *data, struct wl_keyboard *keyboard,
-                                    uint32_t serial, struct wl_surface *surface, struct wl_array *keys) {
+static void maage_wayland_key_enter(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys) {
     maage_wayland_system *native = data;
     maage_window *window;
     uint32_t *code;
@@ -193,8 +190,7 @@ static void maage_wayland_key_enter(void *data, struct wl_keyboard *keyboard,
             break;
         }
 }
-static void maage_wayland_key_leave(void *data, struct wl_keyboard *keyboard,
-                                    uint32_t serial, struct wl_surface *surface) {
+static void maage_wayland_key_leave(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface) {
     maage_wayland_system *native = data;
     (void) keyboard;
     (void) serial;
@@ -202,8 +198,7 @@ static void maage_wayland_key_leave(void *data, struct wl_keyboard *keyboard,
     if (native->keyboard_focus) maage_window_input_focus(native->keyboard_focus, 0);
     native->keyboard_focus = NULL;
 }
-static void maage_wayland_key(void *data, struct wl_keyboard *keyboard,
-                              uint32_t serial, uint32_t time, uint32_t code, uint32_t state) {
+static void maage_wayland_key(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t time, uint32_t code, uint32_t state) {
     maage_wayland_system *native = data;
     int key = maage_wayland_key_code(code);
     (void) keyboard;
@@ -213,8 +208,7 @@ static void maage_wayland_key(void *data, struct wl_keyboard *keyboard,
     maage_window_input_key(native->keyboard_focus, (maage_input_key) key, state == WL_KEYBOARD_KEY_STATE_PRESSED);
     if (code == 29) maage_window_input_key(native->keyboard_focus, MAAGE_INPUT_KEY_LEFT_CONTROL, state == WL_KEYBOARD_KEY_STATE_PRESSED);
 }
-static void maage_wayland_modifiers(void *data, struct wl_keyboard *keyboard,
-                                    uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) {
+static void maage_wayland_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) {
     (void) data;
     (void) keyboard;
     (void) serial;
@@ -233,8 +227,7 @@ static const struct wl_keyboard_listener maage_wayland_keyboard_listener = {
     .keymap = maage_wayland_keymap, .enter = maage_wayland_key_enter, .leave = maage_wayland_key_leave, .key = maage_wayland_key, .modifiers = maage_wayland_modifiers, .repeat_info = maage_wayland_repeat};
 static void maage_wayland_keyboard_free(maage_wayland_system *native) {
     if (!native->keyboard) return;
-    if (wl_proxy_get_version((struct wl_proxy *) native->keyboard) >= 3)
-        wl_keyboard_release(native->keyboard);
+    if (wl_proxy_get_version((struct wl_proxy *) native->keyboard) >= 3) wl_keyboard_release(native->keyboard);
     else
         wl_keyboard_destroy(native->keyboard);
     native->keyboard = NULL;
@@ -256,8 +249,7 @@ static void maage_wayland_seat_name(void *data, struct wl_seat *seat, const char
 }
 static const struct wl_seat_listener maage_wayland_seat_listener = {
     .capabilities = maage_wayland_capabilities, .name = maage_wayland_seat_name};
-static void maage_wayland_global(void *data, struct wl_registry *registry,
-                                 uint32_t name, const char *interface, uint32_t version) {
+static void maage_wayland_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
     maage_wayland_system *native = data;
     if (!strcmp(interface, "wl_seat") && !native->seat) {
         native->seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 4 ? version : 4);
@@ -273,8 +265,7 @@ static void maage_wayland_global(void *data, struct wl_registry *registry,
         native->shell = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
         native->shell_name = name;
         xdg_wm_base_add_listener(native->shell, &maage_wayland_shell_listener, native);
-    } else if (!strcmp(interface, "zxdg_decoration_manager_v1"))
-        native->decorations = wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, 1);
+    } else if (!strcmp(interface, "zxdg_decoration_manager_v1")) native->decorations = wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, 1);
 }
 static void maage_wayland_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
     maage_wayland_system *native = data;
@@ -285,8 +276,7 @@ static void maage_wayland_global_remove(void *data, struct wl_registry *registry
         wl_seat_destroy(native->seat);
         native->seat = NULL;
     }
-    if (name == native->compositor_name || name == native->shm_name || name == native->shell_name)
-        native->disconnected = 1;
+    if (name == native->compositor_name || name == native->shm_name || name == native->shell_name) native->disconnected = 1;
 }
 static const struct wl_registry_listener maage_wayland_registry_listener = {
     .global = maage_wayland_global, .global_remove = maage_wayland_global_remove};
@@ -317,8 +307,7 @@ static void maage_wayland_shutdown(maage_window_system *system) {
     if (native->display) wl_display_disconnect(native->display);
     free(native);
 }
-static void maage_wayland_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
-                                             int32_t width, int32_t height, struct wl_array *states) {
+static void maage_wayland_toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height, struct wl_array *states) {
     maage_window *window = data;
     maage_wayland_window *native = window->platform;
     uint32_t *state;
@@ -346,21 +335,17 @@ static void maage_wayland_configure(void *data, struct xdg_surface *surface, uin
     window->state.framebuffer_height = window->state.height;
     window->state.mode = native->fullscreen ? MAAGE_WINDOW_BORDERLESS_FULLSCREEN : (native->decoration && native->decoration_mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE ? MAAGE_WINDOW_BORDERLESS_WINDOWED : MAAGE_WINDOW_WINDOWED);
     window->state.resized = 1;
-    if (maage_status_code(native->error) == MAAGE_STATUS_SUCCESS)
-        native->error = maage_wayland_backing(window, NULL);
+    if (maage_status_code(native->error) == MAAGE_STATUS_SUCCESS) native->error = maage_wayland_backing(window, NULL);
 }
 static const struct xdg_surface_listener maage_wayland_surface_listener = {
     .configure = maage_wayland_configure};
-static void maage_wayland_decoration_configure(void *data,
-                                               struct zxdg_toplevel_decoration_v1 *decoration, uint32_t mode) {
+static void maage_wayland_decoration_configure(void *data, struct zxdg_toplevel_decoration_v1 *decoration, uint32_t mode) {
     maage_window *window = data;
     maage_wayland_window *native = window->platform;
     (void) decoration;
     native->decoration_mode = mode;
     /* A compositor may reject the request. Report that explicitly to the poller. */
-    if (native->requested_mode == MAAGE_WINDOW_BORDERLESS_WINDOWED &&
-        mode != ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE)
-        native->error = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
+    if (native->requested_mode == MAAGE_WINDOW_BORDERLESS_WINDOWED && mode != ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE) native->error = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
 }
 static const struct zxdg_toplevel_decoration_v1_listener maage_wayland_decoration_listener = {
     .configure = maage_wayland_decoration_configure};
@@ -377,13 +362,10 @@ static maage_status maage_wayland_title(maage_window *window, const char *title)
 static maage_status maage_wayland_mode(maage_window *window, maage_window_mode mode) {
     maage_wayland_window *native = window->platform;
     if (mode >= MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (mode == MAAGE_WINDOW_BORDERLESS_WINDOWED && !native->decoration)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (mode == MAAGE_WINDOW_BORDERLESS_WINDOWED && !native->decoration) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     native->requested_mode = mode;
-    if (native->decoration) zxdg_toplevel_decoration_v1_set_mode(native->decoration,
-                                                                 mode == MAAGE_WINDOW_WINDOWED ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE : ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
-    if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
-        xdg_toplevel_set_fullscreen(native->toplevel, NULL);
+    if (native->decoration) zxdg_toplevel_decoration_v1_set_mode(native->decoration, mode == MAAGE_WINDOW_WINDOWED ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE : ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+    if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN) xdg_toplevel_set_fullscreen(native->toplevel, NULL);
     else
         xdg_toplevel_unset_fullscreen(native->toplevel);
     if (native->configured) wl_surface_commit(native->surface);
@@ -490,8 +472,7 @@ static maage_status maage_wayland_poll(maage_window_system *system, int timeout_
         if (wl_display_read_events(native->display) < 0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
     } else
         wl_display_cancel_read(native->display);
-    if (ready && (fd.revents & POLLOUT) && wl_display_flush(native->display) < 0 && errno != EAGAIN)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
+    if (ready && (fd.revents & POLLOUT) && wl_display_flush(native->display) < 0 && errno != EAGAIN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
     if (wl_display_dispatch_pending(native->display) < 0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
     for (window = system->windows; window; window = window->next) {
         handle = window->platform;

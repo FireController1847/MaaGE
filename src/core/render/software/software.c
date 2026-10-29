@@ -47,8 +47,7 @@ static maage_status maage_software_present(maage_renderer *renderer, const maage
     buffer.pixels = native->pixels;
     result = maage_window_present_pixels(renderer->window, &buffer);
     renderer->refresh = 0;
-    if (maage_status_code(result) == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
+    if (maage_status_code(result) == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
     return result;
 }
 const maage_render_backend_api maage_render_software_api = {

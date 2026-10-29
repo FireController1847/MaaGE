@@ -105,10 +105,8 @@ int maage_render_backend_compiled(maage_render_backend backend);
 /* Parse --renderer=auto|metal|vulkan|opengl|software; last occurrence wins.
  * OpenGL negotiates modern/legacy internally. Explicit selection stays within
  * its family. Removed --renderer-version flags are rejected. */
-maage_status maage_render_desc_parse_args(int argc, char *const argv[],
-                                          maage_render_desc *desc);
-maage_status maage_renderer_get_capabilities(const maage_renderer *renderer,
-                                             maage_render_capabilities *capabilities);
+maage_status maage_render_desc_parse_args(int argc, char *const argv[], maage_render_desc *desc);
+maage_status maage_renderer_get_capabilities(const maage_renderer *renderer, maage_render_capabilities *capabilities);
 
 /* Use the window's initialization thread. The caller owns the window and must
  * keep it alive until renderer destruction. One renderer owns a window's native
@@ -116,8 +114,7 @@ maage_status maage_renderer_get_capabilities(const maage_renderer *renderer,
 maage_status maage_render_desc_init(maage_render_desc *desc);
 /* Failed creation clears *renderer. PARTIAL owns a usable fallback renderer
  * with the original candidate failure and recovery retained in trace. */
-maage_status maage_renderer_create(const maage_render_desc *desc,
-                                   maage_renderer **renderer, maage_status_trace *trace);
+maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer **renderer, maage_status_trace *trace);
 maage_status maage_renderer_destroy(maage_renderer *renderer, maage_status_trace *trace);
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer);
 /* Runtime presentation synchronization. Disabling allows independently paced
@@ -127,20 +124,16 @@ maage_status maage_renderer_set_vsync(maage_renderer *renderer, int enabled);
 /* Borrowed device name, valid until renderer destruction; NULL if unavailable. */
 const char *maage_renderer_device_name(const maage_renderer *renderer);
 /* Components must be finite values in [0, 1]. */
-maage_status maage_renderer_set_clear_color(maage_renderer *renderer,
-                                            float red, float green, float blue, float alpha);
+maage_status maage_renderer_set_clear_color(maage_renderer *renderer, float red, float green, float blue, float alpha);
 /* Static vertex sky/block channels are combined with this frame's sky factor.
  * Optional screen batches draw behind geometry and before the main UI. Borrow
  * data/textures through subsequent draw_frame calls; clear before destruction.
  * Implemented mesh/UI backends only; others return UNSUPPORTED. */
-maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
-                                      const maage_render_ui_data *background, const maage_render_ui_data *overlay);
+maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light, const maage_render_ui_data *background, const maage_render_ui_data *overlay);
 /* Borrow a camera-local presentation mesh until cleared/destroyed; copy its
  * column-major transform. Draw after the scene with independent depth, before
  * GUI. NULL clears the pass. Requires TEXTURED_MESH and SCENE support. */
-maage_status maage_renderer_set_foreground(maage_renderer *renderer,
-                                           const maage_render_mesh *mesh, const float view_projection[16],
-                                           float sky_light, float block_light);
+maage_status maage_renderer_set_foreground(maage_renderer *renderer, const maage_render_mesh *mesh, const float view_projection[16], float sky_light, float block_light);
 /* Repeated immutable geometry with lightweight model transforms and copied
  * light. Borrowed through draw_frame; both primary backends encode the same
  * shared material/depth order and copy uniforms into their command resources.
@@ -151,8 +144,7 @@ typedef struct maage_render_instance {
     float transform[16];
     float sky_light, block_light;
 } maage_render_instance;
-maage_status maage_renderer_set_instances(maage_renderer *renderer,
-                                          const maage_render_instance *instances, size_t count);
+maage_status maage_renderer_set_instances(maage_renderer *renderer, const maage_render_instance *instances, size_t count);
 /* Presentation clock in 20 Hz ticks; caller may wrap at a common animation
  * period. No texture uploads or mesh invalidation are needed to advance it. */
 maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float tick);
@@ -162,8 +154,7 @@ maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float t
 maage_status maage_renderer_prepare_frame(maage_renderer *renderer, maage_status_trace *trace);
 /* Prime a complete GUI frame while hidden, with initial-presentation sync.
  * Borrows the batch only through this call. */
-maage_status maage_renderer_prepare_ui_frame(maage_renderer *renderer,
-                                             const maage_render_ui_data *ui, maage_status_trace *trace);
+maage_status maage_renderer_prepare_ui_frame(maage_renderer *renderer, const maage_render_ui_data *ui, maage_status_trace *trace);
 /* Presents a cleared frame; automatically observes framebuffer size changes.
  * SKIPPED is nonfatal (hidden/minimized/unconfigured, no drawable, or a pending
  * swapchain rebuild). Keep processing events and use a bounded event wait.
@@ -174,30 +165,22 @@ maage_status maage_renderer_present(maage_renderer *renderer, maage_status_trace
  * Destroy meshes before their renderer; renderer destruction also releases any
  * remaining meshes and invalidates their handles. Unsupported backends return
  * UNSUPPORTED rather than drawing a placeholder. */
-maage_status maage_renderer_upload_mesh(maage_renderer *renderer,
-                                        const maage_mesh_data *data, const maage_pixel_buffer *atlas,
-                                        maage_render_mesh **mesh, maage_status_trace *trace);
+maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_mesh_data *data, const maage_pixel_buffer *atlas, maage_render_mesh **mesh, maage_status_trace *trace);
 /* Copies one immutable RGBA8 atlas. Geometry retains it, allowing the caller to
  * release its handle after upload. All resources belong to the renderer and are
  * invalidated by renderer destruction. Use the window initialization thread. */
-maage_status maage_renderer_create_texture(maage_renderer *renderer,
-                                           const maage_pixel_buffer *atlas, maage_render_texture **texture, maage_status_trace *trace);
+maage_status maage_renderer_create_texture(maage_renderer *renderer, const maage_pixel_buffer *atlas, maage_render_texture **texture, maage_status_trace *trace);
 maage_status maage_render_texture_destroy(maage_render_texture *texture);
-maage_status maage_renderer_upload_geometry(maage_renderer *renderer,
-                                            const maage_mesh_data *data, maage_render_texture *texture,
-                                            maage_render_mesh **mesh, maage_status_trace *trace);
+maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maage_mesh_data *data, maage_render_texture *texture, maage_render_mesh **mesh, maage_status_trace *trace);
 maage_status maage_render_mesh_destroy(maage_render_mesh *mesh);
 /* Clears, draws, and presents one mesh. Uses the same visibility/error behavior
  * as present, nearest texture sampling, depth testing and CCW front faces.
  * view_projection is a column-major matrix for a right-handed world with clip
  * depth 0..W (normalized depth 0..1). No graphics API types enter the mesh. */
-maage_status maage_renderer_draw_mesh(maage_renderer *renderer,
-                                      const maage_render_mesh *mesh, const float view_projection[16], maage_status_trace *trace);
+maage_status maage_renderer_draw_mesh(maage_renderer *renderer, const maage_render_mesh *mesh, const float view_projection[16], maage_status_trace *trace);
 /* Clears and presents once for the entire batch. Meshes borrow a shared atlas;
  * zero meshes presents the clear color. Mesh order is preserved. */
-maage_status maage_renderer_draw_meshes(maage_renderer *renderer,
-                                        const maage_render_mesh *const *meshes, size_t count,
-                                        const float view_projection[16], maage_status_trace *trace);
+maage_status maage_renderer_draw_meshes(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count, const float view_projection[16], maage_status_trace *trace);
 /* Draws the world batch, then optional UI, and presents once. UI has nearest
  * sampling, straight-alpha blending and no depth test/writes or face culling.
  * Data and the owned texture handle are borrowed through this call. Reuse CPU
@@ -210,10 +193,7 @@ maage_status maage_renderer_draw_meshes(maage_renderer *renderer,
  * the long idle wait appropriate for hidden/minimized windows. Backend-owned
  * copies/resources outlive submitted work; deferred failures surface on a later
  * call or destroy. */
-maage_status maage_renderer_draw_frame(maage_renderer *renderer,
-                                       const maage_render_mesh *const *meshes, size_t count,
-                                       const float view_projection[16], const maage_render_ui_data *ui,
-                                       maage_status_trace *trace);
+maage_status maage_renderer_draw_frame(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count, const float view_projection[16], const maage_render_ui_data *ui, maage_status_trace *trace);
 /* Force presentation resources to refresh on the next frame, if needed. */
 maage_status maage_renderer_resize(maage_renderer *renderer);
 #endif

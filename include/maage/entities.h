@@ -39,24 +39,17 @@ maage_status maage_entities_create(maage_entities **output);
 maage_status maage_entities_destroy(maage_entities *entities);
 maage_status maage_entities_reserve(maage_entities *entities, size_t additional);
 /* Reserve before authoritative block mutation; spawning afterward cannot allocate. */
-maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items,
-                                  const maage_item_stack *stack, const double position[3], const double velocity[3],
-                                  unsigned int delay);
-maage_status maage_entities_tick(maage_entities *entities, const maage_world *world,
-                                 const maage_item_registry *items, const maage_player *player,
-                                 maage_inventory *inventory, int collect, unsigned int *collected,
-                                 maage_entity_pickup *pickups, size_t capacity, size_t *written);
+maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items, const maage_item_stack *stack, const double position[3], const double velocity[3], unsigned int delay);
+maage_status maage_entities_tick(maage_entities *entities, const maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written);
 unsigned long maage_entities_random(const maage_entities *entities);
 maage_status maage_entities_set_random(maage_entities *entities, unsigned long random);
 size_t maage_entities_count(const maage_entities *entities);
 const maage_entity *maage_entities_at(const maage_entities *entities, size_t index);
 int maage_entity_valid(const maage_entity *entity, const maage_item_registry *items);
 maage_status maage_entities_snapshot(const maage_entities *entities, maage_entity_save *save);
-maage_status maage_entities_restore(maage_entities *entities, const maage_item_registry *items,
-                                    const maage_entity_save *save);
+maage_status maage_entities_restore(maage_entities *entities, const maage_item_registry *items, const maage_entity_save *save);
 maage_status maage_entity_save_clear(maage_entity_save *save);
 /* Shared swept AABB collision for player and entities. Position is feet/center
  * XZ. Returns collided, updating position and clipping velocity on that axis. */
-int maage_world_sweep_body(const maage_world *world, double position[3],
-                           double velocity[3], double width, double height, int axis, double displacement);
+int maage_world_sweep_body(const maage_world *world, double position[3], double velocity[3], double width, double height, int axis, double displacement);
 #endif

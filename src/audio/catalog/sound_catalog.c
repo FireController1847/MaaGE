@@ -74,19 +74,15 @@ static maage_status maage_cat_status(unsigned char code, unsigned char op) {
     return maage_status_make(code, code < 0x40 ? 0 : MAAGE_CONTEXT_RESOURCE, op, 0);
 }
 
-maage_status maage_sound_catalog_create(void *sound_bank, void *audio,
-                                        maage_sound_catalog **output, maage_status_trace *trace) {
+maage_status maage_sound_catalog_create(void *sound_bank, void *audio, maage_sound_catalog **output, maage_status_trace *trace) {
     maage_sound_catalog *catalog;
     unsigned int f, i;
     const maage_catalog_manifest_entry *entry;
     size_t length;
-    if (!output || !sound_bank || !audio)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE);
+    if (!output || !sound_bank || !audio) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE);
     *output = NULL;
     catalog = (maage_sound_catalog *) calloc(1, sizeof(*catalog));
-    if (!catalog) return MAAGE_STATUS_PROPAGATE(trace,
-                                                maage_cat_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE),
-                                                MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE);
+    if (!catalog) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CREATE);
     catalog->bank = sound_bank;
     catalog->audio = audio;
     for (f = 1; f < MAAGE_CAT_FAMILY_COUNT; ++f) {
@@ -97,12 +93,9 @@ maage_status maage_sound_catalog_create(void *sound_bank, void *audio,
         if (length + sizeof("minecraft/sounds/") + 2U + sizeof(".ogg") >= MAAGE_CAT_PATH_LIMIT) break;
         catalog->family[f].count = entry->count;
         for (i = 0; i < entry->count; ++i) {
-            if (!entry->first && !i)
-                sprintf(catalog->family[f].variants[i].path,
-                        "minecraft/sounds/%s.ogg", entry->stem);
+            if (!entry->first && !i) sprintf(catalog->family[f].variants[i].path, "minecraft/sounds/%s.ogg", entry->stem);
             else
-                sprintf(catalog->family[f].variants[i].path,
-                        "minecraft/sounds/%s%u.ogg", entry->stem, entry->first ? (unsigned int) entry->first + i : i + 1U);
+                sprintf(catalog->family[f].variants[i].path, "minecraft/sounds/%s%u.ogg", entry->stem, entry->first ? (unsigned int) entry->first + i : i + 1U);
         }
     }
     if (f != MAAGE_CAT_FAMILY_COUNT) {
@@ -113,27 +106,21 @@ maage_status maage_sound_catalog_create(void *sound_bank, void *audio,
     return maage_cat_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
 }
 
-maage_status maage_sound_catalog_set_port(maage_sound_catalog *catalog,
-                                          const maage_sound_catalog_port *port, maage_status_trace *trace) {
-    if (!catalog || !port || !port->decode || !port->upload || !port->release_pcm ||
-        !port->release_buffer || !port->play)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER);
-    if (catalog->preloaded || catalog->bound)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER);
+maage_status maage_sound_catalog_set_port(maage_sound_catalog *catalog, const maage_sound_catalog_port *port, maage_status_trace *trace) {
+    if (!catalog || !port || !port->decode || !port->upload || !port->release_pcm || !port->release_buffer || !port->play) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER);
+    if (catalog->preloaded || catalog->bound) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER);
     catalog->port = *port;
     catalog->bound = 1;
     return maage_cat_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
 
-maage_status maage_sound_catalog_preload(maage_sound_catalog *catalog,
-                                         maage_status_trace *trace) {
+maage_status maage_sound_catalog_preload(maage_sound_catalog *catalog, maage_status_trace *trace) {
     unsigned int f, i, missing = 0, loaded = 0;
     maage_cat_family *family;
     maage_status result, first_failure = 0;
     void *pcm;
     unsigned long buffer;
-    if (!catalog || !catalog->bound)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_LOAD), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD);
+    if (!catalog || !catalog->bound) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_LOAD), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD);
     if (catalog->preloaded) return maage_cat_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_LOAD);
     catalog->preloaded = 1;
     for (f = 1; f < MAAGE_CAT_FAMILY_COUNT; ++f) {
@@ -145,8 +132,7 @@ maage_status maage_sound_catalog_preload(maage_sound_catalog *catalog,
             if (!maage_status_failed(result) && pcm) {
                 result = catalog->port.upload(catalog->audio, pcm, &buffer, trace);
                 catalog->port.release_pcm(catalog->bank, pcm);
-            } else if (pcm)
-                catalog->port.release_pcm(catalog->bank, pcm);
+            } else if (pcm) catalog->port.release_pcm(catalog->bank, pcm);
             if (maage_status_failed(result) || !buffer) {
                 if (!first_failure) first_failure = maage_status_failed(result) ? result : maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOAD);
                 /* An adapter must not hand back an owned buffer on error. If
@@ -163,15 +149,12 @@ maage_status maage_sound_catalog_preload(maage_sound_catalog *catalog,
     if (missing) {
         /* Recoverable partial registration; no trace-per-missing-variant storm.
          * Preserve the first originating failure and the recovery outcome. */
-        if (first_failure) MAAGE_STATUS_TRACE(trace, first_failure,
-                                              MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD);
+        if (first_failure) MAAGE_STATUS_TRACE(trace, first_failure, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD);
         result = maage_cat_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_LOAD);
-        if (trace) maage_status_trace_recover(trace, result, MAAGE_CONTEXT_RESOURCE,
-                                              MAAGE_OPERATION_LOAD, __FILE__, (unsigned long) __LINE__);
+        if (trace) maage_status_trace_recover(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, __FILE__, (unsigned long) __LINE__);
         return result;
     }
-    return maage_cat_status(loaded ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP,
-                            MAAGE_OPERATION_LOAD);
+    return maage_cat_status(loaded ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, MAAGE_OPERATION_LOAD);
 }
 
 /* 32-bit arithmetic on C90 unsigned long, including 64-bit hosts. No global
@@ -187,8 +170,7 @@ static unsigned long maage_cat_position_mix(unsigned long h, double coord) {
     return maage_cat_mix(h, scaled ^ (coord < 0.0 ? 0x80000000UL : 0UL));
 }
 
-maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
-                                      const maage_sound_event *event, maage_status_trace *trace) {
+maage_status maage_sound_catalog_play(maage_sound_catalog *catalog, const maage_sound_event *event, maage_status_trace *trace) {
     const maage_cat_rule *rule;
     maage_cat_family *family;
     unsigned int event_id, material;
@@ -197,34 +179,24 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     float gain, pitch, volume, range;
     double position[3];
     maage_status result;
-    if (!catalog || !event || !catalog->bound || !catalog->preloaded)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+    if (!catalog || !event || !catalog->bound || !catalog->preloaded) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     event_id = event->event_id;
-    if (!event_id || event_id >= MAAGE_CAT_EVENT_COUNT)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
-    if (!(event->intensity >= 0.0) || event->intensity > (double) FLT_MAX / 16.0 ||
-        !(event->pitch >= 0.0) || event->pitch > (double) FLT_MAX / 2.0)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+    if (!event_id || event_id >= MAAGE_CAT_EVENT_COUNT) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+    if (!(event->intensity >= 0.0) || event->intensity > (double) FLT_MAX / 16.0 || !(event->pitch >= 0.0) || event->pitch > (double) FLT_MAX / 2.0) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     if (event->intensity <= 0.0f) return maage_cat_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     rule = &maage_cat_rules[event_id];
     material = event->material;
-    if (material >= MAAGE_CAT_MATERIAL_COUNT)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+    if (material >= MAAGE_CAT_MATERIAL_COUNT) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     selected = rule->family;
-    if (rule->material_map == 1)
-        selected = maage_cat_step[material];
+    if (rule->material_map == 1) selected = maage_cat_step[material];
     else if (rule->material_map >= 2) {
         selected = maage_cat_dig[material];
-        if (rule->material_map == 3 && material == MAAGE_MATERIAL_GLASS)
-            selected = MAAGE_CAT_STEP_STONE;
-        else if (rule->material_map == 3 && material == MAAGE_MATERIAL_ANVIL)
-            selected = MAAGE_CAT_ANVIL_LAND;
+        if (rule->material_map == 3 && material == MAAGE_MATERIAL_GLASS) selected = MAAGE_CAT_STEP_STONE;
+        else if (rule->material_map == 3 && material == MAAGE_MATERIAL_ANVIL) selected = MAAGE_CAT_ANVIL_LAND;
     }
     if (!selected) return maage_cat_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     family = &catalog->family[selected];
-    if (!family->ready) return MAAGE_STATUS_PROPAGATE(trace,
-                                                      maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP),
-                                                      MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+    if (!family->ready) return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     position[0] = event->position[0];
     position[1] = event->position[1];
     position[2] = event->position[2];
@@ -234,9 +206,7 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
             position[0] < -100000000.0 || position[1] > 100000000.0 ||
             position[1] < -100000000.0 || position[2] > 100000000.0 ||
             position[2] < -100000000.0)
-            return MAAGE_STATUS_PROPAGATE(trace,
-                                          maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT),
-                                          MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+            return MAAGE_STATUS_PROPAGATE(trace, maage_cat_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     } else
         position[0] = position[1] = position[2] = 0.0;
     hash = maage_cat_mix(2166136261UL, (unsigned long) event->tick);
@@ -255,10 +225,8 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     gain = rule->gain;
     pitch = rule->pitch;
     if (rule->material_map) {
-        if (event_id == MAAGE_SOUND_BLOCK_BREAK || event_id == MAAGE_SOUND_BLOCK_PLACE)
-            gain = (volume + 1.0f) * 0.5f;
-        else if (event_id == MAAGE_SOUND_BLOCK_DIG)
-            gain = (volume + 1.0f) * 0.125f;
+        if (event_id == MAAGE_SOUND_BLOCK_BREAK || event_id == MAAGE_SOUND_BLOCK_PLACE) gain = (volume + 1.0f) * 0.5f;
+        else if (event_id == MAAGE_SOUND_BLOCK_DIG) gain = (volume + 1.0f) * 0.125f;
         else
             gain *= volume;
         if (material == MAAGE_MATERIAL_METAL) pitch *= 1.5f;
@@ -271,10 +239,8 @@ maage_status maage_sound_catalog_play(maage_sound_catalog *catalog,
     if (gain > 1.0f) gain = 1.0f;
     if (pitch < 0.5f) pitch = 0.5f;
     if (pitch > 2.0f) pitch = 2.0f;
-    result = catalog->port.play(catalog->audio, family->variants[selected].buffer,
-                                rule->bus, rule->positional, position, gain, pitch, range, trace);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result,
-                                                                   MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
+    result = catalog->port.play(catalog->audio, family->variants[selected].buffer, rule->bus, rule->positional, position, gain, pitch, range, trace);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT);
     return result;
 }
 

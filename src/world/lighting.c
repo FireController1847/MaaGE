@@ -54,9 +54,7 @@ static maage_status maage_region_write(maage_chunk *chunk, int x, int y, int z, 
     section->light[maage_chunk_cell(x, y % 16, z)] = light;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
 }
-maage_status maage_light_region_job(maage_chunk *columns[9], const maage_chunk *halo[25],
-                                    const unsigned char dirty[9][8192], const maage_block_registry *blocks,
-                                    const maage_job_token *token, maage_status_trace *trace) {
+maage_status maage_light_region_job(maage_chunk *columns[9], const maage_chunk *halo[25], const unsigned char dirty[9][8192], const maage_block_registry *blocks, const maage_job_token *token, maage_status_trace *trace) {
     static const int offsets[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     maage_region_light work;
     maage_chunk *chunk;
@@ -121,8 +119,7 @@ maage_status maage_light_region_job(maage_chunk *columns[9], const maage_chunk *
                             chunk->direct_sky[cell] = (unsigned char) sky;
                             maage_region_enqueue(&work, rx + x, y, rz + z);
                             for (side = 0; side < 6; ++side)
-                                maage_region_enqueue(&work,
-                                                     rx + x + offsets[side][0], y + offsets[side][1], rz + z + offsets[side][2]);
+                                maage_region_enqueue(&work, rx + x + offsets[side][0], y + offsets[side][1], rz + z + offsets[side][2]);
                         }
                     }
                 }
@@ -187,15 +184,12 @@ done:
 
 /* Gameplay and presentation share the numerical solver. The Server schedules
  * its authoritative single-column cache independently; it exports no light. */
-maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks,
-                                   const maage_chunk *neighbors[4], maage_section *added[16],
-                                   const maage_job_token *token, maage_status_trace *trace) {
+maage_status maage_light_chunk_job(maage_chunk *chunk, const maage_block_registry *blocks, const maage_chunk *neighbors[4], maage_section *added[16], const maage_job_token *token, maage_status_trace *trace) {
     maage_chunk *columns[9];
     const maage_chunk *halo[25];
     unsigned char dirty[9][8192];
     unsigned int i;
-    if (!chunk || !added || !maage_block_registry_is_finalized(blocks)) return MAAGE_STATUS_TRACE(trace,
-                                                                                                  maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
+    if (!chunk || !added || !maage_block_registry_is_finalized(blocks)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
     memset(columns, 0, sizeof(columns));
     memset(halo, 0, sizeof(halo));
     memset(dirty, 0, sizeof(dirty));

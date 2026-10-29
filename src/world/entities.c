@@ -31,17 +31,14 @@ maage_status maage_entities_reserve(maage_entities *entities, size_t additional)
     maage_entity *data;
     size_t capacity, buckets, *heads, *next;
     if (!entities) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_ACQUIRE);
-    if (additional > 4294967295UL - entities->next_id || additional > (size_t) - 1 - entities->count)
-        return entity_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_ACQUIRE);
-    if (entities->count + additional <= entities->capacity)
-        return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_ACQUIRE);
+    if (additional > 4294967295UL - entities->next_id || additional > (size_t) - 1 - entities->count) return entity_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_ACQUIRE);
+    if (entities->count + additional <= entities->capacity) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_ACQUIRE);
     capacity = entities->capacity ? entities->capacity : 64;
     while (capacity < entities->count + additional) {
         if (capacity > (size_t) - 1 / 2) return entity_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_ACQUIRE);
         capacity *= 2;
     }
-    if (capacity > (size_t) - 1 / sizeof(*data) || capacity > ((size_t) - 1 / sizeof(*heads) - 1) / 2)
-        return entity_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_ACQUIRE);
+    if (capacity > (size_t) - 1 / sizeof(*data) || capacity > ((size_t) - 1 / sizeof(*heads) - 1) / 2) return entity_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_ACQUIRE);
     buckets = capacity * 2 + 1;
     data = (maage_entity *) malloc(capacity * sizeof(*data));
     heads = (size_t *) malloc(buckets * sizeof(*heads));
@@ -75,11 +72,9 @@ int maage_entity_valid(const maage_entity *entity, const maage_item_registry *it
             !(entity->velocity[axis] >= -4 && entity->velocity[axis] <= 4)) return 0;
     return entity->position[1] >= -64 && entity->position[1] <= MAAGE_WORLD_HEIGHT + 64;
 }
-maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items,
-                                  const maage_item_stack *stack, const double position[3], const double velocity[3], unsigned int delay) {
+maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items, const maage_item_stack *stack, const double position[3], const double velocity[3], unsigned int delay) {
     maage_entity entity;
-    if (!entities || !position || !velocity || !stack)
-        return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    if (!entities || !position || !velocity || !stack) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     memset(&entity, 0, sizeof(entity));
     entity.id = entities->next_id;
     entity.type = MAAGE_ENTITY_ITEM;
@@ -103,8 +98,7 @@ static int entity_loaded(const maage_world *world, const maage_entity *entity) {
     /* Freeze before a boundary until every column intersecting the AABB loads. */
     for (z = -1; z <= 1; z += 2)
         for (x = -1; x <= 1; x += 2)
-            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate((int) floor(entity->position[0] + x * 0.126)),
-                                          maage_world_chunk_coordinate((int) floor(entity->position[2] + z * 0.126)))) return 0;
+            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate((int) floor(entity->position[0] + x * 0.126)), maage_world_chunk_coordinate((int) floor(entity->position[2] + z * 0.126)))) return 0;
     return 1;
 }
 static void entity_move(maage_entity *entity, const maage_world *world) {
@@ -139,8 +133,7 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     maage_world_sweep_body(world, entity->position, entity->velocity, 0.25, 0.25, 2, entity->velocity[2]);
     drag = entity->grounded ? 0.588 : 0.98;
     if (entity->grounded) {
-        state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world,
-                                                                                        (int) floor(entity->position[0]), (int) floor(entity->position[1] - 0.01), (int) floor(entity->position[2])));
+        state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, (int) floor(entity->position[0]), (int) floor(entity->position[1] - 0.01), (int) floor(entity->position[2])));
         if (state && state->block_id == MAAGE_BLOCK_ICE) drag = 0.9604;
         entity->velocity[1] = fabs(vertical) > 0.08 ? -vertical * 0.49 : 0;
     } else
@@ -150,18 +143,14 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     if (fabs(entity->velocity[0]) < 0.0001) entity->velocity[0] = 0;
     if (fabs(entity->velocity[2]) < 0.0001) entity->velocity[2] = 0;
 }
-maage_status maage_entities_tick(maage_entities *entities, const maage_world *world,
-                                 const maage_item_registry *items, const maage_player *player,
-                                 maage_inventory *inventory, int collect, unsigned int *collected,
-                                 maage_entity_pickup *pickups, size_t capacity, size_t *written) {
+maage_status maage_entities_tick(maage_entities *entities, const maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
     size_t i, j, step, bucket, output = 0;
     int x, y, z, dx, dy, dz;
     unsigned int remaining, examined;
     maage_entity *entity, *other;
     const maage_item_definition *item;
     maage_status result;
-    if (!entities || !world || !items || !player || !inventory || !collected || !written || (capacity && !pickups))
-        return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
+    if (!entities || !world || !items || !player || !inventory || !collected || !written || (capacity && !pickups)) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
     *collected = 0;
     *written = 0;
     if (!entities->count) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
@@ -178,8 +167,7 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
         if (entity->pickup_delay) --entity->pickup_delay;
         ++entity->age;
         entity_move(entity, world);
-        if (entity->age >= 6000 || entity->position[1] < -64 ||
-            fabs(entity->position[0]) >= MAAGE_WORLD_LIMIT - 4 || fabs(entity->position[2]) >= MAAGE_WORLD_LIMIT - 4) {
+        if (entity->age >= 6000 || entity->position[1] < -64 || fabs(entity->position[0]) >= MAAGE_WORLD_LIMIT - 4 || fabs(entity->position[2]) >= MAAGE_WORLD_LIMIT - 4) {
             entity->payload.item.count = 0;
             continue;
         }
@@ -272,16 +260,13 @@ maage_status maage_entities_snapshot(const maage_entities *entities, maage_entit
     save->random = entities->random;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
 }
-maage_status maage_entities_restore(maage_entities *entities, const maage_item_registry *items,
-                                    const maage_entity_save *save) {
+maage_status maage_entities_restore(maage_entities *entities, const maage_item_registry *items, const maage_entity_save *save) {
     size_t i;
     maage_status result;
     unsigned long previous = 0;
-    if (!entities || !save || !save->next_id || save->next_id > 4294967295UL ||
-        (save->count && !save->entities)) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD);
+    if (!entities || !save || !save->next_id || save->next_id > 4294967295UL || (save->count && !save->entities)) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD);
     for (i = 0; i < save->count; ++i) {
-        if (!maage_entity_valid(&save->entities[i], items) || save->entities[i].id <= previous ||
-            save->entities[i].id >= save->next_id) return entity_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
+        if (!maage_entity_valid(&save->entities[i], items) || save->entities[i].id <= previous || save->entities[i].id >= save->next_id) return entity_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
         previous = save->entities[i].id;
     }
     result = maage_entities_reserve(entities, save->count > entities->count ? save->count - entities->count : 0);

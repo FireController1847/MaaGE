@@ -20,10 +20,7 @@ static void maage_preview_rotate(double point[3], double yaw, double pitch) {
     point[1] = cos(pitch) * y - sin(pitch) * z;
     point[2] = sin(pitch) * y + cos(pitch) * z;
 }
-static void maage_preview_box(maage_preview_face faces[72], unsigned int *count, const maage_client_ui *ui,
-                              const maage_player_box *box, double yaw, double body_pitch,
-                              const maage_player_pose *rest, const float matrix[16],
-                              float center_x, float feet_y) {
+static void maage_preview_box(maage_preview_face faces[72], unsigned int *count, const maage_client_ui *ui, const maage_player_box *box, double yaw, double body_pitch, const maage_player_pose *rest, const float matrix[16], float center_x, float feet_y) {
     double point[4][3], normal[3], a[3], b[3], local[3], transformed[3], light, length;
     float pixels[4][2];
     unsigned int face, corner, axis, k;
@@ -50,8 +47,7 @@ static void maage_preview_box(maage_preview_face faces[72], unsigned int *count,
         length = sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
         for (axis = 0; axis < 3; ++axis)
             normal[axis] /= length;
-        light = 0.4 + 0.6 * maage_preview_positive(normal[0] * 0.1616904 + normal[1] * 0.8084521 - normal[2] * 0.5659165) +
-                0.6 * maage_preview_positive(-normal[0] * 0.1616904 + normal[1] * 0.8084521 + normal[2] * 0.5659165);
+        light = 0.4 + 0.6 * maage_preview_positive(normal[0] * 0.1616904 + normal[1] * 0.8084521 - normal[2] * 0.5659165) + 0.6 * maage_preview_positive(-normal[0] * 0.1616904 + normal[1] * 0.8084521 + normal[2] * 0.5659165);
         if (light > 1) light = 1;
         faces[*count].depth = 0;
         for (corner = 0; corner < 4; ++corner) {
@@ -123,14 +119,12 @@ void maage_client_ui_player_preview(maage_client_ui *ui, maage_client_ui_rect fr
     clip.width = 50;
     clip.height = 66;
     maage_player_model_boxes(ui->resources.skin_model, boxes);
-    maage_player_pose_calculate(ui->resources.skin_model, 0, 0, 0,
-                                horizontal * 40 * 3.141592653589793 / 180 - yaw, -pitch, 0, 0, 0, &pose);
+    maage_player_pose_calculate(ui->resources.skin_model, 0, 0, 0, horizontal * 40 * 3.141592653589793 / 180 - yaw, -pitch, 0, 0, 0, &pose);
     maage_player_pose_calculate(ui->resources.skin_model, 0, 0, 0, 0, 0, 0, 0, 0, &rest);
     for (i = 0; i < MAAGE_PLAYER_PARTS; ++i)
         maage_player_part_matrix(matrices[i], &pose, i);
     for (box = 0; box < MAAGE_PLAYER_BOX_COUNT; ++box)
-        maage_preview_box(faces, &count, ui, &boxes[box], yaw, pitch,
-                          &rest, matrices[boxes[box].part], frame.x + 51, frame.y + 75);
+        maage_preview_box(faces, &count, ui, &boxes[box], yaw, pitch, &rest, matrices[boxes[box].part], frame.x + 51, frame.y + 75);
     for (i = 1; i < count; ++i) {
         temporary = faces[i];
         j = i;

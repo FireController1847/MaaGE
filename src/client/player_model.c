@@ -24,8 +24,7 @@ void maage_player_model_boxes(unsigned int model, maage_player_box boxes[MAAGE_P
         }
     }
 }
-void maage_player_box_face(const maage_player_box *box, unsigned int face,
-                           double points[4][3], float pixels[4][2]) {
+void maage_player_box_face(const maage_player_box *box, unsigned int face, double points[4][3], float pixels[4][2]) {
     double u0, u1, v0 = box->texture_y + box->size[2], v1 = v0 + box->size[1];
     double x = box->texture_x, w = box->size[0], d = box->size[2];
     unsigned int corner, axis;
@@ -56,14 +55,12 @@ void maage_player_box_face(const maage_player_box *box, unsigned int face,
     }
     for (corner = 0; corner < 4; ++corner) {
         for (axis = 0; axis < 3; ++axis)
-            points[corner][axis] = box->minimum[axis] - box->inflate +
-                                   maage_player_corners[face][corner][axis] * (box->size[axis] + 2 * box->inflate);
+            points[corner][axis] = box->minimum[axis] - box->inflate + maage_player_corners[face][corner][axis] * (box->size[axis] + 2 * box->inflate);
         pixels[corner][0] = (float) (corner == 1 || corner == 2 ? u1 : u0);
         pixels[corner][1] = (float) (corner < 2 ? v1 : v0);
     }
 }
-void maage_player_arm_geometry(unsigned int model, const float skin_uv[4],
-                               maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data) {
+void maage_player_arm_geometry(unsigned int model, const float skin_uv[4], maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data) {
     static const unsigned int offsets[6] = {0, 1, 2, 0, 2, 3};
     maage_player_box boxes[MAAGE_PLAYER_BOX_COUNT];
     double points[4][3], shoulder = model == MAAGE_SKIN_SLIM ? 21.5 : 22;
@@ -148,9 +145,7 @@ void maage_player_part_matrix(float matrix[16], const maage_player_pose *pose, u
     maage_player_matrix_rotate(matrix, 1, pose->rotation[part][1]);
     maage_player_matrix_rotate(matrix, 0, pose->rotation[part][0]);
 }
-void maage_player_pose_calculate(unsigned int model, double phase, double amount,
-                                 double age, double head_yaw, double pitch, double swing, int held, int sneaking,
-                                 maage_player_pose *pose) {
+void maage_player_pose_calculate(unsigned int model, double phase, double amount, double age, double head_yaw, double pitch, double swing, int held, int sneaking, maage_player_pose *pose) {
     static const double pivots[6][3] = {{0, 24, 0}, {0, 24, 0}, {5, 22, 0}, {-5, 22, 0}, {1.9, 12, 0.1}, {-1.9, 12, 0.1}};
     double torso, eased, wave, head_wave;
     unsigned int part;
@@ -201,8 +196,7 @@ void maage_player_pose_calculate(unsigned int model, double phase, double amount
     pose->rotation[2][0] -= head_wave;
     pose->rotation[3][0] += head_wave;
 }
-void maage_player_part_geometry(unsigned int model, unsigned int part,
-                                const float skin_uv[4], maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data) {
+void maage_player_part_geometry(unsigned int model, unsigned int part, const float skin_uv[4], maage_mesh_vertex vertices[48], unsigned int indices[72], maage_mesh_data *data) {
     static const unsigned int offsets[6] = {0, 1, 2, 0, 2, 3};
     static const float shades[6] = {0.75f, 0.75f, 0.6f, 1.0f, 0.85f, 0.85f};
     maage_player_box boxes[MAAGE_PLAYER_BOX_COUNT];

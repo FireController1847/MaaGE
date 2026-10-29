@@ -13,32 +13,26 @@
 static maage_status maage_profile_io(maage_status_trace *trace, unsigned char operation) {
     int native = errno;
     maage_status result = maage_status_from_errno(native ? native : EIO, MAAGE_CONTEXT_STORAGE, operation);
-    return maage_status_trace_record(trace, result, MAAGE_CONTEXT_STORAGE, operation,
-                                     __FILE__, (unsigned long) __LINE__, (long) native);
+    return maage_status_trace_record(trace, result, MAAGE_CONTEXT_STORAGE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
 }
-static maage_status maage_profile_path(const char *root, const char *name,
-                                       char path[MAAGE_PATH_CAPACITY], maage_status_trace *trace) {
+static maage_status maage_profile_path(const char *root, const char *name, char path[MAAGE_PATH_CAPACITY], maage_status_trace *trace) {
     char directory[MAAGE_PATH_CAPACITY];
     maage_status result = maage_storage_join(directory, sizeof(directory), root, "config/accounts");
     if (!maage_status_failed(result)) result = maage_storage_directories(directory);
     if (!maage_status_failed(result)) result = maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, name);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_RESOLVE);
 }
-static maage_status maage_profile_write(const char *path, const unsigned char *data,
-                                        size_t size, maage_status_trace *trace) {
+static maage_status maage_profile_write(const char *path, const unsigned char *data, size_t size, maage_status_trace *trace) {
     char temporary[MAAGE_PATH_CAPACITY];
     FILE *file;
     maage_status result, cleanup;
-    if (strlen(path) + 6 >= sizeof(temporary)) return MAAGE_STATUS_PROPAGATE(trace,
-                                                                             maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE, 0),
-                                                                             MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
+    if (strlen(path) + 6 >= sizeof(temporary)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
     strcpy(temporary, path);
     strcat(temporary, ".part");
     result = maage_storage_remove(temporary);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
     file = maage_storage_open(temporary, "wb");
-    if (!file) return MAAGE_STATUS_PROPAGATE(trace, maage_profile_io(trace, MAAGE_OPERATION_OPEN),
-                                             MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
+    if (!file) return MAAGE_STATUS_PROPAGATE(trace, maage_profile_io(trace, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
     result = maage_storage_private_file(temporary);
     if (!maage_status_failed(result) && fwrite(data, 1, size, file) != size) result = maage_profile_io(trace, MAAGE_OPERATION_WRITE);
     if (!maage_status_failed(result)) result = maage_storage_sync(file);
@@ -51,8 +45,7 @@ static maage_status maage_profile_write(const char *path, const unsigned char *d
     }
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SAVE);
 }
-static maage_status maage_profile_key(const char *root, unsigned char key[32],
-                                      int create, maage_status_trace *trace) {
+static maage_status maage_profile_key(const char *root, unsigned char key[32], int create, maage_status_trace *trace) {
     char path[MAAGE_PATH_CAPACITY], fingerprint[128];
     double size;
     FILE *file;
@@ -66,21 +59,18 @@ static maage_status maage_profile_key(const char *root, unsigned char key[32],
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
         file = maage_storage_open(path, "rb");
         if (!file) return MAAGE_STATUS_PROPAGATE(trace, maage_profile_io(trace, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
-        if (fread(key, 1, 32, file) != 32 || fgetc(file) != EOF)
-            result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
+        if (fread(key, 1, 32, file) != 32 || fgetc(file) != EOF) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
         if (ferror(file)) result = maage_profile_io(trace, MAAGE_OPERATION_READ);
         if (fclose(file) && !maage_status_failed(result)) result = maage_profile_io(trace, MAAGE_OPERATION_CLOSE);
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
     }
     /* Never replace an inaccessible or malformed existing encryption key. */
-    if (!create || maage_status_code(result) != MAAGE_STATUS_NOT_FOUND)
-        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
+    if (!create || maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
     result = maage_auth_random(key, 32);
     if (!maage_status_failed(result)) result = maage_profile_write(path, key, 32, trace);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE);
 }
-static maage_status maage_profile_crypt(int encrypt, unsigned char *plain, int size,
-                                        unsigned char *sealed, const unsigned char key[32], const char *uuid, maage_status_trace *trace) {
+static maage_status maage_profile_crypt(int encrypt, unsigned char *plain, int size, unsigned char *sealed, const unsigned char key[32], const char *uuid, maage_status_trace *trace) {
     unsigned char aad[40];
     maage_status result;
     if (encrypt) {
@@ -119,8 +109,7 @@ static maage_status maage_profile_lock(const char *root, maage_storage_lock **ou
 }
 /* Keep the original operation outcome if cleanup also fails; successful
  * publication/load with a failed lease release is an explicit partial result. */
-static maage_status maage_profile_unlock(maage_storage_lock *lock, maage_status result,
-                                         unsigned char operation, maage_status_trace *trace) {
+static maage_status maage_profile_unlock(maage_storage_lock *lock, maage_status result, unsigned char operation, maage_status_trace *trace) {
     maage_status cleanup = maage_storage_release(lock);
     if (maage_status_failed(cleanup)) {
         MAAGE_STATUS_PROPAGATE(trace, cleanup, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_RELEASE);
@@ -128,8 +117,7 @@ static maage_status maage_profile_unlock(maage_storage_lock *lock, maage_status 
     }
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_AUTH, operation);
 }
-maage_status maage_profile_store_load(const char *root, const char *uuid,
-                                      maage_profile_session *session, maage_status_trace *trace) {
+maage_status maage_profile_store_load(const char *root, const char *uuid, maage_profile_session *session, maage_status_trace *trace) {
     unsigned char key[32], *sealed = NULL, *plain = NULL;
     char name[48], normalized[33], path[MAAGE_PATH_CAPACITY];
     const char *token, *player;
@@ -139,8 +127,7 @@ maage_status maage_profile_store_load(const char *root, const char *uuid,
     size_t size;
     maage_status result;
     if (session) memset(session, 0, sizeof(*session));
-    if (!root || !uuid || !session || !maage_access_uuid(uuid, normalized) || strcmp(uuid, normalized))
-        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD);
+    if (!root || !uuid || !session || !maage_access_uuid(uuid, normalized) || strcmp(uuid, normalized)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD);
     sprintf(name, "%s.account", uuid);
     result = maage_profile_lock(root, &lock, trace);
     if (maage_status_failed(result)) goto done;
@@ -173,8 +160,7 @@ maage_status maage_profile_store_load(const char *root, const char *uuid,
     result = maage_access_json((const char *) plain, size, &object);
     if (maage_status_failed(result)) goto done;
     result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_PARSE, 0);
-    if (!object || !json_object_object_get_ex(object, "version", &version) || !json_object_is_type(version, json_type_int) || json_object_get_int(version) != 2 ||
-        strcmp(maage_access_json_string(object, "provider"), "microsoft-oauth") || strcmp(maage_access_json_string(object, "uuid"), uuid)) goto done;
+    if (!object || !json_object_object_get_ex(object, "version", &version) || !json_object_is_type(version, json_type_int) || json_object_get_int(version) != 2 || strcmp(maage_access_json_string(object, "provider"), "microsoft-oauth") || strcmp(maage_access_json_string(object, "uuid"), uuid)) goto done;
     token = maage_access_json_string(object, "minecraft_access_token");
     player = maage_access_json_string(object, "name");
     if (!*token || strlen(token) >= sizeof(session->minecraft_token) || !maage_access_username(player)) goto done;
@@ -279,8 +265,7 @@ maage_status maage_profile_store_remove(const char *root, const char *uuid, maag
     char name[48], normalized[33], path[MAAGE_PATH_CAPACITY];
     maage_storage_lock *lock = NULL;
     maage_status result;
-    if (!root || !uuid || !maage_access_uuid(uuid, normalized) || strcmp(uuid, normalized))
-        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_REMOVE, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_REMOVE);
+    if (!root || !uuid || !maage_access_uuid(uuid, normalized) || strcmp(uuid, normalized)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_REMOVE, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_REMOVE);
     result = maage_profile_lock(root, &lock, trace);
     if (!maage_status_failed(result)) {
         sprintf(name, "%s.account", uuid);

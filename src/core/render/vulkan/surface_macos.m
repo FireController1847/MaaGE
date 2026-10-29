@@ -12,23 +12,18 @@ typedef struct maage_vulkan_cocoa {
 } maage_vulkan_cocoa;
 
 static maage_status maage_vulkan_cocoa_status(maage_renderer *renderer, unsigned char code) {
-    return MAAGE_STATUS_PROPAGATE(renderer->operation_trace,
-                                  maage_status_make(code, MAAGE_CONTEXT_RENDER, renderer->trace_operation, 0),
-                                  MAAGE_CONTEXT_RENDER, renderer->trace_operation);
+    return MAAGE_STATUS_PROPAGATE(renderer->operation_trace, maage_status_make(code, MAAGE_CONTEXT_RENDER, renderer->trace_operation, 0), MAAGE_CONTEXT_RENDER, renderer->trace_operation);
 }
 maage_status maage_vulkan_cocoa_update(maage_renderer *renderer, const maage_window_state *state) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_cocoa *cocoa = native->cocoa;
     CGFloat scale;
     CGSize size;
-    if (![NSThread isMainThread])
-        return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
-    if (!cocoa || !cocoa->installed)
-        return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
+    if (![NSThread isMainThread]) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
+    if (!cocoa || !cocoa->installed) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
     /* Let AppKit finish a Space transition before recreating the swapchain.
      * The window module retains this same viewport across those transitions. */
-    if (state->mode_transitioning)
-        return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_NOOP);
+    if (state->mode_transitioning) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_NOOP);
     scale = [[cocoa->view window] backingScaleFactor];
     if (scale <= 0) scale = 1;
     size = CGSizeMake(state->framebuffer_width, state->framebuffer_height);
@@ -38,11 +33,9 @@ maage_status maage_vulkan_cocoa_update(maage_renderer *renderer, const maage_win
         return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_SUCCESS);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    if (!CGRectEqualToRect(cocoa->layer.frame, NSRectToCGRect([cocoa->view bounds])))
-        cocoa->layer.frame = NSRectToCGRect([cocoa->view bounds]);
+    if (!CGRectEqualToRect(cocoa->layer.frame, NSRectToCGRect([cocoa->view bounds]))) cocoa->layer.frame = NSRectToCGRect([cocoa->view bounds]);
     if (cocoa->layer.contentsScale != scale) cocoa->layer.contentsScale = scale;
-    if (size.width > 0 && size.height > 0 && !CGSizeEqualToSize(cocoa->layer.drawableSize, size))
-        cocoa->layer.drawableSize = size;
+    if (size.width > 0 && size.height > 0 && !CGSizeEqualToSize(cocoa->layer.drawableSize, size)) cocoa->layer.drawableSize = size;
     [CATransaction commit];
     return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_SUCCESS);
 }
@@ -52,9 +45,7 @@ maage_status maage_vulkan_cocoa_surface(maage_renderer *renderer) {
     VkMetalSurfaceCreateInfoEXT info = {0};
     maage_window_state state;
     maage_status result;
-    if (![NSThread isMainThread] || renderer->native.backend != MAAGE_WINDOW_COCOA ||
-        !renderer->native.handles.cocoa.view)
-        return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
+    if (![NSThread isMainThread] || renderer->native.backend != MAAGE_WINDOW_COCOA || !renderer->native.handles.cocoa.view) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
     if (!cocoa) {
         cocoa = calloc(1, sizeof(*cocoa));
         if (!cocoa) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_ALLOCATION_FAILED);
@@ -83,8 +74,7 @@ maage_status maage_vulkan_cocoa_destroy(maage_renderer *renderer) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_cocoa *cocoa = native->cocoa;
     if (!cocoa) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_NOOP);
-    if (![NSThread isMainThread])
-        return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
+    if (![NSThread isMainThread]) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_INVALID_STATE);
     if (cocoa->installed) {
         [cocoa->view setLayer:cocoa->previous_layer];
         [cocoa->view setWantsLayer:cocoa->previous_wants_layer];

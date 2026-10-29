@@ -69,10 +69,7 @@ static void alsa_writer(void *context) {
                 maage_audio_lock_enter(audio->lock);
                 stopped = s->stop;
                 maage_audio_lock_leave(audio->lock);
-                if (!stopped) maage_audio_backend_fail(audio,
-                                                       maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_PRESENT,
-                                                                          MAAGE_DETAIL_AUDIO_DEVICE_LOST),
-                                                       (long) native);
+                if (!stopped) maage_audio_backend_fail(audio, maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_PRESENT, MAAGE_DETAIL_AUDIO_DEVICE_LOST), (long) native);
                 return;
             }
             if (!written) {
@@ -114,8 +111,7 @@ maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *t
     if (err < 0) {
         audio->device_native = err;
         alsa_dispose(s);
-        return maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE,
-                                  MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+        return maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
     }
     /* SND_PCM_ACCESS_RW_INTERLEAVED=3; ALSA provides optional soft resampling.
      * 40ms is a bounded device latency, not a CPU-side unbounded buffer. */
@@ -123,8 +119,7 @@ maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *t
     if (err < 0) {
         audio->device_native = err;
         alsa_dispose(s);
-        return maage_audio_result(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_OPERATION_ACQUIRE,
-                                  MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+        return maage_audio_result(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
     }
     audio->backend_state = s;
     result = maage_thread_start(alsa_writer, s, &s->thread);

@@ -10,8 +10,7 @@ typedef struct maage_client_swing {
     int running;
 } maage_client_swing;
 /* One Client-local action timeline shared by first and third person. */
-double maage_client_swing_update(maage_client_swing *swing, const maage_session_snapshot *snapshot,
-                                 double elapsed, int active, int held, int pressed, int has_target);
+double maage_client_swing_update(maage_client_swing *swing, const maage_session_snapshot *snapshot, double elapsed, int active, int held, int pressed, int has_target);
 
 typedef struct maage_client_interaction_visual {
     maage_render_mesh *mesh;
@@ -35,23 +34,12 @@ typedef struct maage_client_first_person {
 } maage_client_first_person;
 /* Copies pre-resolved crack UVs. The frame path uses bounded stack geometry and
  * uploads only when the target or damage stage changes. */
-maage_status maage_client_interaction_init(maage_client_interaction_visual *visual,
-                                           const maage_client_resources *resources);
-maage_status maage_client_interaction_update(maage_client_interaction_visual *visual,
-                                             maage_renderer *renderer, maage_render_texture *atlas,
-                                             const maage_block_registry *blocks, const maage_session_snapshot *snapshot,
-                                             const struct maage_client_prediction *prediction, maage_status_trace *trace);
-maage_status maage_client_first_person_init(maage_client_first_person *visual,
-                                            const maage_client_resources *resources);
+maage_status maage_client_interaction_init(maage_client_interaction_visual *visual, const maage_client_resources *resources);
+maage_status maage_client_interaction_update(maage_client_interaction_visual *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const struct maage_client_prediction *prediction, maage_status_trace *trace);
+maage_status maage_client_first_person_init(maage_client_first_person *visual, const maage_client_resources *resources);
 /* Geometry is cached across frames. Only item/metadata changes upload it;
  * camera, equip, swing, bobbing and sampled light are frame uniforms. Copied
  * snapshots remain the only source of player/gameplay state. */
-maage_status maage_client_first_person_update(maage_client_first_person *visual,
-                                              maage_renderer *renderer, maage_render_texture *atlas,
-                                              const maage_item_registry *items, const maage_block_registry *blocks,
-                                              const maage_session_snapshot *snapshot,
-                                              const double position[3], double yaw, double pitch,
-                                              double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace);
-maage_status maage_client_first_person_destroy(maage_client_first_person *visual,
-                                               maage_renderer *renderer);
+maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const double position[3], double yaw, double pitch, double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace);
+maage_status maage_client_first_person_destroy(maage_client_first_person *visual, maage_renderer *renderer);
 #endif

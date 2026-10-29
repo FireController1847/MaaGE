@@ -33,8 +33,7 @@ static void maage_client_debug_memory(double *resident, double *peak) {
         mach_task_basic_info_data_t memory;
         mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
         struct rusage usage;
-        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t) &memory, &count) == KERN_SUCCESS)
-            *resident = (double) memory.resident_size;
+        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t) &memory, &count) == KERN_SUCCESS) *resident = (double) memory.resident_size;
         if (!getrusage(RUSAGE_SELF, &usage)) *peak = (double) usage.ru_maxrss;
     }
 #elif defined(__linux__)
@@ -50,8 +49,7 @@ static const char *maage_client_debug_biome(maage_biome_id biome) {
         "Ocean", "Plains", "Desert", "Extreme Hills", "Forest", "Taiga"};
     return biome < MAAGE_BIOME_COUNT ? names[biome] : "Unknown";
 }
-void maage_client_debug_frame(maage_client_debug *debug, double now,
-                              double elapsed, int presented, unsigned long ticks, double tick_seconds) {
+void maage_client_debug_frame(maage_client_debug *debug, double now, double elapsed, int presented, unsigned long ticks, double tick_seconds) {
     double duration, retained, weight;
     if (!debug->initialized) {
         debug->sample_start = now - elapsed;
@@ -76,9 +74,7 @@ void maage_client_debug_frame(maage_client_debug *debug, double now,
     debug->tick_ms = debug->ticks ? debug->tick_seconds * 1000.0 / debug->ticks : 0;
     debug->timing_ready = 1;
 }
-const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug,
-                                                        double now, const maage_session_snapshot *snapshot, int radius, int paused,
-                                                        maage_renderer *renderer, const maage_client_mesh_stats *meshes) {
+const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes) {
     maage_client_ui_debug *text;
     const maage_client_metadata *identity = maage_client_identity();
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
@@ -89,8 +85,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     double degrees, resident, peak, retained;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
-    if (!debug || !snapshot || !renderer || !meshes ||
-        snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
+    if (!debug || !snapshot || !renderer || !meshes || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
     text = &debug->text;
     stats = &snapshot->world_stats;
     player = &snapshot->player.player;
@@ -102,8 +97,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
         sprintf(debug->version, "MaaGE %.96s+%.32s", identity->version, identity->build);
         sprintf(debug->system, "%.48s / %.48s", identity->platform, identity->architecture);
         sprintf(debug->renderer, "Renderer: %s", maage_render_backend_name(maage_renderer_get_backend(renderer)));
-        if (gpu && *gpu)
-            sprintf(debug->gpu, "GPU: %.144s", gpu);
+        if (gpu && *gpu) sprintf(debug->gpu, "GPU: %.144s", gpu);
         else
             debug->gpu[0] = 0;
     }
@@ -111,19 +105,14 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     debug->busy_workers = debug->busy_workers * retained + stats->running_jobs * (1.0 - retained);
     debug->observation_time = now;
     if (now >= debug->measurement_after) {
-        if (debug->timing_ready)
-            sprintf(debug->performance, "%.0f FPS | %.1f TPS | %.1f ms", debug->fps, debug->tps, debug->frame_ms);
+        if (debug->timing_ready) sprintf(debug->performance, "%.0f FPS | %.1f TPS | %.1f ms", debug->fps, debug->tps, debug->frame_ms);
         else
             strcpy(debug->performance, "Collecting timing...");
         maage_client_debug_memory(&resident, &peak);
         debug->memory[0] = 0;
-        if (resident >= 0)
-            sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
-        else if (peak >= 0)
-            sprintf(debug->memory, "Peak memory: %.0f MiB", peak / 1048576.0);
-        sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u",
-                debug->busy_workers, stats->worker_count,
-                stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);
+        if (resident >= 0) sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
+        else if (peak >= 0) sprintf(debug->memory, "Peak memory: %.0f MiB", peak / 1048576.0);
+        sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u", debug->busy_workers, stats->worker_count, stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);
         debug->measurement_after = now + 0.25;
     }
     x = (int) floor(player->position[0]);
@@ -134,24 +123,17 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     direction = ((int) floor((degrees + 45.0) / 90.0)) % 4;
     strcpy(text->left[left++], debug->version);
     sprintf(text->left[left++], "%.160s%s", debug->performance, paused ? " (paused)" : "");
-    sprintf(text->left[left++], "C: %u rendered / %u loaded | %u pending | D: %d",
-            meshes->meshes, stats->loaded, stats->pending, radius);
+    sprintf(text->left[left++], "C: %u rendered / %u loaded | %u pending | D: %d", meshes->meshes, stats->loaded, stats->pending, radius);
     sprintf(text->left[left++], "XYZ: %.3f / %.3f / %.3f", player->position[0], player->position[1], player->position[2]);
     sprintf(text->left[left++], "Block: %d %d %d", x, y, z);
-    sprintf(text->left[left++], "Chunk: %d %d | local: %d %d", maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z),
-            maage_world_local_coordinate(x), maage_world_local_coordinate(z));
+    sprintf(text->left[left++], "Chunk: %d %d | local: %d %d", maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z), maage_world_local_coordinate(x), maage_world_local_coordinate(z));
     sprintf(text->left[left++], "Facing: %s (%.1f / %.1f)", facing[direction], degrees, pitch * 57.29577951308232);
     if (snapshot->has_observation) {
         const maage_world_observation *observation = &snapshot->observation;
         sprintf(text->left[left++], "Biome: %s", maage_client_debug_biome(observation->biome_id));
-        if (observation->light_available)
-            sprintf(text->left[left++], "Light: %u sky / %u block",
-                    (unsigned) observation->light >> 4, (unsigned) observation->light & 15);
+        if (observation->light_available) sprintf(text->left[left++], "Light: %u sky / %u block", (unsigned) observation->light >> 4, (unsigned) observation->light & 15);
     }
-    if (snapshot->player.has_target)
-        sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu",
-                snapshot->player.target.x, snapshot->player.target.y, snapshot->player.target.z,
-                snapshot->player.target.block_id, snapshot->player.target.state_id);
+    if (snapshot->player.has_target) sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu", snapshot->player.target.x, snapshot->player.target.y, snapshot->player.target.z, snapshot->player.target.block_id, snapshot->player.target.state_id);
     if (debug->memory[0]) strcpy(text->right[right++], debug->memory);
     strcpy(text->right[right++], debug->system);
     strcpy(text->right[right++], debug->renderer);

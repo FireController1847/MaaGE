@@ -17,19 +17,15 @@ maage_status maage_client_ui_font_fallback(maage_image *font) {
     const char *mark;
     unsigned char *pixel;
     int character, letter, x, y;
-    if (!font || font->pixels)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!font || font->pixels) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
     font->width = font->height = 128;
     font->stride = 512;
     font->pixels = (unsigned char *) calloc(128, font->stride);
-    if (!font->pixels)
-        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!font->pixels) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0);
     for (character = 33; character <= 126; ++character) {
         letter = character >= 'a' && character <= 'z' ? character - 'a' + 'A' : character;
-        if (letter >= 'A' && letter <= 'Z')
-            rows = letters[letter - 'A'];
-        else if (letter >= '0' && letter <= '9')
-            rows = digits[letter - '0'];
+        if (letter >= 'A' && letter <= 'Z') rows = letters[letter - 'A'];
+        else if (letter >= '0' && letter <= '9') rows = digits[letter - '0'];
         else {
             mark = strchr(punctuation, character);
             rows = mark ? marks[mark - punctuation] : marks[11];
@@ -37,8 +33,7 @@ maage_status maage_client_ui_font_fallback(maage_image *font) {
         for (y = 0; y < 7; ++y)
             for (x = 0; x < 5; ++x)
                 if (rows[y] & (16 >> x)) {
-                    pixel = font->pixels + (size_t) ((character / 16) * 8 + y) * font->stride +
-                            (size_t) ((character % 16) * 8 + x) * 4;
+                    pixel = font->pixels + (size_t) ((character / 16) * 8 + y) * font->stride + (size_t) ((character % 16) * 8 + x) * 4;
                     memset(pixel, 255, 4);
                 }
     }
@@ -48,14 +43,12 @@ maage_status maage_client_ui_font_fallback(maage_image *font) {
 maage_status maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font) {
     int character, x, y, width;
     const unsigned char *pixel;
-    if (!resources || !font || !font->pixels || font->width != 128 || font->height != 128)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, !resources ? 0 : 1);
+    if (!resources || !font || !font->pixels || font->width != 128 || font->height != 128) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, !resources ? 0 : 1);
     for (character = 0; character < 256; ++character) {
         width = 0;
         for (y = 0; y < 8; ++y)
             for (x = 0; x < 8; ++x) {
-                pixel = font->pixels + (size_t) ((character / 16) * 8 + y) * font->stride +
-                        (size_t) ((character % 16) * 8 + x) * 4;
+                pixel = font->pixels + (size_t) ((character / 16) * 8 + y) * font->stride + (size_t) ((character % 16) * 8 + x) * 4;
                 if (pixel[3] && x + 1 > width) width = x + 1;
             }
         resources->glyph_width[character] = (unsigned char) (width + 1);
@@ -77,8 +70,7 @@ float maage_client_ui_text_width(const maage_client_ui *ui, const char *text) {
     return width;
 }
 
-void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
-                               float x, float y, float red, float green, float blue) {
+void maage_client_ui_font_draw(maage_client_ui *ui, const char *text, float x, float y, float red, float green, float blue) {
     maage_client_ui_rect rectangle;
     size_t i;
     unsigned int character, width;
@@ -95,9 +87,7 @@ void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
             rectangle.width = (float) (width - 1);
             u = (float) ((character % 16) * 8) / ui->resources.atlas_edge;
             v = (float) (256 + (character / 16) * 8) / ui->resources.atlas_edge;
-            maage_client_ui_rectangle(ui, rectangle, u, v,
-                                      u + rectangle.width / ui->resources.atlas_edge, v + 8.0f / ui->resources.atlas_edge,
-                                      red, green, blue, 1);
+            maage_client_ui_rectangle(ui, rectangle, u, v, u + rectangle.width / ui->resources.atlas_edge, v + 8.0f / ui->resources.atlas_edge, red, green, blue, 1);
         }
         x += width;
     }

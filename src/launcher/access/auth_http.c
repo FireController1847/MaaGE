@@ -38,8 +38,7 @@ static void maage_auth_json_wipe(struct json_object *object) {
     size_t i;
     struct json_object_iterator iterator, end;
     if (!object) return;
-    if (json_object_is_type(object, json_type_string))
-        maage_crypto_clear((char *) json_object_get_string(object), (size_t) json_object_get_string_len(object));
+    if (json_object_is_type(object, json_type_string)) maage_crypto_clear((char *) json_object_get_string(object), (size_t) json_object_get_string_len(object));
     else if (json_object_is_type(object, json_type_array)) {
         for (i = 0; i < json_object_array_length(object); ++i)
             maage_auth_json_wipe(json_object_array_get_idx(object, i));
@@ -119,9 +118,7 @@ static const char *maage_auth_error(struct json_object *object) {
     if (!strcmp(error, "NOT_FOUND")) return "Minecraft Java profile not found. Confirm Java Edition access and finish profile setup.";
     return "Service rejected the request (unrecognized details withheld). Retry or sign in again.";
 }
-maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint, const char *bearer,
-                                      const char *body, int form, const maage_auth_observer *observer,
-                                      long *status, char detail[256], struct json_object **response) {
+maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint, const char *bearer, const char *body, int form, const maage_auth_observer *observer, long *status, char detail[256], struct json_object **response) {
     maage_auth_http *http = (maage_auth_http *) calloc(1, sizeof(*http));
     CURL *curl = NULL;
     CURLcode result = CURLE_FAILED_INIT;
@@ -141,9 +138,7 @@ maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint
     route = maage_auth_log_endpoint(endpoint);
     *status = 0;
     strcpy(detail, "Cannot initialize a secure authentication request.");
-    if (!http) return MAAGE_STATUS_TRACE(observer->trace,
-                                         maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0),
-                                         MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ);
+    if (!http) return MAAGE_STATUS_TRACE(observer->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ);
     http->observer = observer;
     curl = curl_easy_init();
     if (!curl) goto done;
@@ -193,41 +188,27 @@ maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status);
     curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &elapsed);
     if (result == CURLE_OK) maage_access_json(http->data, http->used, &json);
-    if (observer->cancelled(observer->context))
-        strcpy(detail, "Authentication cancelled. No access was granted.");
-    else if (result != CURLE_OK)
-        strcpy(detail, "Cannot reach authentication services securely. Check your connection and retry.");
+    if (observer->cancelled(observer->context)) strcpy(detail, "Authentication cancelled. No access was granted.");
+    else if (result != CURLE_OK) strcpy(detail, "Cannot reach authentication services securely. Check your connection and retry.");
     else if (*status != 200) {
         /* Endpoint is a compile-time constant. No server-supplied URL/error text
          * is echoed. Known errors are mapped to bounded, actionable messages. */
         sprintf(detail, "%.105s: HTTP %ld. %.130s", route, *status, maage_auth_error(json));
-    } else if (!json)
-        strcpy(detail, "Authentication service returned a malformed or oversized response.");
+    } else if (!json) strcpy(detail, "Authentication service returned a malformed or oversized response.");
     else
         strcpy(detail, "Authentication response received.");
 done:
-    if (observer->cancelled(observer->context))
-        code = MAAGE_STATUS_INTERRUPTED;
-    else if (!performed)
-        code = result == CURLE_OUT_OF_MEMORY ? MAAGE_STATUS_ALLOCATION_FAILED : MAAGE_STATUS_ERROR;
-    else if (http->oversized)
-        code = MAAGE_STATUS_BUFFER_OVERFLOW;
-    else if (result == CURLE_OPERATION_TIMEDOUT)
-        code = MAAGE_STATUS_TIMEOUT;
-    else if (result != CURLE_OK)
-        code = MAAGE_STATUS_IO_ERROR;
-    else if (*status == 401 || *status == 403)
-        code = MAAGE_STATUS_ACCESS_DENIED;
-    else if (*status == 404)
-        code = MAAGE_STATUS_NOT_FOUND;
-    else if (*status == 408 || *status == 504)
-        code = MAAGE_STATUS_TIMEOUT;
-    else if (*status == 429 || *status >= 500)
-        code = MAAGE_STATUS_IO_ERROR;
-    else if (*status != 200)
-        code = MAAGE_STATUS_ERROR;
-    else if (!json)
-        code = MAAGE_STATUS_MALFORMED_INPUT;
+    if (observer->cancelled(observer->context)) code = MAAGE_STATUS_INTERRUPTED;
+    else if (!performed) code = result == CURLE_OUT_OF_MEMORY ? MAAGE_STATUS_ALLOCATION_FAILED : MAAGE_STATUS_ERROR;
+    else if (http->oversized) code = MAAGE_STATUS_BUFFER_OVERFLOW;
+    else if (result == CURLE_OPERATION_TIMEDOUT) code = MAAGE_STATUS_TIMEOUT;
+    else if (result != CURLE_OK) code = MAAGE_STATUS_IO_ERROR;
+    else if (*status == 401 || *status == 403) code = MAAGE_STATUS_ACCESS_DENIED;
+    else if (*status == 404) code = MAAGE_STATUS_NOT_FOUND;
+    else if (*status == 408 || *status == 504) code = MAAGE_STATUS_TIMEOUT;
+    else if (*status == 429 || *status >= 500) code = MAAGE_STATUS_IO_ERROR;
+    else if (*status != 200) code = MAAGE_STATUS_ERROR;
+    else if (!json) code = MAAGE_STATUS_MALFORMED_INPUT;
     else
         code = MAAGE_STATUS_SUCCESS;
     outcome = maage_status_make(code, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
@@ -235,30 +216,22 @@ done:
      * sign-in attempt. Their JSON remains available without filling its trace. */
     error = maage_auth_error_name(maage_access_json_string(json, "error"));
     if (!maage_status_is_success(outcome) && strcmp(error, "authorization_pending") && strcmp(error, "slow_down")) {
-        maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ,
-                                  __FILE__, (unsigned long) __LINE__, (long) result);
-        if (*status) maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH,
-                                               MAAGE_OPERATION_VERIFY, __FILE__, (unsigned long) __LINE__, *status);
+        maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, __FILE__, (unsigned long) __LINE__, (long) result);
+        if (*status) maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, __FILE__, (unsigned long) __LINE__, *status);
     }
-    if (observer->cancelled(observer->context))
-        maage_log_info("maage.launcher.access.http", "Request cancelled: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else if (!performed)
-        maage_log_verbose("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int) result);
-    else if (http->oversized)
-        maage_log_verbose("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else if (result != CURLE_OK)
-        maage_log_verbose("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int) result, curl_easy_strerror(result), *status, elapsed);
+    if (observer->cancelled(observer->context)) maage_log_info("maage.launcher.access.http", "Request cancelled: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    else if (!performed) maage_log_verbose("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int) result);
+    else if (http->oversized) maage_log_verbose("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    else if (result != CURLE_OK) maage_log_verbose("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int) result, curl_easy_strerror(result), *status, elapsed);
     else if (*status != 200) {
         error = maage_auth_error_name(maage_access_json_string(json, "error"));
-        if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down"))
-            maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
+        if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down")) maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
         else {
             maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed);
             xerr = maage_auth_number(json, "XErr");
             if (xerr >= 0) maage_log_verbose("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr);
         }
-    } else if (!json)
-        maage_log_verbose("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    } else if (!json) maage_log_verbose("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
     else
         maage_log_verbose("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
     if (curl) curl_easy_cleanup(curl);
@@ -275,8 +248,6 @@ done:
     return outcome;
 }
 
-maage_status maage_auth_request(const char *endpoint, const char *bearer,
-                                const char *body, int form, const maage_auth_observer *observer,
-                                long *status, char detail[256], struct json_object **response) {
+maage_status maage_auth_request(const char *endpoint, const char *bearer, const char *body, int form, const maage_auth_observer *observer, long *status, char detail[256], struct json_object **response) {
     return maage_auth_request_timed(30, endpoint, bearer, body, form, observer, status, detail, response);
 }

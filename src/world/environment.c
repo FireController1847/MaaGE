@@ -39,13 +39,11 @@ int maage_environment_state_valid(const maage_environment_state *state) {
            state->rain_intensity >= 0 && state->rain_intensity <= 1 &&
            state->thunder_intensity >= 0 && state->thunder_intensity <= 1;
 }
-maage_status maage_environment_create(maage_world_seed seed, const maage_environment_state *saved,
-                                      maage_environment **output) {
+maage_status maage_environment_create(maage_world_seed seed, const maage_environment_state *saved, maage_environment **output) {
     maage_environment *environment;
     if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 2);
     *output = NULL;
-    if (saved && !maage_environment_state_valid(saved))
-        return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
+    if (saved && !maage_environment_state_valid(saved)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
     environment = (maage_environment *) malloc(sizeof(*environment));
     if (!environment) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
     if (saved) {
@@ -81,8 +79,7 @@ double maage_environment_sunlight(const maage_environment_state *state) {
     light = cos(maage_environment_celestial_angle(state) * 6.283185307179586) * 2.0 + 0.2;
     if (light < 0) light = 0;
     if (light > 1) light = 1;
-    return 0.2 + 0.8 * light * (1.0 - state->rain_intensity * 5.0 / 16.0) *
-                     (1.0 - state->thunder_intensity * state->rain_intensity * 5.0 / 16.0);
+    return 0.2 + 0.8 * light * (1.0 - state->rain_intensity * 5.0 / 16.0) * (1.0 - state->thunder_intensity * state->rain_intensity * 5.0 / 16.0);
 }
 static int maage_update_before(const maage_scheduled_update *a, const maage_scheduled_update *b) {
     if (a->due_high != b->due_high) return a->due_high < b->due_high;
@@ -145,8 +142,7 @@ maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_schedul
     maage_scheduled_update *grown;
     size_t capacity, bucket, position, parent;
     int found;
-    if (!chunk || !update || (update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_SUPPORT) || update->cell > 65535U ||
-        update->due_low > MAAGE_ENVIRONMENT_WORD || update->due_high > MAAGE_ENVIRONMENT_WORD) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SUBMIT, 0);
+    if (!chunk || !update || (update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_SUPPORT) || update->cell > 65535U || update->due_low > MAAGE_ENVIRONMENT_WORD || update->due_high > MAAGE_ENVIRONMENT_WORD) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SUBMIT, 0);
     found = 0;
     if (chunk->update_index_capacity) maage_update_bucket(chunk, update->kind, update->cell, &found);
     if (!found && (!chunk->update_index_capacity || chunk->update_index_used + 1 >= chunk->update_index_capacity / 2)) {
@@ -187,14 +183,12 @@ maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_schedul
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
 }
-maage_status maage_chunk_take_update(maage_chunk *chunk, unsigned long low, unsigned long high,
-                                     maage_scheduled_update *update) {
+maage_status maage_chunk_take_update(maage_chunk *chunk, unsigned long low, unsigned long high, maage_scheduled_update *update) {
     size_t position = 0, child, bucket;
     int found;
     if (!chunk || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_POLL, 0);
     if (!chunk->update_count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_POLL, 0);
-    if (chunk->updates[0].due_high > high ||
-        (chunk->updates[0].due_high == high && chunk->updates[0].due_low > low)) return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_POLL, 0);
+    if (chunk->updates[0].due_high > high || (chunk->updates[0].due_high == high && chunk->updates[0].due_low > low)) return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_POLL, 0);
     *update = chunk->updates[0];
     bucket = maage_update_bucket(chunk, update->kind, update->cell, &found);
     chunk->update_index[bucket].heap_index = (size_t) - 1;
@@ -224,13 +218,11 @@ maage_status maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int ce
         }
     return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_REMOVE, 0);
 }
-maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell,
-                                          unsigned long type, unsigned long version, const void *data, size_t length) {
+maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell, unsigned long type, unsigned long version, const void *data, size_t length) {
     maage_block_entity *grown, *entity;
     unsigned char *copy = NULL;
     size_t i, capacity;
-    if (!chunk || cell > 65535U || !type || type > MAAGE_ENVIRONMENT_WORD || !version ||
-        version > MAAGE_ENVIRONMENT_WORD || length > MAAGE_BLOCK_ENTITY_DATA_MAX || (length && !data)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    if (!chunk || cell > 65535U || !type || type > MAAGE_ENVIRONMENT_WORD || !version || version > MAAGE_ENVIRONMENT_WORD || length > MAAGE_BLOCK_ENTITY_DATA_MAX || (length && !data)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     if (length) {
         copy = (unsigned char *) malloc(length);
         if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
@@ -353,28 +345,23 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
      * the published lighting. Flag-only edits never rebuild GPU geometry. */
     for (section = 0; section < 16; ++section)
         if (source->sections[section])
-            memcpy(destination->sections[section]->states, source->sections[section]->states,
-                   sizeof(destination->sections[section]->states));
+            memcpy(destination->sections[section]->states, source->sections[section]->states, sizeof(destination->sections[section]->states));
     memcpy(destination->random_tick_counts, source->random_tick_counts, sizeof(destination->random_tick_counts));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
 }
-static void maage_environment_due(const maage_environment_state *state, unsigned int delay,
-                                  unsigned long *low, unsigned long *high) {
+static void maage_environment_due(const maage_environment_state *state, unsigned int delay, unsigned long *low, unsigned long *high) {
     *low = (state->ticks_low + delay) & MAAGE_ENVIRONMENT_WORD;
     *high = (state->ticks_high + (*low < state->ticks_low ? 1UL : 0UL)) & MAAGE_ENVIRONMENT_WORD;
 }
-static const maage_block_state_definition *maage_environment_fluid(const maage_world *world,
-                                                                   int x, int y, int z) {
+static const maage_block_state_definition *maage_environment_fluid(const maage_world *world, int x, int y, int z) {
     const maage_block_state_definition *state;
     state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y, z));
     return state && state->fluid_kind != MAAGE_FLUID_NONE ? state : NULL;
 }
 static int maage_environment_loaded(maage_world *world, int x, int y, int z) {
-    return y >= 0 && y < MAAGE_WORLD_HEIGHT && x > -MAAGE_WORLD_LIMIT && x < MAAGE_WORLD_LIMIT &&
-           z > -MAAGE_WORLD_LIMIT && z < MAAGE_WORLD_LIMIT && maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
+    return y >= 0 && y < MAAGE_WORLD_HEIGHT && x > -MAAGE_WORLD_LIMIT && x < MAAGE_WORLD_LIMIT && z > -MAAGE_WORLD_LIMIT && z < MAAGE_WORLD_LIMIT && maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
 }
-static maage_status maage_environment_schedule(maage_environment *environment, maage_world *world,
-                                               int x, int y, int z, unsigned int delay) {
+static maage_status maage_environment_schedule(maage_environment *environment, maage_world *world, int x, int y, int z, unsigned int delay) {
     unsigned long low, high;
     if (!maage_environment_loaded(world, x, y, z)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SUBMIT, 0);
     maage_environment_due(&environment->state, delay, &low, &high);
@@ -394,15 +381,13 @@ maage_status maage_environment_changed(maage_environment *environment, maage_wor
         if (!maage_environment_loaded(world, nx, ny, nz)) continue;
         state = maage_environment_fluid(world, nx, ny, nz);
         if (state) {
-            result = maage_environment_schedule(environment, world, nx, ny, nz,
-                                                state->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U);
+            result = maage_environment_schedule(environment, world, nx, ny, nz, state->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U);
             if (maage_status_failed(result)) return result;
         }
     }
     return maage_world_failed(world) ? maage_world_status(world) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
-static maage_status maage_environment_flow(maage_environment *environment, maage_world *world,
-                                           const maage_block_state_definition *source, int x, int y, int z, unsigned int level, int downward, int *flowed) {
+static maage_status maage_environment_flow(maage_environment *environment, maage_world *world, const maage_block_state_definition *source, int x, int y, int z, unsigned int level, int downward, int *flowed) {
     const maage_block_state_definition *target;
     const maage_block_definition *block;
     maage_block_state_id old, state;
@@ -414,8 +399,7 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
     block = target ? maage_block_registry_block(maage_world_registry(world), target->block_id) : NULL;
     if (!block || !target) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
     if (target->fluid_kind && target->fluid_kind != source->fluid_kind) {
-        if (target->fluid_kind == MAAGE_FLUID_LAVA)
-            state = target->fluid_level == 0 ? MAAGE_STATE_OBSIDIAN : MAAGE_STATE_COBBLESTONE;
+        if (target->fluid_kind == MAAGE_FLUID_LAVA) state = target->fluid_level == 0 ? MAAGE_STATE_OBSIDIAN : MAAGE_STATE_COBBLESTONE;
         else
             state = downward ? MAAGE_STATE_STONE : MAAGE_STATE_COBBLESTONE;
         if (!maage_block_registry_state(maage_world_registry(world), state)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
@@ -427,16 +411,14 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
             *flowed = 1;
             return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
         }
-    } else if (!block->replaceable)
-        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    } else if (!block->replaceable) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     state = source->fluid_states[level];
     result = maage_world_set(world, x, y, z, old, state);
     if (maage_status_failed(result)) return result;
     *flowed = 1;
     return maage_environment_schedule(environment, world, x, y, z, source->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U);
 }
-static maage_status maage_environment_fluid_update(maage_environment *environment, maage_world *world,
-                                                   int x, int y, int z) {
+static maage_status maage_environment_fluid_update(maage_environment *environment, maage_world *world, int x, int y, int z) {
     static const int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *state, *neighbor, *above;
     const maage_block_definition *below;
@@ -473,8 +455,7 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
     }
     if (level) {
         next = minimum + (state->fluid_kind == MAAGE_FLUID_LAVA ? 2U : 1U);
-        if (above && above->fluid_kind == state->fluid_kind)
-            next = 8U + (above->fluid_level & 7U);
+        if (above && above->fluid_kind == state->fluid_kind) next = 8U + (above->fluid_level & 7U);
         else if (state->fluid_kind == MAAGE_FLUID_WATER && sources >= 2) {
             const maage_block_state_definition *under = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y - 1, z));
             below = under ? maage_block_registry_block(maage_world_registry(world), under->block_id) : NULL;
@@ -508,8 +489,7 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
-maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_block_registry *blocks,
-                                                unsigned long now_low, unsigned long now_high) {
+maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_block_registry *blocks, unsigned long now_low, unsigned long now_high) {
     static const int directions[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_block_state_definition *state, *neighbor;
     const maage_block_definition *block;
@@ -523,9 +503,7 @@ maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_
         for (i = 0; i < chunk->update_count; ++i) {
             unsigned long old = chunk->updates[i].due_low;
             chunk->updates[i].due_low = (old + now_low) & MAAGE_ENVIRONMENT_WORD;
-            chunk->updates[i].due_high = (chunk->updates[i].due_high + now_high +
-                                          (chunk->updates[i].due_low < old ? 1UL : 0UL)) &
-                                         MAAGE_ENVIRONMENT_WORD;
+            chunk->updates[i].due_high = (chunk->updates[i].due_high + now_high + (chunk->updates[i].due_low < old ? 1UL : 0UL)) & MAAGE_ENVIRONMENT_WORD;
         }
         chunk->updates_relative = 0;
     }
@@ -547,8 +525,7 @@ maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_
                     if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) continue;
                     neighbor = maage_block_registry_state(blocks, maage_chunk_get(chunk, nx, ny, nz));
                     block = neighbor ? maage_block_registry_block(blocks, neighbor->block_id) : NULL;
-                    if (neighbor && ((neighbor->fluid_kind && neighbor->fluid_kind != state->fluid_kind) ||
-                                     (!neighbor->fluid_kind && block && block->replaceable))) exposed = 1;
+                    if (neighbor && ((neighbor->fluid_kind && neighbor->fluid_kind != state->fluid_kind) || (!neighbor->fluid_kind && block && block->replaceable))) exposed = 1;
                 }
                 if (!exposed) continue;
                 update.kind = MAAGE_BLOCK_UPDATE_FLUID;
@@ -594,12 +571,9 @@ maage_status maage_environment_tick(maage_environment *environment, maage_world 
         result = maage_world_take_update(world, state->ticks_low, state->ticks_high, &x, &z, &update);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) break;
-        if (update.kind == MAAGE_BLOCK_UPDATE_SUPPORT)
-            result = maage_support_update(world, x * 16 + (int) (update.cell % 16),
-                                          (int) (update.cell / 256), z * 16 + (int) ((update.cell / 16) % 16));
+        if (update.kind == MAAGE_BLOCK_UPDATE_SUPPORT) result = maage_support_update(world, x * 16 + (int) (update.cell % 16), (int) (update.cell / 256), z * 16 + (int) ((update.cell / 16) % 16));
         else
-            result = maage_environment_fluid_update(environment, world, x * 16 + (int) (update.cell % 16),
-                                                    (int) (update.cell / 256), z * 16 + (int) ((update.cell / 16) % 16));
+            result = maage_environment_fluid_update(environment, world, x * 16 + (int) (update.cell % 16), (int) (update.cell / 256), z * 16 + (int) ((update.cell / 16) % 16));
         if (maage_status_failed(result)) return result;
     }
     return maage_world_failed(world) ? maage_world_status(world) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_TICK, 0);

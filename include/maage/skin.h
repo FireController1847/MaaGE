@@ -15,14 +15,11 @@ typedef struct maage_skin_reference {
 } maage_skin_reference;
 int maage_skin_reference_valid(const maage_skin_reference *reference);
 maage_status maage_skin_reference_parse(const char *text, maage_skin_reference *reference);
-maage_status maage_skin_reference_format(const maage_skin_reference *reference,
-                                         char text[MAAGE_SKIN_ARGUMENT_CAPACITY]);
-maage_status maage_skin_path(const char *root, const maage_skin_reference *reference,
-                             char path[MAAGE_PATH_CAPACITY]);
+maage_status maage_skin_reference_format(const maage_skin_reference *reference, char text[MAAGE_SKIN_ARGUMENT_CAPACITY]);
+maage_status maage_skin_path(const char *root, const maage_skin_reference *reference, char path[MAAGE_PATH_CAPACITY]);
 /* Initialization only. Bounds file/IHDR before decoding through MaaGE::Image.
  * Produces one owned 64x64 RGBA skin; legacy left limbs are mirrored into their
  * modern regions, base faces made opaque, and optional outer alpha preserved.
  * Legacy skins require classic metadata. Destroy output even after failure. */
-maage_status maage_skin_load(const char *path, unsigned int model,
-                             maage_image *image, maage_status_trace *trace);
+maage_status maage_skin_load(const char *path, unsigned int model, maage_image *image, maage_status_trace *trace);
 #endif

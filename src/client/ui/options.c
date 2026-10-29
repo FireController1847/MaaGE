@@ -34,8 +34,7 @@ static const char *const maage_main_labels[12] = {
     "Snooper Settings...", "Done"};
 
 static int maage_options_contains(maage_client_ui_rect r, float x, float y) {
-    return r.width > 0.0f && r.height > 0.0f && x >= r.x && x < r.x + r.width &&
-           y >= r.y && y < r.y + r.height;
+    return r.width > 0.0f && r.height > 0.0f && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
 }
 static float maage_options_top(const maage_client_ui *ui) {
     return (float) (int) (ui->content.y + ui->content.height / 6.0f) - 12.0f;
@@ -57,8 +56,7 @@ static unsigned int maage_options_visible_rows(const maage_client_ui *ui) {
     if (rows > 9) rows = 9;
     return (unsigned int) rows;
 }
-static maage_client_ui_rect maage_options_rect(const maage_client_ui *ui,
-                                               maage_client_ui_screen_id screen, unsigned int id) {
+static maage_client_ui_rect maage_options_rect(const maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id) {
     maage_client_ui_rect r;
     float center = maage_options_center(ui);
     float width = maage_options_column_width(ui);
@@ -113,8 +111,7 @@ static maage_client_ui_rect maage_options_rect(const maage_client_ui *ui,
     }
     row = id / 2U;
     col = id % 2U;
-    if (row < (unsigned int) ui->video_first_row ||
-        row >= (unsigned int) ui->video_first_row + maage_options_visible_rows(ui)) {
+    if (row < (unsigned int) ui->video_first_row || row >= (unsigned int) ui->video_first_row + maage_options_visible_rows(ui)) {
         r.width = r.height = 0.0f;
         return r;
     }
@@ -127,10 +124,8 @@ static unsigned int maage_options_count(maage_client_ui_screen_id screen) {
     if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) return MAAGE_OPTIONS_VIDEO_COUNT;
     return MAAGE_OPTIONS_MAIN_COUNT;
 }
-static int maage_options_enabled(const maage_client_ui *ui,
-                                 maage_client_ui_screen_id screen, unsigned int id) {
-    if (screen == MAAGE_CLIENT_UI_OPTIONS)
-        return id == 0U || id == 3U || id == 5U || id == MAAGE_OPTIONS_MAIN_DONE;
+static int maage_options_enabled(const maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id) {
+    if (screen == MAAGE_CLIENT_UI_OPTIONS) return id == 0U || id == 3U || id == 5U || id == MAAGE_OPTIONS_MAIN_DONE;
     if (screen == MAAGE_CLIENT_UI_SOUND_SETTINGS) return id < MAAGE_OPTIONS_SOUND_COUNT;
     if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) {
         if (id == 3U || id == 6U || id == 15U || id == MAAGE_OPTIONS_VIDEO_DONE) return 1;
@@ -145,8 +140,7 @@ static int maage_options_slider_id(maage_client_ui_screen_id screen, unsigned in
            (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS && id == 3U) ||
            (screen == MAAGE_CLIENT_UI_SOUND_SETTINGS && id < 7U);
 }
-static int maage_options_hover(const maage_client_ui *ui,
-                               maage_client_ui_screen_id screen) {
+static int maage_options_hover(const maage_client_ui *ui, maage_client_ui_screen_id screen) {
     unsigned int n, count = maage_options_count(screen);
     maage_client_ui_rect r;
     for (n = 0; n < count; ++n) {
@@ -156,8 +150,7 @@ static int maage_options_hover(const maage_client_ui *ui,
     }
     return -1;
 }
-static void maage_options_focus_step(maage_client_ui *ui,
-                                     maage_client_ui_screen_id screen, int direction) {
+static void maage_options_focus_step(maage_client_ui *ui, maage_client_ui_screen_id screen, int direction) {
     unsigned int i, idx, count = maage_options_count(screen);
     idx = ui->selected;
     for (i = 0; i < count; ++i) {
@@ -174,13 +167,10 @@ static void maage_options_scroll_selected(maage_client_ui *ui) {
     if (ui->selected == MAAGE_OPTIONS_VIDEO_DONE) return;
     row = ui->selected / 2U;
     visible = maage_options_visible_rows(ui);
-    if (row < (unsigned int) ui->video_first_row)
-        ui->video_first_row = (int) row;
-    else if (row >= (unsigned int) ui->video_first_row + visible)
-        ui->video_first_row = (int) (row - visible + 1U);
+    if (row < (unsigned int) ui->video_first_row) ui->video_first_row = (int) row;
+    else if (row >= (unsigned int) ui->video_first_row + visible) ui->video_first_row = (int) (row - visible + 1U);
 }
-static int maage_options_value_from_mouse(const maage_client_ui *ui,
-                                          maage_client_ui_rect r, int maximum) {
+static int maage_options_value_from_mouse(const maage_client_ui *ui, maage_client_ui_rect r, int maximum) {
     float fraction;
     int result;
     if (r.width <= 8.0f) return 0;
@@ -190,8 +180,7 @@ static int maage_options_value_from_mouse(const maage_client_ui *ui,
     if (result > maximum) result = maximum;
     return result;
 }
-static void maage_options_drag(maage_client_ui *ui,
-                               maage_client_ui_screen_id screen, unsigned int id) {
+static void maage_options_drag(maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id) {
     maage_client_ui_rect r = maage_options_rect(ui, screen, id);
     unsigned int bus;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
@@ -203,8 +192,7 @@ static void maage_options_drag(maage_client_ui *ui,
         ui->audio_volume[bus] = maage_options_value_from_mouse(ui, r, 100);
     }
 }
-static int maage_options_adjust(maage_client_ui *ui,
-                                maage_client_ui_screen_id screen, unsigned int id, int direction) {
+static int maage_options_adjust(maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id, int direction) {
     int *value, previous, minimum, maximum, step;
     value = NULL;
     minimum = 0;
@@ -228,79 +216,59 @@ static int maage_options_adjust(maage_client_ui *ui,
     if (*value > maximum) *value = maximum;
     return *value != previous;
 }
-static void maage_options_action(maage_client_ui *ui,
-                                 maage_client_ui_screen_id screen, unsigned int id) {
+static void maage_options_action(maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id) {
     maage_status result;
     if (!maage_options_enabled(ui, screen, id)) return;
     if (screen == MAAGE_CLIENT_UI_OPTIONS) {
-        if (id == 0U)
-            maage_options_adjust(ui, screen, id, 1);
+        if (id == 0U) maage_options_adjust(ui, screen, id, 1);
         else if (id == 3U) {
             ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_SOUND_SETTINGS);
         } else if (id == 5U) {
             ui->video_first_row = 0;
             ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_VIDEO_SETTINGS);
-        } else if (id == MAAGE_OPTIONS_MAIN_DONE)
-            ui->route_result = maage_client_ui_back(ui);
+        } else if (id == MAAGE_OPTIONS_MAIN_DONE) ui->route_result = maage_client_ui_back(ui);
     } else if (screen == MAAGE_CLIENT_UI_SOUND_SETTINGS) {
-        if (id == MAAGE_OPTIONS_SOUND_DONE)
-            ui->route_result = maage_client_ui_back(ui);
+        if (id == MAAGE_OPTIONS_SOUND_DONE) ui->route_result = maage_client_ui_back(ui);
         else
             maage_options_adjust(ui, screen, id, 1);
     } else {
-        if (id == MAAGE_OPTIONS_VIDEO_DONE)
-            ui->route_result = maage_client_ui_back(ui);
-        else if (id == 3U)
-            maage_options_adjust(ui, screen, id, 1);
-        else if (id == 6U)
-            ui->requested_scale = (ui->requested_scale + 1) % 5;
-        else if (id == 15U)
-            ui->leaves_mode = (ui->leaves_mode + 1) % 3;
-        else if (id == 11U)
-            maage_client_ui_request_window_mode(ui,
-                                                (maage_client_window_choice) ((ui->window_mode + 1) % 3));
-        else if (id == 16U && ui->has_snapshot)
-            maage_client_ui_queue_game_mode(ui);
+        if (id == MAAGE_OPTIONS_VIDEO_DONE) ui->route_result = maage_client_ui_back(ui);
+        else if (id == 3U) maage_options_adjust(ui, screen, id, 1);
+        else if (id == 6U) ui->requested_scale = (ui->requested_scale + 1) % 5;
+        else if (id == 15U) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
+        else if (id == 11U) maage_client_ui_request_window_mode(ui, (maage_client_window_choice) ((ui->window_mode + 1) % 3));
+        else if (id == 16U && ui->has_snapshot) maage_client_ui_queue_game_mode(ui);
         else if (id == 12U && ui->vsync_supported) {
             result = maage_renderer_set_vsync(ui->renderer, !ui->vsync);
-            if (maage_status_is_success(result))
-                ui->vsync = !ui->vsync;
+            if (maage_status_is_success(result)) ui->vsync = !ui->vsync;
             else {
-                if (maage_status_code(result) == MAAGE_STATUS_NOT_IMPLEMENTED ||
-                    maage_status_code(result) == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)
-                    ui->vsync_supported = 0;
+                if (maage_status_code(result) == MAAGE_STATUS_NOT_IMPLEMENTED || maage_status_code(result) == MAAGE_STATUS_SYSTEM_NOT_SUPPORTED) ui->vsync_supported = 0;
                 ui->route_result = result;
             }
         }
     }
 }
-static unsigned int maage_options_input(maage_client_ui *ui,
-                                        const maage_client_ui_input *input, void *context) {
+static unsigned int maage_options_input(maage_client_ui *ui, const maage_client_ui_input *input, void *context) {
     maage_client_ui_screen_id screen = maage_client_ui_current(ui);
     unsigned int chosen, visible;
     int hovered, click, keyboard, held, adjusted = 0;
     (void) context;
     hovered = maage_options_hover(ui, screen);
-    if (ui->mouse_x != ui->previous_mouse_x || ui->mouse_y != ui->previous_mouse_y ||
-        input->primary_pressed) ui->selected_keyboard = 0;
+    if (ui->mouse_x != ui->previous_mouse_x || ui->mouse_y != ui->previous_mouse_y || input->primary_pressed) ui->selected_keyboard = 0;
     if (input->previous) maage_options_focus_step(ui, screen, -1);
     if (input->next) maage_options_focus_step(ui, screen, 1);
     if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) {
         visible = maage_options_visible_rows(ui);
         if (input->scroll != 0.0) ui->selected_keyboard = 0;
         if (input->scroll > 0.0 && ui->video_first_row > 0) --ui->video_first_row;
-        if (input->scroll < 0.0 &&
-            (unsigned int) ui->video_first_row + visible < 9U) ++ui->video_first_row;
+        if (input->scroll < 0.0 && (unsigned int) ui->video_first_row + visible < 9U) ++ui->video_first_row;
         if (input->previous || input->next) maage_options_scroll_selected(ui);
         hovered = maage_options_hover(ui, screen);
     }
-    if (hovered >= 0 && !ui->selected_keyboard)
-        ui->selected = (unsigned int) hovered;
-    if (ui->selected_keyboard && (input->left || input->right) &&
-        maage_options_enabled(ui, screen, ui->selected)) {
+    if (hovered >= 0 && !ui->selected_keyboard) ui->selected = (unsigned int) hovered;
+    if (ui->selected_keyboard && (input->left || input->right) && maage_options_enabled(ui, screen, ui->selected)) {
         chosen = ui->selected;
-        if (maage_options_slider_id(screen, chosen))
-            adjusted = maage_options_adjust(ui, screen, chosen, input->right ? 1 : -1);
+        if (maage_options_slider_id(screen, chosen)) adjusted = maage_options_adjust(ui, screen, chosen, input->right ? 1 : -1);
         else if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS && chosen == 6U) {
             ui->requested_scale = (ui->requested_scale + (input->right ? 1 : 4)) % 5;
             adjusted = 1;
@@ -316,10 +284,8 @@ static unsigned int maage_options_input(maage_client_ui *ui,
      * cursor leaves the widget; never replay click audio on mouse movement. */
     held = ui->dragging_fov || ui->dragging_fps || ui->dragging_volume;
     if (held && input->primary_down) {
-        if (ui->dragging_fov && screen == MAAGE_CLIENT_UI_OPTIONS)
-            maage_options_drag(ui, screen, 0U);
-        else if (ui->dragging_fps && screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS)
-            maage_options_drag(ui, screen, 3U);
+        if (ui->dragging_fov && screen == MAAGE_CLIENT_UI_OPTIONS) maage_options_drag(ui, screen, 0U);
+        else if (ui->dragging_fps && screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) maage_options_drag(ui, screen, 3U);
         else if (ui->dragging_volume && screen == MAAGE_CLIENT_UI_SOUND_SETTINGS) {
             unsigned int n;
             for (n = 0; n < 7U; ++n)
@@ -331,8 +297,7 @@ static unsigned int maage_options_input(maage_client_ui *ui,
     }
     if (!input->primary_down) {
         /* Volume sliders suppress press audio and preview once on release. */
-        if (ui->dragging_volume && screen == MAAGE_CLIENT_UI_SOUND_SETTINGS && ui->click)
-            ui->click(ui->click_context);
+        if (ui->dragging_volume && screen == MAAGE_CLIENT_UI_SOUND_SETTINGS && ui->click) ui->click(ui->click_context);
         ui->dragging_fov = 0;
         ui->dragging_fps = 0;
         ui->dragging_volume = 0;
@@ -343,10 +308,8 @@ static unsigned int maage_options_input(maage_client_ui *ui,
     chosen = click ? (unsigned int) hovered : ui->selected;
     if (!maage_options_enabled(ui, screen, chosen)) return 0;
     if (click && maage_options_slider_id(screen, chosen)) {
-        if (screen == MAAGE_CLIENT_UI_OPTIONS)
-            ui->dragging_fov = 1;
-        else if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS)
-            ui->dragging_fps = 1;
+        if (screen == MAAGE_CLIENT_UI_OPTIONS) ui->dragging_fov = 1;
+        else if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) ui->dragging_fps = 1;
         else
             ui->dragging_volume = (int) maage_sound_buses[chosen] + 1;
         maage_options_drag(ui, screen, chosen);
@@ -359,38 +322,29 @@ static unsigned int maage_options_input(maage_client_ui *ui,
         return 0;
     }
     if (keyboard && maage_options_slider_id(screen, chosen)) {
-        if (!adjusted && maage_options_adjust(ui, screen, chosen, 1) && ui->click)
-            ui->click(ui->click_context);
+        if (!adjusted && maage_options_adjust(ui, screen, chosen, 1) && ui->click) ui->click(ui->click_context);
         return 0;
     }
     if (ui->click) ui->click(ui->click_context);
     maage_options_action(ui, screen, chosen);
     return 0;
 }
-static void maage_options_video_label(const maage_client_ui *ui,
-                                      unsigned int id, char text[96]) {
+static void maage_options_video_label(const maage_client_ui *ui, unsigned int id, char text[96]) {
     static const char *const scales[5] = {"Auto", "Small", "Normal", "Large", "4x"};
     static const char *const leaves[3] = {"Fast", "Smart", "Fancy"};
     static const char *const modes[3] = {"Windowed", "Borderless", "Fullscreen"};
     const char *setting = id < 17U ? maage_video_unsupported[id] : "";
     if (id == 3U) {
-        if (ui->fps_step == 26)
-            strcpy(text, "Max Framerate: Unlimited");
+        if (ui->fps_step == 26) strcpy(text, "Max Framerate: Unlimited");
         else
             sprintf(text, "Max Framerate: %d", (ui->fps_step + 1) * 10);
-    } else if (id == 6U)
-        sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
+    } else if (id == 6U) sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
     else if (id == 12U)
         strcpy(text, !ui->vsync_supported ? "VSync: Unavailable" : (ui->vsync ? "VSync: ON" : "VSync: OFF"));
-    else if (id == 15U)
-        sprintf(text, "Leaves: %s", leaves[ui->leaves_mode]);
-    else if (id == 11U)
-        sprintf(text, "Window: %s",
-                ui->mode_pending || ui->mode_changing ? "Switching..." : modes[ui->window_mode]);
-    else if (id == 16U && ui->has_snapshot)
-        strcpy(text, ui->snapshot.player.game_mode == MAAGE_GAME_MODE_CREATIVE ? "Game: Creative" : "Game: Survival");
-    else if (id == MAAGE_OPTIONS_VIDEO_DONE)
-        strcpy(text, "Done");
+    else if (id == 15U) sprintf(text, "Leaves: %s", leaves[ui->leaves_mode]);
+    else if (id == 11U) sprintf(text, "Window: %s", ui->mode_pending || ui->mode_changing ? "Switching..." : modes[ui->window_mode]);
+    else if (id == 16U && ui->has_snapshot) strcpy(text, ui->snapshot.player.game_mode == MAAGE_GAME_MODE_CREATIVE ? "Game: Creative" : "Game: Survival");
+    else if (id == MAAGE_OPTIONS_VIDEO_DONE) strcpy(text, "Done");
     else {
         strncpy(text, setting, 95);
         text[95] = 0;
@@ -401,8 +355,7 @@ static void maage_options_draw(maage_client_ui *ui, void *context) {
     unsigned int n, count = maage_options_count(screen), bus;
     maage_client_ui_rect r;
     char label[96];
-    float center = maage_options_center(ui), title_y = ui->content.y +
-                                                       (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS ? 5.0f : 15.0f);
+    float center = maage_options_center(ui), title_y = ui->content.y + (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS ? 5.0f : 15.0f);
     int highlight, enabled;
     const char *title = screen == MAAGE_CLIENT_UI_OPTIONS ? "Options" : (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS ? "Video Settings" : "Music & Sounds");
     (void) context;
@@ -414,14 +367,11 @@ static void maage_options_draw(maage_client_ui *ui, void *context) {
         highlight = enabled && (ui->selected_keyboard ? ui->selected == n : maage_options_contains(r, ui->mouse_x, ui->mouse_y));
         if (screen == MAAGE_CLIENT_UI_OPTIONS) {
             if (n == 0U) {
-                if (ui->fov_degrees == 70)
-                    strcpy(label, "FOV: Normal");
-                else if (ui->fov_degrees == 110)
-                    strcpy(label, "FOV: Quake Pro");
+                if (ui->fov_degrees == 70) strcpy(label, "FOV: Normal");
+                else if (ui->fov_degrees == 110) strcpy(label, "FOV: Quake Pro");
                 else
                     sprintf(label, "FOV: %d", ui->fov_degrees);
-                maage_client_ui_slider(ui, r, label,
-                                       (float) (ui->fov_degrees - 30) / 80.0f, highlight);
+                maage_client_ui_slider(ui, r, label, (float) (ui->fov_degrees - 30) / 80.0f, highlight);
             } else
                 maage_client_ui_button_state(ui, r, maage_main_labels[n],
                                              !enabled ? MAAGE_CLIENT_UI_BUTTON_DISABLED : (highlight ? MAAGE_CLIENT_UI_BUTTON_HOVER : MAAGE_CLIENT_UI_BUTTON_NORMAL));
@@ -430,18 +380,14 @@ static void maage_options_draw(maage_client_ui *ui, void *context) {
                 maage_client_ui_button(ui, r, "Done", highlight);
             } else {
                 bus = maage_sound_buses[n];
-                if (ui->audio_volume[bus] == 0)
-                    sprintf(label, "%s: OFF", maage_sound_names[n]);
+                if (ui->audio_volume[bus] == 0) sprintf(label, "%s: OFF", maage_sound_names[n]);
                 else
                     sprintf(label, "%s: %d%%", maage_sound_names[n], ui->audio_volume[bus]);
-                maage_client_ui_slider(ui, r, label,
-                                       (float) ui->audio_volume[bus] / 100.0f, highlight);
+                maage_client_ui_slider(ui, r, label, (float) ui->audio_volume[bus] / 100.0f, highlight);
             }
         } else {
             maage_options_video_label(ui, n, label);
-            if (n == 3U)
-                maage_client_ui_slider(ui, r, label,
-                                       (float) ui->fps_step / 26.0f, highlight);
+            if (n == 3U) maage_client_ui_slider(ui, r, label, (float) ui->fps_step / 26.0f, highlight);
             else
                 maage_client_ui_button_state(ui, r, label,
                                              !enabled ? MAAGE_CLIENT_UI_BUTTON_DISABLED : (highlight ? MAAGE_CLIENT_UI_BUTTON_HOVER : MAAGE_CLIENT_UI_BUTTON_NORMAL));
@@ -449,11 +395,8 @@ static void maage_options_draw(maage_client_ui *ui, void *context) {
     }
 }
 maage_status maage_client_ui_options_register(maage_client_ui *ui) {
-    maage_status result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_OPTIONS,
-                                                          maage_options_draw, maage_options_input, NULL);
-    if (!maage_status_failed(result)) result = maage_client_ui_register_screen(
-                                          ui, MAAGE_CLIENT_UI_SOUND_SETTINGS, maage_options_draw, maage_options_input, NULL);
-    if (!maage_status_failed(result)) result = maage_client_ui_register_screen(
-                                          ui, MAAGE_CLIENT_UI_VIDEO_SETTINGS, maage_options_draw, maage_options_input, NULL);
+    maage_status result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_OPTIONS, maage_options_draw, maage_options_input, NULL);
+    if (!maage_status_failed(result)) result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_SOUND_SETTINGS, maage_options_draw, maage_options_input, NULL);
+    if (!maage_status_failed(result)) result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_VIDEO_SETTINGS, maage_options_draw, maage_options_input, NULL);
     return result;
 }

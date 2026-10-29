@@ -9,18 +9,15 @@ static maage_status maage_leaves_noop(void) {
     return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_TICK, 0);
 }
 
-maage_status maage_leaves_changed(maage_world *world, int x, int y, int z,
-                                  const maage_block_state_definition *before, const maage_block_state_definition *after) {
+maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const maage_block_state_definition *before, const maage_block_state_definition *after) {
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *leaf;
     maage_block_state_id marked;
     maage_status result;
     int radius, dx, dy, dz, nx, ny, nz;
     if (before->block_id == after->block_id) return maage_leaves_noop();
-    if (before->block_id == MAAGE_BLOCK_LOG)
-        radius = 4;
-    else if (before->block_id == MAAGE_BLOCK_LEAVES)
-        radius = 1;
+    if (before->block_id == MAAGE_BLOCK_LOG) radius = 4;
+    else if (before->block_id == MAAGE_BLOCK_LEAVES) radius = 1;
     else
         return maage_leaves_noop();
     /* The mutation already owns an edit batch. Flag-only recursive mutations
@@ -35,8 +32,7 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z,
                 if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) continue;
                 leaf = maage_block_registry_state(blocks, maage_world_get(world, nx, ny, nz));
                 if (!leaf) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-                if (leaf->block_id != MAAGE_BLOCK_LEAVES ||
-                    (leaf->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) continue;
+                if (leaf->block_id != MAAGE_BLOCK_LEAVES || (leaf->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) continue;
                 result = maage_block_leaves_state(leaf->metadata | MAAGE_LEAF_CHECK_DECAY, &marked);
                 if (!maage_status_failed(result)) result = maage_world_set(world, nx, ny, nz, leaf->id, marked);
                 if (maage_status_failed(result)) return result;
@@ -45,8 +41,7 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z,
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
 
-maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z,
-                                      const maage_block_state_definition *state, maage_random_tick_context *context) {
+maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
     static const int steps[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *neighbor;
@@ -59,12 +54,10 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z,
     unsigned long drop_random;
     size_t i;
     maage_status result, mutation;
-    if ((state->metadata & MAAGE_LEAF_PERSISTENT) || !(state->metadata & MAAGE_LEAF_CHECK_DECAY))
-        return maage_leaves_noop();
+    if ((state->metadata & MAAGE_LEAF_PERSISTENT) || !(state->metadata & MAAGE_LEAF_CHECK_DECAY)) return maage_leaves_noop();
     /* Require the radius-five neighborhood before searching the radius-four
      * support cube. Outside vertical world bounds is known air. */
-    if (x - 5 <= -MAAGE_WORLD_LIMIT || x + 5 >= MAAGE_WORLD_LIMIT ||
-        z - 5 <= -MAAGE_WORLD_LIMIT || z + 5 >= MAAGE_WORLD_LIMIT) return maage_leaves_noop();
+    if (x - 5 <= -MAAGE_WORLD_LIMIT || x + 5 >= MAAGE_WORLD_LIMIT || z - 5 <= -MAAGE_WORLD_LIMIT || z + 5 >= MAAGE_WORLD_LIMIT) return maage_leaves_noop();
     for (iz = maage_world_chunk_coordinate(z - 5); iz <= maage_world_chunk_coordinate(z + 5); ++iz)
         for (ix = maage_world_chunk_coordinate(x - 5); ix <= maage_world_chunk_coordinate(x + 5); ++ix)
             if (!maage_world_chunk_loaded(world, ix, iz)) return maage_leaves_noop();

@@ -12,8 +12,7 @@ static void maage_server_signal_handler(int signo) {
     maage_server_stop_signal = 1;
 }
 
-maage_status maage_server_run(const maage_server_config *config,
-                              maage_status_trace *trace) {
+maage_status maage_server_run(const maage_server_config *config, maage_status_trace *trace) {
     maage_server_runtime *runtime = NULL;
     maage_mutex *mutex = NULL;
     maage_condition *condition = NULL;
@@ -37,10 +36,8 @@ maage_status maage_server_run(const maage_server_config *config,
         maage_mutex_lock(mutex);
         while (!maage_server_stop_signal && !maage_server_runtime_finished(runtime)) {
             waited = maage_condition_timed_wait(condition, mutex, 200UL);
-            if (maage_status_failed(waited) &&
-                maage_status_code(waited) != MAAGE_STATUS_TIMEOUT) {
-                result = MAAGE_STATUS_PROPAGATE(trace, waited,
-                                                MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_WAIT);
+            if (maage_status_failed(waited) && maage_status_code(waited) != MAAGE_STATUS_TIMEOUT) {
+                result = MAAGE_STATUS_PROPAGATE(trace, waited, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_WAIT);
                 break;
             }
         }
@@ -59,8 +56,6 @@ done:
     maage_condition_destroy(condition);
     maage_mutex_destroy(mutex);
     closing = maage_server_runtime_destroy(runtime);
-    if (maage_status_failed(closing) && !maage_status_failed(result))
-        result = MAAGE_STATUS_PROPAGATE(trace, closing,
-                                        MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_DESTROY);
+    if (maage_status_failed(closing) && !maage_status_failed(result)) result = MAAGE_STATUS_PROPAGATE(trace, closing, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_DESTROY);
     return result;
 }

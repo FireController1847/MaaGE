@@ -2,8 +2,7 @@
 #include <math.h>
 #include <string.h>
 
-static const maage_block_shape *camera_shape(const maage_world_camera_sample *sample,
-                                             const maage_block_registry *blocks, const int cell[3], maage_block_shape *unknown) {
+static const maage_block_shape *camera_shape(const maage_world_camera_sample *sample, const maage_block_registry *blocks, const int cell[3], maage_block_shape *unknown) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     int x, y, z, corner, axis;
@@ -25,8 +24,7 @@ static const maage_block_shape *camera_shape(const maage_world_camera_sample *sa
     }
     return unknown;
 }
-static double camera_ray(const double origin[3], const double direction[3], double distance,
-                         const maage_world_camera_sample *sample, const maage_block_registry *blocks) {
+static double camera_ray(const double origin[3], const double direction[3], double distance, const maage_world_camera_sample *sample, const maage_block_registry *blocks) {
     maage_block_shape unknown;
     const maage_block_shape *shape;
     int cell[3], step[3], axis, next, iteration;
@@ -70,10 +68,7 @@ static double camera_ray(const double origin[3], const double direction[3], doub
     }
     return distance;
 }
-double maage_client_camera_position(unsigned int mode, const double eye[3],
-                                    double yaw, double pitch, int sneaking, double aspect, double fov,
-                                    const maage_world_camera_sample *sample, const maage_block_registry *blocks,
-                                    double position[3], double *camera_yaw, double *camera_pitch) {
+double maage_client_camera_position(unsigned int mode, const double eye[3], double yaw, double pitch, int sneaking, double aspect, double fov, const maage_world_camera_sample *sample, const maage_block_registry *blocks, double position[3], double *camera_yaw, double *camera_pitch) {
     double direction[3], origin[3], pivot[3], distance = 4, padding, candidate;
     unsigned int axis, ray;
     memcpy(position, eye, 3 * sizeof(double));

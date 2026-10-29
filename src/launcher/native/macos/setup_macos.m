@@ -70,10 +70,8 @@ static NSTextField *maage_setup_label(NSView *parent, NSString *value, NSRect re
     maage_setup_progress p;
     (void) sender;
     maage_assets_snapshot(self.assets, &p);
-    if (!maage_assets_access_allowed(self.assets) && (p.stage == MAAGE_SETUP_FAILED || p.stage == MAAGE_SETUP_COMPLETE))
-        [self finish:2];
-    else if (p.stage == MAAGE_SETUP_COMPLETE && maage_assets_access_allowed(self.assets))
-        [self finish:1];
+    if (!maage_assets_access_allowed(self.assets) && (p.stage == MAAGE_SETUP_FAILED || p.stage == MAAGE_SETUP_COMPLETE)) [self finish:2];
+    else if (p.stage == MAAGE_SETUP_COMPLETE && maage_assets_access_allowed(self.assets)) [self finish:1];
     else if (p.stage == MAAGE_SETUP_FAILED) {
         maage_assets_retry(self.assets);
         [self refresh:nil];
@@ -115,8 +113,7 @@ static NSTextField *maage_setup_label(NSView *parent, NSString *value, NSRect re
                                     60, 23);
     self.percent.stringValue = p.percent < 0 ? @"" : [NSString stringWithFormat:@"%d%%", p.percent];
     self.progress.indeterminate = p.percent < 0;
-    if (p.percent < 0)
-        [self.progress startAnimation:nil];
+    if (p.percent < 0) [self.progress startAnimation:nil];
     else {
         [self.progress stopAnimation:nil];
         self.progress.doubleValue = p.percent;
@@ -128,10 +125,7 @@ static NSTextField *maage_setup_label(NSView *parent, NSString *value, NSRect re
     if (!self.window.visible && (p.needs_setup || t.failed)) [self.window makeKeyAndOrderFront:nil];
 }
 - (void)show {
-    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 561)
-                                              styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
-                                                backing:NSBackingStoreBuffered
-                                                  defer:NO];
+    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 561) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher — Initial setup";
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;

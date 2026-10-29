@@ -37,8 +37,7 @@ maage_status maage_launcher_demonstration(int argc, char *const argv[]) {
     result = maage_renderer_set_clear_color(renderer, 1, 0, 0, 1);
     if (maage_status_failed(result)) goto done;
     result = maage_renderer_prepare_frame(renderer, &trace);
-    if (maage_status_code(result) == MAAGE_STATUS_NOT_IMPLEMENTED)
-        result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
+    if (maage_status_code(result) == MAAGE_STATUS_NOT_IMPLEMENTED) result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
     if (maage_status_failed(result)) goto done;
     result = maage_window_set_visible(window, 1);
     if (maage_status_failed(result)) goto done;
@@ -71,8 +70,7 @@ clock_failed:
 done:
     if (maage_status_failed(result)) {
         MAAGE_STATUS_TRACE(&trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_START);
-        maage_log_trace_status(MAAGE_LOG_ERROR, "maage.launcher.demo", result, &trace,
-                               "Renderer demonstration could not continue.");
+        maage_log_trace_status(MAAGE_LOG_ERROR, "maage.launcher.demo", result, &trace, "Renderer demonstration could not continue.");
     }
     cleanup = maage_renderer_destroy(renderer, &trace);
     if (!maage_status_failed(result) && maage_status_failed(cleanup)) result = cleanup;

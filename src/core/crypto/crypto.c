@@ -60,19 +60,16 @@ maage_status maage_crypto_hash_open(unsigned algorithm, maage_crypto_hash **outp
     maage_crypto_hash *hash;
     int ok;
     if (output) *output = NULL;
-    if (!output || (algorithm != MAAGE_CRYPTO_SHA1 && algorithm != MAAGE_CRYPTO_SHA256))
-        return maage_crypto_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_HASH);
+    if (!output || (algorithm != MAAGE_CRYPTO_SHA1 && algorithm != MAAGE_CRYPTO_SHA256)) return maage_crypto_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_HASH);
     hash = (maage_crypto_hash *) calloc(1, sizeof(*hash));
     if (!hash) return maage_crypto_result(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_HASH);
     hash->length = algorithm == MAAGE_CRYPTO_SHA1 ? 20 : 32;
 #ifdef _WIN32
-    ok = BCryptOpenAlgorithmProvider(&hash->algorithm,
-                                     algorithm == MAAGE_CRYPTO_SHA1 ? BCRYPT_SHA1_ALGORITHM : BCRYPT_SHA256_ALGORITHM, NULL, 0) >= 0;
+    ok = BCryptOpenAlgorithmProvider(&hash->algorithm, algorithm == MAAGE_CRYPTO_SHA1 ? BCRYPT_SHA1_ALGORITHM : BCRYPT_SHA256_ALGORITHM, NULL, 0) >= 0;
     if (ok) ok = BCryptCreateHash(hash->algorithm, &hash->handle, NULL, 0, NULL, 0, 0) >= 0;
 #else
     hash->handle = EVP_MD_CTX_new();
-    ok = hash->handle && EVP_DigestInit_ex(hash->handle,
-                                           algorithm == MAAGE_CRYPTO_SHA1 ? EVP_sha1() : EVP_sha256(), NULL) == 1;
+    ok = hash->handle && EVP_DigestInit_ex(hash->handle, algorithm == MAAGE_CRYPTO_SHA1 ? EVP_sha1() : EVP_sha256(), NULL) == 1;
 #endif
     if (!ok) {
         maage_crypto_hash_destroy(hash);
@@ -122,8 +119,7 @@ maage_status maage_crypto_hash_finish(maage_crypto_hash *hash, unsigned char *ou
     return maage_crypto_result(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_OPERATION_HASH);
 }
 
-maage_status maage_crypto_digest(unsigned algorithm, const void *data, size_t size,
-                                 unsigned char *output, size_t output_size) {
+maage_status maage_crypto_digest(unsigned algorithm, const void *data, size_t size, unsigned char *output, size_t output_size) {
     maage_crypto_hash *hash = NULL;
     maage_status result = maage_crypto_hash_open(algorithm, &hash);
     if (!maage_status_failed(result)) result = maage_crypto_hash_update(hash, data, size);
@@ -132,9 +128,7 @@ maage_status maage_crypto_digest(unsigned algorithm, const void *data, size_t si
     return result;
 }
 
-maage_status maage_crypto_aes_gcm(int encrypt, const unsigned char key[32],
-                                  const unsigned char nonce[12], unsigned char tag[16], const void *aad, size_t aad_size,
-                                  const unsigned char *input, size_t size, unsigned char *output) {
+maage_status maage_crypto_aes_gcm(int encrypt, const unsigned char key[32], const unsigned char nonce[12], unsigned char tag[16], const void *aad, size_t aad_size, const unsigned char *input, size_t size, unsigned char *output) {
     maage_status result = maage_crypto_result(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_OPERATION_UPDATE);
 #ifdef _WIN32
     BCRYPT_ALG_HANDLE algorithm = NULL;
@@ -147,13 +141,11 @@ maage_status maage_crypto_aes_gcm(int encrypt, const unsigned char key[32],
     unsigned char final[16];
     int count = 0, final_count = 0;
 #endif
-    if (!key || !nonce || !tag || !input || !output || (!aad && aad_size) ||
-        size > INT_MAX || aad_size > INT_MAX)
+    if (!key || !nonce || !tag || !input || !output || (!aad && aad_size) || size > INT_MAX || aad_size > INT_MAX)
         return maage_crypto_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
 #ifdef _WIN32
     if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_AES_ALGORITHM, NULL, 0) < 0) goto done;
-    if (BCryptSetProperty(algorithm, BCRYPT_CHAINING_MODE, (PUCHAR) BCRYPT_CHAIN_MODE_GCM,
-                          sizeof(BCRYPT_CHAIN_MODE_GCM), 0) < 0) goto done;
+    if (BCryptSetProperty(algorithm, BCRYPT_CHAINING_MODE, (PUCHAR) BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0) < 0) goto done;
     if (BCryptGenerateSymmetricKey(algorithm, &cipher, NULL, 0, (PUCHAR) key, 32, 0) < 0) goto done;
     BCRYPT_INIT_AUTH_MODE_INFO(info);
     info.pbNonce = (PUCHAR) nonce;
@@ -162,14 +154,10 @@ maage_status maage_crypto_aes_gcm(int encrypt, const unsigned char key[32],
     info.cbAuthData = (ULONG) aad_size;
     info.pbTag = tag;
     info.cbTag = 16;
-    if (encrypt)
-        native = BCryptEncrypt(cipher, (PUCHAR) input, (ULONG) size, &info,
-                               NULL, 0, output, (ULONG) size, &count, 0);
+    if (encrypt) native = BCryptEncrypt(cipher, (PUCHAR) input, (ULONG) size, &info, NULL, 0, output, (ULONG) size, &count, 0);
     else
-        native = BCryptDecrypt(cipher, (PUCHAR) input, (ULONG) size, &info,
-                               NULL, 0, output, (ULONG) size, &count, 0);
-    if (native >= 0 && count == size)
-        result = maage_crypto_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
+        native = BCryptDecrypt(cipher, (PUCHAR) input, (ULONG) size, &info, NULL, 0, output, (ULONG) size, &count, 0);
+    if (native >= 0 && count == size) result = maage_crypto_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
     else if (!encrypt && native == (NTSTATUS) 0xC000A002L) /* STATUS_AUTH_TAG_MISMATCH */
         result = maage_crypto_result(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_VERIFY);
 done:
@@ -203,13 +191,11 @@ done:
     return result;
 }
 
-maage_status maage_crypto_base64url(const unsigned char *input, size_t size,
-                                    char *output, size_t capacity) {
+maage_status maage_crypto_base64url(const unsigned char *input, size_t size, char *output, size_t capacity) {
     static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     size_t i, used = 0, length;
     unsigned a, b, c;
-    if (!output || (!input && size) || size > ((size_t) - 1 - 4) / 4 * 3)
-        return maage_crypto_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FORMAT);
+    if (!output || (!input && size) || size > ((size_t) - 1 - 4) / 4 * 3) return maage_crypto_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FORMAT);
     length = size / 3 * 4 + (size % 3 ? size % 3 + 1 : 0);
     if (capacity <= length) return maage_crypto_result(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FORMAT);
     for (i = 0; i < size;) {

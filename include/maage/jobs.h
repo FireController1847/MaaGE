@@ -49,8 +49,7 @@ unsigned maage_jobs_resolve_workers(unsigned requested);
  * completed jobs not yet polled. Counts are limited only by representable
  * allocation sizes and available OS/memory resources; creation fails cleanly
  * if any worker cannot start. Arrays and threads are allocated only here. */
-maage_status maage_jobs_create(unsigned workers, unsigned capacity, maage_jobs **output,
-                               maage_status_trace *trace);
+maage_status maage_jobs_create(unsigned workers, unsigned capacity, maage_jobs **output, maage_status_trace *trace);
 
 /* Thread-safe and nonblocking apart from brief queue synchronization. Lower
  * numeric priority runs first, FIFO within a priority. Returns INVALID_STATE on saturation
@@ -58,8 +57,7 @@ maage_status maage_jobs_create(unsigned workers, unsigned capacity, maage_jobs *
  * exclusively owns context until poll transfers it back. No automatic freeing.
  * Inputs borrowed by context must remain immutable/alive through completion.
  * IDs are nonzero and valid until that completion is consumed. */
-maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run,
-                               void *context, maage_job_id *id, const maage_status_trace *parent_trace);
+maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run, void *context, maage_job_id *id, const maage_status_trace *parent_trace);
 
 /* Queued cancellation produces a completion without invoking run. Running
  * callbacks cooperate by querying their temporary token at useful boundaries.
@@ -92,8 +90,7 @@ maage_status maage_jobs_snapshot(maage_jobs *jobs, maage_jobs_stats *stats);
  * all accepted work even if observations are truncated. No callbacks or heap
  * allocations; only a brief queue lock. Stats may be NULL. Observed contexts
  * remain worker-owned until poll; never inspect fields workers may change. */
-maage_status maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats,
-                                maage_job_observation *observations, unsigned capacity, unsigned *copied);
+maage_status maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats, maage_job_observation *observations, unsigned capacity, unsigned *copied);
 
 /* Owner lifecycle: stop rejects submissions, cancels accepted work, and joins
  * every worker. Completions remain pollable. Destroy also calls dispose for

@@ -40,9 +40,7 @@ static maage_status maage_auth_transport_failure(maage_status_trace *trace, unsi
 #else
     native = (long) errno;
 #endif
-    return maage_status_trace_record(trace,
-                                     maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_AUTH, operation, 0),
-                                     MAAGE_CONTEXT_AUTH, operation, __FILE__, (unsigned long) __LINE__, native);
+    return maage_status_trace_record(trace, maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_AUTH, operation, 0), MAAGE_CONTEXT_AUTH, operation, __FILE__, (unsigned long) __LINE__, native);
 }
 static int maage_auth_socket_error(void) {
 #ifdef _WIN32
@@ -123,8 +121,7 @@ maage_status maage_auth_listen(unsigned *port, maage_auth_listener **output, maa
     listener = (maage_auth_listener *) malloc(sizeof(*listener));
     if (!listener) {
         maage_auth_network_done();
-        return MAAGE_STATUS_TRACE(trace,
-                                  maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN);
     }
     listener->trace = trace;
     listener->socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -138,8 +135,7 @@ maage_status maage_auth_listen(unsigned *port, maage_auth_listener **output, maa
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(0x7f000001UL); /* 127.0.0.1, never ANY or a resolved hostname. */
     address.sin_port = 0;                          /* The OS chooses an available ephemeral port. */
-    if (bind(listener->socket, (struct sockaddr *) &address, sizeof(address)) || listen(listener->socket, 4) ||
-        getsockname(listener->socket, (struct sockaddr *) &address, &length)) goto failed;
+    if (bind(listener->socket, (struct sockaddr *) &address, sizeof(address)) || listen(listener->socket, 4) || getsockname(listener->socket, (struct sockaddr *) &address, &length)) goto failed;
     listener->port = ntohs(address.sin_port);
     *port = listener->port;
     maage_log_info("maage.launcher.access.callback", "OAuth HTTP listener ready on 127.0.0.1:%u (expected path=/; method=GET).", *port);
@@ -200,8 +196,7 @@ static maage_status maage_auth_http_reply(maage_auth_listener *listener, int sta
     }
     if (sent != size) maage_log_verbose("maage.launcher.access.callback", "Browser callback page could not be fully delivered; authorization result unchanged.");
     maage_auth_client_close(listener);
-    return maage_status_make(sent == size ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL,
-                             MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE, 0);
+    return maage_status_make(sent == size ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE, 0);
 }
 maage_status maage_auth_reply(maage_auth_listener *listener, int accepted) {
     if (!listener) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE, 0);
@@ -212,8 +207,7 @@ maage_status maage_auth_reply(maage_auth_listener *listener, int accepted) {
         listener->socket = MAAGE_AUTH_INVALID;
         maage_log_info("maage.launcher.access.callback", "OAuth loopback listener closed after validated callback (port=%u).", listener->port);
     }
-    return MAAGE_STATUS_PROPAGATE(listener->trace, maage_auth_http_reply(listener, accepted > 0 ? 200 : 400),
-                                  MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE);
+    return MAAGE_STATUS_PROPAGATE(listener->trace, maage_auth_http_reply(listener, accepted > 0 ? 200 : 400), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE);
 }
 static int maage_auth_ascii_equal(const char *left, const char *right) {
     int a, b;
@@ -286,8 +280,7 @@ static int maage_auth_http_query(char *request, unsigned port, char *query, size
                 *reason = "unexpected or duplicate HTTP Host";
                 return 0;
             }
-        } else if (maage_auth_ascii_equal(line, "Transfer-Encoding") ||
-                   (maage_auth_ascii_equal(line, "Content-Length") && strcmp(value, "0"))) {
+        } else if (maage_auth_ascii_equal(line, "Transfer-Encoding") || (maage_auth_ascii_equal(line, "Content-Length") && strcmp(value, "0"))) {
             *reason = "unexpected callback request body";
             return 0;
         }
@@ -297,8 +290,7 @@ static int maage_auth_http_query(char *request, unsigned port, char *query, size
         *reason = "missing localhost Host";
         return 0;
     }
-    if (*target == '/' && target[1] == '?')
-        target += 2;
+    if (*target == '/' && target[1] == '?') target += 2;
     else
         target += 1;
     size = strlen(target);
@@ -315,8 +307,7 @@ maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size
     size_t used = 0;
     int ready, count, status = 400, accepted = 0;
     double deadline;
-    if (!listener || !query || !capacity || !observer || !observer->cancelled)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
+    if (!listener || !query || !capacity || !observer || !observer->cancelled) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
     query[0] = 0;
     ready = maage_auth_ready(listener->socket, 0, 100);
     if (!ready || (ready < 0 && maage_auth_socket_retry())) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_READ, 0);
@@ -333,8 +324,7 @@ maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size
     request = (char *) calloc(1, MAAGE_AUTH_HTTP_LIMIT + 1);
     if (!request) {
         maage_auth_client_close(listener);
-        return MAAGE_STATUS_TRACE(observer->trace,
-                                  maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ);
+        return MAAGE_STATUS_TRACE(observer->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ);
     }
     deadline = maage_time_monotonic_seconds() + 2;
     while (used < MAAGE_AUTH_HTTP_LIMIT && !observer->cancelled(observer->context) && maage_time_monotonic_seconds() >= 0 && maage_time_monotonic_seconds() < deadline) {
@@ -351,8 +341,7 @@ maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size
         request[used] = 0;
         complete = strstr(request, "\r\n\r\n");
         if (complete) {
-            if (complete + 4 == request + used)
-                accepted = maage_auth_http_query(request, listener->port, query, capacity, &status, &reason);
+            if (complete + 4 == request + used) accepted = maage_auth_http_query(request, listener->port, query, capacity, &status, &reason);
             else
                 reason = "unexpected callback request body";
             break;

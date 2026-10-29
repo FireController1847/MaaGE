@@ -10,8 +10,7 @@ typedef struct maage_registry_pages {
     void *root[256];
 } maage_registry_pages;
 
-static void **maage_registry_pages_find(const maage_registry_pages *pages,
-                                        unsigned long id) {
+static void **maage_registry_pages_find(const maage_registry_pages *pages, unsigned long id) {
     void **second, **third, **leaf;
     if (!pages || id > 4294967295UL) return NULL;
     second = (void **) pages->root[(id >> 24) & 255UL];
@@ -22,8 +21,7 @@ static void **maage_registry_pages_find(const maage_registry_pages *pages,
     return leaf ? &leaf[id & 255UL] : NULL;
 }
 
-static void **maage_registry_pages_ensure(maage_registry_pages *pages,
-                                          unsigned long id) {
+static void **maage_registry_pages_ensure(maage_registry_pages *pages, unsigned long id) {
     void **second, **third, **leaf;
     unsigned long high, middle, low;
     if (!pages || id > 4294967295UL) return NULL;
@@ -51,8 +49,7 @@ static void **maage_registry_pages_ensure(maage_registry_pages *pages,
     return &leaf[id & 255UL];
 }
 
-static void maage_registry_pages_destroy(maage_registry_pages *pages,
-                                         void (*release)(void *)) {
+static void maage_registry_pages_destroy(maage_registry_pages *pages, void (*release)(void *)) {
     size_t i, j, k, n;
     void **second, **third, **leaf;
     if (!pages) return;

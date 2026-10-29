@@ -14,8 +14,7 @@ typedef struct maage_setup_win32 {
 } maage_setup_win32;
 static void maage_setup_win32_text(HWND control, const char *text) {
     wchar_t wide[1024];
-    if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1024) &&
-        !maage_launcher_win32_same_text(control, wide)) SetWindowTextW(control, wide);
+    if (MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1024) && !maage_launcher_win32_same_text(control, wide)) SetWindowTextW(control, wide);
 }
 static HWND maage_setup_win32_control(maage_setup_win32 *ui, const wchar_t *kind, const wchar_t *text, DWORD style, int x, int y, int width, int height, int id) {
     return maage_launcher_win32_control(&ui->native, -1, kind, text, style, x, y, width, height, id);
@@ -61,9 +60,7 @@ static void maage_setup_win32_tick(maage_setup_win32 *ui) {
                                                                                  : 235;
                 if (c->y != y) {
                     c->y = y;
-                    SetWindowPos(ui->percent, NULL, maage_launcher_win32_scale(&ui->native, c->x),
-                                 maage_launcher_win32_scale(&ui->native, c->y), maage_launcher_win32_scale(&ui->native, c->width),
-                                 maage_launcher_win32_scale(&ui->native, c->height), SWP_NOZORDER | SWP_NOACTIVATE);
+                    SetWindowPos(ui->percent, NULL, maage_launcher_win32_scale(&ui->native, c->x), maage_launcher_win32_scale(&ui->native, c->y), maage_launcher_win32_scale(&ui->native, c->width), maage_launcher_win32_scale(&ui->native, c->height), SWP_NOZORDER | SWP_NOACTIVATE);
                 }
                 break;
             }
@@ -114,8 +111,7 @@ static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM
         EnableWindow(ui->next, FALSE);
         return 0;
     case WM_COMMAND:
-        if (LOWORD(wparam) == IDCANCEL)
-            SendMessageW(window, WM_CLOSE, 0, 0);
+        if (LOWORD(wparam) == IDCANCEL) SendMessageW(window, WM_CLOSE, 0, 0);
         else if (LOWORD(wparam) == IDOK) {
             maage_setup_progress p;
             maage_assets_snapshot(ui->assets, &p);
@@ -125,8 +121,7 @@ static LRESULT CALLBACK maage_setup_win32_proc(HWND window, UINT message, WPARAM
             } else if (p.stage == MAAGE_SETUP_COMPLETE && maage_assets_access_allowed(ui->assets)) {
                 ui->result = 1;
                 DestroyWindow(window);
-            } else if (p.stage == MAAGE_SETUP_FAILED)
-                maage_assets_retry(ui->assets);
+            } else if (p.stage == MAAGE_SETUP_FAILED) maage_assets_retry(ui->assets);
         }
         return 0;
     case WM_TIMER:
@@ -179,8 +174,7 @@ maage_status maage_setup_native_run(maage_assets *assets, int *action) {
     klass.hCursor = LoadCursor(NULL, IDC_ARROW);
     klass.lpszClassName = L"MaaGEInitialSetup";
     RegisterClassW(&klass);
-    ui.window = CreateWindowExW(WS_EX_CONTROLPARENT, klass.lpszClassName, L"MaaGE Launcher — Initial setup", WS_CLIPCHILDREN | WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                                CW_USEDEFAULT, CW_USEDEFAULT, 620, 561, NULL, NULL, klass.hInstance, &ui);
+    ui.window = CreateWindowExW(WS_EX_CONTROLPARENT, klass.lpszClassName, L"MaaGE Launcher — Initial setup", WS_CLIPCHILDREN | WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 620, 561, NULL, NULL, klass.hInstance, &ui);
     if (!ui.window) {
         outcome = maage_status_from_win32((unsigned long) GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN);
         goto cleanup;

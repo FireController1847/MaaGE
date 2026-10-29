@@ -54,35 +54,25 @@ maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
 /* Foundation respawn returns to the session's start and retains inventory;
  * persistent spawn points and full death-drop rules are deferred. */
-maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player,
-                                    const maage_world *world);
+maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player, const maage_world *world);
 /* Player-only checkpoint; World owns and checkpoints entities independently. */
 maage_status maage_gameplay_destroy(maage_gameplay *game);
 maage_status maage_gameplay_save_clear(maage_gameplay_save *save);
 maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
-maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items,
-                                    const maage_gameplay_save *save);
+maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save);
 /* Slot == MAAGE_INVENTORY_SLOTS selects the inventory cursor. */
-maage_status maage_gameplay_drop(maage_gameplay *game, const maage_player *player,
-                                 maage_world *world, const maage_item_registry *items, double yaw, double pitch,
-                                 unsigned int slot, int whole);
+maage_status maage_gameplay_drop(maage_gameplay *game, const maage_player *player, maage_world *world, const maage_item_registry *items, double yaw, double pitch, unsigned int slot, int whole);
 /* Owner-thread targeting may run every frame. Reach zero uses classic 5/4.5
  * Creative/Survival blocks; positive configured reach is bounded to 64. */
-maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player,
-                                   const maage_world *world, double yaw, double pitch);
+maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player, const maage_world *world, double yaw, double pitch);
 /* Numeric event construction for Server-owned gameplay/environment occurrences.
  * No audio device, transport, allocation, or string identity is involved. */
-maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound_event *event,
-                                        unsigned int kind, unsigned int material, const double position[3],
-                                        double intensity, double pitch);
+maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound_event *event, unsigned int kind, unsigned int material, const double position[3], double intensity, double pitch);
 
 /* One fixed-step owner tick. The caller owns the bounded event array.
  * (NULL, 0, NULL) disables event generation. Otherwise
  * written is required, and capacity > 0 requires a non-NULL events array.
  * Audio-event overflow returns PARTIAL without undoing gameplay mutations;
  * gameplay failures take precedence over this publication warning. */
-maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player,
-                                 maage_world *world, const maage_item_registry *items,
-                                 const maage_gameplay_intent *intent, struct maage_sound_event *events,
-                                 size_t capacity, size_t *written, maage_status_trace *trace);
+maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maage_world *world, const maage_item_registry *items, const maage_gameplay_intent *intent, struct maage_sound_event *events, size_t capacity, size_t *written, maage_status_trace *trace);
 #endif

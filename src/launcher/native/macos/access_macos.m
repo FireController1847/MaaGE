@@ -152,8 +152,7 @@ static NSTextField *maage_access_label(NSView *parent, NSString *text, NSRect fr
         self.device.stringValue = [NSString stringWithFormat:@"%s\nCode: %s · %.0f seconds remaining", _snapshot.device_url, _snapshot.device_code, seconds > 0 ? seconds : 0];
     } else
         self.device.stringValue = @"Your browser will open to complete sign-in.";
-    if (_snapshot.busy)
-        [self.progress startAnimation:nil];
+    if (_snapshot.busy) [self.progress startAnimation:nil];
     else
         [self.progress stopAnimation:nil];
     if (!self.window.visible) [self.window makeKeyAndOrderFront:nil];

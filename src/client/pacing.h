@@ -7,7 +7,5 @@ typedef struct maage_client_pacing {
 } maage_client_pacing;
 /* Owner-thread frame boundary; polls native events during whole-ms waits and
  * carries deadlines through fractional wake delays. Zero FPS resets pacing. */
-maage_status maage_client_pacing_wait(maage_client_pacing *pacing,
-                                      maage_window_system *system, maage_window *window, int fps,
-                                      double frame_start, int *resized);
+maage_status maage_client_pacing_wait(maage_client_pacing *pacing, maage_window_system *system, maage_window *window, int fps, double frame_start, int *resized);
 #endif

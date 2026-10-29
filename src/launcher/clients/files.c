@@ -31,8 +31,7 @@ static wchar_t *maage_client_wide(const char *path) {
     return wide;
 }
 static maage_status maage_client_windows(maage_status_trace *trace, DWORD native, unsigned char operation) {
-    return maage_status_trace_record(trace, maage_status_from_win32(native, MAAGE_CONTEXT_STORAGE, operation),
-                                     MAAGE_CONTEXT_STORAGE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
+    return maage_status_trace_record(trace, maage_status_from_win32(native, MAAGE_CONTEXT_STORAGE, operation), MAAGE_CONTEXT_STORAGE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
 }
 #else
 #include <dirent.h>
@@ -44,8 +43,7 @@ static maage_status maage_client_windows(maage_status_trace *trace, DWORD native
 #endif
 static maage_status maage_client_errno(maage_status_trace *trace, unsigned char operation) {
     int native = errno;
-    return maage_status_trace_record(trace, maage_status_from_errno(native ? native : EIO, MAAGE_CONTEXT_STORAGE, operation),
-                                     MAAGE_CONTEXT_STORAGE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
+    return maage_status_trace_record(trace, maage_status_from_errno(native ? native : EIO, MAAGE_CONTEXT_STORAGE, operation), MAAGE_CONTEXT_STORAGE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
 }
 int maage_client_file_kind(const char *path) {
     if (!path) return 0;
@@ -90,19 +88,16 @@ maage_status maage_client_absolute(const char *path, char out[MAAGE_PATH_CAPACIT
         free(wide);
         if (!count) return maage_client_windows(trace, native, MAAGE_OPERATION_RESOLVE);
         if (count >= MAAGE_PATH_CAPACITY) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RESOLVE);
-        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, full, -1, out, MAAGE_PATH_CAPACITY, NULL, NULL))
-            return maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_RESOLVE);
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, full, -1, out, MAAGE_PATH_CAPACITY, NULL, NULL)) return maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_RESOLVE);
         for (i = 0; out[i]; ++i)
             if (out[i] == '\\') out[i] = '/';
-        result = maage_status_make(maage_client_file_kind(out) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOT_FOUND,
-                                   MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
+        result = maage_status_make(maage_client_file_kind(out) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
     }
 #else
     {
         char *resolved = realpath(path, NULL);
         if (!resolved) return maage_client_errno(trace, MAAGE_OPERATION_RESOLVE);
-        result = maage_status_make(strlen(resolved) < MAAGE_PATH_CAPACITY ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_BUFFER_OVERFLOW,
-                                   MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
+        result = maage_status_make(strlen(resolved) < MAAGE_PATH_CAPACITY ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
         if (!maage_status_failed(result)) strcpy(out, resolved);
         free(resolved);
     }
@@ -208,14 +203,12 @@ static maage_status maage_client_remove_file(const char *path, maage_status_trac
 #endif
     return MAAGE_STATUS_PROPAGATE(trace, maage_storage_remove(path), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 }
-static maage_status maage_client_tree(const char *from, const char *to, const char *root,
-                                      unsigned depth, unsigned *entries, double *bytes, maage_status_trace *trace) {
+static maage_status maage_client_tree(const char *from, const char *to, const char *root, unsigned depth, unsigned *entries, double *bytes, maage_status_trace *trace) {
     char source[MAAGE_PATH_CAPACITY], destination[MAAGE_PATH_CAPACITY];
     int kind = maage_client_file_kind(from);
     unsigned char operation = to ? MAAGE_OPERATION_COPY : MAAGE_OPERATION_REMOVE;
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, operation, 0);
-    if (depth > 32 || ++*entries > 50000) return MAAGE_STATUS_PROPAGATE(trace,
-                                                                        maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
+    if (depth > 32 || ++*entries > 50000) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
 #ifndef _WIN32
     if (kind == 3) {
         char target[MAAGE_PATH_CAPACITY], resolved[MAAGE_PATH_CAPACITY];
@@ -224,14 +217,12 @@ static maage_status maage_client_tree(const char *from, const char *to, const ch
         if (!to) return MAAGE_STATUS_PROPAGATE(trace, maage_storage_remove(from), MAAGE_CONTEXT_LAUNCHER, operation);
         count = readlink(from, target, sizeof(target) - 1);
         if (count < 0) return maage_client_errno(trace, MAAGE_OPERATION_READ);
-        if (!count || (size_t) count >= sizeof(target) - 1) return MAAGE_STATUS_PROPAGATE(trace,
-                                                                                          maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_LAUNCHER, operation);
+        if (!count || (size_t) count >= sizeof(target) - 1) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_LAUNCHER, operation);
         target[count] = 0;
         if (target[0] == '/') return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
         result = maage_client_absolute(from, resolved, trace);
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
-        if (strncmp(root, resolved, length) || (resolved[length] && resolved[length] != '/')) return MAAGE_STATUS_PROPAGATE(trace,
-                                                                                                                            maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
+        if (strncmp(root, resolved, length) || (resolved[length] && resolved[length] != '/')) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
         if (symlink(target, to)) return maage_client_errno(trace, operation);
         return maage_status_make(MAAGE_STATUS_SUCCESS, 0, operation, 0);
     }
@@ -245,8 +236,7 @@ static maage_status maage_client_tree(const char *from, const char *to, const ch
         if (*bytes > 8589934592.0) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
         return to ? maage_client_copy_file(from, to, trace) : maage_client_remove_file(from, trace);
     }
-    if (kind != 2 || !maage_storage_directory_exists(from)) return MAAGE_STATUS_PROPAGATE(trace,
-                                                                                          maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
+    if (kind != 2 || !maage_storage_directory_exists(from)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
     if (to) {
         result = maage_storage_directories(to);
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);

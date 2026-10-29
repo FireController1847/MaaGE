@@ -56,8 +56,7 @@ typedef struct maage_input_snapshot {
  * right/down, and accumulate only while captured. Focus loss releases capture
  * and clears held keys. This is raw input; gameplay maps it to actions.
  * UNSUPPORTED means this adapter cannot supply gameplay input. */
-maage_status maage_window_get_input(maage_window *window,
-                                    maage_input_snapshot *input);
+maage_status maage_window_get_input(maage_window *window, maage_input_snapshot *input);
 /* Capture requires focus, hides the cursor and permits unbounded relative motion.
  * Release also clears pending motion. Escape is an input edge; the application
  * chooses when to release or reacquire capture. Native adapters never recapture

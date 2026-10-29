@@ -144,8 +144,7 @@ unsigned maage_jobs_resolve_workers(unsigned requested) {
     return processors > 1 ? processors - 1 : 1;
 }
 
-maage_status maage_jobs_create(unsigned workers, unsigned capacity, maage_jobs **output,
-                               maage_status_trace *trace) {
+maage_status maage_jobs_create(unsigned workers, unsigned capacity, maage_jobs **output, maage_status_trace *trace) {
     maage_jobs *jobs;
     maage_status result;
     unsigned index;
@@ -193,8 +192,7 @@ failed:
     return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_INITIALIZE);
 }
 
-maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run,
-                               void *context, maage_job_id *id, const maage_status_trace *parent_trace) {
+maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_run run, void *context, maage_job_id *id, const maage_status_trace *parent_trace) {
     maage_job_record *record;
     unsigned slot, index;
     int duplicate;
@@ -232,12 +230,10 @@ maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_ru
     record->cancelled = 0;
     record->stage = 0;
     record->result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_JOB, 0);
-    if (parent_trace)
-        record->trace = *parent_trace;
+    if (parent_trace) record->trace = *parent_trace;
     else
         maage_status_trace_init(&record->trace);
-    MAAGE_STATUS_TRACE(&record->trace, maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0),
-                       MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SUBMIT);
+    MAAGE_STATUS_TRACE(&record->trace, maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0), MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SUBMIT);
     record->run = run;
     record->context = context;
     record->submitted = maage_time_monotonic_seconds();
@@ -261,8 +257,7 @@ maage_status maage_jobs_cancel(maage_jobs *jobs, maage_job_id id) {
             if (record->state == MAAGE_JOB_QUEUED) {
                 maage_jobs_heap_remove(jobs, record->heap_index);
                 maage_jobs_complete(jobs, index);
-            } else if (record->state == MAAGE_JOB_READY)
-                ++jobs->cancelled;
+            } else if (record->state == MAAGE_JOB_READY) ++jobs->cancelled;
         }
         maage_mutex_unlock(jobs->mutex);
         return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CANCEL, 0);
@@ -292,8 +287,7 @@ maage_status maage_job_set_result(const maage_job_token *token, maage_status res
      * worker's existing locked READY publication. No extra lock is needed. */
     if (!token) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SET, 0);
     token->record->result = result;
-    if (!maage_status_is_success(result)) MAAGE_STATUS_TRACE(&token->record->trace, result,
-                                                             MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_JOB);
+    if (!maage_status_is_success(result)) MAAGE_STATUS_TRACE(&token->record->trace, result, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_JOB);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 
@@ -305,8 +299,7 @@ maage_status maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion)
     maage_job_record *record;
     unsigned slot;
     if (completion) memset(completion, 0, sizeof(*completion));
-    if (!jobs || !completion) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_SCHEDULER,
-                                                       MAAGE_OPERATION_POLL, !jobs ? 0 : 1);
+    if (!jobs || !completion) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_POLL, !jobs ? 0 : 1);
     maage_mutex_lock(jobs->mutex);
     if (!jobs->ready) {
         maage_mutex_unlock(jobs->mutex);
@@ -319,13 +312,10 @@ maage_status maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion)
     completion->id = record->id;
     completion->context = record->context;
     completion->cancelled = record->cancelled;
-    completion->result = record->cancelled ? maage_status_make(MAAGE_STATUS_INTERRUPTED,
-                                                               MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_JOB, MAAGE_DETAIL_CANCELLED)
-                                           : record->result;
+    completion->result = record->cancelled ? maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_JOB, MAAGE_DETAIL_CANCELLED) : record->result;
     completion->operation_result = record->result;
     completion->trace = record->trace;
-    if (record->cancelled) MAAGE_STATUS_TRACE(&completion->trace, completion->result,
-                                              MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_CANCEL);
+    if (record->cancelled) MAAGE_STATUS_TRACE(&completion->trace, completion->result, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_CANCEL);
     record->state = MAAGE_JOB_FREE;
     record->context = NULL;
     jobs->free_slots[jobs->free_count++] = slot;
@@ -350,14 +340,12 @@ maage_status maage_jobs_snapshot(maage_jobs *jobs, maage_jobs_stats *stats) {
     return maage_jobs_observe(jobs, stats, NULL, 0, &copied);
 }
 
-maage_status maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats,
-                                maage_job_observation *observations, unsigned capacity, unsigned *copied_output) {
+maage_status maage_jobs_observe(maage_jobs *jobs, maage_jobs_stats *stats, maage_job_observation *observations, unsigned capacity, unsigned *copied_output) {
     maage_job_record *record;
     unsigned index, copied = 0;
     if (stats) memset(stats, 0, sizeof(*stats));
     if (copied_output) *copied_output = 0;
-    if (!jobs || !copied_output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                                          MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SNAPSHOT, !jobs ? 0 : 4);
+    if (!jobs || !copied_output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_SNAPSHOT, !jobs ? 0 : 4);
     maage_mutex_lock(jobs->mutex);
     if (stats) {
         stats->logical_processors = jobs->logical_processors;
@@ -408,8 +396,7 @@ maage_status maage_jobs_stop(maage_jobs *jobs) {
     maage_mutex_unlock(jobs->mutex);
     for (index = 0; index < jobs->workers; ++index) {
         result = maage_thread_join(jobs->threads[index]);
-        if (maage_status_failed(result) && !maage_status_failed(failure))
-            failure = result;
+        if (maage_status_failed(result) && !maage_status_failed(failure)) failure = result;
         else
             jobs->threads[index] = NULL;
     }

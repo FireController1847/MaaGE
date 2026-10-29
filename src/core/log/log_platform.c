@@ -46,14 +46,12 @@ void maage_log_timestamp(char *buffer, size_t capacity) {
     time_t now = time(NULL);
     struct tm local;
     buffer[0] = '\0';
-    if (localtime_s(&local, &now) == 0)
-        strftime(buffer, capacity, "%Y-%m-%d %H:%M:%S", &local);
+    if (localtime_s(&local, &now) == 0) strftime(buffer, capacity, "%Y-%m-%d %H:%M:%S", &local);
 }
 
 int maage_log_console_available(int error) {
     HANDLE handle = GetStdHandle(error ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    return _fileno(error ? stderr : stdout) >= 0 &&
-           handle && handle != INVALID_HANDLE_VALUE && GetFileType(handle) != FILE_TYPE_UNKNOWN;
+    return _fileno(error ? stderr : stdout) >= 0 && handle && handle != INVALID_HANDLE_VALUE && GetFileType(handle) != FILE_TYPE_UNKNOWN;
 }
 
 void maage_log_platform_diagnostic(const char *message) {
@@ -98,8 +96,7 @@ int maage_log_archive_time(const char *path, int closing, char timestamp[32]) {
     }
     if (closing) {
         GetSystemTimeAsFileTime(&info.ftLastWriteTime);
-        handle = CreateFileW(wide, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                             NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        handle = CreateFileW(wide, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (handle == INVALID_HANDLE_VALUE) {
             free(wide);
             return -1;
@@ -113,8 +110,7 @@ int maage_log_archive_time(const char *path, int closing, char timestamp[32]) {
     }
     free(wide);
     if (!FileTimeToLocalFileTime(&info.ftLastWriteTime, &local) || !FileTimeToSystemTime(&local, &parts)) return -1;
-    sprintf(timestamp, "%04u-%02u-%02u_%02u-%02u-%02u", (unsigned) parts.wYear, (unsigned) parts.wMonth,
-            (unsigned) parts.wDay, (unsigned) parts.wHour, (unsigned) parts.wMinute, (unsigned) parts.wSecond);
+    sprintf(timestamp, "%04u-%02u-%02u_%02u-%02u-%02u", (unsigned) parts.wYear, (unsigned) parts.wMonth, (unsigned) parts.wDay, (unsigned) parts.wHour, (unsigned) parts.wMinute, (unsigned) parts.wSecond);
     return 1;
 }
 
@@ -149,8 +145,7 @@ FILE *maage_log_open(const char *path, const char *mode) {
                          FILE_ATTRIBUTE_NORMAL, NULL);
     if (handle != INVALID_HANDLE_VALUE) {
         descriptor = _open_osfhandle((INT_PTR) handle, _O_BINARY | (writing ? _O_APPEND : _O_RDONLY));
-        if (descriptor < 0)
-            CloseHandle(handle);
+        if (descriptor < 0) CloseHandle(handle);
         else {
             file = _fdopen(descriptor, writing ? "ab" : "rb");
             if (!file) _close(descriptor);
@@ -173,8 +168,7 @@ FILE *maage_log_archive_create(const char *path) {
         errno = EINVAL;
         return NULL;
     }
-    handle = CreateFileW(wide, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                         NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    handle = CreateFileW(wide, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     if (handle == INVALID_HANDLE_VALUE) {
         error = GetLastError();
         free(wide);
@@ -182,8 +176,7 @@ FILE *maage_log_archive_create(const char *path) {
         return NULL;
     }
     descriptor = _open_osfhandle((INT_PTR) handle, _O_BINARY);
-    if (descriptor < 0)
-        CloseHandle(handle);
+    if (descriptor < 0) CloseHandle(handle);
     else {
         file = _fdopen(descriptor, "wb");
         if (!file) _close(descriptor);
@@ -306,8 +299,7 @@ int maage_log_archive_time(const char *path, int closing, char timestamp[32]) {
         if (times.modtime == (time_t) -1 || utime(path, &times)) return -1;
         info.st_mtime = times.modtime;
     }
-    if (!localtime_r(&info.st_mtime, &local) ||
-        !strftime(timestamp, 32, "%Y-%m-%d_%H-%M-%S", &local)) return -1;
+    if (!localtime_r(&info.st_mtime, &local) || !strftime(timestamp, 32, "%Y-%m-%d_%H-%M-%S", &local)) return -1;
     return 1;
 }
 int maage_log_archive_publish(const char *path, const char *archive) {
@@ -360,8 +352,7 @@ int maage_log_capture_stdio(FILE *output) {
     ok = 1;
 done:
     failure = errno;
-    if (!ok && rebound && dup2(saved_out, STDOUT_FILENO) < 0)
-        maage_log_platform_diagnostic("Cannot restore stdout after capture failure.");
+    if (!ok && rebound && dup2(saved_out, STDOUT_FILENO) < 0) maage_log_platform_diagnostic("Cannot restore stdout after capture failure.");
     if (saved_out >= 0) close(saved_out);
     if (saved_error >= 0) close(saved_error);
     errno = failure;

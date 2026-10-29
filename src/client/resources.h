@@ -30,24 +30,15 @@ typedef struct maage_client_resources {
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
 typedef maage_status (*maage_client_resource_checkpoint)(void *context, maage_status_trace *trace);
-maage_status maage_client_resources_load(const char *application_data,
-                                         maage_client_resources *resources, maage_biome_registry *biomes,
-                                         const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint,
-                                         void *context, maage_status_trace *trace);
+maage_status maage_client_resources_load(const char *application_data, maage_client_resources *resources, maage_biome_registry *biomes, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace);
 /* Startup-only native icon; external reconstructed artwork is never packaged. */
-maage_status maage_client_resources_set_window_icon(const char *application_data,
-                                                    maage_window *window, maage_status_trace *trace);
+maage_status maage_client_resources_set_window_icon(const char *application_data, maage_window *window, maage_status_trace *trace);
 /* Construct one owning finalized registry set, for integrated Client/Server use.
  * Call after loading the atlas/biome colormaps and finalizing those biomes. */
-maage_status maage_client_content_create(const maage_client_resources *resources,
-                                         const maage_biome_registry *biomes, maage_content **output,
-                                         maage_status_trace *trace);
+maage_status maage_client_content_create(const maage_client_resources *resources, const maage_biome_registry *biomes, maage_content **output, maage_status_trace *trace);
 /* Pure fixed item/inventory color transform; world biome tinting stays in mesh. */
-void maage_client_item_face_tint(const float grass_color[3],
-                                 const maage_block_face_definition *face, unsigned int mode, float color[4]);
-const maage_block_state_definition *maage_client_item_icon_state(
-    const maage_block_registry *blocks, const maage_item_definition *item,
-    unsigned int metadata);
+void maage_client_item_face_tint(const float grass_color[3], const maage_block_face_definition *face, unsigned int mode, float color[4]);
+const maage_block_state_definition *maage_client_item_icon_state(const maage_block_registry *blocks, const maage_item_definition *item, unsigned int metadata);
 const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack);
 maage_texture_id maage_client_item_texture(const maage_item_definition *item, unsigned int metadata);
 maage_status maage_client_resources_destroy(maage_client_resources *resources);

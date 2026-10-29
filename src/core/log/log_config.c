@@ -9,8 +9,7 @@ typedef struct maage_log_config_status {
     char problem[256];
 } maage_log_config_status;
 
-static maage_status maage_log_problem(maage_log_config_status *status,
-                                      maage_status result, const char *message, const char *detail) {
+static maage_status maage_log_problem(maage_log_config_status *status, maage_status result, const char *message, const char *detail) {
     size_t length;
     MAAGE_STATUS_PROPAGATE(&status->trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE);
     if (maage_status_is_success(status->result)) status->result = result;
@@ -47,10 +46,8 @@ static maage_status maage_log_parse_level(const char *text, maage_log_level *lev
 }
 
 static maage_status maage_log_parse_bool(const char *text, int *value) {
-    if (strcmp(text, "true") == 0)
-        *value = 1;
-    else if (strcmp(text, "false") == 0)
-        *value = 0;
+    if (strcmp(text, "true") == 0) *value = 1;
+    else if (strcmp(text, "false") == 0) *value = 0;
     else
         return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
@@ -58,11 +55,9 @@ static maage_status maage_log_parse_bool(const char *text, int *value) {
 
 static maage_status maage_log_path(const char *value) {
     size_t length;
-    if (!value || !*value) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                                    MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0);
+    if (!value || !*value) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0);
     length = strlen(value);
-    if (length >= MAAGE_LOG_PATH_SIZE) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
-                                                                MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0);
+    if (length >= MAAGE_LOG_PATH_SIZE) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0);
     memmove(maage_log_current.path, value, length + 1);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -101,10 +96,8 @@ static maage_status maage_log_read_ini(const char *path, maage_log_config_status
         text = maage_log_trim(line);
         if (!*text || *text == '#' || *text == ';') continue;
         if (*text == '[') {
-            if (strcmp(text, "[logging]") == 0)
-                section = 1;
-            else if (strcmp(text, "[loggers]") == 0)
-                section = 2;
+            if (strcmp(text, "[logging]") == 0) section = 1;
+            else if (strcmp(text, "[loggers]") == 0) section = 2;
             else {
                 section = 0;
                 maage_log_problem(status, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0), "Unknown logging section: ", text);
@@ -120,8 +113,7 @@ static maage_status maage_log_read_ini(const char *path, maage_log_config_status
         key = maage_log_trim(text);
         value = maage_log_trim(separator + 1);
         result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0);
-        if (section == 1)
-            result = maage_log_setting(key, value);
+        if (section == 1) result = maage_log_setting(key, value);
         else if (section == 2 && *key) {
             result = maage_log_parse_level(value, &level);
             if (!maage_status_failed(result)) result = maage_log_override_set(key, level);
@@ -148,8 +140,7 @@ maage_status maage_log_configure(const maage_log_config *defaults, int argc, cha
     maage_log_config_init(config);
     maage_log_path(config->file_path);
     if (defaults) {
-        if (defaults->level >= MAAGE_LOG_VERBOSE && defaults->level <= MAAGE_LOG_OFF)
-            config->level = defaults->level;
+        if (defaults->level >= MAAGE_LOG_VERBOSE && defaults->level <= MAAGE_LOG_OFF) config->level = defaults->level;
         else
             maage_log_problem(&status, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 0), "Invalid default logging level", NULL);
         config->console = defaults->console != 0;
@@ -164,8 +155,7 @@ maage_status maage_log_configure(const maage_log_config *defaults, int argc, cha
     /* Find the INI before applying other CLI overrides. Last argument wins. */
     for (index = 1; argv && index < argc; ++index) {
         if (argv[index] && strncmp(argv[index], "--log-config=", 13) == 0) {
-            if (argv[index][13])
-                ini = argv[index] + 13;
+            if (argv[index][13]) ini = argv[index] + 13;
             else
                 maage_log_problem(&status, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SET, 2), "Empty --log-config path", NULL);
         }
@@ -179,8 +169,7 @@ maage_status maage_log_configure(const maage_log_config *defaults, int argc, cha
             if (maage_status_failed(result)) maage_log_problem(&status, result, "Invalid --log-level: ", argument + 12);
         } else if (strncmp(argument, "--log-file=", 11) == 0) {
             result = maage_log_path(argument + 11);
-            if (!maage_status_failed(result))
-                config->file = 1;
+            if (!maage_status_failed(result)) config->file = 1;
             else
                 maage_log_problem(&status, result, "Invalid --log-file path: ", argument + 11);
         } else if (strncmp(argument, "--log-console=", 14) == 0) {
@@ -196,8 +185,7 @@ maage_status maage_log_configure(const maage_log_config *defaults, int argc, cha
     if (config->file) {
         /* Preserve a prior session before resetting the latest plain file. */
         result = maage_log_rotate(config->file_path, 0, &status.trace);
-        if (!maage_status_failed(result))
-            maage_log_current.output = maage_log_open(config->file_path, "w");
+        if (!maage_status_failed(result)) maage_log_current.output = maage_log_open(config->file_path, "w");
         else
             maage_log_problem(&status, result, "Cannot archive previous logging file: ", config->file_path);
         if (!maage_log_current.output) {
@@ -214,8 +202,7 @@ maage_status maage_log_configure(const maage_log_config *defaults, int argc, cha
         /* Usable settings survive; report the original cause and explicit
          * partial recovery once without recursively entering the log lock. */
         result = maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_INITIALIZE, 0);
-        maage_status_trace_recover(&status.trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_INITIALIZE,
-                                   __FILE__, (unsigned long) __LINE__);
+        maage_status_trace_recover(&status.trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_INITIALIZE, __FILE__, (unsigned long) __LINE__);
         maage_log_format_status(status.result, &status.trace, status.problem, message, sizeof(message));
         console = config->console;
         if (!maage_log_current.output) config->console = 1;

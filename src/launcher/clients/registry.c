@@ -31,8 +31,7 @@ static int maage_client_id(const char *s) {
 /* Descriptors stay small; registries can grow within a bounded JSON byte budget. */
 #define MAAGE_CLIENT_DESCRIPTOR_BYTES (256UL * 1024UL)
 #define MAAGE_CLIENT_REGISTRY_BYTES (16UL * 1024UL * 1024UL)
-static maage_status maage_client_json(const char *path, size_t limit,
-                                      struct json_object **output, maage_status_trace *trace) {
+static maage_status maage_client_json(const char *path, size_t limit, struct json_object **output, maage_status_trace *trace) {
     char *data;
     FILE *file;
     long length;
@@ -41,24 +40,19 @@ static maage_status maage_client_json(const char *path, size_t limit,
     *output = NULL;
     errno = 0;
     file = maage_storage_open(path, "rb");
-    if (!file) return MAAGE_STATUS_PROPAGATE(trace,
-                                             maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN),
-                                             MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
+    if (!file) return MAAGE_STATUS_PROPAGATE(trace, maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     if (fseek(file, 0, SEEK_END) || (length = ftell(file)) < 0 || fseek(file, 0, SEEK_SET)) {
         fclose(file);
-        return MAAGE_STATUS_TRACE(trace,
-                                  maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     if ((unsigned long) length > limit) {
         fclose(file);
-        return MAAGE_STATUS_TRACE(trace,
-                                  maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_PARSE, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     data = (char *) malloc((size_t) length + 1);
     if (!data) {
         fclose(file);
-        return MAAGE_STATUS_TRACE(trace,
-                                  maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     received = fread(data, 1, (size_t) length, file);
     result = received == (size_t) length && !ferror(file) ? maage_access_json(data, received, output) : maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0);
@@ -72,12 +66,8 @@ static maage_status maage_client_json(const char *path, size_t limit,
 }
 static maage_status maage_client_launch_contract(struct json_object *o, maage_status_trace *trace) {
     struct json_object *value;
-    if (!json_object_object_get_ex(o, "instance_storage", &value) ||
-        !json_object_is_type(value, json_type_int) || json_object_get_int(value) != 1)
-        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
-    if (!json_object_object_get_ex(o, "player_appearance", &value) ||
-        !json_object_is_type(value, json_type_int) || json_object_get_int(value) != 1)
-        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    if (!json_object_object_get_ex(o, "instance_storage", &value) || !json_object_is_type(value, json_type_int) || json_object_get_int(value) != 1) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    if (!json_object_object_get_ex(o, "player_appearance", &value) || !json_object_is_type(value, json_type_int) || json_object_get_int(value) != 1) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VALIDATE, 0);
 }
 static maage_status maage_client_fields(struct json_object *o, maage_client_build *b, maage_status_trace *trace) {
@@ -99,8 +89,7 @@ static maage_status maage_client_fields(struct json_object *o, maage_client_buil
     }
 }
 static maage_status maage_client_executable(const char *package, const maage_client_build *b, char path[MAAGE_PATH_CAPACITY], maage_status_trace *trace) {
-    if (!maage_storage_directory_exists(package)) return MAAGE_STATUS_PROPAGATE(trace,
-                                                                                maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
+    if (!maage_storage_directory_exists(package)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
     return MAAGE_STATUS_PROPAGATE(trace, maage_storage_join(path, MAAGE_PATH_CAPACITY, package, b->executable), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
 }
 static maage_status maage_client_identity(maage_client_build *b, maage_status_trace *trace) {
@@ -142,8 +131,7 @@ static maage_status maage_client_inspect(const char *package, maage_client_build
     if (!maage_storage_directory_exists(package) || maage_status_failed(child_result = maage_storage_join(path, sizeof(path), package, MAAGE_CLIENT_DESCRIPTOR))) goto failed;
     child_result = maage_client_json(path, MAAGE_CLIENT_DESCRIPTOR_BYTES, &o, trace);
     if (maage_status_failed(child_result)) goto failed;
-    ok = o && json_object_object_get_ex(o, "schema", &v) && json_object_is_type(v, json_type_int) && json_object_get_int(v) == 1 &&
-         !strcmp(maage_access_json_string(o, "application"), "maage-client") && (!maage_status_failed(child_result = maage_client_fields(o, b, trace)));
+    ok = o && json_object_object_get_ex(o, "schema", &v) && json_object_is_type(v, json_type_int) && json_object_get_int(v) == 1 && !strcmp(maage_access_json_string(o, "application"), "maage-client") && (!maage_status_failed(child_result = maage_client_fields(o, b, trace)));
     /* No network protocol has been implemented; do not claim compatibility. */
     if (ok && json_object_object_get_ex(o, "protocol", &v) && v) ok = json_object_is_type(v, json_type_null);
     if (o) json_object_put(o);
@@ -193,12 +181,10 @@ maage_status maage_clients_path(const maage_client_registry *r, const char *id, 
     if (!r || !id || !path) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
     index = maage_clients_find(r, id);
     if (index < 0) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
-    if (!r->builds[index].available)
-        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
+    if (!r->builds[index].available) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
     result = maage_client_package(r, id, package, trace);
     if (!maage_status_failed(result)) result = maage_client_executable(package, &r->builds[index], path, trace);
-    if (!maage_status_failed(result) && !maage_client_executable_file(path)) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED,
-                                                                                                        MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
+    if (!maage_status_failed(result) && !maage_client_executable_file(path)) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE);
 }
 void maage_client_build_label(const maage_client_build *b, char label[384]) {
@@ -288,9 +274,7 @@ static maage_status maage_client_save(maage_client_registry *r, maage_status_tra
     list = NULL;
     text = json_object_to_json_string_ext(o, JSON_C_TO_STRING_PRETTY);
     if (!text || strlen(text) > MAAGE_CLIENT_REGISTRY_BYTES) goto failed;
-    if ((!maage_status_failed(child_result = maage_storage_join(path, sizeof(path), r->root, "config/client-builds.json"))) &&
-        (!maage_status_failed(child_result = maage_storage_join(tmp, sizeof(tmp), r->root, "config/client-builds.json.tmp"))) &&
-        (f = maage_storage_open(tmp, "wb")) != NULL) {
+    if ((!maage_status_failed(child_result = maage_storage_join(path, sizeof(path), r->root, "config/client-builds.json"))) && (!maage_status_failed(child_result = maage_storage_join(tmp, sizeof(tmp), r->root, "config/client-builds.json.tmp"))) && (f = maage_storage_open(tmp, "wb")) != NULL) {
         ok = fwrite(text, 1, strlen(text), f) == strlen(text);
         if (ok) {
             child_result = maage_storage_sync(f);
@@ -299,8 +283,7 @@ static maage_status maage_client_save(maage_client_registry *r, maage_status_tra
         if (fclose(f)) ok = 0;
         if (ok) ok = !maage_status_failed(child_result = maage_storage_replace(tmp, path));
         if (!ok) maage_storage_remove(tmp);
-    } else if (!maage_status_failed(child_result))
-        child_result = maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN);
+    } else if (!maage_status_failed(child_result)) child_result = maage_status_from_errno(errno ? errno : EIO, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN);
 failed:
     if (list) json_object_put(list);
     if (o) json_object_put(o);
@@ -330,16 +313,14 @@ static maage_status maage_clients_read(maage_client_registry *r, const char *roo
     memset(r, 0, sizeof(*r));
     if (strlen(root) >= sizeof(r->root)) return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
     strcpy(r->root, root);
-    if (maage_status_failed(child_result = maage_storage_join(path, sizeof(path), root, "config")) || maage_status_failed(child_result = maage_storage_directories(path)) ||
-        maage_status_failed(child_result = maage_storage_join(path, sizeof(path), root, "config/client-builds.json"))) return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
+    if (maage_status_failed(child_result = maage_storage_join(path, sizeof(path), root, "config")) || maage_status_failed(child_result = maage_storage_directories(path)) || maage_status_failed(child_result = maage_storage_join(path, sizeof(path), root, "config/client-builds.json"))) return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
     if (!maage_client_file_kind(path)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     child_result = maage_client_json(path, MAAGE_CLIENT_REGISTRY_BYTES, &o, trace);
     if (maage_status_failed(child_result)) {
         strcpy(error, "Cannot read Client registry. Restore config/client-builds.json before managing builds.");
         return MAAGE_STATUS_PROPAGATE(trace, child_result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
-    if (!o || !json_object_object_get_ex(o, "schema", &v) || !json_object_is_type(v, json_type_int) || json_object_get_int(v) != 1 ||
-        !json_object_object_get_ex(o, "builds", &list) || !json_object_is_type(list, json_type_array)) {
+    if (!o || !json_object_object_get_ex(o, "schema", &v) || !json_object_is_type(v, json_type_int) || json_object_get_int(v) != 1 || !json_object_object_get_ex(o, "builds", &list) || !json_object_is_type(list, json_type_array)) {
         if (o) json_object_put(o);
         strcpy(error, "Cannot read Client registry. Restore config/client-builds.json before managing builds.");
         return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
@@ -358,8 +339,7 @@ static maage_status maage_clients_read(maage_client_registry *r, const char *roo
         maage_client_build *item = &r->builds[r->count];
         b = json_object_array_get_idx(list, i);
         memset(item, 0, sizeof(*item));
-        if (maage_status_failed(child_result = maage_client_fields(b, item, trace)) || maage_status_failed(child_result = maage_client_text(b, "id", item->id, sizeof(item->id), 0, trace)) || !maage_client_id(item->id) ||
-            maage_status_failed(child_result = maage_client_text(b, "origin", item->origin, sizeof(item->origin), 0, trace)) || (strcmp(item->origin, "local") && strcmp(item->origin, "remote")) || maage_clients_find(r, item->id) >= 0) goto invalid;
+        if (maage_status_failed(child_result = maage_client_fields(b, item, trace)) || maage_status_failed(child_result = maage_client_text(b, "id", item->id, sizeof(item->id), 0, trace)) || !maage_client_id(item->id) || maage_status_failed(child_result = maage_client_text(b, "origin", item->origin, sizeof(item->origin), 0, trace)) || (strcmp(item->origin, "local") && strcmp(item->origin, "remote")) || maage_clients_find(r, item->id) >= 0) goto invalid;
         candidate = *item;
         if (maage_status_failed(child_result = maage_client_identity(&candidate, trace)) || strcmp(candidate.id, item->id)) goto invalid;
         if (json_object_object_get_ex(b, "imported", &v)) item->imported = json_object_get_double(v);
@@ -394,16 +374,14 @@ maage_status maage_clients_load(maage_client_registry *r, const char *root, char
     *r = next;
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
 }
-static maage_status maage_client_lock(maage_client_registry *r,
-                                      maage_storage_lock **output, maage_status_trace *trace) {
+static maage_status maage_client_lock(maage_client_registry *r, maage_storage_lock **output, maage_status_trace *trace) {
     char path[MAAGE_PATH_CAPACITY];
     maage_status result = maage_storage_join(path, sizeof(path), r->root, "config/client-builds.lock");
     *output = NULL;
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_ACQUIRE);
     return maage_storage_acquire(path, output, trace);
 }
-static maage_status maage_client_unlock(maage_storage_lock *lock, maage_status result,
-                                        unsigned char operation, maage_status_trace *trace) {
+static maage_status maage_client_unlock(maage_storage_lock *lock, maage_status result, unsigned char operation, maage_status_trace *trace) {
     maage_status closed;
     MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
     closed = maage_storage_release(lock);
@@ -446,8 +424,7 @@ done:
             child_result = maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE, 0);
         } else
             child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REMOVE, 0);
-    } else if (!maage_status_failed(child_result))
-        child_result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE, 0);
+    } else if (!maage_status_failed(child_result)) child_result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE, 0);
     return maage_client_unlock(lock, child_result, MAAGE_OPERATION_REMOVE, trace);
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
@@ -497,8 +474,7 @@ maage_status maage_clients_import(maage_client_registry *r, const maage_client_c
         strcpy(error, "This exact Client build is already registered. Select it, or remove it before importing a replacement.");
         goto done;
     }
-    if (maage_status_failed(child_result = maage_storage_join(staging, sizeof(staging), r->root, "clients")) || maage_status_failed(child_result = maage_storage_directories(staging)) ||
-        maage_status_failed(child_result = maage_client_directory(current, verified.id, destination, trace))) goto done;
+    if (maage_status_failed(child_result = maage_storage_join(staging, sizeof(staging), r->root, "clients")) || maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_client_directory(current, verified.id, destination, trace))) goto done;
     /* A stale unregistered package must never be silently overwritten. */
     if (maage_client_file_kind(destination)) {
         strcpy(error, "An unregistered package already occupies this build directory. Resolve it before retrying import.");
@@ -512,8 +488,7 @@ maage_status maage_clients_import(maage_client_registry *r, const maage_client_c
     if (maage_status_failed(child_result = maage_storage_join(staging, sizeof(staging), r->root, "clients/.import"))) goto done;
     if (maage_client_file_kind(staging) && maage_status_failed(child_result = maage_client_remove_tree(staging, trace))) goto done;
     staging_owned = 1;
-    if (maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_storage_join(package, sizeof(package), staging, MAAGE_CLIENT_PAYLOAD)) ||
-        maage_status_failed(child_result = maage_client_copy_tree(c->source, package, trace))) {
+    if (maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_storage_join(package, sizeof(package), staging, MAAGE_CLIENT_PAYLOAD)) || maage_status_failed(child_result = maage_client_copy_tree(c->source, package, trace))) {
         strcpy(error, "Cannot copy Client package. Escaping links, reparse points, special files, oversized trees and unreadable files are unsupported; check package permissions.");
         goto done;
     }
@@ -526,8 +501,7 @@ maage_status maage_clients_import(maage_client_registry *r, const maage_client_c
     if (current->count >= current->capacity) {
         unsigned capacity = current->capacity ? current->capacity * 2 : 8;
         maage_client_build *grown;
-        if (capacity <= current->capacity || (size_t) capacity > (size_t) - 1 / sizeof(*grown) ||
-            !(grown = (maage_client_build *) realloc(current->builds, (size_t) capacity * sizeof(*grown)))) {
+        if (capacity <= current->capacity || (size_t) capacity > (size_t) - 1 / sizeof(*grown) || !(grown = (maage_client_build *) realloc(current->builds, (size_t) capacity * sizeof(*grown)))) {
             strcpy(error, "Cannot grow Client registry; check available memory.");
             goto done;
         }
@@ -552,10 +526,8 @@ done:
     }
     maage_clients_dispose(current);
     free(current);
-    if (ok)
-        child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
-    else if (!maage_status_failed(child_result))
-        child_result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REGISTER, 0);
+    if (ok) child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+    else if (!maage_status_failed(child_result)) child_result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REGISTER, 0);
     return maage_client_unlock(lock, child_result, MAAGE_OPERATION_REGISTER, trace);
 }
 #endif

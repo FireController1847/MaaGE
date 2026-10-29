@@ -3,8 +3,7 @@
 #include <string.h>
 
 maage_status maage_window_config_init(maage_window_config *config) {
-    if (!config) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                          MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!config) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     memset(config, 0, sizeof(*config));
     config->title = "MaaGE";
     config->width = 1000;
@@ -14,13 +13,11 @@ maage_status maage_window_config_init(maage_window_config *config) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
-static maage_status maage_window_try_backend(maage_window_system *system,
-                                             const maage_window_backend_api *api, maage_status_trace *trace) {
+static maage_status maage_window_try_backend(maage_window_system *system, const maage_window_backend_api *api, maage_status_trace *trace) {
     maage_status result;
     system->api = api;
     result = api->init(system);
-    if (maage_status_code(result) == MAAGE_STATUS_NOOP)
-        result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
+    if (maage_status_code(result) == MAAGE_STATUS_NOOP) result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     if (maage_status_failed(result)) {
         api->shutdown(system);
         system->platform = NULL;
@@ -30,8 +27,7 @@ static maage_status maage_window_try_backend(maage_window_system *system,
     return result;
 }
 
-maage_status maage_window_system_create(maage_window_backend backend,
-                                        maage_window_system **output, maage_status_trace *trace) {
+maage_status maage_window_system_create(maage_window_backend backend, maage_window_system **output, maage_status_trace *trace) {
     maage_window_system *system;
     maage_status result;
     int recovered = 0;
@@ -48,8 +44,7 @@ maage_status maage_window_system_create(maage_window_backend backend,
         result = maage_window_try_backend(system, &maage_window_cocoa_api, trace);
 #else
 #if defined(MAAGE_WINDOW_HAS_WAYLAND)
-    if (backend == MAAGE_WINDOW_WAYLAND || (backend == MAAGE_WINDOW_AUTO &&
-                                            (getenv("WAYLAND_DISPLAY") || getenv("WAYLAND_SOCKET")))) {
+    if (backend == MAAGE_WINDOW_WAYLAND || (backend == MAAGE_WINDOW_AUTO && (getenv("WAYLAND_DISPLAY") || getenv("WAYLAND_SOCKET")))) {
         result = maage_window_try_backend(system, &maage_window_wayland_api, trace);
         recovered = maage_status_failed(result);
     }
@@ -83,8 +78,7 @@ maage_status maage_window_system_destroy(maage_window_system *system) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
-maage_status maage_window_create(maage_window_system *system,
-                                 const maage_window_config *config, maage_window **output, maage_status_trace *trace) {
+maage_status maage_window_create(maage_window_system *system, const maage_window_config *config, maage_window **output, maage_status_trace *trace) {
     maage_window *window;
     maage_status result;
     if (!output) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE, 2), MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE);
@@ -188,12 +182,9 @@ maage_status maage_window_get_input(maage_window *window, maage_input_snapshot *
 
 maage_status maage_window_set_cursor(maage_window *window, maage_window_cursor cursor) {
     maage_status result;
-    if (!window || (cursor != MAAGE_WINDOW_CURSOR_ARROW && cursor != MAAGE_WINDOW_CURSOR_POINTER))
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (window->cursor == cursor)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (!window->system->api->cursor)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window || (cursor != MAAGE_WINDOW_CURSOR_ARROW && cursor != MAAGE_WINDOW_CURSOR_POINTER)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (window->cursor == cursor) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window->system->api->cursor) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     result = window->system->api->cursor(window, cursor);
     if (maage_status_is_success(result)) window->cursor = cursor;
     return result;
@@ -237,15 +228,11 @@ maage_status maage_window_release_surface(maage_window *window) {
 
 maage_status maage_window_present_pixels(maage_window *window, const maage_pixel_buffer *buffer) {
     size_t row;
-    if (!window || !window->surface_owned || !buffer || !buffer->pixels ||
-        buffer->width <= 0 || buffer->height <= 0 || (size_t) buffer->width > (size_t) - 1 / 4)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
+    if (!window || !window->surface_owned || !buffer || !buffer->pixels || buffer->width <= 0 || buffer->height <= 0 || (size_t) buffer->width > (size_t) - 1 / 4) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     row = (size_t) buffer->width * 4;
-    if (buffer->stride < row || buffer->stride > (size_t) - 1 / (size_t) buffer->height)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
+    if (buffer->stride < row || buffer->stride > (size_t) - 1 / (size_t) buffer->height) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     if (!window->system->api->pixels) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
-    if (buffer->width != window->state.framebuffer_width || buffer->height != window->state.framebuffer_height)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
+    if (buffer->width != window->state.framebuffer_width || buffer->height != window->state.framebuffer_height) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);
     return window->system->api->pixels(window, buffer);
 }
 
@@ -255,20 +242,14 @@ maage_status maage_window_set_title(maage_window *window, const char *title) {
 }
 maage_status maage_window_set_icon(maage_window *window, const maage_window_icon *icon) {
     size_t i, row;
-    if (!window || !icon || (!icon->native_path && !icon->image_count) ||
-        (icon->native_path && !*icon->native_path) || (icon->image_count && !icon->images))
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window || !icon || (!icon->native_path && !icon->image_count) || (icon->native_path && !*icon->native_path) || (icon->image_count && !icon->images)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     for (i = 0; i < icon->image_count; ++i) {
         const maage_pixel_buffer *image = &icon->images[i];
-        if (!image->pixels || image->width <= 0 || image->height <= 0 ||
-            (size_t) image->width > (size_t) - 1 / 4)
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        if (!image->pixels || image->width <= 0 || image->height <= 0 || (size_t) image->width > (size_t) - 1 / 4) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
         row = (size_t) image->width * 4;
-        if (image->stride < row || image->stride > (size_t) - 1 / (size_t) image->height)
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        if (image->stride < row || image->stride > (size_t) - 1 / (size_t) image->height) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     }
-    if (!window->system->api->icon)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window->system->api->icon) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     return window->system->api->icon(window, icon);
 }
 maage_status maage_window_set_visible(maage_window *window, int visible) {
@@ -284,8 +265,7 @@ maage_status maage_window_resize(maage_window *window, int width, int height) {
     return window->system->api->resize(window, width, height);
 }
 maage_status maage_window_set_mode(maage_window *window, maage_window_mode mode) {
-    if (!window || mode < MAAGE_WINDOW_WINDOWED || mode > MAAGE_WINDOW_NATIVE_FULLSCREEN)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!window || mode < MAAGE_WINDOW_WINDOWED || mode > MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     return window->system->api->mode(window, mode);
 }
 maage_status maage_window_get_native(maage_window *window, maage_window_native *native) {

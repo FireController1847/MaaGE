@@ -18,8 +18,7 @@ static int maage_log_archive_equal(FILE *left, FILE *right) {
 static maage_status maage_log_archive_problem(maage_status_trace *trace, unsigned char operation) {
     int native = errno;
     maage_status result = native ? maage_status_from_errno(native, MAAGE_CONTEXT_CORE, operation) : maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CORE, operation, 0);
-    return maage_status_trace_record(trace, result, MAAGE_CONTEXT_CORE, operation,
-                                     __FILE__, (unsigned long) __LINE__, (long) native);
+    return maage_status_trace_record(trace, result, MAAGE_CONTEXT_CORE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
 }
 maage_status maage_log_rotate(const char *path, int closing, maage_status_trace *trace) {
     char archive[MAAGE_LOG_PATH_SIZE + 64], temporary[MAAGE_LOG_PATH_SIZE + 64], timestamp[32];
@@ -52,8 +51,7 @@ maage_status maage_log_rotate(const char *path, int closing, maage_status_trace 
     result = maage_gzip_compress(input, output, trace);
     if (fclose(input) && !maage_status_failed(result)) result = maage_log_archive_problem(trace, MAAGE_OPERATION_CLOSE);
     input = NULL;
-    if (!maage_status_failed(result) && !maage_log_archive_sync(output))
-        result = maage_log_archive_problem(trace, MAAGE_OPERATION_WRITE);
+    if (!maage_status_failed(result) && !maage_log_archive_sync(output)) result = maage_log_archive_problem(trace, MAAGE_OPERATION_WRITE);
     if (fclose(output) && !maage_status_failed(result)) result = maage_log_archive_problem(trace, MAAGE_OPERATION_CLOSE);
     output = NULL;
     if (maage_status_failed(result)) goto done;
@@ -69,8 +67,7 @@ maage_status maage_log_rotate(const char *path, int closing, maage_status_trace 
     stem = (size_t) (extension - path);
     result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_RENAME, 0);
     for (sequence = 0; sequence <= 99999; ++sequence) {
-        if (!sequence)
-            sprintf(archive, "%.*s.%s%s.gz", (int) stem, path, timestamp, extension);
+        if (!sequence) sprintf(archive, "%.*s.%s%s.gz", (int) stem, path, timestamp, extension);
         else
             sprintf(archive, "%.*s.%s.%u%s.gz", (int) stem, path, timestamp, sequence, extension);
         existing = maage_log_open(archive, "rb");

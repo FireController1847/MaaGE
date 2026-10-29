@@ -44,31 +44,24 @@ static int select_format(const WAVEFORMATEX *w) {
     if (tag == WAVE_FORMAT_EXTENSIBLE) {
         const WAVEFORMATEXTENSIBLE *e = (const WAVEFORMATEXTENSIBLE *) w;
         if (w->cbSize < 22) return 0;
-        if (!memcmp(&e->SubFormat, &maage_wasapi_float, sizeof(GUID)))
-            tag = WAVE_FORMAT_IEEE_FLOAT;
-        else if (!memcmp(&e->SubFormat, &maage_wasapi_pcm, sizeof(GUID)))
-            tag = WAVE_FORMAT_PCM;
+        if (!memcmp(&e->SubFormat, &maage_wasapi_float, sizeof(GUID))) tag = WAVE_FORMAT_IEEE_FLOAT;
+        else if (!memcmp(&e->SubFormat, &maage_wasapi_pcm, sizeof(GUID))) tag = WAVE_FORMAT_PCM;
         else
             return 0;
     }
-    if (tag == WAVE_FORMAT_IEEE_FLOAT && w->wBitsPerSample == 32 &&
-        w->nBlockAlign == w->nChannels * sizeof(float)) return 1;
-    if (tag == WAVE_FORMAT_PCM && w->wBitsPerSample == 16 &&
-        w->nBlockAlign == w->nChannels * sizeof(short)) return 2;
+    if (tag == WAVE_FORMAT_IEEE_FLOAT && w->wBitsPerSample == 32 && w->nBlockAlign == w->nChannels * sizeof(float)) return 1;
+    if (tag == WAVE_FORMAT_PCM && w->wBitsPerSample == 16 && w->nBlockAlign == w->nChannels * sizeof(short)) return 2;
     return 0;
 }
-static void convert_output(BYTE *destination, const WAVEFORMATEX *format,
-                           unsigned int sample_type, const float *stereo, unsigned int frames) {
+static void convert_output(BYTE *destination, const WAVEFORMATEX *format, unsigned int sample_type, const float *stereo, unsigned int frames) {
     unsigned int i, j, channels = format->nChannels;
     float value;
     for (i = 0; i < frames; ++i)
         for (j = 0; j < channels; ++j) {
             value = j == 0 ? stereo[2 * i] : (j == 1 ? stereo[2 * i + 1] : 0.0f);
             if (channels == 1) value = 0.5f * (stereo[2 * i] + stereo[2 * i + 1]);
-            if (sample_type == 1)
-                ((float *) destination)[i * channels + j] = value;
-            else
-                ((signed short *) destination)[i * channels + j] = (signed short) (value * 32767.0f);
+            if (sample_type == 1) ((float *) destination)[i * channels + j] = value;
+            else ((signed short *) destination)[i * channels + j] = (signed short) (value * 32767.0f);
         }
 }
 static void wasapi_worker(void *context) {
@@ -84,30 +77,25 @@ static void wasapi_worker(void *context) {
     int initialized = 0, started = 0, running;
     unsigned int sample_type = 0;
     float scratch[2048];
-    maage_status result = maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE,
-                                             MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+    maage_status result = maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
     hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) goto finish;
     initialized = 1;
-    hr = CoCreateInstance(&maage_wasapi_enumerator_class, NULL, CLSCTX_INPROC_SERVER,
-                          &maage_wasapi_enumerator_interface, (void **) &enumerator);
+    hr = CoCreateInstance(&maage_wasapi_enumerator_class, NULL, CLSCTX_INPROC_SERVER, &maage_wasapi_enumerator_interface, (void **) &enumerator);
     if (FAILED(hr)) goto finish;
     hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(enumerator, eRender, eConsole, &device);
     if (FAILED(hr)) goto finish;
-    hr = IMMDevice_Activate(device, &maage_wasapi_client_interface, CLSCTX_INPROC_SERVER,
-                            NULL, (void **) &client);
+    hr = IMMDevice_Activate(device, &maage_wasapi_client_interface, CLSCTX_INPROC_SERVER, NULL, (void **) &client);
     if (FAILED(hr)) goto finish;
     hr = IAudioClient_GetMixFormat(client, &format);
     if (FAILED(hr)) goto finish;
     sample_type = select_format(format);
     if (!sample_type) {
-        result = maage_audio_result(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED,
-                                    MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+        result = maage_audio_result(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
         hr = E_NOTIMPL;
         goto finish;
     }
-    hr = IAudioClient_Initialize(client, AUDCLNT_SHAREMODE_SHARED,
-                                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 1000000, 0, format, NULL);
+    hr = IAudioClient_Initialize(client, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 1000000, 0, format, NULL);
     if (FAILED(hr)) goto finish;
     hr = IAudioClient_GetBufferSize(client, &capacity);
     if (FAILED(hr) || !capacity) goto finish;
@@ -163,10 +151,7 @@ static void wasapi_worker(void *context) {
     maage_mutex_lock(s->mutex);
     running = !s->stop;
     maage_mutex_unlock(s->mutex);
-    if (running) maage_audio_backend_fail(s->audio,
-                                          maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_PRESENT,
-                                                             MAAGE_DETAIL_AUDIO_DEVICE_LOST),
-                                          (long) hr);
+    if (running) maage_audio_backend_fail(s->audio, maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_PRESENT, MAAGE_DETAIL_AUDIO_DEVICE_LOST), (long) hr);
 finish:
     if (started) IAudioClient_Stop(client);
     if (format) CoTaskMemFree(format);

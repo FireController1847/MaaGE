@@ -173,8 +173,7 @@ typedef struct maage_status_definition {
     (((maage_status) (status) << 24) |                          \
      ((maage_status) ((status) < 0x40 ? 0 : (context)) << 16) | \
      ((maage_status) (operation) << 8) | (maage_status) (detail))
-maage_status maage_status_make(unsigned char status, unsigned char context,
-                               unsigned char operation, unsigned char detail);
+maage_status maage_status_make(unsigned char status, unsigned char context, unsigned char operation, unsigned char detail);
 unsigned char maage_status_code(maage_status result);
 unsigned char maage_status_context(maage_status result);
 unsigned char maage_status_operation(maage_status result);
@@ -198,10 +197,8 @@ size_t maage_status_format(maage_status result, char *buffer, size_t capacity);
 
 /* Native values remain separate, never truncated into the detail byte. The
  * translators are portable numeric boundaries; zero translates to SUCCESS. */
-maage_status maage_status_from_errno(int native_code, unsigned char context,
-                                     unsigned char operation);
-maage_status maage_status_from_win32(unsigned long native_code,
-                                     unsigned char context, unsigned char operation);
+maage_status maage_status_from_errno(int native_code, unsigned char context, unsigned char operation);
+maage_status maage_status_from_win32(unsigned long native_code, unsigned char context, unsigned char operation);
 
 /* Caller/task-owned bounded causal record, copied by value across jobs. It
  * owns no heap or dynamic strings: source names MUST have static lifetime.
@@ -229,20 +226,13 @@ typedef struct maage_status_trace {
     maage_status_trace_frame frames[MAAGE_STATUS_TRACE_CAPACITY];
 } maage_status_trace;
 void maage_status_trace_init(maage_status_trace *trace);
-maage_status maage_status_trace_record(maage_status_trace *trace,
-                                       maage_status result, unsigned char context, unsigned char operation,
-                                       const char *static_file, unsigned long line, long native_code);
-maage_status maage_status_trace_propagate(maage_status_trace *trace,
-                                          maage_status result, unsigned char context, unsigned char operation,
-                                          const char *static_file, unsigned long line);
-maage_status maage_status_trace_recover(maage_status_trace *trace,
-                                        maage_status recovery, unsigned char context, unsigned char operation,
-                                        const char *static_file, unsigned long line);
+maage_status maage_status_trace_record(maage_status_trace *trace, maage_status result, unsigned char context, unsigned char operation, const char *static_file, unsigned long line, long native_code);
+maage_status maage_status_trace_propagate(maage_status_trace *trace, maage_status result, unsigned char context, unsigned char operation, const char *static_file, unsigned long line);
+maage_status maage_status_trace_recover(maage_status_trace *trace, maage_status recovery, unsigned char context, unsigned char operation, const char *static_file, unsigned long line);
 /* Formats indented chronological causal frames, native/source context and
  * outcome/recovery. Returns required characters; always NUL-terminates nonempty output.
  * Formatting is explicit and allocation-free, including in Release builds. */
-size_t maage_status_trace_format(const maage_status_trace *trace,
-                                 char *buffer, size_t capacity);
+size_t maage_status_trace_format(const maage_status_trace *trace, char *buffer, size_t capacity);
 #define MAAGE_STATUS_TRACE(trace, result, context, operation)            \
     maage_status_trace_record((trace), (result), (context), (operation), \
                               __FILE__, (unsigned long) __LINE__, 0)

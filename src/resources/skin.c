@@ -11,8 +11,7 @@ static int maage_skin_hex(const char *text, size_t count) {
 }
 int maage_skin_reference_valid(const maage_skin_reference *reference) {
     size_t length;
-    if (!reference || !memchr(reference->uuid, 0, sizeof(reference->uuid)) ||
-        !memchr(reference->name, 0, sizeof(reference->name)) || !memchr(reference->texture, 0, sizeof(reference->texture))) return 0;
+    if (!reference || !memchr(reference->uuid, 0, sizeof(reference->uuid)) || !memchr(reference->name, 0, sizeof(reference->name)) || !memchr(reference->texture, 0, sizeof(reference->texture))) return 0;
     length = strlen(reference->name);
     return maage_skin_hex(reference->uuid, 32) && strspn(reference->uuid, "0") != 32 &&
            length >= 1 && length <= 16 && strspn(reference->name, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_") == length &&
@@ -35,10 +34,8 @@ maage_status maage_skin_reference_parse(const char *text, maage_skin_reference *
     ++model;
     texture = strchr(model, ':');
     if (!texture) goto invalid;
-    if (texture - model == 4 && !strncmp(model, "slim", 4))
-        parsed.model = MAAGE_SKIN_SLIM;
-    else if (texture - model != 7 || strncmp(model, "classic", 7))
-        goto invalid;
+    if (texture - model == 4 && !strncmp(model, "slim", 4)) parsed.model = MAAGE_SKIN_SLIM;
+    else if (texture - model != 7 || strncmp(model, "classic", 7)) goto invalid;
     ++texture;
     if (strcmp(texture, "-")) {
         if (strlen(texture) != 64) goto invalid;
@@ -50,25 +47,21 @@ maage_status maage_skin_reference_parse(const char *text, maage_skin_reference *
 invalid:
     return maage_skin_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_PARSE);
 }
-maage_status maage_skin_reference_format(const maage_skin_reference *reference,
-                                         char text[MAAGE_SKIN_ARGUMENT_CAPACITY]) {
+maage_status maage_skin_reference_format(const maage_skin_reference *reference, char text[MAAGE_SKIN_ARGUMENT_CAPACITY]) {
     if (!text || !maage_skin_reference_valid(reference)) return maage_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FORMAT);
     sprintf(text, "1:%s:%s:%s:%s", reference->uuid, reference->name,
             reference->model == MAAGE_SKIN_SLIM ? "slim" : "classic", *reference->texture ? reference->texture : "-");
     return maage_skin_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FORMAT);
 }
-maage_status maage_skin_path(const char *root, const maage_skin_reference *reference,
-                             char path[MAAGE_PATH_CAPACITY]) {
+maage_status maage_skin_path(const char *root, const maage_skin_reference *reference, char path[MAAGE_PATH_CAPACITY]) {
     char relative[160], directory[MAAGE_PATH_CAPACITY];
     static const char *const parents[2] = {"minecraft", "minecraft/skins"};
     unsigned int i;
     int kind;
     maage_status result;
-    if (!root || !path || !maage_skin_reference_valid(reference) || !*reference->texture)
-        return maage_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    if (!root || !path || !maage_skin_reference_valid(reference) || !*reference->texture) return maage_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     for (i = 0; i < 3; ++i) {
-        if (i < 2)
-            result = maage_storage_join(directory, sizeof(directory), root, parents[i]);
+        if (i < 2) result = maage_storage_join(directory, sizeof(directory), root, parents[i]);
         else {
             sprintf(relative, "minecraft/skins/%s", reference->uuid);
             result = maage_storage_join(directory, sizeof(directory), root, relative);
@@ -90,8 +83,7 @@ static void maage_skin_mirror(maage_image *image, int sx, int sy, int dx, int dy
     int x, y;
     for (y = 0; y < height; ++y)
         for (x = 0; x < width; ++x)
-            memcpy(image->pixels + (size_t) (dy + y) * image->stride + (size_t) (dx + x) * 4,
-                   image->pixels + (size_t) (sy + y) * image->stride + (size_t) (sx + width - 1 - x) * 4, 4);
+            memcpy(image->pixels + (size_t) (dy + y) * image->stride + (size_t) (dx + x) * 4, image->pixels + (size_t) (sy + y) * image->stride + (size_t) (sx + width - 1 - x) * 4, 4);
 }
 maage_status maage_skin_load(const char *path, unsigned int model, maage_image *image, maage_status_trace *trace) {
     static const unsigned char signature[16] = {137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82};
@@ -101,8 +93,7 @@ maage_status maage_skin_load(const char *path, unsigned int model, maage_image *
     maage_status result;
     FILE *file;
     int legacy, x, y, transparent = 0;
-    if (!path || !image || image->pixels || model > MAAGE_SKIN_SLIM)
-        return maage_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_DECODE);
+    if (!path || !image || image->pixels || model > MAAGE_SKIN_SLIM) return maage_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_DECODE);
     result = maage_storage_stat(path, &size, fingerprint);
     if (maage_status_failed(result)) goto done;
     if (size < 33 || size > MAAGE_SKIN_MAX_BYTES) {
@@ -116,8 +107,7 @@ maage_status maage_skin_load(const char *path, unsigned int model, maage_image *
     }
     x = fread(header, 1, sizeof(header), file) == sizeof(header);
     y = fclose(file);
-    if (!x || y || memcmp(header, signature, sizeof(signature)) || header[16] || header[17] || header[18] || header[19] != 64 ||
-        header[20] || header[21] || header[22] || (header[23] != 32 && header[23] != 64) || (header[23] == 32 && model != MAAGE_SKIN_CLASSIC)) {
+    if (!x || y || memcmp(header, signature, sizeof(signature)) || header[16] || header[17] || header[18] || header[19] != 64 || header[20] || header[21] || header[22] || (header[23] != 32 && header[23] != 64) || (header[23] == 32 && model != MAAGE_SKIN_CLASSIC)) {
         result = maage_skin_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_DECODE);
         goto done;
     }

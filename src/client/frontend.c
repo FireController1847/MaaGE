@@ -40,13 +40,11 @@ static void front_io_run(void *context, const maage_job_token *token) {
     if (!maage_status_failed(io->result)) io->result = maage_world_store_list(io->root, io->items, &io->entries, &io->count, io->error, trace);
     maage_job_set_result(token, io->result);
 }
-maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_instance *instance,
-                                          const maage_item_registry *items, maage_client_frontend **output, maage_status_trace *trace) {
+maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_instance *instance, const maage_item_registry *items, maage_client_frontend **output, maage_status_trace *trace) {
     maage_client_frontend *f;
     maage_status result;
     if (output) *output = NULL;
-    if (!ui || !instance || !items || !output)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_CREATE, 0);
+    if (!ui || !instance || !items || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_CREATE, 0);
     f = (maage_client_frontend *) calloc(1, sizeof(*f));
     if (!f) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_CREATE, 0);
     f->ui = ui;
@@ -67,8 +65,7 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
     *output = f;
     return result;
 }
-maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_system *system,
-                                       maage_client_audio_service *audio, maage_client_world_choice *choice, maage_status_trace *trace) {
+maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_system *system, maage_client_audio_service *audio, maage_client_world_choice *choice, maage_status_trace *trace) {
     maage_client_ui *ui = f->ui;
     maage_window_state state;
     maage_input_snapshot input;
@@ -136,13 +133,11 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         was_options = maage_client_ui_options_visible(ui);
         result = maage_client_ui_update(ui, &routed, state.framebuffer_width, state.framebuffer_height, state.width, state.height, &actions);
         if (maage_status_failed(result)) return result;
-        if ((was_options && !maage_client_ui_options_visible(ui)) ||
-            (was_transitioning && !maage_client_ui_window_mode_changing(ui))) {
+        if ((was_options && !maage_client_ui_options_visible(ui)) || (was_transitioning && !maage_client_ui_window_mode_changing(ui))) {
             maage_client_ui_get_options(ui, &options);
             if (!maage_client_options_equal(&options, &f->saved_options)) {
                 result = maage_client_options_save(f->instance, &options);
-                if (maage_status_failed(result))
-                    maage_client_ui_notify(ui, result, start);
+                if (maage_status_failed(result)) maage_client_ui_notify(ui, result, start);
                 else
                     f->saved_options = options;
             }
@@ -152,14 +147,12 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (audio) {
             maage_client_ui_get_options(ui, &options);
             (void) maage_client_audio_service_apply_options(audio, &options);
-            (void) maage_client_audio_service_update(audio, NULL,
-                                                     menu_listener, menu_forward, start, NULL);
+            (void) maage_client_audio_service_update(audio, NULL, menu_listener, menu_forward, start, NULL);
         }
         if (f->busy && maage_status_code(maage_jobs_poll(f->jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
             f->busy = 0;
             if (maage_status_failed(completion.result)) {
-                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.worlds",
-                                       completion.result, &completion.trace, "World catalog operation failed: %s", f->io.error);
+                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.worlds", completion.result, &completion.trace, "World catalog operation failed: %s", f->io.error);
                 free(f->io.entries);
                 f->io.entries = NULL;
                 maage_client_ui_front_error(f->view, "World operation failed; see logs/client.log");
@@ -175,8 +168,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
             if (request.action == 6) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
             if ((request.action == 4 || request.action == 5) && !f->busy) {
                 if (request.action == 4) {
-                    if (request.selected >= f->count) return maage_status_make(
-                        MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SELECT, 0);
+                    if (request.selected >= f->count) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SELECT, 0);
                     strcpy(choice->id, f->entries[request.selected].id);
                 } else {
                     maage_world_seed parsed;
@@ -212,8 +204,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
             result = maage_window_wait_events(system, state.visible ? 1 : 16);
             if (maage_status_failed(result)) return result;
         }
-        result = maage_client_pacing_wait(&pacing, system, maage_client_ui_window(ui),
-                                          maage_client_ui_max_fps(ui), start, &resize_pending);
+        result = maage_client_pacing_wait(&pacing, system, maage_client_ui_window(ui), maage_client_ui_max_fps(ui), start, &resize_pending);
         if (maage_status_failed(result)) return result;
     }
 }
@@ -244,8 +235,7 @@ maage_status maage_client_frontend_loading(maage_client_frontend *f, maage_statu
     result = maage_window_get_state(maage_client_ui_window(f->ui), &state);
     if (maage_status_failed(result)) return result;
     memset(&input, 0, sizeof(input));
-    result = maage_client_ui_update(f->ui, &input, state.framebuffer_width,
-                                    state.framebuffer_height, state.width, state.height, &actions);
+    result = maage_client_ui_update(f->ui, &input, state.framebuffer_width, state.framebuffer_height, state.width, state.height, &actions);
     if (maage_status_failed(result)) return result;
     result = maage_client_ui_draw(f->ui, NULL, &draw);
     if (maage_status_failed(result)) return result;

@@ -117,8 +117,7 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
         case WM_KEYDOWN:
         case WM_KEYUP:
             maage_window_input_key(window, (maage_input_key) maage_win32_key(lp), message == WM_KEYDOWN);
-            if ((((unsigned long) lp >> 16) & 255UL) == 0x1d && !(lp & 0x01000000L))
-                maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL, message == WM_KEYDOWN);
+            if ((((unsigned long) lp >> 16) & 255UL) == 0x1d && !(lp & 0x01000000L)) maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL, message == WM_KEYDOWN);
             break;
         case WM_MOUSEMOVE:
         case WM_LBUTTONDOWN:
@@ -137,15 +136,13 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
             break;
         case WM_INPUT:
             raw_size = sizeof(raw);
-            if (window->input.captured && GetRawInputData((HRAWINPUT) lp, RID_INPUT, &raw, &raw_size, sizeof(RAWINPUTHEADER)) != (UINT) -1 &&
-                raw.header.dwType == RIM_TYPEMOUSE && !(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
+            if (window->input.captured && GetRawInputData((HRAWINPUT) lp, RID_INPUT, &raw, &raw_size, sizeof(RAWINPUTHEADER)) != (UINT) -1 && raw.header.dwType == RIM_TYPEMOUSE && !(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
                 window->input.mouse_delta_x += raw.data.mouse.lLastX;
                 window->input.mouse_delta_y += raw.data.mouse.lLastY;
             }
             break;
         case WM_CAPTURECHANGED:
-            if (window->input.captured && (HWND) lp != handle)
-                maage_window_capture_mouse(window, 0);
+            if (window->input.captured && (HWND) lp != handle) maage_window_capture_mouse(window, 0);
             break;
         case WM_CLOSE:
             window->state.close_requested = 1;
@@ -155,10 +152,7 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
             break;
         case WM_DPICHANGED:
             suggested = (RECT *) lp;
-            if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
-                SetWindowPos(handle, NULL, suggested->left, suggested->top,
-                             suggested->right - suggested->left, suggested->bottom - suggested->top,
-                             SWP_NOZORDER | SWP_NOACTIVATE);
+            if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN) SetWindowPos(handle, NULL, suggested->left, suggested->top, suggested->right - suggested->left, suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
             window->state.resized = 1;
             return 0;
         case WM_DESTROY:
@@ -240,11 +234,8 @@ static maage_status maage_win32_resize(maage_window *window, int width, int heig
     frame.left = frame.top = 0;
     frame.right = MulDiv(width, dpi, 96);
     frame.bottom = MulDiv(height, dpi, 96);
-    if (!AdjustWindowRectEx(&frame, (DWORD) GetWindowLongPtrW(native->handle, GWL_STYLE), FALSE, 0))
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
-    if (!SetWindowPos(native->handle, NULL, 0, 0, frame.right - frame.left,
-                      frame.bottom - frame.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
+    if (!AdjustWindowRectEx(&frame, (DWORD) GetWindowLongPtrW(native->handle, GWL_STYLE), FALSE, 0)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
+    if (!SetWindowPos(native->handle, NULL, 0, 0, frame.right - frame.left, frame.bottom - frame.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
     window->state.resized = 1;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_RESIZE, 0);
 }
@@ -255,23 +246,18 @@ static maage_status maage_win32_mode(maage_window *window, maage_window_mode mod
     LONG_PTR style;
     if (mode >= MAAGE_WINDOW_NATIVE_FULLSCREEN) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     if (mode == window->state.mode) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN)
-        GetWindowRect(native->handle, &native->normal_rect);
+    if (window->state.mode < MAAGE_WINDOW_BORDERLESS_FULLSCREEN) GetWindowRect(native->handle, &native->normal_rect);
     style = mode == MAAGE_WINDOW_WINDOWED ? WS_OVERLAPPEDWINDOW : WS_POPUP;
     style |= GetWindowLongPtrW(native->handle, GWL_STYLE) & (WS_VISIBLE | WS_DISABLED);
     frame = native->normal_rect;
     if (mode == MAAGE_WINDOW_BORDERLESS_FULLSCREEN) {
         monitor.cbSize = sizeof(monitor);
-        if (!GetMonitorInfoW(MonitorFromWindow(native->handle, MONITOR_DEFAULTTONEAREST), &monitor))
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        if (!GetMonitorInfoW(MonitorFromWindow(native->handle, MONITOR_DEFAULTTONEAREST), &monitor)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
         frame = monitor.rcMonitor;
     }
     SetLastError(0);
-    if (!SetWindowLongPtrW(native->handle, GWL_STYLE, style) && GetLastError())
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (!SetWindowPos(native->handle, NULL, frame.left, frame.top,
-                      frame.right - frame.left, frame.bottom - frame.top,
-                      SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!SetWindowLongPtrW(native->handle, GWL_STYLE, style) && GetLastError()) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!SetWindowPos(native->handle, NULL, frame.left, frame.top, frame.right - frame.left, frame.bottom - frame.top, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     window->state.mode = mode;
     window->state.resized = 1;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
@@ -283,9 +269,7 @@ static maage_status maage_win32_create(maage_window *window, const maage_window_
     native = (maage_win32_window *) calloc(1, sizeof(*native));
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     window->platform = native;
-    native->handle = CreateWindowExW(0, maage_win32_class, L"", WS_OVERLAPPEDWINDOW,
-                                     CW_USEDEFAULT, CW_USEDEFAULT, config->width, config->height, NULL, NULL,
-                                     system->instance, window);
+    native->handle = CreateWindowExW(0, maage_win32_class, L"", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, config->width, config->height, NULL, NULL, system->instance, window);
     if (!native->handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     result = maage_win32_title(window, config->title);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
@@ -345,8 +329,7 @@ static maage_status maage_win32_icon_create(const maage_pixel_buffer *image, HIC
                 target[1] = (unsigned char) ((source[1] * alpha + 127) / 255);
                 target[2] = (unsigned char) ((source[0] * alpha + 127) / 255);
                 target[3] = (unsigned char) alpha;
-                if (!alpha) mask_bits[(size_t) y * mask_stride + (size_t) x / 8] |=
-                            (unsigned char) (128U >> (x % 8));
+                if (!alpha) mask_bits[(size_t) y * mask_stride + (size_t) x / 8] |= (unsigned char) (128U >> (x % 8));
             }
         }
         memset(&info, 0, sizeof(info));
@@ -368,8 +351,7 @@ static maage_status maage_win32_icon(maage_window *window, const maage_window_ic
     size_t i, best;
     int small, size, difference, distance;
     maage_status result;
-    if (!icon->image_count)
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    if (!icon->image_count) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     for (small = 0; small < 2; ++small) {
         size = GetSystemMetrics(small ? SM_CXSMICON : SM_CXICON);
         best = 0;
@@ -401,9 +383,7 @@ static maage_status maage_win32_cursor(maage_window *window, maage_window_cursor
     RECT client;
     handle = LoadCursorW(NULL, cursor == MAAGE_WINDOW_CURSOR_POINTER ? IDC_HAND : IDC_ARROW);
     if (!handle) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
-    if (!window->input.captured && GetCursorPos(&point) && WindowFromPoint(point) == native->handle &&
-        ScreenToClient(native->handle, &point) && GetClientRect(native->handle, &client) && PtInRect(&client, point))
-        SetCursor(handle);
+    if (!window->input.captured && GetCursorPos(&point) && WindowFromPoint(point) == native->handle && ScreenToClient(native->handle, &point) && GetClientRect(native->handle, &client) && PtInRect(&client, point)) SetCursor(handle);
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
 
@@ -417,16 +397,14 @@ static maage_status maage_win32_capture(maage_window *window, int capture) {
     if (GetCurrentThreadId() != system->thread) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_WRONG_THREAD);
     if (capture == window->input.captured) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
     if (capture) {
-        if (GetFocus() != native->handle || !GetClientRect(native->handle, &rect))
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+        if (GetFocus() != native->handle || !GetClientRect(native->handle, &rect)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         for (other = window->system->windows; other; other = other->next)
             if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
         corners[0].x = rect.left;
         corners[0].y = rect.top;
         corners[1].x = rect.right;
         corners[1].y = rect.bottom;
-        if (!ClientToScreen(native->handle, &corners[0]) ||
-            !ClientToScreen(native->handle, &corners[1])) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+        if (!ClientToScreen(native->handle, &corners[0]) || !ClientToScreen(native->handle, &corners[1])) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         device.usUsagePage = 1;
         device.usUsage = 2;
         device.dwFlags = 0;
@@ -464,9 +442,7 @@ static maage_status maage_win32_poll(maage_window_system *system, int timeout_ms
     MSG message;
     if (GetCurrentThreadId() != native->thread) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, MAAGE_DETAIL_WRONG_THREAD);
     if (timeout_ms && !PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE)) {
-        if (MsgWaitForMultipleObjects(0, NULL, FALSE,
-                                      timeout_ms < 0 ? INFINITE : (DWORD) timeout_ms, QS_ALLINPUT) == WAIT_FAILED)
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, timeout_ms < 0 ? INFINITE : (DWORD) timeout_ms, QS_ALLINPUT) == WAIT_FAILED) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
     }
     while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
         if (message.message == WM_QUIT) {
@@ -526,9 +502,7 @@ static maage_status maage_win32_pixels(maage_window *window, const maage_pixel_b
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
     dc = GetDC(native->handle);
-    result = dc ? StretchDIBits(dc, 0, 0, buffer->width, buffer->height, 0, 0,
-                                buffer->width, buffer->height, bgra, &info, DIB_RGB_COLORS, SRCCOPY)
-                : GDI_ERROR;
+    result = dc ? StretchDIBits(dc, 0, 0, buffer->width, buffer->height, 0, 0, buffer->width, buffer->height, bgra, &info, DIB_RGB_COLORS, SRCCOPY) : GDI_ERROR;
     if (dc) ReleaseDC(native->handle, dc);
     free(bgra);
     return result == GDI_ERROR || result == 0 ? MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_PRESENT, 0);

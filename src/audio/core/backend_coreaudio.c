@@ -8,16 +8,14 @@ typedef struct maage_apple_audio {
     AudioComponentInstance unit;
     maage_audio *audio;
 } maage_apple_audio;
-static OSStatus apple_render(void *context, AudioUnitRenderActionFlags *flags,
-                             const AudioTimeStamp *time, UInt32 bus, UInt32 frames, AudioBufferList *io) {
+static OSStatus apple_render(void *context, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *time, UInt32 bus, UInt32 frames, AudioBufferList *io) {
     maage_apple_audio *state = (maage_apple_audio *) context;
     UInt32 cursor = 0, span, remaining;
     float *samples;
     (void) flags;
     (void) time;
     (void) bus;
-    if (!io || io->mNumberBuffers != 1 || !io->mBuffers[0].mData ||
-        io->mBuffers[0].mNumberChannels != 2) {
+    if (!io || io->mNumberBuffers != 1 || !io->mBuffers[0].mData || io->mBuffers[0].mNumberChannels != 2) {
         UInt32 i;
         if (io)
             for (i = 0; i < io->mNumberBuffers; ++i)
@@ -34,8 +32,7 @@ static OSStatus apple_render(void *context, AudioUnitRenderActionFlags *flags,
         cursor += span;
     }
     /* Any excess buffer capacity is silent. */
-    if (remaining > frames) memset(samples + 2 * frames, 0,
-                                   (size_t) (remaining - frames) * 2 * sizeof(float));
+    if (remaining > frames) memset(samples + 2 * frames, 0, (size_t) (remaining - frames) * 2 * sizeof(float));
     return noErr;
 }
 maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *trace) {
@@ -69,13 +66,11 @@ maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *t
     format.mBytesPerFrame = 2 * sizeof(float);
     format.mChannelsPerFrame = 2;
     format.mBitsPerChannel = 32;
-    err = AudioUnitSetProperty(s->unit, kAudioUnitProperty_StreamFormat,
-                               kAudioUnitScope_Input, 0, &format, sizeof(format));
+    err = AudioUnitSetProperty(s->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format));
     if (err != noErr) goto fail;
     callback.inputProc = apple_render;
     callback.inputProcRefCon = s;
-    err = AudioUnitSetProperty(s->unit, kAudioUnitProperty_SetRenderCallback,
-                               kAudioUnitScope_Input, 0, &callback, sizeof(callback));
+    err = AudioUnitSetProperty(s->unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback, sizeof(callback));
     if (err != noErr) goto fail;
     err = AudioUnitInitialize(s->unit);
     if (err != noErr) goto fail;
@@ -91,8 +86,7 @@ fail:
     audio->device_native = (long) err;
     if (s->unit) AudioComponentInstanceDispose(s->unit);
     free(s);
-    return maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE,
-                              MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+    return maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
 }
 void maage_audio_backend_stop(maage_audio *audio) {
     maage_apple_audio *s = (maage_apple_audio *) audio->backend_state;

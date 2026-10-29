@@ -29,9 +29,7 @@
 static char *maage_application_log_path(void) {
     char directory[MAAGE_PATH_CAPACITY];
     char *path;
-    if (maage_status_failed(maage_storage_data_path(directory, sizeof(directory))) ||
-        maage_status_failed(maage_storage_join(directory, sizeof(directory), directory, "logs")) ||
-        maage_status_failed(maage_storage_directories(directory))) return NULL;
+    if (maage_status_failed(maage_storage_data_path(directory, sizeof(directory))) || maage_status_failed(maage_storage_join(directory, sizeof(directory), directory, "logs")) || maage_status_failed(maage_storage_directories(directory))) return NULL;
     path = (char *) malloc(MAAGE_PATH_CAPACITY);
     if (path && maage_status_failed(maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, MAAGE_APPLICATION_KEY ".log"))) {
         free(path);
@@ -86,8 +84,7 @@ static char *maage_application_log_path(void) {
 #if MAAGE_PLATFORM_MACOS
     /* Keep writable data outside the signed application bundle. */
     length = strlen(executable);
-    if (length >= sizeof(".app/Contents/MacOS/") - 1 &&
-        !strcmp(executable + length - (sizeof(".app/Contents/MacOS/") - 1), ".app/Contents/MacOS/")) {
+    if (length >= sizeof(".app/Contents/MacOS/") - 1 && !strcmp(executable + length - (sizeof(".app/Contents/MacOS/") - 1), ".app/Contents/MacOS/")) {
         executable[length - (sizeof(".app/Contents/MacOS/") - 1)] = '\0';
         separator = strrchr(executable, '/');
         if (!separator) return NULL;
@@ -162,8 +159,7 @@ static int maage_application_run(int argc, char *const argv[]) {
 #endif
 #endif
     outcome = maage_log_init(&config, argc, argv);
-    if (!maage_status_is_success(outcome)) maage_log_status(MAAGE_LOG_WARNING,
-                                                            "maage.core.application", outcome, "Logging initialization retained its usable settings.");
+    if (!maage_status_is_success(outcome)) maage_log_status(MAAGE_LOG_WARNING, "maage.core.application", outcome, "Logging initialization retained its usable settings.");
 #ifdef MAAGE_APPLICATION_USER_DATA
     if (!path) maage_log_error("maage.core.application", "Cannot resolve or create the per-user MaaGE logs directory.");
 #endif

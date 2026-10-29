@@ -24,8 +24,7 @@ maage_status maage_auth_browser(const char *url) {
     ok = g_app_info_launch_default_for_uri(url, NULL, &error);
     /* GError strings may contain credentials in authorization URLs. */
     if (error) g_error_free(error);
-    return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_SYSTEM_NOT_SUPPORTED,
-                             MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN, 0);
+    return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN, 0);
 }
 maage_status maage_auth_sleep(unsigned milliseconds) {
     struct timespec delay;

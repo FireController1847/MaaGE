@@ -15,6 +15,5 @@ struct maage_client_ui_frontend {
     int scrolling;
 };
 void maage_client_ui_title_draw(maage_client_ui *ui, void *context);
-unsigned int maage_client_ui_title_input(maage_client_ui *ui,
-                                         const maage_client_ui_input *input, void *context);
+unsigned int maage_client_ui_title_input(maage_client_ui *ui, const maage_client_ui_input *input, void *context);
 #endif

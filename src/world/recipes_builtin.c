@@ -3,10 +3,7 @@
 
 /* Pattern symbols are registration-time data only. Every recipe is copied
  * into the same numeric registry before the Server starts. */
-static maage_status builtin_recipe(maage_recipe_registry *registry,
-                                   unsigned int kind, unsigned int width, unsigned int height, const char *pattern,
-                                   const maage_recipe_choice choices[3], maage_item_id output,
-                                   unsigned int count, unsigned int metadata) {
+static maage_status builtin_recipe(maage_recipe_registry *registry, unsigned int kind, unsigned int width, unsigned int height, const char *pattern, const maage_recipe_choice choices[3], maage_item_id output, unsigned int count, unsigned int metadata) {
     maage_recipe_definition recipe;
     unsigned int i, symbol;
     memset(&recipe, 0, sizeof(recipe));
@@ -27,8 +24,7 @@ static maage_status builtin_recipe(maage_recipe_registry *registry,
     }
     return maage_recipe_registry_register(registry, &recipe, NULL);
 }
-maage_status maage_recipe_registry_create_builtin(const maage_item_registry *items,
-                                                  maage_recipe_registry **output) {
+maage_status maage_recipe_registry_create_builtin(const maage_item_registry *items, maage_recipe_registry **output) {
     static const maage_item_id materials[5] = {MAAGE_BLOCK_PLANKS, MAAGE_BLOCK_COBBLESTONE,
                                                MAAGE_ITEM_IRON_INGOT, MAAGE_ITEM_DIAMOND, MAAGE_ITEM_GOLD_INGOT};
     static const maage_item_id blocks[8] = {MAAGE_BLOCK_GOLD_BLOCK, MAAGE_BLOCK_IRON_BLOCK,
@@ -67,8 +63,7 @@ maage_status maage_recipe_registry_create_builtin(const maage_item_registry *ite
         choices[0].item = materials[i];
         choices[0].metadata = i == 0 ? MAAGE_RECIPE_METADATA_ANY : 0;
         for (family = 0; family < 3; ++family) {
-            result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, widths[family], 3,
-                                    patterns[family], choices, MAAGE_ITEM_TOOL_BASE + i * 3 + family, 1, 0);
+            result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, widths[family], 3, patterns[family], choices, MAAGE_ITEM_TOOL_BASE + i * 3 + family, 1, 0);
             if (maage_status_failed(result)) goto failed;
         }
     }

@@ -108,8 +108,7 @@ static int maage_log_is_enabled(const char *logger, maage_log_level level) {
     if (!logger || !*logger) logger = "maage";
     for (index = 0; index < maage_log_current.count; ++index) {
         length = strlen(maage_log_current.overrides[index].name);
-        if (length > best && strncmp(logger, maage_log_current.overrides[index].name, length) == 0 &&
-            (logger[length] == '\0' || logger[length] == '.')) {
+        if (length > best && strncmp(logger, maage_log_current.overrides[index].name, length) == 0 && (logger[length] == '\0' || logger[length] == '.')) {
             best = length;
             effective = maage_log_current.overrides[index].level;
         }
@@ -125,15 +124,13 @@ int maage_log_enabled(const char *logger, maage_log_level level) {
     return result;
 }
 
-static maage_status maage_log_sink(FILE *sink, const char *timestamp, const char *level,
-                                   const char *logger, const char *message) {
+static maage_status maage_log_sink(FILE *sink, const char *timestamp, const char *level, const char *logger, const char *message) {
     int failed = 0;
     if (*timestamp && fprintf(sink, "%s ", timestamp) < 0) failed = 1;
     /* Pad after the complete severity label, never inside its brackets. */
     if (fprintf(sink, "[%s]%*s [%s] %s\n", level, (int) (7 - strlen(level)), "", logger, message) < 0) failed = 1;
     if (fflush(sink)) failed = 1;
-    return maage_status_make(failed ? MAAGE_STATUS_IO_ERROR : MAAGE_STATUS_SUCCESS,
-                             MAAGE_CONTEXT_CORE, MAAGE_OPERATION_WRITE, 0);
+    return maage_status_make(failed ? MAAGE_STATUS_IO_ERROR : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_WRITE, 0);
 }
 
 maage_status maage_log_emit(maage_log_level level, const char *logger, const char *message) {
@@ -141,13 +138,11 @@ maage_status maage_log_emit(maage_log_level level, const char *logger, const cha
     char timestamp[32];
     maage_status result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WRITE, 0), child;
     int error = level >= MAAGE_LOG_ERROR;
-    if (level < MAAGE_LOG_VERBOSE || level >= MAAGE_LOG_OFF || !message)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_WRITE, 0);
+    if (level < MAAGE_LOG_VERBOSE || level >= MAAGE_LOG_OFF || !message) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_WRITE, 0);
     timestamp[0] = '\0';
     if (maage_log_current.config.timestamp) maage_log_timestamp(timestamp, sizeof(timestamp));
     if (!logger || !*logger) logger = "maage";
-    if (maage_log_current.config.console && !maage_log_current.stdio_captured && maage_log_console_available(error))
-        result = maage_log_sink(error ? stderr : stdout, timestamp, names[level], logger, message);
+    if (maage_log_current.config.console && !maage_log_current.stdio_captured && maage_log_console_available(error)) result = maage_log_sink(error ? stderr : stdout, timestamp, names[level], logger, message);
     if (maage_log_current.output) {
         child = maage_log_sink(maage_log_current.output, timestamp, names[level], logger, message);
         if (!maage_status_failed(result)) result = child;
@@ -195,8 +190,7 @@ static int maage_log_append(char *buffer, size_t capacity, size_t *used, const c
     buffer[*used] = 0;
     return complete;
 }
-void maage_log_format_status(maage_status result, const maage_status_trace *trace,
-                             const char *description, char *buffer, size_t capacity) {
+void maage_log_format_status(maage_status result, const maage_status_trace *trace, const char *description, char *buffer, size_t capacity) {
     const char *truncated = trace ? "\n    ... [log event truncated]" : "... [truncated]";
     maage_status root = result;
     size_t used, added;
@@ -205,8 +199,7 @@ void maage_log_format_status(maage_status result, const maage_status_trace *trac
     char status[384];
     if (!buffer || !capacity) return;
     if (trace) {
-        if (!maage_status_is_success(trace->origin))
-            root = trace->origin;
+        if (!maage_status_is_success(trace->origin)) root = trace->origin;
         else {
             count = trace->count < MAAGE_STATUS_TRACE_CAPACITY ? trace->count : MAAGE_STATUS_TRACE_CAPACITY;
             for (i = 0; i < count; ++i)
@@ -245,8 +238,7 @@ void maage_log_format_status(maage_status result, const maage_status_trace *trac
         strcpy(buffer + used, truncated);
     }
 }
-static maage_status maage_log_vtrace_status(maage_log_level level, const char *logger,
-                                            maage_status result, const maage_status_trace *trace, const char *format, va_list args) {
+static maage_status maage_log_vtrace_status(maage_log_level level, const char *logger, maage_status result, const maage_status_trace *trace, const char *format, va_list args) {
     char message[MAAGE_LOG_EVENT_SIZE], description[2048];
     static const char truncated[] = "... [truncated]";
     size_t used;
@@ -272,8 +264,7 @@ static maage_status maage_log_vtrace_status(maage_log_level level, const char *l
     return written;
 }
 
-maage_status maage_log_status(maage_log_level level, const char *logger,
-                              maage_status result, const char *format, ...) {
+maage_status maage_log_status(maage_log_level level, const char *logger, maage_status result, const char *format, ...) {
     va_list args;
     maage_status written;
     va_start(args, format);
@@ -281,8 +272,7 @@ maage_status maage_log_status(maage_log_level level, const char *logger,
     va_end(args);
     return written;
 }
-maage_status maage_log_trace_status(maage_log_level level, const char *logger,
-                                    maage_status result, const maage_status_trace *trace, const char *format, ...) {
+maage_status maage_log_trace_status(maage_log_level level, const char *logger, maage_status result, const maage_status_trace *trace, const char *format, ...) {
     va_list args;
     maage_status written;
     va_start(args, format);
@@ -316,8 +306,7 @@ maage_status maage_log_flush(void) {
     }
     if (maage_log_current.output && fflush(maage_log_current.output)) failed = 1;
     maage_log_unlock();
-    return maage_status_make(failed ? MAAGE_STATUS_IO_ERROR : MAAGE_STATUS_SUCCESS,
-                             MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_WRITE, 0);
+    return maage_status_make(failed ? MAAGE_STATUS_IO_ERROR : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_WRITE, 0);
 }
 
 maage_status maage_log_shutdown(void) {

@@ -10,8 +10,7 @@ maage_status maage_auth_random(unsigned char *bytes, size_t count) {
     if (!bytes && count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);
     if (!count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CREATE, 0);
     native = SecRandomCopyBytes(kSecRandomDefault, count, bytes);
-    return maage_status_make(native == errSecSuccess ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ERROR,
-                             MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);
+    return maage_status_make(native == errSecSuccess ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ERROR, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_CREATE, 0);
 }
 maage_status maage_auth_browser(const char *url) {
     @autoreleasepool {
@@ -21,8 +20,7 @@ maage_status maage_auth_browser(const char *url) {
         target = CFURLCreateWithBytes(NULL, (const UInt8 *) url, (CFIndex) strlen(url), kCFStringEncodingUTF8, NULL);
         native = target ? LSOpenCFURLRef(target, NULL) : paramErr;
         if (target) CFRelease(target);
-        return maage_status_make(native == noErr ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_SYSTEM_NOT_SUPPORTED,
-                                 MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN, 0);
+        return maage_status_make(native == noErr ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_OPEN, 0);
     }
 }
 maage_status maage_auth_sleep(unsigned milliseconds) {

@@ -10,7 +10,7 @@ SpaceBeforeParens: ControlStatements
 SpaceBeforeAssignmentOperators: true
 PointerAlignment: Right
 DerivePointerAlignment: false
-AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 AllowShortLoopsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortBlocksOnASingleLine: Never
@@ -20,6 +20,7 @@ RemoveBracesLLVM: false
 BreakStringLiterals: false
 ReflowComments: Never
 SortIncludes: Never
+SkipMacroDefinitionBody: true
 IndentPPDirectives: None
 AlignEscapedNewlines: Left
 MaxEmptyLinesToKeep: 1

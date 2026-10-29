@@ -15,9 +15,7 @@ typedef enum maage_process_state {
     MAAGE_PROCESS_EXITED,
     MAAGE_PROCESS_FAILED
 } maage_process_state;
-maage_status maage_process_start(const char *executable, const char *const argv[], const char *directory,
-                                 const char *stdout_path, const char *stderr_path, maage_process **process, char error[256], maage_status_trace *trace);
-maage_status maage_process_poll(maage_process *process, int *exit_code,
-                                maage_process_state *state, char error[256], maage_status_trace *trace);
+maage_status maage_process_start(const char *executable, const char *const argv[], const char *directory, const char *stdout_path, const char *stderr_path, maage_process **process, char error[256], maage_status_trace *trace);
+maage_status maage_process_poll(maage_process *process, int *exit_code, maage_process_state *state, char error[256], maage_status_trace *trace);
 maage_status maage_process_close(maage_process *process);
 #endif

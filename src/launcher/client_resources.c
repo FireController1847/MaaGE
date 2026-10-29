@@ -50,8 +50,7 @@ static int maage_client_selected(const char *name) {
 }
 /* Reads to EOF so libzip verifies the ZIP entry's CRC, with explicit size and
  * expansion bounds. SHA-1 then binds reconstructed files to the verified JAR. */
-static maage_status maage_client_stream(maage_client_resources *resources, maage_client_entry *entry,
-                                        FILE *output, const maage_client_observer *observer, char hash[41]) {
+static maage_status maage_client_stream(maage_client_resources *resources, maage_client_entry *entry, FILE *output, const maage_client_observer *observer, char hash[41]) {
     zip_file_t *file = zip_fopen_index(resources->archive, entry->index, 0);
     maage_crypto_hash *digest = NULL;
     unsigned char buffer[32768], bytes[20];
@@ -85,8 +84,7 @@ static maage_status maage_client_stream(maage_client_resources *resources, maage
     if (maage_status_failed(result)) maage_status_trace_record(observer->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VERIFY, __FILE__, (unsigned long) __LINE__, native_code);
     return result;
 }
-maage_status maage_client_resources_open(const char *archive_path,
-                                         const char *application_data, const maage_client_observer *observer, char error[512], maage_client_resources **output) {
+maage_status maage_client_resources_open(const char *archive_path, const char *application_data, const maage_client_observer *observer, char error[512], maage_client_resources **output) {
     maage_client_resources *resources = NULL;
     FILE *file;
     zip_source_t *source;
@@ -145,11 +143,9 @@ maage_status maage_client_resources_open(const char *archive_path,
         memcpy(logical, name, length + 1);
         if (directory) logical[--length] = 0;
         /* Validate code/metadata entries too, although they will never be written. */
-        if (!(!maage_status_failed(maage_minecraft_asset_path(application_data, logical, destination, sizeof(destination), observer->trace))) ||
-            zip_file_get_external_attributes(resources->archive, (zip_uint64_t) index, 0, &opsys, &attributes)) goto unsafe;
+        if (!(!maage_status_failed(maage_minecraft_asset_path(application_data, logical, destination, sizeof(destination), observer->trace))) || zip_file_get_external_attributes(resources->archive, (zip_uint64_t) index, 0, &opsys, &attributes)) goto unsafe;
         type = (attributes >> 16) & 0170000;
-        if ((type && type != 0100000 && type != 0040000) ||
-            (attributes & 0x400) || (type == 0040000 && !directory) || ((attributes & 0x10) && !directory)) goto unsafe;
+        if ((type && type != 0100000 && type != 0040000) || (attributes & 0x400) || (type == 0040000 && !directory) || ((attributes & 0x10) && !directory)) goto unsafe;
         if (directory || !maage_client_selected(name)) continue;
         /* Stable cross-platform spelling: reject Unicode normalization aliases
          * rather than silently rename archive resources on case-folding disks. */
@@ -211,16 +207,12 @@ failed:
     maage_client_resources_close(resources);
     return MAAGE_STATUS_PROPAGATE(observer->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_OPEN);
 }
-static int maage_client_file_valid(const char *path, const maage_client_entry *entry,
-                                   const maage_client_observer *observer, char fingerprint[128]) {
+static int maage_client_file_valid(const char *path, const maage_client_entry *entry, const maage_client_observer *observer, char fingerprint[128]) {
     char hash[41];
     double size;
-    return (!maage_status_failed(maage_storage_stat(path, &size, fingerprint))) && size == entry->size &&
-           (!maage_status_failed(maage_storage_sha1(path, hash, observer->cancelled, observer->context))) && !strcmp(hash, entry->hash);
+    return (!maage_status_failed(maage_storage_stat(path, &size, fingerprint))) && size == entry->size && (!maage_status_failed(maage_storage_sha1(path, hash, observer->cancelled, observer->context))) && !strcmp(hash, entry->hash);
 }
-maage_status maage_client_resources_reconstruct(maage_client_resources *resources,
-                                                const char *application_data, const char *staging,
-                                                const maage_client_observer *observer, char error[512]) {
+maage_status maage_client_resources_reconstruct(maage_client_resources *resources, const char *application_data, const char *staging, const maage_client_observer *observer, char error[512]) {
     unsigned long i, j;
     char source_path[MAAGE_PATH_CAPACITY];
     char path[MAAGE_PATH_CAPACITY], parent[MAAGE_PATH_CAPACITY], hash[41], *separator;
@@ -244,9 +236,7 @@ maage_status maage_client_resources_reconstruct(maage_client_resources *resource
             cloned = 0;
             for (j = 0; !cloned && j < i; ++j)
                 if (resources->entries[j].size == entry->size && !strcmp(resources->entries[j].hash, entry->hash)) {
-                    if ((!maage_status_failed(maage_minecraft_asset_path(application_data, resources->entries[j].name, source_path, sizeof(source_path), observer->trace))) &&
-                        maage_client_file_valid(source_path, entry, observer, entry->fingerprint))
-                        result = maage_storage_clone(source_path, staging, observer->cancelled, observer->context, &cloned, observer->trace);
+                    if ((!maage_status_failed(maage_minecraft_asset_path(application_data, resources->entries[j].name, source_path, sizeof(source_path), observer->trace))) && maage_client_file_valid(source_path, entry, observer, entry->fingerprint)) result = maage_storage_clone(source_path, staging, observer->cancelled, observer->context, &cloned, observer->trace);
                     break;
                 }
             output = cloned ? NULL : maage_storage_open(staging, "wb");
@@ -274,16 +264,13 @@ maage_status maage_client_resources_reconstruct(maage_client_resources *resource
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
 failed:
-    if (observer->cancelled(observer->context))
-        result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, 0);
-    else if (!maage_status_failed(result))
-        result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, 0);
+    if (observer->cancelled(observer->context)) result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, 0);
+    else if (!maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, 0);
     maage_storage_remove(staging);
     strcpy(error, observer->cancelled(observer->context) ? "Client resource reconstruction cancelled." : "Cannot safely reconstruct a client JAR resource. Check permissions, free space, and the archive; then retry.");
     return MAAGE_STATUS_PROPAGATE(observer->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD);
 }
-maage_status maage_client_resources_check(maage_client_resources *resources,
-                                          const char *application_data, const maage_client_observer *observer, char error[512]) {
+maage_status maage_client_resources_check(maage_client_resources *resources, const char *application_data, const maage_client_observer *observer, char error[512]) {
     char path[MAAGE_PATH_CAPACITY], fingerprint[128];
     double size;
     unsigned long i;

@@ -61,8 +61,7 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
             if (configs) XFree(configs);
         }
     } else {
-        if (glXGetConfig(native->display, visual, GLX_DOUBLEBUFFER, &id) == 0 && id)
-            native->context = glXCreateContext(native->display, visual, NULL, True);
+        if (glXGetConfig(native->display, visual, GLX_DOUBLEBUFFER, &id) == 0 && id) native->context = glXCreateContext(native->display, visual, NULL, True);
     }
     XSync(native->display, False);
     if (maage_glx_error && native->context) {

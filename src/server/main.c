@@ -7,8 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static maage_status maage_server_parse(int argc, char **argv,
-                                       maage_server_config *config) {
+static maage_status maage_server_parse(int argc, char **argv, maage_server_config *config) {
     int i;
     unsigned long number;
     char *end;
@@ -19,8 +18,7 @@ static maage_status maage_server_parse(int argc, char **argv,
     config->initial_game_mode = -1;
     for (i = 1; i < argc; ++i) {
         argument = argv[i];
-        if (!strncmp(argument, "--instance-root=", 16))
-            config->instance_root = argument + 16;
+        if (!strncmp(argument, "--instance-root=", 16)) config->instance_root = argument + 16;
         else if (!strncmp(argument, "--world=", 8)) {
             if (config->world_id || config->create_world) goto invalid;
             config->world_id = argument + 8;
@@ -31,13 +29,11 @@ static maage_status maage_server_parse(int argc, char **argv,
         } else if (!strcmp(argument, "--new-world")) {
             if (config->world_id || config->create_world) goto invalid;
             config->create_world = 1;
-        } else if (!strncmp(argument, "--world-name=", 13))
-            config->world_name = argument + 13;
+        } else if (!strncmp(argument, "--world-name=", 13)) config->world_name = argument + 13;
         else if (!strncmp(argument, "--seed=", 7)) {
             if (maage_status_failed(maage_world_seed_parse(argument + 7, &config->seed))) goto invalid;
             config->has_seed = 1;
-        } else if (!strncmp(argument, "--render-distance=", 18) ||
-                   !strncmp(argument, "--world-workers=", 16)) {
+        } else if (!strncmp(argument, "--render-distance=", 18) || !strncmp(argument, "--world-workers=", 16)) {
             const char *value = argument + (!strncmp(argument, "--render-distance=", 18) ? 18 : 16);
             errno = 0;
             number = strtoul(value, &end, 10);
@@ -47,15 +43,12 @@ static maage_status maage_server_parse(int argc, char **argv,
                 config->render_distance = (int) number;
             } else
                 config->world_workers = (unsigned int) number;
-        } else if (!strcmp(argument, "--survival"))
-            config->initial_game_mode = 0;
-        else if (!strcmp(argument, "--creative"))
-            config->initial_game_mode = 1;
+        } else if (!strcmp(argument, "--survival")) config->initial_game_mode = 0;
+        else if (!strcmp(argument, "--creative")) config->initial_game_mode = 1;
         else if (!strncmp(argument, "--reach=", 8)) {
             errno = 0;
             config->interaction_range = strtod(argument + 8, &end);
-            if (errno || !argument[8] || *end ||
-                !(config->interaction_range > 0 && config->interaction_range <= 64)) goto invalid;
+            if (errno || !argument[8] || *end || !(config->interaction_range > 0 && config->interaction_range <= 64)) goto invalid;
         } else if (!strcmp(argument, "--help")) {
             puts("Usage: server --instance-root=<absolute-instance-directory> [--world=<uuid> | --create-world=<uuid> | --new-world] [--world-name=<name>] [--seed=<signed-seed>] [--render-distance=<within-world-bounds>] [--world-workers=<count>] [--creative | --survival] [--reach=0..64]");
             return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PARSE, 0);
@@ -65,8 +58,7 @@ static maage_status maage_server_parse(int argc, char **argv,
     if (!config->instance_root || !*config->instance_root) goto invalid;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PARSE, 0);
 invalid:
-    return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                             MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_PARSE, 0);
+    return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_PARSE, 0);
 }
 
 int main(int argc, char **argv) {
@@ -77,14 +69,10 @@ int main(int argc, char **argv) {
     result = maage_log_init(NULL, argc, argv);
     if (!maage_status_failed(result)) {
         result = maage_server_parse(argc, argv, &config);
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP)
-            result = 0;
-        else if (!maage_status_failed(result))
-            result = maage_server_run(&config, &trace);
+        if (maage_status_code(result) == MAAGE_STATUS_NOOP) result = 0;
+        else if (!maage_status_failed(result)) result = maage_server_run(&config, &trace);
     }
-    if (maage_status_failed(result))
-        maage_log_trace_status(MAAGE_LOG_ERROR, "maage.server",
-                               result, &trace, "Server stopped.");
+    if (maage_status_failed(result)) maage_log_trace_status(MAAGE_LOG_ERROR, "maage.server", result, &trace, "Server stopped.");
     shutdown = maage_log_shutdown();
     return maage_status_failed(result) || maage_status_failed(shutdown) ? 1 : 0;
 }

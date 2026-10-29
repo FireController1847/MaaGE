@@ -21,12 +21,10 @@ static void recipe_clear(maage_recipe_definition *recipe) {
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
         free((void *) recipe->ingredients[i].choices);
 }
-maage_status maage_recipe_registry_create(const maage_item_registry *items,
-                                          maage_recipe_registry **output) {
+maage_status maage_recipe_registry_create(const maage_item_registry *items, maage_recipe_registry **output) {
     if (!output) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     *output = NULL;
-    if (!maage_item_registry_is_finalized(items))
-        return recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_CREATE);
+    if (!maage_item_registry_is_finalized(items)) return recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_CREATE);
     *output = (maage_recipe_registry *) calloc(1, sizeof(**output));
     if (!*output) return recipe_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     (*output)->items = items;
@@ -41,8 +39,7 @@ maage_status maage_recipe_registry_destroy(maage_recipe_registry *registry) {
     free(registry);
     return recipe_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
-maage_status maage_recipe_registry_register(maage_recipe_registry *registry,
-                                            const maage_recipe_definition *definition, maage_recipe_id *id) {
+maage_status maage_recipe_registry_register(maage_recipe_registry *registry, const maage_recipe_definition *definition, maage_recipe_id *id) {
     recipe_entry entry, *grown;
     maage_recipe_ingredient *ingredient;
     maage_recipe_choice *choices;
@@ -53,11 +50,9 @@ maage_status maage_recipe_registry_register(maage_recipe_registry *registry,
     if (!registry || !definition) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (registry->finalized) return recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
     if (definition->kind == MAAGE_RECIPE_SHAPED) {
-        if (!definition->width || definition->width > 3 || !definition->height || definition->height > 3)
-            return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+        if (!definition->width || definition->width > 3 || !definition->height || definition->height > 3) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
         cells = definition->width * definition->height;
-    } else if (definition->kind == MAAGE_RECIPE_SHAPELESS)
-        cells = definition->ingredient_count;
+    } else if (definition->kind == MAAGE_RECIPE_SHAPELESS) cells = definition->ingredient_count;
     else
         return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (!cells || cells > MAAGE_CRAFTING_CELLS ||
@@ -67,9 +62,7 @@ maage_status maage_recipe_registry_register(maage_recipe_registry *registry,
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i) {
         const maage_recipe_ingredient *source = &definition->ingredients[i];
         if (i >= cells || !source->choice_count) {
-            if (source->choice_count || source->quantity || source->remainder.count ||
-                (i < cells && definition->kind == MAAGE_RECIPE_SHAPELESS))
-                return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+            if (source->choice_count || source->quantity || source->remainder.count || (i < cells && definition->kind == MAAGE_RECIPE_SHAPELESS)) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
             continue;
         }
         if (!source->choices || !source->quantity || source->quantity > 64 ||
@@ -89,8 +82,7 @@ maage_status maage_recipe_registry_register(maage_recipe_registry *registry,
     if (registry->count >= 4294967295UL) return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     if (registry->count == registry->capacity) {
         capacity = registry->capacity ? registry->capacity * 2 : 32;
-        if (capacity < registry->capacity || capacity > (size_t) - 1 / sizeof(*grown))
-            return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
+        if (capacity < registry->capacity || capacity > (size_t) - 1 / sizeof(*grown)) return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
         grown = (recipe_entry *) realloc(registry->entries, capacity * sizeof(*grown));
         if (!grown) return recipe_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_REGISTER);
         registry->entries = grown;
@@ -137,13 +129,10 @@ static int ingredient_matches(const maage_recipe_ingredient *ingredient, const m
     if (!ingredient->choice_count) return stack->count == 0;
     if (stack->count < ingredient->quantity || stack->damage) return 0;
     for (i = 0; i < ingredient->choice_count; ++i)
-        if (stack->item_id == ingredient->choices[i].item &&
-            (ingredient->choices[i].metadata == MAAGE_RECIPE_METADATA_ANY ||
-             stack->metadata == ingredient->choices[i].metadata)) return 1;
+        if (stack->item_id == ingredient->choices[i].item && (ingredient->choices[i].metadata == MAAGE_RECIPE_METADATA_ANY || stack->metadata == ingredient->choices[i].metadata)) return 1;
     return 0;
 }
-static int shaped_match(const maage_recipe_definition *recipe, const maage_item_stack *grid,
-                        unsigned int width, unsigned int ox, unsigned int oy, int mirror, int mapping[9]) {
+static int shaped_match(const maage_recipe_definition *recipe, const maage_item_stack *grid, unsigned int width, unsigned int ox, unsigned int oy, int mirror, int mapping[9]) {
     unsigned int x, y, rx, ry, cell;
     int ingredient;
     for (y = 0; y < width; ++y)
@@ -163,12 +152,10 @@ static int shaped_match(const maage_recipe_definition *recipe, const maage_item_
 }
 /* Bounded augmenting paths give a complete bipartite matching, including
  * duplicate and overlapping alternatives. Each ingredient owns one cell. */
-static int shapeless_assign(const maage_recipe_definition *recipe, const maage_item_stack *grid,
-                            unsigned int cells, int ingredient, int mapping[9], int seen[9]) {
+static int shapeless_assign(const maage_recipe_definition *recipe, const maage_item_stack *grid, unsigned int cells, int ingredient, int mapping[9], int seen[9]) {
     unsigned int cell;
     for (cell = 0; cell < cells; ++cell) {
-        if (seen[cell] || !grid[cell].count ||
-            !ingredient_matches(&recipe->ingredients[ingredient], &grid[cell])) continue;
+        if (seen[cell] || !grid[cell].count || !ingredient_matches(&recipe->ingredients[ingredient], &grid[cell])) continue;
         seen[cell] = 1;
         if (mapping[cell] < 0 || shapeless_assign(recipe, grid, cells, mapping[cell], mapping, seen)) {
             mapping[cell] = ingredient;
@@ -177,8 +164,7 @@ static int shapeless_assign(const maage_recipe_definition *recipe, const maage_i
     }
     return 0;
 }
-maage_status maage_recipe_find(const maage_recipe_registry *registry,
-                               const maage_item_stack *grid, unsigned int width, maage_recipe_match *match) {
+maage_status maage_recipe_find(const maage_recipe_registry *registry, const maage_item_stack *grid, unsigned int width, maage_recipe_match *match) {
     const recipe_entry *entry;
     const maage_recipe_definition *recipe;
     const maage_recipe_ingredient *ingredient;
@@ -187,11 +173,9 @@ maage_status maage_recipe_find(const maage_recipe_registry *registry,
     int mapping[9], seen[9], found;
     if (!match) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     memset(match, 0, sizeof(*match));
-    if (!registry || !registry->finalized || !grid || (width != 2 && width != 3))
-        return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    if (!registry || !registry->finalized || !grid || (width != 2 && width != 3)) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     for (i = 0; i < width * width; ++i) {
-        if (!maage_item_stack_valid(registry->items, &grid[i]))
-            return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+        if (!maage_item_stack_valid(registry->items, &grid[i])) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
         if (grid[i].count) ++occupied;
     }
     for (index = 0; index < registry->count; ++index) {

@@ -58,8 +58,7 @@ static gboolean maage_access_gtk_tick(gpointer context) {
             p = &ui->snapshot.profiles[i];
             break;
         }
-    if (p)
-        g_snprintf(text, sizeof(text), "%s\n%s · %s\n%s", p->uuid, *p->sources ? p->sources : "Source unavailable", maage_access_state_name(p->state), p->detail);
+    if (p) g_snprintf(text, sizeof(text), "%s\n%s · %s\n%s", p->uuid, *p->sources ? p->sources : "Source unavailable", maage_access_state_name(p->state), p->detail);
     else
         text[0] = 0;
     gtk_label_set_text(GTK_LABEL(ui->identity), text);
@@ -83,8 +82,7 @@ static gboolean maage_access_gtk_tick(gpointer context) {
     gtk_label_set_text(GTK_LABEL(ui->device), text);
     gtk_widget_set_sensitive(ui->next, idle && ui->snapshot.allowed);
     gtk_widget_set_sensitive(ui->cancel, !ui->closing);
-    if (ui->snapshot.busy)
-        gtk_spinner_start(GTK_SPINNER(ui->spinner));
+    if (ui->snapshot.busy) gtk_spinner_start(GTK_SPINNER(ui->spinner));
     else
         gtk_spinner_stop(GTK_SPINNER(ui->spinner));
     if (!gtk_widget_get_visible(ui->window)) gtk_widget_show(ui->window);

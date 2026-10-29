@@ -46,10 +46,7 @@ typedef struct maage_content maage_content;
  * authoritative and must not change.
  * state_id, block_id, metadata and face are numeric; no graphics headers needed.
  * The callback and its context are never retained by finalized content. */
-typedef maage_status (*maage_content_presentation_resolver)(
-    void *context, maage_block_state_id state_id, maage_block_id block_id,
-    unsigned int metadata, maage_block_face face,
-    maage_block_face_definition *presentation, float leaf_fast_uv[4]);
+typedef maage_status (*maage_content_presentation_resolver)(void *context, maage_block_state_id state_id, maage_block_id block_id, unsigned int metadata, maage_block_face face, maage_block_face_definition *presentation, float leaf_fast_uv[4]);
 
 typedef struct maage_content_config {
     maage_content_presentation_resolver resolver; /* NULL = headless */
@@ -65,8 +62,7 @@ typedef struct maage_content_config {
  * output is reset to NULL on failure. The returned pointer owns all borrowed
  * immutable definitions until maage_content_destroy, which must run after
  * World, all asynchronous World jobs, gameplay, and readers have stopped. */
-maage_status maage_content_create(const maage_content_config *config,
-                                  maage_content **output, maage_status_trace *trace);
+maage_status maage_content_create(const maage_content_config *config, maage_content **output, maage_status_trace *trace);
 const maage_block_registry *maage_content_blocks(const maage_content *content);
 const maage_biome_registry *maage_content_biomes(const maage_content *content);
 const maage_item_registry *maage_content_items(const maage_content *content);

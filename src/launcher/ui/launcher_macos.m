@@ -62,9 +62,7 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset) {
 - (void)drawSelectionInRect:(NSRect)dirtyRect {
     (void) dirtyRect;
     [[NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:0.20] setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 2)
-                                     xRadius:9
-                                     yRadius:9] fill];
+    [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 2) xRadius:9 yRadius:9] fill];
 }
 @end
 static NSTableView *maage_ui_navigation_table(void) {
@@ -147,8 +145,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)repairAssets:(id)sender {
     (void) sender;
-    if (maage_access_allowed(self.state->access))
-        [self finish:2];
+    if (maage_access_allowed(self.state->access)) [self finish:2];
     else
         [self manage:nil];
 }
@@ -171,12 +168,10 @@ static NSTableView *maage_ui_navigation_table(void) {
     if (page >= MAAGE_PAGE_SETTINGS) {
         NSInteger row = page == MAAGE_PAGE_ABOUT ? 1 : 0;
         [self.sidebar deselectAll:nil];
-        if (self.settingsSidebar.selectedRow != row)
-            [self.settingsSidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+        if (self.settingsSidebar.selectedRow != row) [self.settingsSidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
     } else {
         [self.settingsSidebar deselectAll:nil];
-        if (self.sidebar.selectedRow != (NSInteger) page)
-            [self.sidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:page] byExtendingSelection:NO];
+        if (self.sidebar.selectedRow != (NSInteger) page) [self.sidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:page] byExtendingSelection:NO];
     }
     for (NSUInteger i = 0; i < self.pages.count; ++i)
         self.pages[i].hidden = i != (NSUInteger) page;
@@ -192,20 +187,16 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)selectAccount:(id)sender {
     (void) sender;
     NSString *uuid = self.account.selectedItem.representedObject;
-    if (uuid)
-        maage_launcher_account_select(self.state, uuid.UTF8String);
+    if (uuid) maage_launcher_account_select(self.state, uuid.UTF8String);
     else if (self.account.selectedItem.tag == 1) {
         [self manage:nil];
         return;
-    } else if (self.account.selectedItem.tag == 2)
-        [self verifyAccount:nil];
+    } else if (self.account.selectedItem.tag == 2) [self verifyAccount:nil];
     else if (self.account.selectedItem.tag == 3) {
         [self addAccount:nil];
         return;
-    } else if (self.account.selectedItem.tag == 4)
-        [self signOutAccount:nil];
-    else if (self.account.selectedItem.tag == 5)
-        [self removeAccount:nil];
+    } else if (self.account.selectedItem.tag == 4) [self signOutAccount:nil];
+    else if (self.account.selectedItem.tag == 5) [self removeAccount:nil];
     self.accountRevision = 0;
     [self refresh:nil];
 }
@@ -221,9 +212,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (NSTableRowView *)tableView:(NSTableView *)table rowViewForRow:(NSInteger)row {
     (void) row;
-    return table == self.sidebar || table == self.settingsSidebar
-               ? [[MaaGELauncherNavigationRow alloc] init]
-               : nil;
+    return table == self.sidebar || table == self.settingsSidebar ? [[MaaGELauncherNavigationRow alloc] init] : nil;
 }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
     (void) column;
@@ -340,8 +329,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     [alert addButtonWithTitle:@"Cancel"];
     [alert.window setInitialFirstResponder:name];
     while ([alert runModal] == NSAlertFirstButtonReturn) {
-        if (!maage_status_failed(maage_launcher_installation_write(self.state, creating ? -1 : (int) row,
-                                                                   name.stringValue.UTF8String, [client.selectedItem.representedObject UTF8String], arguments.stringValue.UTF8String))) {
+        if (!maage_status_failed(maage_launcher_installation_write(self.state, creating ? -1 : (int) row, name.stringValue.UTF8String, [client.selectedItem.representedObject UTF8String], arguments.stringValue.UTF8String))) {
             [self reloadInstallations];
             break;
         }
@@ -441,8 +429,7 @@ static NSTableView *maage_ui_navigation_table(void) {
         confirmation.informativeText = [NSString stringWithFormat:@"Client %s + %s\n%s · %s · %s\n\n%@\n\nImport copies the entire package. Only import code you trust. The original remains unchanged.%@", build->version, build->build, build->build_type, build->platform, build->architecture, @(state->client_candidate.source), *state->replacing_client ? @"\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : @""];
         [confirmation addButtonWithTitle:*state->replacing_client ? @"Replace" : @"Import"];
         [confirmation addButtonWithTitle:@"Cancel"];
-        if ([confirmation runModal] == NSAlertFirstButtonReturn)
-            maage_launcher_client_import(state);
+        if ([confirmation runModal] == NSAlertFirstButtonReturn) maage_launcher_client_import(state);
         else
             maage_launcher_client_cancel_import(state);
     }
@@ -601,8 +588,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     panel.treatsFilePackagesAsDirectories = NO;
     panel.allowsMultipleSelection = NO;
     if ([panel runModal] == NSModalResponseOK) {
-        if (replacing)
-            maage_launcher_client_replace(self.state, (unsigned) row, panel.URL.path.UTF8String);
+        if (replacing) maage_launcher_client_replace(self.state, (unsigned) row, panel.URL.path.UTF8String);
         else
             maage_launcher_client_probe(self.state, panel.URL.path.UTF8String);
     }

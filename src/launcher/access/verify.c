@@ -42,10 +42,8 @@ static int maage_access_java_items(struct json_object *response, int license) {
     size_t i, count;
     int game = 0;
     const char *name;
-    if (!*maage_access_json_string(response, "signature") || !*maage_access_json_string(response, "keyId") ||
-        !json_object_object_get_ex(response, "items", &items) || !json_object_is_type(items, json_type_array)) return 0;
-    if (json_object_object_get_ex(response, "errors", &errors) &&
-        (!json_object_is_type(errors, json_type_array) || json_object_array_length(errors))) return 0;
+    if (!*maage_access_json_string(response, "signature") || !*maage_access_json_string(response, "keyId") || !json_object_object_get_ex(response, "items", &items) || !json_object_is_type(items, json_type_array)) return 0;
+    if (json_object_object_get_ex(response, "errors", &errors) && (!json_object_is_type(errors, json_type_array) || json_object_array_length(errors))) return 0;
     count = json_object_array_length(items);
     if (count > 256) return 0;
     for (i = 0; i < count; ++i) {
@@ -57,9 +55,7 @@ static int maage_access_java_items(struct json_object *response, int license) {
     }
     return game;
 }
-maage_status maage_access_verify(const char *token, char uuid[33],
-                                 char name[17], char detail[256], int (*cancelled)(void *), void *context,
-                                 maage_access_state *output_state, maage_skin_reference *skin, int *skin_resolved, maage_status_trace *trace) {
+maage_status maage_access_verify(const char *token, char uuid[33], char name[17], char detail[256], int (*cancelled)(void *), void *context, maage_access_state *output_state, maage_skin_reference *skin, int *skin_resolved, maage_status_trace *trace) {
     maage_auth_observer observer;
     struct json_object *profile = NULL, *entitlements = NULL, *license = NULL;
     maage_access_state state = MAAGE_ACCESS_FAILED;
@@ -71,8 +67,7 @@ maage_status maage_access_verify(const char *token, char uuid[33],
     maage_status outcome;
     if (output_state) *output_state = MAAGE_ACCESS_FAILED;
     if (skin_resolved) *skin_resolved = 0;
-    if (!token || !uuid || !name || !detail || !cancelled || !output_state || !skin || !skin_resolved)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+    if (!token || !uuid || !name || !detail || !cancelled || !output_state || !skin || !skin_resolved) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
     memset(&observer, 0, sizeof(observer));
     observer.cancelled = cancelled;
     observer.context = context;
@@ -106,8 +101,7 @@ maage_status maage_access_verify(const char *token, char uuid[33],
     }
     random[6] = (unsigned char) ((random[6] & 15) | 64);
     random[8] = (unsigned char) ((random[8] & 63) | 128);
-    sprintf(request, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-            random[0], random[1], random[2], random[3], random[4], random[5], random[6], random[7], random[8], random[9], random[10], random[11], random[12], random[13], random[14], random[15]);
+    sprintf(request, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", random[0], random[1], random[2], random[3], random[4], random[5], random[6], random[7], random[8], random[9], random[10], random[11], random[12], random[13], random[14], random[15]);
     sprintf(endpoint, "https://api.minecraftservices.com/entitlements/license?requestId=%s", request);
     outcome = maage_auth_request(endpoint, token, NULL, 0, &observer, &status, detail, &license);
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
@@ -120,12 +114,10 @@ maage_status maage_access_verify(const char *token, char uuid[33],
         {
             maage_status skin_result = maage_launcher_skin_profile(profile, normalized, name, skin);
             *skin_resolved = maage_status_is_success(skin_result);
-            if (!*skin_resolved) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.skins", skin_result,
-                                                  "Authenticated skin metadata unavailable; retaining this profile's cached appearance.");
+            if (!*skin_resolved) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.skins", skin_result, "Authenticated skin metadata unavailable; retaining this profile's cached appearance.");
         }
         strcpy(detail, "Minecraft Java Edition access verified. These services do not conclusively establish permanent purchase versus subscription access.");
-    } else if (status == 200 && license)
-        strcpy(detail, "Minecraft Java Edition access could not be confirmed. A valid Java profile and explicit Java entitlement are required; empty lists and Bedrock-only access do not qualify.");
+    } else if (status == 200 && license) strcpy(detail, "Minecraft Java Edition access could not be confirmed. A valid Java profile and explicit Java entitlement are required; empty lists and Bedrock-only access do not qualify.");
     else {
         char failure[256];
         strcpy(failure, !entitlements ? store_error : detail);
@@ -134,17 +126,13 @@ maage_status maage_access_verify(const char *token, char uuid[33],
 done:
     if (state == MAAGE_ACCESS_VERIFIED)
         maage_log_info("maage.launcher.access.verify", "Java access verified (store entitlement=%s; license entitlement=%s).", game ? "confirmed" : "not confirmed", licensed ? "confirmed" : "not confirmed");
-    else if (!cancelled(context))
-        maage_log_verbose("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed");
+    else if (!cancelled(context)) maage_log_verbose("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed");
     maage_auth_json_free(profile);
     maage_auth_json_free(entitlements);
     maage_auth_json_free(license);
     *output_state = state;
-    if (state == MAAGE_ACCESS_VERIFIED)
-        outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VERIFY, 0);
-    else if (cancelled(context))
-        outcome = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
-    else if (!maage_status_failed(outcome))
-        outcome = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+    if (state == MAAGE_ACCESS_VERIFIED) outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VERIFY, 0);
+    else if (cancelled(context)) outcome = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+    else if (!maage_status_failed(outcome)) outcome = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
     return MAAGE_STATUS_PROPAGATE(trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY);
 }

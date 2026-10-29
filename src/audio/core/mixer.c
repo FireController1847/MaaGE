@@ -38,8 +38,7 @@ void maage_audio_mix(maage_audio *audio, float *output, unsigned int frames) {
             dist = (float) sqrt((double) dx * dx + (double) dy * dy + (double) dz * dz);
             /* Linear distance attenuation uses the voice's resolved range. */
             gain *= dist < v->max_distance ? 1.0f - dist / v->max_distance : 0.0f;
-            if (dist > 0.0001f)
-                pan = (dx * audio->right.x + dy * audio->right.y + dz * audio->right.z) / dist;
+            if (dist > 0.0001f) pan = (dx * audio->right.x + dy * audio->right.y + dz * audio->right.z) / dist;
             if (pan < -1.0f) pan = -1.0f;
             if (pan > 1.0f) pan = 1.0f;
         }
@@ -83,13 +82,10 @@ void maage_audio_mix(maage_audio *audio, float *output, unsigned int frames) {
                 samples = b->samples;
             }
             frac = s ? pos : pos - (double) a;
-            src_l = (float) ((1.0 - frac) * samples[a * channels] +
-                             frac * samples[z * channels]);
-            if (channels == 1U)
-                src_r = src_l;
+            src_l = (float) ((1.0 - frac) * samples[a * channels] + frac * samples[z * channels]);
+            if (channels == 1U) src_r = src_l;
             else
-                src_r = (float) ((1.0 - frac) * samples[a * 2U + 1U] +
-                                 frac * samples[z * 2U + 1U]);
+                src_r = (float) ((1.0 - frac) * samples[a * 2U + 1U] + frac * samples[z * 2U + 1U]);
             output[2U * j] += src_l * left;
             output[2U * j + 1U] += src_r * right;
             v->cursor += step;

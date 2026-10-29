@@ -33,17 +33,13 @@ struct maage_client_item_entities {
 static maage_status item_entities_status(unsigned char code, unsigned char operation) {
     return maage_status_make(code, MAAGE_CONTEXT_CLIENT, operation, 0);
 }
-maage_status maage_client_item_entities_create(maage_renderer *renderer,
-                                               maage_render_texture *atlas, const maage_client_resources *resources,
-                                               const maage_item_registry *items, const maage_block_registry *blocks,
-                                               maage_client_item_entities **output, maage_status_trace *trace) {
+maage_status maage_client_item_entities_create(maage_renderer *renderer, maage_render_texture *atlas, const maage_client_resources *resources, const maage_item_registry *items, const maage_block_registry *blocks, maage_client_item_entities **output, maage_status_trace *trace) {
     maage_client_item_entities *view;
     const maage_item_definition *item;
     void **slot;
     size_t i;
     maage_status result = item_entities_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
-    if (!renderer || !atlas || !resources || !items || !blocks || !output)
-        return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    if (!renderer || !atlas || !resources || !items || !blocks || !output) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     *output = NULL;
     view = (maage_client_item_entities *) calloc(1, sizeof(*view));
     if (!view) return result;
@@ -71,8 +67,7 @@ failed:
     maage_client_item_entities_destroy(view);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
 }
-static maage_status item_entities_model(maage_client_item_entities *view,
-                                        const maage_item_stack *stack, const maage_render_mesh **mesh, int *notice, maage_status_trace *trace) {
+static maage_status item_entities_model(maage_client_item_entities *view, const maage_item_stack *stack, const maage_render_mesh **mesh, int *notice, maage_status_trace *trace) {
     void **slot = maage_registry_pages_find(&view->models, stack->item_id);
     maage_item_models *models = slot ? (maage_item_models *) *slot : NULL;
     maage_mesh_vertex vertices[MAAGE_ITEM_MODEL_FACES * 4];
@@ -80,13 +75,11 @@ static maage_status item_entities_model(maage_client_item_entities *view,
     maage_mesh_data data;
     maage_status result;
     *notice = 0;
-    if (!models || stack->metadata >= models->count || !maage_item_stack_valid(view->items, stack))
-        return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOOKUP);
+    if (!models || stack->metadata >= models->count || !maage_item_stack_valid(view->items, stack)) return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOOKUP);
     if (!models->variants[stack->metadata]) {
         if (maage_status_failed(models->results[stack->metadata])) return models->results[stack->metadata];
         result = maage_client_item_model(view->resources, view->items, view->blocks, stack, vertices, indices, &data);
-        if (!maage_status_failed(result)) result = maage_renderer_upload_geometry(view->renderer, &data,
-                                                                                  view->atlas, &models->variants[stack->metadata], trace);
+        if (!maage_status_failed(result)) result = maage_renderer_upload_geometry(view->renderer, &data, view->atlas, &models->variants[stack->metadata], trace);
         models->results[stack->metadata] = result;
         if (maage_status_failed(result)) {
             *notice = 1;
@@ -96,8 +89,7 @@ static maage_status item_entities_model(maage_client_item_entities *view,
     *mesh = models->variants[stack->metadata];
     return item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOOKUP);
 }
-maage_status maage_client_item_entities_mesh(maage_client_item_entities *view,
-                                             const maage_item_stack *stack, const maage_render_mesh **mesh, maage_status_trace *trace) {
+maage_status maage_client_item_entities_mesh(maage_client_item_entities *view, const maage_item_stack *stack, const maage_render_mesh **mesh, maage_status_trace *trace) {
     int notice;
     if (!view || !stack || !mesh) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOOKUP);
     *mesh = NULL;
@@ -111,15 +103,11 @@ maage_status maage_client_item_entities_clear(maage_client_item_entities *view) 
     memset(view->pickups, 0, sizeof(view->pickups));
     return item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
-maage_status maage_client_item_entities_pickup(maage_client_item_entities *view,
-                                               const maage_session_event *event, double now) {
+maage_status maage_client_item_entities_pickup(maage_client_item_entities *view, const maage_session_event *event, double now) {
     unsigned int i, n, written = 0;
-    if (!view || !event || event->kind != MAAGE_EVENT_PICKUP ||
-        !event->pickup_count || event->pickup_count > 32 || !(now >= 0))
-        return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    if (!view || !event || event->kind != MAAGE_EVENT_PICKUP || !event->pickup_count || event->pickup_count > 32 || !(now >= 0)) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     for (n = 0; n < event->pickup_count; ++n)
-        if (!event->pickups[n].entity || !event->pickups[n].stack.count ||
-            !maage_item_stack_valid(view->items, &event->pickups[n].stack))
+        if (!event->pickups[n].entity || !event->pickups[n].stack.count || !maage_item_stack_valid(view->items, &event->pickups[n].stack))
             return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_UPDATE);
     for (n = 0; n < event->pickup_count; ++n)
         for (i = 0; i < 32; ++i)
@@ -136,10 +124,7 @@ maage_status maage_client_item_entities_pickup(maage_client_item_entities *view,
     return item_entities_status(written == event->pickup_count ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_UPDATE);
 }
 
-maage_status maage_client_item_entities_update(maage_client_item_entities *view,
-                                               maage_local_session *session, maage_world *visual_world, const maage_session_snapshot *snapshot,
-                                               double interpolation, const double eye[3], double now,
-                                               const maage_render_instance *additional, size_t additional_count, maage_status_trace *trace) {
+maage_status maage_client_item_entities_update(maage_client_item_entities *view, maage_local_session *session, maage_world *visual_world, const maage_session_snapshot *snapshot, double interpolation, const double eye[3], double now, const maage_render_instance *additional, size_t additional_count, maage_status_trace *trace) {
     maage_session_entities incoming;
     maage_render_instance *draws, *draw;
     const maage_entity *entity;
@@ -160,19 +145,14 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
             incoming.session_epoch == snapshot->session_epoch && incoming.world_epoch == snapshot->world_epoch &&
             (!view->current.sequence || view->current.session_epoch != incoming.session_epoch ||
              view->current.world_epoch != incoming.world_epoch || incoming.sequence > view->current.sequence)) {
-            if (view->current.tick != incoming.tick || view->current.world_epoch != incoming.world_epoch ||
-                view->current.session_epoch != incoming.session_epoch) view->received = now;
+            if (view->current.tick != incoming.tick || view->current.world_epoch != incoming.world_epoch || view->current.session_epoch != incoming.session_epoch) view->received = now;
             free(view->current.entities);
             view->current = incoming;
         } else
             free(incoming.entities);
-    } else if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_INVALID_STATE)
-        return result;
-    if (view->current.session_epoch != snapshot->session_epoch || view->current.world_epoch != snapshot->world_epoch)
-        (void) maage_client_item_entities_clear(view);
-    if (additional_count > (size_t) - 1 / sizeof(*draws) - 32 ||
-        view->current.count > ((size_t) - 1 / sizeof(*draws) - 32 - additional_count) / 5)
-        return item_entities_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
+    } else if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_INVALID_STATE) return result;
+    if (view->current.session_epoch != snapshot->session_epoch || view->current.world_epoch != snapshot->world_epoch) (void) maage_client_item_entities_clear(view);
+    if (additional_count > (size_t) - 1 / sizeof(*draws) - 32 || view->current.count > ((size_t) - 1 / sizeof(*draws) - 32 - additional_count) / 5) return item_entities_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
     needed = view->current.count * 5 + 32 + additional_count;
     if (needed > view->capacity) {
         draws = (maage_render_instance *) realloc(view->draws, needed * sizeof(*draws));
@@ -188,8 +168,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         entity = &view->current.entities[i];
         collected = 0;
         for (animation = 0; animation < 32; ++animation)
-            if (view->pickups[animation].active && view->pickups[animation].pickup.entity == entity->id &&
-                view->current.tick < view->pickups[animation].tick) collected = 1;
+            if (view->pickups[animation].active && view->pickups[animation].pickup.entity == entity->id && view->current.tick < view->pickups[animation].tick) collected = 1;
         if (collected) continue;
         if (!maage_entity_valid(entity, view->items) || (i && view->current.entities[i - 1].id >= entity->id)) return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_UPDATE);
         for (axis = 0; axis < 3; ++axis)
@@ -200,14 +179,11 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         if (dx * dx + dy * dy + dz * dz > 4096) continue;
         result = item_entities_model(view, &entity->payload.item, &mesh, &notice, trace);
         if (maage_status_failed(result)) {
-            if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED &&
-                maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
+            if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
             if (notice) {
                 MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPLOAD);
-                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.items", result, trace,
-                                       "Item model unavailable; omitting affected instances until resource reload.");
-                maage_status_trace_recover(trace, item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT),
-                                           MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
+                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.items", result, trace, "Item model unavailable; omitting affected instances until resource reload.");
+                maage_status_trace_recover(trace, item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
                 outcome = item_entities_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_UPDATE);
             }
             continue;
@@ -255,8 +231,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     for (animation = 0; animation < 32; ++animation) {
         if (!view->pickups[animation].active) continue;
         phase = (now - view->pickups[animation].began) / 0.15;
-        if (phase >= 1 || view->pickups[animation].session != snapshot->session_epoch ||
-            view->pickups[animation].world != snapshot->world_epoch) {
+        if (phase >= 1 || view->pickups[animation].session != snapshot->session_epoch || view->pickups[animation].world != snapshot->world_epoch) {
             view->pickups[animation].active = 0;
             continue;
         }
@@ -264,13 +239,10 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         phase *= phase;
         result = item_entities_model(view, &view->pickups[animation].pickup.stack, &mesh, &notice, trace);
         if (maage_status_failed(result)) {
-            if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED &&
-                maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
+            if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
             if (notice) {
-                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.items", result, trace,
-                                       "Pickup model unavailable; omitting this decoration until resource reload.");
-                maage_status_trace_recover(trace, item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT),
-                                           MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
+                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.items", result, trace, "Pickup model unavailable; omitting this decoration until resource reload.");
+                maage_status_trace_recover(trace, item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
             }
             outcome = item_entities_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_UPDATE);
             continue;
@@ -280,8 +252,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         draw = &view->draws[count++];
         memset(draw, 0, sizeof(*draw));
         draw->mesh = mesh;
-        rotation = (double) view->pickups[animation].pickup.age / 20 +
-                   (double) ((view->pickups[animation].pickup.entity * 2654435761UL) & 65535UL) / 65536.0 * 6.283185307179586;
+        rotation = (double) view->pickups[animation].pickup.age / 20 + (double) ((view->pickups[animation].pickup.entity * 2654435761UL) & 65535UL) / 65536.0 * 6.283185307179586;
         sine = sin(rotation);
         cosine = cos(rotation);
         draw->transform[0] = (float) (cosine * scale);
@@ -293,8 +264,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         for (axis = 0; axis < 3; ++axis) {
             double target = eye[axis] - (axis == 1 ? MAAGE_PLAYER_EYE_HEIGHT - 0.5 : 0);
             double source = view->pickups[animation].pickup.position[axis];
-            if (axis == 1) source += 0.1 + sin(rotation + (double) view->pickups[animation].pickup.age / 20) * 0.1 +
-                                     (item->model == MAAGE_ITEM_MODEL_BLOCK ? 0.125 : 0.25);
+            if (axis == 1) source += 0.1 + sin(rotation + (double) view->pickups[animation].pickup.age / 20) * 0.1 + (item->model == MAAGE_ITEM_MODEL_BLOCK ? 0.125 : 0.25);
             draw->transform[12 + axis] = (float) (source + (target - source) * phase);
         }
         light = 240;

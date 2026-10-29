@@ -44,8 +44,11 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - `.editorconfig` and `.clang-format` are authoritative for new/modified first-party
   native source: four spaces, no indentation tabs, attached opening braces, spaces
   around binary/assignment/ternary operators, after commas and C casts; no arbitrary
-  line limit. Keep straightforward calls on one line and meaningful complex grouping.
-  Short guards/inline returns are encouraged; simple conditionals need no braces.
+  line limit. Prefer one physical line for each straightforward statement, declaration,
+  function signature, or function call, without any arbitrary length limit. Existing
+  unnecessary line breaks must be actively removed rather than merely preserved by
+  clang-format. Multiline formatting is reserved for genuine logical structure or
+  improved readability. Short guards/inline returns are encouraged; simple conditionals need no braces.
   Separate unrelated statements and logical phases, not every guard/assignment.
 - clang-format prints a cast followed by unary minus as `(size_t) -1`. The
   programmer's explicit sentinel style is `(size_t) - 1`; retain that whitespace

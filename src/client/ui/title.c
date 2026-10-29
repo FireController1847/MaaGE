@@ -25,8 +25,7 @@ static int title_face(const double ray[3]) {
     if (ax >= ay) return ray[0] >= 0.0 ? 1 : 3;
     return ray[1] >= 0.0 ? 5 : 4;
 }
-static void title_uv(const maage_client_ui *ui, const double ray[3], int face,
-                     float *u, float *v) {
+static void title_uv(const maage_client_ui *ui, const double ray[3], int face, float *u, float *v) {
     double a, uu, vv;
     if (face == 0 || face == 2) {
         a = fabs(ray[2]);
@@ -85,8 +84,7 @@ static void title_panorama(maage_client_ui *ui) {
             bottom = top + step;
             if (right > ui->width) right = ui->width;
             if (bottom > ui->height) bottom = ui->height;
-            title_ray(&camera, (left + right) * 0.5f,
-                      (top + bottom) * 0.5f, ray);
+            title_ray(&camera, (left + right) * 0.5f, (top + bottom) * 0.5f, ray);
             face = title_face(ray);
             for (j = 0; j < 4U; ++j) {
                 sx = (j == 0U || j == 3U) ? left : right;
@@ -95,8 +93,7 @@ static void title_panorama(maage_client_ui *ui) {
                 vertices[j].position[1] = sy;
                 title_ray(&camera, sx, sy, ray);
                 title_uv(ui, ray, face, &vertices[j].uv[0], &vertices[j].uv[1]);
-                vertices[j].color[0] = vertices[j].color[1] =
-                    vertices[j].color[2] = vertices[j].color[3] = 1.0f;
+                vertices[j].color[0] = vertices[j].color[1] = vertices[j].color[2] = vertices[j].color[3] = 1.0f;
             }
             if (!maage_client_ui_append_quads(ui, vertices, 1)) return;
         }
@@ -117,8 +114,7 @@ static maage_client_ui_rect title_button(const maage_client_ui *ui, unsigned int
     return r;
 }
 static int title_hit(const maage_client_ui *ui, maage_client_ui_rect r) {
-    return ui->mouse_x >= r.x && ui->mouse_x < r.x + r.width &&
-           ui->mouse_y >= r.y && ui->mouse_y < r.y + r.height;
+    return ui->mouse_x >= r.x && ui->mouse_x < r.x + r.width && ui->mouse_y >= r.y && ui->mouse_y < r.y + r.height;
 }
 static void title_logo(maage_client_ui *ui) {
     maage_client_ui_rect r;
@@ -129,18 +125,15 @@ static void title_logo(maage_client_ui *ui) {
     r.y = ui->content.y + 30;
     r.width = 155;
     r.height = 44;
-    maage_client_ui_rectangle(ui, r, u, 0, u + 155.0f / ui->resources.atlas_edge,
-                              44.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, r, u, 0, u + 155.0f / ui->resources.atlas_edge, 44.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     r.x += 155;
     r.width = 155;
-    maage_client_ui_rectangle(ui, r, u, 45.0f / ui->resources.atlas_edge,
-                              u + 155.0f / ui->resources.atlas_edge, 89.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, r, u, 45.0f / ui->resources.atlas_edge, u + 155.0f / ui->resources.atlas_edge, 89.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
 }
 static void title_splash(maage_client_ui *ui) {
     size_t first = ui->batch.vertex_count, i;
     double radians = -0.3490658504, c = cos(radians), s = sin(radians);
-    double scale = (1.8 - fabs(sin(ui->notice_now * 6.28318530718) * 0.1)) *
-                   100.0 / (maage_client_ui_text_width(ui, "Engage!") + 32);
+    double scale = (1.8 - fabs(sin(ui->notice_now * 6.28318530718) * 0.1)) * 100.0 / (maage_client_ui_text_width(ui, "Engage!") + 32);
     float x = ui->content.x + ui->content.width * 0.5f + 90, y = ui->content.y + 70;
     maage_client_ui_text(ui, "Engage!", x + 1, y + 1, MAAGE_CLIENT_UI_CENTER, 0.18f, 0.18f, 0);
     maage_client_ui_text(ui, "Engage!", x, y, MAAGE_CLIENT_UI_CENTER, 1, 1, 0);
@@ -158,8 +151,7 @@ void maage_client_ui_title_draw(maage_client_ui *ui, void *context) {
     title_logo(ui);
     title_splash(ui);
     r = title_button(ui, 0);
-    maage_client_ui_button(ui, r, "Singleplayer",
-                           (f->focus_keyboard ? f->focus == 0 : title_hit(ui, r)));
+    maage_client_ui_button(ui, r, "Singleplayer", (f->focus_keyboard ? f->focus == 0 : title_hit(ui, r)));
     r = title_button(ui, 1);
     maage_client_ui_button_state(ui, r, "Multiplayer", MAAGE_CLIENT_UI_BUTTON_DISABLED);
     r = title_button(ui, 2);
@@ -167,39 +159,28 @@ void maage_client_ui_title_draw(maage_client_ui *ui, void *context) {
     /* The 1.7.10 language globe is in widgets.png at (0,106/126),
      * not a separate language.png resource. */
     r = title_button(ui, 3);
-    maage_client_ui_rectangle(ui, r, 256.0f / ui->resources.atlas_edge,
-                              106.0f / ui->resources.atlas_edge,
-                              276.0f / ui->resources.atlas_edge,
-                              126.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+    maage_client_ui_rectangle(ui, r, 256.0f / ui->resources.atlas_edge, 106.0f / ui->resources.atlas_edge, 276.0f / ui->resources.atlas_edge, 126.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
     r = title_button(ui, 4);
-    maage_client_ui_button(ui, r, "Options...",
-                           (f->focus_keyboard ? f->focus == 4 : title_hit(ui, r)));
+    maage_client_ui_button(ui, r, "Options...", (f->focus_keyboard ? f->focus == 4 : title_hit(ui, r)));
     r = title_button(ui, 5);
-    maage_client_ui_button(ui, r, "Quit Game",
-                           (f->focus_keyboard ? f->focus == 5 : title_hit(ui, r)));
+    maage_client_ui_button(ui, r, "Quit Game", (f->focus_keyboard ? f->focus == 5 : title_hit(ui, r)));
     maage_client_ui_text(ui, "Minecraft 1.7.10", 3, ui->height - 9, MAAGE_CLIENT_UI_LEFT, 0.14f, 0.14f, 0.14f);
     maage_client_ui_text(ui, "Minecraft 1.7.10", 2, ui->height - 10, MAAGE_CLIENT_UI_LEFT, 1, 1, 1);
-    maage_client_ui_text(ui, "Copyright Mojang AB. Do not distribute!",
-                         ui->width - 1, ui->height - 9, MAAGE_CLIENT_UI_RIGHT, 0.14f, 0.14f, 0.14f);
-    maage_client_ui_text(ui, "Copyright Mojang AB. Do not distribute!",
-                         ui->width - 2, ui->height - 10, MAAGE_CLIENT_UI_RIGHT, 1, 1, 1);
+    maage_client_ui_text(ui, "Copyright Mojang AB. Do not distribute!", ui->width - 1, ui->height - 9, MAAGE_CLIENT_UI_RIGHT, 0.14f, 0.14f, 0.14f);
+    maage_client_ui_text(ui, "Copyright Mojang AB. Do not distribute!", ui->width - 2, ui->height - 10, MAAGE_CLIENT_UI_RIGHT, 1, 1, 1);
 }
-unsigned int maage_client_ui_title_input(maage_client_ui *ui,
-                                         const maage_client_ui_input *input, void *context) {
+unsigned int maage_client_ui_title_input(maage_client_ui *ui, const maage_client_ui_input *input, void *context) {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *) context;
     int hover = -1;
     unsigned int ids[3] = {0, 4, 5}, k;
     /* Keyboard focus is retained only after keyboard navigation. Pointer
      * movement clears it even when the pointer leaves every button. */
-    if (ui->mouse_x != ui->previous_mouse_x ||
-        ui->mouse_y != ui->previous_mouse_y || input->primary_pressed)
-        f->focus_keyboard = 0;
+    if (ui->mouse_x != ui->previous_mouse_x || ui->mouse_y != ui->previous_mouse_y || input->primary_pressed) f->focus_keyboard = 0;
     if (input->next || input->previous) {
         for (k = 0; k < 3; ++k)
             if (f->focus == ids[k]) break;
         if (k == 3) k = 0;
-        if (input->next)
-            k = (k + 1) % 3;
+        if (input->next) k = (k + 1) % 3;
         else
             k = (k + 2) % 3;
         f->focus = ids[k];

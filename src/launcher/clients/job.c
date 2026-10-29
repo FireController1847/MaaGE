@@ -31,22 +31,17 @@ static void *maage_client_worker(void *context)
 #endif
 {
     maage_client_job *job = (maage_client_job *) context;
-    maage_status result = maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED,
-                                            MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_JOB, 0);
+    maage_status result = maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_JOB, 0);
 #if MAAGE_LAUNCHER_DEVELOPMENT
     if (job->mode == 1)
         result = maage_clients_probe(job->source, &job->candidate, job->error, &job->trace);
-    else if (job->mode == 2)
-        result = maage_clients_import(&job->registry, &job->candidate, job->error, &job->trace);
+    else if (job->mode == 2) result = maage_clients_import(&job->registry, &job->candidate, job->error, &job->trace);
     else
 #endif
         if (job->mode == 3)
         result = maage_clients_remove(&job->registry, job->source, job->error, &job->trace);
-    else if (job->mode == 4)
-        result = maage_client_launch(job->registry.root,
-                                     job->source, job->instance_id, job->access, &job->process, job->error, &job->trace);
-    if (!maage_status_is_success(result))
-        MAAGE_STATUS_TRACE(&job->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_JOB);
+    else if (job->mode == 4) result = maage_client_launch(job->registry.root, job->source, job->instance_id, job->access, &job->process, job->error, &job->trace);
+    if (!maage_status_is_success(result)) MAAGE_STATUS_TRACE(&job->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_JOB);
 #ifdef _WIN32
     EnterCriticalSection(&job->mutex);
     job->result = result;
@@ -61,9 +56,7 @@ static void *maage_client_worker(void *context)
     return NULL;
 #endif
 }
-maage_status maage_client_job_start(const char *root, int mode, const char *source,
-                                    const maage_client_candidate *candidate, maage_access *access,
-                                    const char *instance_id, maage_client_job **output, const maage_status_trace *parent) {
+maage_status maage_client_job_start(const char *root, int mode, const char *source, const maage_client_candidate *candidate, maage_access *access, const char *instance_id, maage_client_job **output, const maage_status_trace *parent) {
     maage_client_job *job;
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
     int native_error = 0;
@@ -74,14 +67,11 @@ maage_status maage_client_job_start(const char *root, int mode, const char *sour
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, !root ? 0 : !output ? 6
                                                                                                                                     : 1);
 #if !MAAGE_LAUNCHER_DEVELOPMENT
-    if (mode != 3 && mode != 4) return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED,
-                                                         MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
+    if (mode != 3 && mode != 4) return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
 #endif
     job = (maage_client_job *) calloc(1, sizeof(*job));
-    if (!job) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-                                       MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
-    if (parent)
-        job->trace = *parent;
+    if (!job) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
+    if (parent) job->trace = *parent;
     else
         maage_status_trace_init(&job->trace);
     MAAGE_STATUS_TRACE(&job->trace, maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT);
@@ -121,8 +111,7 @@ maage_status maage_client_job_start(const char *root, int mode, const char *sour
 maage_status maage_client_job_finish(maage_client_job **handle) {
     maage_client_job *job;
     int native_error = 0;
-    if (!handle) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                          MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_DESTROY, 0);
+    if (!handle) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_DESTROY, 0);
     job = *handle;
     if (!job) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
 #ifdef _WIN32
@@ -142,9 +131,7 @@ maage_status maage_client_job_finish(maage_client_job **handle) {
     *handle = NULL;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
-maage_status maage_client_job_take(maage_client_job **handle,
-                                   maage_client_candidate *candidate, maage_client_registry *registry,
-                                   maage_process **process, char error[256], int *completed, maage_status_trace *trace) {
+maage_status maage_client_job_take(maage_client_job **handle, maage_client_candidate *candidate, maage_client_registry *registry, maage_process **process, char error[256], int *completed, maage_status_trace *trace) {
     maage_client_job *job;
     maage_status result, released;
     int done;

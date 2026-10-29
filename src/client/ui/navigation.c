@@ -2,15 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-maage_client_ui_screen *maage_client_ui_screen_get(const maage_client_ui *ui,
-                                                   maage_client_ui_screen_id id) {
+maage_client_ui_screen *maage_client_ui_screen_get(const maage_client_ui *ui, maage_client_ui_screen_id id) {
     void **entry;
     if (!ui) return NULL;
     entry = maage_registry_pages_find(&ui->navigation.screens, (unsigned long) id);
     return entry ? (maage_client_ui_screen *) *entry : NULL;
 }
-maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,
-                                             maage_client_ui_screen_draw draw, maage_client_ui_screen_input input, void *context) {
+maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id, maage_client_ui_screen_draw draw, maage_client_ui_screen_input input, void *context) {
     maage_client_ui_screen *screen;
     maage_client_ui_navigation *navigation;
     void **entry;
@@ -18,18 +16,14 @@ maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_u
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI,
                                  MAAGE_OPERATION_REGISTER, !ui ? 0 : (!id ? 1 : 2));
     navigation = &ui->navigation;
-    if (navigation->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE,
-                                                        MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
-    if (maage_client_ui_screen_get(ui, id))
-        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
+    if (navigation->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
+    if (maage_client_ui_screen_get(ui, id)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
     screen = (maage_client_ui_screen *) calloc(1, sizeof(*screen));
-    if (!screen) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-                                          MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
+    if (!screen) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
     entry = maage_registry_pages_ensure(&navigation->screens, (unsigned long) id);
     if (!entry) {
         free(screen);
-        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-                                 MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_REGISTER, 0);
     }
     screen->draw = draw;
     screen->input = input;
@@ -44,8 +38,7 @@ maage_status maage_client_ui_finalize(maage_client_ui *ui) {
     navigation = &ui->navigation;
     if (navigation->finalized) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_FINALIZE, 0);
     if (!navigation->registered) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_FINALIZE, 0);
-    if (navigation->registered > (size_t) - 1 / sizeof(*navigation->stack))
-        return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_FINALIZE, 0);
+    if (navigation->registered > (size_t) - 1 / sizeof(*navigation->stack)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_FINALIZE, 0);
     navigation->stack = (maage_client_ui_screen_id *) calloc(navigation->registered, sizeof(*navigation->stack));
     if (!navigation->stack) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_FINALIZE, 0);
     navigation->finalized = 1;
@@ -59,13 +52,10 @@ maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui) {
 maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id id) {
     maage_client_ui_navigation *navigation;
     size_t i;
-    if (!ui || !id || (maage_client_ui_screen_id) (size_t) id != id)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, !ui ? 0 : 1);
+    if (!ui || !id || (maage_client_ui_screen_id) (size_t) id != id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, !ui ? 0 : 1);
     navigation = &ui->navigation;
-    if (!navigation->finalized || navigation->depth >= navigation->registered)
-        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
-    if (!maage_client_ui_screen_get(ui, id))
-        return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
+    if (!navigation->finalized || navigation->depth >= navigation->registered) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
+    if (!maage_client_ui_screen_get(ui, id)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     for (i = 0; i < navigation->depth; ++i)
         if (navigation->stack[i] == id)
             return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
@@ -79,9 +69,7 @@ maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id
 maage_status maage_client_ui_back(maage_client_ui *ui) {
     if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     if (!ui->navigation.depth) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_NAVIGATE, 0);
-    if ((maage_client_ui_current(ui) == MAAGE_CLIENT_UI_INVENTORY ||
-         maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CRAFTING_TABLE) &&
-        ui->container_command_pending) {
+    if ((maage_client_ui_current(ui) == MAAGE_CLIENT_UI_INVENTORY || maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CRAFTING_TABLE) && ui->container_command_pending) {
         ui->container_close_requested = 1;
         return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_NAVIGATE, 0);
     }
@@ -107,6 +95,5 @@ int maage_client_ui_modal(const maage_client_ui *ui) {
 
 int maage_client_ui_pauses_game(const maage_client_ui *ui) {
     maage_client_ui_screen_id id = maage_client_ui_current(ui);
-    return maage_client_ui_modal(ui) && id != MAAGE_CLIENT_UI_INVENTORY &&
-           id != MAAGE_CLIENT_UI_CRAFTING_TABLE;
+    return maage_client_ui_modal(ui) && id != MAAGE_CLIENT_UI_INVENTORY && id != MAAGE_CLIENT_UI_CRAFTING_TABLE;
 }

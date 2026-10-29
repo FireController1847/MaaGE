@@ -19,8 +19,7 @@ typedef struct maage_access_win32 {
 } maage_access_win32;
 static void maage_access_win32_text(HWND control, const char *text) {
     wchar_t wide[2048];
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide, 2048) &&
-        !maage_launcher_win32_same_text(control, wide)) SetWindowTextW(control, wide);
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide, 2048) && !maage_launcher_win32_same_text(control, wide)) SetWindowTextW(control, wide);
 }
 static HWND maage_access_win32_control(maage_access_win32 *ui, const wchar_t *kind, const wchar_t *text, DWORD style, int x, int y, int width, int height, int id) {
     return maage_launcher_win32_control(&ui->native, -1, kind, text, style, x, y, width, height, id);
@@ -29,8 +28,7 @@ static int maage_access_win32_selected(maage_access_win32 *ui) {
     LRESULT selected = SendMessageW(ui->profiles, CB_GETCURSEL, 0, 0);
     return selected >= 0 && (unsigned) selected < ui->snapshot.count ? (int) selected : -1;
 }
-static void maage_access_win32_profile_label(const maage_access_snapshot *snapshot,
-                                             unsigned index, wchar_t wide[512]) {
+static void maage_access_win32_profile_label(const maage_access_snapshot *snapshot, unsigned index, wchar_t wide[512]) {
     char text[128];
     if (!snapshot->count) {
         lstrcpyW(wide, L"No Minecraft accounts discovered");
@@ -67,8 +65,7 @@ static void maage_access_win32_tick(maage_access_win32 *ui) {
             if (ui->snapshot.count && !strcmp(ui->snapshot.profiles[i].uuid, uuid)) selected = (int) i;
             if (!rebuild) {
                 LRESULT length = SendMessageW(ui->profiles, CB_GETLBTEXTLEN, i, 0);
-                if (length != lstrlenW(wide))
-                    rebuild = 1;
+                if (length != lstrlenW(wide)) rebuild = 1;
                 else {
                     current[0] = 0;
                     SendMessageW(ui->profiles, CB_GETLBTEXT, i, (LPARAM) current);
@@ -84,8 +81,7 @@ static void maage_access_win32_tick(maage_access_win32 *ui) {
                 SendMessageW(ui->profiles, CB_ADDSTRING, 0, (LPARAM) wide);
             }
         }
-        if (rebuild || SendMessageW(ui->profiles, CB_GETCURSEL, 0, 0) != selected)
-            SendMessageW(ui->profiles, CB_SETCURSEL, (WPARAM) selected, 0);
+        if (rebuild || SendMessageW(ui->profiles, CB_GETCURSEL, 0, 0) != selected) SendMessageW(ui->profiles, CB_SETCURSEL, (WPARAM) selected, 0);
         if (rebuild && redraw) {
             SendMessageW(ui->profiles, WM_SETREDRAW, TRUE, 0);
             RedrawWindow(ui->profiles, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);
@@ -95,8 +91,7 @@ static void maage_access_win32_tick(maage_access_win32 *ui) {
     if (had_profiles != (ui->snapshot.count != 0)) InvalidateRect(ui->window, NULL, TRUE);
     selected = maage_access_win32_selected(ui);
     p = selected >= 0 ? &ui->snapshot.profiles[selected] : NULL;
-    if (p)
-        sprintf(text, "%s\r\n%s · %s\r\n%s", p->uuid, *p->sources ? p->sources : "Source unavailable", maage_access_state_name(p->state), p->detail);
+    if (p) sprintf(text, "%s\r\n%s · %s\r\n%s", p->uuid, *p->sources ? p->sources : "Source unavailable", maage_access_state_name(p->state), p->detail);
     else
         text[0] = 0;
     maage_access_win32_text(ui->identity, text);
@@ -143,8 +138,7 @@ static void maage_access_win32_copy(maage_access_win32 *ui) {
         GlobalUnlock(memory);
         EmptyClipboard();
         if (!SetClipboardData(CF_UNICODETEXT, memory)) GlobalFree(memory);
-    } else if (memory)
-        GlobalFree(memory);
+    } else if (memory) GlobalFree(memory);
     CloseClipboard();
 }
 static LRESULT CALLBACK maage_access_win32_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -181,31 +175,22 @@ static LRESULT CALLBACK maage_access_win32_proc(HWND window, UINT message, WPARA
             if (HIWORD(wparam) == CBN_SELCHANGE) maage_access_win32_tick(ui);
             return 0;
         }
-        if (LOWORD(wparam) == IDCANCEL)
-            SendMessageW(window, WM_CLOSE, 0, 0);
+        if (LOWORD(wparam) == IDCANCEL) SendMessageW(window, WM_CLOSE, 0, 0);
         else if (LOWORD(wparam) == IDOK) {
             if (!ui->snapshot.busy && maage_access_allowed(ui->access)) {
                 ui->result = 1;
                 DestroyWindow(window);
             }
-        } else if (LOWORD(wparam) == 108)
-            maage_access_win32_copy(ui);
-        else if (LOWORD(wparam) == 109 && *ui->snapshot.device_url)
-            maage_auth_browser(ui->snapshot.device_url);
-        else if (LOWORD(wparam) == 110)
-            maage_access_cancel_operation(ui->access);
+        } else if (LOWORD(wparam) == 108) maage_access_win32_copy(ui);
+        else if (LOWORD(wparam) == 109 && *ui->snapshot.device_url) maage_auth_browser(ui->snapshot.device_url);
+        else if (LOWORD(wparam) == 110) maage_access_cancel_operation(ui->access);
         else if (!ui->snapshot.busy && !ui->closing) {
             int selected = maage_access_win32_selected(ui);
-            if (LOWORD(wparam) == 103)
-                maage_access_sign_in(ui->access, 1);
-            else if (LOWORD(wparam) == 101)
-                maage_access_sign_in(ui->access, 0);
-            else if (selected >= 0 && LOWORD(wparam) == 107)
-                maage_access_verify_local(ui->access, ui->snapshot.profiles[selected].uuid);
-            else if (selected >= 0 && LOWORD(wparam) == 102)
-                maage_access_disconnect(ui->access, ui->snapshot.profiles[selected].uuid);
-            else if (selected >= 0 && LOWORD(wparam) == 111)
-                maage_access_sign_out(ui->access, ui->snapshot.profiles[selected].uuid);
+            if (LOWORD(wparam) == 103) maage_access_sign_in(ui->access, 1);
+            else if (LOWORD(wparam) == 101) maage_access_sign_in(ui->access, 0);
+            else if (selected >= 0 && LOWORD(wparam) == 107) maage_access_verify_local(ui->access, ui->snapshot.profiles[selected].uuid);
+            else if (selected >= 0 && LOWORD(wparam) == 102) maage_access_disconnect(ui->access, ui->snapshot.profiles[selected].uuid);
+            else if (selected >= 0 && LOWORD(wparam) == 111) maage_access_sign_out(ui->access, ui->snapshot.profiles[selected].uuid);
             maage_access_win32_tick(ui);
         }
         return 0;

@@ -3,8 +3,7 @@
 #include <string.h>
 #include <errno.h>
 
-maage_status maage_status_make(unsigned char status, unsigned char context,
-                               unsigned char operation, unsigned char detail) {
+maage_status maage_status_make(unsigned char status, unsigned char context, unsigned char operation, unsigned char detail) {
     return MAAGE_STATUS_VALUE(status, context, operation, detail);
 }
 unsigned char maage_status_code(maage_status result) {
@@ -26,8 +25,7 @@ void maage_status_to_bytes(maage_status result, unsigned char bytes[4]) {
     bytes[3] = maage_status_detail(result);
 }
 maage_status maage_status_from_bytes(const unsigned char bytes[4]) {
-    return ((maage_status) bytes[0] << 24) | ((maage_status) bytes[1] << 16) |
-           ((maage_status) bytes[2] << 8) | (maage_status) bytes[3];
+    return ((maage_status) bytes[0] << 24) | ((maage_status) bytes[1] << 16) | ((maage_status) bytes[2] << 8) | (maage_status) bytes[3];
 }
 maage_status_severity_value maage_status_severity(maage_status result) {
     return (maage_status_severity_value) (result >> 30);
@@ -293,8 +291,7 @@ size_t maage_status_format(maage_status result, char *buffer, size_t capacity) {
     maage_status_append(buffer, capacity, &length, ": ");
     maage_status_append(buffer, capacity, &length, definition ? definition->message : "Reserved status code.");
     if (maage_status_code(result) == MAAGE_STATUS_INVALID_ARGUMENT) {
-        if (detail == MAAGE_DETAIL_ARGUMENT_UNKNOWN)
-            maage_status_append(buffer, capacity, &length, " Argument index unknown.");
+        if (detail == MAAGE_DETAIL_ARGUMENT_UNKNOWN) maage_status_append(buffer, capacity, &length, " Argument index unknown.");
         else {
             sprintf(number, " Argument index: %u.", (unsigned int) detail);
             maage_status_append(buffer, capacity, &length, number);
@@ -304,8 +301,7 @@ size_t maage_status_format(maage_status result, char *buffer, size_t capacity) {
         sprintf(number, " Dependency: 0x%02X ", (unsigned int) detail);
         maage_status_append(buffer, capacity, &length, number);
         maage_status_append(buffer, capacity, &length, dependency ? dependency->name : "UNKNOWN");
-    } else if ((context == MAAGE_CONTEXT_SCHEDULER || context == MAAGE_CONTEXT_WORLD) &&
-               (detail == MAAGE_DETAIL_CANCELLED || detail == MAAGE_DETAIL_STALE)) {
+    } else if ((context == MAAGE_CONTEXT_SCHEDULER || context == MAAGE_CONTEXT_WORLD) && (detail == MAAGE_DETAIL_CANCELLED || detail == MAAGE_DETAIL_STALE)) {
         maage_status_append(buffer, capacity, &length, detail == MAAGE_DETAIL_CANCELLED ? " Cancelled." : " Stale result.");
     } else if (context == MAAGE_CONTEXT_WINDOW && detail == MAAGE_DETAIL_WRONG_THREAD) {
         maage_status_append(buffer, capacity, &length, " Wrong owning thread.");
@@ -326,45 +322,32 @@ size_t maage_status_format(maage_status result, char *buffer, size_t capacity) {
     return length;
 }
 
-maage_status maage_status_from_errno(int native_code, unsigned char context,
-                                     unsigned char operation) {
+maage_status maage_status_from_errno(int native_code, unsigned char context, unsigned char operation) {
     unsigned char code = MAAGE_STATUS_IO_ERROR;
-    if (!native_code)
-        code = MAAGE_STATUS_SUCCESS;
-    else if (native_code == ENOENT || native_code == ENOTDIR)
-        code = MAAGE_STATUS_NOT_FOUND;
-    else if (native_code == EACCES || native_code == EPERM)
-        code = MAAGE_STATUS_ACCESS_DENIED;
-    else if (native_code == EINVAL)
-        code = MAAGE_STATUS_INVALID_ARGUMENT;
-    else if (native_code == ENOMEM)
-        code = MAAGE_STATUS_ALLOCATION_FAILED;
-    else if (native_code == EINTR)
-        code = MAAGE_STATUS_INTERRUPTED;
+    if (!native_code) code = MAAGE_STATUS_SUCCESS;
+    else if (native_code == ENOENT || native_code == ENOTDIR) code = MAAGE_STATUS_NOT_FOUND;
+    else if (native_code == EACCES || native_code == EPERM) code = MAAGE_STATUS_ACCESS_DENIED;
+    else if (native_code == EINVAL) code = MAAGE_STATUS_INVALID_ARGUMENT;
+    else if (native_code == ENOMEM) code = MAAGE_STATUS_ALLOCATION_FAILED;
+    else if (native_code == EINTR) code = MAAGE_STATUS_INTERRUPTED;
 #ifdef ETIMEDOUT
-    else if (native_code == ETIMEDOUT)
-        code = MAAGE_STATUS_TIMEOUT;
+    else if (native_code == ETIMEDOUT) code = MAAGE_STATUS_TIMEOUT;
 #endif
 #ifdef ENOSYS
-    else if (native_code == ENOSYS)
-        code = MAAGE_STATUS_NOT_IMPLEMENTED;
+    else if (native_code == ENOSYS) code = MAAGE_STATUS_NOT_IMPLEMENTED;
 #endif
 #ifdef ENOTSUP
-    else if (native_code == ENOTSUP)
-        code = MAAGE_STATUS_SYSTEM_NOT_SUPPORTED;
+    else if (native_code == ENOTSUP) code = MAAGE_STATUS_SYSTEM_NOT_SUPPORTED;
 #endif
 #ifdef EOVERFLOW
-    else if (native_code == EOVERFLOW)
-        code = MAAGE_STATUS_BUFFER_OVERFLOW;
+    else if (native_code == EOVERFLOW) code = MAAGE_STATUS_BUFFER_OVERFLOW;
 #endif
 #ifdef EBUSY
-    else if (native_code == EBUSY)
-        code = MAAGE_STATUS_INVALID_STATE;
+    else if (native_code == EBUSY) code = MAAGE_STATUS_INVALID_STATE;
 #endif
     return maage_status_make(code, context, operation, code == MAAGE_STATUS_INVALID_ARGUMENT ? MAAGE_DETAIL_ARGUMENT_UNKNOWN : 0);
 }
-maage_status maage_status_from_win32(unsigned long native_code,
-                                     unsigned char context, unsigned char operation) {
+maage_status maage_status_from_win32(unsigned long native_code, unsigned char context, unsigned char operation) {
     unsigned char code;
     /* Win32 error numbers are wire-sized numeric inputs; native headers/types
      * stay in the platform adapter. Preserve the full original in a trace. */
@@ -412,13 +395,10 @@ void maage_status_trace_init(maage_status_trace *trace) {
     trace->count = trace->dropped = 0;
     trace->recovered = 0;
 }
-maage_status maage_status_trace_record(maage_status_trace *trace,
-                                       maage_status result, unsigned char context, unsigned char operation,
-                                       const char *static_file, unsigned long line, long native_code) {
+maage_status maage_status_trace_record(maage_status_trace *trace, maage_status result, unsigned char context, unsigned char operation, const char *static_file, unsigned long line, long native_code) {
     maage_status_trace_frame *frame;
     if (!trace) return result;
-    if (maage_status_is_success(trace->origin) && !maage_status_is_success(result))
-        trace->origin = result;
+    if (maage_status_is_success(trace->origin) && !maage_status_is_success(result)) trace->origin = result;
     trace->outcome = result;
     if (trace->count >= MAAGE_STATUS_TRACE_CAPACITY) {
         if (trace->dropped != UINT_MAX) ++trace->dropped;
@@ -433,15 +413,12 @@ maage_status maage_status_trace_record(maage_status_trace *trace,
     frame->native_code = native_code;
     return result;
 }
-maage_status maage_status_trace_recover(maage_status_trace *trace,
-                                        maage_status recovery, unsigned char context, unsigned char operation,
-                                        const char *static_file, unsigned long line) {
+maage_status maage_status_trace_recover(maage_status_trace *trace, maage_status recovery, unsigned char context, unsigned char operation, const char *static_file, unsigned long line) {
     if (trace) {
         trace->recovery = recovery;
         trace->recovered = 1;
     }
-    return maage_status_trace_record(trace, recovery, context, operation,
-                                     static_file, line, 0);
+    return maage_status_trace_record(trace, recovery, context, operation, static_file, line, 0);
 }
 static const char *maage_status_source_path(const char *file) {
     const char *part, *relative = file;
@@ -453,8 +430,7 @@ static const char *maage_status_source_path(const char *file) {
     }
     return relative;
 }
-size_t maage_status_trace_format(const maage_status_trace *trace,
-                                 char *buffer, size_t capacity) {
+size_t maage_status_trace_format(const maage_status_trace *trace, char *buffer, size_t capacity) {
     const maage_status_trace_frame *frame;
     const char *file;
     char number[112], status[384];
@@ -494,8 +470,7 @@ size_t maage_status_trace_format(const maage_status_trace *trace,
         sprintf(number, "\n    ... %u additional propagation frames omitted", trace->dropped);
         maage_status_append(buffer, capacity, &length, number);
     }
-    if (trace->count > MAAGE_STATUS_TRACE_CAPACITY)
-        maage_status_append(buffer, capacity, &length, "\n    ... recorded frame count exceeds trace capacity");
+    if (trace->count > MAAGE_STATUS_TRACE_CAPACITY) maage_status_append(buffer, capacity, &length, "\n    ... recorded frame count exceeds trace capacity");
     if (trace->outcome != trace->origin && (count || trace->outcome)) {
         maage_status_format(trace->outcome, status, sizeof(status));
         maage_status_append(buffer, capacity, &length, "\n    outcome: ");
@@ -509,10 +484,7 @@ size_t maage_status_trace_format(const maage_status_trace *trace,
     return length;
 }
 
-maage_status maage_status_trace_propagate(maage_status_trace *trace,
-                                          maage_status result, unsigned char context, unsigned char operation,
-                                          const char *static_file, unsigned long line) {
+maage_status maage_status_trace_propagate(maage_status_trace *trace, maage_status result, unsigned char context, unsigned char operation, const char *static_file, unsigned long line) {
     if (maage_status_is_success(result)) return result;
-    return maage_status_trace_record(trace, result, context, operation,
-                                     static_file, line, 0);
+    return maage_status_trace_record(trace, result, context, operation, static_file, line, 0);
 }

@@ -55,23 +55,16 @@ typedef struct maage_audio_play_desc {
 /* A device failure returns PARTIAL with a non-NULL engine and no output device.
  * It is safe to destroy the engine and recover by recreating it at an explicit
  * lifecycle boundary; poll never opens devices automatically. */
-maage_status maage_audio_create(const maage_audio_config *config,
-                                maage_audio **output, maage_status_trace *trace);
+maage_status maage_audio_create(const maage_audio_config *config, maage_audio **output, maage_status_trace *trace);
 maage_status maage_audio_destroy(maage_audio *audio, maage_status_trace *trace);
 /* signed 16-bit interleaved PCM, exactly 1 (mono) or 2 (stereo) channels;
  * frame_count is per channel. The audio owns a deep immutable copy until all
  * active voices stop/finish, even after buffer_destroy invalidates the handle.
  * An audio engine must outlive all of its publicly held buffer handles. */
-maage_status maage_audio_buffer_create(maage_audio *audio,
-                                       const signed short *interleaved_pcm, size_t frame_count,
-                                       unsigned int channels, unsigned int sample_rate,
-                                       maage_audio_buffer **output, maage_status_trace *trace);
+maage_status maage_audio_buffer_create(maage_audio *audio, const signed short *interleaved_pcm, size_t frame_count, unsigned int channels, unsigned int sample_rate, maage_audio_buffer **output, maage_status_trace *trace);
 /* Float PCM avoids an intermediate 16-bit conversion in the resource adapter.
  * Source data is deep-copied. */
-maage_status maage_audio_buffer_create_float(maage_audio *audio,
-                                             const float *interleaved_pcm, size_t frame_count,
-                                             unsigned int channels, unsigned int sample_rate,
-                                             maage_audio_buffer **output, maage_status_trace *trace);
+maage_status maage_audio_buffer_create_float(maage_audio *audio, const float *interleaved_pcm, size_t frame_count, unsigned int channels, unsigned int sample_rate, maage_audio_buffer **output, maage_status_trace *trace);
 maage_status maage_audio_buffer_destroy(maage_audio_buffer *buffer);
 
 /* Producer writes bounded interleaved float PCM outside the audio callback.
@@ -79,36 +72,25 @@ maage_status maage_audio_buffer_destroy(maage_audio_buffer *buffer);
  * than requested when the ring is full. Finish signals EOF or decode failure.
  * The owner must stop/join its producer before stream_destroy or engine destroy.
  * The Audio engine must outlive every stream handle. */
-maage_status maage_audio_stream_create(maage_audio *audio,
-                                       unsigned int channels, unsigned int sample_rate, size_t capacity_frames,
-                                       maage_audio_stream **output, maage_status_trace *trace);
-maage_status maage_audio_stream_write(maage_audio_stream *stream,
-                                      const float *samples, size_t frames, size_t *accepted);
+maage_status maage_audio_stream_create(maage_audio *audio, unsigned int channels, unsigned int sample_rate, size_t capacity_frames, maage_audio_stream **output, maage_status_trace *trace);
+maage_status maage_audio_stream_write(maage_audio_stream *stream, const float *samples, size_t frames, size_t *accepted);
 maage_status maage_audio_stream_finish(maage_audio_stream *stream);
 maage_status maage_audio_stream_destroy(maage_audio_stream *stream);
 /* Returns BUFFER_OVERFLOW if the configured active-voice resource budget is
  * exhausted; no voice stealing. IDs never alias previously issued handles.
  * voice_id is zero on non-playback outcomes. */
-maage_status maage_audio_play(maage_audio *audio,
-                              const maage_audio_play_desc *play_desc, maage_audio_voice_id *voice_id,
-                              maage_status_trace *trace);
+maage_status maage_audio_play(maage_audio *audio, const maage_audio_play_desc *play_desc, maage_audio_voice_id *voice_id, maage_status_trace *trace);
 maage_status maage_audio_stop(maage_audio *audio, maage_audio_voice_id voice_id);
 maage_status maage_audio_stop_all(maage_audio *audio);
 /* Stop a category without interrupting unrelated voices (for world changes). */
 maage_status maage_audio_stop_category(maage_audio *audio, maage_audio_bus bus);
 maage_status maage_audio_pause_category(maage_audio *audio, maage_audio_bus bus, int paused);
-maage_status maage_audio_voice_get_state(maage_audio *audio,
-                                         maage_audio_voice_id voice_id, maage_audio_voice_state *state);
-maage_status maage_audio_voice_pause(maage_audio *audio,
-                                     maage_audio_voice_id voice_id, int paused);
-maage_status maage_audio_voice_set_gain(maage_audio *audio,
-                                        maage_audio_voice_id voice_id, float gain);
-maage_status maage_audio_voice_set_pitch(maage_audio *audio,
-                                         maage_audio_voice_id voice_id, float pitch);
-maage_status maage_audio_voice_set_position(maage_audio *audio,
-                                            maage_audio_voice_id voice_id, maage_audio_vec3 position, int positional);
-maage_status maage_audio_set_listener(maage_audio *audio,
-                                      maage_audio_vec3 position, maage_audio_vec3 forward, maage_audio_vec3 up);
+maage_status maage_audio_voice_get_state(maage_audio *audio, maage_audio_voice_id voice_id, maage_audio_voice_state *state);
+maage_status maage_audio_voice_pause(maage_audio *audio, maage_audio_voice_id voice_id, int paused);
+maage_status maage_audio_voice_set_gain(maage_audio *audio, maage_audio_voice_id voice_id, float gain);
+maage_status maage_audio_voice_set_pitch(maage_audio *audio, maage_audio_voice_id voice_id, float pitch);
+maage_status maage_audio_voice_set_position(maage_audio *audio, maage_audio_voice_id voice_id, maage_audio_vec3 position, int positional);
+maage_status maage_audio_set_listener(maage_audio *audio, maage_audio_vec3 position, maage_audio_vec3 forward, maage_audio_vec3 up);
 /* Gain 0..4, MASTER is multiplied with the voice's category. */
 maage_status maage_audio_set_volume(maage_audio *audio, maage_audio_bus bus, float gain);
 /* Reclaims stopped/destroyed buffers and reports persistent device failures.

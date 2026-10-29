@@ -33,15 +33,11 @@ typedef struct maage_biome_registry {
  * Every registered biome has a unique namespaced persistence identity. */
 maage_status maage_biome_registry_init(maage_biome_registry *registry);
 maage_status maage_biome_registry_destroy(maage_biome_registry *registry);
-maage_status maage_biome_registry_register(maage_biome_registry *registry,
-                                           const char *external_name, const maage_biome_definition *definition);
+maage_status maage_biome_registry_register(maage_biome_registry *registry, const char *external_name, const maage_biome_definition *definition);
 maage_status maage_biome_registry_finalize(maage_biome_registry *registry);
-const maage_biome_definition *maage_biome_registry_get(
-    const maage_biome_registry *registry, maage_biome_id id);
-const char *maage_biome_registry_name(const maage_biome_registry *registry,
-                                      maage_biome_id id);
-maage_status maage_biome_registry_resolve_name(
-    const maage_biome_registry *registry, const char *name, maage_biome_id *id);
+const maage_biome_definition *maage_biome_registry_get(const maage_biome_registry *registry, maage_biome_id id);
+const char *maage_biome_registry_name(const maage_biome_registry *registry, maage_biome_id id);
+maage_status maage_biome_registry_resolve_name(const maage_biome_registry *registry, const char *name, maage_biome_id *id);
 #ifdef __cplusplus
 }
 #endif

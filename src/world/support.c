@@ -5,12 +5,9 @@
 static maage_status maage_support_status(unsigned char code) {
     return maage_status_make(code, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
 }
-static maage_status maage_support_block(const maage_world *world, int x, int y, int z,
-                                        const maage_block_state_definition **state, const maage_block_definition **block) {
+static maage_status maage_support_block(const maage_world *world, int x, int y, int z, const maage_block_state_definition **state, const maage_block_definition **block) {
     const maage_block_registry *registry = maage_world_registry(world);
-    if (x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT ||
-        !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z)))
-        return maage_support_status(MAAGE_STATUS_NOOP);
+    if (x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) return maage_support_status(MAAGE_STATUS_NOOP);
     *state = maage_block_registry_state(registry, maage_world_get(world, x, y, z));
     *block = *state ? maage_block_registry_block(registry, (*state)->block_id) : NULL;
     return maage_support_status(*block ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVARIANT_VIOLATION);
@@ -22,8 +19,7 @@ static int maage_support_full(const maage_block_definition *block) {
         if (block->collision_shape.minimum[axis] != 0 || block->collision_shape.maximum[axis] != 1) return 0;
     return 1;
 }
-maage_status maage_support_rule(const maage_world *world, int x, int y, int z,
-                                const maage_block_state_definition *state, int *valid) {
+maage_status maage_support_rule(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
     static const int torch_support[6][3] = {{0, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, -1, 0}};
     static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *below, *neighbor;
@@ -35,8 +31,7 @@ maage_status maage_support_rule(const maage_world *world, int x, int y, int z,
     if (y < 0 || y >= 256) return maage_support_status(MAAGE_STATUS_SUCCESS);
     if (state->block_id == MAAGE_BLOCK_TORCH) {
         if (state->metadata < 1 || state->metadata > 5) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
-        result = maage_support_block(world, x + torch_support[state->metadata][0], y + torch_support[state->metadata][1],
-                                     z + torch_support[state->metadata][2], &neighbor, &block);
+        result = maage_support_block(world, x + torch_support[state->metadata][0], y + torch_support[state->metadata][1], z + torch_support[state->metadata][2], &neighbor, &block);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = maage_support_full(block);
         return result;
     }
@@ -77,8 +72,7 @@ maage_status maage_support_rule(const maage_world *world, int x, int y, int z,
     }
     return maage_support_status(MAAGE_STATUS_SUCCESS);
 }
-maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z,
-                                     maage_block_state_id state_id, int *valid) {
+maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z, maage_block_state_id state_id, int *valid) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     if (!world || !valid) return maage_support_status(MAAGE_STATUS_INVALID_ARGUMENT);
@@ -170,8 +164,7 @@ maage_status maage_support_update(maage_world *world, int x, int y, int z) {
     }
     return maage_entities_set_random(entities, random);
 }
-maage_status maage_chunk_support_initialize(maage_chunk *chunk, const maage_block_registry *blocks,
-                                            unsigned long low, unsigned long high) {
+maage_status maage_chunk_support_initialize(maage_chunk *chunk, const maage_block_registry *blocks, unsigned long low, unsigned long high) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_scheduled_update update;

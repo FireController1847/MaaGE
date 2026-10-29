@@ -153,25 +153,16 @@ void maage_condition_wait(maage_condition *condition, maage_mutex *mutex) {
     pthread_cond_wait(&condition->handle, &mutex->handle);
 #endif
 }
-maage_status maage_condition_timed_wait(maage_condition *condition,
-                                        maage_mutex *mutex, unsigned long timeout_ms) {
+maage_status maage_condition_timed_wait(maage_condition *condition, maage_mutex *mutex, unsigned long timeout_ms) {
     int native;
-    if (!condition || !mutex)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                 MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, !condition ? 0 : 1);
+    if (!condition || !mutex) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, !condition ? 0 : 1);
 #ifdef _WIN32
     if (timeout_ms > 0xffffffffUL)
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                 MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 2);
-    if (SleepConditionVariableCS(&condition->handle, &mutex->handle,
-                                 (DWORD) timeout_ms))
-        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WAIT, 0);
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 2);
+    if (SleepConditionVariableCS(&condition->handle, &mutex->handle, (DWORD) timeout_ms)) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WAIT, 0);
     native = (int) GetLastError();
-    if (native == ERROR_TIMEOUT)
-        return maage_status_make(MAAGE_STATUS_TIMEOUT,
-                                 MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 0);
-    return maage_status_from_win32((unsigned long) native,
-                                   MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
+    if (native == ERROR_TIMEOUT) return maage_status_make(MAAGE_STATUS_TIMEOUT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 0);
+    return maage_status_from_win32((unsigned long) native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
 #else
     {
         struct timespec deadline;
@@ -184,10 +175,7 @@ maage_status maage_condition_timed_wait(maage_condition *condition,
             return maage_status_from_errno(errno, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
         /* Detect conversion overflow rather than passing an already elapsed or
          * wrapped deadline to the native condition variable. */
-        if (timeout_ms / 1000UL > (unsigned long) LONG_MAX -
-                                      (unsigned long) deadline.tv_sec)
-            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                     MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 2);
+        if (timeout_ms / 1000UL > (unsigned long) LONG_MAX - (unsigned long) deadline.tv_sec) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 2);
         deadline.tv_sec += (time_t) (timeout_ms / 1000UL);
         deadline.tv_nsec += (long) ((timeout_ms % 1000UL) * 1000000UL);
         if (deadline.tv_nsec >= 1000000000L) {
@@ -195,9 +183,7 @@ maage_status maage_condition_timed_wait(maage_condition *condition,
             deadline.tv_nsec -= 1000000000L;
         }
         native = pthread_cond_timedwait(&condition->handle, &mutex->handle, &deadline);
-        if (native == ETIMEDOUT)
-            return maage_status_make(MAAGE_STATUS_TIMEOUT,
-                                     MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 0);
+        if (native == ETIMEDOUT) return maage_status_make(MAAGE_STATUS_TIMEOUT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT, 0);
         return maage_status_from_errno(native, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
     }
 #endif
@@ -220,8 +206,7 @@ maage_status maage_thread_start(void (*function)(void *), void *context, maage_t
     maage_thread *thread;
     maage_status result;
     int native = 0;
-    if (!function || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-                                                       MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START, !function ? 0 : 2);
+    if (!function || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START, !function ? 0 : 2);
     *output = NULL;
     thread = (maage_thread *) malloc(sizeof(*thread));
     if (!thread) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_START, 0);
@@ -247,8 +232,7 @@ maage_status maage_thread_join(maage_thread *thread) {
     if (!thread) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WAIT, 0);
 #ifdef _WIN32
     result = maage_status_from_win32(WaitForSingleObject(thread->handle, INFINITE) == WAIT_OBJECT_0 ? 0 : GetLastError(), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
-    if (!maage_status_failed(result) && !CloseHandle(thread->handle))
-        result = maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CLOSE);
+    if (!maage_status_failed(result) && !CloseHandle(thread->handle)) result = maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_CLOSE);
 #else
     result = maage_status_from_errno(pthread_join(thread->handle, NULL), MAAGE_CONTEXT_THREAD, MAAGE_OPERATION_WAIT);
 #endif

@@ -107,8 +107,7 @@ static void maage_launcher_win32_combo_paint(maage_launcher_win32_style *ui, HWN
     RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
-    if (GetComboBoxInfo(combo, &info))
-        center = (info.rcButton.left + info.rcButton.right) / 2;
+    if (GetComboBoxInfo(combo, &info)) center = (info.rcButton.left + info.rcButton.right) / 2;
     else
         center = rect.right - maage_launcher_win32_scale(ui, 14);
     y = (rect.top + rect.bottom) / 2;
@@ -135,8 +134,7 @@ static void maage_launcher_win32_combo_paint(maage_launcher_win32_style *ui, HWN
     RestoreDC(dc, saved);
 }
 
-static LRESULT CALLBACK maage_launcher_win32_combo_proc(HWND combo, UINT message,
-                                                        WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
+static LRESULT CALLBACK maage_launcher_win32_combo_proc(HWND combo, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
     maage_launcher_win32_style *ui = (maage_launcher_win32_style *) reference;
     LRESULT result;
     switch (message) {
@@ -179,14 +177,11 @@ static LRESULT CALLBACK maage_launcher_win32_combo_proc(HWND combo, UINT message
         break;
     }
     result = DefSubclassProc(combo, message, wparam, lparam);
-    if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_ENABLE ||
-        message == WM_KEYDOWN || message == WM_LBUTTONUP || message == CB_SETCURSEL || message == CB_SHOWDROPDOWN)
-        InvalidateRect(combo, NULL, FALSE);
+    if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_ENABLE || message == WM_KEYDOWN || message == WM_LBUTTONUP || message == CB_SETCURSEL || message == CB_SHOWDROPDOWN) InvalidateRect(combo, NULL, FALSE);
     return result;
 }
 
-static void maage_launcher_win32_progress_paint(HWND progress, HDC dc,
-                                                const maage_launcher_control *control) {
+static void maage_launcher_win32_progress_paint(HWND progress, HDC dc, const maage_launcher_control *control) {
     RECT rect, fill;
     PBRANGE range;
     int width, chunk, x, saved = SaveDC(dc);
@@ -207,9 +202,7 @@ static void maage_launcher_win32_progress_paint(HWND progress, HDC dc,
         fill.right = x + chunk < width ? x + chunk : width;
     } else {
         SendMessageW(progress, PBM_GETRANGE, FALSE, (LPARAM) &range);
-        fraction = range.iHigh > range.iLow ? ((double) SendMessageW(progress, PBM_GETPOS, 0, 0) - range.iLow) /
-                                                  ((double) range.iHigh - range.iLow)
-                                            : 0.0;
+        fraction = range.iHigh > range.iLow ? ((double) SendMessageW(progress, PBM_GETPOS, 0, 0) - range.iLow) / ((double) range.iHigh - range.iLow) : 0.0;
         if (fraction < 0.0) fraction = 0.0;
         if (fraction > 1.0) fraction = 1.0;
         fill.right = fill.left + (int) (width * fraction + 0.5);
@@ -221,8 +214,7 @@ static void maage_launcher_win32_progress_paint(HWND progress, HDC dc,
     RestoreDC(dc, saved);
 }
 
-static LRESULT CALLBACK maage_launcher_win32_progress_proc(HWND progress, UINT message,
-                                                           WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
+static LRESULT CALLBACK maage_launcher_win32_progress_proc(HWND progress, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
     maage_launcher_control *control = (maage_launcher_control *) reference;
     LRESULT result;
     switch (message) {
@@ -267,8 +259,7 @@ static LRESULT CALLBACK maage_launcher_win32_progress_proc(HWND progress, UINT m
         break;
     }
     result = DefSubclassProc(progress, message, wparam, lparam);
-    if (message == PBM_SETPOS || message == PBM_SETRANGE || message == PBM_SETRANGE32)
-        InvalidateRect(progress, NULL, FALSE);
+    if (message == PBM_SETPOS || message == PBM_SETRANGE || message == PBM_SETRANGE32) InvalidateRect(progress, NULL, FALSE);
     return result;
 }
 
@@ -277,9 +268,7 @@ static maage_status maage_launcher_win32_fonts(maage_launcher_win32_style *ui, U
     const int sizes[3] = {16, 27, 34};
     unsigned i;
     for (i = 0; i < 3; ++i) {
-        fonts[i] = CreateFontW(-MulDiv(sizes[i], (int) dpi, 96), 0, 0, 0,
-                               i ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                               OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        fonts[i] = CreateFontW(-MulDiv(sizes[i], (int) dpi, 96), 0, 0, 0, i ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         if (!fonts[i]) {
             while (i)
                 DeleteObject(fonts[--i]);
@@ -306,8 +295,7 @@ static maage_status maage_launcher_win32_fonts(maage_launcher_win32_style *ui, U
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
 
-maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui,
-                                             HWND window, int width, int height, int dark) {
+maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui, HWND window, int width, int height, int dark) {
     INITCOMMONCONTROLSEX common;
     HIGHCONTRASTW contrast;
     RECT bounds;
@@ -317,23 +305,17 @@ maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui,
     ui->window = window;
     memset(&contrast, 0, sizeof(contrast));
     contrast.cbSize = sizeof(contrast);
-    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0))
-        ui->high_contrast = (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0)) ui->high_contrast = (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
     ui->dark = dark && !ui->high_contrast;
     common.dwSize = sizeof(common);
     common.dwICC = ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS;
-    if (!dpi || !InitCommonControlsEx(&common))
-        return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!dpi || !InitCommonControlsEx(&common)) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
     ui->result = maage_launcher_win32_fonts(ui, dpi);
     if (maage_status_failed(ui->result)) return ui->result;
     bounds.left = bounds.top = 0;
     bounds.right = maage_launcher_win32_scale(ui, width);
     bounds.bottom = maage_launcher_win32_scale(ui, height);
-    if (!AdjustWindowRectExForDpi(&bounds, (DWORD) GetWindowLongPtrW(window, GWL_STYLE),
-                                  FALSE, (DWORD) GetWindowLongPtrW(window, GWL_EXSTYLE), dpi) ||
-        !SetWindowPos(window, NULL, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top,
-                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
-        return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RESIZE);
+    if (!AdjustWindowRectExForDpi(&bounds, (DWORD) GetWindowLongPtrW(window, GWL_STYLE), FALSE, (DWORD) GetWindowLongPtrW(window, GWL_EXSTYLE), dpi) || !SetWindowPos(window, NULL, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RESIZE);
     immersive = ui->dark;
     /* Optional non-client decoration; unsupported Windows versions retain their frame. */
     DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &immersive, sizeof(immersive));
@@ -341,12 +323,9 @@ maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui,
         ui->icons[small] = (HICON) LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(MAAGE_LAUNCHER_ICON_RESOURCE),
                                               IMAGE_ICON, GetSystemMetricsForDpi(small ? SM_CXSMICON : SM_CXICON, dpi),
                                               GetSystemMetricsForDpi(small ? SM_CYSMICON : SM_CYICON, dpi), 0);
-        if (ui->icons[small])
-            SendMessageW(window, WM_SETICON, small ? ICON_SMALL : ICON_BIG, (LPARAM) ui->icons[small]);
+        if (ui->icons[small]) SendMessageW(window, WM_SETICON, small ? ICON_SMALL : ICON_BIG, (LPARAM) ui->icons[small]);
         else {
-            maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui",
-                             maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_LOAD),
-                             "Launcher window icon is unavailable.");
+            maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_LOAD), "Launcher window icon is unavailable.");
             ui->result = maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
         }
     }
@@ -362,13 +341,10 @@ maage_status maage_launcher_win32_style_destroy(maage_launcher_win32_style *ui) 
     if (ui->icons[1] && !DestroyIcon(ui->icons[1])) failed = 1;
     ui->font = ui->heading = ui->brand = NULL;
     ui->icons[0] = ui->icons[1] = NULL;
-    return maage_status_make(failed ? MAAGE_STATUS_ERROR : MAAGE_STATUS_SUCCESS,
-                             MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_DESTROY, 0);
+    return maage_status_make(failed ? MAAGE_STATUS_ERROR : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_DESTROY, 0);
 }
 
-HWND maage_launcher_win32_control(maage_launcher_win32_style *ui, int page,
-                                  const wchar_t *kind, const wchar_t *text, DWORD style,
-                                  int x, int y, int width, int height, int id) {
+HWND maage_launcher_win32_control(maage_launcher_win32_style *ui, int page, const wchar_t *kind, const wchar_t *text, DWORD style, int x, int y, int width, int height, int id) {
     maage_launcher_control *control;
     int combo = ui->dark && !lstrcmpiW(kind, L"COMBOBOX") && (style & 3) == CBS_DROPDOWNLIST;
     if (maage_status_failed(ui->result)) return NULL;
@@ -397,15 +373,13 @@ HWND maage_launcher_win32_control(maage_launcher_win32_style *ui, int page,
     SendMessageW(control->handle, WM_SETFONT, (WPARAM) ui->font, TRUE);
     if (combo) {
         maage_launcher_win32_combo_height(control->handle, ui->dpi);
-        if (!SetWindowSubclass(control->handle, maage_launcher_win32_combo_proc, 1, (DWORD_PTR) ui))
-            ui->result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
+        if (!SetWindowSubclass(control->handle, maage_launcher_win32_combo_proc, 1, (DWORD_PTR) ui)) ui->result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     if (ui->dark && !lstrcmpiW(kind, PROGRESS_CLASSW)) {
         SetWindowTheme(control->handle, L"", L"");
         SendMessageW(control->handle, PBM_SETBARCOLOR, 0, RGB(222, 48, 158));
         SendMessageW(control->handle, PBM_SETBKCOLOR, 0, RGB(61, 61, 61));
-        if (!SetWindowSubclass(control->handle, maage_launcher_win32_progress_proc, 1, (DWORD_PTR) control))
-            ui->result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
+        if (!SetWindowSubclass(control->handle, maage_launcher_win32_progress_proc, 1, (DWORD_PTR) control)) ui->result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     return control->handle;
 }
@@ -414,20 +388,15 @@ void maage_launcher_win32_layout(maage_launcher_win32_style *ui) {
     unsigned i;
     for (i = 0; i < ui->count; ++i) {
         maage_launcher_control *c = &ui->controls[i];
-        SetWindowPos(c->handle, NULL, maage_launcher_win32_scale(ui, c->x),
-                     maage_launcher_win32_scale(ui, c->y), maage_launcher_win32_scale(ui, c->width),
-                     maage_launcher_win32_scale(ui, c->height), SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(c->handle, NULL, maage_launcher_win32_scale(ui, c->x), maage_launcher_win32_scale(ui, c->y), maage_launcher_win32_scale(ui, c->width), maage_launcher_win32_scale(ui, c->height), SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 
-maage_status maage_launcher_win32_dpi_changed(maage_launcher_win32_style *ui,
-                                              WPARAM dpi, LPARAM bounds) {
+maage_status maage_launcher_win32_dpi_changed(maage_launcher_win32_style *ui, WPARAM dpi, LPARAM bounds) {
     RECT *rect = (RECT *) bounds;
     maage_status result = maage_launcher_win32_fonts(ui, HIWORD(dpi));
     if (maage_status_failed(result)) return result;
-    if (!SetWindowPos(ui->window, NULL, rect->left, rect->top, rect->right - rect->left,
-                      rect->bottom - rect->top, SWP_NOZORDER | SWP_NOACTIVATE))
-        return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RESIZE);
+    if (!SetWindowPos(ui->window, NULL, rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top, SWP_NOZORDER | SWP_NOACTIVATE)) return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RESIZE);
     InvalidateRect(ui->window, NULL, TRUE);
     return result;
 }
@@ -440,8 +409,7 @@ LRESULT maage_launcher_win32_button(maage_launcher_win32_style *ui, LPARAM notif
     COLORREF fill, border, foreground;
     int primary, disabled, pressed, hot, saved, radius;
     UINT flags = DT_CENTER | DT_VCENTER | DT_SINGLELINE;
-    if (draw->hdr.code != NM_CUSTOMDRAW || ui->high_contrast ||
-        (!ui->dark && button != ui->primary)) return CDRF_DODEFAULT;
+    if (draw->hdr.code != NM_CUSTOMDRAW || ui->high_contrast || (!ui->dark && button != ui->primary)) return CDRF_DODEFAULT;
     GetClassNameW(button, kind, 16);
     if (lstrcmpiW(kind, L"Button") || draw->dwDrawStage != CDDS_PREPAINT) return CDRF_DODEFAULT;
     primary = button == ui->primary;

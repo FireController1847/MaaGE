@@ -12,13 +12,11 @@ static maage_status maage_launcher_skin_status(unsigned char code, unsigned char
 }
 static maage_status maage_launcher_skin_directory(const char *root, const char *uuid, char path[MAAGE_PATH_CAPACITY]) {
     char relative[64];
-    if (!uuid || strlen(uuid) != 32 || strspn(uuid, "0123456789abcdef") != 32)
-        return maage_launcher_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    if (!uuid || strlen(uuid) != 32 || strspn(uuid, "0123456789abcdef") != 32) return maage_launcher_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     sprintf(relative, "minecraft/skins/%s", uuid);
     return maage_storage_join(path, MAAGE_PATH_CAPACITY, root, relative);
 }
-maage_status maage_launcher_skin_profile(struct json_object *profile,
-                                         const char *uuid, const char *name, maage_skin_reference *skin) {
+maage_status maage_launcher_skin_profile(struct json_object *profile, const char *uuid, const char *name, maage_skin_reference *skin) {
     struct json_object *skins, *entry;
     maage_skin_reference parsed;
     char normalized[33];
@@ -42,17 +40,13 @@ maage_status maage_launcher_skin_profile(struct json_object *profile,
         if (strcmp(state, "ACTIVE")) goto malformed;
         if (active++) goto malformed;
         variant = maage_access_json_string(entry, "variant");
-        if (!strcmp(variant, "SLIM"))
-            parsed.model = MAAGE_SKIN_SLIM;
-        else if (strcmp(variant, "CLASSIC"))
-            goto malformed;
+        if (!strcmp(variant, "SLIM")) parsed.model = MAAGE_SKIN_SLIM;
+        else if (strcmp(variant, "CLASSIC")) goto malformed;
         /* Some official responses still spell this host with http. Accept
          * only that exact spelling/path, then construct an HTTPS request. */
         url = maage_access_json_string(entry, "url");
-        if (!strncmp(url, secure, sizeof(secure) - 1))
-            texture = url + sizeof(secure) - 1;
-        else if (!strncmp(url, old_scheme, sizeof(old_scheme) - 1))
-            texture = url + sizeof(old_scheme) - 1;
+        if (!strncmp(url, secure, sizeof(secure) - 1)) texture = url + sizeof(secure) - 1;
+        else if (!strncmp(url, old_scheme, sizeof(old_scheme) - 1)) texture = url + sizeof(old_scheme) - 1;
         else
             goto malformed;
         if (strlen(texture) != 64 || strspn(texture, "0123456789abcdef") != 64) goto malformed;
@@ -64,8 +58,7 @@ maage_status maage_launcher_skin_profile(struct json_object *profile,
 malformed:
     return maage_launcher_skin_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_PARSE);
 }
-maage_status maage_launcher_skin_cached(const char *root, const char *uuid,
-                                        const char *name, maage_skin_reference *skin, maage_status_trace *trace) {
+maage_status maage_launcher_skin_cached(const char *root, const char *uuid, const char *name, maage_skin_reference *skin, maage_status_trace *trace) {
     char directory[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY], data[2049], argument[MAAGE_SKIN_ARGUMENT_CAPACITY];
     struct json_object *json = NULL, *schema;
     maage_skin_reference parsed;
@@ -86,9 +79,7 @@ maage_status maage_launcher_skin_cached(const char *root, const char *uuid,
     if (!maage_status_failed(result)) result = maage_access_json(data, bytes, &json);
     if (!maage_status_failed(result)) {
         const char *value = maage_access_json_string(json, "appearance");
-        if (strlen(value) >= sizeof(argument) || !json_object_object_get_ex(json, "schema", &schema) ||
-            !json_object_is_type(schema, json_type_int) || json_object_get_int(schema) != 1 || maage_auth_number(json, "checked_at") <= 0)
-            result = maage_launcher_skin_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
+        if (strlen(value) >= sizeof(argument) || !json_object_object_get_ex(json, "schema", &schema) || !json_object_is_type(schema, json_type_int) || json_object_get_int(schema) != 1 || maage_auth_number(json, "checked_at") <= 0) result = maage_launcher_skin_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
         else {
             strcpy(argument, value);
             result = maage_skin_reference_parse(argument, &parsed);
@@ -100,8 +91,7 @@ maage_status maage_launcher_skin_cached(const char *root, const char *uuid,
         if (!maage_status_failed(result)) result = maage_skin_load(path, parsed.model, &image, trace);
     }
     if (!maage_status_failed(result)) {
-        if (!maage_access_username(name))
-            result = maage_launcher_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+        if (!maage_access_username(name)) result = maage_launcher_skin_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
         else {
             strcpy(parsed.name, name);
             *skin = parsed;
@@ -111,8 +101,7 @@ maage_status maage_launcher_skin_cached(const char *root, const char *uuid,
     if (json) json_object_put(json);
     return result;
 }
-maage_status maage_launcher_skin_publish(const char *root, const maage_skin_reference *skin,
-                                         const maage_auth_observer *observer) {
+maage_status maage_launcher_skin_publish(const char *root, const maage_skin_reference *skin, const maage_auth_observer *observer) {
     char directory[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY], staged[MAAGE_PATH_CAPACITY], metadata[MAAGE_PATH_CAPACITY];
     char url[112], argument[MAAGE_SKIN_ARGUMENT_CAPACITY], download_error[512];
     maage_storage_lock *lock = NULL;
@@ -188,8 +177,7 @@ done:
     maage_image_destroy(&image);
     return MAAGE_STATUS_PROPAGATE(observer->trace, result, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SAVE);
 }
-maage_status maage_launcher_skin_restore(const char *root, const maage_profile_session *session,
-                                         const maage_auth_observer *observer) {
+maage_status maage_launcher_skin_restore(const char *root, const maage_profile_session *session, const maage_auth_observer *observer) {
     maage_skin_reference skin;
     struct json_object *profile = NULL;
     char detail[256];
