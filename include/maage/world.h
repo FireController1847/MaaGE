@@ -48,6 +48,7 @@ typedef enum maage_leaves_mode {
 } maage_leaves_mode;
 typedef struct maage_world_store maage_world_store;
 struct maage_environment_state;
+struct maage_item_registry;
 typedef enum maage_chunk_state {
     MAAGE_CHUNK_REQUESTED = 0, MAAGE_CHUNK_LOADING, MAAGE_CHUNK_GENERATING,
     MAAGE_CHUNK_GENERATED, MAAGE_CHUNK_LIGHTING, MAAGE_CHUNK_MESH_PENDING,
@@ -55,12 +56,19 @@ typedef enum maage_chunk_state {
 } maage_chunk_state;
 typedef struct maage_world_config {
     const maage_block_registry *registry;
+    const struct maage_item_registry *items; /* finalized; borrowed for block drops */
     const maage_biome_registry *biomes;
     maage_world_seed seed;
     maage_world_store *store; /* borrowed; close after world destruction */
     /* 0: logical processors minus one (minimum one), or eight if detection fails. */
     unsigned int worker_count;
     int render_distance;
+    /* Authoritative active square, independent of Client visual settings.
+     * Streaming retains this footprint even with a smaller render distance. */
+    int simulation_distance;
+    /* Attempts per eligible 16^3 section per 20 TPS tick. Explicit 0 disables.
+     * Initialize with maage_world_config_init for the default of 3. */
+    unsigned int random_tick_speed;
     int new_world;
     double position[3];
     /* 0 derives a bounded default from the streaming footprint and workers.
@@ -72,6 +80,7 @@ typedef struct maage_world_config {
     /* Copied during creation; NULL starts the seeded clock/weather defaults. */
     const struct maage_environment_state *initial_environment;
 } maage_world_config;
+maage_status maage_world_config_init(maage_world_config *config);
 typedef struct maage_world_stats {
     unsigned int loaded, loaded_sections, pending, ready;
     unsigned int logical_processors, worker_count, queued_jobs, running_jobs;
@@ -90,6 +99,8 @@ typedef struct maage_world_stats {
     unsigned long generated, loaded_from_disk, meshes;
     unsigned long completed_jobs, cancelled_jobs, stale_jobs;
     unsigned long mutations, rejected_mutations;
+    /* Last active simulation tick; both zero when random ticking is disabled. */
+    unsigned int random_tick_attempts, random_tick_callbacks;
     unsigned int dirty_columns;
     unsigned int resident_columns, cache_capacity, job_capacity;
     unsigned int completed_uncommitted_jobs;
@@ -182,6 +193,14 @@ maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode m
 /* One ordered 20 TPS environment phase, with bounded scheduled block work.
  * Call only while simulation is active; streaming continues while paused. */
 maage_status maage_world_tick(maage_world *world);
+/* Owner thread only; validates aggregate sampling work against unsigned-int
+ * capacity. No change to weather, fixed-step timing or scheduled updates. */
+maage_status maage_world_set_random_tick_speed(maage_world *world, unsigned int speed);
+/* Allocation-free saved sky/block light query for simulation. NOOP means
+ * lighting is not current; never interpret that as darkness. Y>=256 clamps to
+ * 255 as in the reference light query. Missing terrain returns NOOP. */
+maage_status maage_world_sample_light(const maage_world *world,
+    int x, int y, int z, unsigned char *light);
 /* Cheap owner status; full diagnostic snapshots may be sampled less often. */
 int maage_world_failed(const maage_world *world);
 /* Latest important owner-observed failure, retained across successful jobs.
@@ -207,6 +226,7 @@ maage_status maage_world_flush(maage_world *world, maage_status_trace *trace);
  * SUCCESS consumes World even if an earlier completed flush reported data errors. */
 maage_status maage_world_destroy(maage_world *world);
 const maage_block_registry *maage_world_registry(const maage_world *world);
+const struct maage_item_registry *maage_world_item_registry(const maage_world *world);
 void maage_world_spawn(const maage_world *world, double feet[3]);
 /* Missing/loading columns return air for visual queries but are solid barriers
  * for collision, preventing falls/teleports. Only complete columns are visible. */

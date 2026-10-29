@@ -96,7 +96,8 @@ enum {
     MAAGE_STATE_TORCH_NEGATIVE_Z = 278, MAAGE_STATE_TORCH_POSITIVE_Z = 279,
     MAAGE_STATE_LOG_X_BASE = 280, MAAGE_STATE_LOG_Z_BASE = 283,
     MAAGE_STATE_SPRUCE_PLANKS = 286, MAAGE_STATE_BIRCH_PLANKS = 287,
-    MAAGE_STATE_WATER_FLOW_BASE = 512, MAAGE_STATE_LAVA_FLOW_BASE = 528
+    MAAGE_STATE_WATER_FLOW_BASE = 512, MAAGE_STATE_LAVA_FLOW_BASE = 528,
+    MAAGE_STATE_CACTUS_AGE_BASE = 544 /* Ages 1..15; age zero is CACTUS. */
 };
 enum { MAAGE_BLOCK_MESH_CUBE = 0, MAAGE_BLOCK_MESH_CROSS = 1,
     MAAGE_BLOCK_MESH_TORCH = 2 };
@@ -140,12 +141,21 @@ typedef struct maage_block_shape {
     double minimum[3], maximum[3];
 } maage_block_shape;
 
+struct maage_world;
+struct maage_random_tick_context;
+struct maage_block_state_definition;
+typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *world,
+    int x, int y, int z, const struct maage_block_state_definition *state,
+    struct maage_random_tick_context *context);
+
 typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
     int opaque;
+    int material_solid; /* Plant adjacency rule; independent of collision. */
     unsigned int emitted_light; /* 0..15; resolved during registration. */
     unsigned int light_opacity; /* 0..15; independent of face occlusion. */
+    int use_neighbor_brightness; /* Combined light uses up and four sides. */
     int selectable, replaceable;
     unsigned int mesh_shape; /* Numeric cube, crossed plant or narrow torch. */
     double hardness; /* Negative: unbreakable in Survival. */
@@ -154,6 +164,9 @@ typedef struct maage_block_definition {
     unsigned long drop_item_id; /* Item domain, resolved at registration. */
     unsigned int drop_count;
     maage_block_shape collision_shape, selection_shape;
+    /* Called only on the World owner for eligible states. NULL retains sampling
+     * eligibility without behavior when a required system is unimplemented. */
+    maage_block_random_tick_callback random_tick;
 } maage_block_definition;
 
 typedef struct maage_block_state_definition {
@@ -161,6 +174,7 @@ typedef struct maage_block_state_definition {
     maage_block_id block_id;
     /* Numeric property payload; no text at runtime. */
     unsigned int metadata;
+    int random_ticks; /* Section eligibility, independent of callback support. */
     /* Optional selection override; all-zero keeps the type's bounds. */
     maage_block_shape selection_shape;
     unsigned int fluid_kind, fluid_level;

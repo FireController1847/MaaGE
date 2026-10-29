@@ -5,6 +5,7 @@
 #include "maage/seed.h"
 #include "maage/jobs.h"
 #include "maage/environment.h"
+#include "maage/random_ticks.h"
 #define MAAGE_SECTION_VOLUME 4096
 
 /* All block/light arrays are numeric and owned by their column. Empty sections
@@ -22,6 +23,8 @@ struct maage_chunk {
     maage_section *sections[16];
     maage_biome_id biomes[256];
     unsigned short heightmap[256]; /* first air Y, 0..256 */
+    /* Derived once after load/generation, then maintained by owner mutations. */
+    unsigned short random_tick_counts[16];
     maage_scheduled_update *updates;
     size_t update_count, update_capacity;
     size_t fluid_update_count;
@@ -49,6 +52,20 @@ maage_status maage_chunk_copy_environment(maage_chunk *destination, const maage_
 maage_status maage_chunk_replace_environment(maage_chunk *destination, const maage_chunk *source);
 maage_status maage_chunk_environment_initialize(maage_chunk *chunk,
     const maage_block_registry *blocks, unsigned long now_low, unsigned long now_high);
+maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk,
+    const maage_block_registry *blocks);
+maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
+maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
+maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
+maage_status maage_random_tick_bush(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
+maage_status maage_random_tick_snow(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
+maage_status maage_random_tick_ice(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell,
     unsigned long type, unsigned long version, const void *data, size_t length);
 maage_status maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int cell);

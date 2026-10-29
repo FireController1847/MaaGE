@@ -443,7 +443,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store,
     data = (unsigned char *)malloc(capacity);
     if (!data) return maage_store_fail(error, "Not enough memory to encode player metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
     bytes.data = data; bytes.length = capacity; bytes.position = 0; bytes.failed = 0; bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD4", 8);
+    maage_store_text_put(&bytes, "MGWORLD5", 8);
     maage_store_put(&bytes, record->seed.low, 4); maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1); maage_store_put(&bytes, strlen(record->name), 1);
     maage_store_put(&bytes, strlen(record->created_utc), 1); maage_store_put(&bytes, record->new_world ? 1 : 0, 1);
@@ -463,6 +463,8 @@ static maage_status maage_store_metadata_write(const maage_world_store *store,
     maage_store_put(&bytes,record->environment.day_low,4);
     maage_store_put(&bytes,record->environment.day_high,4);
     maage_store_put(&bytes,record->environment.random,4);
+    maage_store_put(&bytes,record->environment.random_tick_selection,4);
+    maage_store_put(&bytes,record->environment.random_tick_random,4);
     maage_store_put(&bytes,record->environment.rain_ticks,4);
     maage_store_put(&bytes,record->environment.thunder_ticks,4);
     maage_store_put(&bytes,record->environment.raining,1);
@@ -499,7 +501,7 @@ static maage_status maage_store_metadata_load(const maage_world_store *store,
     result = maage_store_read(path, MAAGE_STORE_METADATA_MAX, &bytes.data, &bytes.length, error, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     bytes.position = 0; bytes.failed = 0; bytes.failure = 0;
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD4");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD5");
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4); record->seed.high = maage_store_get(&bytes, 4);
         for (i = 0; i < 3; ++i) lengths[i] = maage_store_get(&bytes, 1);
@@ -534,6 +536,8 @@ static maage_status maage_store_metadata_load(const maage_world_store *store,
         record->environment.day_low=maage_store_get(&bytes,4);
         record->environment.day_high=maage_store_get(&bytes,4);
         record->environment.random=maage_store_get(&bytes,4);
+        record->environment.random_tick_selection=maage_store_get(&bytes,4);
+        record->environment.random_tick_random=maage_store_get(&bytes,4);
         record->environment.rain_ticks=maage_store_get(&bytes,4);
         record->environment.thunder_ticks=maage_store_get(&bytes,4);
         record->environment.raining=(unsigned int)maage_store_get(&bytes,1);

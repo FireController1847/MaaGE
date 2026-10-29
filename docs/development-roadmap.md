@@ -585,8 +585,9 @@ vanilla three-dimensional density or seed parity. Built-in feature tables are
 actively maintained; sea level and spawn search remain per-world controls.
 No jungle biome or surface lakes are implemented. Ore blocks drop themselves;
 tree variants use base-log drops. Fluids omit vanilla slope search/exact update
-order, swimming, buoyancy and lava damage. Plant support/leaf decay, snow
-accumulation/melting remain deferred; Phase 6 adds source-integrated weather audio.
+order, swimming, buoyancy and lava damage. General plant support/leaf decay and snow accumulation remain deferred.
+[Random block ticks](random-block-ticks.md) add grass spread/decay, cactus growth,
+mushroom spread and snow/ice melting. Phase 6 adds source-integrated weather audio.
 Fluid textures are opaque
 first frames. Precipitation is a screen-space overlay gated by the player's sky/
 climate observation, without world-depth particles or distant roof occlusion.
@@ -836,7 +837,7 @@ numeric shaped/shapeless recipes, player 2x2 and table 3x3 containers, transacti
 output/remainders, bounded shift crafting, and return/drop closure. The initial
 catalog supports the wooden/stone tool chain and recipes for registered higher
 tiers. Smelting and full Survival progression remain deferred. Runtime/visual
-completion requires programmer verification; the current `MGWORLD4` metadata
+completion requires programmer verification; the current `MGWORLD5` metadata
 rejects previous development worlds.
 
 Build a coherent Survival gameplay loop through Phase 7's **authoritative Server

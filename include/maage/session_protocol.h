@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 8U
+#define MAAGE_SESSION_PROTOCOL_VERSION 9U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1, MAAGE_CMD_HOTBAR = 2,

@@ -747,8 +747,10 @@ static maage_status server_open_world(maage_server_runtime *runtime,
         items, &runtime->store, &runtime->record, error, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace,
         result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_OPEN);
-    memset(&world_config, 0, sizeof(world_config));
+    result = maage_world_config_init(&world_config);
+    if (maage_status_failed(result)) return result;
     world_config.registry = maage_content_blocks(runtime->content);
+    world_config.items = items;
     world_config.biomes = maage_content_biomes(runtime->content);
     world_config.seed = runtime->record.seed;
     runtime->audio_random = (runtime->record.seed.low ^ runtime->record.seed.high ^

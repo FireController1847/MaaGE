@@ -112,7 +112,7 @@ smelting, mobs and combat are not implemented by this foundation.
 
 ## Storage and publication
 
-The sole metadata encoding is `MGWORLD4`; earlier development worlds are rejected
+The sole metadata encoding is `MGWORLD5`; earlier development worlds are rejected
 and must be recreated. Files are never deleted or converted automatically.
 `world.bin` atomically checkpoints player/inventory, environment and all active
 or dormant item entities after successful World flush. Unreturned temporary

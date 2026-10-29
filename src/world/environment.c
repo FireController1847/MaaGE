@@ -25,6 +25,9 @@ maage_status maage_environment_default(maage_world_seed seed, maage_environment_
     memset(state,0,sizeof(*state));
     state->random = (seed.low ^ seed.high ^ 2654435761UL) & MAAGE_ENVIRONMENT_WORD;
     if (!state->random) state->random = 1;
+    state->random_tick_selection = (seed.low ^ seed.high ^ 0x41c64e6dUL) & MAAGE_ENVIRONMENT_WORD;
+    state->random_tick_random = (seed.low ^ seed.high ^ 0x85ebca6bUL) & MAAGE_ENVIRONMENT_WORD;
+    if (!state->random_tick_random) state->random_tick_random = 1;
     state->rain_ticks = 12000UL + maage_environment_random(state) % 168001UL;
     state->thunder_ticks = 12000UL + maage_environment_random(state) % 168001UL;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
@@ -34,6 +37,8 @@ int maage_environment_state_valid(const maage_environment_state *state)
     return state && state->ticks_low <= MAAGE_ENVIRONMENT_WORD && state->ticks_high <= MAAGE_ENVIRONMENT_WORD &&
         state->day_low <= MAAGE_ENVIRONMENT_WORD && state->day_high <= MAAGE_ENVIRONMENT_WORD &&
         state->day_tick < MAAGE_WORLD_DAY_TICKS && state->random && state->random <= MAAGE_ENVIRONMENT_WORD &&
+        state->random_tick_selection <= MAAGE_ENVIRONMENT_WORD && state->random_tick_random &&
+        state->random_tick_random <= MAAGE_ENVIRONMENT_WORD &&
         state->rain_ticks <= 180000UL && state->thunder_ticks <= 180000UL &&
         state->raining <= 1 && state->thundering <= 1 &&
         state->rain_intensity >= 0 && state->rain_intensity <= 1 &&

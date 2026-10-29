@@ -82,7 +82,7 @@ overflow becomes existing authoritative item entities. All overflow capacity is
 reserved before transferring items. Allocation failure leaves unreturned inputs
 owned and blocks further container edits; the owner retries closure.
 
-The single current metadata encoding is `MGWORLD4`. Normal shutdown closes the
+The single current metadata encoding is `MGWORLD5`. Normal shutdown closes the
 container before World flush and the atomic player/entity checkpoint. If closure
 cannot allocate overflow entities, that same checkpoint retains only the still
 unreturned input stacks. Loading returns those stacks before allowing another

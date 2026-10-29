@@ -69,3 +69,23 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z)
     if (chunk->sections[y / 16]) return chunk->sections[y / 16]->light[maage_chunk_cell(x, y, z)];
     return y >= chunk->heightmap[z * 16 + x] ? 0xf0 : 0;
 }
+
+maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk,
+    const maage_block_registry *blocks)
+{
+    const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    int section, cell;
+    if (!chunk || !blocks) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+    for (section = 0; section < 16; ++section) {
+        chunk->random_tick_counts[section] = 0;
+        if (!chunk->sections[section]) continue;
+        for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell) {
+            state = maage_block_registry_state(blocks, chunk->sections[section]->states[cell]);
+            block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+            if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+            if (state->random_ticks) ++chunk->random_tick_counts[section];
+        }
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
+}

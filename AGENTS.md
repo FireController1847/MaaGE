@@ -221,6 +221,19 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   numeric block-entity payloads and clock/weather in the current format.
   Old formats do not require readers or migration. Static sky/block light remains 0..15;
   frame daylight scales sky only, without tick-driven global relighting.
+- World random ticks run only in the active owner-thread 20 TPS phase, separately
+  from scheduled fluids. Initialize World config with `maage_world_config_init`:
+  `random_tick_speed` defaults to 3, explicit 0 disables; the owner setter validates
+  aggregate sampling capacity. Active chunks form the Server simulation square
+  (`simulation_distance`, default 8), independent of Client render settings/cache
+  retention. Maintain numeric state eligibility counts outside sampling; callback
+  dispatch uses immutable block definitions, retaining eligibility for deferred
+  handlers without inventing their behavior. Selection uses the 1.7.10 coordinate
+  LCG, with a separate seeded behavior stream; both checkpoint independently of
+  weather. Grass, cactus, mushrooms, plant substrate checks and snow/ice melting
+  use reference rules. Leaf support/decay and immediate plant neighbor reactions
+  remain unimplemented.
+  `MGWORLD5` is the sole metadata format; recreate rejected development worlds.
 - Store worlds under instances/<instance-uuid>/worlds/<world-uuid>/,
   separate from shared Minecraft resources. World IDs are canonical UUIDs.
   Maintain one current metadata encoding and one current chunk encoding, with

@@ -269,7 +269,8 @@ maage_status maage_block_registry_register_state(
         MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE,
         MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    if (definition->id > 4294967295UL || definition->fluid_kind > MAAGE_FLUID_LAVA ||
+    if (definition->id > 4294967295UL || (definition->random_ticks != 0 && definition->random_ticks != 1) ||
+        definition->fluid_kind > MAAGE_FLUID_LAVA ||
         definition->fluid_level > 15 || (definition->fluid_kind == MAAGE_FLUID_NONE &&
         (definition->fluid_level || definition->fluid_source_state)))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);

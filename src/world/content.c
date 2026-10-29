@@ -1,4 +1,5 @@
 #include "maage/content.h"
+#include "world_internal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,10 +11,16 @@ static maage_status maage_content_register_state(maage_block_registry *registry,
     maage_block_id block, unsigned int metadata, int texture)
 {
     maage_block_state_definition state;
+    const maage_block_definition *definition;
     int face, channel, selected, level, species, log_axis;
     maage_status result;
     memset(&state, 0, sizeof(state));
     state.id = id; state.block_id = block; state.metadata = metadata;
+    definition = maage_block_registry_block(registry, block);
+    if (!definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    state.random_ticks = definition->random_tick != NULL ||
+        block == MAAGE_BLOCK_LEAVES || block == MAAGE_BLOCK_LAVA || block == MAAGE_BLOCK_TORCH ||
+        (block == MAAGE_BLOCK_WATER && metadata != 0);
     if (block == MAAGE_BLOCK_TORCH && metadata >= 1 && metadata <= 4) {
         state.selection_shape.minimum[0] = state.selection_shape.minimum[2] = 0.35;
         state.selection_shape.maximum[0] = state.selection_shape.maximum[2] = 0.65;
@@ -99,8 +106,10 @@ static maage_status maage_content_blocks_create(
         memset(&block, 0, sizeof(block));
         block.id = ids[i];
         block.solid = block.opaque = ids[i] != MAAGE_BLOCK_AIR && ids[i] != MAAGE_BLOCK_WATER;
+        block.material_solid = block.solid;
         block.light_opacity = block.opaque ? 15U : (ids[i] == MAAGE_BLOCK_WATER ? 3U : 0U);
         block.emitted_light = 0;
+        if (block.id == MAAGE_BLOCK_GRASS) block.random_tick = maage_random_tick_grass;
         block.selectable = block.solid;
         block.replaceable = !block.solid;
         block.hardness = hardness[i];
@@ -151,10 +160,20 @@ static maage_status maage_content_blocks_create(
         for (entry = 0; entry < sizeof(content) / sizeof(content[0]); ++entry) {
             memset(&block, 0, sizeof(block));
             block.id = content[entry].id; block.solid = content[entry].solid;
+            block.material_solid = block.solid && block.id != MAAGE_BLOCK_SNOW;
             block.opaque = content[entry].opaque; block.hardness = content[entry].hardness;
             block.light_opacity = block.opaque ? 15U :
                 (block.id == MAAGE_BLOCK_LEAVES ? 1U : (block.id == MAAGE_BLOCK_ICE ? 3U : 0U));
             block.emitted_light = content[entry].emission;
+            block.use_neighbor_brightness = block.light_opacity == 0;
+            if (block.id == MAAGE_BLOCK_CACTUS) block.random_tick = maage_random_tick_cactus;
+            if (block.id == MAAGE_BLOCK_BROWN_MUSHROOM || block.id == MAAGE_BLOCK_RED_MUSHROOM)
+                block.random_tick = maage_random_tick_mushroom;
+            if (block.id == MAAGE_BLOCK_TALL_GRASS || block.id == MAAGE_BLOCK_DEAD_BUSH ||
+                block.id == MAAGE_BLOCK_DANDELION || block.id == MAAGE_BLOCK_POPPY)
+                block.random_tick = maage_random_tick_bush;
+            if (block.id == MAAGE_BLOCK_SNOW) block.random_tick = maage_random_tick_snow;
+            if (block.id == MAAGE_BLOCK_ICE) block.random_tick = maage_random_tick_ice;
             block.mesh_shape = content[entry].cross ? MAAGE_BLOCK_MESH_CROSS : MAAGE_BLOCK_MESH_CUBE;
             if (block.id == MAAGE_BLOCK_TORCH) block.mesh_shape = MAAGE_BLOCK_MESH_TORCH;
             block.selectable = block.id != MAAGE_BLOCK_LAVA; block.replaceable = !block.solid;
@@ -227,6 +246,10 @@ static maage_status maage_content_blocks_create(
                 maage_status_failed(result = maage_content_register_state(registry, config,
                     MAAGE_STATE_LOG_Z_BASE + i, MAAGE_BLOCK_LOG, (unsigned int)i | 8U, 0))) goto failed;
         }
+        for (i = 1; i < 16; ++i)
+            if (maage_status_failed(result = maage_content_register_state(registry, config,
+                MAAGE_STATE_CACTUS_AGE_BASE + i - 1, MAAGE_BLOCK_CACTUS, (unsigned int)i,
+                MAAGE_CONTENT_TEXTURE_EXTRA + 22))) goto failed;
         for (i = 1; i < 16; ++i) {
             if (maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_WATER_FLOW_BASE + i - 1,
                     MAAGE_BLOCK_WATER, (unsigned int)i, MAAGE_CONTENT_TEXTURE_WATER)) ||
