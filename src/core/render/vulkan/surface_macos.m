@@ -11,14 +11,12 @@ typedef struct maage_vulkan_cocoa {
     BOOL previous_wants_layer, installed;
 } maage_vulkan_cocoa;
 
-static maage_status maage_vulkan_cocoa_status(maage_renderer *renderer, unsigned char code)
-{
+static maage_status maage_vulkan_cocoa_status(maage_renderer *renderer, unsigned char code) {
     return MAAGE_STATUS_PROPAGATE(renderer->operation_trace,
-        maage_status_make(code, MAAGE_CONTEXT_RENDER, renderer->trace_operation, 0),
-        MAAGE_CONTEXT_RENDER, renderer->trace_operation);
+                                  maage_status_make(code, MAAGE_CONTEXT_RENDER, renderer->trace_operation, 0),
+                                  MAAGE_CONTEXT_RENDER, renderer->trace_operation);
 }
-maage_status maage_vulkan_cocoa_update(maage_renderer *renderer, const maage_window_state *state)
-{
+maage_status maage_vulkan_cocoa_update(maage_renderer *renderer, const maage_window_state *state) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_cocoa *cocoa = native->cocoa;
     CGFloat scale;
@@ -48,8 +46,7 @@ maage_status maage_vulkan_cocoa_update(maage_renderer *renderer, const maage_win
     [CATransaction commit];
     return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_SUCCESS);
 }
-maage_status maage_vulkan_cocoa_surface(maage_renderer *renderer)
-{
+maage_status maage_vulkan_cocoa_surface(maage_renderer *renderer) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_cocoa *cocoa = native->cocoa;
     VkMetalSurfaceCreateInfoEXT info = {0};
@@ -62,13 +59,13 @@ maage_status maage_vulkan_cocoa_surface(maage_renderer *renderer)
         cocoa = calloc(1, sizeof(*cocoa));
         if (!cocoa) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_ALLOCATION_FAILED);
         native->cocoa = cocoa;
-        cocoa->view = [(NSView *)renderer->native.handles.cocoa.view retain];
+        cocoa->view = [(NSView *) renderer->native.handles.cocoa.view retain];
         cocoa->previous_layer = [[cocoa->view layer] retain];
         cocoa->previous_wants_layer = [cocoa->view wantsLayer];
         cocoa->layer = [[CAMetalLayer alloc] init];
         if (!cocoa->layer) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_ALLOCATION_FAILED);
         cocoa->layer.opaque = YES;
-        cocoa->layer.delegate = (id<CALayerDelegate>)cocoa->view;
+        cocoa->layer.delegate = (id<CALayerDelegate>) cocoa->view;
         cocoa->layer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
         [cocoa->view setLayer:cocoa->layer];
         [cocoa->view setWantsLayer:YES];
@@ -82,8 +79,7 @@ maage_status maage_vulkan_cocoa_surface(maage_renderer *renderer)
     info.pLayer = cocoa->layer;
     return maage_vulkan_result(vkCreateMetalSurfaceEXT(native->instance, &info, NULL, &native->surface));
 }
-maage_status maage_vulkan_cocoa_destroy(maage_renderer *renderer)
-{
+maage_status maage_vulkan_cocoa_destroy(maage_renderer *renderer) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_cocoa *cocoa = native->cocoa;
     if (!cocoa) return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_NOOP);
@@ -97,6 +93,7 @@ maage_status maage_vulkan_cocoa_destroy(maage_renderer *renderer)
     [cocoa->previous_layer release];
     [cocoa->layer release];
     [cocoa->view release];
-    free(cocoa); native->cocoa = NULL;
+    free(cocoa);
+    native->cocoa = NULL;
     return maage_vulkan_cocoa_status(renderer, MAAGE_STATUS_SUCCESS);
 }

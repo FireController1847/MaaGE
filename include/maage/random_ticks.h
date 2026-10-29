@@ -13,7 +13,7 @@ int maage_random_tick_state_valid(const maage_random_tick_state *state);
 maage_status maage_world_random_tick_snapshot(const maage_world *world, maage_random_tick_state *state);
 
 /* Borrowed only during a callback. World owns and checkpoints both streams;
- * selection is the 1.7.10 32-bit coordinate LCG, behavior uses seeded xorshift.
+ * selection uses a 32-bit coordinate LCG; behavior uses seeded xorshift.
  * Weather has a separate stream. Callbacks must not retain this pointer. */
 typedef struct maage_random_tick_context {
     maage_random_tick_state state;

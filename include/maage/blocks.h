@@ -44,10 +44,14 @@ enum {
     MAAGE_BLOCK_OBSIDIAN = 49,
     MAAGE_BLOCK_TORCH = 50,
     MAAGE_BLOCK_CRAFTING_TABLE = 58,
-    MAAGE_BLOCK_GOLD_BLOCK = 41, MAAGE_BLOCK_IRON_BLOCK = 42,
-    MAAGE_BLOCK_DIAMOND_BLOCK = 57, MAAGE_BLOCK_LAPIS_BLOCK = 22,
-    MAAGE_BLOCK_EMERALD_BLOCK = 133, MAAGE_BLOCK_REDSTONE_BLOCK = 152,
-    MAAGE_BLOCK_COAL_BLOCK = 173, MAAGE_BLOCK_SNOW_BLOCK = 80,
+    MAAGE_BLOCK_GOLD_BLOCK = 41,
+    MAAGE_BLOCK_IRON_BLOCK = 42,
+    MAAGE_BLOCK_DIAMOND_BLOCK = 57,
+    MAAGE_BLOCK_LAPIS_BLOCK = 22,
+    MAAGE_BLOCK_EMERALD_BLOCK = 133,
+    MAAGE_BLOCK_REDSTONE_BLOCK = 152,
+    MAAGE_BLOCK_COAL_BLOCK = 173,
+    MAAGE_BLOCK_SNOW_BLOCK = 80,
     MAAGE_BLOCK_DIAMOND_ORE = 56,
     MAAGE_BLOCK_REDSTONE_ORE = 73,
     MAAGE_BLOCK_SNOW = 78,
@@ -90,26 +94,43 @@ enum {
     MAAGE_STATE_ICE = 79,
     MAAGE_STATE_CACTUS = 81,
     MAAGE_STATE_EMERALD_ORE = 129,
-    MAAGE_STATE_SPRUCE_LOG = 272, MAAGE_STATE_BIRCH_LOG = 273,
-    MAAGE_STATE_SPRUCE_LEAVES = 274, MAAGE_STATE_BIRCH_LEAVES = 275,
-    MAAGE_STATE_TORCH_NEGATIVE_X = 276, MAAGE_STATE_TORCH_POSITIVE_X = 277,
-    MAAGE_STATE_TORCH_NEGATIVE_Z = 278, MAAGE_STATE_TORCH_POSITIVE_Z = 279,
-    MAAGE_STATE_LOG_X_BASE = 280, MAAGE_STATE_LOG_Z_BASE = 283,
-    MAAGE_STATE_SPRUCE_PLANKS = 286, MAAGE_STATE_BIRCH_PLANKS = 287,
-    MAAGE_STATE_WATER_FLOW_BASE = 512, MAAGE_STATE_LAVA_FLOW_BASE = 528,
+    MAAGE_STATE_SPRUCE_LOG = 272,
+    MAAGE_STATE_BIRCH_LOG = 273,
+    MAAGE_STATE_SPRUCE_LEAVES = 274,
+    MAAGE_STATE_BIRCH_LEAVES = 275,
+    MAAGE_STATE_TORCH_NEGATIVE_X = 276,
+    MAAGE_STATE_TORCH_POSITIVE_X = 277,
+    MAAGE_STATE_TORCH_NEGATIVE_Z = 278,
+    MAAGE_STATE_TORCH_POSITIVE_Z = 279,
+    MAAGE_STATE_LOG_X_BASE = 280,
+    MAAGE_STATE_LOG_Z_BASE = 283,
+    MAAGE_STATE_SPRUCE_PLANKS = 286,
+    MAAGE_STATE_BIRCH_PLANKS = 287,
+    MAAGE_STATE_WATER_FLOW_BASE = 512,
+    MAAGE_STATE_LAVA_FLOW_BASE = 528,
     MAAGE_STATE_CACTUS_AGE_BASE = 544, /* Ages 1..15; age zero is CACTUS. */
     MAAGE_STATE_PERSISTENT_LEAVES_BASE = 576,
     MAAGE_STATE_CHECK_LEAVES_BASE = 579,
     MAAGE_STATE_PERSISTENT_CHECK_LEAVES_BASE = 582
 };
-enum { MAAGE_LEAF_SPECIES_MASK = 3U, MAAGE_LEAF_PERSISTENT = 4U,
-    MAAGE_LEAF_CHECK_DECAY = 8U };
+enum {
+    MAAGE_LEAF_SPECIES_MASK = 3U,
+    MAAGE_LEAF_PERSISTENT = 4U,
+    MAAGE_LEAF_CHECK_DECAY = 8U
+};
 /* Oak/spruce/birch, with all four flag combinations. Direct numeric mapping;
  * unsupported species/metadata fail explicitly. */
 maage_status maage_block_leaves_state(unsigned int metadata, maage_block_state_id *state);
-enum { MAAGE_BLOCK_MESH_CUBE = 0, MAAGE_BLOCK_MESH_CROSS = 1,
-    MAAGE_BLOCK_MESH_TORCH = 2 };
-enum { MAAGE_FLUID_NONE = 0, MAAGE_FLUID_WATER = 1, MAAGE_FLUID_LAVA = 2 };
+enum {
+    MAAGE_BLOCK_MESH_CUBE = 0,
+    MAAGE_BLOCK_MESH_CROSS = 1,
+    MAAGE_BLOCK_MESH_TORCH = 2
+};
+enum {
+    MAAGE_FLUID_NONE = 0,
+    MAAGE_FLUID_WATER = 1,
+    MAAGE_FLUID_LAVA = 2
+};
 
 typedef enum maage_block_face {
     MAAGE_FACE_NEGATIVE_X = 0,
@@ -153,25 +174,25 @@ struct maage_world;
 struct maage_random_tick_context;
 struct maage_block_state_definition;
 typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *world,
-    int x, int y, int z, const struct maage_block_state_definition *state,
-    struct maage_random_tick_context *context);
+                                                         int x, int y, int z, const struct maage_block_state_definition *state,
+                                                         struct maage_random_tick_context *context);
 
 typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world,
-    int x,int y,int z,const struct maage_block_state_definition *state,int *valid);
+                                                      int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
 
 typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
     int opaque;
-    int material_solid; /* Plant adjacency rule; independent of collision. */
-    unsigned int emitted_light; /* 0..15; resolved during registration. */
-    unsigned int light_opacity; /* 0..15; independent of face occlusion. */
+    int material_solid;          /* Plant adjacency rule; independent of collision. */
+    unsigned int emitted_light;  /* 0..15; resolved during registration. */
+    unsigned int light_opacity;  /* 0..15; independent of face occlusion. */
     int use_neighbor_brightness; /* Combined light uses up and four sides. */
     int selectable, replaceable;
     unsigned int mesh_shape; /* Numeric cube, crossed plant or narrow torch. */
-    double hardness; /* Negative: unbreakable in Survival. */
+    double hardness;         /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
-    int harvest_requires_tool; /* Effectiveness and harvest eligibility differ. */
+    int harvest_requires_tool;  /* Effectiveness and harvest eligibility differ. */
     unsigned long drop_item_id; /* Item domain, resolved at registration. */
     unsigned int drop_count;
     maage_block_shape collision_shape, selection_shape;
@@ -205,7 +226,7 @@ typedef struct maage_block_registry maage_block_registry;
  * The caller owns the registry. Definitions are borrowed until its destruction;
  * after finalize they are immutable. Registration copies names and definitions. */
 maage_status maage_block_registry_create(size_t block_capacity,
-    size_t state_capacity, maage_block_registry **output);
+                                         size_t state_capacity, maage_block_registry **output);
 maage_status maage_block_registry_destroy(maage_block_registry *registry);
 maage_status maage_block_registry_register_block(
     maage_block_registry *registry, const char *external_name,

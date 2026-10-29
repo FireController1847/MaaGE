@@ -41,7 +41,7 @@ typedef struct maage_input_snapshot {
     int pressed[MAAGE_INPUT_KEY_COUNT];
     int primary_pressed, primary_down;
     int secondary_pressed, secondary_down;
-    double scroll_y; /* Positive scroll selects the preceding hotbar slot. */
+    double scroll_y;         /* Positive scroll selects the preceding hotbar slot. */
     double mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
     double mouse_delta_x;
     double mouse_delta_y;
@@ -57,7 +57,7 @@ typedef struct maage_input_snapshot {
  * and clears held keys. This is raw input; gameplay maps it to actions.
  * UNSUPPORTED means this adapter cannot supply gameplay input. */
 maage_status maage_window_get_input(maage_window *window,
-    maage_input_snapshot *input);
+                                    maage_input_snapshot *input);
 /* Capture requires focus, hides the cursor and permits unbounded relative motion.
  * Release also clears pending motion. Escape is an input edge; the application
  * chooses when to release or reacquire capture. Native adapters never recapture

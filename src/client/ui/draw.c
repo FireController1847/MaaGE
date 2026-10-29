@@ -5,31 +5,36 @@
 #include <string.h>
 
 /* Retain geometry between frames; index offsets are limited by unsigned int. */
-static int maage_client_ui_reserve_quad(maage_client_ui *ui)
-{
+static int maage_client_ui_reserve_quad(maage_client_ui *ui) {
     size_t maximum, required, capacity;
     maage_render_ui_vertex *vertices;
     unsigned int *indices;
     unsigned char failure = MAAGE_STATUS_ALLOCATION_FAILED;
     if (maage_status_failed(ui->draw_result)) return 0;
-    maximum = ((size_t)-1) / sizeof(*ui->vertices) / 4;
-    if (maximum > ((size_t)-1) / sizeof(*ui->indices) / 6)
-        maximum = ((size_t)-1) / sizeof(*ui->indices) / 6;
-    if (maximum > (size_t)(UINT_MAX / 4U)) maximum = (size_t)(UINT_MAX / 4U);
+    maximum = ((size_t) - 1) / sizeof(*ui->vertices) / 4;
+    if (maximum > ((size_t) - 1) / sizeof(*ui->indices) / 6)
+        maximum = ((size_t) - 1) / sizeof(*ui->indices) / 6;
+    if (maximum > (size_t) (UINT_MAX / 4U)) maximum = (size_t) (UINT_MAX / 4U);
     required = ui->batch.vertex_count / 4 + 1;
     if (required <= ui->quad_capacity) return 1;
-    if (required > maximum) { failure = MAAGE_STATUS_BUFFER_OVERFLOW; goto failed; }
+    if (required > maximum) {
+        failure = MAAGE_STATUS_BUFFER_OVERFLOW;
+        goto failed;
+    }
     capacity = ui->quad_capacity ? ui->quad_capacity : 256;
     while (capacity < required) {
-        if (capacity > maximum / 2) { capacity = maximum; break; }
+        if (capacity > maximum / 2) {
+            capacity = maximum;
+            break;
+        }
         capacity *= 2;
     }
-    vertices = (maage_render_ui_vertex *)realloc(ui->vertices,
-        capacity * 4 * sizeof(*vertices));
+    vertices = (maage_render_ui_vertex *) realloc(ui->vertices,
+                                                  capacity * 4 * sizeof(*vertices));
     if (!vertices) goto failed;
     ui->vertices = vertices;
     ui->batch.vertices = vertices;
-    indices = (unsigned int *)realloc(ui->indices, capacity * 6 * sizeof(*indices));
+    indices = (unsigned int *) realloc(ui->indices, capacity * 6 * sizeof(*indices));
     if (!indices) goto failed;
     ui->indices = indices;
     ui->batch.indices = indices;
@@ -41,8 +46,7 @@ failed:
 }
 
 int maage_client_ui_append_quads(maage_client_ui *ui,
-    const maage_render_ui_vertex *vertices, size_t count)
-{
+                                 const maage_render_ui_vertex *vertices, size_t count) {
     static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
     size_t quad, first, i;
     for (quad = 0; quad < count; ++quad) {
@@ -50,15 +54,15 @@ int maage_client_ui_append_quads(maage_client_ui *ui,
         first = ui->batch.vertex_count;
         memcpy(ui->vertices + first, vertices + quad * 4, 4 * sizeof(*vertices));
         for (i = 0; i < 6; ++i)
-            ui->indices[ui->batch.index_count + i] = (unsigned int)first + order[i];
-        ui->batch.vertex_count += 4; ui->batch.index_count += 6;
+            ui->indices[ui->batch.index_count + i] = (unsigned int) first + order[i];
+        ui->batch.vertex_count += 4;
+        ui->batch.index_count += 6;
     }
     return 1;
 }
 
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha)
-{
+                               float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha) {
     static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
     maage_render_ui_vertex *vertex;
     float x0, y0, x1, y1, uv[4], positions[4][2];
@@ -83,22 +87,25 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
     first = ui->batch.vertex_count;
     for (i = 0; i < 4; ++i) {
         vertex = &ui->vertices[first + i];
-        vertex->position[0] = positions[i][0]; vertex->position[1] = positions[i][1];
+        vertex->position[0] = positions[i][0];
+        vertex->position[1] = positions[i][1];
         vertex->uv[0] = (i == 0 || i == 3) ? uv[0] : uv[2];
         vertex->uv[1] = i < 2 ? uv[1] : uv[3];
-        vertex->color[0] = red; vertex->color[1] = green;
-        vertex->color[2] = blue; vertex->color[3] = alpha;
+        vertex->color[0] = red;
+        vertex->color[1] = green;
+        vertex->color[2] = blue;
+        vertex->color[3] = alpha;
     }
-    for (i = 0; i < 6; ++i) ui->indices[ui->batch.index_count + i] = (unsigned int)first + order[i];
-    ui->batch.vertex_count += 4; ui->batch.index_count += 6;
+    for (i = 0; i < 6; ++i)
+        ui->indices[ui->batch.index_count + i] = (unsigned int) first + order[i];
+    ui->batch.vertex_count += 4;
+    ui->batch.index_count += 6;
 }
-
 
 /* Draw the original tiled options dirt across the complete framebuffer,
  * including macOS borderless/notch margins. Only subsequent interactive
  * elements use ui->content for safe-area positioning. */
-void maage_client_ui_menu_background(maage_client_ui *ui)
-{
+void maage_client_ui_menu_background(maage_client_ui *ui) {
     const maage_block_state_definition *dirt;
     maage_client_ui_rect previous, full, tile;
     float uv[4], x, y;
@@ -117,31 +124,33 @@ void maage_client_ui_menu_background(maage_client_ui *ui)
         dirt = ui->blocks ? maage_block_registry_state(ui->blocks, MAAGE_STATE_DIRT) : NULL;
         if (dirt && ui->resources.atlas_edge > 0) {
             uv[0] = dirt->faces[0].uv[0] *
-                ui->resources.block_atlas_width / ui->resources.atlas_edge;
+                    ui->resources.block_atlas_width / ui->resources.atlas_edge;
             uv[2] = dirt->faces[0].uv[2] *
-                ui->resources.block_atlas_width / ui->resources.atlas_edge;
-            uv[1] = (dirt->faces[0].uv[1]*ui->resources.block_atlas_height +
-                MAAGE_CLIENT_UI_BLOCK_ATLAS_Y) / ui->resources.atlas_edge;
-            uv[3] = (dirt->faces[0].uv[3]*ui->resources.block_atlas_height +
-                MAAGE_CLIENT_UI_BLOCK_ATLAS_Y) / ui->resources.atlas_edge;
+                    ui->resources.block_atlas_width / ui->resources.atlas_edge;
+            uv[1] = (dirt->faces[0].uv[1] * ui->resources.block_atlas_height +
+                     MAAGE_CLIENT_UI_BLOCK_ATLAS_Y) /
+                    ui->resources.atlas_edge;
+            uv[3] = (dirt->faces[0].uv[3] * ui->resources.block_atlas_height +
+                     MAAGE_CLIENT_UI_BLOCK_ATLAS_Y) /
+                    ui->resources.atlas_edge;
             available = uv[2] > uv[0] && uv[3] > uv[1];
         }
     }
     if (available) {
         tile.width = tile.height = 32.0f;
-        for (y=0.0f; y < full.height; y+=32.0f)
-            for (x=0.0f; x < full.width; x+=32.0f) {
-                tile.x=x; tile.y=y;
-                maage_client_ui_rectangle(ui,tile,uv[0],uv[1],uv[2],uv[3],
-                    0.25f,0.25f,0.25f,1.0f);
+        for (y = 0.0f; y < full.height; y += 32.0f)
+            for (x = 0.0f; x < full.width; x += 32.0f) {
+                tile.x = x;
+                tile.y = y;
+                maage_client_ui_rectangle(ui, tile, uv[0], uv[1], uv[2], uv[3],
+                                          0.25f, 0.25f, 0.25f, 1.0f);
             }
     }
     ui->clip = previous;
 }
 
 void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    float red, float green, float blue, float alpha)
-{
+                           float red, float green, float blue, float alpha) {
     float white;
     if (!ui || !ui->resources.atlas_edge) return;
     white = (ui->resources.atlas_edge - 0.5f) / ui->resources.atlas_edge;
@@ -149,42 +158,41 @@ void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle,
 }
 
 void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    unsigned long top, unsigned long bottom)
-{
-    size_t first=ui->batch.vertex_count,i,c;
+                              unsigned long top, unsigned long bottom) {
+    size_t first = ui->batch.vertex_count, i, c;
     unsigned long color;
     float t;
-    maage_client_ui_panel(ui,rectangle,1,1,1,1);
-    for(i=first;i<ui->batch.vertex_count;++i) {
-        t=(ui->vertices[i].position[1]-rectangle.y)/rectangle.height;
-        for(c=0;c<4;++c) {
-            color=c==3?24UL:(2UL-c)*8UL;
-            ui->vertices[i].color[c]=((1.0f-t)*(float)((top>>color)&255UL)+
-                t*(float)((bottom>>color)&255UL))/255.0f;
+    maage_client_ui_panel(ui, rectangle, 1, 1, 1, 1);
+    for (i = first; i < ui->batch.vertex_count; ++i) {
+        t = (ui->vertices[i].position[1] - rectangle.y) / rectangle.height;
+        for (c = 0; c < 4; ++c) {
+            color = c == 3 ? 24UL : (2UL - c) * 8UL;
+            ui->vertices[i].color[c] = ((1.0f - t) * (float) ((top >> color) & 255UL) +
+                                        t * (float) ((bottom >> color) & 255UL)) /
+                                       255.0f;
         }
     }
 }
 
 void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float y,
-    maage_client_ui_alignment alignment, float red, float green, float blue)
-{
+                          maage_client_ui_alignment alignment, float red, float green, float blue) {
     float width;
     if (!ui || !text) return;
     width = maage_client_ui_text_width(ui, text);
-    if (alignment == MAAGE_CLIENT_UI_CENTER) x -= width * 0.5f;
-    else if (alignment == MAAGE_CLIENT_UI_RIGHT) x -= width;
+    if (alignment == MAAGE_CLIENT_UI_CENTER)
+        x -= width * 0.5f;
+    else if (alignment == MAAGE_CLIENT_UI_RIGHT)
+        x -= width;
     maage_client_ui_font_draw(ui, text, x, y, red, green, blue);
 }
 
-void maage_client_ui_text_shadow(maage_client_ui *ui,const char *text,float x,float y,
-    maage_client_ui_alignment alignment,float red,float green,float blue)
-{
-    maage_client_ui_text(ui,text,x+1,y+1,alignment,red*0.25f,green*0.25f,blue*0.25f);
-    maage_client_ui_text(ui,text,x,y,alignment,red,green,blue);
+void maage_client_ui_text_shadow(maage_client_ui *ui, const char *text, float x, float y,
+                                 maage_client_ui_alignment alignment, float red, float green, float blue) {
+    maage_client_ui_text(ui, text, x + 1, y + 1, alignment, red * 0.25f, green * 0.25f, blue * 0.25f);
+    maage_client_ui_text(ui, text, x, y, alignment, red, green, blue);
 }
 
-void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle)
-{
+void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle) {
     if (!ui->primary_down &&
         ui->mouse_x >= rectangle.x && ui->mouse_x < rectangle.x + rectangle.width &&
         ui->mouse_y >= rectangle.y && ui->mouse_y < rectangle.y + rectangle.height &&
@@ -194,67 +202,66 @@ void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle
 }
 
 void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    const char *label, maage_client_ui_button_visual state)
-{
+                                  const char *label, maage_client_ui_button_visual state) {
     maage_client_ui_rect part;
-    float v, center, tint,half;
-    if(!ui||!label||state<MAAGE_CLIENT_UI_BUTTON_DISABLED||state>MAAGE_CLIENT_UI_BUTTON_HOVER||rectangle.width<=0||rectangle.height<=0)return;
-    if(state!=MAAGE_CLIENT_UI_BUTTON_DISABLED)maage_client_ui_pointer(ui,rectangle);
-    /* GuiButton uses two unscaled horizontal halves of widgets.png. */
-    half=(float)(int)(rectangle.width*0.5f);v=46.0f+(float)state*20.0f;
-    part=rectangle;part.width=half;
-    maage_client_ui_rectangle(ui,part,256.0f/ui->resources.atlas_edge,v/ui->resources.atlas_edge,
-        (256.0f+half)/ui->resources.atlas_edge,(v+20)/ui->resources.atlas_edge,1,1,1,1);
-    part.x+=half;part.width=rectangle.width-half;
-    maage_client_ui_rectangle(ui,part,(456.0f-part.width)/ui->resources.atlas_edge,v/ui->resources.atlas_edge,
-        456.0f/ui->resources.atlas_edge,(v+20)/ui->resources.atlas_edge,1,1,1,1);
-    center=rectangle.x+rectangle.width*0.5f;
-    maage_client_ui_text(ui,label,center+1,rectangle.y+7,
-        MAAGE_CLIENT_UI_CENTER,0.22f,0.22f,0.22f);
-    tint=state==MAAGE_CLIENT_UI_BUTTON_DISABLED?0.63f:
-        (state==MAAGE_CLIENT_UI_BUTTON_HOVER?1.0f:0.88f);
-    maage_client_ui_text(ui,label,center,rectangle.y+6,
-        MAAGE_CLIENT_UI_CENTER,tint,tint,
-        state==MAAGE_CLIENT_UI_BUTTON_HOVER?0.63f:tint);
+    float v, center, tint, half;
+    if (!ui || !label || state < MAAGE_CLIENT_UI_BUTTON_DISABLED || state > MAAGE_CLIENT_UI_BUTTON_HOVER || rectangle.width <= 0 || rectangle.height <= 0) return;
+    if (state != MAAGE_CLIENT_UI_BUTTON_DISABLED) maage_client_ui_pointer(ui, rectangle);
+    /* Buttons use two unscaled horizontal halves of widgets.png. */
+    half = (float) (int) (rectangle.width * 0.5f);
+    v = 46.0f + (float) state * 20.0f;
+    part = rectangle;
+    part.width = half;
+    maage_client_ui_rectangle(ui, part, 256.0f / ui->resources.atlas_edge, v / ui->resources.atlas_edge,
+                              (256.0f + half) / ui->resources.atlas_edge, (v + 20) / ui->resources.atlas_edge, 1, 1, 1, 1);
+    part.x += half;
+    part.width = rectangle.width - half;
+    maage_client_ui_rectangle(ui, part, (456.0f - part.width) / ui->resources.atlas_edge, v / ui->resources.atlas_edge,
+                              456.0f / ui->resources.atlas_edge, (v + 20) / ui->resources.atlas_edge, 1, 1, 1, 1);
+    center = rectangle.x + rectangle.width * 0.5f;
+    maage_client_ui_text(ui, label, center + 1, rectangle.y + 7,
+                         MAAGE_CLIENT_UI_CENTER, 0.22f, 0.22f, 0.22f);
+    tint = state == MAAGE_CLIENT_UI_BUTTON_DISABLED ? 0.63f : (state == MAAGE_CLIENT_UI_BUTTON_HOVER ? 1.0f : 0.88f);
+    maage_client_ui_text(ui, label, center, rectangle.y + 6,
+                         MAAGE_CLIENT_UI_CENTER, tint, tint,
+                         state == MAAGE_CLIENT_UI_BUTTON_HOVER ? 0.63f : tint);
 }
 void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    const char *label, int highlighted)
-{
-    maage_client_ui_button_state(ui,rectangle,label,
-        highlighted?MAAGE_CLIENT_UI_BUTTON_HOVER:MAAGE_CLIENT_UI_BUTTON_NORMAL);
+                            const char *label, int highlighted) {
+    maage_client_ui_button_state(ui, rectangle, label,
+                                 highlighted ? MAAGE_CLIENT_UI_BUTTON_HOVER : MAAGE_CLIENT_UI_BUTTON_NORMAL);
 }
 
-/* The vanilla 1.7.10 slider handle is the two 4x20 end strips of
+/* The slider handle uses the two 4x20 end strips of
  * widgets.png at u=0 and u=196. It travels across a normal button.
  * No separately generated slider rectangles or invented graphics. */
-void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect r,
-    const char *label,float value,int highlighted)
-{
+void maage_client_ui_slider(maage_client_ui *ui, maage_client_ui_rect r,
+                            const char *label, float value, int highlighted) {
     maage_client_ui_rect knob;
-    float atlas,y,center,tint;
-    if(!ui||!label||r.width<8.0f||r.height<=0.0f)return;
-    maage_client_ui_pointer(ui,r);
-    if(value<0.0f)value=0.0f;
-    if(value>1.0f)value=1.0f;
-    /* Minecraft 1.7.10 GuiOptionSlider.getHoverState() returns 0:
-     * the track always uses widgets.png's dark (disabled-state) row,
-     * including during hover and drag. This does NOT disable the control. */
-    maage_client_ui_button_state(ui,r,"",MAAGE_CLIENT_UI_BUTTON_DISABLED);
-    atlas=(float)ui->resources.atlas_edge;
-    /* GuiOptionSlider keeps the handle on the vanilla enabled row even
-     * when its containing button background is hovered. */
-    y=66.0f;
-    knob.x=r.x+(float)(int)((r.width-8.0f)*value);
-    knob.y=r.y;knob.width=4.0f;knob.height=r.height;
-    maage_client_ui_rectangle(ui,knob,256.0f/atlas,y/atlas,
-        260.0f/atlas,(y+20.0f)/atlas,1,1,1,1);
-    knob.x+=4.0f;
-    maage_client_ui_rectangle(ui,knob,452.0f/atlas,y/atlas,
-        456.0f/atlas,(y+20.0f)/atlas,1,1,1,1);
-    center=r.x+r.width*0.5f;
-    maage_client_ui_text(ui,label,center+1.0f,r.y+7.0f,
-        MAAGE_CLIENT_UI_CENTER,0.22f,0.22f,0.22f);
-    tint=highlighted?1.0f:0.88f;
-    maage_client_ui_text(ui,label,center,r.y+6.0f,
-        MAAGE_CLIENT_UI_CENTER,tint,tint,highlighted?0.63f:tint);
+    float atlas, y, center, tint;
+    if (!ui || !label || r.width < 8.0f || r.height <= 0.0f) return;
+    maage_client_ui_pointer(ui, r);
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+    /* The track retains its dark appearance during hover and drag.
+     * This appearance does not disable interaction. */
+    maage_client_ui_button_state(ui, r, "", MAAGE_CLIENT_UI_BUTTON_DISABLED);
+    atlas = (float) ui->resources.atlas_edge;
+    /* The handle keeps its enabled appearance when the track is hovered. */
+    y = 66.0f;
+    knob.x = r.x + (float) (int) ((r.width - 8.0f) * value);
+    knob.y = r.y;
+    knob.width = 4.0f;
+    knob.height = r.height;
+    maage_client_ui_rectangle(ui, knob, 256.0f / atlas, y / atlas,
+                              260.0f / atlas, (y + 20.0f) / atlas, 1, 1, 1, 1);
+    knob.x += 4.0f;
+    maage_client_ui_rectangle(ui, knob, 452.0f / atlas, y / atlas,
+                              456.0f / atlas, (y + 20.0f) / atlas, 1, 1, 1, 1);
+    center = r.x + r.width * 0.5f;
+    maage_client_ui_text(ui, label, center + 1.0f, r.y + 7.0f,
+                         MAAGE_CLIENT_UI_CENTER, 0.22f, 0.22f, 0.22f);
+    tint = highlighted ? 1.0f : 0.88f;
+    maage_client_ui_text(ui, label, center, r.y + 6.0f,
+                         MAAGE_CLIENT_UI_CENTER, tint, tint, highlighted ? 0.63f : tint);
 }

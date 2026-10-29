@@ -16,12 +16,16 @@
 #include <aclapi.h>
 #include <wchar.h>
 #include <io.h>
-struct maage_storage_lock { HANDLE handle; };
-static wchar_t *maage_storage_wide(const char *path)
-{
+struct maage_storage_lock {
+    HANDLE handle;
+};
+static wchar_t *maage_storage_wide(const char *path) {
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
-    wchar_t *wide = n ? (wchar_t *)malloc((size_t)n * sizeof(*wide)) : NULL;
-    if (wide && !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, n)) { free(wide); return NULL; }
+    wchar_t *wide = n ? (wchar_t *) malloc((size_t) n * sizeof(*wide)) : NULL;
+    if (wide && !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, n)) {
+        free(wide);
+        return NULL;
+    }
     return wide;
 }
 #else
@@ -29,16 +33,18 @@ static wchar_t *maage_storage_wide(const char *path)
 #include <sys/file.h>
 #include <fcntl.h>
 #include <unistd.h>
-struct maage_storage_lock { int descriptor; };
+struct maage_storage_lock {
+    int descriptor;
+};
 #endif
 
-maage_status maage_storage_join(char *path, size_t capacity, const char *base, const char *relative)
-{
+maage_status maage_storage_join(char *path, size_t capacity, const char *base, const char *relative) {
     const char *p;
     size_t n, r;
     if (!path || !base || !relative || !capacity) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, !path ? 0 : (!capacity ? 1 : (!base ? 2 : 3)));
-    n = strlen(base); r = strlen(relative);
+                                                                           MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, !path ? 0 : (!capacity ? 1 : (!base ? 2 : 3)));
+    n = strlen(base);
+    r = strlen(relative);
     if (!n || !r || relative[0] == '/' || relative[0] == '\\' || strchr(relative, ':') || strchr(relative, '\\'))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, !n ? 2 : 3);
     for (p = relative; *p; ++p)
@@ -46,13 +52,14 @@ maage_status maage_storage_join(char *path, size_t capacity, const char *base, c
             return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 3);
     if (n >= capacity || r > capacity - n - 1 || capacity - n - 1 <= r)
         return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
-    memmove(path, base, n); path[n] = '/'; memcpy(path + n + 1, relative, r + 1);
+    memmove(path, base, n);
+    path[n] = '/';
+    memcpy(path + n + 1, relative, r + 1);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
 }
-maage_status maage_storage_data_path(char *path, size_t capacity)
-{
+maage_status maage_storage_data_path(char *path, size_t capacity) {
     if (!path || !capacity) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, !path ? 0 : 1);
+                                                     MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, !path ? 0 : 1);
 #ifdef _WIN32
     {
         wchar_t native[MAX_PATH];
@@ -60,7 +67,7 @@ maage_status maage_storage_data_path(char *path, size_t capacity)
         if (SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, native) != S_OK)
             return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
         if (capacity > INT_MAX) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE, 0);
-        n = WideCharToMultiByte(CP_UTF8, 0, native, -1, path, (int)capacity, NULL, NULL);
+        n = WideCharToMultiByte(CP_UTF8, 0, native, -1, path, (int) capacity, NULL, NULL);
         if (!n) return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESOLVE);
         return maage_storage_join(path, capacity, path, "MaaGE");
     }
@@ -79,27 +86,26 @@ maage_status maage_storage_data_path(char *path, size_t capacity)
     }
 #endif
 }
-static maage_status maage_storage_check_directories(const char *path, int create)
-{
+static maage_status maage_storage_check_directories(const char *path, int create) {
     char copy[MAAGE_PATH_CAPACITY];
     size_t i, start;
     int created = 0;
     unsigned char operation = create ? MAAGE_OPERATION_CREATE : MAAGE_OPERATION_QUERY;
     if (!path || !*path) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, operation, 0);
+                                                  MAAGE_CONTEXT_STORAGE, operation, 0);
     if (strlen(path) >= sizeof(copy)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW,
-        MAAGE_CONTEXT_STORAGE, operation, 0);
+                                                               MAAGE_CONTEXT_STORAGE, operation, 0);
     strcpy(copy, path);
 #ifdef _WIN32
     if (strlen(copy) < 3 || copy[1] != ':') return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, operation, 0);
+                                                                     MAAGE_CONTEXT_STORAGE, operation, 0);
     start = 3;
 #else
     if (copy[0] != '/') return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, operation, 0);
+                                                 MAAGE_CONTEXT_STORAGE, operation, 0);
     start = 1;
 #endif
-    for (i = start; ; ++i) {
+    for (i = start;; ++i) {
         char saved = copy[i];
         if (saved == '/' || saved == '\\' || !saved) {
             maage_status result;
@@ -109,25 +115,27 @@ static maage_status maage_storage_check_directories(const char *path, int create
                 wchar_t *wide = maage_storage_wide(copy);
                 DWORD attributes, native;
                 if (!wide) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-                    MAAGE_CONTEXT_STORAGE, operation, 0);
+                                                    MAAGE_CONTEXT_STORAGE, operation, 0);
                 if (create && CreateDirectoryW(wide, NULL)) created = 1;
-                attributes = GetFileAttributesW(wide); native = GetLastError();
+                attributes = GetFileAttributesW(wide);
+                native = GetLastError();
                 free(wide);
                 if (attributes == INVALID_FILE_ATTRIBUTES)
                     result = maage_status_from_win32(native, MAAGE_CONTEXT_STORAGE, operation);
                 else if (attributes & FILE_ATTRIBUTE_REPARSE_POINT)
                     result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0);
-                else result = maage_status_make(attributes & FILE_ATTRIBUTE_DIRECTORY ? MAAGE_STATUS_SUCCESS :
-                    MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, operation, 0);
+                else
+                    result = maage_status_make(attributes & FILE_ATTRIBUTE_DIRECTORY ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, operation, 0);
             }
 #else
             {
                 struct stat information;
                 if (create && !mkdir(copy, 0700)) created = 1;
-                if (lstat(copy, &information)) result = maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, operation);
-                else result = maage_status_make(S_ISDIR(information.st_mode) ? MAAGE_STATUS_SUCCESS :
-                    (S_ISLNK(information.st_mode) ? MAAGE_STATUS_ACCESS_DENIED : MAAGE_STATUS_INVALID_STATE),
-                    MAAGE_CONTEXT_STORAGE, operation, 0);
+                if (lstat(copy, &information))
+                    result = maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, operation);
+                else
+                    result = maage_status_make(S_ISDIR(information.st_mode) ? MAAGE_STATUS_SUCCESS : (S_ISLNK(information.st_mode) ? MAAGE_STATUS_ACCESS_DENIED : MAAGE_STATUS_INVALID_STATE),
+                                               MAAGE_CONTEXT_STORAGE, operation, 0);
             }
 #endif
             copy[i] = saved;
@@ -137,29 +145,35 @@ static maage_status maage_storage_check_directories(const char *path, int create
     }
     return maage_status_make(create && !created ? MAAGE_STATUS_NOOP : MAAGE_STATUS_SUCCESS, 0, operation, 0);
 }
-maage_status maage_storage_directories(const char *path)
-{
+maage_status maage_storage_directories(const char *path) {
     return maage_storage_check_directories(path, 1);
 }
-int maage_storage_directory_exists(const char *path)
-{
+int maage_storage_directory_exists(const char *path) {
     return !maage_status_failed(maage_storage_check_directories(path, 0));
 }
-FILE *maage_storage_open(const char *path, const char *mode)
-{
-    if (!path || !mode || (strcmp(mode, "rb") && strcmp(mode, "wb"))) { errno = EINVAL; return NULL; }
+FILE *maage_storage_open(const char *path, const char *mode) {
+    if (!path || !mode || (strcmp(mode, "rb") && strcmp(mode, "wb"))) {
+        errno = EINVAL;
+        return NULL;
+    }
 #ifdef _WIN32
     {
         wchar_t *wide = maage_storage_wide(path);
         FILE *file;
         DWORD attributes;
-        if (!wide) { errno = ENOMEM; return NULL; }
+        if (!wide) {
+            errno = ENOMEM;
+            return NULL;
+        }
         attributes = GetFileAttributesW(wide);
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
-            free(wide); errno = EACCES; return NULL;
+            free(wide);
+            errno = EACCES;
+            return NULL;
         }
         file = _wfopen(wide, !strcmp(mode, "rb") ? L"rb" : L"wb");
-        free(wide); return file;
+        free(wide);
+        return file;
     }
 #else
     {
@@ -168,21 +182,35 @@ FILE *maage_storage_open(const char *path, const char *mode)
         FILE *file;
         struct stat information;
         if (fd < 0) return NULL;
-        if (fstat(fd, &information)) { native = errno; close(fd); errno = native; return NULL; }
-        if (!S_ISREG(information.st_mode)) { close(fd); errno = EACCES; return NULL; }
+        if (fstat(fd, &information)) {
+            native = errno;
+            close(fd);
+            errno = native;
+            return NULL;
+        }
+        if (!S_ISREG(information.st_mode)) {
+            close(fd);
+            errno = EACCES;
+            return NULL;
+        }
         file = fdopen(fd, mode);
-        if (!file) { native = errno; close(fd); errno = native; }
+        if (!file) {
+            native = errno;
+            close(fd);
+            errno = native;
+        }
         return file;
     }
 #endif
 }
-int maage_storage_status(const char *path)
-{
+int maage_storage_status(const char *path) {
 #ifdef _WIN32
     wchar_t *wide = maage_storage_wide(path);
     DWORD attributes, error;
     if (!wide) return -1;
-    attributes = GetFileAttributesW(wide); error = GetLastError(); free(wide);
+    attributes = GetFileAttributesW(wide);
+    error = GetLastError();
+    free(wide);
     if (attributes == INVALID_FILE_ATTRIBUTES)
         return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? 0 : -1;
     if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return -1;
@@ -194,34 +222,37 @@ int maage_storage_status(const char *path)
     return S_ISDIR(st.st_mode) ? 2 : -1;
 #endif
 }
-maage_status maage_storage_random(unsigned char *bytes, size_t count)
-{
+maage_status maage_storage_random(unsigned char *bytes, size_t count) {
     size_t step;
     if (!bytes && count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
     if (!count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CREATE, 0);
 #ifdef _WIN32
     while (count) {
         step = count > 65536 ? 65536 : count;
-        if (BCryptGenRandom(NULL, bytes, (ULONG)step, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
+        if (BCryptGenRandom(NULL, bytes, (ULONG) step, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
             return maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE, 0);
-        bytes += step; count -= step;
+        bytes += step;
+        count -= step;
     }
 #else
     {
         int descriptor, failure;
         ssize_t received;
-        do { descriptor = open("/dev/urandom", O_RDONLY); } while (descriptor < 0 && errno == EINTR);
+        do {
+            descriptor = open("/dev/urandom", O_RDONLY);
+        } while (descriptor < 0 && errno == EINTR);
         if (descriptor < 0) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CREATE);
         while (count) {
             step = count > 65536 ? 65536 : count;
             received = read(descriptor, bytes, step);
             if (received < 0 && errno == EINTR) continue;
             if (received <= 0) {
-                failure = errno; close(descriptor);
-                return failure ? maage_status_from_errno(failure, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ) :
-                    maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0);
+                failure = errno;
+                close(descriptor);
+                return failure ? maage_status_from_errno(failure, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ) : maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0);
             }
-            bytes += received; count -= (size_t)received;
+            bytes += received;
+            count -= (size_t) received;
         }
         if (close(descriptor)) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE);
     }
@@ -229,8 +260,7 @@ maage_status maage_storage_random(unsigned char *bytes, size_t count)
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
 
-int maage_storage_uuid_valid(const char *uuid)
-{
+int maage_storage_uuid_valid(const char *uuid) {
     size_t index;
     int nonzero = 0;
     if (!uuid || strlen(uuid) != 36) return 0;
@@ -239,14 +269,13 @@ int maage_storage_uuid_valid(const char *uuid)
             if (uuid[index] != '-') return 0;
         } else {
             if (!((uuid[index] >= '0' && uuid[index] <= '9') ||
-                (uuid[index] >= 'a' && uuid[index] <= 'f'))) return 0;
+                  (uuid[index] >= 'a' && uuid[index] <= 'f'))) return 0;
             if (uuid[index] != '0') nonzero = 1;
         }
     }
     return nonzero;
 }
-maage_status maage_storage_uuid_generate(char uuid[37])
-{
+maage_status maage_storage_uuid_generate(char uuid[37]) {
     static const char hex[] = "0123456789abcdef";
     unsigned char bytes[16];
     size_t index, output = 0;
@@ -255,8 +284,8 @@ maage_status maage_storage_uuid_generate(char uuid[37])
     uuid[0] = 0;
     result = maage_storage_random(bytes, sizeof(bytes));
     if (maage_status_failed(result)) return result;
-    bytes[6] = (unsigned char)((bytes[6] & 15) | 64);
-    bytes[8] = (unsigned char)((bytes[8] & 63) | 128);
+    bytes[6] = (unsigned char) ((bytes[6] & 15) | 64);
+    bytes[8] = (unsigned char) ((bytes[8] & 63) | 128);
     for (index = 0; index < sizeof(bytes); ++index) {
         if (index == 4 || index == 6 || index == 8 || index == 10) uuid[output++] = '-';
         uuid[output++] = hex[bytes[index] >> 4];
@@ -265,62 +294,65 @@ maage_status maage_storage_uuid_generate(char uuid[37])
     uuid[output] = '\0';
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
-maage_status maage_storage_sync(FILE *file)
-{
+maage_status maage_storage_sync(FILE *file) {
     if (!file) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE, 0);
     if (fflush(file)) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE);
 #ifdef _WIN32
-    if (!FlushFileBuffers((HANDLE)_get_osfhandle(_fileno(file))))
+    if (!FlushFileBuffers((HANDLE) _get_osfhandle(_fileno(file))))
         return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE);
 #else
     if (fsync(fileno(file))) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE);
 #endif
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WRITE, 0);
 }
-maage_status maage_storage_private_file(const char *path)
-{
+maage_status maage_storage_private_file(const char *path) {
     if (!path) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
     {
 #ifdef _WIN32
-    wchar_t *wide = maage_storage_wide(path);
-    HANDLE process_token = NULL, file = INVALID_HANDLE_VALUE;
-    TOKEN_USER *user = NULL;
-    DWORD bytes = 0, attributes;
-    EXPLICIT_ACCESSW access;
-    PACL acl = NULL;
-    int ok = 0;
-    if (!wide) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
-    attributes = GetFileAttributesW(wide);
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) goto done;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token)) goto done;
-    GetTokenInformation(process_token, TokenUser, NULL, 0, &bytes);
-    if (!bytes || !(user = (TOKEN_USER *)malloc(bytes)) || !GetTokenInformation(process_token, TokenUser, user, bytes, &bytes)) goto done;
-    memset(&access, 0, sizeof(access)); access.grfAccessPermissions = FILE_ALL_ACCESS;
-    access.grfAccessMode = SET_ACCESS; access.grfInheritance = NO_INHERITANCE;
-    access.Trustee.TrusteeForm = TRUSTEE_IS_SID; access.Trustee.TrusteeType = TRUSTEE_IS_USER;
-    access.Trustee.ptstrName = (LPWSTR)user->User.Sid;
-    if (SetEntriesInAclW(1, &access, NULL, &acl) != ERROR_SUCCESS) goto done;
-    file = CreateFileW(wide, READ_CONTROL | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-    if (file == INVALID_HANDLE_VALUE) goto done;
-    ok = SetSecurityInfo(file, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, acl, NULL) == ERROR_SUCCESS;
-done:
-    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
-    if (process_token) CloseHandle(process_token);
-    if (acl) LocalFree(acl);
-    free(user); free(wide); return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
+        wchar_t *wide = maage_storage_wide(path);
+        HANDLE process_token = NULL, file = INVALID_HANDLE_VALUE;
+        TOKEN_USER *user = NULL;
+        DWORD bytes = 0, attributes;
+        EXPLICIT_ACCESSW access;
+        PACL acl = NULL;
+        int ok = 0;
+        if (!wide) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
+        attributes = GetFileAttributesW(wide);
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) goto done;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token)) goto done;
+        GetTokenInformation(process_token, TokenUser, NULL, 0, &bytes);
+        if (!bytes || !(user = (TOKEN_USER *) malloc(bytes)) || !GetTokenInformation(process_token, TokenUser, user, bytes, &bytes)) goto done;
+        memset(&access, 0, sizeof(access));
+        access.grfAccessPermissions = FILE_ALL_ACCESS;
+        access.grfAccessMode = SET_ACCESS;
+        access.grfInheritance = NO_INHERITANCE;
+        access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        access.Trustee.ptstrName = (LPWSTR) user->User.Sid;
+        if (SetEntriesInAclW(1, &access, NULL, &acl) != ERROR_SUCCESS) goto done;
+        file = CreateFileW(wide, READ_CONTROL | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (file == INVALID_HANDLE_VALUE) goto done;
+        ok = SetSecurityInfo(file, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, acl, NULL) == ERROR_SUCCESS;
+    done:
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+        if (process_token) CloseHandle(process_token);
+        if (acl) LocalFree(acl);
+        free(user);
+        free(wide);
+        return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
 #else
-    struct stat st;
-    int descriptor = open(path, O_RDONLY | O_NOFOLLOW);
-    int ok;
-    if (descriptor < 0) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET);
-    ok = fstat(descriptor, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() && fchmod(descriptor, 0600) == 0;
-    close(descriptor); return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
+        struct stat st;
+        int descriptor = open(path, O_RDONLY | O_NOFOLLOW);
+        int ok;
+        if (descriptor < 0) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET);
+        ok = fstat(descriptor, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() && fchmod(descriptor, 0600) == 0;
+        close(descriptor);
+        return maage_status_make(ok ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);
 #endif
     }
 }
-maage_status maage_storage_remove(const char *path)
-{
+maage_status maage_storage_remove(const char *path) {
     if (!path) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0);
 #ifdef _WIN32
     {
@@ -328,7 +360,9 @@ maage_status maage_storage_remove(const char *path)
         DWORD failure;
         int ok;
         if (!wide) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0);
-        ok = DeleteFileW(wide); failure = ok ? 0 : GetLastError(); free(wide);
+        ok = DeleteFileW(wide);
+        failure = ok ? 0 : GetLastError();
+        free(wide);
         if (failure == ERROR_FILE_NOT_FOUND) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_REMOVE, 0);
         return maage_status_from_win32(failure, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE);
     }
@@ -338,55 +372,55 @@ maage_status maage_storage_remove(const char *path)
     return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE);
 #endif
 }
-maage_status maage_storage_replace(const char *temporary, const char *destination)
-{
+maage_status maage_storage_replace(const char *temporary, const char *destination) {
     if (!temporary || !destination) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, !temporary ? 0 : 1);
+                                                             MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME, !temporary ? 0 : 1);
 #ifdef _WIN32
     {
         wchar_t *a = maage_storage_wide(temporary), *b = maage_storage_wide(destination);
         DWORD failure;
         int ok = a && b && MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-        failure = ok ? 0 : GetLastError(); free(a); free(b);
-        return ok ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RENAME, 0) :
-            maage_status_from_win32(failure ? failure : ERROR_NOT_ENOUGH_MEMORY, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME);
+        failure = ok ? 0 : GetLastError();
+        free(a);
+        free(b);
+        return ok ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RENAME, 0) : maage_status_from_win32(failure ? failure : ERROR_NOT_ENOUGH_MEMORY, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME);
     }
 #else
     return maage_status_from_errno(rename(temporary, destination) ? errno : 0, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME);
 #endif
 }
-maage_status maage_storage_stat(const char *path, double *size, char fingerprint[128])
-{
+maage_status maage_storage_stat(const char *path, double *size, char fingerprint[128]) {
     if (size) *size = 0;
     if (fingerprint) fingerprint[0] = 0;
     if (!path || !size || !fingerprint) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, !path ? 0 : (!size ? 1 : 2));
+                                                                 MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, !path ? 0 : (!size ? 1 : 2));
 #ifdef _WIN32
     {
         WIN32_FILE_ATTRIBUTE_DATA st;
         wchar_t *wide = maage_storage_wide(path);
         DWORD native;
         int ok = wide && GetFileAttributesExW(wide, GetFileExInfoStandard, &st);
-        native = ok ? 0 : GetLastError(); free(wide);
+        native = ok ? 0 : GetLastError();
+        free(wide);
         if (!ok) return maage_status_from_win32(native ? native : ERROR_NOT_ENOUGH_MEMORY, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY);
         if (st.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
             return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
-        *size = (double)st.nFileSizeHigh * 4294967296.0 + st.nFileSizeLow;
-        sprintf(fingerprint, "%.0f-%lu-%lu-%lu-%lu", *size, (unsigned long)st.ftLastWriteTime.dwHighDateTime,
-            (unsigned long)st.ftLastWriteTime.dwLowDateTime, (unsigned long)st.ftCreationTime.dwHighDateTime, (unsigned long)st.ftCreationTime.dwLowDateTime);
+        *size = (double) st.nFileSizeHigh * 4294967296.0 + st.nFileSizeLow;
+        sprintf(fingerprint, "%.0f-%lu-%lu-%lu-%lu", *size, (unsigned long) st.ftLastWriteTime.dwHighDateTime,
+                (unsigned long) st.ftLastWriteTime.dwLowDateTime, (unsigned long) st.ftCreationTime.dwHighDateTime, (unsigned long) st.ftCreationTime.dwLowDateTime);
     }
 #else
     {
         struct stat st;
         if (lstat(path, &st)) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY);
         if (!S_ISREG(st.st_mode)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
-        *size = (double)st.st_size;
+        *size = (double) st.st_size;
 #ifdef __APPLE__
-        sprintf(fingerprint, "%.0f-%.0f-%ld-%.0f-%ld", *size, (double)st.st_mtimespec.tv_sec, st.st_mtimespec.tv_nsec,
-            (double)st.st_ctimespec.tv_sec, st.st_ctimespec.tv_nsec);
+        sprintf(fingerprint, "%.0f-%.0f-%ld-%.0f-%ld", *size, (double) st.st_mtimespec.tv_sec, st.st_mtimespec.tv_nsec,
+                (double) st.st_ctimespec.tv_sec, st.st_ctimespec.tv_nsec);
 #else
-        sprintf(fingerprint, "%.0f-%.0f-%ld-%.0f-%ld", *size, (double)st.st_mtim.tv_sec, st.st_mtim.tv_nsec,
-            (double)st.st_ctim.tv_sec, st.st_ctim.tv_nsec);
+        sprintf(fingerprint, "%.0f-%.0f-%ld-%.0f-%ld", *size, (double) st.st_mtim.tv_sec, st.st_mtim.tv_nsec,
+                (double) st.st_ctim.tv_sec, st.st_ctim.tv_nsec);
 #endif
     }
 #endif
@@ -394,47 +428,48 @@ maage_status maage_storage_stat(const char *path, double *size, char fingerprint
 }
 
 maage_status maage_storage_acquire(const char *path, maage_storage_lock **output,
-    maage_status_trace *trace)
-{
+                                   maage_status_trace *trace) {
     maage_storage_lock *lock;
     maage_status result;
     long native = 0;
     if (output) *output = NULL;
-    if (!path || !output) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE, !path ? 0 : 1), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
-    lock = (maage_storage_lock *)malloc(sizeof(*lock));
-    if (!lock) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE, 0), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
+    if (!path || !output) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE, !path ? 0 : 1), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
+    lock = (maage_storage_lock *) malloc(sizeof(*lock));
+    if (!lock) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE, 0), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
 #ifdef _WIN32
     {
         wchar_t *wide = maage_storage_wide(path);
         lock->handle = wide ? CreateFileW(wide, GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL) : INVALID_HANDLE_VALUE;
-        if (lock->handle == INVALID_HANDLE_VALUE) native = (long)GetLastError();
+                                          FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS,
+                                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL)
+                            : INVALID_HANDLE_VALUE;
+        if (lock->handle == INVALID_HANDLE_VALUE) native = (long) GetLastError();
         free(wide);
-        result = maage_status_from_win32((unsigned long)native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
+        result = maage_status_from_win32((unsigned long) native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
         if (lock->handle == INVALID_HANDLE_VALUE && !maage_status_failed(result))
             result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE, 0);
     }
 #else
     lock->descriptor = open(path, O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
-    if (lock->descriptor < 0) native = errno;
-    else if (flock(lock->descriptor, LOCK_EX | LOCK_NB)) { native = errno; close(lock->descriptor); }
-    result = maage_status_from_errno((int)native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
+    if (lock->descriptor < 0)
+        native = errno;
+    else if (flock(lock->descriptor, LOCK_EX | LOCK_NB)) {
+        native = errno;
+        close(lock->descriptor);
+    }
+    result = maage_status_from_errno((int) native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE);
     if (native == EWOULDBLOCK || native == EAGAIN)
         result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_ACQUIRE, 0);
 #endif
     if (maage_status_failed(result)) {
         free(lock);
         return maage_status_trace_record(trace, result, MAAGE_CONTEXT_STORAGE,
-            MAAGE_OPERATION_ACQUIRE, __FILE__, (unsigned long)__LINE__, native);
+                                         MAAGE_OPERATION_ACQUIRE, __FILE__, (unsigned long) __LINE__, native);
     }
     *output = lock;
     return result;
 }
-maage_status maage_storage_release(maage_storage_lock *lock)
-{
+maage_status maage_storage_release(maage_storage_lock *lock) {
     maage_status result;
     if (!lock) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RELEASE, 0);
 #ifdef _WIN32
@@ -445,15 +480,15 @@ maage_status maage_storage_release(maage_storage_lock *lock)
     free(lock);
     return result;
 }
-maage_status maage_storage_remove_directory(const char *path)
-{
+maage_status maage_storage_remove_directory(const char *path) {
     if (!path) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0);
 #ifdef _WIN32
     {
         wchar_t *wide = maage_storage_wide(path);
         DWORD native;
         if (!wide) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0);
-        native = RemoveDirectoryW(wide) ? 0 : GetLastError(); free(wide);
+        native = RemoveDirectoryW(wide) ? 0 : GetLastError();
+        free(wide);
         if (native == ERROR_FILE_NOT_FOUND || native == ERROR_PATH_NOT_FOUND)
             return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_REMOVE, 0);
         return maage_status_from_win32(native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE);
@@ -465,8 +500,7 @@ maage_status maage_storage_remove_directory(const char *path)
 #endif
 }
 
-int maage_storage_same_file(const char *left, const char *right)
-{
+int maage_storage_same_file(const char *left, const char *right) {
 #ifdef _WIN32
     wchar_t *a = maage_storage_wide(left), *b = maage_storage_wide(right);
     HANDLE ah = INVALID_HANDLE_VALUE, bh = INVALID_HANDLE_VALUE;
@@ -476,19 +510,20 @@ int maage_storage_same_file(const char *left, const char *right)
     if (b) bh = CreateFileW(b, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (ah != INVALID_HANDLE_VALUE && bh != INVALID_HANDLE_VALUE && GetFileInformationByHandle(ah, &ai) && GetFileInformationByHandle(bh, &bi))
         same = !(ai.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) &&
-            !(bi.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) && ai.dwVolumeSerialNumber == bi.dwVolumeSerialNumber &&
-            ai.nFileIndexHigh == bi.nFileIndexHigh && ai.nFileIndexLow == bi.nFileIndexLow;
+               !(bi.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) && ai.dwVolumeSerialNumber == bi.dwVolumeSerialNumber &&
+               ai.nFileIndexHigh == bi.nFileIndexHigh && ai.nFileIndexLow == bi.nFileIndexLow;
     if (ah != INVALID_HANDLE_VALUE) CloseHandle(ah);
     if (bh != INVALID_HANDLE_VALUE) CloseHandle(bh);
-    free(a); free(b); return same;
+    free(a);
+    free(b);
+    return same;
 #else
     struct stat a, b;
     return !lstat(left, &a) && !lstat(right, &b) && S_ISREG(a.st_mode) && S_ISREG(b.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
 #endif
 }
 maage_status maage_storage_clone(const char *source, const char *staging,
-    int (*cancel)(void *), void *context, int *kind, maage_status_trace *trace)
-{
+                                 int (*cancel)(void *), void *context, int *kind, maage_status_trace *trace) {
     FILE *input, *output;
     unsigned char buffer[32768];
     char fingerprint[128];
@@ -498,10 +533,11 @@ maage_status maage_storage_clone(const char *source, const char *staging,
     maage_status result;
     if (kind) *kind = 0;
     if (!source || !staging || !kind) return MAAGE_STATUS_TRACE(trace,
-        maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY,
-            !source ? 0 : (!staging ? 1 : 4)), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
+                                                                maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY,
+                                                                                  !source ? 0 : (!staging ? 1 : 4)),
+                                                                MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
     if (cancel && cancel(context)) return MAAGE_STATUS_TRACE(trace,
-        maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY, 0), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
+                                                             maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY, 0), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
     result = maage_storage_stat(source, &size, fingerprint);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
     result = maage_storage_remove(staging);
@@ -510,32 +546,42 @@ maage_status maage_storage_clone(const char *source, const char *staging,
     {
         wchar_t *a = maage_storage_wide(source), *b = maage_storage_wide(staging);
         linked = a && b && CreateHardLinkW(b, a, NULL);
-        free(a); free(b);
+        free(a);
+        free(b);
     }
 #else
     linked = link(source, staging) == 0;
 #endif
-    if (linked) { *kind = 1; return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0); }
+    if (linked) {
+        *kind = 1;
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
+    }
     input = maage_storage_open(source, "rb");
-    if (!input) return MAAGE_STATUS_TRACE(trace, maage_status_from_errno(errno,
-        MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
+    if (!input) return MAAGE_STATUS_TRACE(trace, maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
     output = maage_storage_open(staging, "wb");
     if (!output) {
         result = maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_OPEN);
-        fclose(input); return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
+        fclose(input);
+        return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
     }
     result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
     while ((count = fread(buffer, 1, sizeof(buffer), input)) != 0) {
-        if (cancel && cancel(context)) { result = maage_status_make(MAAGE_STATUS_INTERRUPTED,
-            MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY, 0); break; }
+        if (cancel && cancel(context)) {
+            result = maage_status_make(MAAGE_STATUS_INTERRUPTED,
+                                       MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY, 0);
+            break;
+        }
         if (fwrite(buffer, 1, count, output) != count) {
-            result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE, 0); break;
+            result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE, 0);
+            break;
         }
     }
     if (ferror(input) && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0);
     if (fclose(input) && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE, 0);
     if (fclose(output) && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_CLOSE, 0);
-    if (maage_status_failed(result)) maage_storage_remove(staging);
-    else *kind = 2;
+    if (maage_status_failed(result))
+        maage_storage_remove(staging);
+    else
+        *kind = 2;
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY);
 }

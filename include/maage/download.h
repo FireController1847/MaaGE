@@ -8,7 +8,7 @@ typedef struct maage_download_request {
     const char *url;
     const char *destination;
     const char *sha1; /* NULL only for metadata without a supplied digest. */
-    double size; /* -1 when unknown. */
+    double size;      /* -1 when unknown. */
     double limit;
 } maage_download_request;
 typedef struct maage_download_observer {
@@ -24,9 +24,9 @@ typedef struct maage_download_options {
 } maage_download_options;
 maage_status maage_download_options_init(maage_download_options *options);
 maage_status maage_download_batch_with_options(const maage_download_request *requests, unsigned int count,
-    const maage_download_observer *observer, const maage_download_options *options, char error[512], maage_status_trace *trace);
+                                               const maage_download_observer *observer, const maage_download_options *options, char error[512], maage_status_trace *trace);
 maage_status maage_download_initialize(void);
 maage_status maage_download_shutdown(void);
 maage_status maage_download_batch(const maage_download_request *requests, unsigned int count,
-    const maage_download_observer *observer, char error[512], maage_status_trace *trace);
+                                  const maage_download_observer *observer, char error[512], maage_status_trace *trace);
 #endif

@@ -1,8 +1,5 @@
 # Player Perspectives and Character Presentation
 
-Client `0.1.0-alpha.47`, Server `1.0.0-alpha.17`, local Session protocol 10.
-World/player checkpoint formats and the Launcher appearance contract are unchanged.
-
 ## Input and camera ownership
 
 F5 cycles First Person, Third Person Back, Third Person Front, then First Person.
@@ -12,8 +9,7 @@ repeat cycling. Only focused, captured, visible gameplay accepts it; modal text
 entry and native mode transitions do not. Focus loss clears edges/capture.
 
 Perspective starts in First Person and remains transient within the Client
-process. It is absent from Options and Server commands. The reference GameSettings field is likewise
-not serialized by its load/save methods. Movement still uses the player's own
+process. It is absent from Options, persistence and Server commands. Movement still uses the player's own
 look, including in front view; F5 does not reverse controls or change reach.
 
 The existing first-person projection, hand, equip/swing, bob and dynamic FOV stay
@@ -40,7 +36,7 @@ render-loop I/O, global World lock or frame-driven Server request is involved.
 The sampler also runs during the existing paused publication pump.
 
 Local DDA traversal checks immutable numeric definitions' solid collision AABBs.
-A center ray and the reference eight corner rays shorten either camera boom.
+A center ray and eight corner rays shorten either camera boom.
 Offsets are at least 0.1 blocks and widen to enclose the actual near plane at the
 active aspect/FOV; a small contact margin avoids coplanar wall clipping. Missing
 columns, absent publications, unknown states and positions outside the copied
@@ -55,7 +51,7 @@ inventory and world presentation: six base parts plus inflated hat, jacket,
 sleeves and trousers. Head is 8x8x8 pixels, torso 8x12x4, legs 4x12x4; arms are
 4x12x4 classic or 3x12x4 slim with their existing model offset. Modern limbs have
 independent UVs in the already normalized 64x64 atlas. No new skin acquisition,
-decoding or per-frame resource lookup is added.
+decoding or per-frame resource lookup occurs.
 
 The shared Y-up anatomical conversion preserves UV orientation and reverses
 winding when converting cuboid X coordinates. World presentation lazily uploads
@@ -68,8 +64,8 @@ optional decoration until resource destruction/reload.
 
 Shared pose calculation supplies idle arm motion, distance-derived walk/run
 swings, opposite leg swings, head pitch, bounded relative head yaw, crouching,
-held-arm posture and the reference eased attack/mining swing. Body turning uses
-reference-derived 0.3 response and a 75-degree relative-head limit with additional
+held-arm posture and the shared Client attack/mining swing. Body turning uses
+a 0.3 response and a 75-degree relative-head limit with additional
 turning beyond 50 degrees. Walk amount follows copied displacement at 20 TPS;
 render interpolation and time-based turn response avoid FPS-dependent speed.
 Jump/fall/fly use authoritative vertical positions and the normal airborne biped
@@ -80,8 +76,7 @@ local decorations over the existing provisional health/death rules.
 
 The right-hand transform inherits shoulder, torso/swing and arm rotation. Selected
 blocks, tools and flat icons borrow the existing item-entity model cache, using
-separate equipped scales/orientations adapted from RenderPlayer/ItemRenderer to
-centered native geometry. Items retain their existing texture/tint and lighting.
+separate equipped scales/orientations for centered native geometry. Items retain their existing texture/tint and lighting.
 One instance submission composes the player with dropped/pickup item instances;
 no moving-object mesh upload or second renderer is needed. Instance references
 are cleared before resource teardown.
@@ -93,48 +88,16 @@ projects into the existing GUI batch; it has no world camera or private GPU pass
 Metal and Vulkan consume exactly the same cached meshes, transforms, materials,
 light levels and ordered translucent traversal. Their existing renderer/shader
 interfaces suffice; no backend-specific character algorithm or layout change is
-needed. OpenGL and Software interfaces remain unchanged.
+needed. OpenGL and Software retain their smaller capability subsets.
 
-## Source reference and compilation
+## Limits and Manual Review
 
-The supplied Forge `unpacked` tree contains Forge/FML sources; adjacent
-`forgeSrc-1.7.10-10.13.4.1614-1.7.10-sources.jar` supplies vanilla sources.
-Examined EntityRenderer.orientCamera, Minecraft.runTick, GameSettings load/save
-and key fields, EntityLivingBase.onLivingUpdate/onUpdate and body turning,
-ModelBiped constructor/setRotationAngles, RenderPlayer.doRender,
-preRenderCallback/renderEquippedItems, RendererLivingEntity.doRender/rotateCorpse,
-RenderLiving, EntityPlayerSP.onLivingUpdate, EntityPlayer eye-height handling and
-ItemRenderer.renderItem/renderItemIn2D. ModelPlayer is absent in 1.7.10; slim and
-modern outer layers extend the shared current skin contract.
+Remote character replication, armor, capes, emotes and a general item-use animation
+system are absent. Wayland has keyboard events but lacks the relative mouse
+capture required by Client gameplay; Linux can use X11.
 
-Debug/Release Client and Server compiled and linked on macOS ARM64, including
-Metal, Vulkan/MoltenVK, existing OpenGL/Software code and Vulkan shader generation.
-A separate Release headless Server also compiled/linked. Existing warnings remain
-in renderer initializers, unused helpers/variables, resource signedness and the
-bundled audio decoder; compilation is not visual or gameplay verification.
-Windows/X11/Wayland sources were reviewed but not compiled on this host. Wayland
-now receives physical keyboard events and focus changes, but its pre-existing
-relative mouse capture limitation still prevents the Client gameplay input path
-from running on that adapter. Use its existing X11 fallback on Linux.
-
-No MaaGE applications, tests, benchmarks, synthetic harnesses, runtime-validation
-scripts or GitHub Actions were run. No multiplayer/remote camera replication,
-armor, capes, emotes, item-use animation system or new combat rules are included.
-
-## Pending programmer verification
-
-- Cycle F5 First → Back → Front → First; hold/release, lose focus and type in
-  menus. Check F3, F11, Escape and inventory shortcuts alongside it.
-- Check first-person arms, held items, equip/swing, bob and sprint FOV; compare
-  back-view walking, sprinting, jumping, falling, flying and crouching.
-- Check front-view face/orientation, unchanged movement direction and mining reach;
-  rotate quickly, look vertically/backward and compare smooth head/body turning.
-- Move against walls, ceilings, trees, caves, tunnels and unloaded boundaries in
-  both third-person modes; compress/release the boom and inspect near clipping.
-- Compare authenticated classic/slim asymmetric skins and translucent outer layers
-  across arms, inventory mouse-follow preview and both world views. Swing/mining
-  should carry blocks, tools and flat items with the right hand.
-- Repeat at different FPS/FOV, resize/fullscreen, pause/resume, death/respawn and
-  world transitions on Metal and Vulkan; compare depth, sky and stable resource use.
-
-These scenarios remain unexecuted.
+Check F5 press edges, focus/modal routing, front-view controls and reach, four-block
+boom collision at walls/ceilings/unloaded boundaries, head/body turning, sprint,
+crouch and attack poses. Compare classic/slim clothing, held items, sky alignment
+and stable cached resources across perspectives, FPS/FOV and world transitions on
+Metal and Vulkan. Runtime and visual behavior remain programmer-owned.

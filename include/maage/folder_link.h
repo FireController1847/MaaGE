@@ -35,7 +35,7 @@ maage_status maage_folder_link_move(const char *source, const char *destination)
 /* Names contain one basename, never a relative path. Returning zero from the
  * callback stops enumeration and makes list report INTERRUPTED; entries are not followed. */
 typedef int (*maage_folder_link_entry)(const char *name,
-    maage_folder_link_kind kind, void *context);
+                                       maage_folder_link_kind kind, void *context);
 maage_status maage_folder_link_list(const char *path, maage_folder_link_entry entry,
-    void *context);
+                                    void *context);
 #endif

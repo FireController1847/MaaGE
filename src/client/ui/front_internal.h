@@ -11,10 +11,10 @@ struct maage_client_ui_frontend {
     int busy, quit, play, mode, more;
     char name[128], seed[64], message[256];
     double last_click;
-    float scroll,scroll_grab;
+    float scroll, scroll_grab;
     int scrolling;
 };
-void maage_client_ui_title_draw(maage_client_ui *ui,void *context);
+void maage_client_ui_title_draw(maage_client_ui *ui, void *context);
 unsigned int maage_client_ui_title_input(maage_client_ui *ui,
-    const maage_client_ui_input *input,void *context);
+                                         const maage_client_ui_input *input, void *context);
 #endif

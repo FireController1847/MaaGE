@@ -1,9 +1,5 @@
 # Authenticated Local-Player Skins
 
-Launcher `1.0.0-alpha.40` and Client `0.1.0-alpha.47` share one nonsecret
-appearance contract. [Third-person presentation](third-person.md) reuses it.
-Runtime behavior remains programmer-owned and unverified.
-
 ## Profile and Acquisition
 
 The existing authenticated `GET https://api.minecraftservices.com/minecraft/profile`
@@ -11,16 +7,7 @@ supplies `id`, `name`, and the `skins` array. Only an `ACTIVE` entry supplies
 `url` and `variant` (`CLASSIC` or `SLIM`). UUID/name must match the verified Java
 profile; ambiguous active entries, invalid types/models and unsafe URLs fail as
 optional resource problems. An empty active-skin selection chooses the original
-default appearance. The response shape was cross-checked against the maintained
-[Prism Launcher profile request](https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/auth/steps/MinecraftProfileStep.cpp)
-and [profile parser](https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/auth/Parsers.cpp).
-This is implementation evidence, not a new official Mojang API guarantee.
-
-The public session-server endpoint was considered. It adds a second profile
-lookup and Base64 texture-property parsing that the already authenticated response
-does not need. No username lookup, second authentication flow or public-profile
-fallback can change the selected identity or grant access.
-
+default appearance.
 Skin processing runs on the existing access worker after profile/entitlement
 verification and encrypted credential persistence. The verifier's public response
 is reused, avoiding another profile request. On restoration of a still-valid
@@ -87,14 +74,7 @@ format change is required.
 64x64 RGBA image during initialization. Legacy classic skins mirror the original
 right limbs into modern left-limb regions and keep unused outer regions clear.
 Base skin faces become opaque, matching Minecraft skin handling; modern outer
-alpha remains intact. Legacy all-opaque hat regions receive the reference alpha
-cleanup. Slim metadata with a legacy 64x32 image is rejected rather than stretched.
-
-The local 1.7.10 `unpacked` directory was inspected; the matching adjacent sources
-JAR supplies `ModelBiped`, `ModelBox`, `RenderPlayer.renderFirstPersonArm`,
-`AbstractClientPlayer` and `ImageBufferDownload.parseUserSkin`. That baseline uses
-classic 64x32 geometry; modern independent limbs, three-pixel arms and clothing
-layers extend it without reproducing obsolete username download behavior.
+alpha remains intact. Legacy all-opaque hat regions are cleared. Slim metadata with a legacy 64x32 image is rejected rather than stretched.
 
 `src/client/player_model.c` defines the six base cuboids and their six outer
 layers, with common face UV generation. Classic arms are four pixels wide; slim
@@ -119,7 +99,7 @@ vertex layouts did not need modification. [Third-person rendering](third-person.
 UVs through cached part instances. Armor/capes, a skin editor/uploader and
 multiplayer synchronization remain outside this appearance contract.
 
-## Failure Behavior and Compilation
+## Failure Behavior
 
 Skin failure never grants, revokes or extends Minecraft access. A usable cached
 skin remains available offline for the same account; existing authentication lease
@@ -130,34 +110,11 @@ keeps presentation usable. Model metadata resets to classic with the default.
 Switching accounts cannot select another UUID's cached image. Existing Clients
 retain their initialization-time appearance; refreshed skins apply to a new Client.
 
-macOS ARM64 Debug and Release Launcher/Client compile and link successfully using
-the enabled Metal and Vulkan/MoltenVK implementations. New model/UV/alpha work is
-shared C90; unchanged native renderer implementations are reused. The Client
-linker reports duplicate-library warnings. As-built uncompressed executable file
-sizes are 3,912,744 bytes for Launcher and 3,987,872 bytes for Client; these are not
-bundle sizes or disk-allocation measurements. Windows/Linux compilation, live Mojang
-requests, PNG failure scenarios, shaders and visual behavior remain unverified.
-No applications, tests, harnesses, fixtures, benchmarks or GitHub Actions ran.
+## Manual Review
 
-## Pending Programmer Checklist
-
-- **Identity:** Launch from each selected verified account and compare the skin;
-  switch accounts and confirm that absent cache uses Steve rather than another
-  account. Reserved instance arguments must fail validation.
-- **Caching/offline:** Relaunch with an unchanged skin and observe cache reuse.
-  Change the account skin, refresh verification and start a new Client. Go offline
-  with a current access lease and confirm cached appearance; optional refresh
-  failure must preserve it. Expired authorization still follows existing policy.
-- **Models:** Check classic and slim skins, asymmetric left/right limbs and a
-  legacy classic image. Compare the empty-hand arm, hand orientation, swing and
-  held-item positioning with the full inventory model.
-- **Outer layers:** Check transparent holes and partial alpha in hats, jackets,
-  sleeves and pants, including cursor rotation, GUI scales and clipping.
-- **Backends/lifecycle:** Repeat on Metal and Vulkan. Enter/leave worlds and close
-  normally; appearance should remain stable without repeated skin uploads.
-- **Fallbacks:** Try missing, interrupted, malformed and unsupported-size cache
-  images; expect the correct account's known-good skin or original Steve fallback,
-  bounded diagnostics and playable presentation.
-
-These scenarios have not been executed. Commit details are supplied in the
-completion response; concurrent Launcher/icon changes remain outside this work.
+Check selected-account isolation, unchanged-cache reuse, optional refresh failure,
+current/expired access leases and reserved launch arguments. Compare classic,
+slim, asymmetric and legacy skins plus partially transparent clothing in the arm,
+inventory and third-person views. Missing/corrupt caches must retain the same
+account's usable appearance or default fallback. Repeat on Metal and Vulkan;
+these runtime scenarios remain programmer-owned.

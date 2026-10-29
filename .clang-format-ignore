@@ -1,0 +1,4 @@
+build/**
+cmake/**
+CMakeConfig.h
+src/resources/audio_decode/stb_vorbis.c

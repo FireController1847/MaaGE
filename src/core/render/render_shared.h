@@ -24,19 +24,30 @@ typedef struct maage_render_ordered_mesh {
     size_t order;
 } maage_render_ordered_mesh;
 enum {
-    MAAGE_RENDER_SOLID, MAAGE_RENDER_TRANSLUCENT, MAAGE_RENDER_MULTIPLY,
-    MAAGE_RENDER_UI, MAAGE_RENDER_ADDITIVE, MAAGE_RENDER_INVERT, MAAGE_RENDER_FULLSCREEN,
+    MAAGE_RENDER_SOLID,
+    MAAGE_RENDER_TRANSLUCENT,
+    MAAGE_RENDER_MULTIPLY,
+    MAAGE_RENDER_UI,
+    MAAGE_RENDER_ADDITIVE,
+    MAAGE_RENDER_INVERT,
+    MAAGE_RENDER_FULLSCREEN,
     MAAGE_RENDER_PIPELINE_COUNT
 };
 enum {
-    MAAGE_RENDER_FACTOR_ONE, MAAGE_RENDER_FACTOR_SOURCE_ALPHA,
-    MAAGE_RENDER_FACTOR_INVERSE_ALPHA, MAAGE_RENDER_FACTOR_SOURCE_COLOR,
-    MAAGE_RENDER_FACTOR_DESTINATION_COLOR, MAAGE_RENDER_FACTOR_INVERSE_SOURCE_COLOR,
+    MAAGE_RENDER_FACTOR_ONE,
+    MAAGE_RENDER_FACTOR_SOURCE_ALPHA,
+    MAAGE_RENDER_FACTOR_INVERSE_ALPHA,
+    MAAGE_RENDER_FACTOR_SOURCE_COLOR,
+    MAAGE_RENDER_FACTOR_DESTINATION_COLOR,
+    MAAGE_RENDER_FACTOR_INVERSE_SOURCE_COLOR,
     MAAGE_RENDER_FACTOR_INVERSE_DESTINATION_COLOR
 };
-typedef struct maage_render_ui_segment {size_t first,count;unsigned int blend;} maage_render_ui_segment;
-unsigned int maage_render_ui_segments(const maage_render_ui_data *batch,size_t first,size_t count,
-    maage_render_ui_segment segments[3]);
+typedef struct maage_render_ui_segment {
+    size_t first, count;
+    unsigned int blend;
+} maage_render_ui_segment;
+unsigned int maage_render_ui_segments(const maage_render_ui_data *batch, size_t first, size_t count,
+                                      maage_render_ui_segment segments[3]);
 typedef struct maage_render_pipeline_state {
     int ui, fullscreen, depth_test, depth_write, cull, blend;
     int source_rgb, destination_rgb;
@@ -74,30 +85,30 @@ typedef struct maage_render_mesh_cursor {
 /* Input passed mesh_validate; destination holds index_count indices and geometry
  * starts zeroed. Native mapped destinations avoid an intermediate CPU copy. */
 maage_status maage_render_geometry_prepare(maage_render_geometry *geometry,
-    const maage_mesh_data *data, unsigned int *grouped_indices);
+                                           const maage_mesh_data *data, unsigned int *grouped_indices);
 maage_status maage_render_geometry_dispose(maage_render_geometry *geometry);
 /* Half-block movement gates perspective re-sorts. SUCCESS needs a native upload;
  * mark revisions[slot] only after it succeeds. NOOP keeps the slot unchanged. */
 maage_status maage_render_geometry_sort_slot(const maage_render_mesh *mesh,
-    const float matrix[16], unsigned long *revisions, size_t slots, size_t slot);
+                                             const float matrix[16], unsigned long *revisions, size_t slots, size_t slot);
 maage_status maage_render_geometry_write_sorted(const maage_render_geometry *geometry,
-    unsigned int *indices);
+                                                unsigned int *indices);
 size_t maage_render_geometry_range(const maage_render_geometry *geometry,
-    unsigned int layer, size_t *first);
+                                   unsigned int layer, size_t *first);
 size_t maage_render_transient_capacity(size_t current, size_t required);
 maage_status maage_render_frame_plan_prepare(maage_renderer *renderer,
-    const maage_render_mesh *const *meshes, size_t count, const float matrix[16],
-    const maage_render_ui_data *ui, int preparing, maage_render_frame_plan *plan);
+                                             const maage_render_mesh *const *meshes, size_t count, const float matrix[16],
+                                             const maage_render_ui_data *ui, int preparing, maage_render_frame_plan *plan);
 maage_status maage_render_mesh_validate(const maage_mesh_data *data);
 void maage_render_ui_uniforms(const maage_render_ui_data *batch,
-    maage_render_uniforms *uniforms);
+                              maage_render_uniforms *uniforms);
 maage_status maage_render_ui_pack(const maage_render_ui_data *batch,
-    maage_render_ui_gpu_vertex *vertices, unsigned int *indices);
+                                  maage_render_ui_gpu_vertex *vertices, unsigned int *indices);
 /* Zero the cursor first. Visits nonempty material ranges in canonical order;
  * only world translucent meshes use distance order. NULL ends traversal. */
 const maage_render_mesh *maage_render_frame_next_mesh(const maage_render_frame_plan *plan,
-    int foreground, maage_render_mesh_cursor *cursor);
+                                                      int foreground, maage_render_mesh_cursor *cursor);
 void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foreground,
-    const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms);
+                                const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms);
 int maage_render_gpu_layout_supported(void);
 #endif

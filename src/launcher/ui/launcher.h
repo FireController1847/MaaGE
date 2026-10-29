@@ -7,7 +7,11 @@
 #include "../clients/job.h"
 #define MAAGE_PROJECT_URL "https://github.com/FireController1847/MaaGE"
 typedef enum maage_launcher_page {
-    MAAGE_PAGE_PLAY, MAAGE_PAGE_NEWS, MAAGE_PAGE_INSTALLATIONS, MAAGE_PAGE_SETTINGS, MAAGE_PAGE_ABOUT
+    MAAGE_PAGE_PLAY,
+    MAAGE_PAGE_NEWS,
+    MAAGE_PAGE_INSTALLATIONS,
+    MAAGE_PAGE_SETTINGS,
+    MAAGE_PAGE_ABOUT
 } maage_launcher_page;
 typedef struct maage_installation {
     unsigned id;

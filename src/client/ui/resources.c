@@ -6,8 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static maage_status maage_client_ui_decoration_fallback(maage_image *image, int index)
-{
+static maage_status maage_client_ui_decoration_fallback(maage_image *image, int index) {
     unsigned char *pixel;
     maage_status result;
     int x, y;
@@ -16,34 +15,34 @@ static maage_status maage_client_ui_decoration_fallback(maage_image *image, int 
     if (maage_status_failed(result)) return result;
     if (!index) {
         /* Missing icons are optional; retain an original white crosshair. */
-        memset(image->pixels, 0, image->stride * (size_t)image->height);
-        for (y = 0; y < 15; ++y) for (x = 0; x < 15; ++x)
-            if (x == 7 || y == 7) {
-                pixel = image->pixels + (size_t)y * image->stride + (size_t)x * 4;
-                memset(pixel, 255, 4);
-            }
+        memset(image->pixels, 0, image->stride * (size_t) image->height);
+        for (y = 0; y < 15; ++y)
+            for (x = 0; x < 15; ++x)
+                if (x == 7 || y == 7) {
+                    pixel = image->pixels + (size_t) y * image->stride + (size_t) x * 4;
+                    memset(pixel, 255, 4);
+                }
     } else if (index == 1) {
         /* Keep buttons visually usable while the shared checker marks the
          * remaining unavailable sprite regions. */
-        for (y = 66; y < 106; ++y) for (x = 0; x < 200; ++x) {
-            pixel = image->pixels + (size_t)y * image->stride + (size_t)x * 4;
-            pixel[0] = pixel[1] = pixel[2] = (unsigned char)(y < 86 ? 90 : 130);
-            pixel[3] = 255;
-        }
+        for (y = 66; y < 106; ++y)
+            for (x = 0; x < 200; ++x) {
+                pixel = image->pixels + (size_t) y * image->stride + (size_t) x * 4;
+                pixel[0] = pixel[1] = pixel[2] = (unsigned char) (y < 86 ? 90 : 130);
+                pixel[3] = 255;
+            }
     }
     return result;
 }
 
 maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources,
-    maage_renderer *renderer, const char *application_data, const maage_client_resources *game_resources, maage_status_trace *trace)
-{
+                                            maage_renderer *renderer, const char *application_data, const maage_client_resources *game_resources, maage_status_trace *trace) {
     static const char *const names[7] = {
         "minecraft/textures/gui/icons.png", "minecraft/textures/gui/widgets.png",
         "minecraft/textures/font/ascii.png", "minecraft/textures/gui/container/inventory.png",
         "minecraft/textures/gui/container/crafting_table.png",
         "minecraft/textures/gui/container/creative_inventory/tab_items.png",
-        "minecraft/textures/gui/container/creative_inventory/tabs.png"
-    };
+        "minecraft/textures/gui/container/creative_inventory/tabs.png"};
     static const int origins[7][2] = {{0, 0}, {256, 0}, {0, 256}, {256, 256}, {1536, 256}, {1792, 256}, {1792, 0}};
     maage_image sources[7], title_images[7], menu_image, atlas;
     maage_pixel_buffer pixels;
@@ -81,25 +80,27 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS);
     }
     if (capabilities.max_texture_dimension_2d &&
-        (unsigned long)edge > capabilities.max_texture_dimension_2d) {
+        (unsigned long) edge > capabilities.max_texture_dimension_2d) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
         return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS);
     }
-    if ((size_t)edge > ((size_t)-1) / 4 ||
-        (size_t)edge > ((size_t)-1) / ((size_t)edge * 4)) {
+    if ((size_t) edge > ((size_t) - 1) / 4 ||
+        (size_t) edge > ((size_t) - 1) / ((size_t) edge * 4)) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
         return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS);
     }
     resources->atlas_edge = edge;
     resources->block_atlas_width = block_atlas->width;
     resources->block_atlas_height = block_atlas->height;
-    resources->skin_model=game_resources->skin_model;
-    resources->skin_uv[0]=game_resources->skin_uv[0]*block_atlas->width/edge;
-    resources->skin_uv[1]=(MAAGE_CLIENT_UI_BLOCK_ATLAS_Y+game_resources->skin_uv[1]*block_atlas->height)/edge;
-    resources->skin_uv[2]=game_resources->skin_uv[2]*block_atlas->width/edge;
-    resources->skin_uv[3]=(MAAGE_CLIENT_UI_BLOCK_ATLAS_Y+game_resources->skin_uv[3]*block_atlas->height)/edge;
-    memset(sources, 0, sizeof(sources)); memset(title_images,0,sizeof(title_images));
-    memset(&menu_image, 0, sizeof(menu_image)); memset(&atlas, 0, sizeof(atlas));
+    resources->skin_model = game_resources->skin_model;
+    resources->skin_uv[0] = game_resources->skin_uv[0] * block_atlas->width / edge;
+    resources->skin_uv[1] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + game_resources->skin_uv[1] * block_atlas->height) / edge;
+    resources->skin_uv[2] = game_resources->skin_uv[2] * block_atlas->width / edge;
+    resources->skin_uv[3] = (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + game_resources->skin_uv[3] * block_atlas->height) / edge;
+    memset(sources, 0, sizeof(sources));
+    memset(title_images, 0, sizeof(title_images));
+    memset(&menu_image, 0, sizeof(menu_image));
+    memset(&atlas, 0, sizeof(atlas));
     for (i = 0; i < 7; ++i) {
         maage_status_trace_init(&source_trace);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
@@ -122,8 +123,8 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
                 goto done;
             }
             maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.ui", status, &source_trace,
-                "%s; using %s. Repair resources with the Launcher.", names[i],
-                i == 2 ? "the built-in minimal font" : "a generated decoration fallback");
+                                   "%s; using %s. Repair resources with the Launcher.", names[i],
+                                   i == 2 ? "the built-in minimal font" : "a generated decoration fallback");
             if (resources->failed_resources == 1) recovered_trace = source_trace;
         }
     }
@@ -136,20 +137,20 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
             "minecraft/textures/gui/title/background/panorama_2.png",
             "minecraft/textures/gui/title/background/panorama_3.png",
             "minecraft/textures/gui/title/background/panorama_4.png",
-            "minecraft/textures/gui/title/background/panorama_5.png"
-        };
-        for(i=0;i<7;++i) {
+            "minecraft/textures/gui/title/background/panorama_5.png"};
+        for (i = 0; i < 7; ++i) {
             maage_status_trace_init(&source_trace);
-            status=maage_minecraft_asset_path(application_data,names_title[i],path,sizeof(path),&source_trace);
-            if(!maage_status_failed(status))status=maage_image_load_png(path,&title_images[i],&source_trace);
-            if(!maage_status_failed(status)&&(title_images[i].width<=0||
-                title_images[i].height<=0||title_images[i].width>256||title_images[i].height>256))
-                status=maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,MAAGE_CONTEXT_GUI,MAAGE_OPERATION_LOAD_TEXTURE,0);
-            if(maage_status_failed(status)) {
+            status = maage_minecraft_asset_path(application_data, names_title[i], path, sizeof(path), &source_trace);
+            if (!maage_status_failed(status)) status = maage_image_load_png(path, &title_images[i], &source_trace);
+            if (!maage_status_failed(status) && (title_images[i].width <= 0 ||
+                                                 title_images[i].height <= 0 || title_images[i].width > 256 || title_images[i].height > 256))
+                status = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD_TEXTURE, 0);
+            if (maage_status_failed(status)) {
                 maage_image_destroy(&title_images[i]);
-                maage_log_status(MAAGE_LOG_WARNING,"maage.client.ui",status,
-                    "Original title resource unavailable: %s.",names_title[i]);
-            } else resources->title_available[i] = 1;
+                maage_log_status(MAAGE_LOG_WARNING, "maage.client.ui", status,
+                                 "Original title resource unavailable: %s.", names_title[i]);
+            } else
+                resources->title_available[i] = 1;
         }
     }
     /* Store the original 1.7.10 options_background.png in the still-free
@@ -157,19 +158,19 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
      * Screens tile this resource; no repeated file I/O or texture uploads. */
     maage_status_trace_init(&source_trace);
     status = maage_minecraft_asset_path(application_data,
-        "minecraft/textures/gui/options_background.png",
-        path, sizeof(path), &source_trace);
+                                        "minecraft/textures/gui/options_background.png",
+                                        path, sizeof(path), &source_trace);
     if (!maage_status_failed(status))
         status = maage_image_load_png(path, &menu_image, &source_trace);
     if (!maage_status_failed(status) &&
         (menu_image.width < 1 || menu_image.height < 1 ||
-        menu_image.width > 256 || menu_image.height > 256))
+         menu_image.width > 256 || menu_image.height > 256))
         status = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
-            MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD_TEXTURE, 0);
+                                   MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     if (maage_status_failed(status)) {
         maage_image_destroy(&menu_image);
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.ui", status,
-            "Vanilla menu background unavailable; using registered dirt texture.");
+                         "Vanilla menu background unavailable; using registered dirt texture.");
     } else {
         resources->menu_background_available = 1;
         resources->menu_background_uv[0] = 1280.0f / edge;
@@ -178,43 +179,50 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
         resources->menu_background_uv[3] = (256.0f + menu_image.height) / edge;
     }
     atlas.width = atlas.height = edge;
-    atlas.stride = (size_t)atlas.width * 4;
-    atlas.pixels = (unsigned char *)calloc((size_t)atlas.height, atlas.stride);
+    atlas.stride = (size_t) atlas.width * 4;
+    atlas.pixels = (unsigned char *) calloc((size_t) atlas.height, atlas.stride);
     if (!atlas.pixels) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_ATLAS, 0);
         goto done;
     }
-    for (i = 0; i < 7; ++i) for (y = 0; y < sources[i].height; ++y)
-        memcpy(atlas.pixels + (size_t)(origins[i][1] + y) * atlas.stride + (size_t)origins[i][0] * 4,
-            sources[i].pixels + (size_t)y * sources[i].stride, (size_t)sources[i].width * 4);
+    for (i = 0; i < 7; ++i)
+        for (y = 0; y < sources[i].height; ++y)
+            memcpy(atlas.pixels + (size_t) (origins[i][1] + y) * atlas.stride + (size_t) origins[i][0] * 4,
+                   sources[i].pixels + (size_t) y * sources[i].stride, (size_t) sources[i].width * 4);
     /* Inversion uses source color rather than source alpha. Keep transparent
      * crosshair texels neutral in the derived atlas, preserving source files. */
-    for(y=0;y<16;++y) {
-        int x,channel;
-        for(x=0;x<16;++x)for(channel=0;channel<3;++channel) {
-            unsigned char *pixel=atlas.pixels+(size_t)y*atlas.stride+(size_t)x*4;
-            pixel[channel]=(unsigned char)((unsigned int)pixel[channel]*pixel[3]/255U);
-        }
+    for (y = 0; y < 16; ++y) {
+        int x, channel;
+        for (x = 0; x < 16; ++x)
+            for (channel = 0; channel < 3; ++channel) {
+                unsigned char *pixel = atlas.pixels + (size_t) y * atlas.stride + (size_t) x * 4;
+                pixel[channel] = (unsigned char) ((unsigned int) pixel[channel] * pixel[3] / 255U);
+            }
     }
     for (y = 0; y < block_atlas->height; ++y)
-        memcpy(atlas.pixels + (size_t)(MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + y) * atlas.stride,
-            block_atlas->pixels + (size_t)y * block_atlas->stride, (size_t)block_atlas->width * 4);
-    for(i=0;i<7;++i)if(resources->title_available[i])for(y=0;y<title_images[i].height;++y)
-        memcpy(atlas.pixels+(size_t)(((i/4)*256)+y)*atlas.stride+
-            (size_t)(512+(i%4)*256)*4,
-            title_images[i].pixels+(size_t)y*title_images[i].stride,
-            (size_t)title_images[i].width*4);
+        memcpy(atlas.pixels + (size_t) (MAAGE_CLIENT_UI_BLOCK_ATLAS_Y + y) * atlas.stride,
+               block_atlas->pixels + (size_t) y * block_atlas->stride, (size_t) block_atlas->width * 4);
+    for (i = 0; i < 7; ++i)
+        if (resources->title_available[i])
+            for (y = 0; y < title_images[i].height; ++y)
+                memcpy(atlas.pixels + (size_t) (((i / 4) * 256) + y) * atlas.stride +
+                           (size_t) (512 + (i % 4) * 256) * 4,
+                       title_images[i].pixels + (size_t) y * title_images[i].stride,
+                       (size_t) title_images[i].width * 4);
     if (resources->menu_background_available)
         for (y = 0; y < menu_image.height; ++y)
-            memcpy(atlas.pixels + (size_t)(256+y)*atlas.stride + (size_t)1280*4,
-                menu_image.pixels+(size_t)y*menu_image.stride,
-                (size_t)menu_image.width*4);
-    memset(atlas.pixels + (size_t)(edge - 1) * atlas.stride +
-        (size_t)(edge - 1) * 4, 255, 4);
+            memcpy(atlas.pixels + (size_t) (256 + y) * atlas.stride + (size_t) 1280 * 4,
+                   menu_image.pixels + (size_t) y * menu_image.stride,
+                   (size_t) menu_image.width * 4);
+    memset(atlas.pixels + (size_t) (edge - 1) * atlas.stride +
+               (size_t) (edge - 1) * 4,
+           255, 4);
     resources->recovery_status = maage_client_ui_font_initialize(resources, &sources[2]);
     if (maage_status_failed(resources->recovery_status)) goto done;
-    pixels.width = atlas.width; pixels.height = atlas.height;
-    pixels.stride = atlas.stride; pixels.pixels = atlas.pixels;
+    pixels.width = atlas.width;
+    pixels.height = atlas.height;
+    pixels.stride = atlas.stride;
+    pixels.pixels = atlas.pixels;
     result = maage_renderer_create_texture(renderer, &pixels, &resources->texture, trace);
     resources->recovery_status = result;
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
@@ -223,12 +231,13 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     maage_log_info("maage.client.ui", "Resolved inventory, HUD, font and borrowed block images into one GUI atlas.");
     ok = 1;
 done:
-    for (i = 0; i < 7; ++i) maage_image_destroy(&sources[i]);
-    for(i=0;i<7;++i)maage_image_destroy(&title_images[i]);
+    for (i = 0; i < 7; ++i)
+        maage_image_destroy(&sources[i]);
+    for (i = 0; i < 7; ++i)
+        maage_image_destroy(&title_images[i]);
     maage_image_destroy(&menu_image);
     maage_image_destroy(&atlas);
     if (!ok) return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
     if (trace && resources->failed_resources) *trace = recovered_trace;
-    return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(resources->failed_resources ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS,
-        MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
+    return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(resources->failed_resources ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
 }

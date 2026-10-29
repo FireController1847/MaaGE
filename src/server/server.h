@@ -3,5 +3,5 @@
 #include "maage/server_runtime.h"
 /* Headless entry point, reusing the same runtime as integrated play. */
 maage_status maage_server_run(const maage_server_config *config,
-    maage_status_trace *trace);
+                              maage_status_trace *trace);
 #endif

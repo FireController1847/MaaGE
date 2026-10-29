@@ -1,6 +1,6 @@
 # Include this directory only after the shared Core/World targets are declared:
 #   add_subdirectory(src/session)
-# Link MaaGE::Session from Client and Server after the Phase 7 integration.
+# Client and Server share the local numeric transport.
 if(NOT TARGET MaaGE::World OR NOT TARGET MaaGE::Thread OR NOT TARGET MaaGE::Status)
     message(FATAL_ERROR "MaaGE::Session requires MaaGE::World, MaaGE::Thread and MaaGE::Status")
 endif()

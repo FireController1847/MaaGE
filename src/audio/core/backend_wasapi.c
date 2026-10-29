@@ -38,18 +38,18 @@ typedef struct maage_wasapi_state {
     long native;
 } maage_wasapi_state;
 /* 1 = IEEE float 32, 2 = signed PCM16. */
-static int select_format(const WAVEFORMATEX *w)
-{
+static int select_format(const WAVEFORMATEX *w) {
     WORD tag = w->wFormatTag;
     if (!w->nChannels || w->nChannels > 8 || !w->nSamplesPerSec) return 0;
     if (tag == WAVE_FORMAT_EXTENSIBLE) {
-        const WAVEFORMATEXTENSIBLE *e = (const WAVEFORMATEXTENSIBLE *)w;
+        const WAVEFORMATEXTENSIBLE *e = (const WAVEFORMATEXTENSIBLE *) w;
         if (w->cbSize < 22) return 0;
         if (!memcmp(&e->SubFormat, &maage_wasapi_float, sizeof(GUID)))
             tag = WAVE_FORMAT_IEEE_FLOAT;
         else if (!memcmp(&e->SubFormat, &maage_wasapi_pcm, sizeof(GUID)))
             tag = WAVE_FORMAT_PCM;
-        else return 0;
+        else
+            return 0;
     }
     if (tag == WAVE_FORMAT_IEEE_FLOAT && w->wBitsPerSample == 32 &&
         w->nBlockAlign == w->nChannels * sizeof(float)) return 1;
@@ -58,22 +58,21 @@ static int select_format(const WAVEFORMATEX *w)
     return 0;
 }
 static void convert_output(BYTE *destination, const WAVEFORMATEX *format,
-    unsigned int sample_type, const float *stereo, unsigned int frames)
-{
+                           unsigned int sample_type, const float *stereo, unsigned int frames) {
     unsigned int i, j, channels = format->nChannels;
     float value;
-    for (i = 0; i < frames; ++i) for (j = 0; j < channels; ++j) {
-        value = j == 0 ? stereo[2*i] : (j == 1 ? stereo[2*i+1] : 0.0f);
-        if (channels == 1) value = 0.5f * (stereo[2*i] + stereo[2*i+1]);
-        if (sample_type == 1)
-            ((float *)destination)[i*channels+j] = value;
-        else
-            ((signed short *)destination)[i*channels+j] = (signed short)(value * 32767.0f);
-    }
+    for (i = 0; i < frames; ++i)
+        for (j = 0; j < channels; ++j) {
+            value = j == 0 ? stereo[2 * i] : (j == 1 ? stereo[2 * i + 1] : 0.0f);
+            if (channels == 1) value = 0.5f * (stereo[2 * i] + stereo[2 * i + 1]);
+            if (sample_type == 1)
+                ((float *) destination)[i * channels + j] = value;
+            else
+                ((signed short *) destination)[i * channels + j] = (signed short) (value * 32767.0f);
+        }
 }
-static void wasapi_worker(void *context)
-{
-    maage_wasapi_state *s = (maage_wasapi_state *)context;
+static void wasapi_worker(void *context) {
+    maage_wasapi_state *s = (maage_wasapi_state *) context;
     IMMDeviceEnumerator *enumerator = NULL;
     IMMDevice *device = NULL;
     IAudioClient *client = NULL;
@@ -86,35 +85,39 @@ static void wasapi_worker(void *context)
     unsigned int sample_type = 0;
     float scratch[2048];
     maage_status result = maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_ACQUIRE,
-        MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+                                             MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
     hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(hr)) goto finish;
     initialized = 1;
     hr = CoCreateInstance(&maage_wasapi_enumerator_class, NULL, CLSCTX_INPROC_SERVER,
-        &maage_wasapi_enumerator_interface, (void **)&enumerator);
+                          &maage_wasapi_enumerator_interface, (void **) &enumerator);
     if (FAILED(hr)) goto finish;
     hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(enumerator, eRender, eConsole, &device);
     if (FAILED(hr)) goto finish;
     hr = IMMDevice_Activate(device, &maage_wasapi_client_interface, CLSCTX_INPROC_SERVER,
-        NULL, (void **)&client);
+                            NULL, (void **) &client);
     if (FAILED(hr)) goto finish;
     hr = IAudioClient_GetMixFormat(client, &format);
     if (FAILED(hr)) goto finish;
     sample_type = select_format(format);
     if (!sample_type) {
         result = maage_audio_result(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED,
-            MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
-        hr = E_NOTIMPL; goto finish;
+                                    MAAGE_OPERATION_ACQUIRE, MAAGE_DETAIL_AUDIO_DEVICE_UNAVAILABLE);
+        hr = E_NOTIMPL;
+        goto finish;
     }
     hr = IAudioClient_Initialize(client, AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 1000000, 0, format, NULL);
+                                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 1000000, 0, format, NULL);
     if (FAILED(hr)) goto finish;
     hr = IAudioClient_GetBufferSize(client, &capacity);
     if (FAILED(hr) || !capacity) goto finish;
-    hr = IAudioClient_GetService(client, &maage_wasapi_render_interface, (void **)&render);
+    hr = IAudioClient_GetService(client, &maage_wasapi_render_interface, (void **) &render);
     if (FAILED(hr)) goto finish;
     s->wake = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!s->wake) { hr = HRESULT_FROM_WIN32(GetLastError()); goto finish; }
+    if (!s->wake) {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        goto finish;
+    }
     hr = IAudioClient_SetEventHandle(client, s->wake);
     if (FAILED(hr)) goto finish;
     hr = IAudioRenderClient_GetBuffer(render, capacity, &bytes);
@@ -128,7 +131,8 @@ static void wasapi_worker(void *context)
     started = 1;
     result = maage_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_ACQUIRE, 0);
     maage_mutex_lock(s->mutex);
-    s->startup = result; s->ready = 1;
+    s->startup = result;
+    s->ready = 1;
     maage_condition_signal(s->condition);
     maage_mutex_unlock(s->mutex);
     for (;;) {
@@ -160,8 +164,9 @@ static void wasapi_worker(void *context)
     running = !s->stop;
     maage_mutex_unlock(s->mutex);
     if (running) maage_audio_backend_fail(s->audio,
-        maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_PRESENT,
-            MAAGE_DETAIL_AUDIO_DEVICE_LOST), (long)hr);
+                                          maage_audio_result(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_PRESENT,
+                                                             MAAGE_DETAIL_AUDIO_DEVICE_LOST),
+                                          (long) hr);
 finish:
     if (started) IAudioClient_Stop(client);
     if (format) CoTaskMemFree(format);
@@ -172,55 +177,64 @@ finish:
     if (initialized) CoUninitialize();
     maage_mutex_lock(s->mutex);
     if (!s->ready) {
-        s->startup = result; s->native = (long)hr; s->ready = 1;
+        s->startup = result;
+        s->native = (long) hr;
+        s->ready = 1;
         maage_condition_signal(s->condition);
     }
     maage_mutex_unlock(s->mutex);
 }
-static void wasapi_cleanup(maage_wasapi_state *s)
-{
+static void wasapi_cleanup(maage_wasapi_state *s) {
     if (!s) return;
     if (s->wake) CloseHandle(s->wake);
-    if (s->condition) (void)maage_condition_destroy(s->condition);
-    if (s->mutex) (void)maage_mutex_destroy(s->mutex);
+    if (s->condition) (void) maage_condition_destroy(s->condition);
+    if (s->mutex) (void) maage_mutex_destroy(s->mutex);
     free(s);
 }
-maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *trace)
-{
+maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *trace) {
     maage_wasapi_state *s;
     maage_status result;
-    (void)trace;
-    s = (maage_wasapi_state *)calloc(1, sizeof(*s));
+    (void) trace;
+    s = (maage_wasapi_state *) calloc(1, sizeof(*s));
     if (!s) return maage_audio_result(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ACQUIRE, 0);
     s->audio = audio;
     result = maage_mutex_create(&s->mutex);
-    if (maage_status_failed(result)) { wasapi_cleanup(s); return result; }
+    if (maage_status_failed(result)) {
+        wasapi_cleanup(s);
+        return result;
+    }
     result = maage_condition_create(&s->condition);
-    if (maage_status_failed(result)) { wasapi_cleanup(s); return result; }
+    if (maage_status_failed(result)) {
+        wasapi_cleanup(s);
+        return result;
+    }
     result = maage_thread_start(wasapi_worker, s, &s->worker);
-    if (maage_status_failed(result)) { wasapi_cleanup(s); return result; }
+    if (maage_status_failed(result)) {
+        wasapi_cleanup(s);
+        return result;
+    }
     maage_mutex_lock(s->mutex);
-    while (!s->ready) maage_condition_wait(s->condition, s->mutex);
+    while (!s->ready)
+        maage_condition_wait(s->condition, s->mutex);
     result = s->startup;
     audio->device_native = s->native;
     maage_mutex_unlock(s->mutex);
     if (maage_status_failed(result)) {
-        (void)maage_thread_join(s->worker);
+        (void) maage_thread_join(s->worker);
         wasapi_cleanup(s);
         return result;
     }
     audio->backend_state = s;
     return result;
 }
-void maage_audio_backend_stop(maage_audio *audio)
-{
-    maage_wasapi_state *s = (maage_wasapi_state *)audio->backend_state;
+void maage_audio_backend_stop(maage_audio *audio) {
+    maage_wasapi_state *s = (maage_wasapi_state *) audio->backend_state;
     if (!s) return;
     maage_mutex_lock(s->mutex);
     s->stop = 1;
     maage_mutex_unlock(s->mutex);
     if (s->wake) SetEvent(s->wake);
-    (void)maage_thread_join(s->worker);
+    (void) maage_thread_join(s->worker);
     audio->backend_state = NULL;
     wasapi_cleanup(s);
 }

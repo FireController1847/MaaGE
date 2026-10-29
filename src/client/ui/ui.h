@@ -38,19 +38,23 @@ typedef struct maage_client_ui_debug {
     char right[MAAGE_CLIENT_UI_DEBUG_LINES][MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
     unsigned int left_count, right_count;
 } maage_client_ui_debug;
-typedef struct maage_client_ui_rect { float x, y, width, height; } maage_client_ui_rect;
+typedef struct maage_client_ui_rect {
+    float x, y, width, height;
+} maage_client_ui_rect;
 typedef enum maage_client_ui_alignment {
-    MAAGE_CLIENT_UI_LEFT = 0, MAAGE_CLIENT_UI_CENTER, MAAGE_CLIENT_UI_RIGHT
+    MAAGE_CLIENT_UI_LEFT = 0,
+    MAAGE_CLIENT_UI_CENTER,
+    MAAGE_CLIENT_UI_RIGHT
 } maage_client_ui_alignment;
 typedef void (*maage_client_ui_screen_draw)(maage_client_ui *ui, void *context);
 typedef unsigned int (*maage_client_ui_screen_input)(maage_client_ui *ui,
-    const maage_client_ui_input *input, void *context);
+                                                     const maage_client_ui_input *input, void *context);
 
 /* Owns one GUI atlas and reusable CPU batch; destroy before the renderer.
  * Resources resolve only here, from the existing reconstructed installation. */
 maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *window,
-    const char *application_data, const maage_client_resources *game_resources,
-    maage_client_ui **output, maage_status_trace *trace);
+                                    const char *application_data, const maage_client_resources *game_resources,
+                                    maage_client_ui **output, maage_status_trace *trace);
 /* Returns the first original resource failure, even after successful recovery. */
 maage_status maage_client_ui_resource_status(const maage_client_ui *ui);
 /* Owner-only, bounded, nonmodal and deduplicated by result. Callers log the
@@ -60,29 +64,29 @@ void maage_client_ui_notice_time(maage_client_ui *ui, double now);
 maage_status maage_client_ui_destroy(maage_client_ui *ui);
 /* Immutable numeric content borrowed for icons; Server snapshots copied by value. */
 maage_status maage_client_ui_set_content(maage_client_ui *ui,
-    const maage_item_registry *items, const maage_block_registry *blocks,
-    const float inventory_grass_color[3], const float (*item_uv)[4]);
+                                         const maage_item_registry *items, const maage_block_registry *blocks,
+                                         const float inventory_grass_color[3], const float (*item_uv)[4]);
 maage_status maage_client_ui_set_snapshot(maage_client_ui *ui,
-    const maage_session_snapshot *snapshot);
+                                          const maage_session_snapshot *snapshot);
 /* NOOP when empty. FIFO of authoritative commands; a full queue returns
  * BUFFER_OVERFLOW and retains the unconsumed request for caller feedback. */
 void maage_client_ui_command_submitted(maage_client_ui *ui, const maage_session_command *command,
-    unsigned long sequence);
+                                       unsigned long sequence);
 maage_status maage_client_ui_take_command(maage_client_ui *ui,
-    maage_session_command *command);
+                                          maage_session_command *command);
 /* On local transport BUFFER_OVERFLOW, restore the just-taken command at the
  * front without reordering later GUI requests. Main-thread caller retries. */
 maage_status maage_client_ui_retry_command(maage_client_ui *ui,
-    const maage_session_command *command);
+                                           const maage_session_command *command);
 /* Registration grows direct numeric indexing before finalization. ID zero is
  * gameplay (no modal). Unknown IDs and navigation cycles fail explicitly. */
 maage_status maage_client_ui_register_screen(maage_client_ui *ui, maage_client_ui_screen_id id,
-    maage_client_ui_screen_draw draw, maage_client_ui_screen_input input, void *context);
+                                             maage_client_ui_screen_draw draw, maage_client_ui_screen_input input, void *context);
 maage_status maage_client_ui_finalize(maage_client_ui *ui);
 maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id id);
 maage_status maage_client_ui_back(maage_client_ui *ui);
 maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui);
-maage_status maage_client_ui_open_root(maage_client_ui *ui,maage_client_ui_screen_id id);
+maage_status maage_client_ui_open_root(maage_client_ui *ui, maage_client_ui_screen_id id);
 maage_renderer *maage_client_ui_renderer(const maage_client_ui *ui);
 maage_window *maage_client_ui_window(const maage_client_ui *ui);
 int maage_client_ui_modal(const maage_client_ui *ui);
@@ -102,17 +106,17 @@ int maage_client_ui_window_mode_changing(const maage_client_ui *ui);
  * and option sliders click on press; sound sliders preview once on release.
  * Hover, focus, Escape and inventory slot operations remain silent. */
 void maage_client_ui_set_click_callback(maage_client_ui *ui,
-    maage_client_ui_click_callback callback, void *context);
+                                        maage_client_ui_click_callback callback, void *context);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.
  * Integer GUI scale uses framebuffer pixels, with a 320x240 logical minimum. */
 maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input,
-    int framebuffer_width, int framebuffer_height, int window_width, int window_height, unsigned int *actions);
+                                    int framebuffer_width, int framebuffer_height, int window_width, int window_height, unsigned int *actions);
 /* Build the UI after world preparation; returned CPU data is borrowed until
  * the next draw/destroy and submitted with the world in renderer_draw_frame.
  * NULL indicates an invalid UI or exhausted geometry allocation/index range;
  * no partial batch is returned. The caller treats that as a frame-build failure. */
 maage_status maage_client_ui_draw(maage_client_ui *ui,
-    const maage_client_ui_debug *debug, const maage_render_ui_data **output);
+                                  const maage_client_ui_debug *debug, const maage_render_ui_data **output);
 /* Current option values; 0 FPS means Unlimited; 0 GUI scale means Auto. */
 double maage_client_ui_fov_radians(const maage_client_ui *ui);
 int maage_client_ui_max_fps(const maage_client_ui *ui);
@@ -125,19 +129,19 @@ float maage_client_ui_height(const maage_client_ui *ui);
 /* Small immediate primitives for registered Client screens. RGBA values are
  * straight-alpha [0,1]. Geometry clips to the current logical viewport. */
 void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    float red, float green, float blue, float alpha);
+                           float red, float green, float blue, float alpha);
 /* UV coordinates reference the GUI atlas resolved during initialization. */
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
+                               float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
 void maage_client_ui_text(maage_client_ui *ui, const char *text, float x, float y,
-    maage_client_ui_alignment alignment, float red, float green, float blue);
+                          maage_client_ui_alignment alignment, float red, float green, float blue);
 typedef enum maage_client_ui_button_visual {
     MAAGE_CLIENT_UI_BUTTON_DISABLED = 0,
     MAAGE_CLIENT_UI_BUTTON_NORMAL = 1,
     MAAGE_CLIENT_UI_BUTTON_HOVER = 2
 } maage_client_ui_button_visual;
 void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    const char *label, maage_client_ui_button_visual state);
+                                  const char *label, maage_client_ui_button_visual state);
 void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    const char *label, int highlighted);
+                            const char *label, int highlighted);
 #endif

@@ -13,7 +13,7 @@ typedef struct maage_image {
  * UTF-8 file path; optional caller-owned trace preserves file/decode causes.
  * Failure leaves an empty output and never retains decoder-owned storage. */
 maage_status maage_image_load_png(const char *path, maage_image *image,
-    maage_status_trace *trace);
+                                  maage_status_trace *trace);
 /* Original, asset-independent magenta/black checkerboard. Caller owns pixels;
  * nearest sampling is provided by the existing renderer texture contract. */
 maage_status maage_image_make_missing(maage_image *image, int width, int height);

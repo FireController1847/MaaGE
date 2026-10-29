@@ -89,39 +89,39 @@ struct maage_client_ui {
     char notice_text[64];
 };
 maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources,
-    maage_renderer *renderer, const char *application_data, const maage_client_resources *game_resources, maage_status_trace *trace);
+                                            maage_renderer *renderer, const char *application_data, const maage_client_resources *game_resources, maage_status_trace *trace);
 maage_status maage_client_ui_font_initialize(maage_client_ui_resources *resources, const maage_image *font);
 maage_status maage_client_ui_font_fallback(maage_image *font);
 float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
-/* Vanilla 1.7.10 tiled options background over the entire drawable,
+/* Tiled options background over the entire drawable,
  * restoring the previous clipping region before returning. */
 void maage_client_ui_menu_background(maage_client_ui *ui);
 void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    unsigned long top, unsigned long bottom);
-void maage_client_ui_slider(maage_client_ui *ui,maage_client_ui_rect rectangle,
-    const char *label,float value,int highlighted);
+                              unsigned long top, unsigned long bottom);
+void maage_client_ui_slider(maage_client_ui *ui, maage_client_ui_rect rectangle,
+                            const char *label, float value, int highlighted);
 /* Shared cursor feedback for standard and custom-drawn controls. */
 void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle);
 maage_status maage_client_ui_options_register(maage_client_ui *ui);
-void maage_client_ui_request_window_mode(maage_client_ui *ui,maage_client_window_choice choice);
+void maage_client_ui_request_window_mode(maage_client_ui *ui, maage_client_window_choice choice);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle,
-    float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
-void maage_client_ui_text_shadow(maage_client_ui *ui,const char *text,float x,float y,
-    maage_client_ui_alignment alignment,float red,float green,float blue);
+                               float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);
+void maage_client_ui_text_shadow(maage_client_ui *ui, const char *text, float x, float y,
+                                 maage_client_ui_alignment alignment, float red, float green, float blue);
 void maage_client_ui_font_draw(maage_client_ui *ui, const char *text,
-    float x, float y, float red, float green, float blue);
+                               float x, float y, float red, float green, float blue);
 maage_status maage_client_ui_inventory_register(maage_client_ui *ui);
 /* These helpers queue exact numeric commands, never mutate a gameplay object. */
 maage_status maage_client_ui_queue_command(maage_client_ui *ui,
-    const maage_session_command *command);
+                                           const maage_session_command *command);
 void maage_client_ui_queue_game_mode(maage_client_ui *ui);
 void maage_client_ui_queue_respawn(maage_client_ui *ui);
 void maage_client_ui_player_preview(maage_client_ui *ui, maage_client_ui_rect frame);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
 /* Appends already-clipped quads, rebasing indices into the current frame. */
 int maage_client_ui_append_quads(maage_client_ui *ui,
-    const maage_render_ui_vertex *vertices, size_t count);
+                                 const maage_render_ui_vertex *vertices, size_t count);
 maage_client_ui_screen *maage_client_ui_screen_get(const maage_client_ui *ui,
-    maage_client_ui_screen_id id);
+                                                   maage_client_ui_screen_id id);
 maage_client_ui_screen_id maage_client_ui_current(const maage_client_ui *ui);
 #endif

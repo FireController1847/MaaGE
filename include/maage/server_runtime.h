@@ -11,7 +11,10 @@ extern "C" {
 
 /* Both entry points use one owner-thread simulation and persistence lifecycle. */
 typedef struct maage_server_runtime maage_server_runtime;
-enum { MAAGE_SERVER_INTEGRATED = 1U, MAAGE_SERVER_DEDICATED = 2U };
+enum {
+    MAAGE_SERVER_INTEGRATED = 1U,
+    MAAGE_SERVER_DEDICATED = 2U
+};
 
 typedef struct maage_server_config {
     /* Physical UUID instance directory containing instance.json, not a data root. */
@@ -40,15 +43,15 @@ typedef struct maage_server_config {
  * on the authoritative thread after start, never by Client/render threads.
  * The caller retains borrowed content and session through join/destroy. */
 maage_status maage_server_runtime_create(const maage_server_config *config,
-    maage_server_runtime **output, maage_status_trace *trace);
+                                         maage_server_runtime **output, maage_status_trace *trace);
 maage_status maage_server_runtime_start(maage_server_runtime *runtime,
-    maage_status_trace *trace);
+                                        maage_status_trace *trace);
 /* Safe on a different thread, idempotent, and wakes the tick scheduler. */
 void maage_server_runtime_request_stop(maage_server_runtime *runtime);
 /* May block; never call on the Server thread or a rendering hot path. Returns
  * the original asynchronous failure and copies its causal trace. */
 maage_status maage_server_runtime_join(maage_server_runtime *runtime,
-    maage_status_trace *trace);
+                                       maage_status_trace *trace);
 /* A finished runtime remains queryable until destroy; 1 means its worker
  * returned (including early startup failure). */
 int maage_server_runtime_finished(maage_server_runtime *runtime);

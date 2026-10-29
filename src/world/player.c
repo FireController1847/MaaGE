@@ -7,9 +7,8 @@
 #define MAAGE_PLAYER_COLLISION_EPSILON 0.0000001
 
 static int maage_player_plane_solid(const maage_world *world,
-    const double minimum[3], const double maximum[3], int axis, int cell,
-    double displacement, double *allowed)
-{
+                                    const double minimum[3], const double maximum[3], int axis, int cell,
+                                    double displacement, double *allowed) {
     int low[3];
     int high[3];
     int index;
@@ -20,15 +19,17 @@ static int maage_player_plane_solid(const maage_world *world,
     double face, distance;
     maage_block_shape shape;
     for (index = 0; index < 3; ++index) {
-        low[index] = (int)floor(minimum[index] + MAAGE_PLAYER_COLLISION_EPSILON);
-        high[index] = (int)floor(maximum[index] - MAAGE_PLAYER_COLLISION_EPSILON);
+        low[index] = (int) floor(minimum[index] + MAAGE_PLAYER_COLLISION_EPSILON);
+        high[index] = (int) floor(maximum[index] - MAAGE_PLAYER_COLLISION_EPSILON);
     }
     low[axis] = high[axis] = cell;
     for (z = low[2]; z <= high[2]; ++z) {
         for (y = low[1]; y <= high[1]; ++y) {
             for (x = low[0]; x <= high[0]; ++x) {
                 if (!maage_world_collision_shape(world, x, y, z, &shape)) continue;
-                coordinate[0] = x; coordinate[1] = y; coordinate[2] = z;
+                coordinate[0] = x;
+                coordinate[1] = y;
+                coordinate[2] = z;
                 intersects = 1;
                 for (transverse = 0; transverse < 3; ++transverse) {
                     if (transverse == axis) continue;
@@ -56,8 +57,7 @@ static int maage_player_plane_solid(const maage_world *world,
 }
 
 int maage_world_sweep_body(const maage_world *world, double position[3],
-    double velocity[3], double width, double height, int axis, double displacement)
-{
+                           double velocity[3], double width, double height, int axis, double displacement) {
     double minimum[3];
     double maximum[3];
     double allowed;
@@ -73,23 +73,23 @@ int maage_world_sweep_body(const maage_world *world, double position[3],
     allowed = displacement;
     collided = 0;
     if (displacement > 0.0) {
-        cell = (int)floor(maximum[axis] - MAAGE_PLAYER_COLLISION_EPSILON);
-        last = (int)floor(maximum[axis] + displacement -
-            MAAGE_PLAYER_COLLISION_EPSILON);
+        cell = (int) floor(maximum[axis] - MAAGE_PLAYER_COLLISION_EPSILON);
+        last = (int) floor(maximum[axis] + displacement -
+                           MAAGE_PLAYER_COLLISION_EPSILON);
         for (; cell <= last; ++cell) {
             if (maage_player_plane_solid(world, minimum, maximum, axis, cell,
-                displacement, &allowed)) {
+                                         displacement, &allowed)) {
                 collided = 1;
                 break;
             }
         }
     } else if (displacement < 0.0) {
-        cell = (int)floor(minimum[axis] + MAAGE_PLAYER_COLLISION_EPSILON);
-        last = (int)floor(minimum[axis] + displacement +
-            MAAGE_PLAYER_COLLISION_EPSILON);
+        cell = (int) floor(minimum[axis] + MAAGE_PLAYER_COLLISION_EPSILON);
+        last = (int) floor(minimum[axis] + displacement +
+                           MAAGE_PLAYER_COLLISION_EPSILON);
         for (; cell >= last; --cell) {
             if (maage_player_plane_solid(world, minimum, maximum, axis, cell,
-                displacement, &allowed)) {
+                                         displacement, &allowed)) {
                 collided = 1;
                 break;
             }
@@ -100,8 +100,7 @@ int maage_world_sweep_body(const maage_world *world, double position[3],
     return collided;
 }
 
-unsigned int maage_player_fluid(const maage_player *player, const maage_world *world)
-{
+unsigned int maage_player_fluid(const maage_player *player, const maage_world *world) {
     const maage_block_state_definition *state;
     const maage_block_registry *registry;
     int low[3], high[3], x, y, z;
@@ -109,26 +108,27 @@ unsigned int maage_player_fluid(const maage_player *player, const maage_world *w
     if (!player || !world) return MAAGE_FLUID_NONE;
     registry = maage_world_registry(world);
     for (axis = 0; axis < 3; ++axis) {
-        low[axis] = (int)floor(player->position[axis]-MAAGE_PLAYER_WIDTH*0.5+0.001);
-        high[axis] = (int)floor(player->position[axis]+MAAGE_PLAYER_WIDTH*0.5-0.001);
+        low[axis] = (int) floor(player->position[axis] - MAAGE_PLAYER_WIDTH * 0.5 + 0.001);
+        high[axis] = (int) floor(player->position[axis] + MAAGE_PLAYER_WIDTH * 0.5 - 0.001);
     }
-    low[1] = (int)floor(player->position[1]+0.401);
-    high[1] = (int)floor(player->position[1]+MAAGE_PLAYER_HEIGHT-0.401);
-    for (z = low[2]; z <= high[2]; ++z) for (x = low[0]; x <= high[0]; ++x)
-        if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x),
-            maage_world_chunk_coordinate(z))) return MAAGE_FLUID_NONE;
-    for (z = low[2]; z <= high[2]; ++z) for (x = low[0]; x <= high[0]; ++x)
-        for (y = low[1]; y <= high[1]; ++y) {
-            state = maage_block_registry_state(registry, maage_world_get(world,x,y,z));
-            if (!state) continue;
-            if (state->fluid_kind == MAAGE_FLUID_WATER) return MAAGE_FLUID_WATER;
-            if (state->fluid_kind == MAAGE_FLUID_LAVA) found = MAAGE_FLUID_LAVA;
-        }
+    low[1] = (int) floor(player->position[1] + 0.401);
+    high[1] = (int) floor(player->position[1] + MAAGE_PLAYER_HEIGHT - 0.401);
+    for (z = low[2]; z <= high[2]; ++z)
+        for (x = low[0]; x <= high[0]; ++x)
+            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x),
+                                          maage_world_chunk_coordinate(z))) return MAAGE_FLUID_NONE;
+    for (z = low[2]; z <= high[2]; ++z)
+        for (x = low[0]; x <= high[0]; ++x)
+            for (y = low[1]; y <= high[1]; ++y) {
+                state = maage_block_registry_state(registry, maage_world_get(world, x, y, z));
+                if (!state) continue;
+                if (state->fluid_kind == MAAGE_FLUID_WATER) return MAAGE_FLUID_WATER;
+                if (state->fluid_kind == MAAGE_FLUID_LAVA) found = MAAGE_FLUID_LAVA;
+            }
     return found;
 }
 
-maage_status maage_player_spawn(maage_player *player, const maage_world *world)
-{
+maage_status maage_player_spawn(maage_player *player, const maage_world *world) {
     if (player == NULL || world == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     memset(player, 0, sizeof(*player));
     maage_world_spawn(world, player->position);
@@ -136,8 +136,7 @@ maage_status maage_player_spawn(maage_player *player, const maage_world *world)
 }
 
 maage_status maage_player_tick(maage_player *player, const maage_world *world,
-    const maage_player_input *input)
-{
+                               const maage_player_input *input) {
     double forward;
     double strafe;
     double magnitude;
@@ -156,7 +155,8 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world,
     if (strafe > 1.0) strafe = 1.0;
     if (strafe < -1.0) strafe = -1.0;
     if (input->descend) {
-        forward *= MAAGE_PLAYER_SNEAK_INPUT; strafe *= MAAGE_PLAYER_SNEAK_INPUT;
+        forward *= MAAGE_PLAYER_SNEAK_INPUT;
+        strafe *= MAAGE_PLAYER_SNEAK_INPUT;
     }
     forward *= MAAGE_PLAYER_INPUT_DAMPING;
     strafe *= MAAGE_PLAYER_INPUT_DAMPING;
@@ -165,11 +165,12 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world,
         forward /= magnitude;
         strafe /= magnitude;
     }
-    acceleration = player->grounded ? MAAGE_PLAYER_GROUND_ACCELERATION :
-        MAAGE_PLAYER_AIR_ACCELERATION;
+    acceleration = player->grounded ? MAAGE_PLAYER_GROUND_ACCELERATION : MAAGE_PLAYER_AIR_ACCELERATION;
     fluid = input->flying ? MAAGE_FLUID_NONE : maage_player_fluid(player, world);
-    if (input->flying) acceleration = 0.2;
-    else if (player->sprinting && fluid == MAAGE_FLUID_NONE) acceleration *= MAAGE_PLAYER_SPRINT_SPEED;
+    if (input->flying)
+        acceleration = 0.2;
+    else if (player->sprinting && fluid == MAAGE_FLUID_NONE)
+        acceleration *= MAAGE_PLAYER_SPRINT_SPEED;
     sine = sin(input->yaw);
     cosine = cos(input->yaw);
     player->velocity[0] += acceleration * (forward * sine + strafe * cosine);
@@ -182,17 +183,18 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world,
         }
     }
     if (input->flying) player->velocity[1] = ((input->jump ? 1 : 0) -
-        (input->descend ? 1 : 0)) * 0.3;
+                                              (input->descend ? 1 : 0)) *
+                                             0.3;
     vertical = player->velocity[1];
     hit_vertical = maage_world_sweep_body(world, player->position, player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 1, vertical);
     player->grounded = hit_vertical && vertical < 0.0;
     player->collided_horizontally = maage_world_sweep_body(world, player->position,
-        player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 0, player->velocity[0]);
+                                                           player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 0, player->velocity[0]);
     if (maage_world_sweep_body(world, player->position, player->velocity,
-        MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 2, player->velocity[2])) player->collided_horizontally = 1;
+                               MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 2, player->velocity[2])) player->collided_horizontally = 1;
     if (player->collided_horizontally) player->sprinting = 0;
     player->velocity[1] = (player->velocity[1] - MAAGE_PLAYER_GRAVITY_PER_TICK) *
-        MAAGE_PLAYER_VERTICAL_DRAG;
+                          MAAGE_PLAYER_VERTICAL_DRAG;
     if (input->flying) player->velocity[1] = 0;
     drag = player->grounded ? MAAGE_PLAYER_GROUND_DRAG : MAAGE_PLAYER_AIR_DRAG;
     if (input->flying) drag = 0.6;

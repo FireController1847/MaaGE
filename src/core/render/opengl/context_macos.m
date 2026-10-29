@@ -8,13 +8,11 @@ typedef struct maage_opengl_context {
     NSOpenGLView *view;
 } maage_opengl_context;
 
-maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
-{
+maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
     NSOpenGLPixelFormatAttribute attributes[] = {
         NSOpenGLPFAOpenGLProfile, modern ? NSOpenGLProfileVersion4_1Core : NSOpenGLProfileVersionLegacy,
         NSOpenGLPFADoubleBuffer, NSOpenGLPFAColorSize, 24, NSOpenGLPFAAlphaSize, 8,
-        NSOpenGLPFADepthSize, 24, NSOpenGLPFAStencilSize, 8, 0
-    };
+        NSOpenGLPFADepthSize, 24, NSOpenGLPFAStencilSize, 8, 0};
     maage_opengl_context *native;
     NSOpenGLPixelFormat *format;
     NSView *parent;
@@ -38,8 +36,7 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
     [native->context setValues:&interval forParameter:NSOpenGLContextParameterSwapInterval];
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
-void maage_opengl_context_destroy(maage_renderer *renderer)
-{
+void maage_opengl_context_destroy(maage_renderer *renderer) {
     maage_opengl_context *native = renderer->platform;
     if (!native) return;
     if ([NSOpenGLContext currentContext] == native->context) [NSOpenGLContext clearCurrentContext];
@@ -49,8 +46,7 @@ void maage_opengl_context_destroy(maage_renderer *renderer)
     [native->context release];
     free(native);
 }
-maage_status maage_opengl_context_bind(maage_renderer *renderer)
-{
+maage_status maage_opengl_context_bind(maage_renderer *renderer) {
     maage_opengl_context *native = renderer->platform;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     int current;
@@ -60,8 +56,7 @@ maage_status maage_opengl_context_bind(maage_renderer *renderer)
     [pool drain];
     return maage_status_make(current ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_ACQUIRE, 0);
 }
-maage_status maage_opengl_context_swap(maage_renderer *renderer)
-{
+maage_status maage_opengl_context_swap(maage_renderer *renderer) {
     maage_opengl_context *native = renderer->platform;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     [native->context flushBuffer];

@@ -26,39 +26,46 @@
 #ifndef MAAGE_APPLICATION_LOG_CONFIGURE
 #ifdef MAAGE_APPLICATION_USER_DATA
 #include "maage/storage.h"
-static char *maage_application_log_path(void)
-{
+static char *maage_application_log_path(void) {
     char directory[MAAGE_PATH_CAPACITY];
     char *path;
     if (maage_status_failed(maage_storage_data_path(directory, sizeof(directory))) ||
         maage_status_failed(maage_storage_join(directory, sizeof(directory), directory, "logs")) ||
         maage_status_failed(maage_storage_directories(directory))) return NULL;
-    path = (char *)malloc(MAAGE_PATH_CAPACITY);
+    path = (char *) malloc(MAAGE_PATH_CAPACITY);
     if (path && maage_status_failed(maage_storage_join(path, MAAGE_PATH_CAPACITY, directory, MAAGE_APPLICATION_KEY ".log"))) {
-        free(path); return NULL;
+        free(path);
+        return NULL;
     }
     return path;
 }
 #else
 /* Resolve the application directory without changing the process working directory. */
-static char *maage_application_log_path(void)
-{
+static char *maage_application_log_path(void) {
     char *path;
 #if MAAGE_PLATFORM_WINDOWS
     wchar_t *native, *end;
     DWORD count, capacity = 32768;
     int bytes;
-    native = (wchar_t *)malloc((size_t)capacity * sizeof(*native));
+    native = (wchar_t *) malloc((size_t) capacity * sizeof(*native));
     if (!native) return NULL;
     count = GetModuleFileNameW(NULL, native, capacity);
-    if (!count || count >= capacity) { free(native); return NULL; }
+    if (!count || count >= capacity) {
+        free(native);
+        return NULL;
+    }
     end = wcsrchr(native, L'\\');
-    if (!end) { free(native); return NULL; }
+    if (!end) {
+        free(native);
+        return NULL;
+    }
     end[1] = L'\0';
     bytes = WideCharToMultiByte(CP_UTF8, 0, native, -1, NULL, 0, NULL, NULL);
-    path = bytes ? (char *)malloc((size_t)bytes + sizeof("logs/") + sizeof(MAAGE_APPLICATION_KEY) + sizeof(".log")) : NULL;
+    path = bytes ? (char *) malloc((size_t) bytes + sizeof("logs/") + sizeof(MAAGE_APPLICATION_KEY) + sizeof(".log")) : NULL;
     if (!path || !WideCharToMultiByte(CP_UTF8, 0, native, -1, path, bytes, NULL, NULL)) {
-        free(native); free(path); return NULL;
+        free(native);
+        free(path);
+        return NULL;
     }
     free(native);
 #else
@@ -70,7 +77,7 @@ static char *maage_application_log_path(void)
     if (_NSGetExecutablePath(unresolved, &capacity) != 0 || !realpath(unresolved, executable)) return NULL;
 #else
     ssize_t count = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
-    if (count <= 0 || (size_t)count >= sizeof(executable) - 1) return NULL;
+    if (count <= 0 || (size_t) count >= sizeof(executable) - 1) return NULL;
     executable[count] = '\0';
 #endif
     separator = strrchr(executable, '/');
@@ -87,7 +94,7 @@ static char *maage_application_log_path(void)
         separator[1] = '\0';
     }
 #endif
-    path = (char *)malloc(strlen(executable) + sizeof("logs/") + sizeof(MAAGE_APPLICATION_KEY) + sizeof(".log"));
+    path = (char *) malloc(strlen(executable) + sizeof("logs/") + sizeof(MAAGE_APPLICATION_KEY) + sizeof(".log"));
     if (!path) return NULL;
     strcpy(path, executable);
 #endif
@@ -97,10 +104,15 @@ static char *maage_application_log_path(void)
     {
         wchar_t *directory;
         int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
-        directory = count ? (wchar_t *)malloc((size_t)count * sizeof(*directory)) : NULL;
-        if (!directory) { free(path); return NULL; }
+        directory = count ? (wchar_t *) malloc((size_t) count * sizeof(*directory)) : NULL;
+        if (!directory) {
+            free(path);
+            return NULL;
+        }
         if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, directory, count)) {
-            free(directory); free(path); return NULL;
+            free(directory);
+            free(path);
+            return NULL;
         }
         _wmkdir(directory);
         free(directory);
@@ -116,8 +128,7 @@ static char *maage_application_log_path(void)
 
 #endif
 
-static int maage_application_run(int argc, char *const argv[])
-{
+static int maage_application_run(int argc, char *const argv[]) {
     maage_log_config config;
     maage_status outcome, finished;
     char *path;
@@ -152,7 +163,7 @@ static int maage_application_run(int argc, char *const argv[])
 #endif
     outcome = maage_log_init(&config, argc, argv);
     if (!maage_status_is_success(outcome)) maage_log_status(MAAGE_LOG_WARNING,
-        "maage.core.application", outcome, "Logging initialization retained its usable settings.");
+                                                            "maage.core.application", outcome, "Logging initialization retained its usable settings.");
 #ifdef MAAGE_APPLICATION_USER_DATA
     if (!path) maage_log_error("maage.core.application", "Cannot resolve or create the per-user MaaGE logs directory.");
 #endif
@@ -173,32 +184,35 @@ static int maage_application_run(int argc, char *const argv[])
 }
 
 #if MAAGE_PLATFORM_WINDOWS
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int show)
-{
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int show) {
     wchar_t **wide;
     char **args = NULL;
     int count = 0, index, bytes, result;
-    (void)instance; (void)previous; (void)command; (void)show;
+    (void) instance;
+    (void) previous;
+    (void) command;
+    (void) show;
     wide = CommandLineToArgvW(GetCommandLineW(), &count);
-    if (wide) args = (char **)calloc((size_t)count + 1, sizeof(*args));
+    if (wide) args = (char **) calloc((size_t) count + 1, sizeof(*args));
     if (args) {
         for (index = 0; index < count; ++index) {
             bytes = WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, NULL, 0, NULL, NULL);
             if (!bytes) break;
-            args[index] = (char *)malloc((size_t)bytes);
+            args[index] = (char *) malloc((size_t) bytes);
             if (!args[index]) break;
             if (!WideCharToMultiByte(CP_UTF8, 0, wide[index], -1, args[index], bytes, NULL, NULL)) break;
         }
         result = maage_application_run(index == count ? count : 0, index == count ? args : NULL);
-        for (index = 0; index < count; ++index) free(args[index]);
+        for (index = 0; index < count; ++index)
+            free(args[index]);
         free(args);
-    } else result = maage_application_run(0, NULL);
+    } else
+        result = maage_application_run(0, NULL);
     if (wide) LocalFree(wide);
     return result;
 }
 #else
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     return maage_application_run(argc, argv);
 }
 #endif

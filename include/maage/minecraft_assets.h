@@ -9,5 +9,5 @@
  * names, invalid roots, or insufficient capacity. Does not create files, check
  * installation integrity, or require Launcher/UI/networking initialization. */
 maage_status maage_minecraft_asset_path(const char *application_data,
-    const char *name, char *path, size_t capacity, maage_status_trace *trace);
+                                        const char *name, char *path, size_t capacity, maage_status_trace *trace);
 #endif

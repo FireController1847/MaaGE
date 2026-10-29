@@ -9,12 +9,12 @@ typedef struct maage_render_backend_api {
     unsigned int version;
     maage_status (*present)(maage_renderer *renderer, const maage_window_state *state);
     maage_status (*frame)(maage_renderer *renderer, const maage_window_state *state,
-        const maage_render_frame_plan *plan);
+                          const maage_render_frame_plan *plan);
     maage_status (*upload_geometry)(maage_renderer *renderer, maage_render_mesh *mesh,
-        const maage_mesh_data *data);
+                                    const maage_mesh_data *data);
     void (*destroy_mesh)(maage_render_mesh *mesh);
     maage_status (*create_texture)(maage_renderer *renderer,
-        maage_render_texture *texture, const maage_pixel_buffer *atlas);
+                                   maage_render_texture *texture, const maage_pixel_buffer *atlas);
     void (*destroy_texture)(maage_render_texture *texture);
     maage_status (*set_vsync)(maage_renderer *renderer, int enabled);
 } maage_render_backend_api;

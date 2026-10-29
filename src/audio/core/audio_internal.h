@@ -59,5 +59,5 @@ void maage_audio_backend_fail(maage_audio *audio, maage_status result, long nati
 maage_status maage_audio_backend_start(maage_audio *audio, maage_status_trace *trace);
 void maage_audio_backend_stop(maage_audio *audio);
 maage_status maage_audio_result(unsigned char code, unsigned char operation,
-    unsigned char detail);
+                                unsigned char detail);
 #endif

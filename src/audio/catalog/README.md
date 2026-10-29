@@ -1,15 +1,24 @@
-# Phase 6 numeric sound catalog
+# Numeric Sound Catalog
 
-The catalog is Client-only and has no Server, window, graphics or backend dependencies. `sound_catalog_manifest.c` is the single concrete legacy-resource manifest for this pipeline. Every relative stem becomes `minecraft/sounds/<stem>[N].ogg`, resolved by SoundBank against Launcher-reconstructed `minecraft/assets/reconst`. Numbered variants are registered once at creation and decoded/uploaded once during preload; playback never constructs names, performs filesystem I/O or allocates memory.
+The Client-owned catalog maps numeric Session event/material IDs from
+`maage/session_protocol.h` to the single resource manifest in
+`sound_catalog_manifest.c`. SoundBank resolves its `minecraft/sounds/<stem>[N].ogg`
+paths below reconstructed resources. Registration/preload resolves names and
+copies decoded variants into Audio buffers; playback performs no filesystem work,
+name construction or allocation. One audio unit is one world block.
 
-The fixed wire event/material IDs are defined **only** in Agent 6's `maage/session_protocol.h` (IDs 1–14, materials 0–12); the catalog does not publish a second registry. Event metadata is read as `event_id`, `material_id`, `tick`, `sequence`, `x`, `y`, `z`, `intensity` and `pitch`. The shared protocol header is required when integrated. Agent 6 should retain those field spellings, or Agent 11 should adapt the accessors to its final wire declaration. All coordinates and event parameters remain native numeric data. Event positions are in world blocks; one audio unit equals one block.
+`maage_sound_catalog_create` borrows SoundBank and Audio. Set the copied callback
+port once, then preload before dispatch. All callbacks run on the Client audio
+owner. Decode returns owned immutable PCM; upload copies it into an independently
+owned buffer; PCM releases even if upload fails. Play borrows a buffer. Destroy
+releases successful buffers once; borrowed services must outlive it. The Client
+adapter maps the five catalog bus requests to Audio categories and owns listener
+configuration. Music and long-lived ambience scheduling belong to the Client scene,
+not this one-shot catalog.
 
-## Concurrent-contract adapter
-
-At baseline `514abaddc659546d213f52b8ff39f45142e72dd4` the Audio, SoundBank and session protocol headers do not exist. The catalog provides a **non-global, per-instance** `maage_sound_catalog_set_port` callback bridge to avoid guessing their public C APIs or duplicating ownership. Agent 5 (Client Audio service), or Agent 11 at integration, supplies the bridge after creation and before preload. The bridge must map catalog's 5 numeric buses to Agent 1's volume categories and forward position, gain, pitch, and attenuation distance to its voice API. The Audio engine's listener is configured by the Client audio service. `decode` returns an owned immutable decoded PCM reference from SoundBank, `upload` copies it into an independently owned Audio buffer, then `release_pcm` drops the reference regardless of upload outcome. `release_buffer` releases each successful buffer exactly once during destroy. `play` only borrows a buffer and never takes ownership. The Audio engine and SoundBank are borrowed and must outlive the catalog.
-
-`maage_sound_catalog_create(bank,audio,&catalog,trace)` initializes the fixed numeric table; call `maage_sound_catalog_set_port(catalog,&port,trace)`, then `maage_sound_catalog_preload(catalog,trace)` before the first event. Failed individual variants stay absent until catalog destruction and recreation; preload returns `PARTIAL` when some files fail and `NOT_FOUND` at play time when no compatible loaded family exists. Other loaded members of a partially loaded family remain usable. Passing `NULL` to destroy is safe.
-
-The catalog attempts a material-specific footstep/dig family first, then the compatible default stone family. Other sources have compatible fallbacks (swim -> splash, glass -> stone dig, cave/weather -> silent if absent). Player landing uses `damage/fallbig.ogg` when intensity >= 0.85, otherwise `damage/fallsmall.ogg`; placement uses the dig family at lower gain/pitch. Material mapping: dirt -> grass footsteps, gravel digging; metal/glass -> stone footsteps, metal -> stone digging, glass break -> `random/glass`; water -> swimming/splash, lava -> stone steps or lava pop; foliage -> grass steps/cloth digging. Default, out-of-range material IDs, and unavailable material families fall back to stone. GUI/inventory clicks are non-positional, as is the rain bed. Thunder has a large positional radius. This is a bounded one-shot catalog; Agent 4 is responsible for long-lived ambient loops/music scheduling.
-
-Standalone compilation: add this directory with `add_subdirectory(src/audio/catalog)` once the shared session protocol exists. An isolated compile can provide a temporary, **uncommitted** `maage/session_protocol.h` matching the above field and ID contract. No other agents' files or global versions are modified by this target.
+Preload is idempotent. Unavailable variants remain absent until destruction/reload;
+`PARTIAL` retains usable variants, and playback returns `NOT_FOUND` if no compatible
+family is loaded. Material-specific footsteps/digging use compatible stone fallback;
+missing ambience can remain silent. Landing events select small/big fall samples,
+but ordinary jumps, landings and inventory slot changes emit no such event.
+GUI clicks are local/non-positional; thunder requires a real lightning event.

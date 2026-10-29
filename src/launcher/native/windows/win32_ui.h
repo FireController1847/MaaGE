@@ -24,17 +24,17 @@ typedef struct maage_launcher_win32_style {
 } maage_launcher_win32_style;
 
 maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui,
-    HWND window, int width, int height, int dark);
+                                             HWND window, int width, int height, int dark);
 maage_status maage_launcher_win32_style_destroy(maage_launcher_win32_style *ui);
 HWND maage_launcher_win32_control(maage_launcher_win32_style *ui, int page,
-    const wchar_t *kind, const wchar_t *text, DWORD style,
-    int x, int y, int width, int height, int id);
+                                  const wchar_t *kind, const wchar_t *text, DWORD style,
+                                  int x, int y, int width, int height, int id);
 int maage_launcher_win32_scale(const maage_launcher_win32_style *ui, int value);
 COLORREF maage_launcher_win32_color(const maage_launcher_win32_style *ui, int panel);
 COLORREF maage_launcher_win32_text_color(const maage_launcher_win32_style *ui);
 void maage_launcher_win32_layout(maage_launcher_win32_style *ui);
 maage_status maage_launcher_win32_dpi_changed(maage_launcher_win32_style *ui,
-    WPARAM dpi, LPARAM bounds);
+                                              WPARAM dpi, LPARAM bounds);
 LRESULT maage_launcher_win32_button(maage_launcher_win32_style *ui, LPARAM notification);
 LRESULT maage_launcher_win32_combo_measure(maage_launcher_win32_style *ui, LPARAM item);
 LRESULT maage_launcher_win32_combo_draw(maage_launcher_win32_style *ui, LPARAM item);

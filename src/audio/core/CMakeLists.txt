@@ -1,4 +1,4 @@
-# Root integration hook (Agent 11): add_subdirectory(src/audio/core)
+# Native audio engine; the workspace selects platform backends below.
 # The target is asset-free and independent of World, rendering and gameplay.
 add_library(maage_audio STATIC audio.c mixer.c audio_lock.c)
 add_library(MaaGE::Audio ALIAS maage_audio)

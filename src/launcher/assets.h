@@ -4,11 +4,17 @@
 /* Launcher-owned, UI-independent operation. All snapshots are copied under a
  * lock; worker owns installation files. Destroy cancels and joins the worker. */
 typedef enum maage_setup_stage {
-    MAAGE_SETUP_NOT_STARTED, MAAGE_SETUP_PREPARING, MAAGE_SETUP_METADATA,
-    MAAGE_SETUP_DOWNLOADING, MAAGE_SETUP_CLIENT_ARCHIVE, MAAGE_SETUP_CLIENT_EXTRACT,
-    MAAGE_SETUP_VERIFYING, MAAGE_SETUP_RECONSTRUCTING,
+    MAAGE_SETUP_NOT_STARTED,
+    MAAGE_SETUP_PREPARING,
+    MAAGE_SETUP_METADATA,
+    MAAGE_SETUP_DOWNLOADING,
+    MAAGE_SETUP_CLIENT_ARCHIVE,
+    MAAGE_SETUP_CLIENT_EXTRACT,
+    MAAGE_SETUP_VERIFYING,
+    MAAGE_SETUP_RECONSTRUCTING,
     MAAGE_SETUP_COMPLETE,
-    MAAGE_SETUP_CANCELLED, MAAGE_SETUP_FAILED
+    MAAGE_SETUP_CANCELLED,
+    MAAGE_SETUP_FAILED
 } maage_setup_stage;
 typedef struct maage_setup_progress {
     maage_setup_stage stage;

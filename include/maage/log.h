@@ -9,8 +9,12 @@ extern "C" {
 #endif
 
 typedef enum maage_log_level {
-    MAAGE_LOG_VERBOSE, MAAGE_LOG_INFO, MAAGE_LOG_WARNING,
-    MAAGE_LOG_ERROR, MAAGE_LOG_FATAL, MAAGE_LOG_OFF
+    MAAGE_LOG_VERBOSE,
+    MAAGE_LOG_INFO,
+    MAAGE_LOG_WARNING,
+    MAAGE_LOG_ERROR,
+    MAAGE_LOG_FATAL,
+    MAAGE_LOG_OFF
 } maage_log_level;
 
 typedef struct maage_log_config {
@@ -67,11 +71,13 @@ maage_status maage_log_vwrite(maage_log_level level, const char *logger, const c
  * Formatting is skipped when filtered. Report once at the handling boundary;
  * callers own occurrence/failure caches rather than global last-error state. */
 maage_status maage_log_status(maage_log_level level, const char *logger,
-    maage_status result, const char *format, ...);
-/* One bounded single-line causal diagnostic. No trace formatting or allocation
- * occurs if filtered; trace/source strings are borrowed only during this call. */
+                              maage_status result, const char *format, ...);
+/* One bounded multiline event: root status/message, then indented recorded
+ * propagation frames with source/operation and native causes. The log lock spans
+ * the entire event. No trace formatting or allocation occurs if filtered;
+ * trace/source strings are borrowed only during this call. */
 maage_status maage_log_trace_status(maage_log_level level, const char *logger,
-    maage_status result, const maage_status_trace *trace, const char *format, ...);
+                                    maage_status result, const maage_status_trace *trace, const char *format, ...);
 maage_status maage_log_verbose(const char *logger, const char *format, ...);
 maage_status maage_log_warning(const char *logger, const char *format, ...);
 maage_status maage_log_info(const char *logger, const char *format, ...);

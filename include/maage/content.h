@@ -66,7 +66,7 @@ typedef struct maage_content_config {
  * immutable definitions until maage_content_destroy, which must run after
  * World, all asynchronous World jobs, gameplay, and readers have stopped. */
 maage_status maage_content_create(const maage_content_config *config,
-    maage_content **output, maage_status_trace *trace);
+                                  maage_content **output, maage_status_trace *trace);
 const maage_block_registry *maage_content_blocks(const maage_content *content);
 const maage_biome_registry *maage_content_biomes(const maage_content *content);
 const maage_item_registry *maage_content_items(const maage_content *content);

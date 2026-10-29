@@ -29,8 +29,8 @@ typedef struct maage_client_debug {
  * latest_frame_ms remains unsmoothed for upload scheduling. Owner-thread only:
  * no heap allocation, disk I/O, World lock or worker wait. */
 void maage_client_debug_frame(maage_client_debug *debug, double now,
-    double elapsed, int presented, unsigned long ticks, double tick_seconds);
+                              double elapsed, int presented, unsigned long ticks, double tick_seconds);
 const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug,
-    double now, const maage_session_snapshot *snapshot, int radius, int paused,
-    maage_renderer *renderer, const maage_client_mesh_stats *meshes);
+                                                        double now, const maage_session_snapshot *snapshot, int radius, int paused,
+                                                        maage_renderer *renderer, const maage_client_mesh_stats *meshes);
 #endif

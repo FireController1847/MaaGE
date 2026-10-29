@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* Centralized Phase 1 movement parameters. These approximate classic movement
+/* Centralized movement parameters. These approximate classic movement
  * and require programmer fidelity verification against Java Edition 1.7.10;
  * they do not claim complete vanilla movement compatibility. Units are blocks,
  * seconds, and radians; acceleration/drag below are applied per 20 TPS tick. */
@@ -52,7 +52,7 @@ maage_status maage_player_spawn(maage_player *player, const maage_world *world);
  * Raw platform input and camera interpolation remain outside simulation. The
  * AABB sweeps each crossed voxel plane (Y, X, Z), preventing normal tunneling. */
 maage_status maage_player_tick(maage_player *player, const maage_world *world,
-    const maage_player_input *input);
+                               const maage_player_input *input);
 
 #ifdef __cplusplus
 }

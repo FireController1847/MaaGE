@@ -10,7 +10,6 @@
 typedef struct maage_window_system maage_window_system;
 typedef struct maage_window maage_window;
 
-
 typedef enum maage_window_backend {
     MAAGE_WINDOW_AUTO = 0,
     MAAGE_WINDOW_WIN32,
@@ -83,10 +82,22 @@ typedef struct maage_window_state {
 typedef struct maage_window_native {
     maage_window_backend backend;
     union {
-        struct { void *instance; void *window; } win32;
-        struct { void *window; void *view; } cocoa;
-        struct { void *display; unsigned long window; } x11;
-        struct { void *display; void *surface; } wayland;
+        struct {
+            void *instance;
+            void *window;
+        } win32;
+        struct {
+            void *window;
+            void *view;
+        } cocoa;
+        struct {
+            void *display;
+            unsigned long window;
+        } x11;
+        struct {
+            void *display;
+            void *surface;
+        } wayland;
     } handles;
 } maage_window_native;
 
@@ -95,10 +106,10 @@ maage_status maage_window_config_init(maage_window_config *config);
  * Explicit selection never falls back. Failure sets *system to null; PARTIAL
  * owns a usable system after recovering with another native backend. */
 maage_status maage_window_system_create(maage_window_backend backend,
-    maage_window_system **system, maage_status_trace *trace);
+                                        maage_window_system **system, maage_status_trace *trace);
 maage_status maage_window_system_destroy(maage_window_system *system);
 maage_status maage_window_create(maage_window_system *system,
-    const maage_window_config *config, maage_window **window, maage_status_trace *trace);
+                                 const maage_window_config *config, maage_window **window, maage_status_trace *trace);
 maage_status maage_window_destroy(maage_window *window);
 /* wait != 0 may block until OS events arrive; otherwise dispatch available
  * events only. Close requests remain set; resized is consumed by get_state.
@@ -107,7 +118,7 @@ maage_status maage_window_poll_events(maage_window_system *system, int wait);
 /* Process events, waiting at most timeout_ms milliseconds (zero never blocks). */
 maage_status maage_window_wait_events(maage_window_system *system, int timeout_ms);
 maage_status maage_window_get_state(maage_window *window,
-    maage_window_state *state);
+                                    maage_window_state *state);
 maage_status maage_window_set_title(maage_window *window, const char *title);
 /* Initialization-thread operation; consumes/copies sources before returning.
  * Cocoa loads native_path (UTF-8, e.g. ICNS) as the process-wide Dock icon,
@@ -115,7 +126,7 @@ maage_status maage_window_set_title(maage_window *window, const char *title);
  * the supplied RGBA8 sizes into window icons. Unsupported backends, including
  * current Wayland, return NOT_IMPLEMENTED. Failure preserves the current icon. */
 maage_status maage_window_set_icon(maage_window *window,
-    const maage_window_icon *icon);
+                                   const maage_window_icon *icon);
 maage_status maage_window_set_visible(maage_window *window, int visible);
 /* Client-area shape only; capture continues to control cursor visibility.
  * Unsupported backends return NOT_IMPLEMENTED and retain their native cursor. */
@@ -135,13 +146,13 @@ maage_status maage_window_set_cursor(maage_window *window, maage_window_cursor c
 maage_status maage_window_resize(maage_window *window, int width, int height);
 maage_status maage_window_set_mode(maage_window *window, maage_window_mode mode);
 maage_status maage_window_get_native(maage_window *window,
-    maage_window_native *native);
+                                     maage_window_native *native);
 /* Exclusive native-content ownership for a renderer or other surface producer.
  * Acquire once before attaching graphics resources; release after destroying
  * them, before window destruction. Borrowed native handles keep their lifetime.
  * Wayland suspends its empty wl_shm backing while an external owner is active. */
 maage_status maage_window_acquire_surface(maage_window *window,
-    maage_window_native *native);
+                                          maage_window_native *native);
 maage_status maage_window_release_surface(maage_window *window);
 /* Native CPU-image presentation while the caller owns the surface. Copies or
  * consumes the image before returning; never retains borrowed pixel storage.
@@ -149,6 +160,6 @@ maage_status maage_window_release_surface(maage_window *window);
  * retry. Size must match the current framebuffer. Native surfaces may ignore
  * alpha. No GPU SDK is required. */
 maage_status maage_window_present_pixels(maage_window *window,
-    const maage_pixel_buffer *buffer);
+                                         const maage_pixel_buffer *buffer);
 
 #endif

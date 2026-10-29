@@ -7,8 +7,7 @@
 #include <string.h>
 
 maage_status maage_launcher_demonstration(int argc, char *const argv[]);
-maage_status maage_application_main(int argc, char *const argv[])
-{
+maage_status maage_application_main(int argc, char *const argv[]) {
     maage_assets *assets = NULL;
     maage_access *access = NULL;
     maage_launcher_ui ui;
@@ -33,7 +32,10 @@ maage_status maage_application_main(int argc, char *const argv[])
     for (;;) {
         result = maage_access_native_run(access, manage_accounts, &action);
         if (maage_status_failed(result) || !action) goto finished;
-        if (!maage_access_allowed(access)) { result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0); goto finished; }
+        if (!maage_access_allowed(access)) {
+            result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
+            goto finished;
+        }
         result = maage_assets_start(assets, repair);
         if (maage_status_failed(result)) goto finished;
         result = maage_setup_native_run(assets, &action);
@@ -43,9 +45,15 @@ maage_status maage_application_main(int argc, char *const argv[])
         result = maage_access_restore(access);
         if (maage_status_failed(result)) goto finished;
     }
-    if (demonstration) { result = maage_launcher_demonstration(argc, argv); goto finished; }
+    if (demonstration) {
+        result = maage_launcher_demonstration(argc, argv);
+        goto finished;
+    }
     result = maage_launcher_ui_init(&ui, access, assets);
-    if (maage_status_failed(result)) { trace = ui.trace; goto finished; }
+    if (maage_status_failed(result)) {
+        trace = ui.trace;
+        goto finished;
+    }
     for (;;) {
         result = maage_launcher_native_run(&ui, &action);
         if (maage_status_failed(result) || !action) break;

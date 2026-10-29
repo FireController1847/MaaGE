@@ -50,35 +50,35 @@ typedef struct maage_sound_pcm {
  * Copying the root makes caller string lifetime irrelevant. output must be
  * non-NULL and *output must be NULL. memory_budget bounds cached PCM only. */
 maage_status maage_sound_bank_create(const char *data_root, size_t memory_budget,
-    maage_sound_bank **output, maage_status_trace *trace);
+                                     maage_sound_bank **output, maage_status_trace *trace);
 
 /* Exactly one registration per numeric ID. Asset names use existing
  * maage_minecraft_asset_path validation; only .ogg is accepted. Registration
  * never opens, downloads, or decodes the file. */
 maage_status maage_sound_bank_register(maage_sound_bank *bank,
-    unsigned long numeric_clip_id, const char *logical_asset_path,
-    maage_status_trace *trace);
+                                       unsigned long numeric_clip_id, const char *logical_asset_path,
+                                       maage_status_trace *trace);
 
 /* Copy out a caller-owned PCM. No string lookup, filesystem access on cache
  * hits, or negative-resource reopen after the first failed attempt.
  * NOT_FOUND is recoverable and scoped to the failing clip. Transient memory
  * allocation failures are not negatively cached. */
 maage_status maage_sound_bank_decode(maage_sound_bank *bank,
-    unsigned long numeric_clip_id, maage_sound_pcm *pcm,
-    maage_status_trace *trace);
+                                     unsigned long numeric_clip_id, maage_sound_pcm *pcm,
+                                     maage_status_trace *trace);
 
 /* Incremental Ogg/Vorbis decoder; open/read/close run on a non-audio thread.
  * A stream owns its FILE and decoder independently from the bank. Reads produce
  * up to frame_capacity interleaved float frames; zero frames means EOF.
  * Decoding never occurs on the real-time mixer callback. */
 maage_status maage_sound_bank_stream_open(maage_sound_bank *bank,
-    unsigned long numeric_clip_id, maage_sound_stream **output,
-    maage_status_trace *trace);
+                                          unsigned long numeric_clip_id, maage_sound_stream **output,
+                                          maage_status_trace *trace);
 maage_status maage_sound_stream_format(const maage_sound_stream *stream,
-    unsigned int *channels, unsigned int *sample_rate);
+                                       unsigned int *channels, unsigned int *sample_rate);
 maage_status maage_sound_stream_read(maage_sound_stream *stream,
-    float *samples, size_t frame_capacity, size_t *frames_read,
-    maage_status_trace *trace);
+                                     float *samples, size_t frame_capacity, size_t *frames_read,
+                                     maage_status_trace *trace);
 maage_status maage_sound_stream_destroy(maage_sound_stream *stream);
 
 maage_status maage_sound_pcm_destroy(maage_sound_pcm *pcm);

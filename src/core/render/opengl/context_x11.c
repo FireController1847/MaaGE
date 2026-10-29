@@ -13,14 +13,13 @@ typedef struct maage_opengl_context {
 /* Window/renderer calls are restricted to their initialization thread. Bracket
  * context creation so unsupported GLX requests cannot reach Xlib's fatal handler. */
 static int maage_glx_error;
-static int maage_glx_error_handler(Display *display, XErrorEvent *error)
-{
-    (void)display; (void)error;
+static int maage_glx_error_handler(Display *display, XErrorEvent *error) {
+    (void) display;
+    (void) error;
     maage_glx_error = 1;
     return 0;
 }
-maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
-{
+maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
     maage_opengl_context *native;
     XWindowAttributes attributes;
     XVisualInfo query, *visual;
@@ -29,10 +28,10 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
     const char *extensions;
     int (*previous)(Display *, XErrorEvent *);
     int count, index, id;
-    const int requested[] = { GLX_CONTEXT_MAJOR_VERSION_ARB, 3, GLX_CONTEXT_MINOR_VERSION_ARB, 3,
-        GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, None };
+    const int requested[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 3, GLX_CONTEXT_MINOR_VERSION_ARB, 3,
+                             GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB, None};
     if (renderer->native.backend != MAAGE_WINDOW_X11) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-    native = (maage_opengl_context *)calloc(1, sizeof(*native));
+    native = (maage_opengl_context *) calloc(1, sizeof(*native));
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     renderer->platform = native;
     native->display = renderer->native.handles.x11.display;
@@ -46,14 +45,17 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
     previous = XSetErrorHandler(maage_glx_error_handler);
     if (modern) {
         extensions = glXQueryExtensionsString(native->display, visual->screen);
-        create = (PFNGLXCREATECONTEXTATTRIBSARBPROC)glXGetProcAddressARB((const GLubyte *)"glXCreateContextAttribsARB");
+        create = (PFNGLXCREATECONTEXTATTRIBSARBPROC) glXGetProcAddressARB((const GLubyte *) "glXCreateContextAttribsARB");
         if (extensions && strstr(extensions, "GLX_ARB_create_context_profile") && create) {
             configs = glXGetFBConfigs(native->display, visual->screen, &count);
             for (index = 0; configs && index < count; ++index) {
                 glXGetFBConfigAttrib(native->display, configs[index], GLX_VISUAL_ID, &id);
-                if ((VisualID)id == query.visualid) {
+                if ((VisualID) id == query.visualid) {
                     glXGetFBConfigAttrib(native->display, configs[index], GLX_DOUBLEBUFFER, &id);
-                    if (id) { native->context = create(native->display, configs[index], NULL, True, requested); break; }
+                    if (id) {
+                        native->context = create(native->display, configs[index], NULL, True, requested);
+                        break;
+                    }
                 }
             }
             if (configs) XFree(configs);
@@ -72,21 +74,18 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern)
     XFree(visual);
     return native->context && !maage_glx_error ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0) : MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
 }
-void maage_opengl_context_destroy(maage_renderer *renderer)
-{
+void maage_opengl_context_destroy(maage_renderer *renderer) {
     maage_opengl_context *native = renderer->platform;
     if (!native) return;
     if (glXGetCurrentContext() == native->context) glXMakeCurrent(native->display, None, NULL);
     if (native->context) glXDestroyContext(native->display, native->context);
     free(native);
 }
-maage_status maage_opengl_context_bind(maage_renderer *renderer)
-{
+maage_status maage_opengl_context_bind(maage_renderer *renderer) {
     maage_opengl_context *native = renderer->platform;
     return maage_status_make(glXMakeCurrent(native->display, native->window, native->context) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_ACQUIRE, 0);
 }
-maage_status maage_opengl_context_swap(maage_renderer *renderer)
-{
+maage_status maage_opengl_context_swap(maage_renderer *renderer) {
     maage_opengl_context *native = renderer->platform;
     glXSwapBuffers(native->display, native->window);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);

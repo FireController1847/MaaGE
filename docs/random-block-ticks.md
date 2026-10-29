@@ -1,7 +1,7 @@
 # Random Block Ticks
 
 `maage_world_tick` runs random ticks on the authoritative Server owner at 20 TPS,
-after the existing bounded scheduled-fluid phase and inside the same column edit
+after the bounded scheduled-update phase and inside the same column edit
 batch. Pause stops both simulation phases; the independent streaming pump continues.
 
 Initialize `maage_world_config` with `maage_world_config_init`. Its
@@ -32,8 +32,7 @@ by owner mutations. There is no per-tick block scan or sampling allocation.
 For each attempt, the persisted 32-bit coordinate state advances by multiplication
 by 3 and addition of 1013904223, modulo 2^32. After shifting right by 2, bits 0..3
 select X, 8..11 select Z and 16..19 select section-local Y. Untickable sampled
-blocks consume an attempt. Section eligibility is checked at section entry, as in
-1.7.10. Neither scheduled-update records nor individual Client messages represent
+blocks consume an attempt. Section eligibility is checked at section entry, at that point. Neither scheduled-update records nor individual Client messages represent
 these attempts. The last active tick's attempt/callback counts are copied in World
 statistics.
 
@@ -52,27 +51,26 @@ string lookup or job wait is introduced.
 | Cactus | An exposed top shorter than three blocks increments age 0..15; a subsequent tick at age 15 grows one block and resets the old top. New-growth side obstruction produces the normal item drop after capacity preflight. Ages are numeric registered states and persist in chunk palettes. |
 | Brown/red mushrooms | One-in-25 spread chance; stops with five of the same mushroom in the 9x3x9 density neighborhood. Four candidate-walk steps precede one final placement attempt. Current supported substrates require an opaque top and full saved light below 13. |
 | Flowers, tall grass, dead bush | Random substrate check; plants without valid support disappear with their ordinary drops (including the 1/8 tall-grass seed chance and no ordinary dead-bush drop). This does not spawn vegetation. |
-| Leaves | Marked natural leaves propagate log support through up to four face-adjacent leaf cells; supported leaves clear the check flag, unsupported leaves decay with ordinary drops. Player-placed leaves persist. See [Leaf Decay](leaf-decay.md). |
+| Leaves | Marked natural leaves propagate log support through up to four face-adjacent leaf cells; supported leaves clear the check flag, unsupported leaves decay with ordinary drops. Player-placed leaves persist. See Leaf Support below. |
 | Snow layer | Melts to air when saved block light exceeds 11. Full snow blocks do not melt. |
 | Ice | Melts to source water when saved block light exceeds `11 - light_opacity` (8 for built-in ice); normal fluid scheduling follows. |
 
 Grass uses daylight/weather-subtracted sky light combined with block light,
-including the reference's five-neighbor brightness rule for applicable cover.
+including five-neighbor brightness sampling for applicable cover.
 Mushrooms use full saved light, and melting uses block light only. Queries defer
 when lighting is unavailable or an earlier opacity/emission edit invalidates it;
 missing light is never treated as darkness. Cross-column destinations and all
 required neighborhoods must be loaded. No sample triggers synchronous relighting.
 
 Immediate plant/cactus support reactions now use the persistent neighbor-update
-queue described in [Client Parity](gameplay-parity.md). Crops/sapling growth, lava
+queue described in [Client UI and Visual World](gameplay-parity.md). Crops/sapling growth, lava
 fire ignition, weather-driven snow accumulation/freezing and Nether-specific ice
 behavior remain unsupported. Mycelium and podzol are absent from the catalog, so their mushroom
 light exceptions do not apply. Dirt and full snow blocks have no random callback.
-Lava, flowing water and oriented torches retain reference-derived sampling
+Lava, flowing water and oriented torches retain registered sampling
 eligibility even where the callback is absent. Lava lacks fire, fluid flow
-remains exclusively scheduled, and the
-registered torches already have orientation metadata (the reference's random
-callback only initializes metadata zero). No unsupported behavior is fabricated.
+remains exclusively scheduled, and torches already have initialized orientation
+metadata. Unsupported callbacks are not fabricated.
 
 ## Randomness and Persistence
 
@@ -91,32 +89,86 @@ metadata encoding, before the CRC. Zero is valid for the coordinate LCG; a saved
 zero behavior/weather xorshift state or a word above 32 bits is rejected.
 The same atomic world checkpoint contains player, entities, weather and random
 block-tick progression. Previous development worlds are rejected
-and must be recreated; no migration or automatic deletion is performed. Chunk
-encoding is unchanged. The copied local Session snapshot contract is version 10.
+and must be recreated; no migration or automatic deletion is performed. Chunk files independently persist scheduled fluid/support work.
 Resume restores stream positions; it does not guarantee
 identical gameplay traces when different streaming/lighting availability changes
 which samples can execute. Coordinate traversal itself does not depend on hash,
 cache insertion or worker-completion order.
 
-## Reference and Validation
+## Leaf Support
 
-The supplied local Forge `unpacked` tree contains Forge/FML support sources. The
-adjacent cached `forgeSrc-1.7.10-10.13.4.1614-1.7.10-sources.jar` supplies the inspected
-Minecraft classes: `WorldServer.func_147456_g`/`func_152379_p`,
-`World.setActivePlayerChunksAndCheckLight`, `World.getBlockLightValue_do`,
-`World.getFullBlockLightValue`, `World.calculateSkylightSubtracted`,
-`World.getSunBrightnessFactor`, `Chunk.getBlockLightValue`,
-`ExtendedBlockStorage.func_150818_a`/`getNeedsRandomTick`/`removeInvalidBlocks`,
-`Block.setTickRandomly`/`getTickRandomly`/`registerBlocks`, the relevant material
-properties, and `updateTick` on `BlockGrass`, `BlockCactus`, `BlockMushroom`,
-`BlockSnow`, `BlockIce`, `BlockLeaves` and `BlockBush`; the Forge patches restore
-the vanilla `BlockBush`/`BlockTallGrass` substrate checks. `BlockDeadBush`,
-`BlockTorch`, `BlockRedstoneOre`, `BlockDirt` and `GameRules`
-were also inspected. 1.7.10 hardcodes three section attempts and has no
-`randomTickSpeed` gamerule; MaaGE makes that rate configurable.
+Leaf metadata uses species bits 0..1 (oak 0, spruce 1, birch 2), persistence bit
+4, and pending-check bit 8. The immutable registry contains all twelve combinations:
 
-macOS ARM64 Debug/Release World, Server and Client compiled/linked, including the
-Metal/Vulkan Client configuration. A separate Release headless World/Server build
-also passed. Client linking reported duplicate-library warnings. Windows/Linux
-were not compiled. No applications, tests, benchmarks or Actions ran; runtime and
-visual validation remain with the programmer.
+| Metadata flags | Oak / spruce / birch state IDs | Meaning |
+| --- | --- | --- |
+| 0 | 18 / 274 / 275 | Natural, already checked |
+| 4 | 576 / 577 / 578 | Persistent player placement |
+| 8 | 579 / 580 / 581 | Natural, awaiting support evaluation |
+| 12 | 582 / 583 / 584 | Persistent with check bit retained; never decays |
+
+`maage_block_leaves_state` maps metadata directly to numeric states. Player item
+placement sets bit 4. Check-bit mutations
+preserve species, textures and biome tint. All variants remain eligible for the
+same section sampler; persistent and already-checked leaves return NOOP.
+
+### Propagation
+
+`maage_leaves_changed` participates in the existing owner mutation batch. Replacing
+a log with a non-log marks natural leaves in its radius-4 cube. Removing a leaf
+marks natural leaves in its radius-1 cube, including diagonals. Already-pending
+and persistent leaves are skipped. Flag-only mutations cannot recurse into removal
+propagation; repeated removals reuse one private edit per touched column.
+
+On a random opportunity, marked natural leaves first require the radius-5 column
+neighborhood to be loaded. The callback samples the 9x9x9 radius-4 cube, seeds all
+logs as support distance zero, and propagates through six face-adjacent leaf cells
+for at most four edges. An isolated nearby log cannot support disconnected leaves.
+All supported log orientations/species qualify, and persistent leaves can carry
+support through a canopy. Vertical coordinates outside 0..255 are known air.
+
+A connected center clears bit 8. An unsupported center reserves ordinary item
+drops and changes to air through expected-state `maage_world_set`. Actual removal
+uses normal lighting/mesh invalidation and triggers adjacent leaf rechecks.
+The temporary search uses 729 signed bytes and 729 short queue entries on the
+owner's stack; it scans no whole chunk and allocates nothing for the search.
+
+If any required column is unavailable, the callback retains its check bit and
+returns NOOP without consuming behavior RNG or loading terrain. Removal marks only
+currently loaded destinations. Detached load/generation output marks natural leaves
+for rechecking during the existing section-count initialization pass. This bounded
+import step catches support changes while a destination was absent, without a
+persistent removal-event queue, synchronous loads, or distant generation. Persistent
+states are preserved. Rechecked imported columns become dirty for normal saving.
+
+Flag-only owner edits save new authoritative states while preserving Server
+geometry/light epochs. An accepted asynchronous lighting result merges current
+authoritative state arrays and auxiliary data into its private output before
+publication, retaining current leaf flags with the worker's computed light.
+
+### Decay Drops
+
+Natural decay reuses `maage_item_generate_drops` with no tool: each supported
+species has a 1/20 chance of one corresponding sapling; oak independently has a
+1/200 chance of one apple. Both may drop. No quantities go directly to inventory.
+Leaf-decay drop draws derive from the random-tick behavior stream; the existing
+player/item-entity RNG remains separate. Capacity is reserved before removal, and
+spawns use the existing item-entity store. Ordered owner mutations and expected
+state checks prevent a mined leaf from also decaying into a second drop.
+
+Player breaking retains existing shears behavior (one species-matching leaf item)
+and ordinary drop probabilities. Persistence flags affect natural decay, not the
+ordinary breaking drop table. Fortune and Silk Touch remain unsupported; there is no enchantment system. No jungle leaves/species are registered.
+
+## Persistence and Review
+
+The seed domains are `0x41c64e6d` and `0x85ebca6b`; a new zero behavior seed
+normalizes to one. Resume never reseeds either saved stream. `MGWORLD6` stores
+both words before its CRC, atomically with player, entities and environment.
+Leaf states use the namespaced block/metadata chunk palette.
+
+Programmer review should cover speed zero, pause/resume, growth/light thresholds,
+connected versus disconnected leaf paths, placed leaves, unloaded boundaries,
+ordinary/shears/decay drops and save/reopen continuation. Sampling order and
+persistence contracts do not imply identical gameplay under different terrain
+availability. Runtime verification remains pending.

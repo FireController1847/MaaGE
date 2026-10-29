@@ -75,3 +75,6 @@ CMakeUserPresets.json
 # Workspace-generated configuration, intermediates, and compiled artifacts
 /cmake/
 /build/
+
+# macOS Finder metadata
+.DS_Store
