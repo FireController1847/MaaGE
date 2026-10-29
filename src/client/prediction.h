@@ -18,10 +18,14 @@ typedef struct maage_client_prediction {
         int active, confirmed;
         unsigned long id, revisions[9], generation;
         unsigned int supplied_faces;
+        double input_at, predicted_at;
+        unsigned long frame;
         maage_world_neighborhood sample;
     } entries[MAAGE_CLIENT_PREDICTIONS];
     unsigned long next_id, session, world, generation, applied_generation;
-    unsigned long observed_tick;
+    unsigned long observed_tick, frame, backlog_tick;
+    double input_at;
+    int diagnostics;
     maage_leaves_mode leaves;
     maage_world_target target;
     maage_item_stack held;

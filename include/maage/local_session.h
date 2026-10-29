@@ -9,11 +9,18 @@ extern "C" {
 
 typedef struct maage_local_session maage_local_session;
 
+typedef struct maage_local_session_backlog {
+    size_t commands, events, columns;
+} maage_local_session_backlog;
+/* Bounded counters only; no borrowed queue data or allocations. */
+maage_status maage_local_session_get_backlog(maage_local_session *session, maage_local_session_backlog *backlog);
+
 /* Ordered owned block-state packets. Offer consumes column on SUCCESS only.
  * Deltas are never overwritten/coalesced across their base revision. */
 typedef struct maage_local_column_update {
     int x, z;
     unsigned long revision, world_epoch;
+    double offered_at; /* Local transport clock only; remote adapters must use -1. */
     maage_column_update *column;
 } maage_local_column_update;
 

@@ -48,7 +48,7 @@ struct maage_server_runtime {
     maage_status last_world_notice, crafting_failure;
     int publication_dirty;
     maage_session_collision collision;
-    int sneaking;
+    int sneaking, diagnostics;
     unsigned long last_prediction;
     struct {
         int active, resolved;
@@ -325,6 +325,7 @@ static void server_predictions(maage_server_runtime *runtime) {
             server_capture_failure(runtime, result, NULL);
             break;
         }
+        if (runtime->diagnostics) maage_log_info("maage.server.latency", "action=%lu accepted=%d revision=%lu resolved_at=%.6f", event->prediction, event->accepted, event->column_revisions[4], maage_time_monotonic_seconds());
         runtime->predictions[i].active = 0;
     }
 }
@@ -333,6 +334,7 @@ static maage_status server_predict_request(maage_server_runtime *runtime, const 
     unsigned int i;
     maage_status result;
     if (!command->prediction || command->prediction <= runtime->last_prediction || command->prediction > 4294967295UL) return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+    if (runtime->diagnostics) maage_log_info("maage.server.latency", "action=%lu sequence=%lu received_at=%.6f tick=%lu", command->prediction, command->sequence, maage_time_monotonic_seconds(), runtime->tick);
     runtime->last_prediction = command->prediction;
     for (i = 0; i < 32 && runtime->predictions[i].active; ++i) {
     }
@@ -516,7 +518,11 @@ static maage_status server_take_commands(maage_server_runtime *runtime) {
             break;
         }
         if (maage_status_failed(result)) return result;
-        (void) server_apply_command(runtime, &command); /* rejected action is not fatal */
+        {
+            double began = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
+            (void) server_apply_command(runtime, &command); /* rejected action is not fatal */
+            if (runtime->diagnostics && command.prediction) maage_log_info("maage.server.latency", "action=%lu command_ms=%.3f", command.prediction, (maage_time_monotonic_seconds() - began) * 1000);
+        }
         if (command.kind == MAAGE_CMD_DISCONNECT) break;
     }
     return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_POLL);
@@ -644,6 +650,7 @@ static void server_offer_columns(maage_server_runtime *runtime) {
         outgoing.z = update->z;
         outgoing.revision = update->revision;
         outgoing.world_epoch = 1UL;
+        outgoing.offered_at = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
         outgoing.column = update;
         result = maage_local_session_offer_column(runtime->config.session, &outgoing);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) result = maage_world_ack_column(runtime->world, outgoing.x, outgoing.z, outgoing.revision);
@@ -1000,6 +1007,7 @@ maage_status maage_server_runtime_create(const maage_server_config *config, maag
         return MAAGE_STATUS_TRACE(trace, server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_CREATE);
     runtime = (maage_server_runtime *) calloc(1, sizeof(*runtime));
     if (!runtime) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
+    runtime->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     runtime->config = *config;
     runtime->instance_root = server_copy(config->instance_root);
     runtime->world_id = server_copy(config->world_id);

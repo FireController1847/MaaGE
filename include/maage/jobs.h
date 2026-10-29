@@ -17,9 +17,10 @@ typedef struct maage_job_completion {
     maage_job_id id;
     void *context;
     int cancelled;
-    maage_status result;           /* Published callback outcome, or scheduler interruption. */
-    maage_status operation_result; /* Original callback outcome; NOOP if never invoked. */
-    maage_status_trace trace;      /* Owned value; no references to callback stack data. */
+    maage_status result;                             /* Published callback outcome, or scheduler interruption. */
+    maage_status operation_result;                   /* Original callback outcome; NOOP if never invoked. */
+    maage_status_trace trace;                        /* Owned value; no references to callback stack data. */
+    double queue_seconds, run_seconds, completed_at; /* Local monotonic durations; -1 if unavailable. */
 } maage_job_completion;
 
 typedef struct maage_jobs_stats {

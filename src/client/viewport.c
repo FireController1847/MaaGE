@@ -226,6 +226,7 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
     double budget_ms = maage_client_mesh_budget(options, debug, activity);
     size_t i, selected, vacant;
     unsigned int processed = 0;
+    int diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     activity->status.uploaded_this_frame = 0;
     activity->status.frame_upload_ms = 0;
     activity->status.budget_ms = budget_ms;
@@ -297,6 +298,7 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
                 return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
             }
             upload_ms = (current - upload_begin) * 1000.0;
+            if (diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu state=%lu upload_wait_ms=%.3f upload_ms=%.3f", update.x, update.z, update.revision, update.state_revision, update.completed_at >= 0 ? (upload_begin - update.completed_at) * 1000 : -1, upload_ms);
             activity->status.frame_upload_ms += upload_ms;
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 activity->expected_upload_ms = activity->status.gpu_uploads ? activity->expected_upload_ms * 0.75 + upload_ms * 0.25 : upload_ms;
@@ -1173,9 +1175,15 @@ choose_world:
                 if (maage_status_code(operation) == MAAGE_STATUS_NOOP || maage_status_code(operation) == MAAGE_STATUS_INVALID_STATE) break;
                 if (maage_status_failed(operation)) goto done;
                 if (column_update.world_epoch == world_epoch) operation = maage_world_apply_column(visual_world, column_update.column);
+                if (prediction.diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu local_transport_ms=%.3f applied_at=%.6f receive_apply_ms=%.3f", column_update.x, column_update.z, column_update.revision, column_update.offered_at >= 0 ? (maage_time_monotonic_seconds() - column_update.offered_at) * 1000 : -1, maage_time_monotonic_seconds(), (maage_time_monotonic_seconds() - receive_begin) * 1000);
                 maage_column_update_destroy(column_update.column);
                 if (maage_status_failed(operation)) goto done;
                 if ((maage_time_monotonic_seconds() - receive_begin) * 1000.0 >= 2.0) break;
+            }
+            if (prediction.diagnostics && latest.tick != prediction.backlog_tick && latest.tick % 20 == 0) {
+                maage_local_session_backlog backlog;
+                prediction.backlog_tick = latest.tick;
+                if (maage_status_is_success(maage_local_session_get_backlog(session, &backlog))) maage_log_info("maage.client.latency", "tick=%lu command_backlog=%lu event_backlog=%lu column_backlog=%lu", latest.tick, (unsigned long) backlog.commands, (unsigned long) backlog.events, (unsigned long) backlog.columns);
             }
             video_options.leaves = maage_client_ui_leaves_mode(ui);
             operation = maage_world_set_leaves_mode(visual_world, video_options.leaves);

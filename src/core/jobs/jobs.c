@@ -14,7 +14,7 @@ typedef struct maage_job_record {
     unsigned priority, heap_index, stage;
     unsigned long order_high, order_low;
     int state, cancelled;
-    double submitted;
+    double submitted, started_at, completed_at;
     maage_job_run run;
     void *context;
     maage_status result;
@@ -89,6 +89,7 @@ static void maage_jobs_complete(maage_jobs *jobs, unsigned slot) {
     maage_job_record *record;
     unsigned tail;
     record = &jobs->records[slot];
+    record->completed_at = maage_time_monotonic_seconds();
     record->state = MAAGE_JOB_READY;
     tail = jobs->ready >= jobs->capacity - jobs->ready_head ? jobs->ready - (jobs->capacity - jobs->ready_head) : jobs->ready_head + jobs->ready;
     jobs->ready_slots[tail] = slot;
@@ -117,6 +118,7 @@ static void maage_jobs_worker(void *context) {
         ++jobs->running;
         record->result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_JOB, 0);
         now = maage_time_monotonic_seconds();
+        record->started_at = now;
         if (record->submitted >= 0.0 && now >= record->submitted) {
             latency = now - record->submitted;
             ++jobs->started;
@@ -237,6 +239,7 @@ maage_status maage_jobs_submit(maage_jobs *jobs, unsigned priority, maage_job_ru
     record->run = run;
     record->context = context;
     record->submitted = maage_time_monotonic_seconds();
+    record->started_at = record->completed_at = -1.0;
     maage_jobs_heap_up(jobs, jobs->queued++, slot);
     *id = record->id;
     maage_condition_signal(jobs->work);
@@ -315,6 +318,9 @@ maage_status maage_jobs_poll(maage_jobs *jobs, maage_job_completion *completion)
     completion->result = record->cancelled ? maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_JOB, MAAGE_DETAIL_CANCELLED) : record->result;
     completion->operation_result = record->result;
     completion->trace = record->trace;
+    completion->queue_seconds = record->started_at >= record->submitted && record->submitted >= 0 ? record->started_at - record->submitted : -1.0;
+    completion->run_seconds = record->completed_at >= record->started_at && record->started_at >= 0 ? record->completed_at - record->started_at : -1.0;
+    completion->completed_at = record->completed_at;
     if (record->cancelled) MAAGE_STATUS_TRACE(&completion->trace, completion->result, MAAGE_CONTEXT_SCHEDULER, MAAGE_OPERATION_CANCEL);
     record->state = MAAGE_JOB_FREE;
     record->context = NULL;

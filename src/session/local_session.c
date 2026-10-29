@@ -397,3 +397,13 @@ maage_status maage_local_session_take_collision(maage_local_session *session, ma
     maage_mutex_unlock(session->mutex);
     return result;
 }
+
+maage_status maage_local_session_get_backlog(maage_local_session *session, maage_local_session_backlog *backlog) {
+    if (!session || !backlog) return session_argument(MAAGE_OPERATION_QUERY, 0);
+    maage_mutex_lock(session->mutex);
+    backlog->commands = session->command_count;
+    backlog->events = session->event_count;
+    backlog->columns = session->column_count;
+    maage_mutex_unlock(session->mutex);
+    return session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_QUERY);
+}

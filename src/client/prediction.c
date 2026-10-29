@@ -1,4 +1,6 @@
 #include "prediction.h"
+#include "maage/time.h"
+#include "maage/log.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,6 +85,7 @@ void maage_client_prediction_confirm(maage_client_prediction *prediction, const 
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)
         if (prediction->entries[i].active && prediction->entries[i].id == event->prediction) {
             if (event->block.x != prediction->entries[i].sample.x || event->block.y != prediction->entries[i].sample.y || event->block.z != prediction->entries[i].sample.z) return;
+            if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu accepted=%d acknowledgment_ms=%.3f", event->prediction, event->accepted, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000);
             if (!event->accepted) {
                 prediction->entries[i].active = 0;
                 prediction->rollback_requested = 1;
@@ -185,10 +188,13 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) maage_world_sample_neighborhood(visual, local_target.x, local_target.y, local_target.z, &mining);
     if (prediction->session != snapshot->session_epoch || prediction->world != snapshot->world_epoch) {
         maage_client_prediction_destroy(prediction);
+        prediction->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
         prediction->session = snapshot->session_epoch;
         prediction->world = snapshot->world_epoch;
         ++prediction->generation;
     }
+    ++prediction->frame;
+    if (pressed) prediction->input_at = prediction->diagnostics ? maage_time_monotonic_seconds() : -1;
     if (prediction->leaves != leaves) {
         prediction->leaves = leaves;
         ++prediction->generation;
@@ -227,6 +233,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                     if (column && column->revision < prediction->entries[i].revisions[index]) ready = 0;
                 }
             if (ready) {
+                if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu confirmed_geometry_ms=%.3f frames=%lu", prediction->entries[i].id, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, prediction->frame - prediction->entries[i].frame);
                 prediction->entries[i].active = 0;
                 ++prediction->generation;
             }
@@ -286,6 +293,10 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                             if (!neighbor_column || neighbor_column->revision != mining.revisions[dx + 1 + 3 * (dz + 1)]) predictable = 0;
                         }
                 if (column && column->source && predictable) {
+                    prediction->entries[vacant].predicted_at = prediction->diagnostics ? maage_time_monotonic_seconds() : -1;
+                    prediction->entries[vacant].input_at = prediction->input_at;
+                    prediction->entries[vacant].frame = prediction->frame;
+                    if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu input_to_prediction_ms=%.3f predicted_at=%.6f", prediction->next_id + 1, (prediction->entries[vacant].predicted_at - prediction->input_at) * 1000, prediction->entries[vacant].predicted_at);
                     prediction->entries[vacant].active = 1;
                     prediction->entries[vacant].confirmed = 0;
                     prediction->entries[vacant].supplied_faces = 0;
@@ -356,6 +367,7 @@ reconcile:
     if (prediction->dirty || prediction->generation != prediction->applied_generation) {
         result = maage_prediction_rebuild(prediction, renderer, atlas, blocks, biomes, meshes, capacity, trace);
         if (maage_status_failed(result)) return result;
+        if (prediction->diagnostics && command->kind) maage_log_info("maage.client.latency", "action=%lu prediction_geometry_ms=%.3f frames=0", command->prediction, (maage_time_monotonic_seconds() - prediction->entries[vacant].predicted_at) * 1000);
     }
     return maage_prediction_status(command->kind ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
 }

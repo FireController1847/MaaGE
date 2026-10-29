@@ -69,6 +69,23 @@ Growth, melting and survival defer when that cache is unavailable/stale. The Cli
 samples its own light for player, hand, item entities, pickup effects and F3.
 Day/night scales sky brightness in frame uniforms without relighting.
 
+## Optional Pipeline Diagnostics
+
+`MAAGE_WORLD_DIAGNOSTICS=1` enables bounded records under `maage.world.latency`,
+`maage.server.latency` and `maage.client.latency`. Action IDs correlate prediction,
+Server admission/acknowledgment and confirmed geometry. Column/revision IDs correlate
+mutations, receipt, worker queue/execution/disposition and GPU upload wait/execution.
+World backlog summaries are limited to one per second. Records allocate no diagnostic
+history. Prediction geometry timing ends at upload/submission, not display scanout.
+Local transport durations use one process monotonic clock; remote adapters must mark
+untranslated timestamps unavailable and report peer-local durations separately.
+
+The current critical gates are neighborhood light validity during prediction,
+neighbor mesh revision equality, light readiness before meshing, a single active
+visual-light transaction, whole-halo epoch validation and completion-order uploads.
+These can postpone or reject usable geometry independently of Server block authority.
+Optional diagnostics expose those queues/dispositions; runtime latency remains unmeasured.
+
 ## Break Prediction and Swing
 
 Prediction is bounded Client presentation over copied numeric neighborhoods and

@@ -141,6 +141,7 @@ typedef struct maage_world_mesh_update {
     unsigned long revision;
     unsigned long state_revision, presentation_generation;
     int predicted;
+    double completed_at;    /* Local worker completion time, never a remote timestamp. */
     maage_world_mesh *mesh; /* ownership transfers to caller */
 } maage_world_mesh_update;
 typedef struct maage_world_target {

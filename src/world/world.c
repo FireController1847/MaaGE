@@ -28,6 +28,7 @@ typedef struct maage_world_slot {
     unsigned long mesh_failed_revision, block_revision, sent_revision;
     unsigned long mesh_state_revision, mesh_presentation_generation;
     int mesh_predicted;
+    double mesh_completed_at;
     maage_chunk_snapshot *sent, *authority;
     unsigned char light_cells[8192];
     maage_chunk_snapshot *data;
@@ -82,7 +83,8 @@ struct maage_world {
     int scan_ring, save_turn;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
-    int center_x, center_z, stopped, failed, visual_light_active;
+    int center_x, center_z, stopped, failed, visual_light_active, diagnostics;
+    double diagnostic_at;
     maage_block_position predictions[32];
     maage_block_state_id prediction_states[32];
     size_t prediction_count;
@@ -412,6 +414,7 @@ static void maage_world_commit_edits(maage_world *world) {
             maage_world_invalidate(world, slot, 1);
             slot->data_epoch = slot->revision;
             slot->block_revision = slot->revision;
+            if (world->diagnostics) maage_log_info("maage.world.latency", "owner=server mutation_revision=%lu column=%d,%d mutated_at=%.6f", slot->block_revision, slot->x, slot->z, maage_time_monotonic_seconds());
             maage_world_invalidate_neighbors(world, slot->x, slot->z, 15U);
             maage_world_cancel(world, slot->work);
             slot->work = NULL;
@@ -712,6 +715,7 @@ static maage_status maage_world_collect(maage_world *world) {
             maage_world_mesh_destroy(slot->pending_mesh);
             slot->pending_mesh = task->mesh;
             task->mesh = NULL;
+            slot->mesh_completed_at = completion.completed_at;
             slot->mesh_revision = task->revision;
             slot->mesh_state_revision = task->light_epoch;
             slot->mesh_predicted = task->predicted;
@@ -726,6 +730,7 @@ static maage_status maage_world_collect(maage_world *world) {
                 world->mesh_tail = slot;
             }
         }
+        if (world->diagnostics) maage_log_info("maage.world.latency", "owner=%s kind=%d job=%lu column=%d,%d revision=%lu queue_ms=%.3f run_ms=%.3f cancelled=%d stale=%d", world->config.presentation_only ? "client" : "server", task->kind, task->id, task->x, task->z, task->revision, completion.queue_seconds * 1000, completion.run_seconds * 1000, completion.cancelled, maage_status_detail(disposition) == MAAGE_DETAIL_STALE);
         ++world->stats.completed_jobs;
         world->stats.last_job_result = disposition;
         world->stats.last_job_operation_result = completion.operation_result;
@@ -1056,6 +1061,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
         free(world);
         return result;
     }
+    world->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     world->config = *config;
     world->config.generation_policy = policy;
     world->leaves_mode = MAAGE_LEAVES_FANCY;
@@ -1180,6 +1186,23 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     }
     if (!world->config.presentation_only || cx != old_x || cz != old_z) maage_world_retire(world);
     maage_world_schedule(world);
+    if (world->diagnostics) {
+        double now = maage_time_monotonic_seconds();
+        if (now >= world->diagnostic_at + 1.0) {
+            unsigned blocks = 0, initial = 0, light = 0, mesh = 0, upload = 0;
+            for (slot = world->chunks; slot; slot = slot->next) {
+                if (!maage_world_complete(slot)) ++blocks;
+                else {
+                    if (!slot->light_ready) ++initial;
+                    if (slot->light_dirty || (slot->work && slot->work->kind == MAAGE_JOB_LIGHT)) ++light;
+                    if (slot->mesh_dirty || (slot->work && slot->work->kind == MAAGE_JOB_MESH)) ++mesh;
+                    if (slot->pending_mesh) ++upload;
+                }
+            }
+            maage_log_info("maage.world.latency", "owner=%s center=%d,%d resident=%u awaiting_blocks=%u initializing_light=%u awaiting_light=%u awaiting_mesh=%u awaiting_upload=%u accepted=%u stale=%lu cancelled=%lu", world->config.presentation_only ? "client" : "server", cx, cz, world->count, blocks, initial, light, mesh, upload, world->active, world->stats.stale_jobs, world->stats.cancelled_jobs);
+            world->diagnostic_at = now;
+        }
+    }
     if (world->failed || world->stats.failure_reports != failures) {
         if (trace) *trace = world->trace;
         return world->failed ? world->stats.last_result : maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
@@ -1512,6 +1535,7 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
         update->revision = chosen->mesh_revision;
         update->state_revision = chosen->mesh_state_revision;
         update->presentation_generation = chosen->mesh_presentation_generation;
+        update->completed_at = chosen->mesh_completed_at;
         update->predicted = chosen->mesh_predicted;
         update->mesh = chosen->pending_mesh;
         chosen->pending_mesh = NULL;
