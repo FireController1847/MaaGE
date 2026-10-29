@@ -4,6 +4,7 @@
 #include "maage/gameplay.h"
 #include "maage/environment.h"
 #include "maage/entities.h"
+#include "maage/random_ticks.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -12,6 +13,7 @@ typedef struct maage_world_record {
     maage_world_seed seed;
     maage_generation_policy generation_policy;
     maage_environment_state environment;
+    maage_random_tick_state random_ticks;
     double position[3], yaw, pitch;
     int new_world; /* pending initial spawn; persists until first player save */
     maage_gameplay_save gameplay;
@@ -51,7 +53,8 @@ maage_status maage_world_store_open(const char *instance_root, const char *id,
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
  * independent chunk files may be written concurrently. Player inventories and
  * World entities use stable namespaced item identities; no numeric mapping is persisted.
- * Environment and generation settings share the same atomic metadata replacement. */
+ * Environment, the World's independent random-tick checkpoint and generation
+ * settings share the same atomic metadata replacement (MGWORLD6 only). */
 maage_status maage_world_store_save(maage_world_store *store,
     const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world,
     const maage_environment_state *environment, char error[256], maage_status_trace *trace);

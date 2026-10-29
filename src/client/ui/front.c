@@ -103,7 +103,11 @@ static void front_draw(maage_client_ui *ui, void *context)
             maage_client_ui_text(ui,f->entries[i].name,ui->clip.x,ui->clip.y,MAAGE_CLIENT_UI_LEFT,1,1,1);
             sprintf(line,"Created %.10s",f->entries[i].created_utc);
             maage_client_ui_text(ui,line,ui->clip.x,ui->clip.y+11,MAAGE_CLIENT_UI_LEFT,0.5f,0.5f,0.5f);
-            maage_client_ui_text(ui,maage_status_failed(f->entries[i].status)?"Unreadable / unsupported":
+            maage_client_ui_text(ui,maage_status_code(f->entries[i].status)==MAAGE_STATUS_MALFORMED_INPUT &&
+                maage_status_context(f->entries[i].status)==MAAGE_CONTEXT_WORLD_IO &&
+                maage_status_operation(f->entries[i].status)==MAAGE_OPERATION_LOAD &&
+                maage_status_detail(f->entries[i].status)==MAAGE_DETAIL_WORLD_FORMAT?"Incompatible dev format":
+                maage_status_failed(f->entries[i].status)?"Unreadable / unsupported":
                 f->entries[i].game_mode?"Creative Mode":"Survival Mode",ui->clip.x,ui->clip.y+22,
                 MAAGE_CLIENT_UI_LEFT,0.5f,0.5f,0.5f);
             ui->clip=ui->content;

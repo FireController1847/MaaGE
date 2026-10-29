@@ -48,6 +48,7 @@ typedef enum maage_leaves_mode {
 } maage_leaves_mode;
 typedef struct maage_world_store maage_world_store;
 struct maage_environment_state;
+struct maage_random_tick_state;
 struct maage_item_registry;
 typedef enum maage_chunk_state {
     MAAGE_CHUNK_REQUESTED = 0, MAAGE_CHUNK_LOADING, MAAGE_CHUNK_GENERATING,
@@ -79,6 +80,8 @@ typedef struct maage_world_config {
     maage_generation_policy generation_policy;
     /* Copied during creation; NULL starts the seeded clock/weather defaults. */
     const struct maage_environment_state *initial_environment;
+    /* Copied independently; NULL uses deterministic seed/domain defaults. */
+    const struct maage_random_tick_state *initial_random_ticks;
 } maage_world_config;
 maage_status maage_world_config_init(maage_world_config *config);
 typedef struct maage_world_stats {

@@ -431,6 +431,8 @@ static maage_status maage_store_metadata_write(const maage_world_store *store,
         return maage_store_fail(error, "World generation policy is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     if (!maage_store_gameplay_valid(&record->gameplay, store->items))
         return maage_store_fail(error, "Player gameplay identity or pickup data is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
+    if (!maage_random_tick_state_valid(&record->random_ticks))
+        return maage_store_fail(error, "World random-tick checkpoint is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     if (!maage_environment_state_valid(&record->environment))
         return maage_store_fail(error, "World environment snapshot is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     /* Each entity uses at most 325 bytes including its 255-byte item identity.
@@ -443,7 +445,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store,
     data = (unsigned char *)malloc(capacity);
     if (!data) return maage_store_fail(error, "Not enough memory to encode player metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
     bytes.data = data; bytes.length = capacity; bytes.position = 0; bytes.failed = 0; bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD5", 8);
+    maage_store_text_put(&bytes, "MGWORLD6", 8);
     maage_store_put(&bytes, record->seed.low, 4); maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1); maage_store_put(&bytes, strlen(record->name), 1);
     maage_store_put(&bytes, strlen(record->created_utc), 1); maage_store_put(&bytes, record->new_world ? 1 : 0, 1);
@@ -463,14 +465,14 @@ static maage_status maage_store_metadata_write(const maage_world_store *store,
     maage_store_put(&bytes,record->environment.day_low,4);
     maage_store_put(&bytes,record->environment.day_high,4);
     maage_store_put(&bytes,record->environment.random,4);
-    maage_store_put(&bytes,record->environment.random_tick_selection,4);
-    maage_store_put(&bytes,record->environment.random_tick_random,4);
     maage_store_put(&bytes,record->environment.rain_ticks,4);
     maage_store_put(&bytes,record->environment.thunder_ticks,4);
     maage_store_put(&bytes,record->environment.raining,1);
     maage_store_put(&bytes,record->environment.thundering,1);
     maage_store_double_put(&bytes,record->environment.rain_intensity);
     maage_store_double_put(&bytes,record->environment.thunder_intensity);
+    maage_store_put(&bytes,record->random_ticks.selection,4);
+    maage_store_put(&bytes,record->random_ticks.random,4);
     maage_store_checksum_put(&bytes);
     if (bytes.failed) {
         free(data);
@@ -501,7 +503,13 @@ static maage_status maage_store_metadata_load(const maage_world_store *store,
     result = maage_store_read(path, MAAGE_STORE_METADATA_MAX, &bytes.data, &bytes.length, error, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     bytes.position = 0; bytes.failed = 0; bytes.failure = 0;
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD5");
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD6", 8)) {
+        free(bytes.data);
+        maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
+        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT,
+            MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
+    }
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD6");
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4); record->seed.high = maage_store_get(&bytes, 4);
         for (i = 0; i < 3; ++i) lengths[i] = maage_store_get(&bytes, 1);
@@ -536,16 +544,16 @@ static maage_status maage_store_metadata_load(const maage_world_store *store,
         record->environment.day_low=maage_store_get(&bytes,4);
         record->environment.day_high=maage_store_get(&bytes,4);
         record->environment.random=maage_store_get(&bytes,4);
-        record->environment.random_tick_selection=maage_store_get(&bytes,4);
-        record->environment.random_tick_random=maage_store_get(&bytes,4);
         record->environment.rain_ticks=maage_store_get(&bytes,4);
         record->environment.thunder_ticks=maage_store_get(&bytes,4);
         record->environment.raining=(unsigned int)maage_store_get(&bytes,1);
         record->environment.thundering=(unsigned int)maage_store_get(&bytes,1);
         record->environment.rain_intensity=maage_store_double_get(&bytes);
         record->environment.thunder_intensity=maage_store_double_get(&bytes);
+        record->random_ticks.selection=maage_store_get(&bytes,4);
+        record->random_ticks.random=maage_store_get(&bytes,4);
         ok = ok && !bytes.failed && maage_generation_policy_valid(&record->generation_policy) &&
-            maage_environment_state_valid(&record->environment) &&
+            maage_environment_state_valid(&record->environment) && maage_random_tick_state_valid(&record->random_ticks) &&
             bytes.position == bytes.length && maage_storage_uuid_valid(record->id) &&
             !strcmp(record->id, expected_id) && maage_store_name(record->name) && maage_store_player(record);
         for (i = 0; i < 20; ++i) {
@@ -666,6 +674,7 @@ maage_status maage_world_store_open(const char *instance_root, const char *id,
             result = maage_store_fail(error, "Could not determine the world's creation time.", MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_LOAD, trace); goto done;
         }
         MAAGE_STORE_STEP(maage_environment_default(store->record.seed, &store->record.environment), "Could not initialize environment.");
+        MAAGE_STORE_STEP(maage_random_tick_default(store->record.seed, &store->record.random_ticks), "Could not initialize random-tick streams.");
         MAAGE_STORE_STEP(maage_store_metadata_write(store, &store->record, error, trace), "Could not save new world metadata.");
     } else MAAGE_STORE_STEP(maage_store_metadata_load(store, chosen, &store->record, error, trace), "Could not load world metadata.");
     MAAGE_STORE_STEP(maage_storage_join(store->chunks, sizeof(store->chunks), store->directory, "chunks"), "Chunk path is too long.");
@@ -691,6 +700,8 @@ maage_status maage_world_store_save(maage_world_store *store,
     record = store->record;
     memcpy(record.position, position, sizeof(record.position)); record.yaw = yaw; record.pitch = pitch;
     record.environment = *environment; record.new_world = 0;
+    result = maage_world_random_tick_snapshot(world, &record.random_ticks);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
     if (!maage_store_player(&record) || !maage_environment_state_valid(&record.environment))
         return maage_store_fail(error, "World snapshot is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     result = maage_gameplay_snapshot(game, &record.gameplay);

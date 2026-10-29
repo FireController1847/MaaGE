@@ -13,7 +13,6 @@ enum { MAAGE_BLOCK_ENTITY_CONTAINER = 1UL, MAAGE_BLOCK_ENTITY_FURNACE = 2UL,
 typedef struct maage_environment_state {
     unsigned long ticks_low, ticks_high, day_tick, day_low, day_high;
     unsigned long random, rain_ticks, thunder_ticks;
-    unsigned long random_tick_selection, random_tick_random;
     unsigned int raining, thundering;
     double rain_intensity, thunder_intensity;
 } maage_environment_state;

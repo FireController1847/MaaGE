@@ -25,9 +25,6 @@ maage_status maage_environment_default(maage_world_seed seed, maage_environment_
     memset(state,0,sizeof(*state));
     state->random = (seed.low ^ seed.high ^ 2654435761UL) & MAAGE_ENVIRONMENT_WORD;
     if (!state->random) state->random = 1;
-    state->random_tick_selection = (seed.low ^ seed.high ^ 0x41c64e6dUL) & MAAGE_ENVIRONMENT_WORD;
-    state->random_tick_random = (seed.low ^ seed.high ^ 0x85ebca6bUL) & MAAGE_ENVIRONMENT_WORD;
-    if (!state->random_tick_random) state->random_tick_random = 1;
     state->rain_ticks = 12000UL + maage_environment_random(state) % 168001UL;
     state->thunder_ticks = 12000UL + maage_environment_random(state) % 168001UL;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
@@ -37,8 +34,6 @@ int maage_environment_state_valid(const maage_environment_state *state)
     return state && state->ticks_low <= MAAGE_ENVIRONMENT_WORD && state->ticks_high <= MAAGE_ENVIRONMENT_WORD &&
         state->day_low <= MAAGE_ENVIRONMENT_WORD && state->day_high <= MAAGE_ENVIRONMENT_WORD &&
         state->day_tick < MAAGE_WORLD_DAY_TICKS && state->random && state->random <= MAAGE_ENVIRONMENT_WORD &&
-        state->random_tick_selection <= MAAGE_ENVIRONMENT_WORD && state->random_tick_random &&
-        state->random_tick_random <= MAAGE_ENVIRONMENT_WORD &&
         state->rain_ticks <= 180000UL && state->thunder_ticks <= 180000UL &&
         state->raining <= 1 && state->thundering <= 1 &&
         state->rain_intensity >= 0 && state->rain_intensity <= 1 &&
@@ -291,7 +286,11 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
 {
     maage_chunk temporary;
     maage_status result;
+    int section;
     if (!destination || !source) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    for (section = 0; section < 16; ++section)
+        if (source->sections[section] && !destination->sections[section])
+            return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
     memset(&temporary,0,sizeof(temporary));
     result = maage_chunk_copy_environment(&temporary,source);
     if (maage_status_failed(result)) {
@@ -308,6 +307,13 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
     destination->updates_relative=temporary.updates_relative;
     destination->generation_stages=temporary.generation_stages;
     memcpy(destination->generation_features,temporary.generation_features,sizeof(temporary.generation_features));
+    /* The owner already verified matching geometry epochs. Keep current leaf
+     * flags along with queues/entities; only the worker's light bytes replace
+     * the published lighting. Flag-only edits never rebuild GPU geometry. */
+    for (section = 0; section < 16; ++section) if (source->sections[section])
+        memcpy(destination->sections[section]->states, source->sections[section]->states,
+            sizeof(destination->sections[section]->states));
+    memcpy(destination->random_tick_counts, source->random_tick_counts, sizeof(destination->random_tick_counts));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
 }
 static void maage_environment_due(const maage_environment_state *state, unsigned int delay,

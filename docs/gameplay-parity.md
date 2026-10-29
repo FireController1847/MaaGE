@@ -2,8 +2,8 @@
 
 This pass implements the requested pickup, mining, presentation, container audio,
 inventory and frontend corrections. Client is `0.1.0-alpha.47`, Server is
-`1.0.0-alpha.17`, and the local session contract is version 9. World metadata
-now uses `MGWORLD5`; [random block ticks](random-block-ticks.md) add independent
+`1.0.0-alpha.17`, and the local session contract is version 10. World metadata
+now uses `MGWORLD6`; [random block ticks](random-block-ticks.md) add independent
 simulation RNG checkpoints without an older-format reader or migration.
 
 ## Reference inspection

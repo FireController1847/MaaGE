@@ -116,6 +116,7 @@ typedef enum maage_status_operation_value {
 #define MAAGE_DETAIL_DEVICE_LOST 3 /* RENDER context. */
 #define MAAGE_DETAIL_SURFACE_LOST 4 /* RENDER context. */
 #define MAAGE_DETAIL_SURFACE_UNAVAILABLE 5 /* RENDER context. */
+#define MAAGE_DETAIL_WORLD_FORMAT 1 /* WORLD_IO / MALFORMED_INPUT / LOAD. */
 
 typedef struct maage_status_definition {
     unsigned char code;

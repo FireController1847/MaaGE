@@ -71,12 +71,15 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z)
 }
 
 maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk,
-    const maage_block_registry *blocks)
+    const maage_block_registry *blocks, int *leaf_rechecks)
 {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
+    maage_block_state_id pending;
+    maage_status result;
     int section, cell;
-    if (!chunk || !blocks) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+    if (leaf_rechecks) *leaf_rechecks = 0;
+    if (!chunk || !blocks || !leaf_rechecks) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     for (section = 0; section < 16; ++section) {
         chunk->random_tick_counts[section] = 0;
         if (!chunk->sections[section]) continue;
@@ -84,6 +87,18 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk,
             state = maage_block_registry_state(blocks, chunk->sections[section]->states[cell]);
             block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
             if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+            /* Detached load/generation output only. Rechecking natural leaves
+             * catches support removals that occurred while this column was
+             * absent, without retaining events or generating distant terrain. */
+            if (state->block_id == MAAGE_BLOCK_LEAVES &&
+                !(state->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) {
+                result = maage_block_leaves_state(state->metadata | MAAGE_LEAF_CHECK_DECAY, &pending);
+                if (maage_status_failed(result)) return result;
+                if (!maage_block_registry_state(blocks, pending))
+                    return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+                chunk->sections[section]->states[cell] = pending;
+                *leaf_rechecks = 1;
+            }
             if (state->random_ticks) ++chunk->random_tick_counts[section];
         }
     }

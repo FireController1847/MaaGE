@@ -223,7 +223,7 @@ static maage_status maage_item_oriented_placement(const maage_item_definition *i
         if (item->block_id == MAAGE_BLOCK_PLANKS)
             *state = species ? MAAGE_STATE_SPRUCE_PLANKS + species - 1 : MAAGE_STATE_PLANKS;
         else if (item->block_id == MAAGE_BLOCK_LEAVES)
-            *state = species ? MAAGE_STATE_SPRUCE_LEAVES + species - 1 : MAAGE_STATE_LEAVES;
+            return maage_block_leaves_state(species | MAAGE_LEAF_PERSISTENT, state);
         else if (face / 2 == 0) *state = MAAGE_STATE_LOG_X_BASE + species;
         else if (face / 2 == 2) *state = MAAGE_STATE_LOG_Z_BASE + species;
         else *state = species ? MAAGE_STATE_SPRUCE_LOG + species - 1 : MAAGE_STATE_LOG;

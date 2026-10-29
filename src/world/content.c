@@ -60,9 +60,10 @@ static maage_status maage_content_register_state(maage_block_registry *registry,
             selected = MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 26 : (species == 2 ? 29 : 6));
             log_axis = (metadata & 12) == 4 ? 0 : ((metadata & 12) == 8 ? 2 : 1);
             if (face / 2 == log_axis) ++selected;
-        } else if (block == MAAGE_BLOCK_LEAVES)
-            selected = MAAGE_CONTENT_TEXTURE_EXTRA + (metadata == 1 ? 28 : (metadata == 2 ? 31 : 8));
-        else if (block == MAAGE_BLOCK_CACTUS) {
+        } else if (block == MAAGE_BLOCK_LEAVES) {
+            species = metadata & MAAGE_LEAF_SPECIES_MASK;
+            selected = MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 28 : (species == 2 ? 31 : 8));
+        } else if (block == MAAGE_BLOCK_CACTUS) {
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_CONTENT_TEXTURE_EXTRA + 23;
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_CONTENT_TEXTURE_EXTRA + 24;
         }
@@ -94,7 +95,8 @@ static maage_status maage_content_blocks_create(
     maage_block_registry *registry = NULL;
     maage_status result;
     maage_block_definition block;
-    int i;
+    maage_block_state_id leaf_state;
+    int i, flags, species;
     if (output) *output = NULL;
     if (!output || !biomes) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT,
         MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, !output ? 2 : 1);
@@ -167,6 +169,7 @@ static maage_status maage_content_blocks_create(
             block.emitted_light = content[entry].emission;
             block.use_neighbor_brightness = block.light_opacity == 0;
             if (block.id == MAAGE_BLOCK_CACTUS) block.random_tick = maage_random_tick_cactus;
+            if (block.id == MAAGE_BLOCK_LEAVES) block.random_tick = maage_random_tick_leaves;
             if (block.id == MAAGE_BLOCK_BROWN_MUSHROOM || block.id == MAAGE_BLOCK_RED_MUSHROOM)
                 block.random_tick = maage_random_tick_mushroom;
             if (block.id == MAAGE_BLOCK_TALL_GRASS || block.id == MAAGE_BLOCK_DEAD_BUSH ||
@@ -233,6 +236,11 @@ static maage_status maage_content_blocks_create(
             maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LOG, MAAGE_BLOCK_LOG, 2, 0)) ||
             maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_BLOCK_LEAVES, 1, 0)) ||
             maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIRCH_LEAVES, MAAGE_BLOCK_LEAVES, 2, 0))) goto failed;
+        for (flags = 4; flags <= 12; flags += 4) for (species = 0; species < 3; ++species) {
+            result = maage_block_leaves_state((unsigned int)(flags + species), &leaf_state);
+            if (maage_status_failed(result) || maage_status_failed(result = maage_content_register_state(
+                registry, config, leaf_state, MAAGE_BLOCK_LEAVES, (unsigned int)(flags + species), 0))) goto failed;
+        }
         for (i = 1; i <= 2; ++i)
             if (maage_status_failed(result = maage_content_register_state(registry, config,
                 MAAGE_STATE_SPRUCE_PLANKS + i - 1, MAAGE_BLOCK_PLANKS, (unsigned int)i, 0))) goto failed;

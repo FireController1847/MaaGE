@@ -745,8 +745,10 @@ static maage_status server_open_world(maage_server_runtime *runtime,
         runtime->config.has_seed ? &runtime->config.seed : NULL,
         runtime->config.generation_policy,
         items, &runtime->store, &runtime->record, error, trace);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace,
-        result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_OPEN);
+    if (maage_status_failed(result)) {
+        maage_log_trace_status(MAAGE_LOG_ERROR, "maage.server.world", result, trace, "%s", error);
+        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_OPEN);
+    }
     result = maage_world_config_init(&world_config);
     if (maage_status_failed(result)) return result;
     world_config.registry = maage_content_blocks(runtime->content);
@@ -764,6 +766,7 @@ static maage_status server_open_world(maage_server_runtime *runtime,
         sizeof(world_config.position));
     world_config.generation_policy = runtime->record.generation_policy;
     world_config.initial_environment = &runtime->record.environment;
+    world_config.initial_random_ticks = &runtime->record.random_ticks;
     result = maage_world_create(&world_config, &runtime->world, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace,
         result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_CREATE);

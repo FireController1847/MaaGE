@@ -97,8 +97,16 @@ enum {
     MAAGE_STATE_LOG_X_BASE = 280, MAAGE_STATE_LOG_Z_BASE = 283,
     MAAGE_STATE_SPRUCE_PLANKS = 286, MAAGE_STATE_BIRCH_PLANKS = 287,
     MAAGE_STATE_WATER_FLOW_BASE = 512, MAAGE_STATE_LAVA_FLOW_BASE = 528,
-    MAAGE_STATE_CACTUS_AGE_BASE = 544 /* Ages 1..15; age zero is CACTUS. */
+    MAAGE_STATE_CACTUS_AGE_BASE = 544, /* Ages 1..15; age zero is CACTUS. */
+    MAAGE_STATE_PERSISTENT_LEAVES_BASE = 576,
+    MAAGE_STATE_CHECK_LEAVES_BASE = 579,
+    MAAGE_STATE_PERSISTENT_CHECK_LEAVES_BASE = 582
 };
+enum { MAAGE_LEAF_SPECIES_MASK = 3U, MAAGE_LEAF_PERSISTENT = 4U,
+    MAAGE_LEAF_CHECK_DECAY = 8U };
+/* Oak/spruce/birch, with all four flag combinations. Direct numeric mapping;
+ * unsupported species/metadata fail explicitly. */
+maage_status maage_block_leaves_state(unsigned int metadata, maage_block_state_id *state);
 enum { MAAGE_BLOCK_MESH_CUBE = 0, MAAGE_BLOCK_MESH_CROSS = 1,
     MAAGE_BLOCK_MESH_TORCH = 2 };
 enum { MAAGE_FLUID_NONE = 0, MAAGE_FLUID_WATER = 1, MAAGE_FLUID_LAVA = 2 };

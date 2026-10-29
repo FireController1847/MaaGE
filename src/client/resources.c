@@ -448,6 +448,7 @@ static maage_status maage_client_content_resolve(void *context,
             sizeof(presentation->flow_animation));
     }
     if (block == MAAGE_BLOCK_LEAVES) {
+        metadata &= MAAGE_LEAF_SPECIES_MASK;
         if (metadata == 1 || metadata == 2) {
             color = leaf_colors[metadata - 1];
             for (channel = 0; channel < 3; ++channel)

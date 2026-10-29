@@ -53,7 +53,15 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
 maage_status maage_chunk_environment_initialize(maage_chunk *chunk,
     const maage_block_registry *blocks, unsigned long now_low, unsigned long now_high);
 maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk,
-    const maage_block_registry *blocks);
+    const maage_block_registry *blocks, int *leaf_rechecks);
+maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *state, maage_random_tick_context *context);
+/* Missing destinations recheck on column import, without removal-event queues. */
+maage_status maage_leaves_changed(maage_world *world, int x, int y, int z,
+    const maage_block_state_definition *before, const maage_block_state_definition *after);
+struct maage_item_stack;
+maage_status maage_random_tick_spawn_drop(maage_world *world, int x, int y, int z,
+    const struct maage_item_stack *drop, maage_random_tick_context *context);
 maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z,
     const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z,

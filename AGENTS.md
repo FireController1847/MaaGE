@@ -231,9 +231,18 @@ ID-to-definition lookups must be direct, deterministic O(1) operations.
   handlers without inventing their behavior. Selection uses the 1.7.10 coordinate
   LCG, with a separate seeded behavior stream; both checkpoint independently of
   weather. Grass, cactus, mushrooms, plant substrate checks and snow/ice melting
-  use reference rules. Leaf support/decay and immediate plant neighbor reactions
-  remain unimplemented.
-  `MGWORLD5` is the sole metadata format; recreate rejected development worlds.
+  use reference rules. Leaf metadata preserves species (bits 0..1), persistence
+  (4) and decay checks (8). Log removal marks radius 4; leaf removal marks radius 1.
+  Random callbacks evaluate four-step face-connected log support only with the
+  radius-5 column neighborhood loaded. Missing data retains checks; detached
+  load/generation outputs recheck natural leaves, catching missed unloaded edits.
+  Flag-only edits preserve visual epochs and merge into lighting results. Decay
+  reserves ordinary item drops before removal; placed leaves are persistent.
+  Immediate general plant neighbor reactions remain unimplemented.
+  Random-tick checkpoints are World-owned, separate from environment state;
+  seed domains initialize them only for new state, never on resume. Weather's
+  initialization/draws remain unchanged. `MGWORLD6` is the sole metadata format;
+  reject incompatible development worlds explicitly without migration/deletion.
 - Store worlds under instances/<instance-uuid>/worlds/<world-uuid>/,
   separate from shared Minecraft resources. World IDs are canonical UUIDs.
   Maintain one current metadata encoding and one current chunk encoding, with

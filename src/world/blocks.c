@@ -6,6 +6,20 @@
 #include <float.h>
 #include <limits.h>
 
+maage_status maage_block_leaves_state(unsigned int metadata, maage_block_state_id *state)
+{
+    static const maage_block_state_id checked[3] = {
+        MAAGE_STATE_LEAVES, MAAGE_STATE_SPRUCE_LEAVES, MAAGE_STATE_BIRCH_LEAVES
+    };
+    unsigned int species = metadata & MAAGE_LEAF_SPECIES_MASK;
+    if (state) *state = 0;
+    if (!state || metadata > 15 || species > 2)
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    *state = metadata < 4 ? checked[species] :
+        MAAGE_STATE_PERSISTENT_LEAVES_BASE + ((metadata >> 2) - 1) * 3 + species;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
+
 typedef struct maage_block_slot {
     maage_block_definition definition;
     char *name;

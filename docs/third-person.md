@@ -1,6 +1,6 @@
 # Player Perspectives and Character Presentation
 
-Client `0.1.0-alpha.47`, Server `1.0.0-alpha.17`, local Session protocol 9.
+Client `0.1.0-alpha.47`, Server `1.0.0-alpha.17`, local Session protocol 10.
 World/player checkpoint formats and the Launcher appearance contract are unchanged.
 
 ## Input and camera ownership

@@ -52,6 +52,7 @@ string lookup or job wait is introduced.
 | Cactus | An exposed top shorter than three blocks increments age 0..15; a subsequent tick at age 15 grows one block and resets the old top. New-growth side obstruction produces the normal item drop after capacity preflight. Ages are numeric registered states and persist in chunk palettes. |
 | Brown/red mushrooms | One-in-25 spread chance; stops with five of the same mushroom in the 9x3x9 density neighborhood. Four candidate-walk steps precede one final placement attempt. Current supported substrates require an opaque top and full saved light below 13. |
 | Flowers, tall grass, dead bush | Random substrate check; plants without valid support disappear with their ordinary drops (including the 1/8 tall-grass seed chance and no ordinary dead-bush drop). This does not spawn vegetation. |
+| Leaves | Marked natural leaves propagate log support through up to four face-adjacent leaf cells; supported leaves clear the check flag, unsupported leaves decay with ordinary drops. Player-placed leaves persist. See [Leaf Decay](leaf-decay.md). |
 | Snow layer | Melts to air when saved block light exceeds 11. Full snow blocks do not melt. |
 | Ice | Melts to source water when saved block light exceeds `11 - light_opacity` (8 for built-in ice); normal fluid scheduling follows. |
 
@@ -62,14 +63,13 @@ when lighting is unavailable or an earlier opacity/emission edit invalidates it;
 missing light is never treated as darkness. Cross-column destinations and all
 required neighborhoods must be loaded. No sample triggers synchronous relighting.
 
-Leaf support propagation, leaf decay flags/drops, immediate plant/cactus support
-reactions after arbitrary neighbor edits, crops/sapling growth, lava fire ignition,
+Immediate plant/cactus support reactions after arbitrary neighbor edits, crops/sapling growth, lava fire ignition,
 weather-driven snow accumulation/freezing, and Nether-specific ice behavior remain
 unsupported. Mycelium and podzol are absent from the catalog, so their mushroom
 light exceptions do not apply. Dirt and full snow blocks have no random callback.
-Leaves, lava, flowing water and oriented torches retain reference-derived sampling
-eligibility even where the callback is absent. Leaves lack decay flags/support
-propagation, lava lacks fire, fluid flow remains exclusively scheduled, and the
+Lava, flowing water and oriented torches retain reference-derived sampling
+eligibility even where the callback is absent. Lava lacks fire, fluid flow
+remains exclusively scheduled, and the
 registered torches already have orientation metadata (the reference's random
 callback only initializes metadata zero). No unsupported behavior is fabricated.
 
@@ -81,10 +81,17 @@ Java RNG/seed parity is not a MaaGE contract. Weather keeps its original RNG and
 draw sequence. No process-global random source, render clock, worker count or
 visual option supplies randomness.
 
-Both streams are checkpointed through the existing environment/player checkpoint
-in the sole `MGWORLD5` metadata encoding. Previous development worlds are rejected
+`maage_random_tick_state` belongs to World, independently of
+`maage_environment_state`. Distinct seed-mixing domains initialize selection and
+behavior; supplied saved states are copied unchanged. Weather initialization and
+its draw sequence are unchanged. Both random-tick words are explicitly encoded
+as four little-endian bytes after the environment payload in the sole `MGWORLD6`
+metadata encoding, before the CRC. Zero is valid for the coordinate LCG; a saved
+zero behavior/weather xorshift state or a word above 32 bits is rejected.
+The same atomic world checkpoint contains player, entities, weather and random
+block-tick progression. Previous development worlds are rejected
 and must be recreated; no migration or automatic deletion is performed. Chunk
-encoding is unchanged. The copied local Session snapshot contract is version 9.
+encoding is unchanged. The copied local Session snapshot contract is version 10.
 Resume restores stream positions; it does not guarantee
 identical gameplay traces when different streaming/lighting availability changes
 which samples can execute. Coordinate traversal itself does not depend on hash,
@@ -107,6 +114,8 @@ the vanilla `BlockBush`/`BlockTallGrass` substrate checks. `BlockDeadBush`,
 were also inspected. 1.7.10 hardcodes three section attempts and has no
 `randomTickSpeed` gamerule; MaaGE makes that rate configurable.
 
-Only source/diff inspection was performed. Builds, automated tests, runtime passes
-and application execution were not authorized. All platforms and both graphics
-backends require programmer compilation and gameplay/visual validation.
+macOS ARM64 Debug/Release World, Server and Client compiled/linked, including the
+Metal/Vulkan Client configuration. A separate Release headless World/Server build
+also passed. Client linking reported duplicate-library warnings. Windows/Linux
+were not compiled. No applications, tests, benchmarks or Actions ran; runtime and
+visual validation remain with the programmer.
