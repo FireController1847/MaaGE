@@ -667,6 +667,12 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     window_config.full_display_content = 1;
     result = maage_window_create(system, &window_config, &window, trace);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
+    maage_status_trace_init(trace);
+    operation = maage_client_resources_set_window_icon(directory, window, trace);
+    if (!maage_status_is_success(operation))
+        maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.resources", operation, trace,
+            "Client icon unavailable; retaining the platform default. Reconstructed icons: %s/minecraft/assets/reconst/icons", directory);
+    maage_status_trace_init(trace);
     render_config.window = window;
     render_config.required_features |= MAAGE_RENDER_CAP_TEXTURED_MESH |
         MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;

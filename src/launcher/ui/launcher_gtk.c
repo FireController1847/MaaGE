@@ -275,6 +275,7 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action)
     *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.state = state;
     if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0); }
+    gtk_window_set_default_icon_name(MAAGE_LAUNCHER_ICON_NAME);
     /* Setup requests dark temporarily; main Launcher restores the desktop preference. */
     gtk_settings_reset_property(gtk_settings_get_default(), "gtk-application-prefer-dark-theme");
     maage_ui_appearance_apply(&ui);

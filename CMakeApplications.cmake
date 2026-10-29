@@ -1,6 +1,8 @@
 # GUI identity is shared by CMake target configuration and build-time metadata.
 set(MAAGE_LAUNCHER_NAME "MaaGE")
 set(MAAGE_LAUNCHER_IDENTIFIER "org.maage.launcher")
+set(MAAGE_LAUNCHER_ICON_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/src/launcher/icons")
+set(MAAGE_LAUNCHER_ICON_FILE "icon.icns")
 set(MAAGE_CLIENT_NAME "MaaGE Client")
 set(MAAGE_CLIENT_IDENTIFIER "org.maage.client")
 if(CMAKE_SCRIPT_MODE_FILE)
@@ -47,6 +49,12 @@ function(maage_configure_gui_application target application)
             MACOSX_BUNDLE_GUI_IDENTIFIER "${MAAGE_GUI_IDENTIFIER}"
             MACOSX_BUNDLE_BUNDLE_VERSION "${MAAGE_NUMERIC_VERSION}"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${MAAGE_NUMERIC_VERSION}")
+        if(application STREQUAL "launcher")
+            set(MAAGE_BUNDLE_ICON "${MAAGE_LAUNCHER_ICON_DIRECTORY}/${MAAGE_LAUNCHER_ICON_FILE}")
+            target_sources(${target} PRIVATE "${MAAGE_BUNDLE_ICON}")
+            set_source_files_properties("${MAAGE_BUNDLE_ICON}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+            set_target_properties(${target} PROPERTIES MACOSX_BUNDLE_ICON_FILE "${MAAGE_LAUNCHER_ICON_FILE}")
+        endif()
         # The version target writes the complete plist with the same HEAD snapshot
         # as the version headers. Refresh even when no relink is otherwise needed.
         add_custom_target(${target}_metadata
@@ -59,8 +67,15 @@ function(maage_configure_gui_application target application)
     elseif(MAAGE_PLATFORM_LINUX AND NOT MAAGE_GUI_LAUNCHER_MANAGED)
         set(MAAGE_DESKTOP_DIR "${PROJECT_BINARY_DIR}/generated/applications")
         file(MAKE_DIRECTORY "${MAAGE_DESKTOP_DIR}")
+        set(MAAGE_DESKTOP_ICON_ENTRY "")
+        if(application STREQUAL "launcher")
+            set(MAAGE_DESKTOP_ICON_ENTRY "Icon=${MAAGE_GUI_IDENTIFIER}\n")
+            install(FILES "${MAAGE_LAUNCHER_ICON_DIRECTORY}/icon.png"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/pixmaps"
+                RENAME "${MAAGE_GUI_IDENTIFIER}.png" COMPONENT Runtime)
+        endif()
         file(WRITE "${MAAGE_DESKTOP_DIR}/${application}.desktop.in"
-            "[Desktop Entry]\nType=Application\nName=${MAAGE_GUI_NAME}\nExec=\"@MAAGE_DESKTOP_EXECUTABLE@\"\nTerminal=false\nCategories=Game;\n")
+            "[Desktop Entry]\nType=Application\nName=${MAAGE_GUI_NAME}\nExec=\"@MAAGE_DESKTOP_EXECUTABLE@\"\nTerminal=false\n${MAAGE_DESKTOP_ICON_ENTRY}Categories=Game;\n")
         if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
             set(MAAGE_EXEC_DIR "${CMAKE_INSTALL_BINDIR}")
         else()

@@ -4,6 +4,7 @@
 #include "maage/skin.h"
 #include "maage/pixels.h"
 #include "maage/content.h"
+#include "maage/window.h"
 #define MAAGE_CLIENT_SOURCE_COUNT (64 + MAAGE_ITEM_TEXTURE_COUNT + 13)
 #define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
@@ -33,6 +34,9 @@ maage_status maage_client_resources_load(const char *application_data,
     maage_client_resources *resources, maage_biome_registry *biomes,
     const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint,
     void *context, maage_status_trace *trace);
+/* Startup-only native icon; external reconstructed artwork is never packaged. */
+maage_status maage_client_resources_set_window_icon(const char *application_data,
+    maage_window *window, maage_status_trace *trace);
 /* Construct one owning finalized registry set, for integrated Client/Server use.
  * Call after loading the atlas/biome colormaps and finalizing those biomes. */
 maage_status maage_client_content_create(const maage_client_resources *resources,

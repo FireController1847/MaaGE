@@ -11,6 +11,8 @@ typedef struct maage_cocoa_system {
     id delegate;
     id previous_delegate;
     NSApplicationPresentationOptions presentation;
+    NSImage *previous_icon;
+    int icon_changed;
 } maage_cocoa_system;
 typedef struct maage_cocoa_window {
     NSWindow *handle;
@@ -388,6 +390,8 @@ static void maage_cocoa_shutdown(maage_window_system *system)
     if (!native) return;
     [NSApp setPresentationOptions:native->presentation];
     [NSApp setDelegate:native->previous_delegate];
+    if (native->icon_changed) [NSApp setApplicationIconImage:native->previous_icon];
+    [native->previous_icon release];
     [native->previous_delegate release];
     [native->delegate release];
     [native->pool drain];
@@ -400,6 +404,41 @@ static maage_status maage_cocoa_title(maage_window *window, const char *title)
     NSString *text = [NSString stringWithUTF8String:title];
     if (!text) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     [native->handle setTitle:text];
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+}
+static maage_status maage_cocoa_icon(maage_window *window, const maage_window_icon *icon)
+{
+    maage_cocoa_system *system = window->system->platform;
+    NSAutoreleasePool *pool;
+    NSString *path;
+    NSData *data;
+    NSImage *image;
+    NSError *error = nil;
+    maage_status result;
+    if (![NSThread isMainThread])
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, MAAGE_DETAIL_WRONG_THREAD);
+    if (!icon->native_path)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    pool = [[NSAutoreleasePool alloc] init];
+    path = [NSString stringWithUTF8String:icon->native_path];
+    if (!path) { [pool drain]; return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_LOAD, 0); }
+    data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:&error];
+    if (!data) {
+        result = maage_status_make([error.domain isEqualToString:NSCocoaErrorDomain] && error.code == NSFileReadNoSuchFileError ?
+            MAAGE_STATUS_NOT_FOUND : MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_LOAD, 0);
+        [pool drain]; return result;
+    }
+    image = [[NSImage alloc] initWithData:data];
+    if (!image || ![image isValid]) {
+        [image release]; [pool drain];
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_LOAD, 0);
+    }
+    if (!system->icon_changed) {
+        system->previous_icon = [[NSApp applicationIconImage] retain];
+        system->icon_changed = 1;
+    }
+    [NSApp setApplicationIconImage:image];
+    [image release]; [pool drain];
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
 }
 static maage_status maage_cocoa_visible(maage_window *window, int visible)
@@ -771,5 +810,5 @@ const maage_window_backend_api maage_window_cocoa_api = {
     MAAGE_WINDOW_COCOA, maage_cocoa_init, maage_cocoa_shutdown, maage_cocoa_create,
     maage_cocoa_destroy, maage_cocoa_poll, maage_cocoa_state, maage_cocoa_title,
     maage_cocoa_visible, maage_cocoa_resize, maage_cocoa_mode, maage_cocoa_native,
-    maage_cocoa_surface, maage_cocoa_pixels, maage_cocoa_capture, maage_cocoa_cursor
+    maage_cocoa_surface, maage_cocoa_pixels, maage_cocoa_capture, maage_cocoa_cursor, maage_cocoa_icon
 };

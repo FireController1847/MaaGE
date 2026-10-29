@@ -6,6 +6,43 @@
 #include <stdlib.h>
 #include <string.h>
 
+maage_status maage_client_resources_set_window_icon(const char *application_data,
+    maage_window *window, maage_status_trace *trace)
+{
+    static const char *const names[2] = {"icons/icon_32x32.png", "icons/icon_16x16.png"};
+    maage_window_native native;
+    maage_window_icon icon;
+    maage_image images[2];
+    maage_pixel_buffer pixels[2];
+    char path[MAAGE_PATH_CAPACITY];
+    maage_status result;
+    int i;
+    memset(&icon, 0, sizeof(icon));
+    memset(images, 0, sizeof(images));
+    result = maage_window_get_native(window, &native);
+    if (maage_status_failed(result)) goto done;
+    if (native.backend == MAAGE_WINDOW_COCOA) {
+        result = maage_minecraft_asset_path(application_data, "icons/minecraft.icns", path, sizeof(path), trace);
+        if (maage_status_failed(result)) goto done;
+        icon.native_path = path;
+    } else {
+        for (i = 0; i < 2; ++i) {
+            result = maage_minecraft_asset_path(application_data, names[i], path, sizeof(path), trace);
+            if (maage_status_failed(result)) goto done;
+            result = maage_image_load_png(path, &images[i], trace);
+            if (maage_status_failed(result)) goto done;
+            pixels[i].pixels = images[i].pixels;
+            pixels[i].width = images[i].width; pixels[i].height = images[i].height;
+            pixels[i].stride = images[i].stride;
+        }
+        icon.images = pixels; icon.image_count = 2;
+    }
+    result = maage_window_set_icon(window, &icon);
+done:
+    for (i = 0; i < 2; ++i) (void)maage_image_destroy(&images[i]);
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SET);
+}
+
 static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] = {
     "minecraft/textures/blocks/stone.png",
     "minecraft/textures/blocks/dirt.png",

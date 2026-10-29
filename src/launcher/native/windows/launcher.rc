@@ -1,1 +1,7 @@
+#include "resources.h"
+
+MAAGE_LAUNCHER_ICON_RESOURCE ICON "icon.ico"
+
+#ifndef MAAGE_LAUNCHER_LINKER_MANIFEST
 1 24 "launcher.manifest"
+#endif

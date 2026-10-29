@@ -1051,6 +1051,14 @@ Do not implement third-party mod compatibility layers unless explicitly requeste
   native GUI runs inside that process. No `maage_server_gui` target or packaging.
   Preserve independent headless builds and defer GUI implementation.
 - Keep GUI identity/installation configuration in root `CMakeApplications.cmake`.
+  Original artwork in `src/launcher/icons/` is Launcher-only: ICNS for the macOS
+  bundle, ICO for Windows resources, and PNG for Linux desktop integration.
+  Never apply these icons to the Client or Server.
+  Client icons load once at startup from the selected data root's reconstructed
+  `icons/minecraft.icns` (macOS) or `icons/icon_16x16.png` and `icon_32x32.png`
+  (Windows/X11), through MinecraftAssets/Image and native Window APIs. Never
+  embed/copy this artwork into Client packages or modify executables on import.
+  Missing/invalid icons retain the platform default; Wayland reports unsupported.
   Preserve `cmake/` intermediates and `build/` outputs, including complete bundles.
   Apple bundle version fields are numeric; `MaaGESemanticVersion` stores full SemVer
   and Git metadata from the shared build-time version generator. Desktop commands

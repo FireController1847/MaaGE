@@ -110,6 +110,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
     <key>CFBundleName</key><string>@MAAGE_BUNDLE_NAME@</string>
     <key>CFBundleDisplayName</key><string>@MAAGE_BUNDLE_NAME@</string>
     <key>CFBundleIdentifier</key><string>@MAAGE_BUNDLE_IDENTIFIER@</string>
+    <key>CFBundleIconFile</key><string>@MAAGE_LAUNCHER_ICON_FILE@</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleShortVersionString</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>

@@ -16,6 +16,7 @@ typedef struct maage_win32_system {
 typedef struct maage_win32_window {
     HWND handle;
     RECT normal_rect;
+    HICON icons[2];
 } maage_win32_window;
 static UINT maage_win32_dpi(maage_window *window);
 static unsigned int maage_win32_users;
@@ -268,7 +269,91 @@ static void maage_win32_destroy(maage_window *window)
     if (!native) return;
     maage_window_input_focus(window, 0);
     if (native->handle) DestroyWindow(native->handle);
+    if (native->icons[0]) DestroyIcon(native->icons[0]);
+    if (native->icons[1]) DestroyIcon(native->icons[1]);
     free(native);
+}
+static maage_status maage_win32_icon_create(const maage_pixel_buffer *image, HICON *output)
+{
+    BITMAPINFO bitmap;
+    struct { BITMAPINFOHEADER header; RGBQUAD colors[2]; } mask_bitmap;
+    ICONINFO info;
+    HBITMAP color = NULL, mask = NULL;
+    unsigned char *bits = NULL, *mask_bits = NULL;
+    size_t mask_stride = ((size_t)image->width + 31) / 32 * 4;
+    DWORD error;
+    int x, y;
+    maage_status result;
+    *output = NULL;
+    memset(&bitmap, 0, sizeof(bitmap));
+    bitmap.bmiHeader.biSize = sizeof(bitmap.bmiHeader);
+    bitmap.bmiHeader.biWidth = image->width;
+    bitmap.bmiHeader.biHeight = -image->height;
+    bitmap.bmiHeader.biPlanes = 1;
+    bitmap.bmiHeader.biBitCount = 32;
+    bitmap.bmiHeader.biCompression = BI_RGB;
+    color = CreateDIBSection(NULL, &bitmap, DIB_RGB_COLORS, (void **)&bits, NULL, 0);
+    if (color) {
+        memset(&mask_bitmap, 0, sizeof(mask_bitmap));
+        mask_bitmap.header = bitmap.bmiHeader; mask_bitmap.header.biBitCount = 1;
+        mask_bitmap.colors[1].rgbRed = mask_bitmap.colors[1].rgbGreen = mask_bitmap.colors[1].rgbBlue = 255;
+        mask = CreateDIBSection(NULL, (BITMAPINFO *)&mask_bitmap, DIB_RGB_COLORS, (void **)&mask_bits, NULL, 0);
+    }
+    if (color && mask) {
+        memset(mask_bits, 0, mask_stride * (size_t)image->height);
+        for (y = 0; y < image->height; ++y) {
+            const unsigned char *source = image->pixels + (size_t)y * image->stride;
+            unsigned char *target = bits + (size_t)y * (size_t)image->width * 4;
+            for (x = 0; x < image->width; ++x, source += 4, target += 4) {
+                unsigned int alpha = source[3];
+                target[0] = (unsigned char)((source[2] * alpha + 127) / 255);
+                target[1] = (unsigned char)((source[1] * alpha + 127) / 255);
+                target[2] = (unsigned char)((source[0] * alpha + 127) / 255);
+                target[3] = (unsigned char)alpha;
+                if (!alpha) mask_bits[(size_t)y * mask_stride + (size_t)x / 8] |=
+                    (unsigned char)(128U >> (x % 8));
+            }
+        }
+        memset(&info, 0, sizeof(info)); info.fIcon = TRUE;
+        info.hbmColor = color; info.hbmMask = mask;
+        *output = CreateIconIndirect(&info);
+    }
+    error = *output ? ERROR_SUCCESS : GetLastError();
+    result = *output ? MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0) :
+        error ? maage_status_from_win32(error, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE) :
+            MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_CREATE, 0);
+    if (mask) DeleteObject(mask);
+    if (color) DeleteObject(color);
+    return result;
+}
+static maage_status maage_win32_icon(maage_window *window, const maage_window_icon *icon)
+{
+    maage_win32_window *native = window->platform;
+    HICON handles[2] = {NULL, NULL};
+    size_t i, best;
+    int small, size, difference, distance;
+    maage_status result;
+    if (!icon->image_count)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    for (small = 0; small < 2; ++small) {
+        size = GetSystemMetrics(small ? SM_CXSMICON : SM_CXICON);
+        best = 0; distance = abs(icon->images[0].width - size);
+        for (i = 1; i < icon->image_count; ++i) {
+            difference = abs(icon->images[i].width - size);
+            if (difference < distance) { best = i; distance = difference; }
+        }
+        result = maage_win32_icon_create(&icon->images[best], &handles[small]);
+        if (maage_status_failed(result)) {
+            if (handles[0]) DestroyIcon(handles[0]);
+            return result;
+        }
+    }
+    for (small = 0; small < 2; ++small) {
+        SendMessageW(native->handle, WM_SETICON, small ? ICON_SMALL : ICON_BIG, (LPARAM)handles[small]);
+        if (native->icons[small]) DestroyIcon(native->icons[small]);
+        native->icons[small] = handles[small];
+    }
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 static maage_status maage_win32_cursor(maage_window *window, maage_window_cursor cursor)
 {
@@ -407,5 +492,5 @@ const maage_window_backend_api maage_window_win32_api = {
     MAAGE_WINDOW_WIN32, maage_win32_init, maage_win32_shutdown, maage_win32_create,
     maage_win32_destroy, maage_win32_poll, maage_win32_state, maage_win32_title,
     maage_win32_visible, maage_win32_resize, maage_win32_mode, maage_win32_native, NULL, maage_win32_pixels,
-    maage_win32_capture, maage_win32_cursor
+    maage_win32_capture, maage_win32_cursor, maage_win32_icon
 };

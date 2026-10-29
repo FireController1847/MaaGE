@@ -20,6 +20,7 @@ typedef struct maage_window_backend_api {
     maage_status (*pixels)(maage_window *window, const maage_pixel_buffer *buffer);
     maage_status (*capture)(maage_window *window, int capture);
     maage_status (*cursor)(maage_window *window, maage_window_cursor cursor);
+    maage_status (*icon)(maage_window *window, const maage_window_icon *icon);
 } maage_window_backend_api;
 
 struct maage_window_system {

@@ -16,6 +16,7 @@ typedef struct maage_launcher_win32_style {
     HWND window, primary, hot_combo;
     UINT dpi;
     HFONT font, heading, brand;
+    HICON icons[2];
     maage_launcher_control controls[72];
     unsigned count;
     int dark, high_contrast;

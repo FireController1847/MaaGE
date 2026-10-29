@@ -113,6 +113,7 @@ maage_status maage_access_native_run(maage_access *access, int manage_accounts, 
     *action = 0;
     memset(&ui, 0, sizeof(ui)); ui.access = access; ui.manage_accounts = manage_accounts; ui.revision = (unsigned)-1;
     if (!gtk_init_check(NULL, NULL)) { maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display."); return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0); }
+    gtk_window_set_default_icon_name(MAAGE_LAUNCHER_ICON_NAME);
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
     css = gtk_css_provider_new(); gtk_css_provider_load_from_data(css,
         "window.maage-access { background: #1c1c1c; color: #e6e6e6; } .maage-access label { color: #e6e6e6; }"

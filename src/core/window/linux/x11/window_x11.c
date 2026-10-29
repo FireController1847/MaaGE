@@ -5,6 +5,7 @@
 #include <X11/cursorfont.h>
 #include <poll.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../../window_internal.h"
@@ -100,6 +101,43 @@ static maage_status maage_x11_title(maage_window *window, const char *title)
     XStoreName(system->display, native->handle, title);
     XFlush(system->display);
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+}
+static maage_status maage_x11_icon(maage_window *window, const maage_window_icon *icon)
+{
+    maage_x11_system *system = window->system->platform;
+    maage_x11_window *native = window->platform;
+    unsigned long *data;
+    size_t i, count = 0, amount, offset = 0;
+    int x, y;
+    if (!icon->image_count)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    for (i = 0; i < icon->image_count; ++i) {
+        amount = (size_t)icon->images[i].width * (size_t)icon->images[i].height + 2;
+        if (amount > (size_t)-1 - count)
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        count += amount;
+    }
+    if (count > (size_t)INT_MAX || count > (size_t)XMaxRequestSize(system->display) - 6 ||
+        count > (size_t)-1 / sizeof(*data))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    data = (unsigned long *)malloc(count * sizeof(*data));
+    if (!data) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    for (i = 0; i < icon->image_count; ++i) {
+        const maage_pixel_buffer *image = &icon->images[i];
+        data[offset++] = (unsigned long)image->width;
+        data[offset++] = (unsigned long)image->height;
+        for (y = 0; y < image->height; ++y) {
+            const unsigned char *source = image->pixels + (size_t)y * image->stride;
+            for (x = 0; x < image->width; ++x, source += 4)
+                data[offset++] = ((unsigned long)source[3] << 24) | ((unsigned long)source[0] << 16) |
+                    ((unsigned long)source[1] << 8) | (unsigned long)source[2];
+        }
+    }
+    XChangeProperty(system->display, native->handle, XInternAtom(system->display, "_NET_WM_ICON", False),
+        XA_CARDINAL, 32, PropModeReplace, (const unsigned char *)data, (int)count);
+    XFlush(system->display);
+    free(data);
+    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 static maage_status maage_x11_visible(maage_window *window, int visible)
 {
@@ -410,5 +448,5 @@ const maage_window_backend_api maage_window_x11_api = {
     MAAGE_WINDOW_X11, maage_x11_init, maage_x11_shutdown, maage_x11_create,
     maage_x11_destroy, maage_x11_poll, maage_x11_state, maage_x11_title,
     maage_x11_visible, maage_x11_resize, maage_x11_mode, maage_x11_native, NULL, maage_x11_pixels,
-    maage_x11_capture, maage_x11_cursor
+    maage_x11_capture, maage_x11_cursor, maage_x11_icon
 };

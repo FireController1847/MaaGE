@@ -274,6 +274,25 @@ maage_status maage_window_set_title(maage_window *window, const char *title)
     if (!window || !title) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
     return window->system->api->title(window, title);
 }
+maage_status maage_window_set_icon(maage_window *window, const maage_window_icon *icon)
+{
+    size_t i, row;
+    if (!window || !icon || (!icon->native_path && !icon->image_count) ||
+        (icon->native_path && !*icon->native_path) || (icon->image_count && !icon->images))
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    for (i = 0; i < icon->image_count; ++i) {
+        const maage_pixel_buffer *image = &icon->images[i];
+        if (!image->pixels || image->width <= 0 || image->height <= 0 ||
+            (size_t)image->width > (size_t)-1 / 4)
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+        row = (size_t)image->width * 4;
+        if (image->stride < row || image->stride > (size_t)-1 / (size_t)image->height)
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    }
+    if (!window->system->api->icon)
+        return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_SET, 0);
+    return window->system->api->icon(window, icon);
+}
 maage_status maage_window_set_visible(maage_window *window, int visible)
 {
     maage_status result;

@@ -40,6 +40,12 @@ typedef struct maage_window_config {
     maage_window_mode mode;
 } maage_window_config;
 
+typedef struct maage_window_icon {
+    const char *native_path;
+    const maage_pixel_buffer *images;
+    size_t image_count;
+} maage_window_icon;
+
 typedef struct maage_window_insets {
     double top;
     double right;
@@ -103,6 +109,13 @@ maage_status maage_window_wait_events(maage_window_system *system, int timeout_m
 maage_status maage_window_get_state(maage_window *window,
     maage_window_state *state);
 maage_status maage_window_set_title(maage_window *window, const char *title);
+/* Initialization-thread operation; consumes/copies sources before returning.
+ * Cocoa loads native_path (UTF-8, e.g. ICNS) as the process-wide Dock icon,
+ * restoring the previous icon when the system is destroyed. Win32/X11 copy
+ * the supplied RGBA8 sizes into window icons. Unsupported backends, including
+ * current Wayland, return NOT_IMPLEMENTED. Failure preserves the current icon. */
+maage_status maage_window_set_icon(maage_window *window,
+    const maage_window_icon *icon);
 maage_status maage_window_set_visible(maage_window *window, int visible);
 /* Client-area shape only; capture continues to control cursor visibility.
  * Unsupported backends return NOT_IMPLEMENTED and retain their native cursor. */

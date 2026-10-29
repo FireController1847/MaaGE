@@ -3,6 +3,7 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include "win32_ui.h"
+#include "resources.h"
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include "maage/storage.h"
@@ -268,6 +269,7 @@ maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui,
     RECT bounds;
     UINT dpi = GetDpiForWindow(window);
     BOOL immersive;
+    int small;
     ui->window = window;
     memset(&contrast, 0, sizeof(contrast)); contrast.cbSize = sizeof(contrast);
     if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0))
@@ -289,6 +291,18 @@ maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui,
     immersive = ui->dark;
     /* Optional non-client decoration; unsupported Windows versions retain their frame. */
     DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &immersive, sizeof(immersive));
+    for (small = 0; small < 2; ++small) {
+        ui->icons[small] = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(MAAGE_LAUNCHER_ICON_RESOURCE),
+            IMAGE_ICON, GetSystemMetricsForDpi(small ? SM_CXSMICON : SM_CXICON,dpi),
+            GetSystemMetricsForDpi(small ? SM_CYSMICON : SM_CYICON,dpi), 0);
+        if (ui->icons[small]) SendMessageW(window,WM_SETICON,small ? ICON_SMALL : ICON_BIG,(LPARAM)ui->icons[small]);
+        else {
+            maage_log_status(MAAGE_LOG_WARNING,"maage.launcher.ui",
+                maage_status_from_win32(GetLastError(),MAAGE_CONTEXT_LAUNCHER,MAAGE_OPERATION_LOAD),
+                "Launcher window icon is unavailable.");
+            ui->result = maage_status_make(MAAGE_STATUS_PARTIAL,MAAGE_CONTEXT_LAUNCHER,MAAGE_OPERATION_INITIALIZE,0);
+        }
+    }
     return ui->result;
 }
 
@@ -298,7 +312,10 @@ maage_status maage_launcher_win32_style_destroy(maage_launcher_win32_style *ui)
     if (ui->font && !DeleteObject(ui->font)) failed = 1;
     if (ui->heading && !DeleteObject(ui->heading)) failed = 1;
     if (ui->brand && !DeleteObject(ui->brand)) failed = 1;
+    if (ui->icons[0] && !DestroyIcon(ui->icons[0])) failed = 1;
+    if (ui->icons[1] && !DestroyIcon(ui->icons[1])) failed = 1;
     ui->font = ui->heading = ui->brand = NULL;
+    ui->icons[0] = ui->icons[1] = NULL;
     return maage_status_make(failed ? MAAGE_STATUS_ERROR : MAAGE_STATUS_SUCCESS,
         MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_DESTROY, 0);
 }
