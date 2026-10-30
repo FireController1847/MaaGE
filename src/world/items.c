@@ -334,7 +334,7 @@ int maage_item_stack_valid(const maage_item_registry *registry, const maage_item
     if (!stack) return 0;
     if (!stack->count) return !stack->item_id && !stack->metadata && !stack->damage;
     item = maage_item_registry_get(registry, stack->item_id);
-    return item && stack->count <= item->max_stack && stack->metadata <= item->max_metadata && stack->damage <= item->durability && (!item->durability || stack->damage < item->durability);
+    return item && stack->count <= item->max_stack && stack->metadata <= item->max_metadata && stack->damage <= item->durability;
 }
 const maage_item_stack *maage_inventory_selected(const maage_inventory *inventory) {
     return inventory && inventory->selected < MAAGE_HOTBAR_SLOTS ? &inventory->slots[inventory->selected] : NULL;

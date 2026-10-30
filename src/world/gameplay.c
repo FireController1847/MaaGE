@@ -257,7 +257,7 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
     if (!game || !maage_item_registry_is_finalized(items) || !save || save->mode > MAAGE_GAME_MODE_CREATIVE ||
         save->health > 20 || save->hunger > 20 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
-        !(save->exhaustion >= 0 && save->exhaustion <= 4) ||
+        !(save->exhaustion >= 0 && save->exhaustion <= 40) ||
         !(save->fall_distance >= 0 && save->fall_distance < MAAGE_WORLD_LIMIT) ||
         (save->flying != 0 && save->flying != 1) ||
         (save->mode == MAAGE_GAME_MODE_SURVIVAL && save->flying)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
@@ -392,9 +392,13 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     maage_entities_set_random(entities, random);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         game->exhaustion += 0.025;
-        if (tool && tool->durability && (tool->tool_class == MAAGE_TOOL_SHEARS ? (block->id == MAAGE_BLOCK_LEAVES || block->id == MAAGE_BLOCK_TALL_GRASS || block->id == MAAGE_BLOCK_DEAD_BUSH) : block->hardness != 0) && ++held->damage >= tool->durability) {
-            memset(held, 0, sizeof(*held));
-            maage_gameplay_sound(sink, MAAGE_SOUND_ITEM_BREAK, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 0.8, 0.8 + maage_gameplay_sound_random(game) * 0.4);
+        if (tool && tool->durability && (tool->tool_class == MAAGE_TOOL_SHEARS ? (block->id == MAAGE_BLOCK_LEAVES || block->id == MAAGE_BLOCK_TALL_GRASS || block->id == MAAGE_BLOCK_DEAD_BUSH) : block->hardness != 0)) {
+            /* Maximum damage is still a usable final state. Check before
+             * incrementing so even the full unsigned domain cannot wrap. */
+            if (held->damage == tool->durability) {
+                memset(held, 0, sizeof(*held));
+                maage_gameplay_sound(sink, MAAGE_SOUND_ITEM_BREAK, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 0.8, 0.8 + maage_gameplay_sound_random(game) * 0.4);
+            } else ++held->damage;
         }
     }
     game->last_break = game->target;

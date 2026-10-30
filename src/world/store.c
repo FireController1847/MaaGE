@@ -276,7 +276,7 @@ static int maage_store_gameplay_valid(const maage_gameplay_save *save, const maa
     if (save->mode > MAAGE_GAME_MODE_CREATIVE || save->health > 20 || save->hunger > 20 ||
         save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
-        !(save->exhaustion >= 0 && save->exhaustion <= 4) ||
+        !(save->exhaustion >= 0 && save->exhaustion <= 40) ||
         !(save->fall_distance >= 0 && save->fall_distance < MAAGE_WORLD_LIMIT) ||
         (save->flying != 0 && save->flying != 1) ||
         (save->mode == MAAGE_GAME_MODE_SURVIVAL && save->flying)) return 0;

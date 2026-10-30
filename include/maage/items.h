@@ -46,6 +46,7 @@ typedef struct maage_item_definition {
     maage_block_id block_id;
     maage_block_state_id placement_state_id, icon_state_id;
     unsigned int max_stack, durability, tool_class, tool_level, max_metadata;
+    /* Nonzero durability is the inclusive maximum usable damage value. */
     double mining_speed;
     unsigned int model;         /* Shared numeric presentation category. */
     unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
