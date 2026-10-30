@@ -12,8 +12,10 @@ Perspective starts in First Person and remains transient within the Client
 process. It is absent from Options, persistence and Server commands. Movement still uses the player's own
 look, including in front view; F5 does not reverse controls or change reach.
 
-The existing first-person projection, hand, equip/swing, bob and dynamic FOV stay
-on their original path. First person excludes all full-body instances. Third
+The first-person hand retains its own base projection and equip/swing path;
+world and hand share the [camera effects](visual-fidelity.md#player-presentation-and-sprinting)
+prefix once, including optional bob/vertical response and required hurt/death
+effects. First person excludes all full-body instances. Third
 person clears the foreground hand and uses the current interpolated feet plus
 the 1.62-block eye offset as its pivot, lowered 0.2 while crouching. Back places
 the camera four blocks opposite the look vector; Front places it along that
@@ -69,9 +71,10 @@ turning beyond 50 degrees. Walk amount follows copied displacement at 20 TPS;
 render interpolation and time-based turn response avoid FPS-dependent speed.
 Jump/fall/fly use authoritative vertical positions and the normal airborne biped
 pose; no new movement or flight simulation is introduced. Crouching raises leg
-pivots in Y-up coordinates and lowers the root to keep the feet planted. Health
-loss adds brief recoil; observed death rolls the model onto its side. These are
-local decorations over the existing provisional health/death rules.
+pivots in Y-up coordinates and lowers the root to keep the feet planted. Damage
+occurrence markers add brief recoil; the authoritative death tick rolls
+the model onto its side. These animations use the owner clock and reset at a new
+life rather than inferring repeated damage from unchanged health snapshots.
 
 The right-hand transform inherits shoulder, torso/swing and arm rotation. Selected
 blocks, tools and flat icons borrow the existing item-entity model cache, using
@@ -84,10 +87,10 @@ Inventory keeps its mouse-following head/body rotation and GUI clipping/batching
 It uses the same cuboids, UV generation, pivots and pose/part-matrix helpers, then
 projects into the existing GUI batch; it has no world camera or private GPU pass.
 
-Metal and Vulkan consume exactly the same cached meshes, transforms, materials,
+Metal, Vulkan and modern OpenGL consume the same cached meshes, transforms, materials,
 light levels and ordered translucent traversal. Their existing renderer/shader
 interfaces suffice; no backend-specific character algorithm or layout change is
-needed. OpenGL and Software retain their smaller capability subsets.
+needed. Legacy OpenGL and Software retain their smaller capability subsets.
 
 ## Limits and Manual Review
 

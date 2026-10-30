@@ -41,6 +41,7 @@ without fabricated category/search functionality.
 Catalog/admin I/O runs on bounded Jobs work. Title starts without a Server;
 Play starts the integrated runtime. Save/Quit flushes and joins before returning.
 Pause and Options stop gameplay; inventory and tables keep simulation/music active.
+The death screen keeps the owner clock running for the death transition and respawn.
 Modal screens release capture, and closure restores it when appropriate.
 
 ## State Transfer and Visual Lighting
@@ -54,8 +55,14 @@ packet owns all necessary state. Ordered unload packets close an interest lifeti
 the replica retains bases until that removal arrives. Reentry starts with a complete
 column. Initial local capacity covers Server residency plus bounded packets in flight;
 remote transports must negotiate an equivalent bound. Packets contain no light arrays,
-scheduled work, camera samples, ambient candidates or visual meshes. Protocol is 12;
+scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 14;
 remote encoding is not implemented.
+
+Snapshots include per-life raw travel/velocity observations and authoritative
+damage occurrence/tick/bearing markers. FIFO player-motion events retain raw
+intermediate owner steps for Client camera interpolation when snapshots coalesce.
+They carry no camera matrices or animation filters and use bounded existing
+event transport; omitted samples produce explicit partial presentation recovery.
 
 The presentation-only World replica reuses numeric chunks, immutable snapshots,
 registries, Jobs, light propagation and CPU meshing. It cannot generate, simulate,

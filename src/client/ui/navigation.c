@@ -95,5 +95,6 @@ int maage_client_ui_modal(const maage_client_ui *ui) {
 
 int maage_client_ui_pauses_game(const maage_client_ui *ui) {
     maage_client_ui_screen_id id = maage_client_ui_current(ui);
+    if (id == MAAGE_CLIENT_UI_PAUSE && ui->has_snapshot && !ui->snapshot.player.health) return 0;
     return maage_client_ui_modal(ui) && id != MAAGE_CLIENT_UI_INVENTORY && id != MAAGE_CLIENT_UI_CRAFTING_TABLE;
 }

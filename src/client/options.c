@@ -17,6 +17,7 @@ void maage_client_options_defaults(maage_client_options *options) {
     options->fov_degrees = 70;
     options->max_fps = 240;
     options->vsync = 1;
+    options->view_bobbing = 1;
     options->gui_scale = 0;
     options->leaves = MAAGE_LEAVES_FANCY;
     options->window_mode = MAAGE_CLIENT_WINDOWED;
@@ -26,7 +27,7 @@ void maage_client_options_defaults(maage_client_options *options) {
 int maage_client_options_equal(const maage_client_options *a, const maage_client_options *b) {
     int i;
     if (!a || !b || a->fov_degrees != b->fov_degrees ||
-        a->max_fps != b->max_fps || a->vsync != b->vsync ||
+        a->max_fps != b->max_fps || a->vsync != b->vsync || a->view_bobbing != b->view_bobbing ||
         a->gui_scale != b->gui_scale || a->leaves != b->leaves ||
         a->window_mode != b->window_mode || a->fullscreen_style != b->fullscreen_style)
         return 0;
@@ -99,6 +100,9 @@ static void maage_client_options_parse(maage_client_options *options, char *line
         else if (!strcmp(value, "false")) options->vsync = 0;
         else
             options->vsync = 1;
+    } else if (!strcmp(key, "view_bobbing")) {
+        if (!strcmp(value, "true")) options->view_bobbing = 1;
+        else if (!strcmp(value, "false")) options->view_bobbing = 0;
     } else if (!strcmp(key, "gui_scale")) {
         options->gui_scale = maage_client_options_integer(value, 0, 4, 1, &number) ? number : 0;
     } else if (!strcmp(key, "leaves")) {
@@ -156,6 +160,7 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
     if (!instance || !options || options->fov_degrees < 30 ||
         options->fov_degrees > 110 || (options->max_fps != 0 && (options->max_fps < 10 || options->max_fps > 260 || options->max_fps % 10)) ||
         (options->vsync != 0 && options->vsync != 1) ||
+        (options->view_bobbing != 0 && options->view_bobbing != 1) ||
         options->gui_scale < 0 || options->gui_scale > 4 ||
         options->leaves < MAAGE_LEAVES_FAST || options->leaves > MAAGE_LEAVES_FANCY ||
         options->window_mode < MAAGE_CLIENT_WINDOWED || options->window_mode > MAAGE_CLIENT_FULLSCREEN ||
@@ -173,11 +178,11 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
     if (status < 0 || status == 2) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
     file = maage_storage_open(temporary, "wb");
     if (!file) return maage_status_from_errno(errno, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE);
-    if (fprintf(file, "[video]\nfov_degrees=%d\nmax_fps=%d\nvsync=%s\ngui_scale=%d\nleaves=%s\n"
+    if (fprintf(file, "[video]\nfov_degrees=%d\nmax_fps=%d\nvsync=%s\nview_bobbing=%s\ngui_scale=%d\nleaves=%s\n"
                       "window_mode=%s\nfullscreen_style=%s\n\n"
                       "[audio]\nmaster=%d\nblocks=%d\nplayer=%d\nambient=%d\nweather=%d\nmusic=%d\nui=%d\n",
                 options->fov_degrees, options->max_fps,
-                options->vsync ? "true" : "false", options->gui_scale, leaves[options->leaves],
+                options->vsync ? "true" : "false", options->view_bobbing ? "true" : "false", options->gui_scale, leaves[options->leaves],
                 modes[options->window_mode], modes[options->fullscreen_style],
                 options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MASTER],
                 options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_BLOCKS],

@@ -153,6 +153,35 @@ static void server_emit_effect(maage_server_runtime *runtime, const maage_sound_
 static void server_emit_sound(maage_server_runtime *runtime, const maage_sound_event *sound) {
     server_emit_effect(runtime, sound, NULL, 0);
 }
+static void server_player_motion(const maage_server_runtime *runtime, maage_session_player_motion *motion) {
+    memcpy(motion->velocity, runtime->player.velocity, sizeof(motion->velocity));
+    motion->walk_distance = runtime->game.walk_distance;
+    motion->life = runtime->game.life;
+    motion->grounded = runtime->player.grounded;
+    motion->alive = runtime->game.health != 0;
+    motion->sneaking = runtime->sneaking;
+}
+static maage_status server_emit_motion(maage_server_runtime *runtime, maage_status_trace *trace) {
+    maage_session_event event;
+    maage_status result;
+    if (!runtime->config.session) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SNAPSHOT);
+    memset(&event, 0, sizeof(event));
+    event.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
+    event.kind = MAAGE_EVENT_PLAYER_MOTION;
+    event.session_epoch = event.world_epoch = 1;
+    event.tick = runtime->tick;
+    event.sequence = ++runtime->event_sequence;
+    server_player_motion(runtime, &event.motion);
+    result = maage_local_session_publish_event(runtime->config.session, &event);
+    /* Presentation can rebase from a snapshot after a dropped observation;
+     * transport pressure never blocks or rolls back authoritative movement. */
+    if (maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
+        MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_SUBMIT);
+        result = server_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_SNAPSHOT);
+        maage_status_trace_recover(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_SNAPSHOT, __FILE__, __LINE__);
+    } else if (maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SNAPSHOT);
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_SNAPSHOT);
+}
 
 /* Gameplay effect pitch never changes terrain, behavior or weather RNG. */
 static unsigned long server_effect_random(maage_server_runtime *runtime, unsigned long bound) {
@@ -482,6 +511,11 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.saturation = runtime->game.saturation;
     snapshot.player.flying = runtime->game.flying;
     snapshot.player.sneaking = runtime->sneaking;
+    server_player_motion(runtime, &snapshot.player.motion);
+    snapshot.player.damage_sequence = runtime->game.damage_sequence;
+    snapshot.player.damage_tick = runtime->game.damage_tick;
+    snapshot.player.death_tick = runtime->game.death_tick;
+    snapshot.player.damage_yaw = runtime->game.damage_yaw;
     snapshot.player.has_target = runtime->game.has_target;
     snapshot.player.breaking_active = runtime->game.breaking_active;
     snapshot.player.reach = runtime->game.reach > 0 ? runtime->game.reach : (runtime->game.mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5);
@@ -730,7 +764,7 @@ static maage_status server_tick(maage_server_runtime *runtime, maage_status_trac
     intent.pitch = runtime->pitch;
     runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
     result = maage_gameplay_tick(&runtime->game, &runtime->player, runtime->world, maage_content_items(runtime->content), &intent, sounds, sizeof(sounds) / sizeof(sounds[0]), &sound_count, trace);
-    runtime->sneaking = intent.movement.descend && !runtime->game.flying && runtime->game.health != 0;
+    runtime->sneaking = intent.descend && !runtime->game.flying && runtime->game.health != 0;
     /* Effects describe outcomes already resolved by authoritative gameplay.
      * Transport saturation may omit a sound, never roll back block mutations. */
     for (i = 0; i < sound_count; ++i) {
@@ -762,6 +796,9 @@ static maage_status server_tick(maage_server_runtime *runtime, maage_status_trac
     result = maage_world_tick(runtime->world);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_TICK);
     ++runtime->tick;
+    result = server_emit_motion(runtime, trace);
+    if (maage_status_failed(result)) return result;
+    if (maage_status_is_warning(result)) server_status_event(runtime, result, trace);
     return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
 

@@ -109,6 +109,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->last_nonwindowed_mode = ui->confirmed_fullscreen_style = MAAGE_CLIENT_BORDERLESS;
     ui->fps_step = 26;
     ui->vsync = 1;
+    ui->view_bobbing = 1;
     ui->leaves_mode = MAAGE_LEAVES_FANCY;
     ui->fov_degrees = 70;
     ui->audio_volume[0] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
@@ -303,6 +304,7 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     ui->fps_step = options->max_fps ? options->max_fps / 10 - 1 : 26;
     ui->requested_scale = options->gui_scale;
     ui->leaves_mode = options->leaves;
+    ui->view_bobbing = options->view_bobbing != 0;
     {
         unsigned int n;
         for (n = 0; n < 7; ++n) {
@@ -330,6 +332,7 @@ void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options
     options->fov_degrees = ui->fov_degrees;
     options->max_fps = ui->fps_step == 26 ? 0 : (ui->fps_step + 1) * 10;
     options->vsync = ui->vsync;
+    options->view_bobbing = ui->view_bobbing;
     options->gui_scale = ui->requested_scale;
     options->leaves = (maage_leaves_mode) ui->leaves_mode;
     {
@@ -358,6 +361,9 @@ int maage_client_ui_max_fps(const maage_client_ui *ui) {
 }
 int maage_client_ui_vsync(const maage_client_ui *ui) {
     return ui ? ui->vsync : 1;
+}
+int maage_client_ui_view_bobbing(const maage_client_ui *ui) {
+    return ui ? ui->view_bobbing : 1;
 }
 int maage_client_ui_gui_scale(const maage_client_ui *ui) {
     return ui ? ui->requested_scale : 0;

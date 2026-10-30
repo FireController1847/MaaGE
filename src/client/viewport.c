@@ -364,18 +364,19 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
 
 typedef struct maage_client_fov {
     double multiplier;
-    unsigned long session_epoch, world_epoch;
+    unsigned long session_epoch, world_epoch, life;
     int initialized;
 } maage_client_fov;
 
 static double maage_client_fov_update(maage_client_fov *view, const maage_session_snapshot *snapshot, double elapsed) {
     double target = snapshot->player.player.sprinting ? (MAAGE_PLAYER_SPRINT_SPEED + 1.0) * 0.5 : 1.0;
     if (snapshot->player.flying) target *= 1.1;
-    if (!view->initialized || view->session_epoch != snapshot->session_epoch || view->world_epoch != snapshot->world_epoch) {
+    if (!view->initialized || view->session_epoch != snapshot->session_epoch || view->world_epoch != snapshot->world_epoch || view->life != snapshot->player.motion.life) {
         view->multiplier = target;
         view->initialized = 1;
         view->session_epoch = snapshot->session_epoch;
         view->world_epoch = snapshot->world_epoch;
+        view->life = snapshot->player.motion.life;
     } else if (!snapshot->paused && elapsed > 0) {
         /* Half the remaining difference per 20 Hz tick, expressed
          * continuously so rendering FPS and duplicate snapshots cannot reset it.
@@ -386,7 +387,7 @@ static double maage_client_fov_update(maage_client_fov *view, const maage_sessio
     return view->multiplier;
 }
 
-static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius, double fov, const float bob[16]) {
+static void maage_client_camera(float output[16], const double eye[3], double yaw, double pitch, double aspect, int radius, double fov, const float bob[16], int first_person) {
     double sy = sin(yaw), cy = cos(yaw), sp = sin(pitch), cp = cos(pitch);
     double forward[3], right[3], up[3], focal, far_clip;
     float view[16], projection[16], bobbed_view[16];
@@ -411,6 +412,7 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
         view[14] += (float) (forward[k] * eye[k]);
     }
     view[15] = 1.0f;
+    if (first_person) view[14] -= 0.1f;
     focal = 1.0 / tan(fov * 0.5);
     projection[0] = (float) (focal / aspect);
     projection[5] = (float) focal;
@@ -553,6 +555,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_options video_options, saved_video_options, current_options;
     maage_client_interaction_visual interaction;
     maage_client_first_person first_person;
+    maage_client_camera_effects camera_effects;
     maage_client_swing local_swing;
     maage_session_snapshot visual_snapshot;
     double swing_progress = 0;
@@ -583,13 +586,13 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
     double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
     maage_client_pacing pacing = {0, 0.0};
-    maage_client_fov fov = {0.0, 0, 0, 0};
+    maage_client_fov fov = {0.0, 0, 0, 0, 0};
     double effective_fov;
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
     double render_yaw = 0.0, render_pitch = 0.0, yaw_arc = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
     unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
-    float matrix[16], camera_bob[16];
+    float matrix[16];
     double camera_eye[3], camera_yaw, camera_pitch, camera_distance;
     size_t draw_count, resident_count, slot_index;
     int valid_snapshot = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
@@ -608,6 +611,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&interaction, 0, sizeof(interaction));
     memset(&first_person, 0, sizeof(first_person));
+    memset(&camera_effects, 0, sizeof(camera_effects));
     memset(&player_view, 0, sizeof(player_view));
     memset(&collision, 0, sizeof(collision));
     memset(&debug, 0, sizeof(debug));
@@ -1112,6 +1116,7 @@ choose_world:
                 previous = incoming;
                 received_time = now;
                 memset(&collision, 0, sizeof(collision));
+                memset(&camera_effects, 0, sizeof(camera_effects));
                 player_view.initialized = 0;
                 world_epoch = incoming.world_epoch;
                 view_sent = 0;
@@ -1122,6 +1127,11 @@ choose_world:
                 pitch = incoming.player.pitch;
                 selected_hotbar = queued_hotbar = (int) incoming.player.inventory.selected;
                 jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = 0;
+            } else if (incoming.player.motion.life != latest.player.motion.life) {
+                previous = incoming;
+                received_time = now;
+                memset(&camera_effects, 0, sizeof(camera_effects));
+                player_view.initialized = 0;
             } else if (incoming.tick != latest.tick) {
                 previous = latest;
                 received_time = now;
@@ -1133,6 +1143,12 @@ choose_world:
             if (was_modal && !maage_client_ui_modal(ui)) initial_capture = 1;
             if (!latest.player.health && latest.player.game_mode == MAAGE_GAME_MODE_SURVIVAL && !maage_client_ui_modal(ui)) (void) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
         } else if (maage_status_failed(operation) && maage_status_code(operation) != MAAGE_STATUS_NOOP && maage_status_code(operation) != MAAGE_STATUS_INVALID_STATE) goto done;
+        /* Anchor a new life at its first copied snapshot before FIFO events
+         * can run ahead of that snapshot during an owner catch-up phase. */
+        if (!camera_effects.initialized) {
+            operation = maage_client_camera_observe(&camera_effects, latest.session_epoch, latest.world_epoch, latest.tick, &latest.player.motion);
+            if (maage_status_failed(operation)) goto done;
+        }
         for (event_budget = 0; event_budget < 256U; ++event_budget) {
             operation = maage_local_session_take_event(session, &event);
             if (maage_status_code(operation) == MAAGE_STATUS_NOOP || maage_status_code(operation) == MAAGE_STATUS_INVALID_STATE) break;
@@ -1148,7 +1164,13 @@ choose_world:
                 break;
             }
             if (event.session_epoch != latest.session_epoch || event.world_epoch != latest.world_epoch) continue;
-            if (event.kind == MAAGE_EVENT_BLOCK_ACTION) {
+            if (event.kind == MAAGE_EVENT_PLAYER_MOTION) {
+                if (event.motion.life == latest.player.motion.life) {
+                    operation = maage_client_camera_observe(&camera_effects, event.session_epoch, event.world_epoch, event.tick, &event.motion);
+                    if (maage_status_failed(operation)) goto done;
+                    if (maage_status_is_warning(operation)) maage_client_ui_notify(ui, operation, now);
+                }
+            } else if (event.kind == MAAGE_EVENT_BLOCK_ACTION) {
                 maage_client_prediction_confirm(&prediction, &event);
             } else if (event.kind == MAAGE_EVENT_SOUND || event.kind == MAAGE_EVENT_PICKUP) {
                 if (sound_epoch != event.session_epoch || sound_world_epoch != event.world_epoch) {
@@ -1315,7 +1337,10 @@ choose_world:
         swing_progress = maage_client_swing_update(&local_swing, &latest, raw_elapsed, active, input.primary_down || input.primary_pressed, input.primary_pressed, visual_snapshot.player.has_target);
         rendered = maage_client_interaction_update(&interaction, renderer, atlas, blocks, &visual_snapshot, &prediction, trace);
         if (maage_status_failed(rendered)) goto done;
-        effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed);
+        operation = maage_client_camera_effects_update(&camera_effects, &latest, alpha, latest.paused || maage_client_ui_pauses_game(ui), maage_client_ui_view_bobbing(ui));
+        if (maage_status_failed(operation)) goto done;
+        if (maage_status_is_warning(operation)) maage_client_ui_notify(ui, operation, now);
+        effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed) * camera_effects.fov_scale;
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;
@@ -1353,15 +1378,13 @@ choose_world:
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
-            rendered = maage_client_first_person_update(&first_person, renderer, atlas, items, blocks, &visual_snapshot, eye, render_yaw, render_pitch, raw_elapsed, (double) state.framebuffer_width / state.framebuffer_height, swing_progress, camera_mode == MAAGE_CAMERA_FIRST && !maage_client_ui_modal(ui), trace);
+            rendered = maage_client_first_person_update(&first_person, renderer, atlas, items, blocks, &visual_snapshot, &camera_effects, render_yaw, render_pitch, raw_elapsed, (double) state.framebuffer_width / state.framebuffer_height, swing_progress, camera_mode == MAAGE_CAMERA_FIRST && !maage_client_ui_modal(ui), trace);
             if (maage_status_failed(rendered)) goto done;
             operation = maage_world_sample_camera(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &collision);
             if (maage_status_failed(operation)) goto done;
-            camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch, latest.player.sneaking, (double) state.framebuffer_width / state.framebuffer_height, effective_fov, &collision, blocks, camera_eye, &camera_yaw, &camera_pitch);
-            maage_player_matrix_identity(camera_bob);
-            if (camera_mode == MAAGE_CAMERA_FIRST) memcpy(camera_bob, first_person.camera_bob, sizeof(camera_bob));
-            maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_bob);
-            rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, now, swing_progress, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
+            camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch, latest.player.sneaking, camera_effects.eye_drop, (double) state.framebuffer_width / state.framebuffer_height, effective_fov, &collision, blocks, camera_eye, &camera_yaw, &camera_pitch);
+            maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
+            rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, swing_progress, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_client_environment_update(environment_view, renderer, &latest, maage_client_ui_width(ui), maage_client_ui_height(ui), matrix);
@@ -1457,6 +1480,7 @@ return_to_title:
     rendered = maage_renderer_set_foreground(renderer, NULL, NULL, 0, 0);
     if (maage_status_failed(rendered)) goto done;
     first_person.initialized = 0;
+    memset(&camera_effects, 0, sizeof(camera_effects));
     operation = maage_client_item_entities_clear(item_entities);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_player_view_destroy(&player_view);

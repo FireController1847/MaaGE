@@ -22,7 +22,7 @@ static const char *const maage_sound_names[7] = {
     "Master Volume", "Music", "Blocks", "Weather", "Player", "Ambient", "UI"};
 static const char *const maage_video_unsupported[17] = {
     "Graphics: Fancy", "Render Distance: 8 Normal",
-    "Smooth Lighting: Maximum", "", "3D Anaglyph: OFF", "View Bobbing: ON",
+    "Smooth Lighting: Maximum", "", "3D Anaglyph: OFF", "",
     "", "Advanced OpenGL: OFF", "Brightness: Moody", "Clouds: ON",
     "Particles: All", "", "", "Mipmap Levels: OFF",
     "Anisotropic Filtering: OFF", "", ""};
@@ -128,7 +128,7 @@ static int maage_options_enabled(const maage_client_ui *ui, maage_client_ui_scre
     if (screen == MAAGE_CLIENT_UI_OPTIONS) return id == 0U || id == 3U || id == 5U || id == MAAGE_OPTIONS_MAIN_DONE;
     if (screen == MAAGE_CLIENT_UI_SOUND_SETTINGS) return id < MAAGE_OPTIONS_SOUND_COUNT;
     if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) {
-        if (id == 3U || id == 6U || id == 15U || id == MAAGE_OPTIONS_VIDEO_DONE) return 1;
+        if (id == 3U || id == 5U || id == 6U || id == 15U || id == MAAGE_OPTIONS_VIDEO_DONE) return 1;
         if (id == 12U) return ui->vsync_supported;
         if (id == 11U) return !ui->mode_pending && !ui->mode_changing;
         if (id == 16U) return ui->has_snapshot;
@@ -234,6 +234,7 @@ static void maage_options_action(maage_client_ui *ui, maage_client_ui_screen_id 
     } else {
         if (id == MAAGE_OPTIONS_VIDEO_DONE) ui->route_result = maage_client_ui_back(ui);
         else if (id == 3U) maage_options_adjust(ui, screen, id, 1);
+        else if (id == 5U) ui->view_bobbing = !ui->view_bobbing;
         else if (id == 6U) ui->requested_scale = (ui->requested_scale + 1) % 5;
         else if (id == 15U) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
         else if (id == 11U) maage_client_ui_request_window_mode(ui, (maage_client_window_choice) ((ui->window_mode + 1) % 3));
@@ -338,7 +339,8 @@ static void maage_options_video_label(const maage_client_ui *ui, unsigned int id
         if (ui->fps_step == 26) strcpy(text, "Max Framerate: Unlimited");
         else
             sprintf(text, "Max Framerate: %d", (ui->fps_step + 1) * 10);
-    } else if (id == 6U) sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
+    } else if (id == 5U) strcpy(text, ui->view_bobbing ? "View Bobbing: ON" : "View Bobbing: OFF");
+    else if (id == 6U) sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
     else if (id == 12U)
         strcpy(text, !ui->vsync_supported ? "VSync: Unavailable" : (ui->vsync ? "VSync: ON" : "VSync: OFF"));
     else if (id == 15U) sprintf(text, "Leaves: %s", leaves[ui->leaves_mode]);

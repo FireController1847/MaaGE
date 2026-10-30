@@ -1,6 +1,7 @@
 #include "maage/local_session.h"
 #include "maage/thread.h"
 #include <limits.h>
+#include <float.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -78,11 +79,21 @@ static int session_command_valid(const maage_session_command *command) {
     }
 }
 
+static int session_motion_valid(const maage_session_player_motion *motion) {
+    unsigned int axis;
+    if (!motion->life || !(motion->walk_distance >= 0 && motion->walk_distance <= DBL_MAX) ||
+        (motion->grounded != 0 && motion->grounded != 1) || (motion->alive != 0 && motion->alive != 1) || (motion->sneaking != 0 && motion->sneaking != 1)) return 0;
+    for (axis = 0; axis < 3; ++axis)
+        if (!(motion->velocity[axis] >= -MAAGE_WORLD_LIMIT && motion->velocity[axis] <= MAAGE_WORLD_LIMIT)) return 0;
+    return 1;
+}
+
 static int session_event_valid(const maage_session_event *event) {
     if (event->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_BLOCK_ACTION || event->kind == 3U ||
+        event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_PLAYER_MOTION || event->kind == 3U ||
         (event->has_trace != 0 && event->has_trace != 1)) return 0;
     if (event->kind == MAAGE_EVENT_PICKUP && (!event->pickup_count || event->pickup_count > 32)) return 0;
+    if (event->kind == MAAGE_EVENT_PLAYER_MOTION && (!event->sequence || !session_motion_valid(&event->motion))) return 0;
     if (event->kind == MAAGE_EVENT_SOUND || event->kind == MAAGE_EVENT_PICKUP)
         return event->sound.event_id >= MAAGE_SOUND_FOOTSTEP &&
                event->sound.event_id <= MAAGE_SOUND_MAX &&
@@ -185,6 +196,9 @@ maage_status maage_local_session_publish_snapshot(maage_local_session *session, 
     maage_status result;
     if (!session) return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
     if (!snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+        !session_motion_valid(&snapshot->player.motion) ||
+        snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick ||
+        !(snapshot->player.damage_yaw >= -DBL_MAX && snapshot->player.damage_yaw <= DBL_MAX) ||
         (snapshot->paused != 0 && snapshot->paused != 1) ||
         (snapshot->has_observation != 0 && snapshot->has_observation != 1))
         return session_argument(MAAGE_OPERATION_SNAPSHOT, 1);

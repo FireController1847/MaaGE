@@ -167,11 +167,17 @@ static maage_status maage_gameplay_sound_result(maage_status outcome, const maag
     return outcome;
 }
 
+static void maage_gameplay_begin_life(maage_gameplay *game) {
+    if (++game->life == 0) ++game->life;
+    game->walk_distance = game->damage_yaw = 0;
+    game->damage_sequence = game->damage_tick = game->death_tick = 0;
+}
 maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items) {
     const maage_item_definition *item;
     unsigned int i;
     if (!game) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     memset(game, 0, sizeof(*game));
+    maage_gameplay_begin_life(game);
     game->mode = MAAGE_GAME_MODE_CREATIVE;
     game->health = game->hunger = 20;
     game->saturation = 5;
@@ -197,12 +203,16 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode) {
     game->footstep_distance = 0;
     game->audio_initialized = 0;
     if (mode == MAAGE_GAME_MODE_SURVIVAL) game->flying = 0;
-    else if (!game->health) game->health = 20;
+    else if (!game->health) {
+        game->health = 20;
+        maage_gameplay_begin_life(game);
+    }
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
 }
 maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player, const maage_world *world) {
     if (!game || !player || !world) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
     maage_player_spawn(player, world);
+    maage_gameplay_begin_life(game);
     game->health = game->hunger = 20;
     game->saturation = 5;
     game->exhaustion = game->fall_distance = 0;
@@ -259,6 +269,7 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
             return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
     memset(game, 0, sizeof(*game));
     memcpy(game->crafting.inputs, save->crafting_inputs, sizeof(game->crafting.inputs));
+    maage_gameplay_begin_life(game);
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
         if (game->crafting.inputs[i].count) game->crafting.closing = 1;
     game->inventory = save->inventory;
@@ -476,6 +487,10 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
 static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player, unsigned int damage, maage_gameplay_sound_sink *sink) {
     if (!damage || !game->health) return;
     game->health = damage >= game->health ? 0 : game->health - damage;
+    if (++game->damage_sequence == 0) ++game->damage_sequence;
+    game->damage_tick = game->ticks;
+    game->damage_yaw = 0; /* Current sources are fall impact and starvation, with no attacker. */
+    if (!game->health) game->death_tick = game->ticks;
     maage_gameplay_sound(sink, game->health ? MAAGE_SOUND_PLAYER_HURT : MAAGE_SOUND_PLAYER_DEATH, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 1.0, maage_gameplay_sound_pitch(game, 0.2));
 }
 static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *player, const maage_world *world, const double previous[3], int was_grounded, int jumped, int sprint_jump, int in_water, maage_gameplay_sound_sink *sink) {
@@ -628,6 +643,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     dy = player->position[1] - previous[1];
     dz = player->position[2] - previous[2];
     travel = sqrt(dx * dx + dz * dz);
+    if (!(grounded && movement.descend)) game->walk_distance += travel * 0.6;
     in_water = maage_player_fluid(player, world) == MAAGE_FLUID_WATER;
     if (in_water && !game->in_water && game->audio_initialized) {
         strength = sqrt((velocity[0] * velocity[0] + velocity[2] * velocity[2]) * 0.2 + velocity[1] * velocity[1]) * 0.2;

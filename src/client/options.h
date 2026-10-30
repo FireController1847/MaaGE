@@ -44,6 +44,7 @@ typedef struct maage_client_options {
     int fov_degrees;                                /* Vertical field of view, 30..110, default 70. */
     int max_fps;                                    /* 0 unlimited, otherwise 10..260 in increments of 10. */
     int vsync;
+    int view_bobbing;
     int gui_scale; /* 0 auto; 1..4 explicit. */
     maage_leaves_mode leaves;
     maage_client_window_choice window_mode;

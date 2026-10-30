@@ -125,29 +125,21 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual, c
     if (!visual || !resources) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE, 0);
     memset(visual, 0, sizeof(*visual));
     visual->resources = resources;
-    maage_first_person_identity(visual->camera_bob);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
-maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const double position[3], double yaw, double pitch, double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace) {
+maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const maage_client_camera_effects *effects, double yaw, double pitch, double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace) {
     const maage_item_stack *selected;
     maage_item_id item_id;
     maage_status result;
     float matrix[16], projection[16], sky = 1, emission = 0;
-    double target, amount, distance, dx, dz, speed, lag, arc, swing, wave, root_wave, square_wave;
+    double target, amount, lag, arc, swing, wave, root_wave, square_wave, focal;
     unsigned int metadata;
     int changed = 0;
-    if (!visual || !renderer || !atlas || !items || !blocks || !snapshot || !position || !(aspect > 0) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
+    if (!visual || !renderer || !atlas || !items || !blocks || !snapshot || !effects || !(aspect > 0) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     if (!visible) {
-        /* Keep interpolation anchored while a modal hides the hand. A paused
-         * scene retains its current bob; a new world starts with no bob. */
-        memcpy(visual->last_position, position, sizeof(visual->last_position));
         visual->arm_yaw = yaw;
         visual->arm_pitch = pitch;
-        if (!visual->initialized || visual->session_epoch != snapshot->session_epoch || visual->world_epoch != snapshot->world_epoch) {
-            maage_first_person_identity(visual->camera_bob);
-            visual->walk_distance = visual->walk_amount = 0;
-        }
         return maage_renderer_set_foreground(renderer, NULL, NULL, 0, 0);
     }
     selected = maage_inventory_selected(&snapshot->player.inventory);
@@ -155,17 +147,16 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     metadata = item_id ? selected->metadata : 0;
     if (elapsed < 0) elapsed = 0;
     if (elapsed > 0.1) elapsed = 0.1;
-    if (!visual->initialized || visual->session_epoch != snapshot->session_epoch || visual->world_epoch != snapshot->world_epoch) {
+    if (!visual->initialized || visual->session_epoch != snapshot->session_epoch || visual->world_epoch != snapshot->world_epoch || visual->life != snapshot->player.motion.life) {
         visual->initialized = 1;
         visual->equipped = 1;
         visual->item_id = item_id;
         visual->metadata = metadata;
         visual->arm_yaw = yaw;
         visual->arm_pitch = pitch;
-        visual->walk_distance = visual->walk_amount = 0;
-        memcpy(visual->last_position, position, sizeof(visual->last_position));
         visual->session_epoch = snapshot->session_epoch;
         visual->world_epoch = snapshot->world_epoch;
+        visual->life = snapshot->player.motion.life;
         changed = 1;
     }
     target = visual->item_id == item_id && visual->metadata == metadata ? 1 : 0;
@@ -199,22 +190,8 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
             return maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
         }
     }
-    dx = position[0] - visual->last_position[0];
-    dz = position[2] - visual->last_position[2];
-    distance = sqrt(dx * dx + dz * dz);
-    memcpy(visual->last_position, position, sizeof(visual->last_position));
-    if (snapshot->player.player.grounded && !snapshot->player.flying && distance < 1) visual->walk_distance = fmod(visual->walk_distance + distance * 0.6, 2.0);
-    speed = sqrt(snapshot->player.player.velocity[0] * snapshot->player.player.velocity[0] + snapshot->player.player.velocity[2] * snapshot->player.player.velocity[2]);
-    if (speed > 0.1) speed = 0.1;
-    if (!snapshot->player.player.grounded || snapshot->player.flying) speed = 0;
-    lag = 1 - exp(-elapsed * 10.216512475);
-    visual->walk_amount += (speed - visual->walk_amount) * lag;
-    maage_first_person_identity(matrix);
-    wave = -visual->walk_distance * 3.141592653589793;
-    maage_first_person_translate(matrix, sin(wave) * visual->walk_amount * 0.5, -fabs(cos(wave) * visual->walk_amount), 0);
-    maage_first_person_rotate(matrix, 2, sin(wave) * visual->walk_amount * 3);
-    maage_first_person_rotate(matrix, 0, fabs(cos(wave - 0.2) * visual->walk_amount) * 5);
-    memcpy(visual->camera_bob, matrix, sizeof(visual->camera_bob));
+    /* World and hand consume one evaluated camera transform, each exactly once. */
+    memcpy(matrix, effects->matrix, sizeof(matrix));
     arc = atan2(sin(yaw - visual->arm_yaw), cos(yaw - visual->arm_yaw));
     maage_first_person_rotate(matrix, 0, (pitch - visual->arm_pitch) * 5.7295779513);
     maage_first_person_rotate(matrix, 1, arc * 5.7295779513);
@@ -256,10 +233,11 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
         maage_first_person_translate(matrix, 5.6 - 5.0 / 16, 2.0 / 16, 0);
         maage_first_person_rotate(matrix, 2, 5.7295779513);
     }
-    /* First-person FOV stays at 70 degrees independently of world FOV. */
+    /* The hand keeps its 70-degree base; water/death projection changes remain shared. */
     memset(projection, 0, sizeof(projection));
-    projection[0] = (float) (1.4281480067421144 / aspect);
-    projection[5] = 1.4281480067421144f;
+    focal = 1 / tan(0.6108652381980153 * effects->fov_scale);
+    projection[0] = (float) (focal / aspect);
+    projection[5] = (float) focal;
     projection[10] = 16.0f / (0.05f - 16.0f);
     projection[11] = -1;
     projection[14] = 0.05f * 16.0f / (0.05f - 16.0f);
@@ -388,10 +366,11 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
 
 double maage_client_swing_update(maage_client_swing *swing, const maage_session_snapshot *snapshot, double elapsed, int active, int held, int pressed, int has_target) {
     int request;
-    if (swing->session != snapshot->session_epoch || swing->world != snapshot->world_epoch) {
+    if (swing->session != snapshot->session_epoch || swing->world != snapshot->world_epoch || swing->life != snapshot->player.motion.life) {
         memset(swing, 0, sizeof(*swing));
         swing->session = snapshot->session_epoch;
         swing->world = snapshot->world_epoch;
+        swing->life = snapshot->player.motion.life;
         swing->placement_tick = snapshot->player.swing_tick;
     }
     if (elapsed < 0) elapsed = 0;

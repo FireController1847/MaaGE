@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 13U
+#define MAAGE_SESSION_PROTOCOL_VERSION 14U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -110,6 +110,13 @@ typedef struct maage_sound_event {
     double pitch;
 } maage_sound_event;
 
+/* Raw owner-step observations. FIFO motion events preserve intermediate steps
+ * when the latest-state snapshot mailbox coalesces ticks on a slower Client. */
+typedef struct maage_session_player_motion {
+    double velocity[3], walk_distance;
+    unsigned long life;
+    int grounded, alive, sneaking;
+} maage_session_player_motion;
 typedef struct maage_session_player_view {
     maage_player player;
     double yaw, pitch;
@@ -118,6 +125,9 @@ typedef struct maage_session_player_view {
     unsigned int game_mode, health, hunger;
     double saturation;
     int flying, sneaking;
+    maage_session_player_motion motion;
+    unsigned long damage_sequence, damage_tick, death_tick;
+    double damage_yaw; /* Incoming bearing relative to body yaw, radians; zero for current environmental damage. */
     int has_target, breaking_active, submerged;
     double reach;
     unsigned int break_delay, attack_miss_delay;
@@ -156,7 +166,8 @@ typedef enum maage_session_event_kind {
     MAAGE_EVENT_STATUS = 2,
     MAAGE_EVENT_DISCONNECTED = 4,
     MAAGE_EVENT_PICKUP = 5,
-    MAAGE_EVENT_BLOCK_ACTION = 6
+    MAAGE_EVENT_BLOCK_ACTION = 6,
+    MAAGE_EVENT_PLAYER_MOTION = 7
 } maage_session_event_kind;
 
 typedef struct maage_session_event {
@@ -164,8 +175,9 @@ typedef struct maage_session_event {
     unsigned int kind;
     unsigned long session_epoch, world_epoch;
     unsigned long tick, sequence;
-    double emitted_at;       /* Local monotonic seconds; remote clocks need translation. */
-    maage_sound_event sound; /* SOUND/PICKUP. */
+    double emitted_at;                  /* Local monotonic seconds; remote clocks need translation. */
+    maage_sound_event sound;            /* SOUND/PICKUP. */
+    maage_session_player_motion motion; /* PLAYER_MOTION, one immutable owner-step observation. */
     unsigned long prediction;
     int accepted;
     maage_block_position block;

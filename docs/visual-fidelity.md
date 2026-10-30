@@ -138,7 +138,7 @@ are not MaaGE measurements; no runtime improvement has been measured here.
 ## Player Presentation and Sprinting
 
 First-person blocks, extruded icons and the selected skin arm use a separate
-70° perspective/depth pass before GUI. Equip transitions, swing, bob and camera lag
+70° base perspective/depth pass before GUI. Equip transitions, swing, bob and camera lag
 remain Client presentation; returning to Title clears foreground state. Shared
 cuboids/UVs serve arms, inventory and [third person](third-person.md).
 
@@ -153,14 +153,49 @@ Survival exhaustion is 0.1/m sprinting versus 0.01/m walking and 0.8/jump versus
 Client sprint FOV targets a factor of 1.15, with an additional 1.1 for flight.
 A continuous half-difference-per-20-Hz filter smooths frames; repeated snapshots
 do not reset it, pause freezes it and new worlds reset it. World and sky share
-effective FOV; saved base FOV and fixed hand projection stay independent.
+effective FOV; saved base FOV and the hand's base projection stay independent.
+
+`camera.c` evaluates movement, hurt and death once for world/hand presentation.
+Raw 20 TPS motion observations preserve intermediate ticks across coalesced
+snapshots; a bounded Client history keeps simulation endpoints for interpolation.
+Horizontal amplitude approaches clamped speed by 0.4 per tick; vertical pitch
+approaches `atan(-vertical_velocity * 0.2) * 15` degrees by 0.8, targeting zero on
+landing/death. Distance phase advances through airborne travel, while grounded
+crouch holds it. First-person crouch lowers the eye by 0.08 blocks with tick-based
+release recovery, independently of targeting/audio, and retains the 0.1-block
+camera-local view offset. Third-person boom positioning/collision stays separate.
+
+Authoritative damage occurrence/life IDs and tick markers drive ten-tick hurt
+rotation, fourth-power easing, captured incoming bearing, death roll and death
+FOV. Current environmental damage has zero bearing; combat is still absent.
+Water scales world and hand FOV by 60/70. The transform order is death/hurt,
+optional movement bob/vertical pitch, then camera orientation/position; the hand
+uses the same effect prefix once before its own lag/equip/swing transforms.
+These screen effects also apply in third person, preserving the reference order.
+Pause freezes evaluated effects; respawn/world changes reset them. Missing raw
+observations explicitly return PARTIAL and rebase from a snapshot or hold an
+available filter endpoint; this recovery cannot reconstruct an omitted transient.
+No rendering work runs on the Server.
+
+Video Settings exposes View Bobbing (default ON), persisted as
+`[video] view_bobbing=true|false` in the instance's atomic `config/options.ini`.
+OFF suppresses movement bob and vertical pitch, retaining hurt/death transforms,
+water/death FOV and required camera positioning.
+
+Grounded sneaking reduces projected X, Z and combined diagonal walk requests in
+0.05-block steps until the body shifted one block down overlaps collision shapes.
+This permits overhang and partial-height support before the normal Y/X/Z sweep.
+It does not invent wall collisions, zero horizontal inertia or alter gravity;
+upward takeoff, airborne motion and Creative flight bypass the guard. Unknown
+terrain retains the World collision contract. This uses registered collision
+geometry; slab/stair content and multibox shapes are not introduced here.
 
 ## Limits and Manual Review
 
 Exact lightmap/gamma/flicker matching, altitude/noise biome tint variation,
 randomized plant offsets, particles, underwater overlays/fog, clouds/stars and
 maps/bows/eating/enchantment effects remain incomplete or absent. Movement/fluid
-feel, sneak ledges, blindness and item-use slowdowns remain provisional/unsupported.
+feel, blindness and item-use slowdowns remain provisional/unsupported.
 Legacy OpenGL and Software retain their implemented subsets and reject unsupported draws.
 
 Pending programmer review: compare day/night/weather sky edges, foliage modes,
