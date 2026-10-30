@@ -134,7 +134,7 @@ failed:
     }
     return result;
 }
-maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, int active, int held, int pressed, int use, int use_pressed, unsigned int hotbar, maage_session_command *command) {
+maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command) {
     maage_world_target target, destination;
     maage_block_state_id placed;
     double direction[3], damage;
@@ -247,7 +247,8 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             stack = &snapshot->player.inventory.slots[hotbar];
-            result = maage_gameplay_placement(&snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
+            if (target.block_id == MAAGE_BLOCK_CRAFTING_TABLE && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+            else result = maage_gameplay_placement(&snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 memset(&prediction->entries[vacant], 0, sizeof(prediction->entries[vacant]));
                 prediction->entries[vacant].active = 1;

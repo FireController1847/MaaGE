@@ -57,7 +57,8 @@ typedef struct maage_gameplay_intent {
 
 /* Read-only ordinary block placement rules, shared by Server authority and
  * Client presentation. SUCCESS returns the expected destination and new state;
- * NOOP defers unavailable/invalid placement or non-block interaction. */
+ * NOOP defers unavailable/invalid placement or non-block interaction. The caller
+ * resolves block activation first, including the held-item crouch bypass. */
 maage_status maage_gameplay_placement(const maage_player *player, const maage_world *world, const maage_item_registry *items, const maage_item_stack *held, const maage_world_target *target, double yaw, maage_world_target *destination, maage_block_state_id *placed);
 maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
