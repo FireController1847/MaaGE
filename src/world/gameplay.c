@@ -407,16 +407,52 @@ static int maage_gameplay_player_overlap(const maage_player *player, int x, int 
     }
     return 1;
 }
-static maage_status maage_gameplay_place(maage_gameplay *game, const maage_player *player, maage_world *world, const maage_item_registry *items, double yaw, maage_gameplay_sound_sink *sink) {
+maage_status maage_gameplay_placement(const maage_player *player, const maage_world *world, const maage_item_registry *items, const maage_item_stack *held, const maage_world_target *target, double yaw, maage_world_target *destination, maage_block_state_id *placed) {
     static const int dx[MAAGE_FACE_COUNT] = {-1, 1, 0, 0, 0, 0};
     static const int dy[MAAGE_FACE_COUNT] = {0, 0, -1, 1, 0, 0};
     static const int dz[MAAGE_FACE_COUNT] = {0, 0, 0, 0, -1, 1};
-    maage_item_stack *held;
     const maage_item_definition *item;
     const maage_block_state_definition *state, *old_state;
     const maage_block_definition *block, *old_block;
-    maage_block_state_id placed, old;
     int x, y, z, valid;
+    maage_status result;
+    if (!player || !world || !items || !held || !target || !destination || !placed || (unsigned int) target->face >= MAAGE_FACE_COUNT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    if (target->x <= -MAAGE_WORLD_LIMIT || target->x >= MAAGE_WORLD_LIMIT || target->z <= -MAAGE_WORLD_LIMIT || target->z >= MAAGE_WORLD_LIMIT || target->y < 0 || target->y >= MAAGE_WORLD_HEIGHT) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    if (target->block_id == MAAGE_BLOCK_CRAFTING_TABLE || maage_world_get(world, target->x, target->y, target->z) != target->state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
+    if (!item || !item->has_block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    result = maage_item_placement_state(item, held->metadata, target->face, yaw, placed);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    state = maage_block_registry_state(maage_world_registry(world), *placed);
+    block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
+    if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    x = target->x;
+    y = target->y;
+    z = target->z;
+    old_block = maage_block_registry_block(maage_world_registry(world), target->block_id);
+    if (!old_block || !old_block->replaceable) {
+        x += dx[target->face];
+        y += dy[target->face];
+        z += dz[target->face];
+    }
+    if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    memset(destination, 0, sizeof(*destination));
+    destination->x = x;
+    destination->y = y;
+    destination->z = z;
+    destination->state_id = maage_world_get(world, x, y, z);
+    old_state = maage_block_registry_state(maage_world_registry(world), destination->state_id);
+    old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
+    if (!old_block || !old_block->replaceable || (block->solid && maage_gameplay_player_overlap(player, x, y, z, &block->collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    destination->block_id = old_state->block_id;
+    result = maage_world_can_survive(world, x, y, z, *placed, &valid);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    return maage_status_make(valid ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+}
+static maage_status maage_gameplay_place(maage_gameplay *game, const maage_player *player, maage_world *world, const maage_item_registry *items, double yaw, maage_gameplay_sound_sink *sink) {
+    maage_item_stack *held;
+    maage_world_target destination;
+    maage_block_state_id placed;
     maage_status result;
     if (game->use_delay) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     /* Failed use also arms the held-input repeat timer. */
@@ -425,33 +461,13 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     if (maage_world_get(world, game->target.x, game->target.y, game->target.z) != game->target.state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     if (game->target.block_id == MAAGE_BLOCK_CRAFTING_TABLE) return maage_crafting_open(&game->crafting, MAAGE_CONTAINER_TABLE, game->target.x, game->target.y, game->target.z);
     held = &game->inventory.slots[game->inventory.selected];
-    item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
-    if (!item || !item->has_block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    result = maage_item_placement_state(item, held->metadata, game->target.face, yaw, &placed);
+    result = maage_gameplay_placement(player, world, items, held, &game->target, yaw, &destination, &placed);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    state = maage_block_registry_state(maage_world_registry(world), placed);
-    block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-    if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-    x = game->target.x;
-    y = game->target.y;
-    z = game->target.z;
-    old_block = maage_block_registry_block(maage_world_registry(world), game->target.block_id);
-    if (!old_block || !old_block->replaceable) {
-        x += dx[game->target.face];
-        y += dy[game->target.face];
-        z += dz[game->target.face];
-    }
-    if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    old = maage_world_get(world, x, y, z);
-    old_state = maage_block_registry_state(maage_world_registry(world), old);
-    old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
-    if (!old_block || !old_block->replaceable || (block->solid && maage_gameplay_player_overlap(player, x, y, z, &block->collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    result = maage_world_can_survive(world, x, y, z, placed, &valid);
+    result = maage_world_set(world, destination.x, destination.y, destination.z, destination.state_id, placed);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (!valid) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
-    result = maage_world_set(world, x, y, z, old, placed);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE, maage_gameplay_state_material(world, placed), x + 0.5, y + 0.5, z + 0.5, 1.0, 1.0);
+    game->last_place = destination;
+    game->last_placed_state = placed;
+    maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE, maage_gameplay_state_material(world, placed), destination.x + 0.5, destination.y + 0.5, destination.z + 0.5, 1.0, 1.0);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && --held->count == 0) memset(held, 0, sizeof(*held));
     ++game->blocks_placed;
     maage_gameplay_swing(game, 2U);

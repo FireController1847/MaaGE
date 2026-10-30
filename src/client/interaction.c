@@ -300,7 +300,9 @@ maage_status maage_client_interaction_update(maage_client_interaction_visual *vi
     int stage = -1, axis, first, second, a, b, component;
     size_t faces = 0;
     if (!visual || !renderer || !atlas || !blocks || !snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, MAAGE_DETAIL_ARGUMENT_UNKNOWN), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
-    if (!snapshot->player.has_target || (prediction && maage_client_prediction_hides(prediction, snapshot->player.target.x, snapshot->player.target.y, snapshot->player.target.z))) {
+    /* The viewport raycasts the effective replica, including placement and
+     * reconciliation. An older break entry must not hide that newer target. */
+    if (!snapshot->player.has_target) {
         result = maage_status_make(visual->visible ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
         maage_render_mesh_destroy(visual->mesh);
         visual->mesh = NULL;

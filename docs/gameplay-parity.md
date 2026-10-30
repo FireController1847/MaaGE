@@ -70,9 +70,10 @@ work; direct-sky caches restrict rescans to affected X/Z shafts. Both channels
 retain the attenuating removal/addition fixed point. Missing boundaries contribute
 no numerical light and are revisited when membership changes.
 
-Owner publication validates incarnation, merges only light into any newer block
-snapshot and preserves edits queued during execution. Changed facing boundaries
-request another pass; they do not discard completed work. Geometry epochs are
+Owner publication validates incarnation and local/facing opacity/emission epochs. Results
+from incompatible block inputs are discarded with their consumed dirty cells
+requeued; compatible auxiliary edits retain their current data while merging light.
+Changed facing boundaries request another pass. Geometry epochs are
 separate from light epochs: correct geometry with older illumination can upload
 while refinement stays pending. Block/membership changes still reject obsolete
 geometry. Cardinal and diagonal AO meshes refresh after relevant boundary changes.
@@ -88,8 +89,13 @@ Block, first-geometry, light-initialization, pending-light and GPU-ready states
 are separate. First geometry uses a roof-aware sky approximation until numerical
 light exists. Light queries distinguish calculated, retained/approximate and
 unavailable values; pending actor samples may use adjacent cached illumination.
-Approximations never enter propagation buffers, and calculated zero remains zero.
-Only changes in numeric opacity/emission dirty visual light.
+The initial sky approximation never enters propagation buffers. At an edited cell
+with initialized light, a bounded sky-shaft/neighbor calculation seeds both channels
+from effective opacity/emission before its geometry is exposed. Other cells retain
+prior illumination until asynchronous propagation handles increases and decreases;
+calculated darkness remains valid. Direct-sky caches stay untouched by this seed so
+the solver still detects changed shafts. Only numeric opacity/emission changes dirty
+visual light.
 Day/night scales sky brightness in frame uniforms without relighting.
 
 Nearby admission, state reception, mesh selection and GPU upload use square-ring
@@ -124,30 +130,48 @@ paused presentation accumulates no catch-up work. Missing data is skipped, and c
 ambience requires calculated darkness. Gameplay impacts, pickups, damage and thunder
 remain authoritative events. No cosmetic World scan runs on the Server owner.
 
-## Break Prediction and Swing
+## Block Prediction and Swing
 
-Prediction is bounded Client presentation over expected numeric states and owned
-meshes. A deduplicated patch regenerates the affected 3x3x3 cells through the same
-face generator as ordinary meshes; old owner-cell geometry is filtered immediately.
-Block availability, rather than light readiness or neighboring GPU revisions, gates
-prediction. Frame submission precedes ordinary mesh uploads, which prepare the
-next frame. Renderer backpressure retains ready CPU meshes rather than accepting
-more GPU work. The next prediction update refreshes affected views before those
-new cache entries are drawn, advancing mining only once per frame. Leaves, ice and
-fluid neighbors use ordinary material/height rules. It never predicts inventory,
-drops or sounds. Immediate
-local overlays also invalidate visual light inputs. Confirmation retires overlays
-only after required authoritative revisions reach presentation; rejection restores
-correct effective inputs and rebuilds the local patch immediately. Stable action IDs,
-ordered authority and presentation generations prevent old acknowledgments from
-retiring newer geometry. Unknown terrain remains obstructing; no authoritative
-inventory, drops or persistent world mutation is predicted.
+Prediction is bounded Client presentation over expected/replacement numeric states
+and owned meshes. Breaking and ordinary block placement change the effective replica
+immediately. Placement uses the same read-only destination, replacement, support and
+player-overlap checks as the Server; tables and unavailable/indeterminate actions stay
+authoritative. INPUT still performs every Server action; preview markers only request
+confirmation of its recorded result, never authorize mutations or consume inventory.
+
+A deduplicated patch regenerates affected 3x3x3 cells and axial foliage dependencies
+through the ordinary face generator. The patch and every filtered source replacement
+are prepared before any draw pointer changes. Failed preparation retains the previous
+complete presentation and retries; background GPU replacements also defer while that
+correction remains uncommitted. Streamed meshes are filtered against the currently
+published patch before replacing cached sources, including sources with no remaining
+faces. Removed owner cells and their replacement geometry therefore share one publication.
+Leaves, ice and fluid neighbors retain ordinary material/height rules.
+
+Block availability gates prediction independently of full light convergence. The edited
+cell's provisional light belongs to the same effective snapshot as immediate geometry.
+Frame submission still precedes budgeted background uploads; the next prediction update
+refreshes affected views before those cache entries are drawn, advancing mining once.
+This frame's input and preview marker flush after local state resolution and before
+GPU preparation, so its own Server result cannot retarget that click or wait for
+resource uploads. No render-loop barrier, GPU synchronization or scheduler replacement
+is introduced.
+
+Overlapping edits compose in action-ID order. Accepted actions stop overriding authority
+at their acknowledged column revision, preventing an old break from hiding a later
+placement of the same type. Patches retire only after required authority and compatible
+cached geometry arrive; neighbor occlusion invalidation also advances geometry epochs.
+Rejection restores effective authoritative blocks/light and rebuilds the whole local
+transaction. Target decoration uses the effective raycast rather than a separate
+pending-break hide mask. Unknown terrain remains obstructing. Inventory, drops, sounds and persistent
+world mutations are never predicted. The local session contract is version 13.
 
 One Client timeline drives first- and third-person swings: six ticks long, eligible
 restart after three. Presses respond immediately; held mining requests follow
 20 TPS cadence, misses do not repeatedly punch air, and release lets the active
 swing finish. Attack echoes do not restart it. Successful placement has its own
-Server action observation. Mining rules remain authoritative; local progress drives crack stages, which are
+Server action observation. Mining rules remain authoritative; local progress drives
+crack stages, which are
 `floor(progress * 10) - 1` and clear locally on release/target change. See
 [Visual Rendering](visual-fidelity.md) for hand projection and material behavior.
 

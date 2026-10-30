@@ -27,7 +27,8 @@ typedef struct maage_gameplay {
     int flying;
     unsigned int sprint_window, sprint_ticks;
     int forward_down;
-    maage_world_target target, breaking, last_break;
+    maage_world_target target, breaking, last_break, last_place;
+    maage_block_state_id last_placed_state;
     int has_target, breaking_active;
     double break_progress, swing, reach;
     unsigned long swing_tick;
@@ -50,6 +51,10 @@ typedef struct maage_gameplay_intent {
     int attack_pressed, use_pressed; /* Latched input edges, consumed once. */
 } maage_gameplay_intent;
 
+/* Read-only ordinary block placement rules, shared by Server authority and
+ * Client presentation. SUCCESS returns the expected destination and new state;
+ * NOOP defers unavailable/invalid placement or non-block interaction. */
+maage_status maage_gameplay_placement(const maage_player *player, const maage_world *world, const maage_item_registry *items, const maage_item_stack *held, const maage_world_target *target, double yaw, maage_world_target *destination, maage_block_state_id *placed);
 maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
 /* Foundation respawn returns to the session's start and retains inventory;

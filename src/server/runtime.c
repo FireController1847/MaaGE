@@ -49,7 +49,8 @@ struct maage_server_runtime {
     int sneaking, diagnostics;
     unsigned long last_prediction;
     struct {
-        int active, resolved;
+        int active, resolved, placing;
+        maage_block_state_id replacement;
         unsigned long counter, admitted_tick;
         maage_world_target target;
         maage_session_event event;
@@ -192,9 +193,14 @@ static void server_predictions(maage_server_runtime *runtime) {
         maage_world_target *target = &runtime->predictions[i].target;
         if (!runtime->predictions[i].active) continue;
         if (!runtime->predictions[i].resolved) {
-            confirmed = runtime->game.blocks_broken > runtime->predictions[i].counter &&
-                        runtime->game.last_break.x == target->x && runtime->game.last_break.y == target->y &&
-                        runtime->game.last_break.z == target->z && runtime->game.last_break.state_id == target->state_id;
+            if (runtime->predictions[i].placing) {
+                confirmed = runtime->game.blocks_placed > runtime->predictions[i].counter &&
+                            runtime->game.last_place.x == target->x && runtime->game.last_place.y == target->y &&
+                            runtime->game.last_place.z == target->z && runtime->game.last_place.state_id == target->state_id &&
+                            runtime->game.last_placed_state == runtime->predictions[i].replacement;
+            } else confirmed = runtime->game.blocks_broken > runtime->predictions[i].counter &&
+                               runtime->game.last_break.x == target->x && runtime->game.last_break.y == target->y &&
+                               runtime->game.last_break.z == target->z && runtime->game.last_break.state_id == target->state_id;
             if (confirmed) {
                 event->accepted = 1;
                 event->status = server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MUTATE);
@@ -204,7 +210,7 @@ static void server_predictions(maage_server_runtime *runtime) {
                         event->column_revisions[n] = maage_world_column_revision(runtime->world, maage_world_chunk_coordinate(target->x + dx), maage_world_chunk_coordinate(target->z + dz));
                     }
                 runtime->predictions[i].resolved = 1;
-            } else if (!runtime->game.health || runtime->paused || runtime->game.crafting.kind || runtime->game.crafting.closing || (runtime->game.ticks != runtime->predictions[i].admitted_tick && (!runtime->game.attack_held || !runtime->game.has_target || runtime->game.target.x != target->x || runtime->game.target.y != target->y || runtime->game.target.z != target->z || maage_world_get(runtime->world, target->x, target->y, target->z) != target->state_id))) {
+            } else if (!runtime->game.health || runtime->paused || runtime->game.crafting.kind || runtime->game.crafting.closing || (runtime->game.ticks != runtime->predictions[i].admitted_tick && (runtime->predictions[i].placing ? (!runtime->game.use_held || runtime->game.use_delay == 4 || runtime->game.ticks - runtime->predictions[i].admitted_tick >= 5) : (!runtime->game.attack_held || !runtime->game.has_target || runtime->game.target.x != target->x || runtime->game.target.y != target->y || runtime->game.target.z != target->z || maage_world_get(runtime->world, target->x, target->y, target->z) != target->state_id)))) {
                 event->status = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, MAAGE_DETAIL_STALE);
                 runtime->predictions[i].resolved = 1;
             }
@@ -241,13 +247,31 @@ static maage_status server_predict_request(maage_server_runtime *runtime, const 
     memset(&runtime->predictions[i], 0, sizeof(runtime->predictions[i]));
     runtime->predictions[i].active = 1;
     runtime->predictions[i].target = command->predicted_target;
-    runtime->predictions[i].counter = runtime->game.blocks_broken;
+    runtime->predictions[i].placing = command->kind == MAAGE_CMD_PLACE_PREVIEW;
+    runtime->predictions[i].replacement = command->predicted_state;
+    runtime->predictions[i].counter = runtime->predictions[i].placing ? runtime->game.blocks_placed : runtime->game.blocks_broken;
     runtime->predictions[i].admitted_tick = runtime->game.ticks;
     runtime->predictions[i].event.prediction = command->prediction;
     target = &runtime->predictions[i].target;
     runtime->predictions[i].event.block.x = target->x;
     runtime->predictions[i].event.block.y = target->y;
     runtime->predictions[i].event.block.z = target->z;
+    if (runtime->predictions[i].placing) {
+        /* This marker only observes the normal authoritative use path. It does
+         * not place blocks, consume inventory or reset the Server repeat timer. */
+        if (runtime->game.blocks_placed && runtime->game.last_place.x == target->x &&
+            runtime->game.last_place.y == target->y && runtime->game.last_place.z == target->z &&
+            runtime->game.last_place.state_id == target->state_id && runtime->game.last_placed_state == command->predicted_state &&
+            maage_world_get(runtime->world, target->x, target->y, target->z) == command->predicted_state) {
+            runtime->predictions[i].counter = runtime->game.blocks_placed - 1;
+        } else if (!runtime->game.health || runtime->paused || runtime->game.crafting.kind || runtime->game.crafting.closing ||
+                   !(runtime->sampled.use || runtime->pending_use) ||
+                   !maage_block_registry_state(maage_content_blocks(runtime->content), command->predicted_state)) {
+            runtime->predictions[i].resolved = 1;
+            runtime->predictions[i].event.status = server_status(MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_VALIDATE);
+        }
+        return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
+    }
     /* A legitimate preview may trail the owner by one transport cycle. The
      * recorded owner mutation is sufficient confirmation even after retargeting. */
     if (runtime->game.blocks_broken && runtime->game.last_break.x == target->x &&
@@ -310,6 +334,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         runtime->pitch = command->intent.pitch;
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
     case MAAGE_CMD_BREAK_PREVIEW:
+    case MAAGE_CMD_PLACE_PREVIEW:
         return server_predict_request(runtime, command);
     case MAAGE_CMD_HOTBAR:
         if (command->hotbar_slot >= MAAGE_HOTBAR_SLOTS) return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SELECT);

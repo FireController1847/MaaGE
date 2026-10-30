@@ -215,11 +215,12 @@ static void maage_client_mesh_rates(maage_client_mesh_activity *activity, double
  * later attempts predict cost to avoid repeatedly overrunning frame pacing.
  * No CPU mesh or render handle survives a failed/stale transfer. */
 /* Client replica jobs transfer detached CPU ownership to the GPU cache. */
-static maage_status maage_client_stream_meshes(maage_world *visual, maage_renderer *renderer, maage_render_texture *atlas, maage_client_mesh_cache *cache, maage_client_mesh_activity *activity, const maage_client_world_options *options, const maage_client_debug *debug, int center_x, int center_z) {
+static maage_status maage_client_stream_meshes(maage_world *visual, maage_renderer *renderer, maage_render_texture *atlas, maage_client_mesh_cache *cache, maage_client_mesh_activity *activity, const maage_client_prediction *prediction, const maage_client_world_options *options, const maage_client_debug *debug, int center_x, int center_z) {
     maage_world_mesh_update update;
     const maage_mesh_data *geometry;
-    maage_render_mesh *replacement;
+    maage_render_mesh *replacement, *filtered_mesh;
     maage_status result;
+    int filtered;
     double begin, current, upload_begin, upload_ms;
     double budget_ms = maage_client_mesh_budget(options, debug, activity);
     size_t i, selected, vacant;
@@ -277,18 +278,30 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
                 }
             }
         }
+        upload_begin = maage_time_monotonic_seconds();
+        if (upload_begin < 0.0) {
+            maage_world_mesh_destroy(update.mesh);
+            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
+        }
+        filtered_mesh = NULL;
+        result = maage_client_prediction_mesh(prediction, renderer, atlas, update.mesh, update.x, update.z, &filtered_mesh, &filtered, NULL);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
+            maage_render_mesh_destroy(filtered_mesh);
+            maage_world_mesh_destroy(update.mesh);
+            if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED || maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
+                activity->last_result = result;
+                continue;
+            }
+            return result;
+        }
         geometry = maage_world_mesh_data(update.mesh);
         replacement = NULL;
         result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SUBMIT, 0);
         if (geometry && geometry->index_count) {
-            upload_begin = maage_time_monotonic_seconds();
-            if (upload_begin < 0.0) {
-                maage_world_mesh_destroy(update.mesh);
-                return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
-            }
             result = maage_renderer_upload_geometry(renderer, geometry, atlas, &replacement, NULL);
             current = maage_time_monotonic_seconds();
             if (current < 0.0) {
+                maage_render_mesh_destroy(filtered_mesh);
                 maage_render_mesh_destroy(replacement);
                 maage_world_mesh_destroy(update.mesh);
                 return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
@@ -306,6 +319,11 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
             }
         }
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+            maage_render_mesh_destroy(cache->slots[selected].prediction);
+            cache->slots[selected].prediction = filtered_mesh;
+            cache->slots[selected].filtered = filtered;
+            cache->slots[selected].filtered_revision = update.revision;
+            cache->slots[selected].filtered_generation = prediction->applied_generation;
             maage_render_mesh_destroy(cache->slots[selected].mesh);
             cache->slots[selected].mesh = replacement;
             cache->slots[selected].used = 1;
@@ -321,6 +339,7 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
             update.mesh = NULL;
             ++cache->generation;
         } else {
+            maage_render_mesh_destroy(filtered_mesh);
             maage_render_mesh_destroy(replacement);
             if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED) {
                 if (activity->last_result != result) {
@@ -1080,8 +1099,8 @@ choose_world:
              * command can be queued; never acknowledge an unsent click. */
             maage_client_ui_notify(ui, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0), now);
         }
-        operation = maage_client_outbox_flush(&outbox, session);
-        if (maage_status_failed(operation) && maage_status_code(operation) != MAAGE_STATUS_BUFFER_OVERFLOW) goto done;
+        /* Prepare local interaction against the received state before this
+         * frame's input can produce an authoritative mutation of its own. */
         operation = maage_local_session_read_snapshot(session, &incoming);
         if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS &&
             incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION &&
@@ -1188,6 +1207,8 @@ choose_world:
         }
         {
             double prediction_eye[3];
+            maage_status delivery;
+            int preview_queued = 0;
             for (i = 0; i < 3; ++i)
                 prediction_eye[i] = latest.player.player.position[i];
             prediction_eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
@@ -1195,7 +1216,23 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, renderer, atlas, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, &command, trace);
+            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, input.secondary_down || input.secondary_pressed, input.secondary_pressed, (unsigned int) selected_hotbar, &command);
+            if (!maage_status_failed(operation) && command.kind) {
+                delivery = maage_client_outbox_queue(&outbox, &command);
+                if (maage_status_failed(delivery)) {
+                    operation = delivery;
+                    goto done;
+                }
+                preview_queued = 1;
+            }
+            /* Send input and its observation marker before any GPU preparation.
+             * Resource failure cannot hold up the authoritative gameplay path. */
+            delivery = maage_client_outbox_flush(&outbox, session);
+            if (maage_status_failed(delivery) && maage_status_code(delivery) != MAAGE_STATUS_BUFFER_OVERFLOW) {
+                operation = delivery;
+                goto done;
+            }
+            if (!maage_status_failed(operation)) operation = maage_client_prediction_prepare(&prediction, renderer, atlas, visual_world, cache.slots, cache.capacity, trace);
             if (maage_status_failed(operation)) {
                 unsigned int prediction_index;
                 if (maage_status_is_fatal(operation) ||
@@ -1203,30 +1240,19 @@ choose_world:
                      maage_status_code(operation) != MAAGE_STATUS_BUFFER_OVERFLOW &&
                      maage_status_code(operation) != MAAGE_STATUS_SYSTEM_NOT_SUPPORTED)) goto done;
                 MAAGE_STATUS_PROPAGATE(trace, operation, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT);
-                maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.prediction", operation, trace, "Prediction unavailable; retaining authoritative geometry until a later action.");
-                maage_client_ui_notify(ui, operation, now);
-                for (slot_index = 0; slot_index < cache.capacity; ++slot_index) {
-                    maage_render_mesh_destroy(cache.slots[slot_index].prediction);
-                    cache.slots[slot_index].prediction = NULL;
-                    cache.slots[slot_index].filtered = 0;
+                if (prediction.failure != operation) {
+                    maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.prediction", operation, trace, "Prediction resources unavailable; retaining the previous complete presentation and retrying.");
+                    maage_client_ui_notify(ui, operation, now);
+                    prediction.failure = operation;
                 }
                 for (prediction_index = 0; prediction_index < MAAGE_CLIENT_PREDICTIONS; ++prediction_index)
-                    if (command.kind == MAAGE_CMD_BREAK_PREVIEW && prediction.entries[prediction_index].id == command.prediction)
-                        prediction.entries[prediction_index].active = 0; /* This request was never sent. */
-                maage_render_mesh_destroy(prediction.reveal);
-                prediction.reveal = NULL;
-                prediction.suspended = 1;
-                prediction.targeting = 0;
+                    if (!preview_queued && command.kind && prediction.entries[prediction_index].id == command.prediction)
+                        prediction.entries[prediction_index].active = 0; /* This preview was never sent. */
+                prediction.dirty = 1;
                 ++prediction.generation;
-                operation = maage_world_present_predictions(visual_world, NULL, NULL, 0, prediction.generation);
-                if (maage_status_failed(operation)) goto done;
                 maage_status_trace_recover(trace, maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
-            } else if (command.kind) {
-                operation = maage_client_outbox_queue(&outbox, &command);
-                if (maage_status_failed(operation)) goto done;
-                operation = maage_client_outbox_flush(&outbox, session);
-                if (maage_status_failed(operation) && maage_status_code(operation) != MAAGE_STATUS_BUFFER_OVERFLOW) goto done;
-            }
+            } else
+                prediction.failure = 0;
         }
         if (mesh_notice != mesh_activity.last_result) {
             mesh_notice = mesh_activity.last_result;
@@ -1299,7 +1325,7 @@ choose_world:
         for (slot_index = 0; slot_index < cache.capacity; ++slot_index)
             if (cache.slots[slot_index].used) {
                 ++resident_count;
-                if (cache.slots[slot_index].mesh) {
+                if (cache.slots[slot_index].filtered || cache.slots[slot_index].mesh) {
                     if (cache.slots[slot_index].filtered) {
                         if (cache.slots[slot_index].prediction) cache.draws[draw_count++] = cache.slots[slot_index].prediction;
                     } else
@@ -1352,16 +1378,18 @@ choose_world:
         if (prediction.diagnostics && maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
             unsigned int action;
             for (action = 0; action < MAAGE_CLIENT_PREDICTIONS; ++action)
-                if (prediction.entries[action].active && prediction.entries[action].confirmed >= 0 && !prediction.entries[action].submitted && !prediction.suspended) {
+                if (prediction.entries[action].active && prediction.entries[action].confirmed >= 0 && !prediction.entries[action].submitted && prediction.applied_generation == prediction.generation) {
                     prediction.entries[action].submitted = 1;
                     maage_log_info("maage.client.latency", "action=%lu prediction_to_frame_submit_ms=%.3f frames=%lu", prediction.entries[action].id, (frame_end - prediction.entries[action].predicted_at) * 1000, prediction.frame - prediction.entries[action].frame);
                 }
         }
         /* Submit interaction presentation first. Budgeted background uploads
          * prepare the next frame; the next prediction update refreshes any
-         * affected views once, before those cache replacements can be drawn. */
-        if (maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
-            operation = maage_client_stream_meshes(visual_world, renderer, atlas, &cache, &mesh_activity, &options, &debug, cx, cz);
+         * affected views once, before those cache replacements can be drawn.
+         * Failed local preparation retains the complete old draw state; do not
+         * replace its bases with geometry from the uncommitted correction. */
+        if (maage_status_code(rendered) == MAAGE_STATUS_SUCCESS && !prediction.dirty && prediction.applied_generation == prediction.generation) {
+            operation = maage_client_stream_meshes(visual_world, renderer, atlas, &cache, &mesh_activity, &prediction, &options, &debug, cx, cz);
             if (maage_status_failed(operation)) goto done;
         } else {
             mesh_activity.status.uploaded_this_frame = 0;

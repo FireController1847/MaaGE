@@ -55,7 +55,7 @@ struct maage_world_task {
     int predicted;
     unsigned long presentation_generation;
     unsigned char light_cells[8192];
-    unsigned long geometry_epochs[9], boundary_epochs[4];
+    unsigned long geometry_epochs[9], boundary_epochs[4], light_input_epochs[4];
     maage_chunk_snapshot *inputs[9]; /* center, cardinal and diagonal mesh halo */
     unsigned long input_epochs[9];
     maage_chunk *output;
@@ -86,9 +86,9 @@ struct maage_world {
     int center_x, center_z, stopped, failed, diagnostics;
     double diagnostic_at;
     maage_block_position predictions[32];
-    maage_block_state_id prediction_states[32];
+    maage_block_state_id prediction_states[32], prediction_replacements[32];
     size_t prediction_count;
-    unsigned long prediction_generation;
+    unsigned long prediction_generation, prediction_revisions[32];
     maage_leaves_mode leaves_mode;
     double yaw, spawn[3];
     maage_world_stats stats;
@@ -319,7 +319,10 @@ static void maage_world_invalidate_neighbors(maage_world *world, int x, int z, u
     maage_world_neighbors(world, x, z, neighbors);
     for (side = 0; side < 8; ++side) {
         unsigned affected = side < 4 ? 1U << side : ((1U << ((side - 4) & 1)) | (1U << (side < 6 ? 2 : 3)));
-        if (neighbors[side] && (mask & affected)) maage_world_invalidate(world, neighbors[side], 0);
+        if (neighbors[side] && (mask & affected)) {
+            maage_world_invalidate(world, neighbors[side], 0);
+            neighbors[side]->geometry_epoch = neighbors[side]->revision;
+        }
     }
 }
 static void maage_world_failure_status(maage_world *world, maage_world_slot *slot, maage_status result, const char *error) {
@@ -538,8 +541,17 @@ static int maage_world_inputs_current(const maage_world *world, const maage_worl
         if ((neighbors[side] ? (geometry ? neighbors[side]->geometry_epoch : neighbors[side]->data_epoch) : 0) != (geometry ? task->geometry_epochs[side + 1] : task->input_epochs[side + 1])) return 0;
     return 1;
 }
-/* Rebase only numerical output when block/auxiliary edits arrived during work.
- * Current states always survive; the next dirty pass solves their new inputs. */
+static int maage_world_light_inputs_current(const maage_world *world, const maage_world_slot *slot, const maage_world_task *task) {
+    maage_world_slot *neighbors[8];
+    int side;
+    if (slot->light_epoch != task->light_epoch) return 0;
+    maage_world_neighbors(world, slot->x, slot->z, neighbors);
+    for (side = 0; side < 4; ++side)
+        if ((neighbors[side] ? neighbors[side]->light_epoch : 0) != task->light_input_epochs[side]) return 0;
+    return 1;
+}
+/* Rebase numerical output only across light-compatible auxiliary edits.
+ * Collection rejects results whose opacity/emission epoch changed. */
 static maage_status maage_world_merge_light(maage_chunk *current, const maage_chunk *source) {
     int section;
     size_t cell;
@@ -572,7 +584,8 @@ static maage_status maage_world_publish_light(maage_world *world, maage_world_sl
             slot->light_dirty = 1;
             slot->light_boundaries |= 1U << side;
         }
-    if (slot->light_epoch != task->light_epoch) slot->light_dirty = 1;
+    /* A changed boundary schedules refinement; a changed local block-light
+     * epoch was rejected by collection before any numerical output is merged. */
     if (slot->data != task->inputs[0]) {
         result = maage_chunk_clone(slot->data->chunk, &merged);
         if (!maage_status_failed(result)) result = maage_world_merge_light(merged, task->output);
@@ -646,7 +659,7 @@ static maage_status maage_world_collect(maage_world *world) {
         disposition = completion.result;
         slot = maage_world_find(world, task->x, task->z);
         stale = !slot || slot->incarnation != task->incarnation;
-        obsolete = slot && maage_world_distance(world, slot) > maage_world_resident_radius(world) + 2;
+        obsolete = slot && (maage_world_distance(world, slot) > maage_world_resident_radius(world) + 2 || (task->kind == MAAGE_JOB_LIGHT && !maage_world_light_inputs_current(world, slot, task)));
         owns = !stale && (task->kind == MAAGE_JOB_SAVE ? slot->save == task : (task->kind == MAAGE_JOB_LIGHT ? slot->light_work == task : slot->work == task));
         if (owns) {
             if (task->kind == MAAGE_JOB_SAVE) slot->save = NULL;
@@ -657,7 +670,7 @@ static maage_status maage_world_collect(maage_world *world) {
             if (task->kind == MAAGE_JOB_LIGHT) {
                 size_t byte;
                 slot->light_dirty = 1;
-                slot->light_boundaries |= task->boundaries;
+                slot->light_boundaries |= task->boundaries | (obsolete ? 15U : 0U);
                 for (byte = 0; byte < sizeof(slot->light_cells); ++byte)
                     slot->light_cells[byte] |= task->light_cells[byte];
             }
@@ -804,7 +817,10 @@ static maage_status maage_world_submit(maage_world *world, maage_world_slot *slo
                     ++task->inputs[side + 1]->references;
                     task->input_epochs[side + 1] = neighbors[side]->data_epoch;
                     task->geometry_epochs[side + 1] = neighbors[side]->geometry_epoch;
-                    if (side < 4) task->boundary_epochs[side] = neighbors[side]->boundary_epochs[side ^ 1];
+                    if (side < 4) {
+                        task->boundary_epochs[side] = neighbors[side]->boundary_epochs[side ^ 1];
+                        task->light_input_epochs[side] = neighbors[side]->light_epoch;
+                    }
                 }
         }
     }
@@ -2038,6 +2054,16 @@ static maage_status maage_world_visual_cell(const maage_world *world, maage_worl
     if (!old_block || !new_block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     result = maage_chunk_set(chunk, x, y, z, state);
     if (maage_status_failed(result)) return result;
+    if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
+        const maage_chunk *inputs[4];
+        maage_world_slot *neighbors[8];
+        int side;
+        maage_world_neighbors(world, slot->x, slot->z, neighbors);
+        for (side = 0; side < 4; ++side)
+            inputs[side] = neighbors[side] ? neighbors[side]->data->chunk : NULL;
+        result = maage_light_provisional_cell(chunk, inputs, world->config.registry, x, y, z);
+        if (maage_status_failed(result)) return result;
+    }
     if (before->block_id != MAAGE_BLOCK_LEAVES || after->block_id != MAAGE_BLOCK_LEAVES || (before->metadata & MAAGE_LEAF_SPECIES_MASK) != (after->metadata & MAAGE_LEAF_SPECIES_MASK)) slot->geometry_changed = 1;
     if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
@@ -2121,8 +2147,8 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
     for (i = 0; i < world->prediction_count; ++i)
         if (maage_world_chunk_coordinate(world->predictions[i].x) == slot->x && maage_world_chunk_coordinate(world->predictions[i].z) == slot->z) {
             int x = maage_world_local_coordinate(world->predictions[i].x), z = maage_world_local_coordinate(world->predictions[i].z), y = world->predictions[i].y;
-            if (maage_chunk_get(authority, x, y, z) == world->prediction_states[i]) {
-                result = maage_world_visual_cell(world, slot, visual, (unsigned int) ((y * 16 + z) * 16 + x), MAAGE_STATE_AIR);
+            if ((!world->prediction_revisions[i] || update->revision < world->prediction_revisions[i]) && maage_chunk_get(visual, x, y, z) == world->prediction_states[i]) {
+                result = maage_world_visual_cell(world, slot, visual, (unsigned int) ((y * 16 + z) * 16 + x), world->prediction_replacements[i]);
                 if (maage_status_failed(result)) goto done;
             }
         }
@@ -2151,19 +2177,19 @@ done:
     maage_chunk_destroy(visual);
     return result;
 }
-maage_status maage_world_present_predictions(maage_world *world, const maage_block_position *positions, const maage_block_state_id *expected, size_t count, unsigned long generation) {
+maage_status maage_world_present_predictions(maage_world *world, const maage_block_position *positions, const maage_block_state_id *expected, const maage_block_state_id *replacements, const unsigned long *confirmed_revisions, size_t count, unsigned long generation) {
     maage_world_slot *slot;
     maage_chunk *copy;
     maage_chunk_snapshot *snapshot;
     maage_status result;
     size_t i, j, total;
     maage_block_position all[64];
-    if (!world || !world->config.presentation_only || count > 32 || (count && (!positions || !expected))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
+    if (!world || !world->config.presentation_only || count > 32 || (count && (!positions || !expected || !replacements || !confirmed_revisions))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
     for (i = 0; i < count; ++i)
         if (positions[i].y < 0 || positions[i].y >= 256 ||
             positions[i].x <= -MAAGE_WORLD_LIMIT || positions[i].x >= MAAGE_WORLD_LIMIT ||
             positions[i].z <= -MAAGE_WORLD_LIMIT || positions[i].z >= MAAGE_WORLD_LIMIT ||
-            !maage_block_registry_state(world->config.registry, expected[i])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
+            (!maage_block_registry_state(world->config.registry, expected[i]) || !maage_block_registry_state(world->config.registry, replacements[i]))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
     if (world->prediction_generation == generation) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
     total = world->prediction_count + count;
     memcpy(all, world->predictions, world->prediction_count * sizeof(*all));
@@ -2179,10 +2205,7 @@ maage_status maage_world_present_predictions(maage_world *world, const maage_blo
         cell = (unsigned int) ((all[i].y * 16 + maage_world_local_coordinate(all[i].z)) * 16 + maage_world_local_coordinate(all[i].x));
         desired = maage_chunk_get(slot->authority->chunk, cell % 16, cell / 256, (cell / 16) % 16);
         for (j = 0; j < count; ++j)
-            if (positions[j].x == all[i].x && positions[j].y == all[i].y && positions[j].z == all[i].z && expected[j] == desired) {
-                desired = MAAGE_STATE_AIR;
-                break;
-            }
+            if (positions[j].x == all[i].x && positions[j].y == all[i].y && positions[j].z == all[i].z && expected[j] == desired && (!confirmed_revisions[j] || slot->block_revision < confirmed_revisions[j])) desired = replacements[j];
         if (maage_chunk_get(slot->data->chunk, cell % 16, cell / 256, (cell / 16) % 16) == desired) continue;
         result = maage_chunk_clone(slot->data->chunk, &copy);
         if (maage_status_failed(result)) return result;
@@ -2205,6 +2228,8 @@ maage_status maage_world_present_predictions(maage_world *world, const maage_blo
     if (count) {
         memcpy(world->predictions, positions, count * sizeof(*positions));
         memcpy(world->prediction_states, expected, count * sizeof(*expected));
+        memcpy(world->prediction_replacements, replacements, count * sizeof(*replacements));
+        memcpy(world->prediction_revisions, confirmed_revisions, count * sizeof(*confirmed_revisions));
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
 }

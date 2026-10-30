@@ -42,11 +42,12 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size) {
 }
 
 static int session_command_valid(const maage_session_command *command) {
-    if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_BREAK_PREVIEW) return 0;
+    if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_PLACE_PREVIEW) return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
     case MAAGE_CMD_BREAK_PREVIEW:
+    case MAAGE_CMD_PLACE_PREVIEW:
         return command->prediction != 0 && command->prediction <= 4294967295UL;
     case MAAGE_CMD_CONTAINER_OPEN:
         return 1;

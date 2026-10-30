@@ -198,8 +198,10 @@ maage_status maage_world_ack_column(maage_world *world, const maage_column_updat
 maage_status maage_column_update_destroy(maage_column_update *update);
 maage_status maage_world_apply_column(maage_world *replica, const maage_column_update *update);
 /* Presentation overlay over the replica's independently retained authority.
- * Expected states prevent a preview from concealing a different Server block. */
-maage_status maage_world_present_predictions(maage_world *replica, const maage_block_position *positions, const maage_block_state_id *expected, size_t count, unsigned long generation);
+ * Ordered expected/replacement pairs compose edits at one cell. Unexpected
+ * authoritative states remain visible. Nonzero confirmed revisions fence edits
+ * once authority reaches their result; generation owns the whole overlay. */
+maage_status maage_world_present_predictions(maage_world *replica, const maage_block_position *positions, const maage_block_state_id *expected, const maage_block_state_id *replacements, const unsigned long *confirmed_revisions, size_t count, unsigned long generation);
 /* Floor division/positive modulo, including negative world coordinates. */
 int maage_world_chunk_coordinate(int coordinate);
 int maage_world_local_coordinate(int coordinate);

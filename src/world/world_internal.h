@@ -40,6 +40,9 @@ struct maage_chunk {
     unsigned long generation_features[8];
 };
 maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output);
+/* Seed one edited cell from effective opacity/emission, its sky shaft and
+ * retained neighboring light. The asynchronous solver still owns convergence. */
+maage_status maage_light_provisional_cell(maage_chunk *chunk, const maage_chunk *neighbors[4], const maage_block_registry *blocks, int x, int y, int z);
 maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neighbors[4], const unsigned char dirty[8192], unsigned boundaries, const maage_block_registry *blocks, const maage_job_token *token, maage_status_trace *trace);
 maage_status maage_chunk_create(int x, int z, maage_chunk **output);
 maage_status maage_chunk_destroy(maage_chunk *chunk);

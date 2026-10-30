@@ -46,6 +46,49 @@ static maage_status maage_light_write(maage_chunk *chunk, int x, int y, int z, u
     section->light[maage_chunk_cell(x, y % 16, z)] = light;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
 }
+maage_status maage_light_provisional_cell(maage_chunk *chunk, const maage_chunk *neighbors[4], const maage_block_registry *blocks, int x, int y, int z) {
+    static const int offsets[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+    const maage_block_state_definition *state;
+    const maage_block_definition *block = NULL;
+    const maage_chunk *sample;
+    unsigned int sky = 15, emission, opacity, value, side;
+    unsigned char adjacent;
+    int height, nx, ny, nz;
+    /* Without a numerical cache all consumers already use the heightmap seed.
+     * Never invent a numerical cache, or turn an uninitialized zero into dark. */
+    if (!chunk->direct_sky) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_LIGHT, 0);
+    for (height = 255; height >= y; --height) {
+        state = maage_block_registry_state(blocks, maage_chunk_get(chunk, x, height, z));
+        block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+        if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
+        opacity = block->light_opacity;
+        if (!opacity && sky < 15) opacity = 1;
+        sky = sky > opacity ? sky - opacity : 0;
+    }
+    emission = block->emitted_light;
+    opacity = block->light_opacity;
+    if (!opacity || (opacity >= 15 && emission)) opacity = 1;
+    if (opacity < 15)
+        for (side = 0; side < 6; ++side) {
+            nx = x + offsets[side][0];
+            ny = y + offsets[side][1];
+            nz = z + offsets[side][2];
+            sample = chunk;
+            if (nx < 0) sample = neighbors[0];
+            else if (nx >= 16) sample = neighbors[1];
+            else if (nz < 0) sample = neighbors[2];
+            else if (nz >= 16) sample = neighbors[3];
+            if (!sample) continue;
+            adjacent = maage_chunk_presentation_light(sample, blocks, maage_world_local_coordinate(nx), ny, maage_world_local_coordinate(nz));
+            value = adjacent >> 4;
+            if (value > opacity && value - opacity > sky) sky = value - opacity;
+            value = adjacent & 15;
+            if (value > opacity && value - opacity > emission) emission = value - opacity;
+        }
+    /* Keep the direct-sky cache unchanged: the queued dirty pass must detect
+     * every changed shaft value, including the cells below a closing roof. */
+    return maage_light_write(chunk, x, y, z, (unsigned char) ((sky << 4) | emission));
+}
 maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neighbors[4], const unsigned char dirty[8192], unsigned boundaries, const maage_block_registry *blocks, const maage_job_token *token, maage_status_trace *trace) {
     static const int offsets[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     maage_column_light work;

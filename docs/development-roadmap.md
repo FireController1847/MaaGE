@@ -14,7 +14,7 @@ audio and cross-platform completion require programmer verification.
 | Applications | Independent native Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote transport, administration GUI and Launcher Server management are absent. |
 | World | Numeric registries, deterministic staged generation, sparse columns, immutable asynchronous I/O/jobs, environment, scheduled fluids/support and random ticks | One current generator/format; no Java seed/save interoperability or migration. |
 | Gameplay | Movement/collision, breaking/placement, provisional vitals, inventory, typed item entities, transactional 2x2/3x3 crafting | Full Survival progression, mobs, combat and smelting remain incomplete/absent. |
-| Presentation | Title/world management, gameplay/settings/inventory screens, local visual light/meshing, break prediction, shared player skins/perspectives, audio | Creative has one catalog; unavailable settings/content remain disabled or absent. |
+| Presentation | Title/world management, gameplay/settings/inventory screens, local visual light/meshing, break/placement prediction, shared player skins/perspectives, audio | Creative has one catalog; unavailable settings/content remain disabled or absent. |
 | Launcher/resources | Microsoft authentication/access verification, encrypted account records, verified local resources, UUID instances and exact local Client selection | No remote distribution or modpack installation system. |
 
 Predevelopment data is disposable: incompatible encodings fail explicitly without automatic

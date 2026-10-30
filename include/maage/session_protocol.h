@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 12U
+#define MAAGE_SESSION_PROTOCOL_VERSION 13U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -27,7 +27,8 @@ typedef enum maage_session_command_kind {
     MAAGE_CMD_CONTAINER_OPEN = 11,
     MAAGE_CMD_CONTAINER_CLOSE = 12,
     MAAGE_CMD_CONTAINER_SLOT = 13,
-    MAAGE_CMD_BREAK_PREVIEW = 14
+    MAAGE_CMD_BREAK_PREVIEW = 14,
+    MAAGE_CMD_PLACE_PREVIEW = 15
 } maage_session_command_kind;
 
 typedef enum maage_session_sound_id {
@@ -88,7 +89,8 @@ typedef struct maage_session_command {
     unsigned long container_identity, container_revision;
     unsigned int slot_group, container_slot, slot_action;
     unsigned long prediction;
-    maage_world_target predicted_target; /* Request only; never a claimed mutation. */
+    maage_world_target predicted_target;  /* Request only; never a claimed mutation. */
+    maage_block_state_id predicted_state; /* PLACE_PREVIEW result to acknowledge, never execute. */
     int secondary_click;
     maage_item_id item_id;
     unsigned int item_metadata;
