@@ -274,6 +274,5 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
             if (cold) x += (float) sin(phase + i) * 4;
             maage_client_environment_quad(&view->weather, x, y, size, cold ? size : 18, (float) resource->x / 256, (float) resource->y / 256, (float) resource->width / 256, (float) resource->height / 256, alpha);
         }
-    if (precipitation && state->thunder_intensity > 0.5 && state->ticks_low % 173UL < 2) maage_client_environment_quad(&view->weather, 0, 0, width, height, 127.5f / 256, 255.5f / 256, 0, 0, 0.25f);
     return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);
 }
