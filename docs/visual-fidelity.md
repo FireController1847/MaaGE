@@ -149,6 +149,12 @@ or modal pause cancels sprint. Its 600-tick timer can reactivate from a held req
 Ground/air acceleration increases 30%; jump adds 0.2 forward impulse. Sneak scales
 horizontal input by 0.3; sprint does not multiply Creative flight or fluid movement.
 Survival exhaustion is 0.1/m sprinting versus 0.01/m walking and 0.8/jump versus 0.2.
+Horizontal drag uses contact at step entry: ordinary-ground takeoff retains 0.546,
+while a landing entered airborne retains 0.91 until the next step. Dry non-flying
+velocity below 0.005 blocks/tick settles before acceleration. Held grounded jumps
+repeat no sooner than ten ticks; release rearms immediately. Flight and fluid
+movement keep their separate input behavior. Supporting-surface slipperiness and
+automatic half-block stepping remain incomplete.
 
 Client sprint FOV targets a factor of 1.15, with an additional 1.1 for flight.
 A continuous half-difference-per-20-Hz filter smooths frames; repeated snapshots

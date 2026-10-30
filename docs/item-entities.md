@@ -12,7 +12,7 @@ are not implemented.
 The Server advances entities once per unpaused 20 TPS step. The player and items
 share swept AABB collision against registered block shapes. Items use a 0.25-block
 body, gravity 0.04/tick, drag 0.98, ordinary ground friction 0.588 and ice friction
-0.9604. Small floor impacts settle; removing support resumes falling. Water items
+0.9604. Floor impacts settle without a physical rebound; removing support resumes falling. Water items
 sink and receive a bounded current derived from neighboring numeric fluid levels.
 Presentation bobbing/spin never feeds back into physics.
 
@@ -60,7 +60,11 @@ acquisition of a non-instant block is separate from damage ticks, and the existi
 five-tick repeat cooldown follows completed sustained mining. Crack stages use
 authoritative progress. There is no render-rate mining multiplier.
 
-| Tool tier | Harvest level | Effective speed | Durability |
+Tool damage is valid through the listed maximum, inclusive; the following wear
+operation breaks the tool. Pending exhaustion may exceed the consumption
+threshold of four after mining and remains saveable in the bounded 0..40 domain.
+
+| Tool tier | Harvest level | Effective speed | Maximum damage |
 | --- | ---: | ---: | ---: |
 | Wooden | 0 | 2 | 59 |
 | Stone | 1 | 4 | 131 |

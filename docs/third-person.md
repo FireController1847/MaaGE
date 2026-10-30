@@ -36,7 +36,8 @@ corrections; only a changed center or epoch refreshes it. This presentation cach
 uses neither a Session collision mailbox nor any Server sampling. It continues
 while paused as replica updates arrive, without I/O, worker waits or a World lock.
 
-Local DDA traversal checks immutable numeric definitions' solid collision AABBs.
+Local DDA traversal checks state-resolved selection AABBs, including selectable
+thin blocks without player-body collision; liquids remain excluded.
 A center ray and eight corner rays shorten either camera boom.
 Offsets are at least 0.1 blocks and widen to enclose the actual near plane at the
 active aspect/FOV; a small contact margin avoids coplanar wall clipping. Missing
@@ -72,9 +73,11 @@ render interpolation and time-based turn response avoid FPS-dependent speed.
 Jump/fall/fly use authoritative vertical positions and the normal airborne biped
 pose; no new movement or flight simulation is introduced. Crouching raises leg
 pivots in Y-up coordinates and lowers the root to keep the feet planted. Damage
-occurrence markers add brief recoil; the authoritative death tick rolls
-the model onto its side. These animations use the owner clock and reset at a new
-life rather than inferring repeated damage from unchanged health snapshots.
+uses the shared hurt-camera effect; the model does not add a separate body tilt.
+The authoritative death tick rolls the model onto its side after the first tick.
+These animations use the owner clock and reset at a new life rather than inferring
+repeated damage from unchanged health snapshots. The model's red damage tint is
+not implemented.
 
 The right-hand transform inherits shoulder, torso/swing and arm rotation. Selected
 blocks, tools and flat icons borrow the existing item-entity model cache, using

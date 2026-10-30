@@ -70,7 +70,9 @@ and oak-plank bottom textures resolve through the existing resource installation
 There is no table block entity or persistent table storage.
 
 The existing numeric use intent performs an authoritative raycast and expected
-state check before opening a table, including when the hand is empty. No command
+state check before opening a table, including when the hand is empty. Crouching
+with a held item bypasses activation and permits ordinary placement against the
+table; the Client preview follows the same rule. No command
 accepts Client coordinates to open a table. Every slot transaction rechecks health,
 container identity, loaded table presence and the eight-block container
 range. Player inventory opens through its own command.
