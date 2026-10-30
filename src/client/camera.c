@@ -16,7 +16,12 @@ static const maage_block_shape *camera_shape(const maage_world_camera_sample *sa
         if (x >= 0 && x < 11 && y >= 0 && y < 11 && z >= 0 && z < 11 && sample->revisions[corner]) {
             state = maage_block_registry_state(blocks, sample->states[x + 11 * z + 121 * y]);
             block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-            if (block) return block->solid ? &block->collision_shape : NULL;
+            if (block) {
+                if (!block->selectable) return NULL;
+                /* Camera obstruction follows visible raycast bounds, including
+                 * thin blocks that do not collide with the player's body. */
+                return state->selection_shape.maximum[0] != 0 ? &state->selection_shape : &block->selection_shape;
+            }
         }
     }
     for (axis = 0; axis < 3; ++axis) {
