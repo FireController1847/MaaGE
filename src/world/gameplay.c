@@ -171,6 +171,7 @@ static void maage_gameplay_begin_life(maage_gameplay *game) {
     if (++game->life == 0) ++game->life;
     game->walk_distance = game->damage_yaw = 0;
     game->damage_sequence = game->damage_tick = game->death_tick = 0;
+    game->jump_repeat_ticks = 0;
 }
 maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items) {
     const maage_item_definition *item;
@@ -198,6 +199,7 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode) {
     game->attack_held = game->use_held = 0;
     game->fall_distance = 0;
     game->jump_window = 0;
+    game->jump_repeat_ticks = 0;
     game->sprint_window = game->sprint_ticks = 0;
     game->forward_down = 0;
     game->footstep_distance = 0;
@@ -594,6 +596,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     double previous[3], velocity[3], dx, dy, dz, travel, strength;
     const maage_block_state_definition *surface;
     int in_water;
+    unsigned int fluid;
     maage_gameplay_sound_sink sink;
     int grounded, sprint_jump, jumped;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_TICK, 0);
@@ -615,6 +618,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     if (game->use_delay) --game->use_delay;
     if (game->attack_miss_delay) --game->attack_miss_delay;
     if (game->jump_window) --game->jump_window;
+    if (game->jump_repeat_ticks) --game->jump_repeat_ticks;
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         player->sprinting = 0;
         game->sprint_window = game->sprint_ticks = 0;
@@ -636,7 +640,15 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     movement.descend = intent->descend;
     maage_gameplay_sprint(game, player, intent);
     sprint_jump = player->sprinting;
-    jumped = movement.jump && !movement.flying && maage_player_fluid(player, world) == MAAGE_FLUID_NONE;
+    fluid = maage_player_fluid(player, world);
+    /* A held jump repeats at most every ten owner steps, even under a low
+     * ceiling. Releasing rearms immediately; flight and fluids keep their input. */
+    if (!movement.jump) game->jump_repeat_ticks = 0;
+    else if (!movement.flying && fluid == MAAGE_FLUID_NONE && player->grounded) {
+        if (game->jump_repeat_ticks) movement.jump = 0;
+        else game->jump_repeat_ticks = 10;
+    }
+    jumped = movement.jump && !movement.flying && fluid == MAAGE_FLUID_NONE;
     memcpy(previous, player->position, sizeof(previous));
     grounded = player->grounded;
     memcpy(velocity, player->velocity, sizeof(velocity));

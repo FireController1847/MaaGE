@@ -34,6 +34,7 @@ typedef struct maage_gameplay {
     unsigned long swing_tick;
     unsigned int swing_kind; /* 1 attack, 2 successful placement */
     unsigned int use_delay, break_delay, attack_miss_delay, jump_window, hunger_ticks;
+    unsigned int jump_repeat_ticks; /* Held grounded jumps; release rearms immediately. */
     unsigned long ticks, blocks_broken, blocks_placed;
     /* Raw travel and gameplay occurrence markers, never camera animations.
      * Ephemeral within a life; excluded from the authoritative checkpoint. */

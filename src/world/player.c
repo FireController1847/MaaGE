@@ -166,7 +166,7 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
     double vertical;
     double horizontal[2];
     int hit_vertical;
-    unsigned int fluid;
+    unsigned int axis, fluid;
     if (player == NULL || world == NULL || input == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
     forward = input->forward;
     strafe = input->strafe;
@@ -190,6 +190,11 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
      * the takeoff and landing steps. The sweep publishes next step's contact. */
     drag = player->grounded ? MAAGE_PLAYER_GROUND_DRAG : MAAGE_PLAYER_AIR_DRAG;
     fluid = input->flying ? MAAGE_FLUID_NONE : maage_player_fluid(player, world);
+    /* Dry living motion settles before acceleration; do not preserve an
+     * indefinitely shrinking drift after the controls are released. */
+    if (!input->flying && fluid == MAAGE_FLUID_NONE)
+        for (axis = 0; axis < 3; ++axis)
+            if (fabs(player->velocity[axis]) < 0.005) player->velocity[axis] = 0;
     if (input->flying) {
         acceleration = 0.2;
         drag = 0.6;
