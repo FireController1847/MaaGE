@@ -582,7 +582,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     if (self.state->client_job || (replacing && row < 0)) return;
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.title = replacing ? @"Replace Client" : @"Import Local Client";
-    panel.message = @"Choose maage-client with its adjacent maage-client.json manifest. Import copies its package and runtime dependencies without running it.";
+    panel.message = @"Choose maage-client with its adjacent maage-client.json manifest. Import copies only those two files without running the Client.";
     panel.canChooseFiles = YES;
     panel.canChooseDirectories = NO;
     panel.treatsFilePackagesAsDirectories = NO;

@@ -547,10 +547,11 @@ maage_status maage_clients_import(maage_client_registry *r, const maage_client_c
     if (maage_status_failed(child_result = maage_storage_join(staging, sizeof(staging), r->root, "clients/.import"))) goto done;
     if (maage_client_file_kind(staging) && maage_status_failed(child_result = maage_client_remove_tree(staging, trace))) goto done;
     staging_owned = 1;
-    if (maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_storage_join(package, sizeof(package), staging, MAAGE_CLIENT_PAYLOAD)) || maage_status_failed(child_result = maage_client_copy_tree(c->source, package, trace))) {
-        strcpy(error, "Cannot copy Client package. Escaping links, reparse points, special files, oversized trees and unreadable files are unsupported; check package permissions.");
+    if (maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_storage_join(package, sizeof(package), staging, MAAGE_CLIENT_PAYLOAD)) || maage_status_failed(child_result = maage_client_copy_package(c->source, package, verified.executable, trace))) {
+        strcpy(error, "Cannot copy Client executable and manifest. Check that both files are readable regular files and that managed storage is writable.");
         goto done;
     }
+    maage_log_info("maage.launcher.clients", "Copied only %s and %s from the selected Client directory.", verified.executable, MAAGE_CLIENT_DESCRIPTOR);
     memset(&verified, 0, sizeof(verified));
     if (maage_status_failed(child_result = maage_client_inspect(package, &verified, error, trace)) || strcmp(verified.id, c->build.id)) goto done;
     if (maage_status_failed(child_result = maage_storage_replace(staging, destination))) goto done;

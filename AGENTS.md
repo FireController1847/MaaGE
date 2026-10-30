@@ -415,9 +415,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Client descriptors/registry SHA-256 bind exact local packages and require current instance/
   appearance contracts. SemVer precedence ignores metadata; build identity includes hash,
   platform/type/executable digest. Replacing imports reassigns safely before removing old
-  packages; never overwrite/remove running builds. Debug developer imports copy trusted
-  executables/relative contained links without executing, reject app bundles, escaping
-  links/reparse/special files and retain originals. Release omits import UI; Release Client
+  packages; never overwrite/remove running builds. Debug developer imports copy only the validated executable and adjacent manifest,
+  without executing or traversing other source-directory contents. Reject links,
+  reparse/special files and retain developer originals. Release omits import UI; Release Client
   remains importable. Shell-free Core Process starts exact executables with explicit cwd,
   environment, nonblocking monitoring and combined append capture; no shells/Launch Services.
 
