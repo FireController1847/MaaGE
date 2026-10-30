@@ -135,9 +135,10 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     if (entity->grounded) {
         state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, (int) floor(entity->position[0]), (int) floor(entity->position[1] - 0.01), (int) floor(entity->position[2])));
         if (state && state->block_id == MAAGE_BLOCK_ICE) drag = 0.9604;
-        entity->velocity[1] = fabs(vertical) > 0.08 ? -vertical * 0.49 : 0;
-    } else
-        entity->velocity[1] *= 0.98;
+    }
+    /* A clipped vertical sweep has already removed impact velocity. Preserve
+     * that rest state rather than reflecting the pre-collision request. */
+    entity->velocity[1] *= 0.98;
     entity->velocity[0] *= drag;
     entity->velocity[2] *= drag;
     if (fabs(entity->velocity[0]) < 0.0001) entity->velocity[0] = 0;

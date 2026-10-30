@@ -178,7 +178,11 @@ static maage_status maage_content_blocks_create(const maage_content_config *conf
                 block.selection_shape.maximum[1] = 0.6;
             }
             if (block.id == MAAGE_BLOCK_SNOW) {
-                block.collision_shape.maximum[1] = block.selection_shape.maximum[1] = 0.125;
+                /* The current snow state is one visible/selectable layer,
+                 * with no raised body collision. */
+                block.selection_shape.maximum[1] = 0.125;
+                block.solid = 0;
+                memset(&block.collision_shape, 0, sizeof(block.collision_shape));
                 block.replaceable = 1;
             } else if (block.id == MAAGE_BLOCK_CACTUS) {
                 block.collision_shape.minimum[0] = block.collision_shape.minimum[2] = 0.0625;
