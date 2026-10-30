@@ -612,24 +612,36 @@ static void maage_gl_destroy_mesh(maage_render_mesh *mesh) {
     mesh->platform = NULL;
 }
 
+static maage_status maage_gl_limit(maage_renderer *renderer, GLenum parameter, const char *name, GLint *value) {
+    maage_status result;
+    glGetIntegerv(parameter, value);
+    result = maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE);
+    if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.render.opengl", result, "Required capability query %s (0x%04lX) failed.", name, (unsigned long) parameter);
+    return result;
+}
 static maage_status maage_gl_limits(maage_renderer *renderer) {
     maage_gl_renderer *native = maage_gl_gpu(renderer);
-    const char *language = (const char *) glGetString(MAAGE_GL_SHADING_LANGUAGE_VERSION);
-    GLint profile = 0, attributes = 0, units = 0, vertex_uniforms = 0, fragment_uniforms = 0, varying = 0;
+    const char *language;
+    GLint profile = 0, attributes = 0, units = 0, vertex_uniforms = 0, fragment_uniforms = 0, vertex_outputs = 0, fragment_inputs = 0;
     GLboolean double_buffer = GL_FALSE;
     int major = 0, minor = 0;
-    glGetIntegerv(MAAGE_GL_CONTEXT_PROFILE_MASK, &profile);
-    glGetIntegerv(MAAGE_GL_MAX_VERTEX_ATTRIBS, &attributes);
-    glGetIntegerv(MAAGE_GL_MAX_TEXTURE_IMAGE_UNITS, &units);
-    glGetIntegerv(MAAGE_GL_MAX_VERTEX_UNIFORM_COMPONENTS, &vertex_uniforms);
-    glGetIntegerv(MAAGE_GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, &fragment_uniforms);
-    glGetIntegerv(MAAGE_GL_MAX_VARYING_COMPONENTS, &varying);
-    glGetIntegerv(MAAGE_GL_MAX_RENDERBUFFER_SIZE, &native->target_limit);
-    glGetIntegerv(GL_MAX_VIEWPORT_DIMS, native->viewport_limit);
+    language = (const char *) glGetString(MAAGE_GL_SHADING_LANGUAGE_VERSION);
+    MAAGE_GL_TRY(maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_CONTEXT_PROFILE_MASK, "GL_CONTEXT_PROFILE_MASK", &profile));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_VERTEX_ATTRIBS, "GL_MAX_VERTEX_ATTRIBS", &attributes));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_TEXTURE_IMAGE_UNITS, "GL_MAX_TEXTURE_IMAGE_UNITS", &units));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_VERTEX_UNIFORM_COMPONENTS, "GL_MAX_VERTEX_UNIFORM_COMPONENTS", &vertex_uniforms));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, "GL_MAX_FRAGMENT_UNIFORM_COMPONENTS", &fragment_uniforms));
+    /* Forward-compatible core contexts remove the deprecated aggregate varying
+     * query. The mesh writes nine user components plus four for gl_Position. */
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_VERTEX_OUTPUT_COMPONENTS, "GL_MAX_VERTEX_OUTPUT_COMPONENTS", &vertex_outputs));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_FRAGMENT_INPUT_COMPONENTS, "GL_MAX_FRAGMENT_INPUT_COMPONENTS", &fragment_inputs));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_RENDERBUFFER_SIZE, "GL_MAX_RENDERBUFFER_SIZE", &native->target_limit));
+    MAAGE_GL_TRY(maage_gl_limit(renderer, GL_MAX_VIEWPORT_DIMS, "GL_MAX_VIEWPORT_DIMS", native->viewport_limit));
     glGetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
     MAAGE_GL_TRY(maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE));
-    maage_log_info("maage.render.opengl", "GLSL %.120s; profile 0x%lX; attributes %d; fragment textures %d; vertex/fragment uniform components %d/%d; varyings %d; max texture %u; renderbuffer %d; viewport %dx%d.", language ? language : "unavailable", (unsigned long) profile, attributes, units, vertex_uniforms, fragment_uniforms, varying, renderer->capabilities.max_texture_dimension_2d, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
-    if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 7 || units < 1 || vertex_uniforms < 24 || fragment_uniforms < 24 || varying < 12 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
+    maage_log_info("maage.render.opengl", "GLSL %.120s; profile 0x%lX; attributes %d; fragment textures %d; vertex/fragment uniform components %d/%d; vertex-output/fragment-input components %d/%d; max texture %u; renderbuffer %d; viewport %dx%d.", language ? language : "unavailable", (unsigned long) profile, attributes, units, vertex_uniforms, fragment_uniforms, vertex_outputs, fragment_inputs, renderer->capabilities.max_texture_dimension_2d, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
+    if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 7 || units < 1 || vertex_uniforms < 24 || fragment_uniforms < 24 || vertex_outputs < 13 || fragment_inputs < 9 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
         maage_log_warning("maage.render.opengl", "Required GLSL 3.30, core profile, double buffering, vertex layout, uniform/varying capacity, or framebuffer limits are unavailable.");
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
