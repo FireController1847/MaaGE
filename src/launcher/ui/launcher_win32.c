@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
 #include <commdlg.h>
@@ -37,7 +38,7 @@ typedef struct maage_launcher_win32 {
     maage_launcher_win32_style native;
     HBRUSH background, sidebar;
     unsigned revision, client_revision;
-    int result, updating;
+    int result, updating, scroll[5], scrollbar_visible;
 } maage_launcher_win32;
 static void maage_ui_text(HWND control, const char *text) {
     wchar_t wide[MAAGE_PATH_CAPACITY];
@@ -52,13 +53,45 @@ static HWND maage_ui_label(maage_launcher_win32 *ui, int page, const wchar_t *ti
 static HWND maage_ui_button(maage_launcher_win32 *ui, int page, const wchar_t *title, int x, int y, int width, int id) {
     return maage_ui_control(ui, page, L"BUTTON", title, WS_TABSTOP | BS_PUSHBUTTON, x, y, width, 32, id);
 }
+/* Only the main content scrolls. Sidebar navigation and the status footer
+ * remain visible, even when a compact window needs additional page height. */
 static void maage_ui_layout(maage_launcher_win32 *ui) {
     RECT rect;
+    SCROLLINFO scroll;
     unsigned i;
-    int width, height, x, y, w, h, center;
+    int width, height, x, y, w, h, center, page, narrow, virtual_height;
+    int top = 78, bottom, content_bottom = 0, max_scroll, visible_scroll, visible;
+    if (!ui->native.count) return;
     GetClientRect(ui->window, &rect);
     width = MulDiv(rect.right, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
     height = MulDiv(rect.bottom, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
+    page = (int) ui->state->page;
+    narrow = width < 860;
+    virtual_height = height < 740 ? 740 : height;
+    bottom = height - 100;
+    if (page == MAAGE_PAGE_INSTALLATIONS) content_bottom = virtual_height - 100 + (narrow ? 86 : 0);
+    else if (page == MAAGE_PAGE_SETTINGS) content_bottom = 566;
+    else if (page == MAAGE_PAGE_ABOUT) content_bottom = 584;
+    max_scroll = content_bottom - bottom;
+    if (max_scroll < 0) max_scroll = 0;
+    if (page < MAAGE_PAGE_INSTALLATIONS) max_scroll = 0;
+    if (ui->scroll[page] > max_scroll) ui->scroll[page] = max_scroll;
+    visible_scroll = max_scroll > 0;
+    if (ui->scrollbar_visible != visible_scroll) {
+        ui->scrollbar_visible = visible_scroll;
+        ShowScrollBar(ui->window, SB_VERT, visible_scroll);
+        GetClientRect(ui->window, &rect);
+        width = MulDiv(rect.right, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
+        narrow = width < 860;
+    }
+    memset(&scroll, 0, sizeof(scroll));
+    scroll.cbSize = sizeof(scroll);
+    scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    scroll.nMin = 0;
+    scroll.nMax = max_scroll + bottom - top - 1;
+    scroll.nPage = (UINT) (bottom > top ? bottom - top : 1);
+    scroll.nPos = ui->scroll[page];
+    SetScrollInfo(ui->window, SB_VERT, &scroll, TRUE);
     center = 170 + (width - 170) / 2;
     for (i = 0; i < ui->native.count; ++i) {
         maage_launcher_control *c = &ui->native.controls[i];
@@ -66,19 +99,51 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
         y = c->y;
         w = c->width;
         h = c->height;
-        if (y < 0) y += height;
+        visible = c->page < 0 || c->page == page;
+        if (y < 0) y += c->page == MAAGE_PAGE_INSTALLATIONS ? virtual_height : height;
         if (x < 0) x += width;
         if (w < 0) w += width;
-        if (h < 0) h += height;
+        if (h < 0) h += c->page == MAAGE_PAGE_INSTALLATIONS ? virtual_height : height;
         if (c->page == MAAGE_PAGE_PLAY && c->y >= 150) {
             x = center - w / 2;
             y = height / 2 + c->y - 285;
         }
-        MoveWindow(c->handle, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y), maage_launcher_win32_scale(&ui->native, w), maage_launcher_win32_scale(&ui->native, h), TRUE);
-        ShowWindow(c->handle, c->page < 0 || c->page == (int) ui->state->page ? SW_SHOW : SW_HIDE);
+        if (c->page == MAAGE_PAGE_PLAY && narrow && c->handle == ui->account) {
+            x = 198;
+            y = 76;
+            w = width - 335;
+        } else if (c->page == MAAGE_PAGE_PLAY && narrow && c->y == 25 && c->x < 0) y = 76;
+        if (c->page == MAAGE_PAGE_INSTALLATIONS && narrow) {
+            if (c->y == 150 && c->x >= 592) {
+                x = 198;
+                y += 44;
+            } else if (c->y >= 198 || c->y < 0) y += 44;
+            if (c->y == -185) {
+                int column = (c->x - 198) / 128;
+                x = 198 + (column < 3 ? column * 115 : (column - 3) * 135);
+                w = column == 4 ? 155 : column == 2 ? 120 : 110;
+                if (column >= 3) y += 42;
+            }
+            if (c->y == -140) y += 42;
+        }
+        if (c->page >= MAAGE_PAGE_INSTALLATIONS && c->page == page && c->y != 25) {
+            y -= ui->scroll[page];
+            /* Keep the scrolling page out of the fixed header and footer.
+             * The installations list can shrink while crossing either edge. */
+            if (c->handle == ui->list) {
+                if (y < top) {
+                    h -= top - y;
+                    y = top;
+                }
+                if (y + h > bottom) h = bottom - y;
+                if (h < 48) visible = 0;
+            } else if (y < top || y + (h > 36 ? 36 : h) > bottom) visible = 0;
+        }
+        if (visible) MoveWindow(c->handle, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y), maage_launcher_win32_scale(&ui->native, w), maage_launcher_win32_scale(&ui->native, h), TRUE);
+        ShowWindow(c->handle, visible ? SW_SHOW : SW_HIDE);
     }
     for (i = 0; i < 5; ++i)
-        SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned) ui->state->page ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned) page ? BST_CHECKED : BST_UNCHECKED, 0);
     InvalidateRect(ui->window, NULL, TRUE);
 }
 static int maage_ui_selected(maage_launcher_win32 *ui) {
@@ -190,7 +255,7 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
         wchar_t wide[MAAGE_PATH_CAPACITY + 1024];
         maage_client_build *b = &state->client_candidate.build;
         state->client_confirmation = 0;
-        sprintf(message, "Client %s + %s\n%s | %s | %s\n%s\n\nImport copies the whole package. Only import code you trust. The original is preserved.%s", b->version, b->build, b->build_type, b->platform, b->architecture, state->client_candidate.source, *state->replacing_client ? "\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : "");
+        sprintf(message, "Client %s + %s\n%s | %s | %s\n%s\n\nImport copies only the Client executable and its manifest. Only import code you trust. The original is preserved.%s", b->version, b->build, b->build_type, b->platform, b->architecture, state->client_candidate.source, *state->replacing_client ? "\n\nAll installations using the selected Client will switch to this build, then the old managed package will be removed." : "");
         if (MultiByteToWideChar(CP_UTF8, 0, message, -1, wide, MAAGE_PATH_CAPACITY + 1024) && MessageBoxW(ui->window, wide, *state->replacing_client ? L"Replace Client?" : L"Import Local Client?", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_client_import(state);
         else
             maage_launcher_client_cancel_import(state);
@@ -287,8 +352,8 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     if (!ui) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
     case WM_GETMINMAXINFO:
-        ((MINMAXINFO *) lparam)->ptMinTrackSize.x = maage_launcher_win32_scale(&ui->native, 1020);
-        ((MINMAXINFO *) lparam)->ptMinTrackSize.y = maage_launcher_win32_scale(&ui->native, 740);
+        ((MINMAXINFO *) lparam)->ptMinTrackSize.x = maage_launcher_win32_scale(&ui->native, 760);
+        ((MINMAXINFO *) lparam)->ptMinTrackSize.y = maage_launcher_win32_scale(&ui->native, 570);
         return 0;
     case WM_DPICHANGED: {
         maage_status result = maage_launcher_win32_dpi_changed(&ui->native, wparam, lparam);
@@ -302,6 +367,59 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_SIZE:
         maage_ui_layout(ui);
         return 0;
+    case WM_VSCROLL: {
+        int page = (int) ui->state->page, position, amount;
+        SCROLLINFO info;
+        if (page < MAAGE_PAGE_INSTALLATIONS) break;
+        memset(&info, 0, sizeof(info));
+        info.cbSize = sizeof(info);
+        info.fMask = SIF_ALL;
+        if (!GetScrollInfo(window, SB_VERT, &info)) break;
+        position = ui->scroll[page];
+        amount = (int) info.nPage;
+        switch (LOWORD(wparam)) {
+        case SB_LINEUP: position -= 28; break;
+        case SB_LINEDOWN: position += 28; break;
+        case SB_PAGEUP: position -= amount; break;
+        case SB_PAGEDOWN: position += amount; break;
+        case SB_THUMBPOSITION:
+        case SB_THUMBTRACK: position = info.nTrackPos; break;
+        case SB_TOP: position = 0; break;
+        case SB_BOTTOM: position = info.nMax; break;
+        default: return 0;
+        }
+        if (position < 0) position = 0;
+        if (position > info.nMax - (int) info.nPage + 1) position = info.nMax - (int) info.nPage + 1;
+        if (position != ui->scroll[page]) {
+            ui->scroll[page] = position;
+            maage_ui_layout(ui);
+        }
+        return 0;
+    }
+    case WM_MOUSEWHEEL: {
+        POINT point;
+        int page = (int) ui->state->page, position, max_scroll;
+        SCROLLINFO info;
+        if (page < MAAGE_PAGE_INSTALLATIONS) break;
+        point.x = GET_X_LPARAM(lparam);
+        point.y = GET_Y_LPARAM(lparam);
+        ScreenToClient(window, &point);
+        if (point.x < maage_launcher_win32_scale(&ui->native, 170)) break;
+        memset(&info, 0, sizeof(info));
+        info.cbSize = sizeof(info);
+        info.fMask = SIF_RANGE | SIF_PAGE;
+        if (!GetScrollInfo(window, SB_VERT, &info)) break;
+        max_scroll = info.nMax - (int) info.nPage + 1;
+        if (max_scroll <= 0) break;
+        position = ui->scroll[page] - (int) GET_WHEEL_DELTA_WPARAM(wparam) * 48 / WHEEL_DELTA;
+        if (position < 0) position = 0;
+        if (position > max_scroll) position = max_scroll;
+        if (position != ui->scroll[page]) {
+            ui->scroll[page] = position;
+            maage_ui_layout(ui);
+        }
+        return 0;
+    }
     case WM_TIMER:
         maage_ui_refresh(ui);
         return 0;

@@ -6,6 +6,7 @@
 #endif
 #include "files.h"
 #include "maage/crypto.h"
+#include "maage/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -32,6 +33,46 @@ static wchar_t *maage_client_wide(const char *path) {
 }
 static maage_status maage_client_windows(maage_status_trace *trace, DWORD native, unsigned char operation) {
     return maage_status_trace_record(trace, maage_status_from_win32(native, MAAGE_CONTEXT_STORAGE, operation), MAAGE_CONTEXT_STORAGE, operation, __FILE__, (unsigned long) __LINE__, (long) native);
+}
+/* Diagnostic queries must not replace the original Win32 failure code.
+ * A destination file normally does not exist yet, so inspect its parent. */
+static DWORD maage_client_windows_attributes(const char *path, DWORD *native, size_t *characters) {
+    wchar_t *wide = maage_client_wide(path);
+    DWORD attributes;
+    *characters = 0;
+    if (!wide) {
+        *native = GetLastError();
+        return INVALID_FILE_ATTRIBUTES;
+    }
+    *characters = wcslen(wide);
+    attributes = GetFileAttributesW(wide);
+    *native = attributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    free(wide);
+    return attributes;
+}
+static void maage_client_windows_copy_diagnostic(const char *action, const char *from, const char *to, DWORD native) {
+    char parent[MAAGE_PATH_CAPACITY];
+    const char *slash = strrchr(to, '/'), *backslash = strrchr(to, '\\');
+    DWORD source_error, parent_error, source_attributes, parent_attributes;
+    size_t source_characters, parent_characters;
+    if (backslash && (!slash || backslash > slash)) slash = backslash;
+    if (slash && (size_t) (slash - to) < sizeof(parent)) {
+        memcpy(parent, to, (size_t) (slash - to));
+        parent[slash - to] = 0;
+    } else
+        parent[0] = 0;
+    source_attributes = maage_client_windows_attributes(from, &source_error, &source_characters);
+    if (*parent)
+        parent_attributes = maage_client_windows_attributes(parent, &parent_error, &parent_characters);
+    else {
+        parent_attributes = INVALID_FILE_ATTRIBUTES;
+        parent_error = ERROR_INVALID_NAME;
+        parent_characters = 0;
+    }
+    maage_log_error("maage.launcher.clients.files",
+                    "Windows %s failed: win32=%lu; source='%s' (UTF-16 chars=%zu, attrs=0x%08lx, query_win32=%lu); destination='%s' (UTF-8 bytes=%zu); destination parent='%s' (UTF-16 chars=%zu, attrs=0x%08lx, query_win32=%lu).",
+                    action, (unsigned long) native, from, source_characters, (unsigned long) source_attributes, (unsigned long) source_error,
+                    to, strlen(to), parent, parent_characters, (unsigned long) parent_attributes, (unsigned long) parent_error);
 }
 #else
 #include <dirent.h>
@@ -134,14 +175,20 @@ static maage_status maage_client_copy_file(const char *from, const char *to, maa
 #ifdef _WIN32
     wchar_t *source = maage_client_wide(from), *destination;
     DWORD native;
-    if (!source) return maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_COPY);
+    if (!source) {
+        native = GetLastError();
+        maage_client_windows_copy_diagnostic("source path conversion", from, to, native);
+        return maage_client_windows(trace, native, MAAGE_OPERATION_COPY);
+    }
     destination = maage_client_wide(to);
     if (!destination) {
         native = GetLastError();
         free(source);
+        maage_client_windows_copy_diagnostic("destination path conversion", from, to, native);
         return maage_client_windows(trace, native, MAAGE_OPERATION_COPY);
     }
     native = CopyFileW(source, destination, TRUE) ? 0 : GetLastError();
+    if (native) maage_client_windows_copy_diagnostic("CopyFileW", from, to, native);
     free(source);
     free(destination);
     result = native ? maage_client_windows(trace, native, MAAGE_OPERATION_COPY) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
@@ -182,6 +229,40 @@ static maage_status maage_client_copy_file(const char *from, const char *to, maa
 #endif
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
 }
+/* Import only the two files explicitly described by the Client package
+ * contract. The executable's parent may be Downloads or a populated build
+ * directory and must never be treated as an archive. */
+maage_status maage_client_copy_package(const char *source, const char *destination, const char *executable, maage_status_trace *trace) {
+    const char *names[2];
+    char from[MAAGE_PATH_CAPACITY], to[MAAGE_PATH_CAPACITY], fingerprint[128];
+    maage_status result;
+    double size, bytes = 0;
+    unsigned i;
+    if (!source || !destination || !executable || !*executable || strchr(executable, '/') || strchr(executable, '\\') || strchr(executable, ':') || !strcmp(executable, ".") || !strcmp(executable, "..") || !strcmp(executable, "maage-client.json")) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY, 2), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+    if (!maage_storage_directory_exists(source)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+    result = maage_storage_directories(destination);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+    names[0] = "maage-client.json";
+    names[1] = executable;
+    for (i = 0; i < 2; ++i) {
+        result = maage_storage_join(from, sizeof(from), source, names[i]);
+        if (!maage_status_failed(result)) result = maage_storage_join(to, sizeof(to), destination, names[i]);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+        if (maage_client_file_kind(from) != 1) {
+#ifdef _WIN32
+            maage_client_windows_copy_diagnostic("package file validation", from, to, ERROR_SUCCESS);
+#endif
+            return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_COPY, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+        }
+        result = maage_storage_stat(from, &size, fingerprint);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+        bytes += size;
+        if (bytes > 8589934592.0) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+        result = maage_client_copy_file(from, to, trace);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+    }
+    return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+}
 static maage_status maage_client_remove_file(const char *path, maage_status_trace *trace) {
 #ifdef _WIN32
     wchar_t *wide = maage_client_wide(path);
@@ -203,81 +284,66 @@ static maage_status maage_client_remove_file(const char *path, maage_status_trac
 #endif
     return MAAGE_STATUS_PROPAGATE(trace, maage_storage_remove(path), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 }
-static maage_status maage_client_tree(const char *from, const char *to, const char *root, unsigned depth, unsigned *entries, double *bytes, maage_status_trace *trace) {
-    char source[MAAGE_PATH_CAPACITY], destination[MAAGE_PATH_CAPACITY];
-    int kind = maage_client_file_kind(from);
-    unsigned char operation = to ? MAAGE_OPERATION_COPY : MAAGE_OPERATION_REMOVE;
-    maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, operation, 0);
-    if (depth > 32 || ++*entries > 50000) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
+/* Recursive traversal is exclusively for removing Launcher-owned managed
+ * storage. Never traverse a selected developer directory while importing. */
+static maage_status maage_client_remove_contents(const char *path, unsigned depth, unsigned *entries, double *bytes, maage_status_trace *trace) {
+    char child[MAAGE_PATH_CAPACITY];
+    int kind = maage_client_file_kind(path);
+    maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REMOVE, 0);
+    if (depth > 32 || ++*entries > 50000) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 #ifndef _WIN32
-    if (kind == 3) {
-        char target[MAAGE_PATH_CAPACITY], resolved[MAAGE_PATH_CAPACITY];
-        ssize_t count;
-        size_t length = strlen(root);
-        if (!to) return MAAGE_STATUS_PROPAGATE(trace, maage_storage_remove(from), MAAGE_CONTEXT_LAUNCHER, operation);
-        count = readlink(from, target, sizeof(target) - 1);
-        if (count < 0) return maage_client_errno(trace, MAAGE_OPERATION_READ);
-        if (!count || (size_t) count >= sizeof(target) - 1) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_READ, 0), MAAGE_CONTEXT_LAUNCHER, operation);
-        target[count] = 0;
-        if (target[0] == '/') return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
-        result = maage_client_absolute(from, resolved, trace);
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
-        if (strncmp(root, resolved, length) || (resolved[length] && resolved[length] != '/')) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
-        if (symlink(target, to)) return maage_client_errno(trace, operation);
-        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, operation, 0);
-    }
+    if (kind == 3) return MAAGE_STATUS_PROPAGATE(trace, maage_storage_remove(path), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 #endif
     if (kind == 1) {
         double size;
         char fingerprint[128];
-        result = maage_storage_stat(from, &size, fingerprint);
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
+        result = maage_storage_stat(path, &size, fingerprint);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
         *bytes += size;
-        if (*bytes > 8589934592.0) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
-        return to ? maage_client_copy_file(from, to, trace) : maage_client_remove_file(from, trace);
+        if (*bytes > 8589934592.0) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
+        return maage_client_remove_file(path, trace);
     }
-    if (kind != 2 || !maage_storage_directory_exists(from)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, operation, 0), MAAGE_CONTEXT_LAUNCHER, operation);
-    if (to) {
-        result = maage_storage_directories(to);
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
-    }
+    if (kind != 2 || !maage_storage_directory_exists(path)) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_REMOVE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 #ifdef _WIN32
     {
         WIN32_FIND_DATAW information;
         HANDLE search;
         wchar_t *pattern;
         DWORD native;
-        result = maage_storage_join(source, sizeof(source), from, "*");
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
-        pattern = maage_client_wide(source);
+        result = maage_storage_join(child, sizeof(child), path, "*");
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
+        pattern = maage_client_wide(child);
         if (!pattern) return maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_QUERY);
         search = FindFirstFileW(pattern, &information);
         native = GetLastError();
         free(pattern);
-        if (search == INVALID_HANDLE_VALUE) return maage_client_windows(trace, native, MAAGE_OPERATION_QUERY);
-        for (;;) {
-            char name[MAAGE_PATH_CAPACITY];
-            if (wcscmp(information.cFileName, L".") && wcscmp(information.cFileName, L"..")) {
-                if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, information.cFileName, -1, name, sizeof(name), NULL, NULL)) {
-                    result = maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_RESOLVE);
+        if (search == INVALID_HANDLE_VALUE) {
+            /* FindFirstFileW reports FILE_NOT_FOUND for empty directories. */
+            if (native != ERROR_FILE_NOT_FOUND) return maage_client_windows(trace, native, MAAGE_OPERATION_QUERY);
+        } else {
+            for (;;) {
+                char name[MAAGE_PATH_CAPACITY];
+                if (wcscmp(information.cFileName, L".") && wcscmp(information.cFileName, L"..")) {
+                    if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, information.cFileName, -1, name, sizeof(name), NULL, NULL)) {
+                        result = maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_RESOLVE);
+                        break;
+                    }
+                    result = maage_storage_join(child, sizeof(child), path, name);
+                    if (!maage_status_failed(result)) result = maage_client_remove_contents(child, depth + 1, entries, bytes, trace);
+                    if (maage_status_failed(result)) break;
+                }
+                if (!FindNextFileW(search, &information)) {
+                    native = GetLastError();
+                    if (native != ERROR_NO_MORE_FILES) result = maage_client_windows(trace, native, MAAGE_OPERATION_QUERY);
                     break;
                 }
-                result = maage_storage_join(source, sizeof(source), from, name);
-                if (!maage_status_failed(result) && to) result = maage_storage_join(destination, sizeof(destination), to, name);
-                if (!maage_status_failed(result)) result = maage_client_tree(source, to ? destination : NULL, root, depth + 1, entries, bytes, trace);
-                if (maage_status_failed(result)) break;
             }
-            if (!FindNextFileW(search, &information)) {
-                native = GetLastError();
-                if (native != ERROR_NO_MORE_FILES) result = maage_client_windows(trace, native, MAAGE_OPERATION_QUERY);
-                break;
-            }
+            if (!FindClose(search) && !maage_status_failed(result)) result = maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_CLOSE);
         }
-        if (!FindClose(search) && !maage_status_failed(result)) result = maage_client_windows(trace, GetLastError(), MAAGE_OPERATION_CLOSE);
     }
 #else
     {
-        DIR *directory = opendir(from);
+        DIR *directory = opendir(path);
         struct dirent *entry;
         if (!directory) return maage_client_errno(trace, MAAGE_OPERATION_OPEN);
         for (;;) {
@@ -288,26 +354,19 @@ static maage_status maage_client_tree(const char *from, const char *to, const ch
                 break;
             }
             if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
-            result = maage_storage_join(source, sizeof(source), from, entry->d_name);
-            if (!maage_status_failed(result) && to) result = maage_storage_join(destination, sizeof(destination), to, entry->d_name);
-            if (!maage_status_failed(result)) result = maage_client_tree(source, to ? destination : NULL, root, depth + 1, entries, bytes, trace);
+            result = maage_storage_join(child, sizeof(child), path, entry->d_name);
+            if (!maage_status_failed(result)) result = maage_client_remove_contents(child, depth + 1, entries, bytes, trace);
             if (maage_status_failed(result)) break;
         }
         if (closedir(directory) && !maage_status_failed(result)) result = maage_client_errno(trace, MAAGE_OPERATION_CLOSE);
     }
 #endif
-    if (!to && !maage_status_failed(result)) result = maage_storage_remove_directory(from);
-    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, operation);
-}
-maage_status maage_client_copy_tree(const char *source, const char *destination, maage_status_trace *trace) {
-    unsigned entries = 0;
-    double bytes = 0;
-    if (!source || !destination) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY, !source ? 0 : 1), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
-    return MAAGE_STATUS_PROPAGATE(trace, maage_client_tree(source, destination, source, 0, &entries, &bytes, trace), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_COPY);
+    if (!maage_status_failed(result)) result = maage_storage_remove_directory(path);
+    return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 }
 maage_status maage_client_remove_tree(const char *path, maage_status_trace *trace) {
     unsigned entries = 0;
     double bytes = 0;
     if (!path) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
-    return MAAGE_STATUS_PROPAGATE(trace, maage_client_tree(path, NULL, path, 0, &entries, &bytes, trace), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
+    return MAAGE_STATUS_PROPAGATE(trace, maage_client_remove_contents(path, 0, &entries, &bytes, trace), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_REMOVE);
 }

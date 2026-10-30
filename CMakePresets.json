@@ -59,6 +59,42 @@
       "cacheVariables": {
         "CMAKE_CONFIGURATION_TYPES": "Debug;Release"
       }
+    },
+    {
+      "name": "windows-ci-x64",
+      "inherits": "windows-ci",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "Windows",
+        "CMAKE_SYSTEM_PROCESSOR": "AMD64",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static"
+      }
+    },
+    {
+      "name": "windows-msvc-x64",
+      "inherits": "windows-msvc",
+      "architecture": "x64"
+    },
+    {
+      "name": "windows-ci-arm64",
+      "inherits": "windows-ci",
+      "architecture": {
+        "value": "arm64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "Windows",
+        "CMAKE_SYSTEM_PROCESSOR": "ARM64",
+        "VCPKG_TARGET_TRIPLET": "arm64-windows-static"
+      }
+    },
+    {
+      "name": "windows-msvc-arm64",
+      "inherits": "windows-msvc",
+      "architecture": "ARM64"
     }
   ],
   "buildPresets": [
@@ -92,6 +128,34 @@
     {
       "name": "windows-msvc-release",
       "configurePreset": "windows-msvc",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-ci-x64",
+      "configurePreset": "windows-ci-x64"
+    },
+    {
+      "name": "windows-msvc-x64-debug",
+      "configurePreset": "windows-msvc-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-x64-release",
+      "configurePreset": "windows-msvc-x64",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-ci-arm64",
+      "configurePreset": "windows-ci-arm64"
+    },
+    {
+      "name": "windows-msvc-arm64-debug",
+      "configurePreset": "windows-msvc-arm64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-arm64-release",
+      "configurePreset": "windows-msvc-arm64",
       "configuration": "Release"
     }
   ]

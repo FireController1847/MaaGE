@@ -28,8 +28,8 @@ void maage_client_build_label(const maage_client_build *build, char label[384]);
 /* Only unreferenced local builds may be passed for removal by the controller. */
 maage_status maage_clients_remove(maage_client_registry *registry, const char *id, char error[256], maage_status_trace *trace);
 #if MAAGE_LAUNCHER_DEVELOPMENT
-/* Explicitly trusted developer packages, inspected without execution. A manifest
- * and matching SHA-256 are required. Import revalidates after copying. */
+/* Developer imports copy only the standalone executable and adjacent descriptor.
+ * A matching SHA-256 is required, and import revalidates the staged files. */
 maage_status maage_clients_probe(const char *source, maage_client_candidate *candidate, char error[256], maage_status_trace *trace);
 maage_status maage_clients_import(maage_client_registry *registry, const maage_client_candidate *candidate, char error[256], maage_status_trace *trace);
 #endif

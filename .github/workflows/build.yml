@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.os }}${{ matrix.arch && format(' / {0}', matrix.arch) || '' }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -21,8 +21,13 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            configure_preset: windows-ci
-            build_preset: windows-ci
+            arch: x64
+            configure_preset: windows-ci-x64
+            build_preset: windows-ci-x64
+          - os: windows-latest
+            arch: arm64
+            configure_preset: windows-ci-arm64
+            build_preset: windows-ci-arm64
           - os: ubuntu-latest
             configure_preset: release
             build_preset: release
@@ -53,7 +58,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: x64
+          arch: ${{ matrix.arch }}
 
       - name: Verify Windows build tools
         if: runner.os == 'Windows'
@@ -103,3 +108,11 @@ jobs:
 
       - name: Build all targets
         run: cmake --build --preset ${{ matrix.build_preset }} --parallel
+
+      - name: Upload Windows executables and Client descriptor
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: maage-windows-${{ matrix.arch }}
+          path: build/${{ matrix.configure_preset }}/bin/
+          if-no-files-found: error

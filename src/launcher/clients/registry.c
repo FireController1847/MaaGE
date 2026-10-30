@@ -128,18 +128,58 @@ static maage_status maage_client_inspect(const char *package, maage_client_build
     FILE *f;
     unsigned char magic[4];
     int ok;
-    if (!maage_storage_directory_exists(package) || maage_status_failed(child_result = maage_storage_join(path, sizeof(path), package, MAAGE_CLIENT_DESCRIPTOR))) goto failed;
+    if (!maage_storage_directory_exists(package)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client package directory cannot be accessed: '%s'.", package);
+#endif
+        goto failed;
+    }
+    child_result = maage_storage_join(path, sizeof(path), package, MAAGE_CLIENT_DESCRIPTOR);
+    if (maage_status_failed(child_result)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client manifest path cannot be constructed for package '%s' (status=0x%08lx).", package, (unsigned long) child_result);
+#endif
+        goto failed;
+    }
     child_result = maage_client_json(path, MAAGE_CLIENT_DESCRIPTOR_BYTES, &o, trace);
-    if (maage_status_failed(child_result)) goto failed;
+    if (maage_status_failed(child_result)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client manifest cannot be loaded: '%s' (status=0x%08lx).", path, (unsigned long) child_result);
+#endif
+        goto failed;
+    }
     ok = o && json_object_object_get_ex(o, "schema", &v) && json_object_is_type(v, json_type_int) && json_object_get_int(v) == 1 && !strcmp(maage_access_json_string(o, "application"), "maage-client") && (!maage_status_failed(child_result = maage_client_fields(o, b, trace)));
     /* No network protocol has been implemented; do not claim compatibility. */
     if (ok && json_object_object_get_ex(o, "protocol", &v) && v) ok = json_object_is_type(v, json_type_null);
     if (o) json_object_put(o);
     if (!ok || !maage_client_compatible(b)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client manifest is invalid or incompatible: '%s' (schema/contract valid=%d, package platform='%s', architecture='%s', host platform='%s', host architecture='%s').",
+                        path, ok, b->platform, b->architecture, MAAGE_CLIENT_HOST_PLATFORM, MAAGE_CLIENT_HOST_ARCH);
+#endif
         strcpy(error, "Select a MaaGE Client package for this platform and architecture with a valid schema-1 manifest, instance_storage 1 and player_appearance 1. Network protocol must be undefined.");
         return MAAGE_STATUS_PROPAGATE(trace, (maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0)), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
     }
-    if (maage_status_failed(child_result = maage_client_executable(package, b, path, trace)) || !maage_client_executable_file(path) || !(f = maage_storage_open(path, "rb"))) goto failed;
+    child_result = maage_client_executable(package, b, path, trace);
+    if (maage_status_failed(child_result)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client executable path cannot be resolved in package '%s' (status=0x%08lx).", package, (unsigned long) child_result);
+#endif
+        goto failed;
+    }
+    if (!maage_client_executable_file(path)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client executable is absent, a reparse point, or not a regular file: '%s'.", path);
+#endif
+        goto failed;
+    }
+    f = maage_storage_open(path, "rb");
+    if (!f) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client executable cannot be opened: '%s' (errno=%d).", path, errno);
+#endif
+        goto failed;
+    }
     ok = fread(magic, 1, 4, f) == 4;
     fclose(f);
 #ifdef __APPLE__
@@ -149,7 +189,26 @@ static maage_status maage_client_inspect(const char *package, maage_client_build
 #else
     ok = ok && !memcmp(magic, "\177ELF", 4);
 #endif
-    if (!ok || maage_status_failed(child_result = maage_client_sha256(path, actual, trace)) || strcmp(actual, b->sha256) || maage_status_failed(child_result = maage_client_identity(b, trace))) goto failed;
+    if (!ok) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client executable has an invalid PE signature or cannot be read: '%s'.", path);
+#endif
+        goto failed;
+    }
+    child_result = maage_client_sha256(path, actual, trace);
+    if (maage_status_failed(child_result)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Cannot hash Windows Client executable: '%s' (status=0x%08lx).", path, (unsigned long) child_result);
+#endif
+        goto failed;
+    }
+    if (strcmp(actual, b->sha256)) {
+#ifdef _WIN32
+        maage_log_error("maage.launcher.clients.registry", "Windows Client executable SHA-256 does not match manifest: '%s' (expected=%s; actual=%s).", path, b->sha256, actual);
+#endif
+        goto failed;
+    }
+    if (maage_status_failed(child_result = maage_client_identity(b, trace))) goto failed;
     b->available = 1;
     strcpy(b->status, "Available");
     return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE, 0), MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_VALIDATE);
@@ -488,10 +547,11 @@ maage_status maage_clients_import(maage_client_registry *r, const maage_client_c
     if (maage_status_failed(child_result = maage_storage_join(staging, sizeof(staging), r->root, "clients/.import"))) goto done;
     if (maage_client_file_kind(staging) && maage_status_failed(child_result = maage_client_remove_tree(staging, trace))) goto done;
     staging_owned = 1;
-    if (maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_storage_join(package, sizeof(package), staging, MAAGE_CLIENT_PAYLOAD)) || maage_status_failed(child_result = maage_client_copy_tree(c->source, package, trace))) {
-        strcpy(error, "Cannot copy Client package. Escaping links, reparse points, special files, oversized trees and unreadable files are unsupported; check package permissions.");
+    if (maage_status_failed(child_result = maage_storage_directories(staging)) || maage_status_failed(child_result = maage_storage_join(package, sizeof(package), staging, MAAGE_CLIENT_PAYLOAD)) || maage_status_failed(child_result = maage_client_copy_package(c->source, package, verified.executable, trace))) {
+        strcpy(error, "Cannot copy Client executable and manifest. Check that both files are readable regular files and that managed storage is writable.");
         goto done;
     }
+    maage_log_info("maage.launcher.clients", "Copied only %s and %s from the selected Client directory.", verified.executable, MAAGE_CLIENT_DESCRIPTOR);
     memset(&verified, 0, sizeof(verified));
     if (maage_status_failed(child_result = maage_client_inspect(package, &verified, error, trace)) || strcmp(verified.id, c->build.id)) goto done;
     if (maage_status_failed(child_result = maage_storage_replace(staging, destination))) goto done;
