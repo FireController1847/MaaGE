@@ -99,9 +99,10 @@ static void title_panorama(maage_client_ui *ui) {
     if (ui->width <= 0.0f || ui->height <= 0.0f) return;
     for (i = 1; i <= 6; ++i)
         if (!ui->resources.title_available[i]) return;
-    /* Monotonic seconds keep the sweep and gradual pitch independent of FPS. */
+    /* A constant elevation keeps the horizon stationary during the horizontal
+     * sweep. Monotonic seconds set the yaw rate independently of frame rate. */
     yaw = ui->notice_now * 0.03490658504;
-    pitch = (20.0 + sin(ui->notice_now / 20.0) * 25.0) * 0.01745329252;
+    pitch = 20.0 * 0.01745329252;
     camera.cy = cos(yaw);
     camera.sy = sin(yaw);
     camera.cp = cos(pitch);
