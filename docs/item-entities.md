@@ -63,6 +63,8 @@ authoritative progress. There is no render-rate mining multiplier.
 Tool damage is valid through the listed maximum, inclusive; the following wear
 operation breaks the tool. Pending exhaustion may exceed the consumption
 threshold of four after mining and remains saveable in the bounded 0..40 domain.
+Charges are capped at 40; one four-point quantum is consumed per owner tick,
+with regeneration and later mining charges retained for the following step.
 
 | Tool tier | Harvest level | Effective speed | Maximum damage |
 | --- | ---: | ---: | ---: |

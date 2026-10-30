@@ -315,6 +315,10 @@ static void maage_gameplay_swing(maage_gameplay *game, unsigned int kind) {
 static int maage_gameplay_same_target(const maage_world_target *a, const maage_world_target *b) {
     return a->x == b->x && a->y == b->y && a->z == b->z && a->state_id == b->state_id;
 }
+static void maage_gameplay_exhaust(maage_gameplay *game, double amount) {
+    game->exhaustion += amount;
+    if (game->exhaustion > 40) game->exhaustion = 40;
+}
 static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *player, maage_world *world, const maage_item_registry *items, maage_gameplay_sound_sink *sink, int pressed) {
     const maage_block_definition *block;
     const maage_item_definition *tool;
@@ -393,7 +397,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     }
     maage_entities_set_random(entities, random);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
-        game->exhaustion += 0.025;
+        maage_gameplay_exhaust(game, 0.025);
         if (tool && tool->durability && (tool->tool_class == MAAGE_TOOL_SHEARS ? (block->id == MAAGE_BLOCK_LEAVES || block->id == MAAGE_BLOCK_TALL_GRASS || block->id == MAAGE_BLOCK_DEAD_BUSH) : block->hardness != 0)) {
             /* Maximum damage is still a usable final state. Check before
              * incrementing so even the full unsigned domain cannot wrap. */
@@ -523,10 +527,12 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
         game->fall_distance = 0;
     }
     distance = floor(sqrt(dx * dx + dz * dz) * 100.0 + 0.5) * 0.01;
-    if (in_water) game->exhaustion += distance * 0.015;
-    else if (player->grounded) game->exhaustion += distance * (player->sprinting ? 0.1 : 0.01);
-    if (jumped && was_grounded) game->exhaustion += sprint_jump ? 0.8 : 0.2;
-    while (game->exhaustion > 4) {
+    if (in_water) maage_gameplay_exhaust(game, distance * 0.015);
+    else if (player->grounded) maage_gameplay_exhaust(game, distance * (player->sprinting ? 0.1 : 0.01));
+    if (jumped && was_grounded) maage_gameplay_exhaust(game, sprint_jump ? 0.8 : 0.2);
+    /* Consume at most one exhaustion quantum per owner tick. Later charges,
+     * including regeneration and mining, remain valid pending checkpoint data. */
+    if (game->exhaustion > 4) {
         game->exhaustion -= 4;
         if (game->saturation > 0) {
             game->saturation -= 1;
@@ -537,7 +543,7 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
     if (game->hunger >= 18 && game->health && game->health < 20) {
         if (++game->hunger_ticks >= 80) {
             ++game->health;
-            game->exhaustion += 3;
+            maage_gameplay_exhaust(game, 3);
             game->hunger_ticks = 0;
         }
     } else if (!game->hunger && game->health > 1) {
@@ -547,14 +553,6 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
         }
     } else
         game->hunger_ticks = 0;
-    /* Normalize after regeneration as well, keeping every persisted snapshot valid. */
-    while (game->exhaustion > 4) {
-        game->exhaustion -= 4;
-        if (game->saturation > 0) {
-            game->saturation -= 1;
-            if (game->saturation < 0) game->saturation = 0;
-        } else if (game->hunger) --game->hunger;
-    }
 }
 /* Deferred owner actions keep their original cause while the successful
  * recovery leaves the block/drop untouched and permits the next fixed step. */
