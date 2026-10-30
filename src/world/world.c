@@ -1434,13 +1434,24 @@ maage_status maage_world_present_light(const maage_world *world, int x, int y, i
     }
     return maage_status_make(pending ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS, pending ? MAAGE_CONTEXT_WORLD : 0, MAAGE_OPERATION_QUERY, 0);
 }
+static int maage_world_gameplay_light_ready(const maage_world *world, const maage_world_slot *slot) {
+    maage_world_slot *neighbors[8];
+    int side;
+    if (!maage_world_complete(slot) || !slot->light_ready || slot->light_dirty || slot->edit_light || slot->light_work) return 0;
+    maage_world_neighbors(world, slot->x, slot->z, neighbors);
+    /* Any light reaching this column originates within its one-column halo.
+     * Pending neighboring propagation must not be claimed as current gameplay light. */
+    for (side = 0; side < 8; ++side)
+        if (!neighbors[side] || !neighbors[side]->light_ready || neighbors[side]->light_dirty || neighbors[side]->edit_light || neighbors[side]->light_work) return 0;
+    return 1;
+}
 maage_status maage_world_sample_light(const maage_world *world, int x, int y, int z, unsigned char *light) {
     maage_world_slot *slot;
     if (light) *light = 0;
     if (!world || !light) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
     if (x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     slot = maage_world_find(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
-    if (!maage_world_complete(slot) || !slot->light_ready || slot->light_dirty || slot->edit_light || slot->light_work) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    if (!maage_world_gameplay_light_ready(world, slot)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     if (y >= MAAGE_WORLD_HEIGHT) y = MAAGE_WORLD_HEIGHT - 1;
     *light = maage_chunk_light(slot->data->chunk, maage_world_local_coordinate(x), y, maage_world_local_coordinate(z));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
@@ -1468,7 +1479,7 @@ int maage_world_observe(const maage_world *world, int x, int y, int z, maage_wor
     observation->precipitation_height = chunk->heightmap[local_z * 16 + local_x];
     for (section = 0; section < 16; ++section)
         if (chunk->sections[section]) ++observation->section_count;
-    observation->light_available = slot->light_ready && !slot->light_dirty && !slot->light_work;
+    observation->light_available = world->config.presentation_only ? slot->light_ready && !slot->light_dirty && !slot->light_work : maage_world_gameplay_light_ready(world, slot);
     if (observation->light_available) observation->light = maage_chunk_light(chunk, local_x, y, local_z);
     return 1;
 }
@@ -1485,9 +1496,7 @@ maage_status maage_world_sample_camera(const maage_world *world, int x, int y, i
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     changed = !sample->valid || sample->x != x || sample->y != y || sample->z != z;
     for (i = 0; i < 4; ++i) {
-        revisions[i] = maage_world_column_revision(world,
-                                                   maage_world_chunk_coordinate(x + (i % 2 ? 5 : -5)),
-                                                   maage_world_chunk_coordinate(z + (i / 2 ? 5 : -5)));
+        revisions[i] = maage_world_column_revision(world, maage_world_chunk_coordinate(x + (i % 2 ? 5 : -5)), maage_world_chunk_coordinate(z + (i / 2 ? 5 : -5)));
         if (world->config.presentation_only) {
             maage_world_slot *slot = maage_world_find(world, maage_world_chunk_coordinate(x + (i % 2 ? 5 : -5)), maage_world_chunk_coordinate(z + (i / 2 ? 5 : -5)));
             revisions[i] = maage_world_complete(slot) ? slot->geometry_epoch : 0;
@@ -1958,6 +1967,7 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
             if (state != (before ? maage_chunk_get(before, x, y, z) : MAAGE_STATE_AIR)) ++count;
         }
     }
+    if (count > (size_t) - 1 / sizeof(*update->cells)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     update = (maage_column_update *) calloc(1, sizeof(*update));
     if (!update) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     if (count) update->cells = (maage_column_cell *) malloc(count * sizeof(*update->cells));

@@ -90,7 +90,7 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
     prediction->dirty = 0;
     return maage_prediction_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
-maage_status maage_client_prediction_update(maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, maage_leaves_mode leaves, int active, int held, int pressed, maage_session_command *command, maage_status_trace *trace) {
+maage_status maage_client_prediction_update(maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, int active, int held, int pressed, maage_session_command *command, maage_status_trace *trace) {
     maage_world_target target;
     double direction[3], damage;
     maage_block_position positions[MAAGE_CLIENT_PREDICTIONS];
@@ -112,7 +112,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         ++prediction->generation;
     }
     ++prediction->frame;
-    if (pressed) prediction->input_at = prediction->diagnostics ? maage_time_monotonic_seconds() : -1;
+    if (pressed) prediction->input_at = prediction->diagnostics ? input_time : -1;
     if (prediction->leaves != leaves) {
         prediction->leaves = leaves;
         ++prediction->generation;
@@ -139,7 +139,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                     if (column && column->presentation_generation < prediction->entries[i].generation) ready = 0;
                 }
             if (ready) {
-                if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu confirmed_geometry_ms=%.3f frames=%lu", prediction->entries[i].id, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, prediction->frame - prediction->entries[i].frame);
+                if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu accepted=%d reconciled_geometry_ms=%.3f frames=%lu", prediction->entries[i].id, prediction->entries[i].confirmed > 0, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, prediction->frame - prediction->entries[i].frame);
                 prediction->entries[i].active = 0;
                 ++prediction->generation;
             }
@@ -190,6 +190,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
             if (prediction->progress >= 1 && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
                 prediction->entries[vacant].predicted_at = prediction->diagnostics ? maage_time_monotonic_seconds() : -1;
                 prediction->entries[vacant].frame = prediction->frame;
+                prediction->entries[vacant].submitted = 0;
                 if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu input_to_prediction_ms=%.3f predicted_at=%.6f", prediction->next_id + 1, (prediction->entries[vacant].predicted_at - prediction->input_at) * 1000, prediction->entries[vacant].predicted_at);
                 prediction->entries[vacant].active = 1;
                 prediction->entries[vacant].confirmed = 0;

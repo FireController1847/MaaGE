@@ -294,7 +294,7 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
                 return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
             }
             upload_ms = (current - upload_begin) * 1000.0;
-            if (diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu state=%lu upload_wait_ms=%.3f upload_ms=%.3f", update.x, update.z, update.revision, update.state_revision, update.completed_at >= 0 ? (upload_begin - update.completed_at) * 1000 : -1, upload_ms);
+            if (diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu state=%lu upload_wait_ms=%.3f upload_api_ms=%.3f", update.x, update.z, update.revision, update.state_revision, update.completed_at >= 0 ? (upload_begin - update.completed_at) * 1000 : -1, upload_ms);
             activity->status.frame_upload_ms += upload_ms;
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 activity->expected_upload_ms = activity->status.gpu_uploads ? activity->expected_upload_ms * 0.75 + upload_ms * 0.25 : upload_ms;
@@ -1162,14 +1162,15 @@ choose_world:
         cz = maage_world_chunk_coordinate((int) floor(latest.player.player.position[2]));
         {
             unsigned int received = 0;
-            double receive_begin = maage_time_monotonic_seconds();
+            double receive_begin = maage_time_monotonic_seconds(), apply_begin;
             while (received++ < 16U) {
                 memset(&column_update, 0, sizeof(column_update));
                 operation = maage_local_session_take_column(session, cx, cz, &column_update);
                 if (maage_status_code(operation) == MAAGE_STATUS_NOOP || maage_status_code(operation) == MAAGE_STATUS_INVALID_STATE) break;
                 if (maage_status_failed(operation)) goto done;
+                apply_begin = prediction.diagnostics ? maage_time_monotonic_seconds() : -1;
                 if (column_update.world_epoch == world_epoch) operation = maage_world_apply_column(visual_world, column_update.column);
-                if (prediction.diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu local_transport_ms=%.3f applied_at=%.6f receive_apply_ms=%.3f", column_update.x, column_update.z, column_update.revision, column_update.offered_at >= 0 ? (maage_time_monotonic_seconds() - column_update.offered_at) * 1000 : -1, maage_time_monotonic_seconds(), (maage_time_monotonic_seconds() - receive_begin) * 1000);
+                if (prediction.diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu local_transport_ms=%.3f applied_at=%.6f receive_apply_ms=%.3f", column_update.x, column_update.z, column_update.revision, column_update.offered_at >= 0 ? (maage_time_monotonic_seconds() - column_update.offered_at) * 1000 : -1, maage_time_monotonic_seconds(), (maage_time_monotonic_seconds() - apply_begin) * 1000);
                 maage_column_update_destroy(column_update.column);
                 if (maage_status_failed(operation)) goto done;
                 if ((maage_time_monotonic_seconds() - receive_begin) * 1000.0 >= 2.0) break;
@@ -1196,7 +1197,7 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, renderer, atlas, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, &command, trace);
+            operation = maage_client_prediction_update(&prediction, renderer, atlas, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, &command, trace);
             if (maage_status_failed(operation)) {
                 unsigned int prediction_index;
                 if (maage_status_is_fatal(operation) ||
@@ -1350,6 +1351,14 @@ choose_world:
             rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
         frame_end = maage_time_monotonic_seconds();
         if (frame_end < 0.0) goto clock_failed;
+        if (prediction.diagnostics && maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
+            unsigned int action;
+            for (action = 0; action < MAAGE_CLIENT_PREDICTIONS; ++action)
+                if (prediction.entries[action].active && prediction.entries[action].confirmed >= 0 && !prediction.entries[action].submitted && !prediction.suspended) {
+                    prediction.entries[action].submitted = 1;
+                    maage_log_info("maage.client.latency", "action=%lu prediction_to_frame_submit_ms=%.3f frames=%lu", prediction.entries[action].id, (frame_end - prediction.entries[action].predicted_at) * 1000, prediction.frame - prediction.entries[action].frame);
+                }
+        }
         tick_count = latest.tick >= last_seen_tick ? latest.tick - last_seen_tick : 0;
         last_seen_tick = latest.tick;
         maage_client_debug_frame(&debug, frame_end, raw_elapsed, maage_status_code(rendered) == MAAGE_STATUS_SUCCESS, tick_count, 0.0);

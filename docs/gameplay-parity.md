@@ -81,7 +81,8 @@ is needed. Prior GPU data remains usable until replacement, with local edit patc
 covering interactions immediately.
 
 The Server independently schedules the same numerical solver for gameplay light.
-Growth, melting and survival defer when that cache is unavailable/stale. The Client
+Growth, melting and survival defer while the queried cache or its input halo is
+unavailable/pending. This readiness gate does not apply to Client geometry. The Client
 samples its own light for player, hand, item entities, pickup effects and F3.
 Block, first-geometry, light-initialization, pending-light and GPU-ready states
 are separate. First geometry uses a roof-aware sky approximation until numerical
@@ -103,9 +104,12 @@ between columns never reorders a column's own state packets.
 `MAAGE_WORLD_DIAGNOSTICS=1` enables bounded records under `maage.world.latency`,
 `maage.server.latency` and `maage.client.latency`. Action IDs correlate prediction,
 Server admission/acknowledgment and confirmed geometry. Column/revision IDs correlate
-mutations, receipt, worker queue/execution/disposition and GPU upload wait/execution.
+mutations, receipt, worker queue/execution/disposition and GPU upload wait/API duration.
 World backlog summaries are limited to one per second. Records allocate no diagnostic
-history. Prediction geometry timing ends at upload/submission, not display scanout.
+history. Input timing begins at the native input poll; Survival timing includes
+intended mining duration. First successful frame submission is recorded separately.
+Upload API duration excludes later asynchronous device execution; neither upload
+nor frame submission is display scanout timing.
 Local transport durations use one process monotonic clock; remote adapters must mark
 untranslated timestamps unavailable and report peer-local durations separately.
 

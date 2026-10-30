@@ -454,11 +454,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                             }
                             smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && state->block_id != MAAGE_BLOCK_CACTUS;
                             maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary, smooth, current->emitted_light, &illumination);
-                            maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x,
-                                            y, chunk->z * 16 + z, face, definition, uv, &face_shape, model,
-                                            state->metadata, log_axis, material,
-                                            tint_mode ? colors[tint_mode] : neutral, animation,
-                                            state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
+                            maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
                             if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], NULL, NULL, NULL, &illumination);
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));
                         }
@@ -596,6 +592,7 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
         if (amount == (size_t) - 1) return maage_mesh_failure(trace, failure);
         faces += amount;
     }
+    if (faces > UINT_MAX / 4U || faces > (size_t) - 1 / (4 * sizeof(maage_mesh_vertex)) || faces > (size_t) - 1 / (6 * sizeof(unsigned int))) return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
     mesh = (maage_world_mesh *) calloc(1, sizeof(*mesh));
     if (!mesh) return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
     if (faces) {
