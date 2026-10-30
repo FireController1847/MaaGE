@@ -130,7 +130,12 @@ Prediction is bounded Client presentation over expected numeric states and owned
 meshes. A deduplicated patch regenerates the affected 3x3x3 cells through the same
 face generator as ordinary meshes; old owner-cell geometry is filtered immediately.
 Block availability, rather than light readiness or neighboring GPU revisions, gates
-prediction. Leaves, ice and fluid neighbors use ordinary material/height rules. It never predicts inventory, drops or sounds. Immediate
+prediction. Frame submission precedes ordinary mesh uploads, which prepare the
+next frame. Renderer backpressure retains ready CPU meshes rather than accepting
+more GPU work. The next prediction update refreshes affected views before those
+new cache entries are drawn, advancing mining only once per frame. Leaves, ice and
+fluid neighbors use ordinary material/height rules. It never predicts inventory,
+drops or sounds. Immediate
 local overlays also invalidate visual light inputs. Confirmation retires overlays
 only after required authoritative revisions reach presentation; rejection restores
 correct effective inputs and rebuilds the local patch immediately. Stable action IDs,

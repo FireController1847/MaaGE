@@ -1186,8 +1186,6 @@ choose_world:
             operation = maage_world_stream(visual_world, latest.player.player.position[0], latest.player.player.position[2], yaw, trace);
             if (maage_status_failed(operation)) goto done;
         }
-        rendered = maage_client_stream_meshes(visual_world, renderer, atlas, &cache, &mesh_activity, &options, &debug, cx, cz);
-        if (maage_status_failed(rendered)) goto done;
         {
             double prediction_eye[3];
             for (i = 0; i < 3; ++i)
@@ -1359,6 +1357,18 @@ choose_world:
                     maage_log_info("maage.client.latency", "action=%lu prediction_to_frame_submit_ms=%.3f frames=%lu", prediction.entries[action].id, (frame_end - prediction.entries[action].predicted_at) * 1000, prediction.frame - prediction.entries[action].frame);
                 }
         }
+        /* Submit interaction presentation first. Budgeted background uploads
+         * prepare the next frame; the next prediction update refreshes any
+         * affected views once, before those cache replacements can be drawn. */
+        if (maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
+            operation = maage_client_stream_meshes(visual_world, renderer, atlas, &cache, &mesh_activity, &options, &debug, cx, cz);
+            if (maage_status_failed(operation)) goto done;
+        } else {
+            mesh_activity.status.uploaded_this_frame = 0;
+            mesh_activity.status.frame_upload_ms = 0;
+        }
+        frame_end = maage_time_monotonic_seconds();
+        if (frame_end < 0.0) goto clock_failed;
         tick_count = latest.tick >= last_seen_tick ? latest.tick - last_seen_tick : 0;
         last_seen_tick = latest.tick;
         maage_client_debug_frame(&debug, frame_end, raw_elapsed, maage_status_code(rendered) == MAAGE_STATUS_SUCCESS, tick_count, 0.0);
