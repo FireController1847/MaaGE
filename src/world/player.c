@@ -186,9 +186,14 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
         strafe /= magnitude;
     }
     acceleration = player->grounded ? MAAGE_PLAYER_GROUND_ACCELERATION : MAAGE_PLAYER_AIR_ACCELERATION;
+    /* Contact at the start of the step determines retained momentum, including
+     * the takeoff and landing steps. The sweep publishes next step's contact. */
+    drag = player->grounded ? MAAGE_PLAYER_GROUND_DRAG : MAAGE_PLAYER_AIR_DRAG;
     fluid = input->flying ? MAAGE_FLUID_NONE : maage_player_fluid(player, world);
-    if (input->flying) acceleration = 0.2;
-    else if (player->sprinting && fluid == MAAGE_FLUID_NONE) acceleration *= MAAGE_PLAYER_SPRINT_SPEED;
+    if (input->flying) {
+        acceleration = 0.2;
+        drag = 0.6;
+    } else if (player->sprinting && fluid == MAAGE_FLUID_NONE) acceleration *= MAAGE_PLAYER_SPRINT_SPEED;
     sine = sin(input->yaw);
     cosine = cos(input->yaw);
     player->velocity[0] += acceleration * (forward * sine + strafe * cosine);
@@ -225,8 +230,6 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
     if (player->collided_horizontally) player->sprinting = 0;
     player->velocity[1] = (player->velocity[1] - MAAGE_PLAYER_GRAVITY_PER_TICK) * MAAGE_PLAYER_VERTICAL_DRAG;
     if (input->flying) player->velocity[1] = 0;
-    drag = player->grounded ? MAAGE_PLAYER_GROUND_DRAG : MAAGE_PLAYER_AIR_DRAG;
-    if (input->flying) drag = 0.6;
     player->velocity[0] *= drag;
     player->velocity[2] *= drag;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
