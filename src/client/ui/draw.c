@@ -8,10 +8,12 @@
 static int maage_client_ui_reserve_quad(maage_client_ui *ui) {
     size_t maximum, required, capacity;
     maage_render_ui_vertex *vertices;
+    float *projective_depth;
     unsigned int *indices;
     unsigned char failure = MAAGE_STATUS_ALLOCATION_FAILED;
     if (maage_status_failed(ui->draw_result)) return 0;
     maximum = ((size_t) - 1) / sizeof(*ui->vertices) / 4;
+    if (maximum > ((size_t) - 1) / sizeof(*ui->projective_depth) / 4) maximum = ((size_t) - 1) / sizeof(*ui->projective_depth) / 4;
     if (maximum > ((size_t) - 1) / sizeof(*ui->indices) / 6) maximum = ((size_t) - 1) / sizeof(*ui->indices) / 6;
     if (maximum > (size_t) (UINT_MAX / 4U)) maximum = (size_t) (UINT_MAX / 4U);
     required = ui->batch.vertex_count / 4 + 1;
@@ -32,6 +34,10 @@ static int maage_client_ui_reserve_quad(maage_client_ui *ui) {
     if (!vertices) goto failed;
     ui->vertices = vertices;
     ui->batch.vertices = vertices;
+    projective_depth = (float *) realloc(ui->projective_depth, capacity * 4 * sizeof(*projective_depth));
+    if (!projective_depth) goto failed;
+    ui->projective_depth = projective_depth;
+    ui->batch.projective_depth = projective_depth;
     indices = (unsigned int *) realloc(ui->indices, capacity * 6 * sizeof(*indices));
     if (!indices) goto failed;
     ui->indices = indices;
@@ -50,6 +56,8 @@ int maage_client_ui_append_quads(maage_client_ui *ui, const maage_render_ui_vert
         if (!maage_client_ui_reserve_quad(ui)) return 0;
         first = ui->batch.vertex_count;
         memcpy(ui->vertices + first, vertices + quad * 4, 4 * sizeof(*vertices));
+        for (i = 0; i < 4; ++i)
+            ui->projective_depth[first + i] = 1.0f;
         for (i = 0; i < 6; ++i)
             ui->indices[ui->batch.index_count + i] = (unsigned int) first + order[i];
         ui->batch.vertex_count += 4;
@@ -82,6 +90,7 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
     positions[2][1] = positions[3][1] = y1;
     first = ui->batch.vertex_count;
     for (i = 0; i < 4; ++i) {
+        ui->projective_depth[first + i] = 1.0f;
         vertex = &ui->vertices[first + i];
         vertex->position[0] = positions[i][0];
         vertex->position[1] = positions[i][1];

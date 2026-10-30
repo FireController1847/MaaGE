@@ -136,6 +136,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
         return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
     }
     ui->batch.vertices = ui->vertices;
+    ui->batch.projective_depth = ui->projective_depth;
     ui->batch.indices = ui->indices;
     ui->batch.texture = ui->resources.texture;
     *output = ui;
@@ -163,6 +164,7 @@ maage_status maage_client_ui_destroy(maage_client_ui *ui) {
     free(ui->creative_items);
     free(ui->debug_cache.vertices);
     free(ui->vertices);
+    free(ui->projective_depth);
     free(ui->indices);
     maage_registry_pages_destroy(&ui->navigation.screens, free);
     free(ui->navigation.stack);

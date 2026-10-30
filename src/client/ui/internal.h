@@ -68,6 +68,7 @@ struct maage_client_ui {
     maage_client_ui_resources resources;
     maage_client_ui_debug_cache debug_cache;
     maage_render_ui_vertex *vertices;
+    float *projective_depth;
     unsigned int *indices;
     size_t quad_capacity;
     maage_render_ui_data batch;

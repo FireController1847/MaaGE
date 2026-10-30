@@ -1,69 +1,105 @@
 #include "front_internal.h"
 #include <math.h>
 #include <stddef.h>
-/* Six verified cubemap faces packed into the existing atlas. View-space
- * tessellation provides panorama rotation without a second renderer. */
-/* The panorama must project each quad into ONE cubemap face. The old
- * per-corner face choice interpolated across unrelated atlas tiles whenever
- * a cube boundary passed beneath the camera, creating rotating glitches. */
+#include <string.h>
+
+/* Project the six atlas faces through the shared UI pipeline. Camera depths
+ * preserve perspective interpolation across each face's triangles. */
 typedef struct title_camera {
     double cy, sy, cp, sp;
-    float width, height;
+    double width, height, focal;
 } title_camera;
-static void title_ray(const title_camera *camera, float x, float y, double ray[3]) {
-    double edge = camera->width > camera->height ? camera->width : camera->height;
-    double dx = (x - camera->width * 0.5f) * 3.46410161514 / edge;
-    double dy = (y - camera->height * 0.5f) * 3.46410161514 / edge;
-    double z = camera->cy - dx * camera->sy;
-    ray[0] = dx * camera->cy + camera->sy;
-    ray[1] = dy * camera->cp - z * camera->sp;
-    ray[2] = dy * camera->sp + z * camera->cp;
-}
-static int title_face(const double ray[3]) {
-    double ax = fabs(ray[0]), ay = fabs(ray[1]), az = fabs(ray[2]);
-    if (az >= ax && az >= ay) return ray[2] >= 0.0 ? 0 : 2;
-    if (ax >= ay) return ray[0] >= 0.0 ? 1 : 3;
-    return ray[1] >= 0.0 ? 5 : 4;
-}
-static void title_uv(const maage_client_ui *ui, const double ray[3], int face, float *u, float *v) {
-    double a, uu, vv;
-    if (face == 0 || face == 2) {
-        a = fabs(ray[2]);
-        uu = (face == 0 ? ray[0] : -ray[0]) / a;
-        vv = ray[1] / a;
-    } else if (face == 1 || face == 3) {
-        a = fabs(ray[0]);
-        uu = (face == 1 ? -ray[2] : ray[2]) / a;
-        vv = ray[1] / a;
-    } else {
-        a = fabs(ray[1]);
-        uu = ray[0] / a;
-        vv = (face == 5 ? -ray[2] : ray[2]) / a;
+typedef struct title_vertex {
+    double point[3], uv[2];
+} title_vertex;
+
+static void title_face(const title_camera *camera, int face, title_vertex vertices[8]) {
+    double s, t, point[3], x, z;
+    unsigned int i;
+    for (i = 0; i < 4; ++i) {
+        s = i == 0 || i == 3 ? -1.0 : 1.0;
+        t = i < 2 ? -1.0 : 1.0;
+        /* Y and texture V increase downward. Side faces run front, right,
+         * back, left; the upper/lower faces preserve their shared edges. */
+        if (face == 0 || face == 2) {
+            point[0] = face == 0 ? s : -s;
+            point[1] = t;
+            point[2] = face == 0 ? 1.0 : -1.0;
+        } else if (face == 1 || face == 3) {
+            point[0] = face == 1 ? 1.0 : -1.0;
+            point[1] = t;
+            point[2] = face == 1 ? -s : s;
+        } else {
+            point[0] = s;
+            point[1] = face == 4 ? -1.0 : 1.0;
+            point[2] = face == 4 ? t : -t;
+        }
+        /* Invert world-Y yaw, then local-X pitch. Pitch stays independent
+         * of heading, keeping the camera upright throughout a full turn. */
+        x = camera->cy * point[0] - camera->sy * point[2];
+        z = camera->sy * point[0] + camera->cy * point[2];
+        vertices[i].point[0] = x;
+        vertices[i].point[1] = camera->cp * point[1] + camera->sp * z;
+        vertices[i].point[2] = camera->cp * z - camera->sp * point[1];
+        vertices[i].uv[0] = s;
+        vertices[i].uv[1] = t;
     }
-    /* Clamp cube-edge straddling cells to their center-selected face. */
-    if (uu < -1.0) uu = -1.0;
-    if (uu > 1.0) uu = 1.0;
-    if (vv < -1.0) vv = -1.0;
-    if (vv > 1.0) vv = 1.0;
-    /* Use full 256x256 face bounds at texel centers. The previous two-pixel
-     * inset cut away scenery at every face boundary and made seams visible. */
-    *u = (float) (512 + ((face + 1) % 4) * 256 + 0.5 + (uu + 1.0) * 127.5) / ui->resources.atlas_edge;
-    *v = (float) (((face + 1) / 4) * 256 + 0.5 + (vv + 1.0) * 127.5) / ui->resources.atlas_edge;
 }
-/* The original panorama remains animated, but each face is Gaussian filtered
- * ONCE during asset loading. Render one continuous projection per frame:
- * an 8-pixel mosaic with five offset passes is not a Gaussian blur. */
+
+static double title_clip_distance(const title_camera *camera, const title_vertex *vertex, unsigned int plane) {
+    unsigned int axis = plane / 2;
+    double extent = axis == 0 ? camera->width : camera->height;
+    double offset = camera->focal * vertex->point[axis];
+    return extent * 0.5 * vertex->point[2] + (plane & 1 ? -offset : offset);
+}
+
+static unsigned int title_clip(const title_camera *camera, title_vertex vertices[8]) {
+    title_vertex output[8];
+    const title_vertex *previous, *current;
+    double previous_distance, distance, t;
+    unsigned int count = 4, next, plane, i, component;
+    /* A convex quad gains at most one vertex per clipping plane. These four
+     * planes also exclude Z <= 0: their only Z == 0 point is the origin,
+     * which cannot lie on a face of the cube surrounding the camera. */
+    for (plane = 0; plane < 4 && count; ++plane) {
+        next = 0;
+        previous = &vertices[count - 1];
+        previous_distance = title_clip_distance(camera, previous, plane);
+        for (i = 0; i < count; ++i) {
+            current = &vertices[i];
+            distance = title_clip_distance(camera, current, plane);
+            if ((previous_distance < 0.0 && distance > 0.0) || (previous_distance > 0.0 && distance < 0.0)) {
+                t = previous_distance / (previous_distance - distance);
+                for (component = 0; component < 3; ++component)
+                    output[next].point[component] = previous->point[component] + t * (current->point[component] - previous->point[component]);
+                for (component = 0; component < 2; ++component)
+                    output[next].uv[component] = previous->uv[component] + t * (current->uv[component] - previous->uv[component]);
+                ++next;
+            }
+            if (distance >= 0.0) output[next++] = *current;
+            previous = current;
+            previous_distance = distance;
+        }
+        memcpy(vertices, output, next * sizeof(*vertices));
+        count = next;
+    }
+    return count;
+}
+
 static void title_panorama(maage_client_ui *ui) {
     title_camera camera;
+    title_vertex polygon[8];
     maage_render_ui_vertex vertices[4];
     maage_client_ui_rect full;
-    double ray[3], yaw, pitch;
-    float left, top, right, bottom, sx, sy;
-    unsigned int j;
-    int face, i, x, y;
-    const int step = 3;
+    double yaw, pitch;
+    float depths[4];
+    size_t first;
+    unsigned int count, i, j, corner;
+    int face;
+    if (ui->width <= 0.0f || ui->height <= 0.0f) return;
     for (i = 1; i <= 6; ++i)
         if (!ui->resources.title_available[i]) return;
+    /* Monotonic seconds keep the sweep and gradual pitch independent of FPS. */
     yaw = ui->notice_now * 0.03490658504;
     pitch = (20.0 + sin(ui->notice_now / 20.0) * 25.0) * 0.01745329252;
     camera.cy = cos(yaw);
@@ -72,30 +108,30 @@ static void title_panorama(maage_client_ui *ui) {
     camera.sp = sin(pitch);
     camera.width = ui->width;
     camera.height = ui->height;
+    /* Equal X/Y focal scale crops a square 120-degree view to the viewport. */
+    camera.focal = (camera.width > camera.height ? camera.width : camera.height) / 3.46410161514;
     full.x = full.y = 0;
     full.width = ui->width;
     full.height = ui->height;
     maage_client_ui_panel(ui, full, 0.48f, 0.55f, 0.61f, 1.0f);
-    for (y = 0; y < (int) ui->height; y += step) {
-        for (x = 0; x < (int) ui->width; x += step) {
-            left = (float) x;
-            top = (float) y;
-            right = left + step;
-            bottom = top + step;
-            if (right > ui->width) right = ui->width;
-            if (bottom > ui->height) bottom = ui->height;
-            title_ray(&camera, (left + right) * 0.5f, (top + bottom) * 0.5f, ray);
-            face = title_face(ray);
-            for (j = 0; j < 4U; ++j) {
-                sx = (j == 0U || j == 3U) ? left : right;
-                sy = j < 2U ? top : bottom;
-                vertices[j].position[0] = sx;
-                vertices[j].position[1] = sy;
-                title_ray(&camera, sx, sy, ray);
-                title_uv(ui, ray, face, &vertices[j].uv[0], &vertices[j].uv[1]);
+    for (face = 0; face < 6; ++face) {
+        title_face(&camera, face, polygon);
+        count = title_clip(&camera, polygon);
+        for (i = 1; i + 1 < count; ++i) {
+            for (j = 0; j < 4; ++j) {
+                corner = j == 0 || j == 3 ? 0 : (j == 1 ? i : i + 1);
+                vertices[j].position[0] = (float) (camera.width * 0.5 + camera.focal * polygon[corner].point[0] / polygon[corner].point[2]);
+                vertices[j].position[1] = (float) (camera.height * 0.5 + camera.focal * polygon[corner].point[1] / polygon[corner].point[2]);
+                /* Full face bounds at texel centers avoid neighboring atlas tiles. */
+                vertices[j].uv[0] = (float) (512 + ((face + 1) % 4) * 256 + 0.5 + (polygon[corner].uv[0] + 1.0) * 127.5) / ui->resources.atlas_edge;
+                vertices[j].uv[1] = (float) (((face + 1) / 4) * 256 + 0.5 + (polygon[corner].uv[1] + 1.0) * 127.5) / ui->resources.atlas_edge;
                 vertices[j].color[0] = vertices[j].color[1] = vertices[j].color[2] = vertices[j].color[3] = 1.0f;
+                depths[j] = (float) polygon[corner].point[2];
             }
+            first = ui->batch.vertex_count;
             if (!maage_client_ui_append_quads(ui, vertices, 1)) return;
+            for (j = 0; j < 4; ++j)
+                ui->projective_depth[first + j] = depths[j];
         }
     }
     maage_client_ui_panel(ui, full, 0.38f, 0.36f, 0.43f, 0.28f);
