@@ -50,7 +50,9 @@ unsigned int maage_player_fluid(const maage_player *player, const maage_world *w
 maage_status maage_player_spawn(maage_player *player, const maage_world *world);
 /* Exactly one 20 TPS tick. Caller accumulates wall time and caps catch-up work.
  * Raw platform input and camera interpolation remain outside simulation. The
- * AABB sweeps each crossed voxel plane (Y, X, Z), preventing normal tunneling. */
+ * Grounded crouch clips horizontal requests against the projected body shifted
+ * one block down; upward takeoff, airborne motion and flight bypass the guard.
+ * The AABB then sweeps each crossed voxel plane (Y, X, Z). */
 maage_status maage_player_tick(maage_player *player, const maage_world *world, const maage_player_input *input);
 
 #ifdef __cplusplus
