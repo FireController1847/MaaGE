@@ -175,8 +175,10 @@ if(MAAGE_ENABLE_OPENGL OR MAAGE_ENABLE_OPENGL_LEGACY)
             target_link_libraries(maage_render PRIVATE OpenGL::GL)
             if(MAAGE_PLATFORM_MACOS)
                 enable_language(OBJC)
+                find_library(MAAGE_OPENGL_APPKIT_FRAMEWORK AppKit REQUIRED)
                 target_sources(maage_render PRIVATE opengl/context_macos.m)
                 target_compile_options(maage_render PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fno-objc-arc>")
+                target_link_libraries(maage_render PRIVATE "${MAAGE_OPENGL_APPKIT_FRAMEWORK}")
             elseif(MAAGE_PLATFORM_WINDOWS)
                 target_sources(maage_render PRIVATE opengl/context_win32.c)
             else()
@@ -184,7 +186,20 @@ if(MAAGE_ENABLE_OPENGL OR MAAGE_ENABLE_OPENGL_LEGACY)
                 target_link_libraries(maage_render PRIVATE X11::X11)
             endif()
             if(MAAGE_ENABLE_OPENGL)
-                target_sources(maage_render PRIVATE opengl/modern/modern.c)
+                set(MAAGE_OPENGL_HEADER "${PROJECT_BINARY_DIR}/generated/maage_opengl_shaders.h")
+                add_custom_command(OUTPUT "${MAAGE_OPENGL_HEADER}"
+                    COMMAND "${CMAKE_COMMAND}"
+                        "-DMAAGE_OPENGL_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}/opengl/modern"
+                        "-DMAAGE_MATERIAL_SOURCE=${PROJECT_SOURCE_DIR}/include/maage/geometry_materials.h"
+                        "-DMAAGE_OPENGL_HEADER=${MAAGE_OPENGL_HEADER}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/opengl/modern/embed_shaders.cmake"
+                    DEPENDS opengl/modern/embed_shaders.cmake opengl/modern/shaders/common.glsl
+                        opengl/modern/shaders/mesh.vert opengl/modern/shaders/mesh.frag
+                        opengl/modern/shaders/ui.vert opengl/modern/shaders/ui.frag
+                        opengl/modern/shaders/fullscreen.vert opengl/modern/shaders/blur.frag
+                        render_shader_defs.h render_shader_common.h
+                        "${PROJECT_SOURCE_DIR}/include/maage/geometry_materials.h" VERBATIM)
+                target_sources(maage_render PRIVATE opengl/modern/modern.c "${MAAGE_OPENGL_HEADER}")
                 target_compile_definitions(maage_render PRIVATE MAAGE_RENDER_HAS_OPENGL)
             endif()
             if(MAAGE_ENABLE_OPENGL_LEGACY)

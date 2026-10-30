@@ -135,7 +135,7 @@ maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
  * GUI. NULL clears the pass. Requires TEXTURED_MESH and SCENE support. */
 maage_status maage_renderer_set_foreground(maage_renderer *renderer, const maage_render_mesh *mesh, const float view_projection[16], float sky_light, float block_light);
 /* Repeated immutable geometry with lightweight model transforms and copied
- * light. Borrowed through draw_frame; both primary backends encode the same
+ * light. Borrowed through draw_frame; scene backends encode the same
  * shared material/depth order and copy uniforms into their command resources.
  * Clear the array before destroying any referenced mesh; draw_frame needs a
  * world view-projection matrix while instances are installed. */
@@ -148,8 +148,8 @@ maage_status maage_renderer_set_instances(maage_renderer *renderer, const maage_
 /* Presentation clock in 20 Hz ticks; caller may wrap at a common animation
  * period. No texture uploads or mesh invalidation are needed to advance it. */
 maage_status maage_renderer_set_animation_tick(maage_renderer *renderer, float tick);
-/* Prime the initial clear frame before showing a hidden window. Metal and
- * Vulkan support this; UNSUPPORTED leaves others unchanged. SKIPPED means no drawable
+/* Prime the initial clear frame before showing a hidden window. Metal, Vulkan
+ * and modern OpenGL support this; UNSUPPORTED leaves others unchanged. SKIPPED means no drawable
  * yet. Does not change window visibility; normal present still skips hidden windows. */
 maage_status maage_renderer_prepare_frame(maage_renderer *renderer, maage_status_trace *trace);
 /* Prime a complete GUI frame while hidden, with initial-presentation sync.
@@ -188,7 +188,8 @@ maage_status maage_renderer_draw_meshes(maage_renderer *renderer, const maage_re
  * Meshes retain the same matrix/depth contract as draw_meshes. SUCCESS accepts
  * the frame; GPU completion/presentation may be asynchronous. With VSync off,
  * presentation may coalesce completed frames. A visible Metal window may return
- * NOOP for temporary mailbox/GPU backpressure; this is not a rendered frame.
+ * NOOP for temporary mailbox/GPU backpressure; modern OpenGL also returns NOOP
+ * when its bounded frame slots are busy. This is not a rendered frame.
  * Continue polling events and retry with a brief event wait rather than using
  * the long idle wait appropriate for hidden/minimized windows. Backend-owned
  * copies/resources outlive submitted work; deferred failures surface on a later

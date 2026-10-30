@@ -1,8 +1,8 @@
 # Visual Rendering
 
-Metal and Vulkan consume the same portable world, UI, scene, foreground and
-animation contracts. Runtime appearance and platform behavior require programmer
-verification; source integration does not establish visual parity.
+Metal, Vulkan and modern OpenGL consume the same portable world, UI, scene,
+foreground and animation contracts. Runtime appearance and platform behavior
+require programmer verification; source integration does not establish visual parity.
 
 ## Shared Preparation and Backend Ownership
 
@@ -17,13 +17,16 @@ Native MSL and GLSL use shared vertex/uniform field lists, material IDs and
 lighting/animation equations. Metal embeds MSL for native compilation. Vulkan
 compiles and embeds SPIR-V with host `glslc` or `glslangValidator`; missing tools
 fail configuration. Metal-only/headless targets need no Vulkan tools.
+OpenGL embeds GLSL 3.30 with the same shared headers and compiles three programs
+once per context, using the native driver; it requires no Vulkan tools.
 
 Solid/cutout passes write depth; sorted translucent passes read it. Cracks multiply
 the already lit/tinted surface. Celestial sprites use source-alpha additive
 blending: opaque black asset pixels contribute zero without color-key replacement.
 RGBA remains straight alpha. Shared UI segment planning supports destination
 inversion for the crosshair; layout is backend independent. Metal uses MPS Gaussian
-panorama blur; Vulkan uses separable Gaussian passes with shared sigma/clamping.
+panorama blur; Vulkan and OpenGL use full-resolution separable Gaussian passes
+with shared sigma/radius and edge clamping, followed by crisp UI composition.
 
 Vulkan bounds frame/command resources and uses FIFO with VSync; disabling prefers
 MAILBOX, then IMMEDIATE, then FIFO. Baseline swapchain synchronization uses per-image
@@ -36,6 +39,37 @@ Metal bounds frames in flight. VSync Off renders to owned offscreen targets whil
 a presenter displays the latest completed result; re-enabling VSync restores direct
 drawable presentation. Mutable batches/traces are copied rather than borrowed across
 threads. Native fullscreen transitions must not join the presenter from the event loop.
+
+Modern OpenGL uses WGL/GLX 3.3 Core or NSOpenGL 4.1 Core. Context-local entry
+points, GLSL/profile/limits, double buffering, actual RGBA8/depth24/stencil8
+framebuffer completeness and sync creation are checked before scene capabilities
+are published. Driver version/vendor/device and limits are logged; the device
+interface also exposes bounded vendor/version text for F3. Virtualized drivers
+follow these same checks, with no version-only bypass or vendor blacklist.
+
+Immutable geometry uses VAO/VBO/index buffers; shared material preparation writes
+directly into mapped index storage. UI and sorted indices use reusable growing
+buffers in three fence-protected frame slots. Busy slots return `NOOP` without
+waiting. World and foreground sorting have separate slot storage. Native deletion
+retains queued GPU uses through OpenGL object lifetime rules. Scene/depth and
+panorama targets resize transactionally per retired slot; atlas rows preserve the
+top-first CPU contract, while framebuffer composition uses native bottom-first
+UVs. The mesh shader converts shared clip depth `0..W` to OpenGL `-W..W`, preserving
+XY/CCW winding. Composition uses RGBA8 display values with framebuffer sRGB
+conversion disabled, matching the other backends' scene blending.
+
+Only hidden initial-frame preparation uses `glFinish`; ordinary rendering flushes
+and polls fences. WGL discovers extensions and validates GPU initialization on
+disposable drawables before committing the real window's pixel format once;
+existing formats are reused. Shader/FBO failures leave a previously unset window
+format untouched for fallback. GLX requires a compatible double-buffered RGB window
+visual and brackets context/binding/swap-control negotiation against X errors.
+NSOpenGL tracks backing-size changes on the main thread. Native VSync uses
+WGL EXT, GLX EXT/MESA/SGI or NSOpenGL swap intervals; unavailable or rejected
+changes return an explicit status. Wayland OpenGL contexts remain unsupported.
+Explicit `opengl` stays within its family. Legacy 1.1 remains clear-only, lacks
+Client scene/mesh/UI capabilities and is rejected by Client's required-feature
+negotiation. AUTO retains the existing platform preference order.
 
 ## Geometry, Light and Resources
 
@@ -127,7 +161,7 @@ Exact lightmap/gamma/flicker matching, altitude/noise biome tint variation,
 randomized plant offsets, particles, underwater overlays/fog, clouds/stars and
 maps/bows/eating/enchantment effects remain incomplete or absent. Movement/fluid
 feel, sneak ledges, blindness and item-use slowdowns remain provisional/unsupported.
-OpenGL and Software retain their implemented subsets and reject unsupported draws.
+Legacy OpenGL and Software retain their implemented subsets and reject unsupported draws.
 
 Pending programmer review: compare day/night/weather sky edges, foliage modes,
 biome seams, torch orientations, log axes, partial shapes, cave AO, fluid animation,

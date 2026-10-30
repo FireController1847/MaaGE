@@ -10,7 +10,7 @@ audio and cross-platform completion require programmer verification.
 
 | Area | Implemented in Source | Current Limits |
 | --- | --- | --- |
-| Platform | C90 shared libraries; native Window/Input/Storage/Jobs/Status/Log; Metal and Vulkan primary rendering | OpenGL/Software implement smaller subsets; Wayland lacks Client relative capture. |
+| Platform | C90 shared libraries; native Window/Input/Storage/Jobs/Status/Log; Metal/Vulkan rendering and a modern OpenGL scene/UI backend | Modern OpenGL awaits compilation and programmer runtime/platform validation; legacy OpenGL/Software implement smaller subsets; Wayland lacks Client relative capture. |
 | Applications | Independent native Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote transport, administration GUI and Launcher Server management are absent. |
 | World | Numeric registries, deterministic staged generation, sparse columns, immutable asynchronous I/O/jobs, environment, scheduled fluids/support and random ticks | One current generator/format; no Java seed/save interoperability or migration. |
 | Gameplay | Movement/collision, breaking/placement, provisional vitals, inventory, typed item entities, transactional 2x2/3x3 crafting | Full Survival progression, mobs, combat and smelting remain incomplete/absent. |
