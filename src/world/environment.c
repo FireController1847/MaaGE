@@ -562,7 +562,9 @@ maage_status maage_environment_tick(maage_environment *environment, maage_world 
         state->thunder_ticks = state->thundering ? 3600UL + maage_environment_random(state) % 12001UL : 12000UL + maage_environment_random(state) % 168001UL;
     }
     state->rain_intensity += state->raining ? 0.01 : -0.01;
-    state->thunder_intensity += state->raining && state->thundering ? 0.01 : -0.01;
+    /* Rain weights the observed thunder strength at presentation time. Its
+     * independent transition must not be faded a second time when rain starts. */
+    state->thunder_intensity += state->thundering ? 0.01 : -0.01;
     if (state->rain_intensity < 0) state->rain_intensity = 0;
     if (state->rain_intensity > 1) state->rain_intensity = 1;
     if (state->thunder_intensity < 0) state->thunder_intensity = 0;
