@@ -34,13 +34,13 @@ static void title_face(const title_camera *camera, int face, title_vertex vertic
             point[1] = face == 4 ? -1.0 : 1.0;
             point[2] = face == 4 ? t : -t;
         }
-        /* Invert world-Y yaw, then local-X pitch. Pitch stays independent
-         * of heading, keeping the camera upright throughout a full turn. */
+        /* Rotate the cubemap about Y, then X in the projected frame. Texture V
+         * and screen Y both increase downward, fixing the pitch orientation. */
         x = camera->cy * point[0] - camera->sy * point[2];
         z = camera->sy * point[0] + camera->cy * point[2];
         vertices[i].point[0] = x;
-        vertices[i].point[1] = camera->cp * point[1] + camera->sp * z;
-        vertices[i].point[2] = camera->cp * z - camera->sp * point[1];
+        vertices[i].point[1] = camera->cp * point[1] - camera->sp * z;
+        vertices[i].point[2] = camera->cp * z + camera->sp * point[1];
         vertices[i].uv[0] = s;
         vertices[i].uv[1] = t;
     }

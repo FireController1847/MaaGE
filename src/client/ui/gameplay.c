@@ -95,8 +95,9 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui) {
     for (i = 0; i < MAAGE_HOTBAR_SLOTS; ++i)
         maage_client_ui_stack(ui, &ui->snapshot.player.inventory.slots[i], x + 3 + (float) i * 20, y + 3);
     if (ui->snapshot.player.game_mode == MAAGE_GAME_MODE_SURVIVAL) {
-        maage_client_ui_status(ui, x, y - 17, ui->snapshot.player.health, 0);
-        maage_client_ui_status(ui, x + 173, y - 17, ui->snapshot.player.hunger, 1);
+        /* Vitals sit directly above the hotbar; no experience row is rendered. */
+        maage_client_ui_status(ui, x, y - 9, ui->snapshot.player.health, 0);
+        maage_client_ui_status(ui, x + 173, y - 9, ui->snapshot.player.hunger, 1);
     }
     selected = maage_inventory_selected(&ui->snapshot.player.inventory);
     item = selected && selected->count ? maage_item_registry_get(ui->items, selected->item_id) : NULL;

@@ -12,7 +12,7 @@ the frontend root. Unknown IDs and cycles fail explicitly.
 
 | ID | Screen | Current Layout and Behavior |
 | --- | --- | --- |
-| 0 | Gameplay HUD | Centered hotbar, 24x22 selection, health/hunger at height−39, right-aligned counts and a 16x16 destination-inverted crosshair. Held names last two seconds with a final half-second fade. |
+| 0 | Gameplay HUD | Centered hotbar, 24x22 selection, health/hunger at height−31 (no experience row), right-aligned counts and a 16x16 destination-inverted crosshair. Held names last two seconds with a final half-second fade. |
 | 1 | Pause | Title at Y=40; quarter-height rows for Resume, Options and Save/Quit. |
 | 2 | Options | Two 150-pixel columns, FOV endpoint labels, persistent supported settings and Done navigation. |
 | 3 | Inventory | Survival panel 176x166; player preview at (51,75), 2x2 inputs and result. Creative uses a 195x136 panel, five rows of nine catalog items, hotbar at (9,112), wheel/drag scrollbar. |
