@@ -75,7 +75,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view, maa
     maage_player_pose pose;
     maage_render_instance *draw;
     maage_status result, outcome = player_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
-    double dx, dz, target, heading, relative, ticks, phase, amount, swing, age, death, hurt_age;
+    double dx, dz, target, heading, relative, ticks, phase, amount, swing, age, death;
     float root[16], part_matrix[16], hand[16], sky = 1, light = 0;
     unsigned int part;
     int changed;
@@ -145,12 +145,10 @@ maage_status maage_client_player_view_update(maage_client_player_view *view, maa
     if (snapshot->player.sneaking) maage_player_matrix_translate(root, 0, -3 * 0.9375 / 16, 0);
     maage_player_matrix_rotate(root, 1, -view->body_yaw);
     if (!snapshot->player.health) {
-        death = sqrt(((double) snapshot->tick - snapshot->player.death_tick + interpolation) * 0.08);
+        death = (double) snapshot->tick - snapshot->player.death_tick + interpolation - 1;
+        death = death > 0 ? sqrt(death * 0.08) : 0;
         if (death > 1) death = 1;
         maage_player_matrix_rotate(root, 2, death * 1.5707963267948966);
-    } else if (snapshot->player.damage_sequence) {
-        hurt_age = (double) snapshot->tick - snapshot->player.damage_tick + interpolation;
-        if (hurt_age >= 0 && hurt_age < 10) maage_player_matrix_rotate(root, 2, sin((10 - hurt_age) * 0.3141592653589793) * 0.08);
     }
     maage_player_matrix_scale(root, 0.9375 / 16, 0.9375 / 16, 0.9375 / 16);
     if (snapshot->has_observation && snapshot->observation.light_available) {
