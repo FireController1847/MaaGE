@@ -504,6 +504,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.pitch = runtime->pitch;
     snapshot.player.inventory = runtime->game.inventory;
     snapshot.player.crafting = runtime->game.crafting;
+    snapshot.player.food = runtime->game.food;
     runtime->publication_dirty = 0;
     snapshot.player.game_mode = runtime->game.mode;
     snapshot.player.health = runtime->game.health;

@@ -4,6 +4,7 @@
 #include "maage/internal/registry_pages.h"
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 
 typedef struct maage_item_slot {
     maage_item_definition definition;
@@ -124,6 +125,10 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
         (definition->durability && definition->max_stack != 1) ||
         !(definition->mining_speed >= 1 && definition->mining_speed <= 1024))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if ((definition->food_ticks && (!definition->food_hunger || definition->food_hunger > 20 || !(definition->food_saturation >= 0 && definition->food_saturation <= DBL_MAX / 40))) ||
+        (definition->food_always_edible != 0 && definition->food_always_edible != 1) ||
+        (!definition->food_ticks && (definition->food_hunger || definition->food_saturation || definition->food_always_edible || definition->food_remainder)) ||
+        (definition->food_remainder && definition->max_stack != 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     length = strlen(name);
     display_length = strlen(definition->display_name);
     if (!length || length > 255 || !display_length || display_length > 127) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -171,8 +176,14 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
 maage_status maage_item_registry_finalize(maage_item_registry *registry) {
+    size_t i;
+    const maage_item_definition *item;
     if (!registry || !registry->count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    for (i = 0; i < registry->count; ++i) {
+        item = maage_item_registry_get(registry, registry->ordered[i]);
+        if (item->food_remainder && !maage_item_registry_get(registry, item->food_remainder)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    }
     registry->finalized = 1;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
 }
@@ -292,6 +303,11 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
             }
             if (item.id == MAAGE_ITEM_SAPLING) item.max_metadata = 2;
             if (item.id == MAAGE_ITEM_COAL) item.max_metadata = 1;
+            if (item.id == MAAGE_ITEM_APPLE) {
+                item.food_hunger = 4;
+                item.food_saturation = 0.3;
+                item.food_ticks = 32;
+            }
             item.model = MAAGE_ITEM_MODEL_SPRITE;
             item.texture_index = 15 + t;
             item.texture_id = MAAGE_CONTENT_TEXTURE_ITEMS + item.texture_index;
@@ -314,6 +330,12 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
             item.texture_index = 28 + (unsigned int) i;
             item.texture_id = MAAGE_CONTENT_TEXTURE_ITEMS + item.texture_index;
             item.display_name = labels[i];
+            if (item.id == MAAGE_ITEM_MUSHROOM_STEW) {
+                item.food_hunger = 6;
+                item.food_saturation = 0.6;
+                item.food_ticks = 32;
+                item.food_remainder = MAAGE_ITEM_BOWL;
+            }
             strcpy(name, "minecraft:");
             strcat(name, names_new[i]);
             result = maage_item_registry_register(registry, name, &item);

@@ -69,7 +69,7 @@ packet owns all necessary state. Ordered unload packets close an interest lifeti
 the replica retains bases until that removal arrives. Reentry starts with a complete
 column. Initial local capacity covers Server residency plus bounded packets in flight;
 remote transports must negotiate an equivalent bound. Packets contain no light arrays,
-scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 16;
+scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 17;
 remote encoding is not implemented.
 
 Snapshots include per-life raw travel/velocity observations and authoritative
@@ -185,7 +185,7 @@ cached geometry arrive; neighbor occlusion invalidation also advances geometry e
 Rejection restores effective authoritative blocks/light and rebuilds the whole local
 transaction. Target decoration uses the effective raycast rather than a separate
 pending-break hide mask. Unknown terrain remains obstructing. Inventory, drops, sounds and persistent
-world mutations are never predicted. The local session contract is version 16.
+world mutations are never predicted. The local session contract is version 17.
 
 One Client timeline drives first- and third-person swings: six ticks long, eligible
 restart after three. Presses respond immediately; held mining requests follow
@@ -236,7 +236,7 @@ tick underwater, and at −20 resets to zero and deals two damage through the
 existing environmental damage path. Surfacing restores 300 immediately; Creative,
 death and respawn reset breath. There are no enchantment/potion protections yet.
 The checkpoint retains air and its damage phase; `MGWORLD8` rejects older worlds
-without conversion. Protocol 16 copies air and eye immersion in ordinary snapshots.
+without conversion. Protocol 17 copies air and eye immersion in ordinary snapshots.
 The Survival HUD draws up to ten filled/popping bubbles above hunger from the latest
 air value; it needs no per-bubble events. GUI scale and the accepted health/hunger
 alignment are unchanged.
@@ -317,3 +317,22 @@ Pending water gameplay review (no scenarios have been run):
   rapid adjacent edits on Metal, Vulkan and modern OpenGL where available.
 - Audio: entry splash, swimming and exit, flowing ambience, pause/resume and
   repeated small surface contacts without excessive repeated sounds.
+
+## Food Use
+
+Item definitions own hunger, saturation modifier, owner-tick duration, full-hunger
+eligibility and an optional single-stack remainder. Apples restore four hunger
+and up to 2.4 saturation after 32 ticks of held Use; the existing mushroom stew
+restores six and up to 7.2 saturation, returning its bowl. Ordinary food requires
+Survival mode and missing hunger. The Server cancels on release, attack, changed
+selected stack/slot, container opening, death or a new life. Completion removes
+exactly one item, caps hunger/saturation and publishes the resulting inventory.
+Interrupted use is transient: checkpoints preserve the unconsumed inventory.
+Snapshots copy active use identity and remaining ticks; no animation transforms
+are authoritative. Eating slows horizontal input and prevents sprinting. Eat and
+burp events use the existing bounded sound publication and catalog.
+
+Oak apple drops were already implemented: an independent 1/200 roll accompanies
+the sapling roll, shared by ordinary breaking and natural decay. Shears take the
+leaf-stack path; spruce/birch do not roll apples. Drops remain owner-reserved item
+entities, using the existing authoritative random streams and normal pickup.

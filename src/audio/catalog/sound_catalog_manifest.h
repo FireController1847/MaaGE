@@ -35,6 +35,8 @@ typedef enum maage_catalog_family {
     MAAGE_CAT_ANVIL_LAND,
     MAAGE_CAT_POP,
     MAAGE_CAT_ITEM_BREAK,
+    MAAGE_CAT_EAT,
+    MAAGE_CAT_BURP,
     MAAGE_CAT_FAMILY_COUNT
 } maage_catalog_family;
 

@@ -48,8 +48,12 @@ typedef struct maage_item_definition {
     unsigned int max_stack, durability, tool_class, tool_level, max_metadata;
     /* Nonzero durability is the inclusive maximum usable damage value. */
     double mining_speed;
-    unsigned int model;         /* Shared numeric presentation category. */
-    unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
+    unsigned int food_hunger, food_ticks; /* food_ticks == 0 is not edible. */
+    double food_saturation;
+    int food_always_edible;
+    maage_item_id food_remainder; /* Optional single-stack food remainder; max_stack must be one. */
+    unsigned int model;           /* Shared numeric presentation category. */
+    unsigned int texture_index;   /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;
     const char *display_name;
     maage_item_placement placement; /* NULL uses placement_state_id, metadata 0. */

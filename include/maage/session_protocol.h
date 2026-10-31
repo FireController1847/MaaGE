@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 16U
+#define MAAGE_SESSION_PROTOCOL_VERSION 17U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -52,9 +52,11 @@ typedef enum maage_session_sound_id {
     MAAGE_SOUND_PLAYER_FALL_SMALL = 18,
     MAAGE_SOUND_PLAYER_FALL_BIG = 19,
     MAAGE_SOUND_PLAYER_DEATH = 20,
-    MAAGE_SOUND_ITEM_BREAK = 21
+    MAAGE_SOUND_ITEM_BREAK = 21,
+    MAAGE_SOUND_EAT = 22,
+    MAAGE_SOUND_BURP = 23
 } maage_session_sound_id;
-#define MAAGE_SOUND_MAX MAAGE_SOUND_ITEM_BREAK
+#define MAAGE_SOUND_MAX MAAGE_SOUND_BURP
 
 typedef enum maage_session_material_id {
     MAAGE_MATERIAL_DEFAULT = 0,
@@ -122,6 +124,7 @@ typedef struct maage_session_player_view {
     double yaw, pitch;
     maage_inventory inventory;
     maage_crafting_container crafting; /* Copied authoritative temporary state. */
+    maage_food_use food;               /* Copied active consumption; animation remains Client-owned. */
     unsigned int game_mode, health, hunger;
     int air; /* Authoritative remaining breath and drowning phase, -19..300. */
     double saturation;

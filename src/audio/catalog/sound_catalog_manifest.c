@@ -35,4 +35,6 @@ const maage_catalog_manifest_entry maage_catalog_manifest[MAAGE_CAT_FAMILY_COUNT
     {"step/ladder", 1, 5},
     {"random/anvil_land", 0, 1},
     {"random/pop", 0, 1},
-    {"random/break", 0, 1}};
+    {"random/break", 0, 1},
+    {"random/eat", 1, 3},
+    {"random/burp", 0, 1}};

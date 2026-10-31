@@ -170,6 +170,7 @@ static maage_status maage_gameplay_sound_result(maage_status outcome, const maag
 static void maage_gameplay_begin_life(maage_gameplay *game) {
     if (++game->life == 0) ++game->life;
     game->walk_distance = game->damage_yaw = 0;
+    memset(&game->food, 0, sizeof(game->food));
     game->air = 300;
     game->hurt_resistance = game->last_damage = 0;
     game->damage_sequence = game->damage_tick = game->death_tick = 0;
@@ -195,6 +196,7 @@ maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode) {
     if (!game || mode > MAAGE_GAME_MODE_CREATIVE) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     game->mode = mode;
+    memset(&game->food, 0, sizeof(game->food));
     game->air = 300;
     game->hurt_resistance = game->last_damage = 0;
     game->breaking_active = 0;
@@ -515,6 +517,7 @@ static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player
     game->damage_yaw = 0; /* Environmental damage has no attacker. */
     if (!game->health) {
         game->death_tick = game->ticks;
+        memset(&game->food, 0, sizeof(game->food));
         game->air = 300;
     }
     if (occurrence || !game->health) maage_gameplay_sound(sink, game->health ? MAAGE_SOUND_PLAYER_HURT : MAAGE_SOUND_PLAYER_DEATH, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 1.0, maage_gameplay_sound_pitch(game, 0.2));
@@ -610,6 +613,53 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
     } else
         game->hunger_ticks = 0;
 }
+static void maage_gameplay_food(maage_gameplay *game, const maage_player *player, const maage_item_registry *items, const maage_gameplay_intent *intent, maage_gameplay_sound_sink *sink, int *handled) {
+    maage_item_stack *held = &game->inventory.slots[game->inventory.selected];
+    const maage_item_definition *item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
+    double volume, pitch;
+    int active = game->food.remaining != 0;
+    *handled = 0;
+    if (!intent->use || intent->attack || !game->health || game->mode != MAAGE_GAME_MODE_SURVIVAL || game->crafting.kind || game->crafting.closing ||
+        !item || !item->food_ticks || (game->hunger >= 20 && !item->food_always_edible)) {
+        memset(&game->food, 0, sizeof(game->food));
+        return;
+    }
+    if (active && (game->food.slot != game->inventory.selected || game->food.stack.item_id != held->item_id || game->food.stack.metadata != held->metadata || game->food.stack.damage != held->damage)) {
+        memset(&game->food, 0, sizeof(game->food));
+        game->use_delay = 4;
+        *handled = 1;
+        return;
+    }
+    if (!active && game->has_target && game->target.block_id == MAAGE_BLOCK_CRAFTING_TABLE && !intent->descend) return;
+    *handled = 1;
+    if (!active) {
+        if (game->use_delay) return;
+        game->food.stack = *held;
+        game->food.slot = game->inventory.selected;
+        game->food.remaining = game->food.duration = item->food_ticks;
+        game->food.started_tick = game->ticks;
+        return;
+    }
+    if ((game->food.remaining <= 25 && game->food.remaining % 4 == 0) || game->food.remaining == 1) {
+        volume = maage_gameplay_sound_random(game) < 0.5 ? 0.5 : 1.0;
+        pitch = maage_gameplay_sound_pitch(game, 0.2);
+        maage_gameplay_sound(sink, MAAGE_SOUND_EAT, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1] + MAAGE_PLAYER_EYE_HEIGHT, player->position[2], volume, pitch);
+    }
+    if (--game->food.remaining) return;
+    if (item->food_remainder) {
+        memset(held, 0, sizeof(*held));
+        held->item_id = item->food_remainder;
+        held->count = 1;
+    } else if (!--held->count) memset(held, 0, sizeof(*held));
+    game->hunger += item->food_hunger;
+    if (game->hunger > 20) game->hunger = 20;
+    game->saturation += item->food_hunger * 2.0 * item->food_saturation;
+    if (game->saturation > game->hunger) game->saturation = game->hunger;
+    maage_gameplay_sound(sink, MAAGE_SOUND_BURP, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 0.5, 0.9 + maage_gameplay_sound_random(game) * 0.1);
+    memset(&game->food, 0, sizeof(game->food));
+    game->use_delay = 4;
+}
+
 /* Deferred owner actions keep their original cause while the successful
  * recovery leaves the block/drop untouched and permits the next fixed step. */
 static maage_status maage_gameplay_action_result(maage_status result, const maage_world *world, maage_status_trace *trace) {
@@ -652,7 +702,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     int in_water;
     unsigned int fluid;
     maage_gameplay_sound_sink sink;
-    int grounded, sprint_jump, jumped;
+    int grounded, sprint_jump, jumped, eating;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_TICK, 0);
     if (written) *written = 0;
     if ((capacity && (!events || !written)) || (events && !written) ||
@@ -694,6 +744,11 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     movement.flying = game->flying;
     movement.descend = intent->descend;
     maage_gameplay_sprint(game, player, intent);
+    if (game->food.remaining && intent->use && !intent->attack) {
+        movement.forward *= 0.2;
+        movement.strafe *= 0.2;
+        player->sprinting = 0;
+    }
     sprint_jump = player->sprinting;
     fluid = maage_player_fluid(player, world);
     /* A held jump repeats at most every ten owner steps, even under a low
@@ -757,6 +812,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     }
     result = maage_gameplay_target(game, player, world, intent->movement.yaw, intent->pitch);
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return maage_gameplay_sound_result(result, &sink, written, trace);
+    maage_gameplay_food(game, player, items, intent, &sink, &eating);
     if (intent->attack) {
         if (intent->attack_pressed) {
             game->attack_held = 0;
@@ -779,7 +835,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
         game->dig_ticks = game->attack_miss_delay = 0;
     }
     game->attack_held = intent->attack;
-    if (intent->use) {
+    if (intent->use && !eating) {
         if (intent->use_pressed || !game->use_held) game->use_delay = 0;
         result = maage_gameplay_action_result(maage_gameplay_place(game, player, world, items, intent->movement.yaw, intent->descend, &sink), world, trace);
         if (maage_status_failed(result)) return maage_gameplay_sound_result(result, &sink, written, trace);

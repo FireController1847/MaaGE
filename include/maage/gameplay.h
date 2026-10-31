@@ -20,9 +20,15 @@ typedef struct maage_gameplay_save {
     double saturation, exhaustion, fall_distance;
     int flying;
 } maage_gameplay_save;
+typedef struct maage_food_use {
+    maage_item_stack stack;
+    unsigned int slot, remaining, duration;
+    unsigned long started_tick;
+} maage_food_use;
 typedef struct maage_gameplay {
     maage_inventory inventory;
     maage_crafting_container crafting;
+    maage_food_use food;
     unsigned int mode, health, hunger;
     int air; /* -19..300 owner ticks; negative phase precedes drowning damage. */
     double saturation, exhaustion, fall_distance;
