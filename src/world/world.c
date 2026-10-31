@@ -84,8 +84,8 @@ struct maage_world {
     maage_job_observation *observations;
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
-    unsigned scan_step, schedule_turn, mesh_turn, column_turn;
-    int scan_ring, save_turn;
+    unsigned scan_step, mesh_turn, column_turn;
+    int scan_ring, save_turn, send_frontier, visual_frontier;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
     int center_x, center_z, stopped, failed, diagnostics;
@@ -286,6 +286,13 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
         world->chunks = slot->next;
     if (slot->next) slot->next->previous = slot->previous;
     --world->count;
+    /* Removing a previously acknowledged inner column reopens that ring. */
+    {
+        int dx = abs(slot->x - world->center_x), dz = abs(slot->z - world->center_z);
+        int ring = dx > dz ? dx : dz;
+        if (ring < world->send_frontier) world->send_frontier = ring;
+        if (ring < world->visual_frontier) world->visual_frontier = ring;
+    }
     if (world->save_cursor == slot) world->save_cursor = slot->next ? slot->next : world->chunks;
     maage_world_release(slot->data);
     maage_world_release(slot->edit_publication);
@@ -297,6 +304,30 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
 static int maage_world_distance(const maage_world *world, const maage_world_slot *slot) {
     int x = abs(slot->x - world->center_x), z = abs(slot->z - world->center_z);
     return x > z ? x : z;
+}
+/* Workers remain independent; only initial owner-to-client delivery and first
+ * visual presentation respect a monotonic square-ring frontier. Recheck one
+ * incomplete ring, not the full view square, when acknowledgements arrive.
+ * Already delivered/presented columns may refine without waiting. */
+static void maage_world_advance_frontier(maage_world *world, int presentation) {
+    int *frontier = presentation ? &world->visual_frontier : &world->send_frontier;
+    int radius = world->config.render_distance + (presentation ? 0 : 1);
+    int bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
+    int ring, dx, dz, x, z;
+    maage_world_slot *slot;
+    while (*frontier <= radius) {
+        ring = *frontier;
+        for (dz = -ring; dz <= ring; ++dz)
+            for (dx = -ring; dx <= ring; ++dx) {
+                if (abs(dx) != ring && abs(dz) != ring) continue;
+                x = world->center_x + dx;
+                z = world->center_z + dz;
+                if (x < -bound || x > bound || z < -bound || z > bound) continue;
+                slot = maage_world_find(world, x, z);
+                if (!slot || (presentation ? !slot->presented : !slot->sent)) return;
+            }
+        ++*frontier;
+    }
 }
 static int maage_world_complete(const maage_world_slot *slot) {
     return slot && slot->data && !slot->failed;
@@ -1044,15 +1075,14 @@ static maage_status maage_world_schedule(maage_world *world) {
     if (world->config.presentation_only && budget > 64U) budget = 64U;
     forward_x = sin(world->yaw);
     forward_z = -cos(world->yaw);
-    ++world->schedule_turn;
     for (examined = 0; examined < budget && world->active - world->saves_active < work_limit && world->active < world->task_limit; ++examined) {
         if (world->scan_ring > radius) {
             world->scan_ring = 0;
             world->scan_step = 0;
         }
-        /* A small near-player pass cannot reset the progressing outer scan.
-         * Every eighth pump admits background work first under saturation. */
-        if (examined < 25U && world->schedule_turn % 8U) maage_world_scan_next(&near_ring, &near_step, &dx, &dz);
+        /* Always submit near-player candidates first. The persistent outer
+         * cursor continues independently, keeping the worker pool busy. */
+        if (examined < 25U) maage_world_scan_next(&near_ring, &near_step, &dx, &dz);
         else maage_world_scan_next(&world->scan_ring, &world->scan_step, &dx, &dz);
         if (abs(dx) > radius || abs(dz) > radius) continue;
         x = world->center_x + dx;
@@ -1244,6 +1274,7 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
         }
         world->scan_ring = 0;
         world->scan_step = 0;
+        world->send_frontier = world->visual_frontier = 0;
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -1291,6 +1322,7 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     world->center_x = cx;
     world->center_z = cz;
     world->yaw = yaw;
+    if (cx != old_x || cz != old_z) world->send_frontier = world->visual_frontier = 0;
     maage_world_collect(world);
     if (cx != old_x || cz != old_z) {
         unsigned index;
@@ -1627,6 +1659,13 @@ maage_status maage_world_sample_camera(const maage_world *world, int x, int y, i
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
 
+/* Only first presentation is ring-gated; an existing visible column must not
+ * disappear when the player moves or a neighboring mesh is being refined. */
+int maage_world_mesh_can_present(const maage_world *world, int x, int z) {
+    maage_world_slot *slot = world ? maage_world_find(world, x, z) : NULL;
+    return world && world->config.presentation_only && maage_world_complete(slot) &&
+           (slot->presented || maage_world_distance(world, slot) <= world->visual_frontier);
+}
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision) {
     maage_world_slot *slot, *neighbors[8];
     int side;
@@ -1658,9 +1697,10 @@ maage_status maage_world_mesh_presented(maage_world *world, int x, int z, unsign
     maage_world_slot *slot;
     if (!world || !world->config.presentation_only || !revision) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
     slot = maage_world_find(world, x, z);
-    if (!maage_world_complete(slot) || slot->mesh_prepared_revision != revision || !maage_world_mesh_current(world, x, z, revision)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
+    if (!maage_world_complete(slot) || slot->mesh_prepared_revision != revision || !maage_world_mesh_current(world, x, z, revision) || !maage_world_mesh_can_present(world, x, z)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
     if (!slot->presented) {
         slot->presented = 1;
+        maage_world_advance_frontier(world, 1);
         if (world->diagnostics) maage_log_info("maage.world.latency", "owner=client phase=first_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f", x, z, revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
@@ -1683,6 +1723,7 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     fair = ++world->mesh_turn % 8U == 0;
+    if (world->config.presentation_only) maage_world_advance_frontier(world, 1);
     link = &world->mesh_head;
     while ((slot = *link) != NULL) {
         if (!slot->pending_mesh || !maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {
@@ -1696,6 +1737,11 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
             continue;
         }
         distance = maage_world_distance(world, slot);
+        if (world->config.presentation_only && !slot->presented && distance > world->visual_frontier) {
+            previous = slot;
+            link = &slot->mesh_next;
+            continue;
+        }
         if (!chosen || (!fair && distance < best)) {
             chosen = slot;
             best = distance;
@@ -2184,10 +2230,12 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     if (output) *output = NULL;
     if (!world || !output || world->config.presentation_only) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     fair = ++world->column_turn % 8U == 0;
+    maage_world_advance_frontier(world, 0);
     for (slot = world->chunks; slot; slot = slot->next) {
         distance = maage_world_distance(world, slot);
         if (!maage_world_complete(slot)) continue;
         if (distance <= world->config.render_distance + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
+        if (!slot->sent && distance > world->send_frontier) continue;
         if (chosen && (fair ? slot->block_revision >= chosen->block_revision : distance >= best)) continue;
         if (!slot->sent && !maage_world_initial_ready(world, slot, 0)) continue;
         chosen = slot;
@@ -2265,6 +2313,7 @@ maage_status maage_world_ack_column(maage_world *world, const maage_column_updat
         slot->sent = slot->data;
         ++slot->sent->references;
         slot->sent_revision = update->revision;
+        if (!update->base_revision) maage_world_advance_frontier(world, 0);
     }
     memset(slot->transfer_cells, 0, sizeof(slot->transfer_cells));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);

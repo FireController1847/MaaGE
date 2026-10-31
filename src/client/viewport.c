@@ -1418,7 +1418,7 @@ choose_world:
                 ++resident_count;
                 if (!maage_world_chunk_loaded(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
                 if (!cache.slots[slot_index].presented) {
-                    if (!maage_world_mesh_current(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision)) continue;
+                    if (!maage_world_mesh_current(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision) || !maage_world_mesh_can_present(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
                     cache.slots[slot_index].first_frame = 1;
                     ++first_count;
                 }

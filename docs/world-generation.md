@@ -23,8 +23,10 @@ arbitrarily thin categorical strip at individual columns.
 
 Compact neighboring seed influences are summed by biome, and the strongest group
 selects one discrete regional identity. Combining seeds of the same biome rounds
-their cell joins instead of exposing individual nearest-seed vertices. Compact
-support preserves pure seed interiors. A shared coordinate deformation adds broad
+their cell joins instead of exposing individual nearest-seed vertices. The broad
+quintic distance-gap window rounds junctions over tens of blocks rather than a
+narrow band around seed-cell edges, without introducing per-column randomness.
+Compact support preserves pure seed interiors. A shared coordinate deformation adds broad
 terrain-related shape and smaller eight-block edge detail. The same regional geometry
 drives surface identity and ecological influences; materials and individual features
 do not receive separate perturbations. Sampling uses World coordinates, including
@@ -50,7 +52,8 @@ are immutable after finalization; ecological interpolation never modifies them.
 ## Transition Ecology
 
 Compact quintic weights use the squared-distance gap from the nearest seed.
-Gaps at least `128 * 16` square blocks contribute nothing; the local seed geometry
+Gaps at least `128 * 96` square blocks contribute nothing (roughly 48 blocks
+from an ordinary two-site bisector on either side); the local seed geometry
 therefore controls the transition's physical width. Same-profile neighbors do not
 change the environment at internal seed-cell edges. Multiple neighbors can contribute
 at junctions, while region interiors retain a pure profile. Surface/filler selection
@@ -107,6 +110,23 @@ an overhead canopy. Shared tree geometry still serves live sapling growth.
 Emerald and small underground basin eligibility use the same boundary influences.
 Unrestricted ore bands, cave paths and dungeon placement remain independent of
 biome decoration.
+
+## Parallel Generation and Outward Presentation
+
+The World scheduler maintains a progressing square-ring scan with a near-player
+admission pass on each pump. Independent load, generation, lighting and mesh jobs
+still execute in parallel, including farther work when nearby jobs are in flight.
+The initial Server column-transfer frontier advances only when every valid column
+of the current ring has been acknowledged, so distant completed jobs cannot
+overtake missing near-player chunks on the wire. Subsequent deltas and unloads
+are not held behind first-time transfers.
+
+The Client likewise keeps completed meshes pending until their first-presentation
+ring is eligible. It does not draw previously prepared, never-presented meshes
+outside that ring. A successful first frame advances the frontier; already
+presented geometry remains visible and can update independently. Both frontiers
+rebase when the player changes chunk or render distance changes, and missing
+columns reopen their ring. No worker waits on neighboring work or on a frame.
 
 ## Determinism and Persistence
 

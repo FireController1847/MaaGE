@@ -268,6 +268,9 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
  * exact center/halo light inputs. Presented columns retain geometry validity
  * while later lighting refines it. */
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision);
+/* First-frame presentation waits for closer rings, not for worker completion
+ * order. Previously presented geometry can continue refining independently. */
+int maage_world_mesh_can_present(const maage_world *world, int x, int z);
 /* Replica owner confirms complete GPU preparation for this CPU revision.
  * Local patches may then accompany its first coherent whole-column frame.
  * Revision zero revokes preparation when an unpresented GPU cache is dropped. */
