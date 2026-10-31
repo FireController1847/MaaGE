@@ -6,7 +6,8 @@
  * within a world. Explicit encoding uses 32-bit words, never native layouts. */
 typedef unsigned long maage_entity_id;
 enum {
-    MAAGE_ENTITY_ITEM = 1
+    MAAGE_ENTITY_ITEM = 1,
+    MAAGE_ENTITY_FALLING_BLOCK = 2
 };
 typedef struct maage_entity {
     maage_entity_id id;
@@ -17,6 +18,12 @@ typedef struct maage_entity {
     int grounded;
     union {
         maage_item_stack item;
+        struct {
+            maage_item_stack stack; /* Block-item identity/metadata for exact restoration and failed-landing drop. */
+            maage_block_state_id state;
+            int source[3];
+            unsigned long source_revision; /* Pre-removal revision; transient across save/load. */
+        } falling;
     } payload;
 } maage_entity;
 typedef struct maage_entity_pickup {
@@ -40,7 +47,10 @@ maage_status maage_entities_destroy(maage_entities *entities);
 maage_status maage_entities_reserve(maage_entities *entities, size_t additional);
 /* Reserve before authoritative block mutation; spawning afterward cannot allocate. */
 maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items, const maage_item_stack *stack, const double position[3], const double velocity[3], unsigned int delay);
-maage_status maage_entities_tick(maage_entities *entities, const maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written);
+/* Owner transaction: reserve, expected-state remove, then publish without allocation. */
+maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_block_state_id state);
+const maage_item_stack *maage_entity_stack(const maage_entity *entity);
+maage_status maage_entities_tick(maage_entities *entities, maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written);
 unsigned long maage_entities_random(const maage_entities *entities);
 maage_status maage_entities_set_random(maage_entities *entities, unsigned long random);
 size_t maage_entities_count(const maage_entities *entities);

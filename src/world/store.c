@@ -406,11 +406,15 @@ static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entit
             maage_store_double_put(bytes, entity->position[axis]);
         for (axis = 0; axis < 3; ++axis)
             maage_store_double_put(bytes, entity->velocity[axis]);
-        maage_store_stack_put(bytes, &entity->payload.item, items);
+        maage_store_stack_put(bytes, maage_entity_stack(entity), items);
+        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK)
+            for (axis = 0; axis < 3; ++axis)
+                maage_store_put(bytes, (unsigned long) ((long) entity->payload.falling.source[axis] + MAAGE_WORLD_LIMIT), 4);
     }
 }
 static void maage_store_entities_get(maage_store_bytes *bytes, maage_entity_save *save, const maage_item_registry *items) {
-    unsigned long count, previous = 0;
+    unsigned long count, previous = 0, coordinate;
+    const maage_item_definition *item;
     size_t i;
     unsigned int axis;
     maage_entity *entity;
@@ -444,7 +448,16 @@ static void maage_store_entities_get(maage_store_bytes *bytes, maage_entity_save
         for (axis = 0; axis < 3; ++axis)
             entity->velocity[axis] = maage_store_double_get(bytes);
         memcpy(entity->previous, entity->position, sizeof(entity->previous));
-        maage_store_stack_get(bytes, &entity->payload.item, items);
+        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
+            maage_store_stack_get(bytes, &entity->payload.falling.stack, items);
+            item = maage_item_registry_get(items, entity->payload.falling.stack.item_id);
+            if (!item || maage_status_failed(maage_item_placement_state(item, entity->payload.falling.stack.metadata, MAAGE_FACE_POSITIVE_Y, 0, &entity->payload.falling.state))) bytes->failed = 1;
+            for (axis = 0; axis < 3; ++axis) {
+                coordinate = maage_store_get(bytes, 4);
+                if (coordinate >= 2UL * MAAGE_WORLD_LIMIT) bytes->failed = 1;
+                entity->payload.falling.source[axis] = coordinate < 2UL * MAAGE_WORLD_LIMIT ? (int) ((long) coordinate - MAAGE_WORLD_LIMIT) : 0;
+            }
+        } else maage_store_stack_get(bytes, &entity->payload.item, items);
         if (!maage_entity_valid(entity, items) || entity->id <= previous || entity->id >= save->next_id) bytes->failed = 1;
         previous = entity->id;
     }
@@ -459,10 +472,10 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     if (!maage_store_gameplay_valid(&record->gameplay, store->items)) return maage_store_fail(error, "Player gameplay identity or pickup data is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     if (!maage_random_tick_state_valid(&record->random_ticks)) return maage_store_fail(error, "World random-tick checkpoint is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     if (!maage_environment_state_valid(&record->environment)) return maage_store_fail(error, "World environment snapshot is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
-    /* Each entity uses at most 325 bytes including its 255-byte item identity.
+    /* Each entity uses at most 352 bytes including its 255-byte item identity.
      * The inventory/header reserve is independent of world entity count. */
-    if (record->entities.count > ((size_t) - 1 - 16384UL) / 325UL) return maage_store_fail(error, "Entity checkpoint exceeds addressable memory.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
-    capacity = 16384UL + record->entities.count * 325UL;
+    if (record->entities.count > ((size_t) - 1 - 16384UL) / 352UL) return maage_store_fail(error, "Entity checkpoint exceeds addressable memory.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
+    capacity = 16384UL + record->entities.count * 352UL;
     if (capacity > MAAGE_STORE_METADATA_MAX) return maage_store_fail(error, "Entity checkpoint exceeds file encoding capacity.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
     data = (unsigned char *) malloc(capacity);
     if (!data) return maage_store_fail(error, "Not enough memory to encode player metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
@@ -471,7 +484,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD7", 8);
+    maage_store_text_put(&bytes, "MGWORLD8", 8);
     maage_store_put(&bytes, record->seed.low, 4);
     maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1);
@@ -534,12 +547,12 @@ static maage_status maage_store_metadata_load(const maage_world_store *store, co
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD7", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD8", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD7");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD8");
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4);
         record->seed.high = maage_store_get(&bytes, 4);

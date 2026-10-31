@@ -99,6 +99,7 @@ static maage_status maage_content_blocks_create(const maage_content_config *conf
         block.id = ids[i];
         block.solid = block.opaque = ids[i] != MAAGE_BLOCK_AIR && ids[i] != MAAGE_BLOCK_WATER;
         block.material_solid = block.solid;
+        block.falls = block.id == MAAGE_BLOCK_SAND || block.id == MAAGE_BLOCK_GRAVEL;
         block.light_opacity = block.opaque ? 15U : (ids[i] == MAAGE_BLOCK_WATER ? 3U : 0U);
         block.emitted_light = 0;
         if (block.id == MAAGE_BLOCK_GRASS) block.random_tick = maage_random_tick_grass;

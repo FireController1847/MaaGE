@@ -181,6 +181,7 @@ typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
     int opaque;
+    int falls;                   /* Scheduled unsupported-block motion, independent of plant survival. */
     int material_solid;          /* Plant adjacency rule; independent of collision. */
     unsigned int emitted_light;  /* 0..15; resolved during registration. */
     unsigned int light_opacity;  /* 0..15; independent of face occlusion. */

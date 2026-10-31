@@ -6,7 +6,7 @@
 monotonic 32-bit identities, separate from entity type IDs and item/block IDs.
 Records carry a numeric type, typed item-stack payload, feet position, previous
 authoritative position, velocity in blocks/tick, grounded contact, active age,
-pickup delay. Presentation light is sampled from the Client replica. The current entity type is an item; mobs and AI
+pickup delay. Presentation light is sampled from the Client replica. The current entity types are items and falling blocks; mobs and AI
 are not implemented.
 
 The Server advances entities once per unpaused 20 TPS step. The player and items
@@ -115,9 +115,29 @@ eating, thrown projectiles, enchantments, XP orbs, fire/lava item damage,
 smelting, mobs and combat are not implemented currently.
 [Crafting](crafting.md) consumes these registered resources through Server-owned containers.
 
+## Falling Blocks
+
+Sand and gravel opt into scheduled support checks, two ticks after placement or
+neighbor changes. Load/generation schedules the same checks on detached columns.
+Air and fluids permit falling; unavailable columns defer. The owner reserves a
+distinct falling-block record before expected-state removal, preserving numeric
+state, block-item metadata, source cell/revision, age and velocity. Its 0.98-block
+body uses swept collision, gravity 0.04 and drag 0.98, with no sand/gravel impact
+damage. Unloaded body bounds freeze retained records and their active ages.
+
+Landing attempts block restoration over non-fall-through support in a replaceable
+cell. Failed publication retains the falling entity; invalid/expired landing
+converts its owned stack in place to an ordinary item without allocation or a
+second quantity. Gravel landing failure yields gravel, not a mining flint roll.
+The named block-item identity plus metadata reconstructs the exact current falling
+state on load; source revisions reset because they belong to the old World epoch.
+Client instances borrow cached full-sized block geometry with fixed orientation,
+interpolated motion and replica light. Source-column GPU revisions gate takeover
+from stationary geometry; async mesh latency can delay that visual handoff.
+
 ## Storage and publication
 
-The sole metadata encoding is `MGWORLD7`; earlier development worlds are rejected
+The sole metadata encoding is `MGWORLD8`; earlier development worlds are rejected
 and must be recreated. Files are never deleted or converted automatically.
 `world.bin` atomically checkpoints player/inventory, environment and all active
 or dormant item entities after successful World flush. Unreturned temporary

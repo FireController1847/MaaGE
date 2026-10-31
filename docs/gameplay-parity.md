@@ -69,7 +69,7 @@ packet owns all necessary state. Ordered unload packets close an interest lifeti
 the replica retains bases until that removal arrives. Reentry starts with a complete
 column. Initial local capacity covers Server residency plus bounded packets in flight;
 remote transports must negotiate an equivalent bound. Packets contain no light arrays,
-scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 15;
+scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 16;
 remote encoding is not implemented.
 
 Snapshots include per-life raw travel/velocity observations and authoritative
@@ -185,7 +185,7 @@ cached geometry arrive; neighbor occlusion invalidation also advances geometry e
 Rejection restores effective authoritative blocks/light and rebuilds the whole local
 transaction. Target decoration uses the effective raycast rather than a separate
 pending-break hide mask. Unknown terrain remains obstructing. Inventory, drops, sounds and persistent
-world mutations are never predicted. The local session contract is version 15.
+world mutations are never predicted. The local session contract is version 16.
 
 One Client timeline drives first- and third-person swings: six ticks long, eligible
 restart after three. Presses respond immediately; held mining requests follow
@@ -226,8 +226,8 @@ Survival breathing uses the classic eye threshold (nominal fluid height plus
 tick underwater, and at −20 resets to zero and deals two damage through the
 existing environmental damage path. Surfacing restores 300 immediately; Creative,
 death and respawn reset breath. There are no enchantment/potion protections yet.
-The checkpoint retains air and its damage phase; `MGWORLD7` rejects older worlds
-without conversion. Protocol 15 copies air and eye immersion in ordinary snapshots.
+The checkpoint retains air and its damage phase; `MGWORLD8` rejects older worlds
+without conversion. Protocol 16 copies air and eye immersion in ordinary snapshots.
 The Survival HUD draws up to ten filled/popping bubbles above hunger from the latest
 air value; it needs no per-bubble events. GUI scale and the accepted health/hunger
 alignment are unchanged.
@@ -266,7 +266,7 @@ Capacity is reserved before removal and drops become item entities. Repeated
 notifications observe changed states and cannot drop the same block twice.
 [Random ticks and leaf support](random-block-ticks.md) describe separate decay rules.
 
-`MGWORLD7` metadata and `MGCHNK5` chunks are the sole current encodings. Chunks
+`MGWORLD8` metadata and `MGCHNK5` chunks are the sole current encodings. Chunks
 persist fluid/support kinds and remaining delays. Incompatible development worlds
 are rejected without conversion or automatic deletion.
 

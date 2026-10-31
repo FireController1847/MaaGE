@@ -60,18 +60,66 @@ maage_status maage_entities_reserve(maage_entities *entities, size_t additional)
     entities->buckets = buckets;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_ACQUIRE);
 }
+const maage_item_stack *maage_entity_stack(const maage_entity *entity) {
+    if (!entity) return NULL;
+    return entity->type == MAAGE_ENTITY_ITEM ? &entity->payload.item : (entity->type == MAAGE_ENTITY_FALLING_BLOCK ? &entity->payload.falling.stack : NULL);
+}
 int maage_entity_valid(const maage_entity *entity, const maage_item_registry *items) {
+    const maage_item_stack *stack = maage_entity_stack(entity);
+    const maage_item_definition *item;
+    maage_block_state_id state;
     unsigned int axis;
-    if (!entity || !entity->id || entity->id >= 4294967295UL || entity->type != MAAGE_ENTITY_ITEM ||
+    if (!entity || !entity->id || entity->id >= 4294967295UL || !stack ||
         entity->age >= 6000 || entity->pickup_delay > 32767 ||
-        !entity->payload.item.count || !maage_item_stack_valid(items, &entity->payload.item) ||
+        !stack->count || !maage_item_stack_valid(items, stack) ||
         (entity->grounded != 0 && entity->grounded != 1)) return 0;
+    if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
+        item = maage_item_registry_get(items, stack->item_id);
+        if (stack->count != 1 || !item || !item->has_block || maage_status_failed(maage_item_placement_state(item, stack->metadata, MAAGE_FACE_POSITIVE_Y, 0, &state)) || state != entity->payload.falling.state) return 0;
+        if (entity->payload.falling.source[1] < 0 || entity->payload.falling.source[1] >= MAAGE_WORLD_HEIGHT) return 0;
+        for (axis = 0; axis < 3; ++axis)
+            if (entity->payload.falling.source[axis] <= -MAAGE_WORLD_LIMIT || entity->payload.falling.source[axis] >= MAAGE_WORLD_LIMIT) return 0;
+    }
     for (axis = 0; axis < 3; ++axis)
         if (!(entity->position[axis] > -MAAGE_WORLD_LIMIT && entity->position[axis] < MAAGE_WORLD_LIMIT) ||
             !(entity->previous[axis] > -MAAGE_WORLD_LIMIT && entity->previous[axis] < MAAGE_WORLD_LIMIT) ||
             !(entity->velocity[axis] >= -4 && entity->velocity[axis] <= 4)) return 0;
     return entity->position[1] >= -64 && entity->position[1] <= MAAGE_WORLD_HEIGHT + 64;
 }
+
+maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_block_state_id state_id) {
+    maage_entities *entities = maage_world_entities(world);
+    const maage_item_registry *items = maage_world_item_registry(world);
+    const maage_block_state_definition *state = maage_block_registry_state(maage_world_registry(world), state_id);
+    const maage_block_definition *block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
+    maage_entity entity;
+    maage_status result;
+    if (!entities || !block || !block->falls) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    memset(&entity, 0, sizeof(entity));
+    entity.id = entities->next_id;
+    entity.type = MAAGE_ENTITY_FALLING_BLOCK;
+    entity.position[0] = x + 0.5;
+    entity.position[1] = y + 0.01;
+    entity.position[2] = z + 0.5;
+    memcpy(entity.previous, entity.position, sizeof(entity.previous));
+    entity.payload.falling.state = state_id;
+    entity.payload.falling.stack.item_id = block->drop_item_id;
+    entity.payload.falling.stack.count = 1;
+    entity.payload.falling.stack.metadata = state->metadata;
+    entity.payload.falling.source[0] = x;
+    entity.payload.falling.source[1] = y;
+    entity.payload.falling.source[2] = z;
+    entity.payload.falling.source_revision = maage_world_column_revision(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
+    if (!maage_entity_valid(&entity, items)) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_CREATE);
+    result = maage_entities_reserve(entities, 1);
+    if (maage_status_failed(result)) return result;
+    result = maage_world_set(world, x, y, z, state_id, MAAGE_STATE_AIR);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    entities->data[entities->count++] = entity;
+    ++entities->next_id;
+    return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
+}
+
 maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items, const maage_item_stack *stack, const double position[3], const double velocity[3], unsigned int delay) {
     maage_entity entity;
     if (!entities || !position || !velocity || !stack) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
@@ -98,7 +146,7 @@ static int entity_loaded(const maage_world *world, const maage_entity *entity) {
     /* Freeze before a boundary until every column intersecting the AABB loads. */
     for (z = -1; z <= 1; z += 2)
         for (x = -1; x <= 1; x += 2)
-            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate((int) floor(entity->position[0] + x * 0.126)), maage_world_chunk_coordinate((int) floor(entity->position[2] + z * 0.126)))) return 0;
+            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate((int) floor(entity->position[0] + x * (entity->type == MAAGE_ENTITY_FALLING_BLOCK ? 0.491 : 0.126))), maage_world_chunk_coordinate((int) floor(entity->position[2] + z * (entity->type == MAAGE_ENTITY_FALLING_BLOCK ? 0.491 : 0.126))))) return 0;
     return 1;
 }
 static void entity_move(maage_entity *entity, const maage_world *world) {
@@ -132,7 +180,52 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     if (fabs(entity->velocity[0]) < 0.0001) entity->velocity[0] = 0;
     if (fabs(entity->velocity[2]) < 0.0001) entity->velocity[2] = 0;
 }
-maage_status maage_entities_tick(maage_entities *entities, const maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
+static maage_status entity_fall_move(maage_entity *entity, maage_world *world) {
+    const maage_block_state_definition *state, *under;
+    const maage_block_definition *block;
+    maage_item_stack drop;
+    double vertical;
+    int x, y, z;
+    unsigned int axis;
+    maage_status result;
+    entity->velocity[1] -= 0.04;
+    vertical = entity->velocity[1];
+    entity->grounded = maage_world_sweep_body(world, entity->position, entity->velocity, 0.98, 0.98, 1, vertical) && vertical < 0;
+    maage_world_sweep_body(world, entity->position, entity->velocity, 0.98, 0.98, 0, entity->velocity[0]);
+    maage_world_sweep_body(world, entity->position, entity->velocity, 0.98, 0.98, 2, entity->velocity[2]);
+    for (axis = 0; axis < 3; ++axis)
+        entity->velocity[axis] *= 0.98;
+    x = (int) floor(entity->position[0]);
+    y = (int) floor(entity->position[1] + 0.01);
+    z = (int) floor(entity->position[2]);
+    if (!entity->grounded && entity->age <= 600 && !(entity->age > 100 && (y < 1 || y > 256))) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
+    if (entity->grounded && y >= 0 && y < MAAGE_WORLD_HEIGHT) {
+        state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y, z));
+        under = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y - 1, z));
+        block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
+        if (!block || !under) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_LOOKUP);
+        if (block->replaceable && under->block_id != MAAGE_BLOCK_AIR && !under->fluid_kind) {
+            result = maage_world_set(world, x, y, z, state->id, entity->payload.falling.state);
+            if (maage_status_failed(result)) return result; /* Retain the entity on failed publication. */
+            if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+                entity->type = 0;
+                return result;
+            }
+        }
+    }
+    /* Failed landing transfers ownership in place: no allocation, lost drop or
+     * extra instance can result, and ordinary item collection begins next step. */
+    drop = entity->payload.falling.stack;
+    memset(&entity->payload, 0, sizeof(entity->payload));
+    entity->payload.item = drop;
+    entity->type = MAAGE_ENTITY_ITEM;
+    entity->age = 0;
+    entity->pickup_delay = 10;
+    entity->velocity[1] = 0;
+    return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
+}
+
+maage_status maage_entities_tick(maage_entities *entities, maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
     size_t i, j, step, bucket, output = 0;
     int x, y, z, dx, dy, dz;
     unsigned int remaining, examined;
@@ -155,6 +248,11 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
         if (!entity_loaded(world, entity)) continue;
         if (entity->pickup_delay) --entity->pickup_delay;
         ++entity->age;
+        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
+            result = entity_fall_move(entity, world);
+            if (maage_status_failed(result)) return result;
+            continue;
+        }
         entity_move(entity, world);
         if (entity->age >= 6000 || entity->position[1] < -64 || fabs(entity->position[0]) >= MAAGE_WORLD_LIMIT - 4 || fabs(entity->position[2]) >= MAAGE_WORLD_LIMIT - 4) {
             entity->payload.item.count = 0;
@@ -169,7 +267,7 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
      * linear in entity count, rather than quadratic pairwise work. */
     for (i = 0; i < entities->count; ++i) {
         entity = &entities->data[i];
-        if (!entity->payload.item.count || !entity_loaded(world, entity)) continue;
+        if (entity->type != MAAGE_ENTITY_ITEM || !entity->payload.item.count || !entity_loaded(world, entity)) continue;
         item = maage_item_registry_get(items, entity->payload.item.item_id);
         if (!item) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_LOOKUP);
         x = (int) floor(entity->position[0]);
@@ -183,7 +281,7 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
                         bucket = entity_bucket(entities, x + dx, y + dy, z + dz);
                         for (j = entities->heads[bucket]; j != (size_t) - 1 && examined < 128; j = entities->next[j], ++examined) {
                             other = &entities->data[j];
-                            if (j <= i || !other->payload.item.count ||
+                            if (j <= i || other->type != MAAGE_ENTITY_ITEM || !other->payload.item.count ||
                                 other->payload.item.item_id != entity->payload.item.item_id ||
                                 other->payload.item.metadata != entity->payload.item.metadata ||
                                 other->payload.item.damage != entity->payload.item.damage ||
@@ -219,7 +317,7 @@ maage_status maage_entities_tick(maage_entities *entities, const maage_world *wo
     }
     /* Preserve increasing identity order for binary search in presentation. */
     for (i = 0; i < entities->count; ++i)
-        if (entities->data[i].payload.item.count)
+        if (entities->data[i].type == MAAGE_ENTITY_FALLING_BLOCK || (entities->data[i].type == MAAGE_ENTITY_ITEM && entities->data[i].payload.item.count))
             entities->data[output++] = entities->data[i];
     entities->count = output;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);

@@ -224,7 +224,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
   never acquire plant support requirements. Preserve each block's distinct rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWORLD7` metadata and `MGCHNK5` chunks are the
+  worlds. Canonical UUIDs identify them. `MGWORLD8` metadata and `MGCHNK5` chunks are the
   sole encodings; private identifiers reject prior data. Use named item identities and
   chunk-local named biome/block palettes plus metadata, explicit lengths/coordinates/
   identities/CRC validation, single writers and atomic replacement. Store open borrows

@@ -47,7 +47,7 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
  * independent chunk files may be written concurrently. Player inventories and
  * World entities use stable namespaced item identities; no numeric mapping is persisted.
  * Environment, the World's independent random-tick checkpoint and generation
- * settings share the same atomic metadata replacement (MGWORLD7 only). */
+ * settings share the same atomic metadata replacement (MGWORLD8 only). */
 maage_status maage_world_store_save(maage_world_store *store, const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world, const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);

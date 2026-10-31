@@ -1386,7 +1386,7 @@ choose_world:
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_client_environment_update(environment_view, renderer, &latest, maage_client_ui_width(ui), maage_client_ui_height(ui), matrix, visual_world, camera_eye, camera_yaw, camera_pitch, camera_mode == MAAGE_CAMERA_FIRST, options.radius);
             if (maage_status_failed(rendered)) goto done;
-            rendered = maage_client_item_entities_update(item_entities, session, visual_world, &visual_snapshot, alpha, eye, now, player_view.draws, player_view.count, trace);
+            rendered = maage_client_item_entities_update(item_entities, session, visual_world, &visual_snapshot, alpha, eye, now, player_view.draws, player_view.count, cache.slots, cache.capacity, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_renderer_draw_frame(renderer, cache.draws, draw_count, matrix, ui_draw, trace);

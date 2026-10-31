@@ -85,16 +85,16 @@ maage_status maage_world_can_survive(const maage_world *world, int x, int y, int
     *valid = 1;
     return maage_support_status(MAAGE_STATUS_SUCCESS);
 }
-static maage_status maage_support_schedule(maage_world *world, int x, int y, int z, int retry) {
+static maage_status maage_support_schedule(maage_world *world, int x, int y, int z, unsigned int delay) {
     maage_environment_state clock;
     unsigned long low, high;
     if (y < 0 || y >= 256) return maage_support_status(MAAGE_STATUS_NOOP);
     maage_world_environment(world, &clock);
     low = clock.ticks_low;
     high = clock.ticks_high;
-    if (retry) {
-        low = (low + 1UL) & 4294967295UL;
-        if (!low) high = (high + 1UL) & 4294967295UL;
+    if (delay) {
+        low = (low + delay) & 4294967295UL;
+        if (low < clock.ticks_low) high = (high + 1UL) & 4294967295UL;
     }
     return maage_world_schedule_update(world, x, y, z, MAAGE_BLOCK_UPDATE_SUPPORT, low, high);
 }
@@ -117,8 +117,8 @@ maage_status maage_support_changed(maage_world *world, int x, int y, int z, maag
         } else
             result = maage_support_block(world, nx, ny, nz, &state, &block);
         if (maage_status_failed(result)) return result;
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || !block->survives) continue;
-        result = maage_support_schedule(world, nx, ny, nz, 0);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || (!block->survives && !block->falls)) continue;
+        result = maage_support_schedule(world, nx, ny, nz, block->falls ? 2U : 0U);
         if (maage_status_failed(result)) return result;
     }
     return maage_support_status(MAAGE_STATUS_SUCCESS);
@@ -134,7 +134,17 @@ maage_status maage_support_update(maage_world *world, int x, int y, int z) {
     double position[3], velocity[3];
     int valid;
     maage_status result = maage_support_block(world, x, y, z, &state, &block);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || !block->survives) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (block->falls) {
+        const maage_block_state_definition *under;
+        const maage_block_definition *support;
+        result = maage_support_block(world, x, y - 1, z, &under, &support);
+        if (maage_status_code(result) == MAAGE_STATUS_NOOP) return maage_support_schedule(world, x, y, z, 1);
+        if (maage_status_failed(result)) return result;
+        if (under->block_id != MAAGE_BLOCK_AIR && !under->fluid_kind) return maage_support_status(MAAGE_STATUS_NOOP);
+        return maage_entities_fall(world, x, y, z, state->id);
+    }
+    if (!block->survives) return maage_support_status(MAAGE_STATUS_NOOP);
     result = maage_world_can_survive(world, x, y, z, state->id, &valid);
     if (maage_status_code(result) == MAAGE_STATUS_NOOP) return maage_support_schedule(world, x, y, z, 1);
     if (maage_status_failed(result) || valid) return result;
@@ -182,8 +192,10 @@ maage_status maage_chunk_support_initialize(maage_chunk *chunk, const maage_bloc
         state = maage_block_registry_state(blocks, maage_chunk_get(chunk, cell % 16, cell / 256, (cell / 16) % 16));
         block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
         if (!block) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
-        if (!block->survives) continue;
+        if (!block->survives && !block->falls) continue;
         update.cell = cell;
+        update.due_low = block->falls ? (low + 2UL) & 4294967295UL : low;
+        update.due_high = (high + (update.due_low < low ? 1UL : 0UL)) & 4294967295UL;
         result = maage_chunk_schedule_update(chunk, &update);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) changed = 1;

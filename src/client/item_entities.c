@@ -124,14 +124,14 @@ maage_status maage_client_item_entities_pickup(maage_client_item_entities *view,
     return item_entities_status(written == event->pickup_count ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_UPDATE);
 }
 
-maage_status maage_client_item_entities_update(maage_client_item_entities *view, maage_local_session *session, maage_world *visual_world, const maage_session_snapshot *snapshot, double interpolation, const double eye[3], double now, const maage_render_instance *additional, size_t additional_count, maage_status_trace *trace) {
+maage_status maage_client_item_entities_update(maage_client_item_entities *view, maage_local_session *session, maage_world *visual_world, const maage_session_snapshot *snapshot, double interpolation, const double eye[3], double now, const maage_render_instance *additional, size_t additional_count, const maage_client_chunk_mesh *columns, size_t column_count, maage_status_trace *trace) {
     maage_session_entities incoming;
     maage_render_instance *draws, *draw;
     const maage_entity *entity;
     const maage_item_definition *item;
     const maage_render_mesh *mesh;
     maage_status result, outcome = 0;
-    size_t i, count = 0, needed;
+    size_t i, column, count = 0, needed;
     unsigned int copy, copies, axis, animation;
     int collected;
     int notice;
@@ -177,7 +177,12 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         dy = position[1] - eye[1];
         dz = position[2] - eye[2];
         if (dx * dx + dy * dy + dz * dz > 4096) continue;
-        result = item_entities_model(view, &entity->payload.item, &mesh, &notice, trace);
+        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK && entity->payload.falling.source_revision) {
+            for (column = 0; column < column_count; ++column)
+                if (columns[column].used && columns[column].x == maage_world_chunk_coordinate(entity->payload.falling.source[0]) && columns[column].z == maage_world_chunk_coordinate(entity->payload.falling.source[2]) && columns[column].revision <= entity->payload.falling.source_revision) break;
+            if (column < column_count) continue; /* Retain the old stationary presentation until removal geometry arrives. */
+        }
+        result = item_entities_model(view, maage_entity_stack(entity), &mesh, &notice, trace);
         if (maage_status_failed(result)) {
             if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
             if (notice) {
@@ -186,6 +191,19 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
                 maage_status_trace_recover(trace, item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_PRESENT), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
                 outcome = item_entities_status(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_UPDATE);
             }
+            continue;
+        }
+        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
+            draw = &view->draws[count++];
+            memset(draw, 0, sizeof(*draw));
+            draw->mesh = mesh;
+            draw->transform[0] = draw->transform[5] = draw->transform[10] = draw->transform[15] = 1;
+            for (axis = 0; axis < 3; ++axis)
+                draw->transform[12 + axis] = (float) (position[axis] + (axis == 1 ? 0.49 : 0));
+            light = snapshot->observation.light_available ? snapshot->observation.light : 64;
+            (void) maage_world_present_light(visual_world, (int) floor(position[0]), (int) floor(position[1] + 0.49), (int) floor(position[2]), &light);
+            draw->sky_light = (float) (light >> 4) / 15;
+            draw->block_light = (float) (light & 15) / 15;
             continue;
         }
         item = maage_item_registry_get(view->items, entity->payload.item.item_id);
