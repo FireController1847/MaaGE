@@ -14,7 +14,7 @@ typedef struct maage_client_chunk_mesh {
 } maage_client_chunk_mesh;
 typedef struct maage_client_prediction {
     struct {
-        int active, confirmed, submitted;
+        int active, confirmed, submitted, sound_pending, sound_echo;
         unsigned long id, revisions[9], generation;
         double predicted_at;
         unsigned long frame;
@@ -44,6 +44,10 @@ maage_status maage_client_prediction_prepare(maage_client_prediction *prediction
 /* Prepare a streamed source against exactly the currently published patch.
  * The caller publishes both resources together only after successful upload. */
 maage_status maage_client_prediction_mesh(const maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, const maage_world_mesh *source, int x, int z, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace);
+/* Consume the matching Server effect echo once; late dig cues cannot trail a
+ * locally completed break. Local completion audio follows published geometry. */
+maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_session_event *event);
+maage_status maage_client_prediction_take_break_sound(maage_client_prediction *prediction, const maage_block_registry *blocks, unsigned long tick, maage_sound_event *sound);
 void maage_client_prediction_confirm(maage_client_prediction *prediction, const maage_session_event *event);
 maage_status maage_client_prediction_destroy(maage_client_prediction *prediction);
 #endif
