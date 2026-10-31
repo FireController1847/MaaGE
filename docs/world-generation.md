@@ -52,7 +52,7 @@ are immutable after finalization; ecological interpolation never modifies them.
 ## Transition Ecology
 
 Compact quintic weights use the squared-distance gap from the nearest seed.
-Gaps at least `128 * 96` square blocks contribute nothing (roughly 48 blocks
+Gaps at least `128 * 64` square blocks contribute nothing (roughly 32 blocks
 from an ordinary two-site bisector on either side); the local seed geometry
 therefore controls the transition's physical width. Same-profile neighbors do not
 change the environment at internal seed-cell edges. Multiple neighbors can contribute
@@ -118,15 +118,21 @@ admission pass on each pump. Independent load, generation, lighting and mesh job
 still execute in parallel, including farther work when nearby jobs are in flight.
 The initial Server column-transfer frontier advances only when every valid column
 of the current ring has been acknowledged, so distant completed jobs cannot
-overtake missing near-player chunks on the wire. Subsequent deltas and unloads
-are not held behind first-time transfers.
+overtake missing near-player chunks on the wire. Initial block/biome transfer
+starts as soon as the authoritative column is generated or loaded: Server
+lighting is not transmitted and no longer delays the first packet. Subsequent
+deltas and unloads are not held behind first-time transfers.
 
 The Client likewise keeps completed meshes pending until their first-presentation
-ring is eligible. It does not draw previously prepared, never-presented meshes
-outside that ring. A successful first frame advances the frontier; already
-presented geometry remains visible and can update independently. Both frontiers
-rebase when the player changes chunk or render distance changes, and missing
-columns reopen their ring. No worker waits on neighboring work or on a frame.
+ring is eligible. Its first mesh waits for stable local lighting, not neighboring
+columns to finish their light jobs; immutable halo snapshots and epochs reject
+outdated geometry, and later arrivals cause normal lighting/mesh refinement.
+It does not draw previously prepared, never-presented meshes outside that ring.
+A successful first frame advances the frontier; already presented geometry
+remains visible and can update independently. Both frontiers rebase when the
+player changes chunk or render distance changes, and missing columns reopen
+their ring. Workers remain parallel per column; no subcolumn synchronization,
+neighbor wait or render-frame barrier is introduced.
 
 ## Determinism and Persistence
 

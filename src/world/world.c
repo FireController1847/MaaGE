@@ -340,18 +340,13 @@ static void maage_world_neighbors(const maage_world *world, int x, int z, maage_
         if (!maage_world_complete(neighbors[side])) neighbors[side] = NULL;
     }
 }
-/* Only first publication waits for currently available light inputs. Lighting
- * itself never waits for this predicate or another column's publication, so
- * one worker can make progress too. Missing/out-of-interest neighbors refine
- * later; they cannot hold the visible frontier indefinitely. */
-static int maage_world_initial_ready(const maage_world *world, const maage_world_slot *slot, int mesh) {
-    maage_world_slot *neighbors[8];
-    int side, radius = maage_world_resident_radius(world) + 1;
-    if (!maage_world_complete(slot) || !slot->initial_light || !slot->light_ready || slot->light_dirty || slot->light_work || slot->edit_light) return 0;
-    maage_world_neighbors(world, slot->x, slot->z, neighbors);
-    for (side = 0; side < (mesh ? 8 : 4); ++side)
-        if (neighbors[side] && maage_world_distance(world, neighbors[side]) <= radius && (!neighbors[side]->initial_light || !neighbors[side]->light_ready || neighbors[side]->light_dirty || neighbors[side]->light_work || neighbors[side]->edit_light)) return 0;
-    return 1;
+/* A first mesh needs its own stable lighting. Its halo is captured by value
+ * and input epochs reject any neighbor changes while the job is in flight.
+ * Waiting for all neighbor light jobs before even starting creates an outward
+ * dependency chain on top of the ordered presentation frontier. Neighbor
+ * arrivals still invalidate and refine visible meshes asynchronously. */
+static int maage_world_initial_ready(const maage_world_slot *slot) {
+    return maage_world_complete(slot) && slot->initial_light && slot->light_ready && !slot->light_dirty && !slot->light_work && !slot->edit_light;
 }
 static int maage_world_mesh_retry_ready(const maage_world_slot *slot) {
     return slot->mesh_failed_revision != slot->revision || maage_time_monotonic_seconds() >= slot->mesh_retry_at;
@@ -361,7 +356,7 @@ static void maage_world_initial_report(maage_world *world, maage_world_slot *slo
     if (!world->diagnostics || slot->initial_ready_reported) return;
     slot->initial_ready_reported = 1;
     now = maage_time_monotonic_seconds();
-    maage_log_info("maage.world.latency", "owner=%s phase=initial_light_ready column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", slot->x, slot->z, slot->revision, slot->block_revision, (now - slot->initialized_at) * 1000);
+    maage_log_info("maage.world.latency", "owner=%s phase=%s column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", world->config.presentation_only ? "initial_light_ready" : "initial_blocks_ready", slot->x, slot->z, slot->revision, slot->block_revision, (now - slot->initialized_at) * 1000);
 }
 static void maage_world_invalidate(maage_world *world, maage_world_slot *slot, int light) {
     slot->mesh_dirty = 1;
@@ -762,7 +757,7 @@ static maage_status maage_world_collect(maage_world *world) {
         } else if (stale || (obsolete && task->kind != MAAGE_JOB_SAVE)) {
             ++world->stats.stale_jobs;
             disposition = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_JOB, MAAGE_DETAIL_STALE);
-        } else if (task->kind == MAAGE_JOB_MESH && (!maage_world_inputs_current(world, slot, task, 1) || task->leaves_mode != world->leaves_mode || task->biome_blend != world->biome_blend || (!slot->presented && (!maage_world_initial_ready(world, slot, 1) || !maage_world_inputs_current(world, slot, task, 0))))) {
+        } else if (task->kind == MAAGE_JOB_MESH && (!maage_world_inputs_current(world, slot, task, 1) || task->leaves_mode != world->leaves_mode || task->biome_blend != world->biome_blend || (!slot->presented && (!maage_world_initial_ready(slot) || !maage_world_inputs_current(world, slot, task, 0))))) {
             ++world->stats.stale_jobs;
             disposition = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_JOB, MAAGE_DETAIL_STALE);
             slot->mesh_dirty = 1;
@@ -1105,7 +1100,7 @@ static maage_status maage_world_schedule(maage_world *world) {
         else if (world->config.build_meshes && !slot->work && slot->mesh_dirty &&
                  abs(dx) <= world->config.render_distance &&
                  abs(dz) <= world->config.render_distance && maage_world_mesh_retry_ready(slot) &&
-                 (slot->presented ? (world->config.presentation_only || (slot->light_ready && !slot->light_dirty)) : maage_world_initial_ready(world, slot, 1)))
+                 (slot->presented ? (world->config.presentation_only || (slot->light_ready && !slot->light_dirty)) : maage_world_initial_ready(slot)))
             kind = MAAGE_JOB_MESH;
         if (!kind) continue;
         if (!slot) slot = maage_world_insert(world, x, z);
@@ -1673,7 +1668,7 @@ int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned lo
     slot = maage_world_find(world, x, z);
     if (!maage_world_complete(slot) || slot->mesh_revision != revision || slot->mesh_geometry_epoch != slot->geometry_epoch || maage_world_distance(world, slot) > world->config.render_distance) return 0;
     if (!slot->presented) {
-        if (!maage_world_initial_ready(world, slot, 1) || slot->mesh_input_epochs[0] != slot->data_epoch) return 0;
+        if (!maage_world_initial_ready(slot) || slot->mesh_input_epochs[0] != slot->data_epoch) return 0;
         maage_world_neighbors(world, x, z, neighbors);
         for (side = 0; side < 8; ++side)
             if (slot->mesh_input_epochs[side + 1] != (neighbors[side] ? neighbors[side]->data_epoch : 0)) return 0;
@@ -2237,7 +2232,8 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
         if (distance <= world->config.render_distance + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
         if (!slot->sent && distance > world->send_frontier) continue;
         if (chosen && (fair ? slot->block_revision >= chosen->block_revision : distance >= best)) continue;
-        if (!slot->sent && !maage_world_initial_ready(world, slot, 0)) continue;
+        /* Transfer only blocks and biomes; Server lighting is neither copied
+         * nor needed to begin Client-owned lighting and meshing. */
         chosen = slot;
         best = distance;
     }

@@ -11,7 +11,7 @@
 #define MAAGE_GENERATION_BIOME_SCALE 128
 #define MAAGE_GENERATION_TRANSITION_MARGIN 0.02
 #define MAAGE_GENERATION_REGION_SCALE 128
-#define MAAGE_GENERATION_REGION_BLEND 96.0
+#define MAAGE_GENERATION_REGION_BLEND 64.0
 
 maage_status maage_generation_policy_default(maage_generation_policy *policy) {
     if (!policy) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
@@ -216,7 +216,7 @@ static maage_biome_id maage_generation_region_sample(maage_world_seed seed, int 
             }
         }
     /* Blend neighboring sites over a broad, smooth distance-gap window: for
-     * opposing sites one lattice spacing apart this reaches roughly 48 blocks
+     * opposing sites one lattice spacing apart this reaches roughly 32 blocks
      * to either side of the bisector. Summing same-biome influence curves
      * sharp cell corners without blurring the final categorical identity.
      * Compact support still preserves the nearest seed's pure interior. */
