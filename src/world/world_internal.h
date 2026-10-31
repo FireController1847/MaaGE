@@ -89,7 +89,7 @@ typedef struct maage_generation_sample {
     int height;
     maage_biome_id biome;
     maage_block_state_id surface, filler;
-    double temperature, rainfall, cover;
+    double temperature, rainfall;
     maage_biome_decoration decoration;
 } maage_generation_sample;
 typedef struct maage_generation_context {
@@ -114,10 +114,10 @@ typedef enum maage_generation_write_rule {
     MAAGE_GENERATION_WRITE_FOLIAGE
 } maage_generation_write_rule;
 int maage_generation_surface(maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, int *height, maage_biome_id *biome);
-/* Same biome lattice/height function as surface(); full profiles are cached
- * once per detached column. Halo/spawn queries reproduce them from coordinates. */
+/* Same discrete region and unchanged height function as surface(); climate
+ * and decoration interpolate only near environmental classification thresholds.
+ * Cached profiles and halo/spawn queries use the same coordinate functions. */
 int maage_generation_sample_at(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample);
-double maage_generation_patch(maage_world_seed seed, int x, int z, int scale, unsigned long salt);
 int maage_generation_cold(const maage_generation_sample *sample, int y);
 unsigned long maage_generation_feature_hash(maage_world_seed seed, int x, int z, unsigned long salt);
 unsigned long maage_generation_feature_next(unsigned long *random);

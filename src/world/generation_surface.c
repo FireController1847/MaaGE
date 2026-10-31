@@ -20,7 +20,7 @@ static int maage_cactus_height(const maage_generation_context *context, int x, i
     const maage_block_state_definition *floor, *neighbor_floor;
     unsigned long other;
     int dx, dz;
-    if (!column || column->height != ground || ground <= context->policy->sea_level || ground >= 252 || (column->rainfall > 0 && maage_generation_cold(column, ground + 1)) || maage_surface_unit(random) >= column->decoration.cacti * column->cover) return 0;
+    if (!column || column->height != ground || ground <= context->policy->sea_level || ground >= 252 || (column->rainfall > 0 && maage_generation_cold(column, ground + 1)) || maage_surface_unit(random) >= column->decoration.cacti) return 0;
     floor = maage_block_registry_state(context->blocks, column->surface);
     if (!floor || floor->block_id != MAAGE_BLOCK_SAND) return 0;
     /* Coordinate priority gives irregular spacing without touching a neighbor
@@ -33,7 +33,7 @@ static int maage_cactus_height(const maage_generation_context *context, int x, i
             neighbor_floor = maage_block_registry_state(context->blocks, neighbor->surface);
             if (!neighbor_floor) return 0;
             other = maage_generation_feature_hash(context->seed, x + dx, z + dz, 13000UL);
-            if (neighbor->height == ground && neighbor_floor->block_id == MAAGE_BLOCK_SAND && !(neighbor->rainfall > 0 && maage_generation_cold(neighbor, ground + 1)) && maage_surface_unit(other) < neighbor->decoration.cacti * neighbor->cover && (other < random || (other == random && (dx < 0 || dz < 0)))) return 0;
+            if (neighbor->height == ground && neighbor_floor->block_id == MAAGE_BLOCK_SAND && !(neighbor->rainfall > 0 && maage_generation_cold(neighbor, ground + 1)) && maage_surface_unit(other) < neighbor->decoration.cacti && (other < random || (other == random && (dx < 0 || dz < 0)))) return 0;
         }
     return 1 + (int) ((random >> 24) % 3UL);
 }
@@ -67,10 +67,10 @@ maage_status maage_generation_decorate(maage_generation_context *context) {
                     if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SURFACE);
                 }
                 ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_SURFACE];
-            } else if ((floor->block_id == MAAGE_BLOCK_DIRT || floor->block_id == MAAGE_BLOCK_SAND) && maage_surface_unit(maage_generation_feature_next(&random)) < column->decoration.dead_bushes * column->cover) state = MAAGE_STATE_DEAD_BUSH;
+            } else if ((floor->block_id == MAAGE_BLOCK_DIRT || floor->block_id == MAAGE_BLOCK_SAND) && maage_surface_unit(maage_generation_feature_next(&random)) < column->decoration.dead_bushes) state = MAAGE_STATE_DEAD_BUSH;
             else if (floor->block_id == MAAGE_BLOCK_GRASS || floor->block_id == MAAGE_BLOCK_DIRT) {
-                if (maage_surface_unit(maage_generation_feature_next(&random)) < column->decoration.flowers * column->cover) state = maage_generation_patch(context->seed, wx, wz, 16, 13001UL) < 0.5 ? MAAGE_STATE_DANDELION : MAAGE_STATE_POPPY;
-                else if (maage_surface_unit(maage_generation_feature_next(&random)) < column->decoration.grass * column->cover) state = MAAGE_STATE_TALL_GRASS;
+                if (maage_surface_unit(maage_generation_feature_next(&random)) < column->decoration.flowers) state = (random & 16777216UL) ? MAAGE_STATE_DANDELION : MAAGE_STATE_POPPY;
+                else if (maage_surface_unit(maage_generation_feature_next(&random)) < column->decoration.grass) state = MAAGE_STATE_TALL_GRASS;
             }
             if (state != MAAGE_STATE_AIR) {
                 result = maage_generation_write(context, wx, height + 1, wz, state, MAAGE_GENERATION_WRITE_AIR);
@@ -299,7 +299,7 @@ static int maage_tree_candidate(const maage_generation_context *context, int gx,
     if (!floor || (floor->block_id != MAAGE_BLOCK_GRASS && floor->block_id != MAAGE_BLOCK_DIRT)) return 0;
     for (species = 0; species < 3; ++species)
         total += column->decoration.trees[species];
-    if (total <= 0 || maage_surface_unit(maage_generation_feature_next(random)) >= total * column->cover) return 0;
+    if (total <= 0 || maage_surface_unit(maage_generation_feature_next(random)) >= total) return 0;
     for (dz = -1; dz <= 1; ++dz)
         for (dx = -1; dx <= 1; ++dx)
             if (!maage_generation_surface(context->seed, context->biomes, *x + dx, *z + dz, &sample_height, &sample_biome) || abs(sample_height - *height) > 1) return 0;
@@ -411,7 +411,7 @@ maage_status maage_generation_vegetation(maage_generation_context *context) {
                 result = maage_generation_write(context, x, top + 1, z, MAAGE_STATE_SNOW, MAAGE_GENERATION_WRITE_AIR);
                 if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
                 if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_VEGETATION];
-            } else if (maage_surface_unit(random) < column->decoration.mushrooms * column->cover) {
+            } else if (maage_surface_unit(random) < column->decoration.mushrooms) {
                 state = maage_block_registry_state(context->blocks, maage_chunk_get(context->chunk, local_x, height, local_z));
                 block = state ? maage_block_registry_block(context->blocks, state->block_id) : NULL;
                 if (!block || !block->opaque) continue;

@@ -27,7 +27,7 @@ typedef struct maage_biome_definition {
     maage_biome_id id;
     double base_height, variation, temperature, rainfall;
     maage_block_state_id surface, filler;
-    int aquatic; /* Excludes seabed material from dry-land surface transitions. */
+    int aquatic; /* Discrete geographic trait used by dry-land spawn selection. */
     maage_biome_decoration decoration;
     float grass_color[3], foliage_color[3];
 } maage_biome_definition;
