@@ -128,12 +128,12 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual, c
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }
 
-maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const maage_client_camera_effects *effects, double yaw, double pitch, double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace) {
+maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const maage_client_camera_effects *effects, double yaw, double pitch, double elapsed, double aspect, double swing_progress, const maage_client_food_animation *food, int visible, maage_status_trace *trace) {
     const maage_item_stack *selected;
     maage_item_id item_id;
     maage_status result;
     float matrix[16], projection[16], sky = 1, emission = 0;
-    double target, amount, lag, arc, swing, wave, root_wave, square_wave, focal;
+    double target, amount, lag, arc, swing, wave, root_wave, square_wave, focal, eating = 0, ease, bounce;
     unsigned int metadata;
     int changed = 0;
     if (!visual || !renderer || !atlas || !items || !blocks || !snapshot || !effects || !(aspect > 0) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
@@ -198,7 +198,8 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     lag = 1 - exp(-elapsed * 13.862943611);
     visual->arm_yaw = yaw - arc * (1 - lag);
     visual->arm_pitch += (pitch - visual->arm_pitch) * lag;
-    swing = swing_progress;
+    if (food && food->item == visual->item_id && food->metadata == visual->metadata) eating = food->amount;
+    swing = swing_progress * (1 - eating);
     if (swing < 0) swing = 0;
     if (swing > 1) swing = 1;
     wave = sin(swing * 3.141592653589793);
@@ -207,6 +208,14 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     maage_first_person_translate(matrix, -root_wave * (visual->item_id ? 0.4 : 0.3),
                                  sin(sqrt(swing) * 6.283185307179586) * (visual->item_id ? 0.2 : 0.4),
                                  -wave * (visual->item_id ? 0.2 : 0.4));
+    if (eating > 0) {
+        ease = (1 - pow(1 - food->progress, 27)) * eating;
+        bounce = food->progress > 0.2 ? fabs(cos(food->remaining * 0.7853981633974483)) * 0.1 * eating : 0;
+        maage_first_person_translate(matrix, ease * 0.6, -ease * 0.5 + bounce, 0);
+        maage_first_person_rotate(matrix, 1, ease * 90);
+        maage_first_person_rotate(matrix, 0, ease * 10);
+        maage_first_person_rotate(matrix, 2, ease * 30);
+    }
     maage_first_person_translate(matrix, visual->item_id ? 0.56 : 0.64,
                                  (visual->item_id ? -0.52 : -0.60) - (1 - visual->equipped) * 0.6, -0.72);
     maage_first_person_rotate(matrix, 1, 45);
@@ -406,4 +415,43 @@ double maage_client_swing_update(maage_client_swing *swing, const maage_session_
         swing->age = 0;
     }
     return swing->running ? swing->age / 6.0 : 0;
+}
+
+void maage_client_food_animation_update(maage_client_food_animation *animation, const maage_session_snapshot *snapshot, double elapsed, int held_use) {
+    const maage_food_use *use = &snapshot->player.food;
+    const maage_item_stack *held = maage_inventory_selected(&snapshot->player.inventory);
+    double target, fraction;
+    int active;
+    if (animation->session != snapshot->session_epoch || animation->world != snapshot->world_epoch || animation->life != snapshot->player.motion.life) {
+        memset(animation, 0, sizeof(*animation));
+        animation->session = snapshot->session_epoch;
+        animation->world = snapshot->world_epoch;
+        animation->life = snapshot->player.motion.life;
+    }
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > 0.1) elapsed = 0.1;
+    active = held_use && snapshot->player.health && use->remaining && use->duration && held && held->count && held->item_id == use->stack.item_id && held->metadata == use->stack.metadata;
+    if (active) {
+        if (animation->started != use->started_tick || animation->tick != snapshot->tick) {
+            animation->age = 0;
+            animation->started = use->started_tick;
+            animation->tick = snapshot->tick;
+        } else if (!snapshot->paused) animation->age += elapsed;
+        animation->item = held->item_id;
+        animation->metadata = held->metadata;
+        fraction = animation->age * 20;
+        if (fraction > 1) fraction = 1;
+        animation->remaining = use->remaining + 1.0 - fraction;
+        animation->progress = 1 - animation->remaining / use->duration;
+        if (animation->progress < 0) animation->progress = 0;
+        if (animation->progress > 1) animation->progress = 1;
+    }
+    target = active ? 1 : 0;
+    if (animation->amount < target) {
+        animation->amount += elapsed * 10;
+        if (animation->amount > target) animation->amount = target;
+    } else {
+        animation->amount -= elapsed * 10;
+        if (animation->amount < target) animation->amount = target;
+    }
 }

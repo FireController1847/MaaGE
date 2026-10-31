@@ -68,7 +68,7 @@ static void player_held_matrix(float matrix[16], const maage_item_definition *it
         }
     }
 }
-maage_status maage_client_player_view_update(maage_client_player_view *view, maage_renderer *renderer, maage_render_texture *atlas, const maage_client_resources *resources, const maage_item_registry *items, maage_client_item_entities *models, const maage_session_snapshot *previous, const maage_session_snapshot *snapshot, double interpolation, const double eye[3], double yaw, double pitch, double elapsed, double swing_progress, int visible, double camera_distance, maage_status_trace *trace) {
+maage_status maage_client_player_view_update(maage_client_player_view *view, maage_renderer *renderer, maage_render_texture *atlas, const maage_client_resources *resources, const maage_item_registry *items, maage_client_item_entities *models, const maage_session_snapshot *previous, const maage_session_snapshot *snapshot, double interpolation, const double eye[3], double yaw, double pitch, double elapsed, double swing_progress, const maage_client_food_animation *food, int visible, double camera_distance, maage_status_trace *trace) {
     const maage_item_stack *held;
     const maage_item_definition *item;
     const maage_render_mesh *mesh = NULL;
@@ -140,6 +140,13 @@ maage_status maage_client_player_view_update(maage_client_player_view *view, maa
     if (relative > 1.308996938995747) relative = 1.308996938995747;
     if (relative < -1.308996938995747) relative = -1.308996938995747;
     maage_player_pose_calculate(resources->skin_model, phase, amount * view->gait_sign, age, relative, pitch, swing, item != NULL, snapshot->player.sneaking, &pose);
+    if (food && item && food->item == held->item_id && food->metadata == held->metadata) {
+        double weight = food->amount * (1 - pow(1 - food->progress, 27));
+        double motion = fabs(cos(food->remaining * 0.7853981633974483)) * 0.08;
+        pose.rotation[MAAGE_PLAYER_RIGHT_ARM][0] += (1.5 - pitch * 0.5 + motion - pose.rotation[MAAGE_PLAYER_RIGHT_ARM][0]) * weight;
+        pose.rotation[MAAGE_PLAYER_RIGHT_ARM][1] *= 1 - weight;
+        pose.rotation[MAAGE_PLAYER_RIGHT_ARM][2] += (-0.35 - pose.rotation[MAAGE_PLAYER_RIGHT_ARM][2]) * weight;
+    }
     maage_player_matrix_identity(root);
     maage_player_matrix_translate(root, eye[0], eye[1] - MAAGE_PLAYER_EYE_HEIGHT, eye[2]);
     if (snapshot->player.sneaking) maage_player_matrix_translate(root, 0, -3 * 0.9375 / 16, 0);

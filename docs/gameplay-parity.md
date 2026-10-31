@@ -336,3 +336,11 @@ Oak apple drops were already implemented: an independent 1/200 roll accompanies
 the sapling roll, shared by ordinary breaking and natural decay. Shears take the
 leaf-stack path; spruce/birch do not roll apples. Drops remain owner-reserved item
 entities, using the existing authoritative random streams and normal pickup.
+
+The Client evaluates one eating timeline for both perspectives, interpolating
+remaining owner ticks without restarting on duplicate snapshots. The held item
+uses a separate mouth approach, periodic bite motion and rotations over its
+ordinary cached model/scale; start/release/completion blend over 0.1 seconds.
+Third person raises the existing right arm and attached item toward the mouth.
+Both use shared mesh transforms across backends. No general food-fragment
+particle emitter exists, so food particles remain unimplemented.

@@ -557,6 +557,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_first_person first_person;
     maage_client_camera_effects camera_effects;
     maage_client_swing local_swing;
+    maage_client_food_animation food_animation;
     maage_session_snapshot visual_snapshot;
     double swing_progress = 0;
     maage_client_player_view player_view;
@@ -608,6 +609,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     memset(&cache, 0, sizeof(cache));
     memset(&prediction, 0, sizeof(prediction));
     memset(&local_swing, 0, sizeof(local_swing));
+    memset(&food_animation, 0, sizeof(food_animation));
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     memset(&interaction, 0, sizeof(interaction));
     memset(&first_person, 0, sizeof(first_person));
@@ -835,6 +837,7 @@ choose_world:
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
     }
     memset(&local_swing, 0, sizeof(local_swing));
+    memset(&food_animation, 0, sizeof(food_animation));
     memset(&visual_stats, 0, sizeof(visual_stats));
     visual_stats_time = -1;
     maage_world_config_init(&visual_config);
@@ -1327,6 +1330,7 @@ choose_world:
             }
         }
         swing_progress = maage_client_swing_update(&local_swing, &latest, raw_elapsed, active, input.primary_down || input.primary_pressed, input.primary_pressed, visual_snapshot.player.has_target);
+        maage_client_food_animation_update(&food_animation, &latest, raw_elapsed, active && (input.secondary_down || input.secondary_pressed) && !input.primary_down && !input.primary_pressed);
         rendered = maage_client_interaction_update(&interaction, renderer, atlas, blocks, &visual_snapshot, &prediction, trace);
         if (maage_status_failed(rendered)) goto done;
         visual_snapshot.player.submerged = maage_world_fluid_at(visual_world, eye) == MAAGE_FLUID_WATER;
@@ -1371,7 +1375,7 @@ choose_world:
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
-            rendered = maage_client_first_person_update(&first_person, renderer, atlas, items, blocks, &visual_snapshot, &camera_effects, render_yaw, render_pitch, raw_elapsed, (double) state.framebuffer_width / state.framebuffer_height, swing_progress, camera_mode == MAAGE_CAMERA_FIRST && !maage_client_ui_modal(ui), trace);
+            rendered = maage_client_first_person_update(&first_person, renderer, atlas, items, blocks, &visual_snapshot, &camera_effects, render_yaw, render_pitch, raw_elapsed, (double) state.framebuffer_width / state.framebuffer_height, swing_progress, &food_animation, camera_mode == MAAGE_CAMERA_FIRST && !maage_client_ui_modal(ui), trace);
             if (maage_status_failed(rendered)) goto done;
             operation = maage_world_sample_camera(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &collision);
             if (maage_status_failed(operation)) goto done;
@@ -1381,7 +1385,7 @@ choose_world:
                 if (maage_world_fluid_at(visual_world, camera_eye) == MAAGE_FLUID_WATER) effective_fov *= 60.0 / 70.0;
             }
             maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
-            rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, swing_progress, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
+            rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, swing_progress, &food_animation, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_client_environment_update(environment_view, renderer, &latest, maage_client_ui_width(ui), maage_client_ui_height(ui), matrix, visual_world, camera_eye, camera_yaw, camera_pitch, camera_mode == MAAGE_CAMERA_FIRST, options.radius);

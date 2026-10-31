@@ -13,6 +13,15 @@ typedef struct maage_client_swing {
 /* One Client-local action timeline shared by first and third person. */
 double maage_client_swing_update(maage_client_swing *swing, const maage_session_snapshot *snapshot, double elapsed, int active, int held, int pressed, int has_target);
 
+typedef struct maage_client_food_animation {
+    unsigned long session, world, life, started, tick;
+    maage_item_id item;
+    unsigned int metadata;
+    double age, remaining, progress, amount;
+} maage_client_food_animation;
+/* One interpolated owner-use timeline; no predicted inventory mutation. */
+void maage_client_food_animation_update(maage_client_food_animation *animation, const maage_session_snapshot *snapshot, double elapsed, int held_use);
+
 typedef struct maage_client_interaction_visual {
     maage_render_mesh *mesh;
     maage_world_target target;
@@ -39,6 +48,6 @@ maage_status maage_client_first_person_init(maage_client_first_person *visual, c
 /* Geometry is cached across frames. Only item/metadata changes upload it;
  * camera, equip, swing, bobbing and sampled light are frame uniforms. Copied
  * snapshots/events remain the only source of player/gameplay state. */
-maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const maage_client_camera_effects *effects, double yaw, double pitch, double elapsed, double aspect, double swing_progress, int visible, maage_status_trace *trace);
+maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const maage_client_camera_effects *effects, double yaw, double pitch, double elapsed, double aspect, double swing_progress, const maage_client_food_animation *food, int visible, maage_status_trace *trace);
 maage_status maage_client_first_person_destroy(maage_client_first_person *visual, maage_renderer *renderer);
 #endif
