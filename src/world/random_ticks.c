@@ -121,6 +121,66 @@ maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, co
     return outcome;
 }
 
+maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_block_state_definition *neighbor;
+    const maage_block_definition *block;
+    maage_block_state_id staged, reset[4];
+    maage_tree_plan plan;
+    unsigned char light;
+    unsigned int species = state->metadata & 7U;
+    unsigned long random;
+    int dx, dz, ox, oz, match, attempted, large = 0;
+    maage_status result;
+    if (species > 2 || (state->metadata & ~15U)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
+    result = maage_support_update(world, x, y, z);
+    if (maage_status_failed(result) || maage_status_code(result) == MAAGE_STATUS_NOOP || maage_world_get(world, x, y, z) != state->id) return result;
+    result = maage_world_sample_light(world, x, y + 1, z, &light);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (maage_random_light_value(light, context) < 9 || maage_random_tick_next(context, 7)) return maage_random_noop();
+    if (!(state->metadata & 8U)) {
+        result = maage_block_sapling_state(state->metadata | 8U, &staged);
+        return maage_status_failed(result) ? result : maage_world_set(world, x, y, z, state->id, staged);
+    }
+    if (species == 1) {
+        /* A missing neighbor must not turn a possible 2x2 into a single tree. */
+        for (dz = -1; dz <= 1; ++dz)
+            for (dx = -1; dx <= 1; ++dx) {
+                result = maage_random_block(world, x + dx, y, z + dz, &neighbor, &block);
+                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+            }
+        for (oz = 0; oz >= -1 && !large; --oz)
+            for (ox = 0; ox >= -1 && !large; --ox) {
+                match = 1;
+                for (dz = 0; dz < 2; ++dz)
+                    for (dx = 0; dx < 2; ++dx) {
+                        neighbor = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x + ox + dx, y, z + oz + dz));
+                        if (!neighbor || neighbor->block_id != MAAGE_BLOCK_SAPLING || (neighbor->metadata & 7U) != species) match = 0;
+                    }
+                if (match) {
+                    x += ox;
+                    z += oz;
+                    large = 1;
+                }
+            }
+    } else if (!species) large = maage_random_tick_next(context, 10) == 0;
+    random = ((1UL + maage_random_tick_next(context, 65535U)) << 16);
+    random |= maage_random_tick_next(context, 65536U);
+    result = maage_generation_grow_tree(world, x, y, z, species, large, random, &attempted);
+    if (maage_status_code(result) != MAAGE_STATUS_NOOP || !attempted) return result;
+    /* A known obstruction restarts the two-stage cycle. Operational failure
+     * and unavailable terrain keep every original sapling/stage untouched. */
+    result = maage_block_sapling_state(species, &staged);
+    if (maage_status_failed(result)) return result;
+    reset[0] = reset[1] = reset[2] = reset[3] = staged;
+    plan.x = x;
+    plan.y = y;
+    plan.z = z;
+    plan.edge = species == 1 && large ? 2 : 1;
+    plan.height = 1;
+    plan.cells = reset;
+    return maage_world_plant_tree(world, &plan);
+}
+
 maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
     static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *neighbor;

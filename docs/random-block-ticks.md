@@ -48,6 +48,7 @@ string lookup or job wait is introduced.
 | Block | Random-tick behavior |
 | --- | --- |
 | Grass | Decays to dirt when light above is below 4 and cover opacity exceeds 2. With source light at least 9, makes four spread attempts: X/Z offsets -1..1, Y offsets -3..1. Destination must be metadata-zero dirt, with light above at least 4 and opacity at most 2. No tall grass is created. |
+| Saplings | Oak/spruce/birch require valid soil and light above at least 9. A 1/7 opportunity advances the stage bit, then attempts growth on a later opportunity. See Sapling Growth below. |
 | Cactus | An exposed top shorter than three blocks increments age 0..15; a subsequent tick at age 15 grows one block and resets the old top. New-growth side obstruction produces the normal item drop after capacity preflight. Ages are numeric registered states and persist in chunk palettes. |
 | Brown/red mushrooms | One-in-25 spread chance; stops with five of the same mushroom in the 9x3x9 density neighborhood. Four candidate-walk steps precede one final placement attempt. Current supported substrates require an opaque top and full saved light below 13. |
 | Flowers, tall grass, dead bush | Random substrate check; plants without valid support disappear with their ordinary drops (including the 1/8 tall-grass seed chance and no ordinary dead-bush drop). This does not spawn vegetation. |
@@ -63,7 +64,7 @@ missing light is never treated as darkness. Cross-column destinations and all
 required neighborhoods must be loaded. No sample triggers synchronous relighting.
 
 Immediate plant/cactus support reactions now use the persistent neighbor-update
-queue described in [Client UI and Visual World](gameplay-parity.md). Crops/sapling growth, lava
+queue described in [Client UI and Visual World](gameplay-parity.md). Crops, bone meal, lava
 fire ignition, weather-driven snow accumulation/freezing and Nether-specific ice
 behavior remain unsupported. Mycelium and podzol are absent from the catalog, so their mushroom
 light exceptions do not apply. Dirt and full snow blocks have no random callback.
@@ -94,6 +95,39 @@ Resume restores stream positions; it does not guarantee
 identical gameplay traces when different streaming/lighting availability changes
 which samples can execute. Coordinate traversal itself does not depend on hash,
 cache insertion or worker-completion order.
+
+## Sapling Growth
+
+The existing sapling items now place registered crossed-quad blocks. Metadata
+retains species 0/1/2 and growth-stage bit 8 through ordinary named chunk palettes;
+drops discard the stage bit. Grass/dirt supports saplings. Random opportunities
+use daylight/weather-adjusted light above, defer unavailable light, and advance
+only on a 1/7 roll. The first opportunity sets bit 8; the next eligible opportunity
+attempts a tree. A known obstruction resets participating saplings to their first
+stage; unavailable columns and operational failure retain the original stages.
+
+Oak chooses an ordinary tree or, with probability 1/10, a branching large oak.
+Birch uses its taller broadleaf feature. Spruce grows singly or detects a same-species
+2x2 at any of the four possible origins; one mature sapling can trigger the group.
+The 2x2 feature has a tall two-block-wide trunk and one of two crown depths.
+Trunk heights are 4..6 (oak), 5..7 (birch), 6..9 (single spruce), 5..16 (large oak)
+and 13..29 (large spruce). Shapes are MaaGE's independent features, not seed-exact
+reproductions of another engine's voxel layouts. Podzol decoration and bone meal
+remain absent from the supported catalog.
+
+One tree emitter serves both generation columns and live growth. Live growth
+builds a bounded dense plan, checks soil, trunk clearance, canopy cells, headroom
+and loaded columns including the notification halo, then runs the ordinary mutation
+callbacks against detached column copies. Sections, neighbor queues and publication
+handles exist before any copy replaces owner state. Publication does not allocate;
+failed preparation discards only detached copies, leaving the saplings and World
+untouched. The existing phase commits the complete tree before Session publication,
+worker scheduling or saves. New leaves are natural species states and reuse decay,
+drops and Client biome tinting. Sapling stage-only edits preserve geometry/light.
+
+Tree selection consumes only the saved behavior stream. Feature-local shape choices
+are derived from that attempt's seed; they do not reseed coordinate/weather streams.
+No scan of all saplings or scheduled growth timer is added.
 
 ## Leaf Support
 

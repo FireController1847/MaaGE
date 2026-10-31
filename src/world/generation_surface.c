@@ -1,5 +1,6 @@
 #include "world_internal.h"
 #include <stdlib.h>
+#include <string.h>
 
 static int maage_surface_cold(const maage_generation_context *context, maage_biome_id biome, int height) {
     const maage_biome_definition *definition = maage_biome_registry_get(context->biomes, biome);
@@ -58,15 +59,23 @@ maage_status maage_generation_decorate(maage_generation_context *context) {
 typedef struct maage_tree_feature {
     unsigned int id;
     maage_block_state_id trunk, leaves;
-    int minimum_height, height_variation, radius, conical;
+    int minimum_height, height_variation, radius, conical, width, branches;
 } maage_tree_feature;
 static const maage_tree_feature maage_tree_features[] = {
-    {1U, MAAGE_STATE_LOG, MAAGE_STATE_LEAVES, 4, 3, 2, 0},
-    {2U, MAAGE_STATE_BIRCH_LOG, MAAGE_STATE_BIRCH_LEAVES, 5, 3, 2, 0},
-    {3U, MAAGE_STATE_SPRUCE_LOG, MAAGE_STATE_SPRUCE_LEAVES, 6, 4, 3, 1}};
+    {1U, MAAGE_STATE_LOG, MAAGE_STATE_LEAVES, 4, 3, 2, 0, 1, 0},
+    {2U, MAAGE_STATE_BIRCH_LOG, MAAGE_STATE_BIRCH_LEAVES, 5, 3, 2, 0, 1, 0},
+    {3U, MAAGE_STATE_SPRUCE_LOG, MAAGE_STATE_SPRUCE_LEAVES, 6, 4, 3, 1, 1, 0},
+    {4U, MAAGE_STATE_LOG, MAAGE_STATE_LEAVES, 5, 12, 5, 0, 1, 1},
+    {5U, MAAGE_STATE_SPRUCE_LOG, MAAGE_STATE_SPRUCE_LEAVES, 13, 15, 4, 1, 2, 0}};
+typedef int (*maage_tree_writer)(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule);
+static int maage_tree_height(const maage_tree_feature *feature, unsigned long random) {
+    int height = feature->minimum_height + (int) (random % (unsigned long) feature->height_variation);
+    if (feature->width == 2) height += (int) ((random >> 8) % 3UL);
+    return height;
+}
 static int maage_tree_radius(const maage_tree_feature *feature, int height, int dy) {
     int radius;
-    if (!feature->conical) return dy >= height - 1 ? 1 : feature->radius;
+    if (!feature->conical) return dy >= height - 1 ? 1 : (feature->branches ? 2 : feature->radius);
     radius = (height - dy + 1) / 2;
     if (radius > feature->radius) radius = feature->radius;
     if (dy < height - 1 && !(dy & 1) && radius > 1) --radius;
@@ -74,31 +83,176 @@ static int maage_tree_radius(const maage_tree_feature *feature, int height, int 
 }
 static int maage_tree_leaf(const maage_tree_feature *feature, int height, int dy, int dx, int dz, unsigned long random) {
     int radius = maage_tree_radius(feature, height, dy);
-    if (abs(dx) > radius || abs(dz) > radius) return 0;
-    return !(radius > 0 && abs(dx) == radius && abs(dz) == radius && (feature->conical || dy == height || ((random + dx * dx + dz * dz + dy) & 1UL)));
+    int ax = dx < 0 ? -dx : (dx >= feature->width ? dx - feature->width + 1 : 0);
+    int az = dz < 0 ? -dz : (dz >= feature->width ? dz - feature->width + 1 : 0);
+    if (ax > radius || az > radius) return 0;
+    return !(radius > 0 && ax == radius && az == radius && (feature->conical || dy == height || ((random + ax * ax + az * az + dy) & 1UL)));
 }
-static int maage_tree_place(maage_generation_context *context, const maage_tree_feature *feature, int x, int ground, int z, unsigned long random) {
-    int height, dy, dx, dz, radius, result, changed = 0;
-    height = feature->minimum_height + (int) (random % (unsigned long) feature->height_variation);
-    if (ground + height + 2 >= 256) return 0;
-    for (dy = feature->conical ? 2 : height - 3; dy <= height; ++dy) {
+/* One feature emitter serves detached generation columns and staged live
+ * growth. Writers own clipping/capacity; shape selection has no World access. */
+static int maage_tree_emit(const maage_tree_feature *feature, int height, int x, int ground, int z, unsigned long random, maage_tree_writer write, void *context) {
+    static const int directions[8][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}};
+    int dy, dx, dz, radius, result, changed = 0, first, crown, branch, cx, cy, cz, step, steps, bx, by, bz;
+    first = feature->conical ? 2 : height - 3;
+    if (feature->width == 2) {
+        crown = (random & 65536UL ? 13 : 3) + (int) ((random >> 12) % 5UL);
+        first = height - crown;
+        if (first < 2) first = 2;
+    }
+    for (dy = first; dy <= height; ++dy) {
         radius = maage_tree_radius(feature, height, dy);
-        for (dz = -radius; dz <= radius; ++dz)
-            for (dx = -radius; dx <= radius; ++dx) {
+        for (dz = -radius; dz < radius + feature->width; ++dz)
+            for (dx = -radius; dx < radius + feature->width; ++dx) {
                 if (!maage_tree_leaf(feature, height, dy, dx, dz, random)) continue;
-                result = maage_generation_write(context, x + dx, ground + 1 + dy, z + dz, feature->leaves, MAAGE_GENERATION_WRITE_FOLIAGE);
+                result = write(context, x + dx, ground + 1 + dy, z + dz, feature->leaves, MAAGE_GENERATION_WRITE_FOLIAGE);
                 if (result < 0) return -1;
                 changed |= result;
             }
     }
-    for (dy = 1; dy <= height; ++dy) {
-        result = maage_generation_write(context, x, ground + dy, z, feature->trunk, MAAGE_GENERATION_WRITE_FOLIAGE);
-        if (result < 0) return -1;
-        changed |= result;
-    }
-    result = maage_generation_write(context, x, ground, z, MAAGE_STATE_DIRT, MAAGE_GENERATION_WRITE_ANY);
-    return result < 0 ? -1 : changed;
+    if (feature->branches)
+        for (branch = 0; branch < 8; ++branch) {
+            cx = x + directions[branch][0] * 3;
+            cz = z + directions[branch][1] * 3;
+            cy = ground + height - 2 + (int) ((random >> branch) & 1UL);
+            for (dy = -2; dy <= 1; ++dy) {
+                radius = dy == 1 ? 1 : 2;
+                for (dz = -radius; dz <= radius; ++dz)
+                    for (dx = -radius; dx <= radius; ++dx) {
+                        if (abs(dx) == radius && abs(dz) == radius) continue;
+                        result = write(context, cx + dx, cy + dy, cz + dz, feature->leaves, MAAGE_GENERATION_WRITE_FOLIAGE);
+                        if (result < 0) return -1;
+                        changed |= result;
+                    }
+            }
+        }
+    for (dy = 1; dy <= height; ++dy)
+        for (dz = 0; dz < feature->width; ++dz)
+            for (dx = 0; dx < feature->width; ++dx) {
+                if (feature->width == 2 && dy == height && (dx || dz)) continue;
+                result = write(context, x + dx, ground + dy, z + dz, feature->trunk, MAAGE_GENERATION_WRITE_FOLIAGE);
+                if (result < 0) return -1;
+                changed |= result;
+            }
+    if (feature->branches)
+        for (branch = 0; branch < 8; ++branch) {
+            cy = height - 2 + (int) ((random >> branch) & 1UL);
+            steps = cy - height / 2;
+            if (steps < 3) steps = 3;
+            for (step = 1; step <= steps; ++step) {
+                bx = directions[branch][0] * 3 * step / steps;
+                bz = directions[branch][1] * 3 * step / steps;
+                by = height / 2 + (cy - height / 2) * step / steps;
+                if (!bx && !bz) continue;
+                result = write(context, x + bx, ground + by, z + bz, directions[branch][0] ? MAAGE_STATE_LOG_X_BASE : MAAGE_STATE_LOG_Z_BASE, MAAGE_GENERATION_WRITE_FOLIAGE);
+                if (result < 0) return -1;
+                changed |= result;
+            }
+        }
+    for (dz = 0; dz < feature->width; ++dz)
+        for (dx = 0; dx < feature->width; ++dx) {
+            result = write(context, x + dx, ground, z + dz, MAAGE_STATE_DIRT, MAAGE_GENERATION_WRITE_ANY);
+            if (result < 0) return -1;
+            changed |= result;
+        }
+    return changed;
 }
+static int maage_tree_generation_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
+    return maage_generation_write((maage_generation_context *) context, x, y, z, state, rule);
+}
+static int maage_tree_place(maage_generation_context *context, const maage_tree_feature *feature, int x, int ground, int z, unsigned long random) {
+    int height = maage_tree_height(feature, random);
+    if (ground + height + 2 >= 256) return 0;
+    return maage_tree_emit(feature, height, x, ground, z, random, maage_tree_generation_write, context);
+}
+
+static int maage_tree_plan_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
+    maage_tree_plan *plan = (maage_tree_plan *) context;
+    (void) rule;
+    x -= plan->x;
+    y -= plan->y;
+    z -= plan->z;
+    if (x < 0 || x >= plan->edge || z < 0 || z >= plan->edge || y < 0 || y >= plan->height) return -1;
+    plan->cells[((size_t) y * plan->edge + z) * plan->edge + x] = state;
+    return 1;
+}
+static int maage_tree_replaceable(const maage_block_state_definition *state) {
+    return state && (state->block_id == MAAGE_BLOCK_AIR || state->block_id == MAAGE_BLOCK_LEAVES || state->block_id == MAAGE_BLOCK_SAPLING || state->block_id == MAAGE_BLOCK_TALL_GRASS || state->block_id == MAAGE_BLOCK_DANDELION || state->block_id == MAAGE_BLOCK_POPPY || state->block_id == MAAGE_BLOCK_SNOW);
+}
+maage_status maage_generation_grow_tree(maage_world *world, int x, int y, int z, unsigned int species, int large, unsigned long random, int *attempted) {
+    const maage_tree_feature *feature;
+    const maage_block_registry *blocks = maage_world_registry(world);
+    const maage_block_state_definition *state;
+    maage_tree_plan plan;
+    maage_block_state_id replacement;
+    maage_status result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    size_t count;
+    int height, radius, dx, dy, dz, cx, cz;
+    if (attempted) *attempted = 0;
+    if (!world || !attempted || species > 2 || (large != 0 && large != 1) || !random) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    feature = &maage_tree_features[species == 0 ? (large ? 3 : 0) : (species == 1 ? (large ? 4 : 2) : 1)];
+    height = maage_tree_height(feature, random);
+    if (x - feature->radius - 2 <= -MAAGE_WORLD_LIMIT || z - feature->radius - 2 <= -MAAGE_WORLD_LIMIT || x + feature->radius + feature->width + 1 >= MAAGE_WORLD_LIMIT || z + feature->radius + feature->width + 1 >= MAAGE_WORLD_LIMIT) return result;
+    if (y < 1 || y + height + 1 >= MAAGE_WORLD_HEIGHT) {
+        *attempted = 1;
+        return result;
+    }
+    memset(&plan, 0, sizeof(plan));
+    plan.x = x - feature->radius;
+    plan.y = y - 1;
+    plan.z = z - feature->radius;
+    plan.edge = feature->radius * 2 + feature->width;
+    plan.height = height + 2;
+    for (cz = maage_world_chunk_coordinate(plan.z - 2); cz <= maage_world_chunk_coordinate(plan.z + plan.edge + 1); ++cz)
+        for (cx = maage_world_chunk_coordinate(plan.x - 2); cx <= maage_world_chunk_coordinate(plan.x + plan.edge + 1); ++cx)
+            if (!maage_world_chunk_loaded(world, cx, cz)) return result;
+    *attempted = 1;
+    for (dz = 0; dz < feature->width; ++dz)
+        for (dx = 0; dx < feature->width; ++dx) {
+            state = maage_block_registry_state(blocks, maage_world_get(world, x + dx, y - 1, z + dz));
+            if (!state) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+            if (state->block_id != MAAGE_BLOCK_DIRT && state->block_id != MAAGE_BLOCK_GRASS) return result;
+            state = maage_block_registry_state(blocks, maage_world_get(world, x + dx, y, z + dz));
+            if (!state) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+            if (state->block_id != MAAGE_BLOCK_SAPLING || (state->metadata & 7U) != species) return result;
+        }
+    /* Keep a clear trunk corridor and headroom as well as every emitted cell;
+     * a hollow canopy must not permit solid obstacles through its interior. */
+    for (dy = 0; dy <= height + 1; ++dy) {
+        radius = !dy ? 0 : (dy >= height - 1 ? 2 : 1);
+        if (feature->conical && dy >= 2 && dy <= height) radius = maage_tree_radius(feature, height, dy);
+        for (dz = -radius; dz < radius + feature->width; ++dz)
+            for (dx = -radius; dx < radius + feature->width; ++dx) {
+                state = maage_block_registry_state(blocks, maage_world_get(world, x + dx, y + dy, z + dz));
+                if (!state) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+                if (!maage_tree_replaceable(state)) return result;
+            }
+    }
+    count = (size_t) plan.edge * plan.edge * plan.height;
+    if (count > (size_t) - 1 / sizeof(*plan.cells)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    plan.cells = (maage_block_state_id *) calloc(count, sizeof(*plan.cells));
+    if (!plan.cells) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    if (maage_tree_emit(feature, height, x, y - 1, z, random, maage_tree_plan_write, &plan) < 0) {
+        result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+        goto done;
+    }
+    for (dy = 0; dy < plan.height; ++dy)
+        for (dz = 0; dz < plan.edge; ++dz)
+            for (dx = 0; dx < plan.edge; ++dx) {
+                replacement = plan.cells[((size_t) dy * plan.edge + dz) * plan.edge + dx];
+                if (!replacement) continue;
+                state = maage_block_registry_state(blocks, maage_world_get(world, plan.x + dx, plan.y + dy, plan.z + dz));
+                if (!state) {
+                    result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+                    goto done;
+                }
+                if (replacement == MAAGE_STATE_DIRT ? (state->block_id != MAAGE_BLOCK_DIRT && state->block_id != MAAGE_BLOCK_GRASS) : !maage_tree_replaceable(state)) goto done;
+            }
+    result = maage_world_plant_tree(world, &plan);
+done:
+    free(plan.cells);
+    return result;
+}
+
 static int maage_tree_candidate(const maage_generation_context *context, int gx, int gz, int *x, int *height, int *z, const maage_tree_feature **tree, unsigned long *random) {
     maage_biome_id biome, sample_biome;
     int dx, dz, sample_height, chance;
@@ -149,7 +303,7 @@ int maage_generation_spawn_floor(maage_world_seed seed, const maage_biome_regist
     for (gz = maage_generation_region(z, 8) - 1; gz <= maage_generation_region(z, 8) + 1; ++gz)
         for (gx = maage_generation_region(x, 8) - 1; gx <= maage_generation_region(x, 8) + 1; ++gx) {
             if (!maage_tree_candidate(&context, gx, gz, &tx, &tree_ground, &tz, &tree, &random)) continue;
-            height = tree->minimum_height + (int) (random % (unsigned long) tree->height_variation);
+            height = maage_tree_height(tree, random);
             dx = x - tx;
             dz = z - tz;
             if (!dx && !dz && tree_ground + height > top) top = tree_ground + height;

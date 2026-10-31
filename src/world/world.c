@@ -37,6 +37,7 @@ typedef struct maage_world_slot {
     maage_world_task *work, *light_work, *save;
     maage_world_mesh *pending_mesh;
     maage_chunk *edit;
+    maage_chunk_snapshot *edit_publication; /* Reserved before any private mutation. */
     int edit_blocks, edit_states, edit_light, update_linked, mesh_linked;
     struct maage_world_slot *mesh_next;
     struct maage_world_slot *edit_next, *update_next, *update_previous;
@@ -269,6 +270,7 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
     --world->count;
     if (world->save_cursor == slot) world->save_cursor = slot->next ? slot->next : world->chunks;
     maage_world_release(slot->data);
+    maage_world_release(slot->edit_publication);
     maage_world_release(slot->sent);
     maage_world_release(slot->authority);
     maage_world_mesh_destroy(slot->pending_mesh);
@@ -383,6 +385,13 @@ static maage_status maage_world_edit(maage_world *world, maage_world_slot *slot,
     *output = slot->edit;
     if (slot->edit) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SNAPSHOT, 0);
     result = maage_chunk_clone(slot->data->chunk, &slot->edit);
+    if (!maage_status_failed(result)) {
+        result = maage_world_snapshot(slot->edit, &slot->edit_publication);
+        if (maage_status_failed(result)) {
+            maage_chunk_destroy(slot->edit);
+            slot->edit = NULL;
+        }
+    }
     if (maage_status_failed(result)) {
         maage_world_failure_status(world, slot, result, "World edit snapshot allocation failed.");
         return result;
@@ -420,13 +429,8 @@ static void maage_world_commit_edits(maage_world *world) {
         slot = world->edits;
         world->edits = slot->edit_next;
         slot->edit_next = NULL;
-        if (maage_status_failed(maage_world_snapshot(slot->edit, &snapshot))) {
-            maage_chunk_destroy(slot->edit);
-            slot->edit = NULL;
-            maage_world_failure(world, slot, "Environment snapshot publication allocation failed.");
-            maage_world_update_membership(world, slot);
-            continue;
-        }
+        snapshot = slot->edit_publication;
+        slot->edit_publication = NULL;
         maage_world_release(slot->data);
         slot->data = snapshot;
         slot->edit = NULL;
@@ -1321,6 +1325,8 @@ static maage_status maage_world_random_ticks(maage_world *world) {
                     if (!state->random_ticks || !block->random_tick) continue;
                     ++world->stats.random_tick_callbacks;
                     result = block->random_tick(world, x, y, z, state, &world->random_ticks);
+                    /* A successful feature may replace this private column. */
+                    chunk = slot->edit ? slot->edit : slot->data->chunk;
                     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(&world->trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
                     if (maage_status_is_warning(result) && !maage_status_is_warning(outcome)) outcome = result;
                 }
@@ -1650,7 +1656,7 @@ int maage_world_collision_shape(const maage_world *world, int x, int y, int z, m
 maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_block_state_id expected, maage_block_state_id replacement) {
     maage_world_slot *slot;
     maage_chunk *copy;
-    int local_x, local_z, top, leaf_flags_only;
+    int local_x, local_z, top, flags_only;
     const maage_block_definition *before, *after;
     const maage_block_state_definition *old_state, *new_state;
     maage_status result;
@@ -1689,11 +1695,13 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
         maage_world_failure_status(world, slot, result, "Invalid random-tick section membership.");
         return result;
     }
-    leaf_flags_only = old_state->block_id == MAAGE_BLOCK_LEAVES && new_state->block_id == MAAGE_BLOCK_LEAVES && (old_state->metadata & MAAGE_LEAF_SPECIES_MASK) == (new_state->metadata & MAAGE_LEAF_SPECIES_MASK);
+    flags_only = old_state->block_id == new_state->block_id &&
+                 ((old_state->block_id == MAAGE_BLOCK_LEAVES && (old_state->metadata & MAAGE_LEAF_SPECIES_MASK) == (new_state->metadata & MAAGE_LEAF_SPECIES_MASK)) ||
+                  (old_state->block_id == MAAGE_BLOCK_SAPLING && (old_state->metadata & 7U) == (new_state->metadata & 7U)));
     /* Queue allocations precede the state mutation and any reserved drop.
      * Existing fluid/support entries are deduplicated without allocation. */
     ++world->edit_depth;
-    if (!leaf_flags_only) {
+    if (!flags_only) {
         result = maage_support_changed(world, x, y, z, replacement);
         if (!maage_status_failed(result)) result = maage_environment_changed(world->environment, world, x, y, z);
         if (maage_status_failed(result)) {
@@ -1723,14 +1731,14 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
     }
     if (maage_block_registry_state(world->config.registry, expected)->block_id != maage_block_registry_state(world->config.registry, replacement)->block_id) maage_chunk_block_entity_remove(copy, (unsigned int) ((y * 16 + local_z) * 16 + local_x));
-    if (!leaf_flags_only) {
+    if (!flags_only) {
         top = MAAGE_WORLD_HEIGHT;
         while (top > 0 && maage_chunk_get(copy, local_x, top - 1, local_z) == MAAGE_STATE_AIR)
             --top;
         copy->heightmap[local_z * MAAGE_CHUNK_EDGE + local_x] = (unsigned short) top;
         slot->edit_blocks = 1;
     }
-    if (!leaf_flags_only) {
+    if (!flags_only) {
         result = maage_environment_changed(world->environment, world, x, y, z);
         if (!maage_status_failed(result)) result = maage_leaves_changed(world, x, y, z, old_state, new_state);
     }
@@ -1738,6 +1746,101 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
     ++world->stats.mutations;
     return maage_status_failed(result) ? result : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
+/* Reuse ordinary mutations/callbacks in a detached owner view. The halo covers
+ * support/fluid notifications and leaf-to-log neighbor flags. No scheduler runs
+ * here; only the final pointer transfer reaches the authoritative owner. */
+maage_status maage_world_plant_tree(maage_world *world, const maage_tree_plan *plan) {
+    maage_world *staged = NULL;
+    maage_world_slot *slot, *source, *next;
+    maage_chunk *copy = NULL;
+    maage_block_state_id replacement, expected;
+    maage_status result;
+    size_t columns, byte;
+    int cx, cz, x, y, z, first_x, last_x, first_z, last_z;
+    if (!world || !plan || !plan->cells || plan->edge < 1 || plan->height < 1 || plan->height > MAAGE_WORLD_HEIGHT || plan->y < 0 || plan->y > MAAGE_WORLD_HEIGHT - plan->height ||
+        plan->x <= -MAAGE_WORLD_LIMIT + 2 || plan->z <= -MAAGE_WORLD_LIMIT + 2 || plan->edge >= MAAGE_WORLD_LIMIT || plan->x >= MAAGE_WORLD_LIMIT - plan->edge - 2 || plan->z >= MAAGE_WORLD_LIMIT - plan->edge - 2 || world->config.presentation_only || world->stopped || world->failed) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    first_x = maage_world_chunk_coordinate(plan->x - 2);
+    last_x = maage_world_chunk_coordinate(plan->x + plan->edge + 1);
+    first_z = maage_world_chunk_coordinate(plan->z - 2);
+    last_z = maage_world_chunk_coordinate(plan->z + plan->edge + 1);
+    if ((size_t) (last_x - first_x + 1) > (size_t) - 1 / (size_t) (last_z - first_z + 1)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    columns = (size_t) (last_x - first_x + 1) * (size_t) (last_z - first_z + 1);
+    if (columns > UINT_MAX || columns > ~0UL / 9UL || world->clock > ~0UL - (unsigned long) columns * 9UL) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    for (cz = first_z; cz <= last_z; ++cz)
+        for (cx = first_x; cx <= last_x; ++cx)
+            if (!maage_world_complete(maage_world_find(world, cx, cz))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
+    staged = (maage_world *) calloc(1, sizeof(*staged));
+    if (!staged) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    staged->config = world->config;
+    staged->environment = world->environment; /* changed() only reads the clock. */
+    staged->clock = world->clock;
+    staged->cache_limit = (unsigned int) columns;
+    staged->edit_depth = 1;
+    result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
+    for (cz = first_z; cz <= last_z; ++cz)
+        for (cx = first_x; cx <= last_x; ++cx) {
+            source = maage_world_find(world, cx, cz);
+            slot = maage_world_insert(staged, cx, cz);
+            if (!slot) {
+                result = maage_world_status(staged);
+                goto done;
+            }
+            slot->data = source->data; /* Borrowed until this synchronous call ends. */
+            result = maage_chunk_clone(source->edit ? source->edit : source->data->chunk, &copy);
+            if (maage_status_failed(result)) goto done;
+            result = maage_world_snapshot(copy, &slot->edit_publication);
+            if (maage_status_failed(result)) {
+                maage_chunk_destroy(copy);
+                goto done;
+            }
+            slot->edit = copy;
+        }
+    for (y = 0; y < plan->height; ++y)
+        for (z = 0; z < plan->edge; ++z)
+            for (x = 0; x < plan->edge; ++x) {
+                replacement = plan->cells[((size_t) y * plan->edge + z) * plan->edge + x];
+                if (!replacement) continue;
+                expected = maage_world_get(staged, plan->x + x, plan->y + y, plan->z + z);
+                result = maage_world_set(staged, plan->x + x, plan->y + y, plan->z + z, expected, replacement);
+                if (maage_status_failed(result)) goto done;
+            }
+    /* All columns, sections, neighbor queues and publication handles exist.
+     * Replace private owner edits without allocation; ordinary phase commit
+     * publishes them together before any worker, save or Session observation. */
+    for (slot = staged->chunks; slot; slot = slot->next) {
+        source = maage_world_find(world, slot->x, slot->z);
+        if (!source->edit) {
+            source->edit_next = world->edits;
+            world->edits = source;
+        }
+        maage_world_release(source->edit_publication);
+        source->edit_publication = slot->edit_publication;
+        source->edit = slot->edit;
+        slot->edit_publication = NULL;
+        slot->edit = NULL;
+        source->edit_blocks |= slot->edit_blocks;
+        source->edit_states |= slot->edit_states;
+        source->edit_light |= slot->edit_light;
+        for (byte = 0; byte < sizeof(source->light_cells); ++byte) {
+            source->light_cells[byte] |= slot->light_cells[byte];
+            source->transfer_cells[byte] |= slot->transfer_cells[byte];
+        }
+        maage_world_update_membership(world, source);
+    }
+    world->stats.mutations += staged->stats.mutations;
+    if (!world->edit_depth) maage_world_commit_edits(world);
+    result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
+done:
+    for (slot = staged->chunks; slot; slot = next) {
+        next = slot->next;
+        maage_world_release(slot->edit_publication);
+        free(slot);
+    }
+    free(staged->buckets);
+    free(staged);
+    return result;
+}
+
 static maage_world_slot *maage_world_entity_slot(const maage_world *world, int x, int y, int z) {
     maage_world_slot *slot;
     if (!world || y < 0 || y >= MAAGE_WORLD_HEIGHT || x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return NULL;
@@ -1929,7 +2032,7 @@ maage_status maage_world_destroy(maage_world *world) {
     for (slot = world->chunks; slot; slot = next) {
         next = slot->next;
         maage_world_release(slot->data);
-        maage_chunk_destroy(slot->edit);
+        maage_world_release(slot->edit_publication);
         maage_world_release(slot->sent);
         maage_world_release(slot->authority);
         maage_world_mesh_destroy(slot->pending_mesh);
@@ -2081,7 +2184,9 @@ static maage_status maage_world_visual_cell(const maage_world *world, maage_worl
         result = maage_light_provisional_cell(chunk, inputs, world->config.registry, x, y, z);
         if (maage_status_failed(result)) return result;
     }
-    if (before->block_id != MAAGE_BLOCK_LEAVES || after->block_id != MAAGE_BLOCK_LEAVES || (before->metadata & MAAGE_LEAF_SPECIES_MASK) != (after->metadata & MAAGE_LEAF_SPECIES_MASK)) slot->geometry_changed = 1;
+    if (before->block_id != after->block_id ||
+        !((before->block_id == MAAGE_BLOCK_LEAVES && (before->metadata & MAAGE_LEAF_SPECIES_MASK) == (after->metadata & MAAGE_LEAF_SPECIES_MASK)) ||
+          (before->block_id == MAAGE_BLOCK_SAPLING && (before->metadata & 7U) == (after->metadata & 7U)))) slot->geometry_changed = 1;
     if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
         slot->light_changed = 1;

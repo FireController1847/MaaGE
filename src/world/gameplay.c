@@ -76,6 +76,7 @@ unsigned int maage_gameplay_block_material(maage_block_id id) {
     case 145UL:
         return MAAGE_MATERIAL_ANVIL;
     case MAAGE_BLOCK_LEAVES:
+    case MAAGE_BLOCK_SAPLING:
     case MAAGE_BLOCK_TALL_GRASS:
     case MAAGE_BLOCK_DEAD_BUSH:
     case MAAGE_BLOCK_DANDELION:

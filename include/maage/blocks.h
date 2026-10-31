@@ -22,6 +22,7 @@ enum {
     MAAGE_BLOCK_DIRT = 3,
     MAAGE_BLOCK_COBBLESTONE = 4,
     MAAGE_BLOCK_PLANKS = 5,
+    MAAGE_BLOCK_SAPLING = 6,
     MAAGE_BLOCK_BEDROCK = 7,
     MAAGE_BLOCK_WATER = 9,
     MAAGE_BLOCK_LAVA = 11,
@@ -66,6 +67,7 @@ enum {
     MAAGE_STATE_DIRT = 3,
     MAAGE_STATE_COBBLESTONE = 4,
     MAAGE_STATE_PLANKS = 5,
+    MAAGE_STATE_SAPLING = 6,
     MAAGE_STATE_BEDROCK = 7,
     MAAGE_STATE_WATER = 9,
     MAAGE_STATE_LAVA = 11,
@@ -106,6 +108,9 @@ enum {
     MAAGE_STATE_LOG_Z_BASE = 283,
     MAAGE_STATE_SPRUCE_PLANKS = 286,
     MAAGE_STATE_BIRCH_PLANKS = 287,
+    MAAGE_STATE_SPRUCE_SAPLING = 288,
+    MAAGE_STATE_BIRCH_SAPLING = 289,
+    MAAGE_STATE_GROWING_SAPLING_BASE = 590, /* Oak/spruce/birch, growth-stage bit 8. */
     MAAGE_STATE_WATER_FLOW_BASE = 512,
     MAAGE_STATE_LAVA_FLOW_BASE = 528,
     MAAGE_STATE_CACTUS_AGE_BASE = 544, /* Ages 1..15; age zero is CACTUS. */
@@ -121,6 +126,8 @@ enum {
 /* Oak/spruce/birch, with all four flag combinations. Direct numeric mapping;
  * unsupported species/metadata fail explicitly. */
 maage_status maage_block_leaves_state(unsigned int metadata, maage_block_state_id *state);
+/* Species 0..2 plus stage bit 8; unsupported metadata fails explicitly. */
+maage_status maage_block_sapling_state(unsigned int metadata, maage_block_state_id *state);
 enum {
     MAAGE_BLOCK_MESH_CUBE = 0,
     MAAGE_BLOCK_MESH_CROSS = 1,

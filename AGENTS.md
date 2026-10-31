@@ -216,6 +216,8 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   aggregate work. Simulation square defaults to radius 8, independent of rendering/cache.
   Eligibility counts and immutable callbacks avoid sampling scans. Coordinate, behavior
   and weather RNG streams/checkpoints remain separate and never reseed on resume.
+  Saplings retain species/stage metadata and grow through shared tree features with
+  complete detached placement preflight; absent terrain defers growth.
   Preserve numeric leaf species/persistent/check flags, bounded connected log support,
   unavailable-neighborhood deferral and capacity-preflighted drops; no immediate leaf
   deletion on log removal. Details: [random ticks](docs/random-block-ticks.md).

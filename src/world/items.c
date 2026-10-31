@@ -214,6 +214,7 @@ static maage_status maage_item_oriented_placement(const maage_item_definition *i
     } else {
         species = metadata & 3U;
         if (species > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+        if (item->block_id == MAAGE_BLOCK_SAPLING) return maage_block_sapling_state(species, state);
         if (item->block_id == MAAGE_BLOCK_PLANKS) *state = species ? MAAGE_STATE_SPRUCE_PLANKS + species - 1 : MAAGE_STATE_PLANKS;
         else if (item->block_id == MAAGE_BLOCK_LEAVES) return maage_block_leaves_state(species | MAAGE_LEAF_PERSISTENT, state);
         else if (face / 2 == 0) *state = MAAGE_STATE_LOG_X_BASE + species;
@@ -301,7 +302,13 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
                 item.durability = 238;
                 item.tool_class = MAAGE_TOOL_SHEARS;
             }
-            if (item.id == MAAGE_ITEM_SAPLING) item.max_metadata = 2;
+            if (item.id == MAAGE_ITEM_SAPLING) {
+                item.max_metadata = 2;
+                item.has_block = 1;
+                item.block_id = MAAGE_BLOCK_SAPLING;
+                item.placement_state_id = item.icon_state_id = MAAGE_STATE_SAPLING;
+                item.placement = maage_item_oriented_placement;
+            }
             if (item.id == MAAGE_ITEM_COAL) item.max_metadata = 1;
             if (item.id == MAAGE_ITEM_APPLE) {
                 item.food_hunger = 4;
@@ -514,6 +521,7 @@ maage_status maage_item_generate_drops(const maage_block_registry *blocks, const
     case MAAGE_BLOCK_GRAVEL:
         if (!maage_drop_random(random, 10)) stack->item_id = MAAGE_ITEM_FLINT;
         break;
+    case MAAGE_BLOCK_SAPLING:
     case MAAGE_BLOCK_PLANKS:
     case MAAGE_BLOCK_LOG:
         stack->metadata = state->metadata & 3U;

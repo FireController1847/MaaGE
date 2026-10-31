@@ -38,6 +38,7 @@ maage_status maage_support_rule(const maage_world *world, int x, int y, int z, c
     result = maage_support_block(world, x, y - 1, z, &below, &block);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     switch (state->block_id) {
+    case MAAGE_BLOCK_SAPLING:
     case MAAGE_BLOCK_TALL_GRASS:
     case MAAGE_BLOCK_DANDELION:
     case MAAGE_BLOCK_POPPY:

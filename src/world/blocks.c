@@ -408,3 +408,10 @@ maage_status maage_block_registry_resolve_state(const maage_block_registry *regi
     *id = registry->state_buckets[bucket]->definition.id;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
 }
+
+maage_status maage_block_sapling_state(unsigned int metadata, maage_block_state_id *state) {
+    unsigned int species = metadata & 7U;
+    if (!state || (metadata & ~15U) || species > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    *state = metadata & 8U ? MAAGE_STATE_GROWING_SAPLING_BASE + species : (species ? MAAGE_STATE_SPRUCE_SAPLING + species - 1 : MAAGE_STATE_SAPLING);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}

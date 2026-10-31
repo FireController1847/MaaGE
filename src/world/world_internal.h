@@ -72,6 +72,7 @@ maage_status maage_chunk_support_initialize(maage_chunk *chunk, const maage_bloc
 maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
+maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_bush(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_snow(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
 maage_status maage_random_tick_ice(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context);
@@ -117,6 +118,14 @@ maage_status maage_generation_carve(maage_generation_context *context);
 maage_status maage_generation_underground(maage_generation_context *context);
 maage_status maage_generation_decorate(maage_generation_context *context);
 maage_status maage_generation_vegetation(maage_generation_context *context);
+/* Dense, bounded feature plan; zero cells are untouched, never air removals. */
+typedef struct maage_tree_plan {
+    int x, y, z, edge, height;
+    maage_block_state_id *cells;
+} maage_tree_plan;
+maage_status maage_generation_grow_tree(maage_world *world, int x, int y, int z, unsigned int species, int large, unsigned long random, int *attempted);
+/* Owner preflight on detached columns, then allocation-free publication. */
+maage_status maage_world_plant_tree(maage_world *world, const maage_tree_plan *plan);
 maage_status maage_generation_structures(maage_generation_context *context);
 int maage_generation_spawn_clear(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z);
 int maage_generation_spawn_floor(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y);

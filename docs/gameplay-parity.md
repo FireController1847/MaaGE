@@ -261,6 +261,7 @@ Loading/generation schedules validation to catch edits missed while absent.
 
 | Block | Survival Rule | Automatic Support-Loss Drop |
 | --- | --- | --- |
+| Saplings | Grass block or dirt below | Matching sapling species, without its growth-stage bit. |
 | Dandelion, poppy, tall grass | Grass block or dirt below | Flower itself; tall grass has a 1/8 seed chance. |
 | Dead bush | Sand or dirt below | None without shears. |
 | Floor/wall torch | Metadata-selected full solid supporting face | Torch with normalized item metadata. |

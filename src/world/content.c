@@ -241,6 +241,27 @@ static maage_status maage_content_blocks_create(const maage_content_config *conf
     for (i = 0; i < MAAGE_BIOME_COUNT; ++i) {
         if (!biomes->builtin_names[i] || maage_status_failed(result = maage_content_register_state(registry, config, MAAGE_STATE_BIOME_GRASS(i), MAAGE_BLOCK_GRASS, (unsigned int) i + 1, MAAGE_CONTENT_TEXTURE_GRASS_TOP))) goto failed;
     }
+    memset(&block, 0, sizeof(block));
+    block.id = MAAGE_BLOCK_SAPLING;
+    block.mesh_shape = MAAGE_BLOCK_MESH_CROSS;
+    block.selectable = block.replaceable = block.use_neighbor_brightness = 1;
+    block.drop_item_id = MAAGE_ITEM_SAPLING;
+    block.drop_count = 1;
+    block.random_tick = maage_random_tick_sapling;
+    block.survives = maage_support_rule;
+    block.selection_shape.minimum[0] = block.selection_shape.minimum[2] = 0.1;
+    block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 0.9;
+    block.selection_shape.maximum[1] = 0.8;
+    result = maage_block_registry_register_block(registry, "minecraft:sapling", &block);
+    if (maage_status_failed(result)) goto failed;
+    for (flags = 0; flags < 2; ++flags)
+        for (species = 0; species < 3; ++species) {
+            unsigned int metadata = (unsigned int) species | (flags ? 8U : 0U);
+            int texture = MAAGE_CONTENT_TEXTURE_ITEMS + (species ? 25 + species : 23);
+            result = maage_block_sapling_state(metadata, &leaf_state);
+            if (!maage_status_failed(result)) result = maage_content_register_state(registry, config, leaf_state, MAAGE_BLOCK_SAPLING, metadata, texture);
+            if (maage_status_failed(result)) goto failed;
+        }
     if (maage_status_failed(result = maage_block_registry_finalize(registry))) goto failed;
     *output = registry;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);

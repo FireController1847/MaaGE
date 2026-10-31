@@ -422,7 +422,7 @@ maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_r
     for (i = 0; i < maage_item_registry_count(items); ++i) {
         item = maage_item_registry_at(items, i);
         variants = (size_t) item->max_metadata + 1;
-        if (!variants || variants > (size_t) -1 / sizeof(*creative) - count) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
+        if (!variants || variants > (size_t) - 1 / sizeof(*creative) - count) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
         count += variants;
     }
     creative = (maage_item_stack *) calloc(count, sizeof(*creative));
