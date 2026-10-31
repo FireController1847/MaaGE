@@ -46,12 +46,29 @@ maage_status maage_biome_registry_init(maage_biome_registry *registry) {
         definition->rainfall = parameters[id][3];
         definition->surface = MAAGE_STATE_BIOME_GRASS(id);
         definition->filler = MAAGE_STATE_DIRT;
+        definition->decoration.lakes = 1.0;
+        definition->decoration.grass = 0.25;
+        definition->decoration.flowers = 1.0 / 97.0;
         if (id == MAAGE_BIOME_DESERT) {
             definition->surface = MAAGE_STATE_SAND;
             definition->filler = MAAGE_STATE_SAND;
+            definition->decoration.grass = definition->decoration.flowers = 0;
+            definition->decoration.dead_bushes = 1.0 / 43.0;
+            definition->decoration.cacti = 1.0 / 64.0;
         } else if (id == MAAGE_BIOME_OCEAN) {
             definition->surface = MAAGE_STATE_GRAVEL;
             definition->filler = MAAGE_STATE_DIRT;
+            definition->aquatic = 1;
+            memset(&definition->decoration, 0, sizeof(definition->decoration));
+        } else if (id == MAAGE_BIOME_FOREST) {
+            definition->decoration.trees[0] = 0.64;
+            definition->decoration.trees[2] = 0.16;
+            definition->decoration.mushrooms = 1.0 / 73.0;
+        } else if (id == MAAGE_BIOME_TAIGA) definition->decoration.trees[1] = 0.70;
+        else if (id == MAAGE_BIOME_PLAINS) definition->decoration.trees[0] = 0.04;
+        else if (id == MAAGE_BIOME_HILLS) {
+            definition->decoration.trees[0] = 0.09;
+            definition->decoration.emeralds = 1.0;
         }
         for (component = 0; component < 3; ++component) {
             definition->grass_color[component] = 1.0f;
@@ -127,10 +144,21 @@ maage_status maage_biome_registry_register(maage_biome_registry *registry, const
 }
 static int maage_biome_valid(const maage_biome_definition *definition) {
     unsigned int component;
+    const maage_biome_decoration *decoration = &definition->decoration;
+    double trees = 0;
     if (!(definition->base_height >= 1.0 && definition->base_height <= 240.0) ||
         !(definition->variation >= 0.0 && definition->variation <= 120.0) ||
         !(definition->temperature >= 0.0 && definition->temperature <= 2.0) ||
-        !(definition->rainfall >= 0.0 && definition->rainfall <= 1.0)) return 0;
+        !(definition->rainfall >= 0.0 && definition->rainfall <= 1.0) ||
+        (definition->aquatic != 0 && definition->aquatic != 1) ||
+        !(decoration->grass >= 0 && decoration->grass <= 1) || !(decoration->flowers >= 0 && decoration->flowers <= 1) ||
+        !(decoration->dead_bushes >= 0 && decoration->dead_bushes <= 1) || !(decoration->cacti >= 0 && decoration->cacti <= 1) ||
+        !(decoration->mushrooms >= 0 && decoration->mushrooms <= 1) || !(decoration->emeralds >= 0 && decoration->emeralds <= 1) || !(decoration->lakes >= 0 && decoration->lakes <= 1)) return 0;
+    for (component = 0; component < 3; ++component) {
+        if (!(decoration->trees[component] >= 0 && decoration->trees[component] <= 1)) return 0;
+        trees += decoration->trees[component];
+    }
+    if (trees > 1) return 0;
     for (component = 0; component < 3; ++component)
         if (!(definition->grass_color[component] >= 0.0f &&
               definition->grass_color[component] <= 1.0f &&

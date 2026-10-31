@@ -1108,7 +1108,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->cache_limit = cache_limit;
     world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
-    if (config->new_world && maage_status_failed(maage_generation_spawn(config->seed, config->biomes, &policy, world->spawn))) {
+    if (config->new_world && maage_status_failed(maage_generation_spawn(config->seed, config->registry, config->biomes, &policy, world->spawn))) {
         maage_entities_destroy(world->entities);
         free(world);
         goto invalid_spawn;

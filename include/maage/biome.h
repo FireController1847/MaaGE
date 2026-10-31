@@ -14,10 +14,21 @@ extern "C" {
 #define MAAGE_STATE_BIOME_GRASS_BASE 256UL
 #define MAAGE_STATE_BIOME_GRASS(id) (MAAGE_STATE_BIOME_GRASS_BASE + (id))
 typedef unsigned int maage_biome_id;
+/* Generation probabilities, independent of Client color blending. Trees are
+ * oak/spruce/birch probabilities per jittered eight-block candidate; their sum
+ * is at most one. Other densities are per eligible decoration/feature attempt.
+ * Zero disables a feature. Finalization validates every probability. */
+typedef struct maage_biome_decoration {
+    double trees[3];
+    double grass, flowers, dead_bushes, cacti, mushrooms;
+    double emeralds, lakes;
+} maage_biome_decoration;
 typedef struct maage_biome_definition {
     maage_biome_id id;
     double base_height, variation, temperature, rainfall;
     maage_block_state_id surface, filler;
+    int aquatic; /* Excludes seabed material from dry-land surface transitions. */
+    maage_biome_decoration decoration;
     float grass_color[3], foliage_color[3];
 } maage_biome_definition;
 typedef struct maage_biome_registry {
