@@ -52,7 +52,7 @@ typedef struct maage_player_input {
 
 /* Owner-thread contracted body observation, shared by movement and gameplay. */
 unsigned int maage_player_fluid(const maage_player *player, const maage_world *world);
-/* Eye threshold is below the nominal surface; body contact is independent. */
+/* Classic eye threshold adds 1/9 to nominal fluid height; body contact is independent. */
 int maage_player_submerged(const maage_player *player, const maage_world *world);
 maage_status maage_player_spawn(maage_player *player, const maage_world *world);
 /* Exactly one 20 TPS tick. Caller accumulates wall time and caps catch-up work.

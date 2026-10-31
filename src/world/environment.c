@@ -368,6 +368,25 @@ static maage_status maage_environment_schedule(maage_environment *environment, m
     maage_environment_due(&environment->state, delay, &low, &high);
     return maage_world_schedule_update(world, x, y, z, MAAGE_BLOCK_UPDATE_FLUID, low, high);
 }
+/* Contact solidification must not wait for lava's ordinary spreading delay.
+ * Keep the mutation in the bounded scheduled owner phase, outside this hook. */
+static unsigned int maage_environment_change_delay(maage_world *world, const maage_block_state_definition *state, int x, int y, int z) {
+    static const int offsets[5][3] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}};
+    const maage_block_state_definition *neighbor;
+    unsigned int side;
+    int nx, ny, nz;
+    if (state->fluid_kind != MAAGE_FLUID_LAVA) return 5;
+    if (state->fluid_level > 4) return 30;
+    for (side = 0; side < 5; ++side) {
+        nx = x + offsets[side][0];
+        ny = y + offsets[side][1];
+        nz = z + offsets[side][2];
+        if (!maage_environment_loaded(world, nx, ny, nz)) continue;
+        neighbor = maage_environment_fluid(world, nx, ny, nz);
+        if (neighbor && neighbor->fluid_kind == MAAGE_FLUID_WATER) return 1;
+    }
+    return 30;
+}
 maage_status maage_environment_changed(maage_environment *environment, maage_world *world, int x, int y, int z) {
     static const int directions[7][3] = {{0, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_block_state_definition *state;
@@ -382,7 +401,7 @@ maage_status maage_environment_changed(maage_environment *environment, maage_wor
         if (!maage_environment_loaded(world, nx, ny, nz)) continue;
         state = maage_environment_fluid(world, nx, ny, nz);
         if (state) {
-            result = maage_environment_schedule(environment, world, nx, ny, nz, state->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U);
+            result = maage_environment_schedule(environment, world, nx, ny, nz, maage_environment_change_delay(world, state, nx, ny, nz));
             if (maage_status_failed(result)) return result;
         }
     }
@@ -583,7 +602,11 @@ maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_
         }
         chunk->updates_relative = 0;
     }
-    for (y = 0; y < MAAGE_WORLD_HEIGHT; ++y)
+    for (y = 0; y < MAAGE_WORLD_HEIGHT; ++y) {
+        if (!chunk->sections[y / 16]) {
+            y += 15;
+            continue;
+        }
         for (z = 0; z < 16; ++z)
             for (x = 0; x < 16; ++x) {
                 state = maage_block_registry_state(blocks, maage_chunk_get(chunk, x, y, z));
@@ -610,6 +633,7 @@ maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_
                 result = maage_chunk_schedule_update(chunk, &update);
                 if (maage_status_failed(result)) return result;
             }
+    }
     chunk->environment_initialized = 1;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
 }

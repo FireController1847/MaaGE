@@ -103,30 +103,18 @@ static int entity_loaded(const maage_world *world, const maage_entity *entity) {
 }
 static void entity_move(maage_entity *entity, const maage_world *world) {
     const maage_block_state_definition *state;
-    int x = (int) floor(entity->position[0]), y = (int) floor(entity->position[1]), z = (int) floor(entity->position[2]);
-    double vertical, drag;
-    state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y, z));
-    entity->velocity[1] -= 0.04;
-    /* 1.7.10 items sink. Flow adds a bounded horizontal current; surface
-     * levels use the same numeric fluid states as the environment. */
-    if (state && state->fluid_kind == MAAGE_FLUID_WATER) {
-        static const int dx[4] = {-1, 1, 0, 0}, dz[4] = {0, 0, -1, 1};
-        const maage_block_state_definition *neighbor;
-        double flow[2] = {0, 0}, length, level;
-        unsigned int side;
-        for (side = 0; side < 4; ++side) {
-            neighbor = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x + dx[side], y, z + dz[side]));
-            if (!neighbor || neighbor->fluid_kind != MAAGE_FLUID_WATER) continue;
-            level = (double) (neighbor->fluid_level & 7U) - (double) (state->fluid_level & 7U);
-            flow[0] += dx[side] * level;
-            flow[1] += dz[side] * level;
-        }
-        length = sqrt(flow[0] * flow[0] + flow[1] * flow[1]);
-        if (length > 0) {
-            entity->velocity[0] += flow[0] / length * 0.014;
-            entity->velocity[2] += flow[1] / length * 0.014;
-        }
+    double vertical, drag, minimum[3], maximum[3], current[3];
+    unsigned int axis;
+    for (axis = 0; axis < 3; ++axis) {
+        minimum[axis] = entity->position[axis] - (axis == 1 ? 0 : 0.125);
+        maximum[axis] = minimum[axis] + 0.25;
     }
+    /* Item water motion retains ordinary gravity/drag and has no buoyancy.
+     * Observe the whole small body, including a current across a cell edge. */
+    if (maage_world_fluid_volume(world, minimum, maximum, MAAGE_FLUID_WATER, current))
+        for (axis = 0; axis < 3; ++axis)
+            entity->velocity[axis] += current[axis] * MAAGE_PLAYER_CURRENT_IMPULSE;
+    entity->velocity[1] -= 0.04;
     vertical = entity->velocity[1];
     entity->grounded = maage_world_sweep_body(world, entity->position, entity->velocity, 0.25, 0.25, 1, vertical) && vertical < 0;
     maage_world_sweep_body(world, entity->position, entity->velocity, 0.25, 0.25, 0, entity->velocity[0]);

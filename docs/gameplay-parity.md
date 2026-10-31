@@ -207,8 +207,8 @@ before water replaces it. Water never displaces lava; water beside/above lava
 forms obsidian for sources and cobblestone only at levels 1–4, while lava falling
 into water forms stone. Comprehensive lava behavior remains outside this pass.
 
-Survival breathing uses the eye threshold below the fluid surface, independently
-of leg/body contact. Air starts at 300 owner ticks, decreases once per unpaused
+Survival breathing uses the classic eye threshold (nominal fluid height plus
+1/9 block), independently of leg/body contact. Air starts at 300 owner ticks, decreases once per unpaused
 tick underwater, and at −20 resets to zero and deals two damage through the
 existing environmental damage path. Surfacing restores 300 immediately; Creative,
 death and respawn reset breath. There are no enchantment/potion protections yet.
@@ -217,6 +217,15 @@ without conversion. Protocol 15 copies air and eye immersion in ordinary snapsho
 The Survival HUD draws up to ten filled/popping bubbles above hunger from the latest
 air value; it needs no per-bubble events. GUI scale and the accepted health/hunger
 alignment are unchanged.
+
+Entry splashes retain transition gating and weighted incoming speed. Swimming
+cues use incoming tick velocity, including vertical motion while grounded, on
+the existing travel cadence. No special exit sound is added. Flow ambience keeps
+its bounded 20 Hz local trials, levels 1–7, 1/64 chance, volume 0.75–1 and pitch
+0.5–1.5; unavailable columns are excluded. There is no general particle emitter
+or billboard lifetime pool yet. Entry splash/bubble bursts, drowning bubbles,
+suspended water motes and underside drips remain absent; the existing pickup and
+weather decorations do not provide that subsystem.
 
 ## Neighbor Support
 
@@ -266,3 +275,22 @@ Checks below are pending; repeat presentation work on Metal and Vulkan.
   instant-break plants and break consecutive blocks; compare both perspectives.
 - Remove each support type, inspect cascading quantities/metadata/chances, save
   and reopen near unavailable boundaries, and distinguish natural/placed leaves.
+
+Pending water gameplay review (no scenarios have been run):
+
+- Swimming: shallow/deep entry, partial immersion, horizontal motion and release,
+  upward swimming, passive/crouched descent, surface balance, wall/ceiling/channel
+  collision, ledge exit, opposed/unopposed currents, high falls into water, and
+  ordinary walking/jumping/sprinting/flight after exit.
+- Fluids: flat sources, nearby drops/obstacles, source removal/decay, terrain
+  break/place/block/unblock, supported two-source regeneration, lava contact,
+  boundary flow, and unload/reload of active streams.
+- Breathing: full depletion, repeated two-damage intervals, immediate resurfacing
+  recovery, reentry, drowning death/respawn and Creative immunity.
+- Items: still/flowing water sinking, falling currents, bottom rest, air transitions,
+  submerged pickup, normal pickup delay and expiry.
+- Presentation: entry/exit fog/FOV/overlay, ten-bubble HUD at several GUI scales,
+  still/flow animations, roofs/waterfalls/transparent neighbors, chunk seams and
+  rapid adjacent edits on Metal, Vulkan and modern OpenGL where available.
+- Audio: entry splash, swimming and exit, flowing ambience, pause/resume and
+  repeated small surface contacts without excessive repeated sounds.

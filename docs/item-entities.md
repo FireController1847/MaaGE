@@ -13,7 +13,10 @@ The Server advances entities once per unpaused 20 TPS step. The player and items
 share swept AABB collision against registered block shapes. Items use a 0.25-block
 body, gravity 0.04/tick, drag 0.98, ordinary ground friction 0.588 and ice friction
 0.9604. Floor impacts settle without a physical rebound; removing support resumes falling. Water items
-sink and receive a bounded current derived from neighboring numeric fluid levels.
+sink with the same gravity and drag as air. Their complete AABB receives the same
+normalized 0.014 current impulse as players, including openings below adjacent
+non-solid material and downward currents beside falling-water walls. There is no
+upward buoyancy or modern floating-item behavior.
 Presentation bobbing/spin never feeds back into physics.
 
 Mined drops have a ten-tick pickup delay. Q drops one selected item and Control-Q

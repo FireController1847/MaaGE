@@ -196,6 +196,16 @@ upward takeoff, airborne motion and Creative flight bypass the guard. Unknown
 terrain retains the World collision contract. This uses registered collision
 geometry; slab/stair content and multibox shapes are not introduced here.
 
+Fluid surfaces retain shared four-cell weighted corner heights and numeric
+still/flow animations. Player, item and texture orientation now share the same
+flow observation, including downward openings and falling-water wall currents.
+Non-solid material lowers exposed corners; same-fluid internal faces stay hidden.
+Top faces remain visible under opaque roofs, and stacked falling-fluid sides meet
+without a per-cell vertical slit. Fluid light takes the brighter channels from
+the sampled cell and the cell above, without solid-cube AO. Existing async mesh
+jobs, local prediction patches, transparency sorting and retained GPU presentation
+remain in use; no separate fluid mesher or synchronous relight is introduced.
+
 ## Underwater Presentation
 
 Client replica surfaces at the interpolated camera select water presentation.

@@ -465,7 +465,6 @@ static maage_status maage_gl_frame_render(maage_renderer *renderer, const maage_
     maage_gl_mesh_passes(native, plan, 0, native->slot);
     if (plan->panorama_count) {
         maage_gl_pass(native, frame->panorama[0].framebuffer, renderer->clear, 0);
-        if (plan->layers[1] && plan->layers[1]->after_foreground) maage_gl_ui_draw(native, &frame->ui[1], plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
         maage_gl_ui_draw(native, &frame->ui[2], plan->layers[2], 0, plan->panorama_count, 1);
         maage_gl_pass(native, frame->panorama[1].framebuffer, renderer->clear, 0);
         maage_gl_fullscreen(native, frame->panorama[0].color, 1.0f / state->framebuffer_width, 0, 1);

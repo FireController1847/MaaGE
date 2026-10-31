@@ -852,7 +852,6 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
     if (plan->panorama_count) {
         vkCmdEndRenderPass(flight->command);
         maage_vulkan_pass_begin(renderer, flight->command, gpu->color_pass, frame->panorama_framebuffer[0]);
-        if (plan->layers[1] && plan->layers[1]->after_foreground) maage_vulkan_ui_draw(native, flight->command, frame, 1, plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
         maage_vulkan_ui_draw(native, flight->command, frame, 2, plan->layers[2], 0, plan->panorama_count, 1);
         vkCmdEndRenderPass(flight->command);
         maage_vulkan_pass_begin(renderer, flight->command, gpu->color_pass, frame->panorama_framebuffer[1]);

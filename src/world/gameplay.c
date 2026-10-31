@@ -697,7 +697,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
         if ((travel > 0.0 || dy != 0.0) && game->footstep_distance > 1.0 && surface) {
             game->footstep_distance -= floor(game->footstep_distance);
             if (in_water) {
-                strength = sqrt((dx * dx + dz * dz) * 0.2 + (player->grounded ? 0.0 : (player->position[1] - previous[1]) * (player->position[1] - previous[1]))) * 0.35;
+                strength = sqrt((velocity[0] * velocity[0] + velocity[2] * velocity[2]) * 0.2 + velocity[1] * velocity[1]) * 0.35;
                 if (strength > 1.0) strength = 1.0;
                 maage_gameplay_sound(&sink, MAAGE_SOUND_PLAYER_SWIM, MAAGE_MATERIAL_WATER, player->position[0], player->position[1], player->position[2], strength, maage_gameplay_sound_pitch(game, 0.4));
             }

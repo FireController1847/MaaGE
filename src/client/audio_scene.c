@@ -342,7 +342,7 @@ static maage_status sc_observe(maage_client_audio_scene *scene, const maage_worl
         x = px + (int) sc_bounded(scene, 16) - (int) sc_bounded(scene, 16);
         y = py + (int) sc_bounded(scene, 16) - (int) sc_bounded(scene, 16);
         z = pz + (int) sc_bounded(scene, 16) - (int) sc_bounded(scene, 16);
-        if (y < 0 || y >= MAAGE_WORLD_HEIGHT) continue;
+        if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
         state = maage_block_registry_state(registry, maage_world_get(visual, x, y, z));
         if (!state) continue;
         if (state->fluid_kind == MAAGE_FLUID_WATER && state->fluid_level > 0 && state->fluid_level < 8) {

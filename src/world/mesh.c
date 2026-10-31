@@ -116,6 +116,30 @@ static void maage_mesh_lighting(const maage_block_registry *registry, const maag
     }
 }
 
+/* Fluid brightness takes the brighter channel from a cell and the one above,
+ * independently of corner AO. This also lights top faces beneath opaque roofs. */
+static void maage_mesh_fluid_lighting(const maage_block_registry *registry, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int y, int z, unsigned int face, unsigned int emission, maage_mesh_illumination *output) {
+    unsigned char own, base, above;
+    unsigned int sky, block, corner;
+    int opaque, sx = x, sy = y, sz = z;
+    own = maage_chunk_presentation_light(chunk, registry, x, y, z);
+    if (face != MAAGE_FACE_POSITIVE_Y) {
+        sx += maage_face_neighbor[face][0];
+        sy += maage_face_neighbor[face][1];
+        sz += maage_face_neighbor[face][2];
+    }
+    base = maage_mesh_sample(registry, chunk, neighbors, sx, sy, sz, own, &opaque);
+    above = maage_mesh_sample(registry, chunk, neighbors, sx, sy + 1, sz, base, &opaque);
+    sky = (base >> 4) > (above >> 4) ? base >> 4 : above >> 4;
+    block = (base & 15U) > (above & 15U) ? base & 15U : above & 15U;
+    if (block < emission) block = emission;
+    for (corner = 0; corner < 4; ++corner) {
+        output->light[corner][0] = sky / 15.0f;
+        output->light[corner][1] = block / 15.0f;
+        output->occlusion[corner] = 1;
+    }
+}
+
 static void maage_mesh_biome_colors(const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int z, float colors[4][3]) {
     const maage_chunk *sample;
     const maage_biome_definition *biome;
@@ -167,7 +191,7 @@ static float maage_mesh_fluid_height(const maage_block_registry *registry, const
                 total += weight;
             } else {
                 block = state ? maage_block_registry_block(registry, state->block_id) : NULL;
-                if (block && !block->solid) {
+                if (block && !block->material_solid) {
                     depth += 1;
                     ++total;
                 }
@@ -177,37 +201,23 @@ static float maage_mesh_fluid_height(const maage_block_registry *registry, const
 }
 
 static void maage_mesh_fluid_flow(const maage_block_registry *registry, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int y, int z, const maage_block_state_definition *current, float flow[2]) {
-    static const unsigned int faces[4] = {0, 1, 4, 5};
+    static const int dx[4] = {-1, 1, 0, 0}, dz[4] = {0, 0, -1, 1};
     const maage_chunk *sample;
-    const maage_block_state_definition *state;
-    const maage_block_definition *block;
-    int side, sx, sz, level, difference;
-    float length;
-    flow[0] = flow[1] = 0;
-    level = current->fluid_level & 8 ? 0 : (int) current->fluid_level;
+    const maage_block_state_definition *sides[4], *below[4], *above[4];
+    int side, sx, sz;
+    double vector[3], length;
     for (side = 0; side < 4; ++side) {
-        sx = x + maage_face_neighbor[faces[side]][0];
-        sz = z + maage_face_neighbor[faces[side]][2];
+        sx = x + dx[side];
+        sz = z + dz[side];
         sample = maage_mesh_neighbor(chunk, neighbors, &sx, &sz);
-        if (!sample) continue;
-        state = maage_block_registry_state(registry, maage_chunk_get(sample, sx, y, sz));
-        if (!state) continue;
-        if (state->fluid_kind == current->fluid_kind) difference = (state->fluid_level & 8 ? 0 : (int) state->fluid_level) - level;
-        else {
-            block = maage_block_registry_block(registry, state->block_id);
-            if (!block || block->solid) continue;
-            state = maage_block_registry_state(registry, maage_chunk_get(sample, sx, y - 1, sz));
-            if (!state || state->fluid_kind != current->fluid_kind) continue;
-            difference = (state->fluid_level & 8 ? 0 : (int) state->fluid_level) - level + 8;
-        }
-        flow[0] += maage_face_neighbor[faces[side]][0] * difference;
-        flow[1] += maage_face_neighbor[faces[side]][2] * difference;
+        sides[side] = sample ? maage_block_registry_state(registry, maage_chunk_get(sample, sx, y, sz)) : NULL;
+        below[side] = sample ? maage_block_registry_state(registry, maage_chunk_get(sample, sx, y - 1, sz)) : NULL;
+        above[side] = sample ? maage_block_registry_state(registry, maage_chunk_get(sample, sx, y + 1, sz)) : NULL;
     }
-    length = (float) sqrt(flow[0] * flow[0] + flow[1] * flow[1]);
-    if (length > 0) {
-        flow[0] /= length;
-        flow[1] /= length;
-    }
+    maage_block_fluid_flow(registry, current, sides, below, above, vector);
+    length = sqrt(vector[0] * vector[0] + vector[2] * vector[2]);
+    flow[0] = length > 0 ? (float) (vector[0] / length) : 0;
+    flow[1] = length > 0 ? (float) (vector[2] / length) : 0;
 }
 
 static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, size_t face_index, int x, int y, int z, unsigned int face, const maage_block_face_definition *definition, const float uv[4], const maage_block_shape *shape, unsigned int model, unsigned int metadata, int log_axis, float material, const float tint[3], const float animation[3], const float fluid_heights[4], const float fluid_flow[2], const maage_mesh_illumination *illumination) {
@@ -235,7 +245,7 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
         point = model == MAAGE_BLOCK_MESH_CROSS ? cross_corners[face][corner] : maage_face_corners[face][corner];
         for (component = 0; component < 3; ++component)
             local[component] = (float) (shape->minimum[component] + point[component] * (shape->maximum[component] - shape->minimum[component]));
-        if (fluid_heights && point[1]) local[1] = fluid_heights[point[0] + 2 * point[2]] - 0.001f;
+        if (fluid_heights && point[1]) local[1] = fluid_heights[point[0] + 2 * point[2]];
         ao = illumination->occlusion[corner];
         light[0] = illumination->light[corner][0];
         light[1] = illumination->light[corner][1];
@@ -396,12 +406,14 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                         shape.minimum[0] = shape.minimum[2] = 0;
                         shape.maximum[0] = shape.maximum[2] = 1;
                     }
+                    above = maage_block_registry_state(registry, maage_chunk_get(chunk, x, y + 1, z));
                     if (vertices && state->fluid_kind) {
-                        for (axis = 0; axis < 4; ++axis)
+                        for (axis = 0; axis < 4; ++axis) {
                             fluid_heights[axis] = maage_mesh_fluid_height(registry, chunk, neighbors, x + (axis & 1), y, z + (axis >> 1), state->fluid_kind);
+                            if (!above || above->fluid_kind != state->fluid_kind) fluid_heights[axis] -= 0.001f;
+                        }
                         maage_mesh_fluid_flow(registry, chunk, neighbors, x, y, z, state, fluid_flow);
                     }
-                    above = maage_block_registry_state(registry, maage_chunk_get(chunk, x, y + 1, z));
                     snowed = above && above->block_id == MAAGE_BLOCK_SNOW;
                     colors_ready = 0;
                     log_axis = state->block_id == MAAGE_BLOCK_LOG ? ((state->metadata & 12) == 4 ? 0 : ((state->metadata & 12) == 8 ? 2 : 1)) : -1;
@@ -421,7 +433,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                             face_shape.minimum[axis] = face_shape.maximum[axis] = face & 1 ? 0.9375 : 0.0625;
                             boundary = 0;
                         }
-                        if (boundary && (block->opaque || (mode == MAAGE_LEAVES_FAST && neighbor->block_id == MAAGE_BLOCK_LEAVES))) continue;
+                        if (boundary && (!state->fluid_kind || face != MAAGE_FACE_POSITIVE_Y) && (block->opaque || (mode == MAAGE_LEAVES_FAST && neighbor->block_id == MAAGE_BLOCK_LEAVES))) continue;
                         if (boundary && state->block_id == MAAGE_BLOCK_ICE && neighbor->block_id == MAAGE_BLOCK_ICE) continue;
                         if (state->block_id == MAAGE_BLOCK_LEAVES && neighbor->block_id == MAAGE_BLOCK_LEAVES && boundary) {
                             if (mode == MAAGE_LEAVES_FAST) continue;
@@ -453,7 +465,8 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                                 colors_ready = 1;
                             }
                             smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && state->block_id != MAAGE_BLOCK_CACTUS;
-                            maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary, smooth, current->emitted_light, &illumination);
+                            if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, current->emitted_light, &illumination);
+                            else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary, smooth, current->emitted_light, &illumination);
                             maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
                             if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], NULL, NULL, NULL, &illumination);
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));

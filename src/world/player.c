@@ -102,7 +102,7 @@ unsigned int maage_world_fluid_at(const maage_world *world, const double point[3
     const maage_block_state_definition *above;
     if (!state || !state->fluid_kind) return MAAGE_FLUID_NONE;
     above = maage_player_fluid_cell(world, x, y + 1, z);
-    return (above && above->fluid_kind == state->fluid_kind) || point[1] < y + maage_block_fluid_height(state) ? state->fluid_kind : MAAGE_FLUID_NONE;
+    return (above && above->fluid_kind == state->fluid_kind) || point[1] < y + maage_block_fluid_height(state) + 1.0 / 9.0 ? state->fluid_kind : MAAGE_FLUID_NONE;
 }
 
 int maage_world_fluid_volume(const maage_world *world, const double minimum[3], const double maximum[3], unsigned int kind, double flow[3]) {
@@ -173,7 +173,7 @@ int maage_player_submerged(const maage_player *player, const maage_world *world)
     eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
     y = (int) floor(eye[1]);
     state = maage_player_fluid_cell(world, (int) floor(eye[0]), y, (int) floor(eye[2]));
-    return state && state->fluid_kind == MAAGE_FLUID_WATER && eye[1] < y + maage_block_fluid_height(state) - 1.0 / 9.0;
+    return state && state->fluid_kind == MAAGE_FLUID_WATER && eye[1] < y + maage_block_fluid_height(state) + 1.0 / 9.0;
 }
 
 /* The ledge impulse requires an entirely clear, dry destination. A ceiling or

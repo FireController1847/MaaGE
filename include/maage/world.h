@@ -11,7 +11,7 @@
 #if CHAR_BIT != 8 || INT_MAX < 30000000L
 #error World requires 8-bit bytes and an int coordinate range through 30000000
 #endif
-typedef char maage_world_required_address_space[((size_t) -1 >= 262144UL) ? 1 : -1];
+typedef char maage_world_required_address_space[((size_t) - 1 >= 262144UL) ? 1 : -1];
 #define MAAGE_CHUNK_EDGE 16
 #define MAAGE_WORLD_HEIGHT 256
 #define MAAGE_WORLD_LIMIT 30000000
@@ -266,6 +266,7 @@ maage_block_state_id maage_world_get(const maage_world *world, int x, int y, int
  * heights. Unknown columns contribute neither air nor flow. Optional flow sums
  * intersecting unit currents then normalizes once; callers apply the impulse. */
 int maage_world_fluid_volume(const maage_world *world, const double minimum[3], const double maximum[3], unsigned int kind, double flow[3]);
+/* Point immersion uses the classic 1/9-block surface tolerance. */
 unsigned int maage_world_fluid_at(const maage_world *world, const double point[3]);
 int maage_world_solid(const maage_world *world, int x, int y, int z);
 /* Allocation-free DDA through selection shapes. Direction is normalized here;

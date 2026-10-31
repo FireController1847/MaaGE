@@ -30,10 +30,10 @@ void maage_block_fluid_flow(const maage_block_registry *registry, const maage_bl
         else difference = 0;
         flow[0] += dx[side] * difference;
         flow[2] += dz[side] * difference;
-        if (block && block->opaque && neighbor->block_id != MAAGE_BLOCK_ICE) wall = 1;
+        if (block && block->material_solid && neighbor->block_id != MAAGE_BLOCK_ICE) wall = 1;
         neighbor = above[side];
         block = neighbor ? maage_block_registry_block(registry, neighbor->block_id) : NULL;
-        if (block && block->opaque && neighbor->block_id != MAAGE_BLOCK_ICE) wall = 1;
+        if (block && block->material_solid && neighbor->block_id != MAAGE_BLOCK_ICE) wall = 1;
     }
     length = sqrt(flow[0] * flow[0] + flow[2] * flow[2]);
     if (length > 0) {
