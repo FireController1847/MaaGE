@@ -113,9 +113,14 @@ biome decoration.
 
 ## Parallel Generation and Outward Presentation
 
-The World scheduler maintains a progressing square-ring scan with a near-player
-admission pass on each pump. Independent load, generation, lighting and mesh jobs
-still execute in parallel, including farther work when nearby jobs are in flight.
+The World scheduler admits independent jobs through one progressing square-ring
+spiral, without waiting for earlier rings to finish. Completed loads, generation,
+lighting and changed neighbor inputs immediately reopen the closest eligible ring
+for its next job rather than waiting for a full scan around the view. Jobs remain
+prioritized by distance, while asynchronous saves use reserved queue slots and
+the scheduler's oldest-job fairness at background priority. Independent load,
+generation, lighting and mesh jobs execute in parallel, including farther work
+while nearby jobs are still running.
 The initial Server column-transfer frontier advances only when every valid column
 of the current ring has been acknowledged, so distant completed jobs cannot
 overtake missing near-player chunks on the wire. Initial block/biome transfer
@@ -131,8 +136,10 @@ It does not draw previously prepared, never-presented meshes outside that ring.
 A successful first frame advances the frontier; already presented geometry
 remains visible and can update independently. Both frontiers rebase when the
 player changes chunk or render distance changes, and missing columns reopen
-their ring. Workers remain parallel per column; no subcolumn synchronization,
-neighbor wait or render-frame barrier is introduced.
+their ring. Submission stays outward-prioritized, completion remains
+independent, and first display follows the outward frontier. Workers remain
+parallel per column; no subcolumn synchronization, neighbor wait or render-frame
+barrier is introduced.
 
 ## Determinism and Persistence
 

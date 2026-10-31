@@ -305,6 +305,15 @@ static int maage_world_distance(const maage_world *world, const maage_world_slot
     int x = abs(slot->x - world->center_x), z = abs(slot->z - world->center_z);
     return x > z ? x : z;
 }
+/* An earlier column becoming eligible for its next independent job brings the
+ * admission cursor back to that ring, without waiting for another sweep. */
+static void maage_world_scan_revisit(maage_world *world, const maage_world_slot *slot) {
+    int ring = maage_world_distance(world, slot);
+    if (ring <= maage_world_resident_radius(world) + 1 && ring <= world->scan_ring) {
+        world->scan_ring = ring;
+        world->scan_step = 0;
+    }
+}
 /* Workers remain independent; only initial owner-to-client delivery and first
  * visual presentation respect a monotonic square-ring frontier. Recheck one
  * incomplete ring, not the full view square, when acknowledgements arrive.
@@ -368,6 +377,7 @@ static void maage_world_invalidate(maage_world *world, maage_world_slot *slot, i
         if (!world->config.presentation_only) slot->light_ready = 0;
         slot->light_epoch = slot->revision;
     }
+    maage_world_scan_revisit(world, slot);
 }
 static void maage_world_light_neighbors(maage_world *world, int x, int z, unsigned mask) {
     maage_world_slot *neighbors[8];
@@ -377,12 +387,14 @@ static void maage_world_light_neighbors(maage_world *world, int x, int z, unsign
         if (neighbors[side] && (mask & (1U << side))) {
             neighbors[side]->light_dirty = 1;
             neighbors[side]->light_boundaries |= 1U << (side ^ 1);
+            maage_world_scan_revisit(world, neighbors[side]);
         }
 }
 static void maage_world_light_visual_changed(maage_world *world, maage_world_slot *slot) {
     /* Keep completed and previous geometry usable while its light is refined. */
     slot->mesh_dirty = 1;
     slot->revision = maage_world_revision(world);
+    maage_world_scan_revisit(world, slot);
 }
 static void maage_world_invalidate_neighbors(maage_world *world, int x, int z, unsigned mask) {
     maage_world_slot *neighbors[8];
@@ -843,6 +855,10 @@ static maage_status maage_world_collect(maage_world *world) {
         world->stats.last_job_operation_result = completion.operation_result;
         world->last_job_trace = completion.trace;
         if (disposition != completion.operation_result) MAAGE_STATUS_TRACE(&world->last_job_trace, disposition, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_POLL);
+        /* Completed load, generation and lighting jobs can enable a nearer
+         * successor regardless of the order workers finished their jobs. */
+        if (owns && (task->kind == MAAGE_JOB_LOAD || task->kind == MAAGE_JOB_GENERATE || task->kind == MAAGE_JOB_LIGHT || (task->kind == MAAGE_JOB_MESH && slot->mesh_dirty)))
+            maage_world_scan_revisit(world, slot);
         maage_world_task_release(world, task);
     }
     if (world->failed) return world->stats.last_result;
@@ -985,9 +1001,8 @@ static int maage_world_make_room(maage_world *world) {
     maage_world_light_neighbors(world, x, z, 15U);
     return 1;
 }
-/* Walk concentric square rings incrementally. A single pump examines at
- * most a workload-derived budget, never rescanning the entire grid per job.
- * On movement the cursor restarts at the nearest column. */
+/* Admit independent jobs along one bounded, progressing outward spiral.
+ * Earlier re-enabled stages rewind admission, not worker completion. */
 static void maage_world_scan_next(int *scan_ring, unsigned *scan_step, int *dx, int *dz) {
     int ring = *scan_ring;
     unsigned step, span;
@@ -1026,7 +1041,9 @@ static maage_status maage_world_schedule_saves(maage_world *world, unsigned rese
     do {
         next = slot->next ? slot->next : world->chunks;
         if (slot->dirty && slot->data && !slot->save && !slot->failed) {
-            result = maage_world_submit(world, slot, MAAGE_JOB_SAVE, 0);
+            /* Saves keep reserved contexts and oldest-job fairness without
+             * outranking nearby first terrain and lighting work. */
+            result = maage_world_submit(world, slot, MAAGE_JOB_SAVE, ((unsigned) maage_world_resident_radius(world) + 2U) * 16U);
             if (maage_status_failed(result)) {
                 maage_world_failure_status(world, slot, result, "World save submission failed.");
                 return result;
@@ -1043,8 +1060,7 @@ static maage_status maage_world_schedule_saves(maage_world *world, unsigned rese
 static maage_status maage_world_schedule(maage_world *world) {
     maage_world_slot *slot;
     int radius = maage_world_resident_radius(world) + 1;
-    int dx, dz, x, z, kind, ring, no_room = 0, near_ring = 0;
-    unsigned near_step = 0;
+    int dx, dz, x, z, kind, ring, no_room = 0;
     size_t span = (size_t) radius * 2U + 1U;
     unsigned limit, reserve, work_limit, budget, examined;
     unsigned priority;
@@ -1075,10 +1091,9 @@ static maage_status maage_world_schedule(maage_world *world) {
             world->scan_ring = 0;
             world->scan_step = 0;
         }
-        /* Always submit near-player candidates first. The persistent outer
-         * cursor continues independently, keeping the worker pool busy. */
-        if (examined < 25U) maage_world_scan_next(&near_ring, &near_step, &dx, &dz);
-        else maage_world_scan_next(&world->scan_ring, &world->scan_step, &dx, &dz);
+        /* One outward submission order, revisited from a newly eligible
+         * nearer ring while accepted workers continue in parallel. */
+        maage_world_scan_next(&world->scan_ring, &world->scan_step, &dx, &dz);
         if (abs(dx) > radius || abs(dz) > radius) continue;
         x = world->center_x + dx;
         z = world->center_z + dz;
