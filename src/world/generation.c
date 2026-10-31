@@ -114,9 +114,9 @@ static double maage_generation_transition(double value, double threshold) {
     if (value >= threshold + margin) return 1;
     return maage_generation_fade((value - threshold + margin) / (2 * margin));
 }
-static maage_biome_id maage_generation_biome(maage_world_seed seed, int x, int z, double *influences) {
+static maage_biome_id maage_generation_biome(maage_world_seed seed, int x, int z, int boundary_detail, double *influences) {
     static const double sea_limit = -0.10, hill_limit = 0.16, cold_limit = -0.11, warm_limit = 0.04, dry_limit = -0.04, forest_limit = 0.06;
-    double continental, temperature, rainfall, hills, remaining, weight;
+    double continental, temperature, rainfall, hills, remaining, weight, region_x = x, region_z = z;
     maage_biome_id biome;
     if (influences) memset(influences, 0, MAAGE_BIOME_COUNT * sizeof(*influences));
     continental = maage_generation_fractal(seed, x / 1100.0, z / 1100.0, 100UL, 3);
@@ -124,9 +124,18 @@ static maage_biome_id maage_generation_biome(maage_world_seed seed, int x, int z
         if (influences) influences[MAAGE_BIOME_OCEAN] = 1;
         return MAAGE_BIOME_OCEAN;
     }
-    temperature = maage_generation_fractal(seed, x / 700.0, z / 700.0, 200UL, 2);
-    rainfall = maage_generation_fractal(seed, x / 700.0, z / 700.0, 300UL, 2);
-    hills = maage_generation_fractal(seed, x / 450.0, z / 450.0, 400UL, 2);
+    /* Deform the shared inland coordinate map, not materials or individual
+     * features. The first component shares the broad terrain-noise octaves;
+     * both vary over landforms rather than independently at each block. The
+     * continental field above keeps its existing geographic boundary. Terrain
+     * anchors omit this detail so their height interpolation remains intact. */
+    if (boundary_detail) {
+        region_x += 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 2);
+        region_z += 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 800UL, 2);
+    }
+    temperature = maage_generation_fractal(seed, region_x / 700.0, region_z / 700.0, 200UL, 2);
+    rainfall = maage_generation_fractal(seed, region_x / 700.0, region_z / 700.0, 300UL, 2);
+    hills = maage_generation_fractal(seed, region_x / 450.0, region_z / 450.0, 400UL, 2);
     if (continental < sea_limit) biome = MAAGE_BIOME_OCEAN;
     else if (hills > hill_limit) biome = MAAGE_BIOME_HILLS;
     else if (temperature < cold_limit) biome = MAAGE_BIOME_TAIGA;
@@ -178,7 +187,7 @@ static int maage_generation_column_at(maage_world_seed seed, const maage_biome_r
     for (corner = 0; corner < 4; ++corner) {
         cx = (gx + (corner & 1)) * MAAGE_GENERATION_BIOME_SCALE;
         cz = (gz + (corner >> 1)) * MAAGE_GENERATION_BIOME_SCALE;
-        biome = maage_generation_biome(seed, cx, cz, NULL);
+        biome = maage_generation_biome(seed, cx, cz, 0, NULL);
         definition = maage_biome_registry_get(biomes, biome);
         if (definition == NULL) return 0;
         heights[corner] = definition->base_height;
@@ -186,7 +195,7 @@ static int maage_generation_column_at(maage_world_seed seed, const maage_biome_r
     }
     /* Region identity follows the field at this coordinate, not the nearest
      * terrain corner. Coarse corners remain exclusively height inputs. */
-    column->biome = maage_generation_biome(seed, x, z, influences);
+    column->biome = maage_generation_biome(seed, x, z, 1, influences);
     if (!maage_biome_registry_get(biomes, column->biome)) return 0;
     fx = maage_generation_fade(fx);
     fz = maage_generation_fade(fz);

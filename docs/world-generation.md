@@ -10,10 +10,17 @@ and cannot change generated blocks, regional climate or feature choices.
 One seeded sampler classifies ocean, hills, taiga, desert, forest and plains from
 low-frequency continental, relief, temperature and rainfall fields. The existing
 thresholds and classification precedence select one discrete registered biome at
-each World coordinate. The same sampler supplies the four corners of the existing
-128-block terrain lattice. Base height, variation and terrain/detail noise retain
-the existing interpolated height function; the lattice does not quantize regional
-biome identities into square cells.
+each World coordinate. Inland fields share a continuous coordinate deformation
+with two octaves at a 96-block scale and a 24-block amplitude. One displacement
+component uses the broad octaves of the terrain field, tying boundary detail to
+landform structure. The same deformed coordinates drive regional identity and all
+ecological influences; materials and features do not receive separate perturbations.
+
+The continental field retains its undeformed coordinates, preserving its geographic
+boundary. The four corners of the existing 128-block terrain lattice also retain
+their undeformed classification. Base height, variation and terrain/detail noise
+retain the existing interpolated height function; regional detail does not move
+terrain-height anchors or quantize biome identities into square cells.
 
 Boundaries follow contours of those environmental fields. Categorical surfaces
 use the selected biome's own surface/filler pair, and the same identity is stored
@@ -48,9 +55,15 @@ probabilities can shift toward conifers at taiga boundaries. The existing altitu
 lapse of one temperature unit per 600 blocks above Y=64 and cold threshold of 0.15
 remain. Snow follows that continuous climate and elevation, without a separate
 microclimate patch field. Exposed source sea water freezes using the same climate.
-Snow requires precipitation and supporting ground or leaves; it is placed on the
-final exposed surface after trees. Ice does not support a generated snow layer.
-Ordinary owner light-based melting remains active.
+Ground snow requires precipitation and supporting ground; it is placed on the
+final exposed surface after trees. Each generated tree takes one snow decision
+from its root's shared climate at crown elevation. Exposed canopy cells retain that
+feature decision across biome and chunk boundaries instead of resampling climate
+independently for every branch column. Overlapping trees retain the decision of the
+feature that supplied the final exposed block, including equal-state writes that
+leave the existing block intact. Ice does not support a generated snow layer.
+Ordinary owner light-based melting remains active; subsequent gameplay is not
+forced to preserve a generated tree's initial snow coverage.
 
 These are generation-time decisions. Runtime weather observations use saved
 discrete biome identities. Weather-driven accumulation/freezing is not implemented.
@@ -85,7 +98,9 @@ Signed coordinates use floor division; hash arithmetic retains explicit 32-bit
 masking. No loaded neighbor, shared RNG, render option, job completion order,
 global smoothing pass or cross-column wait participates in regional decisions.
 Feature emission retains deterministic regional replay and clips writes to the
-detached output column.
+detached output column. Tree snow ownership uses two small job-local arrays of
+256 entries, with no persisted tree records or neighbor access. Spawn floor queries
+replay the same tree emitter and snow decisions.
 
 `MGWORLD8` and `MGCHNK5` remain the current formats. Existing saved chunks load
 their authoritative blocks and biome identities; they are not regenerated or
@@ -96,11 +111,20 @@ is introduced.
 
 ## Reference and Verification Limits
 
-Minecraft 1.7.10 blends terrain parameters while choosing surface replacement and
-decoration from discrete biome regions, with altitude-sensitive snow/ice decisions.
-MaaGE also keeps categorical materials tied to their region and confines ecological
-interpolation to environmental boundaries. Algorithms and noise are independent;
-seed parity and the full vanilla biome/feature catalog are not implemented.
+Minecraft 1.7.10 uses repeated regional zooming/smoothing and a final perturbed
+nearest-region lookup to give discrete biome outlines detail at several scales.
+Its terrain parameters blend neighboring regions, while surface replacement and
+decoration use discrete biome choices. Biome outlines do not strictly track height
+contours. Snow/ice depend on biome temperature and elevation, with a small spatial
+temperature adjustment above Y=64. The final snow pass checks each precipitation
+column after decoration; it does not guarantee whole-tree snow coverage.
+
+MaaGE's shared boundary deformation is an independent algorithm for irregular
+regional outlines, retaining its existing terrain function and ecological margins.
+Snow follows actual elevation, but biome outlines are not forced onto constant-height
+contours. Whole-tree initial snow decisions intentionally improve on vanilla's
+per-column behavior. Seed parity and the full vanilla biome/feature catalog are
+not implemented.
 
 Source inspection and formatting do not establish visual quality, runtime cost,
 or cross-platform floating-point equivalence. Those outcomes require programmer

@@ -94,6 +94,12 @@ static const maage_tree_feature maage_tree_features[] = {
     {4U, MAAGE_STATE_LOG, MAAGE_STATE_LEAVES, 5, 12, 5, 0, 1, 1},
     {5U, MAAGE_STATE_SPRUCE_LOG, MAAGE_STATE_SPRUCE_LEAVES, 13, 15, 4, 1, 2, 0}};
 typedef int (*maage_tree_writer)(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule);
+typedef struct maage_tree_generation {
+    maage_generation_context *context;
+    unsigned short top[256];
+    unsigned char snow[256];
+    int snowfall;
+} maage_tree_generation;
 static int maage_tree_height(const maage_tree_feature *feature, unsigned long random) {
     int height = feature->minimum_height + (int) (random % (unsigned long) feature->height_variation);
     if (feature->width == 2) height += (int) ((random >> 8) % 3UL);
@@ -183,12 +189,24 @@ static int maage_tree_emit(const maage_tree_feature *feature, int height, int x,
     return changed;
 }
 static int maage_tree_generation_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
-    return maage_generation_write((maage_generation_context *) context, x, y, z, state, rule);
+    maage_tree_generation *trees = (maage_tree_generation *) context;
+    int index, result = maage_generation_write(trees->context, x, y, z, state, rule);
+    if (result > 0 && rule == MAAGE_GENERATION_WRITE_FOLIAGE) {
+        index = (z - trees->context->chunk->z * 16) * 16 + x - trees->context->chunk->x * 16;
+        /* Retain the owner of the highest emitted cell. Equal-state writes
+         * leave that owner intact, just as they leave the block intact. */
+        if (y >= trees->top[index]) {
+            trees->top[index] = (unsigned short) y;
+            trees->snow[index] = (unsigned char) trees->snowfall;
+        }
+    }
+    return result;
 }
-static int maage_tree_place(maage_generation_context *context, const maage_tree_feature *feature, int x, int ground, int z, unsigned long random) {
+static int maage_tree_place(maage_tree_generation *trees, const maage_tree_feature *feature, int x, int ground, int z, unsigned long random, int snowfall) {
     int height = maage_tree_height(feature, random);
     if (ground + height + 2 >= 256) return 0;
-    return maage_tree_emit(feature, height, x, ground, z, random, maage_tree_generation_write, context);
+    trees->snowfall = snowfall;
+    return maage_tree_emit(feature, height, x, ground, z, random, maage_tree_generation_write, trees);
 }
 
 static int maage_tree_plan_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
@@ -279,7 +297,7 @@ done:
     return result;
 }
 
-static int maage_tree_candidate(const maage_generation_context *context, int gx, int gz, int *x, int *height, int *z, const maage_tree_feature **tree, unsigned long *random) {
+static int maage_tree_candidate(const maage_generation_context *context, int gx, int gz, int *x, int *height, int *z, const maage_tree_feature **tree, unsigned long *random, int *snowfall) {
     maage_generation_sample sample;
     const maage_generation_sample *column;
     const maage_block_state_definition *floor;
@@ -308,6 +326,9 @@ static int maage_tree_candidate(const maage_generation_context *context, int gx,
         rank -= column->decoration.trees[species];
     *tree = &maage_tree_features[species == 1 ? 2 : (species == 2 ? 1 : 0)];
     maage_generation_feature_next(random);
+    /* A tree uses its root's shared climate at crown elevation throughout
+     * its canopy, including portions replayed into another output column. */
+    *snowfall = column->rainfall > 0 && maage_generation_cold(column, *height + maage_tree_height(*tree, *random) + 2);
     return 1;
 }
 int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z) {
@@ -315,7 +336,7 @@ int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_regist
     maage_generation_sample column;
     const maage_tree_feature *tree;
     unsigned long random;
-    int gx, gz, tx, tz, height;
+    int gx, gz, tx, tz, height, snowfall;
     memset(&context, 0, sizeof(context));
     context.seed = seed;
     context.blocks = blocks;
@@ -326,79 +347,102 @@ int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_regist
     if (maage_cactus_height(&context, x, column.height, z, random)) return 0;
     for (gz = maage_generation_region(z, 8) - 1; gz <= maage_generation_region(z, 8) + 1; ++gz)
         for (gx = maage_generation_region(x, 8) - 1; gx <= maage_generation_region(x, 8) + 1; ++gx)
-            if (maage_tree_candidate(&context, gx, gz, &tx, &height, &tz, &tree, &random) && abs(tx - x) <= tree->radius && abs(tz - z) <= tree->radius) return 0;
+            if (maage_tree_candidate(&context, gx, gz, &tx, &height, &tz, &tree, &random, &snowfall) && abs(tx - x) <= tree->radius && abs(tz - z) <= tree->radius) return 0;
+    return 1;
+}
+typedef struct maage_tree_spawn_column {
+    const maage_block_registry *blocks;
+    maage_block_state_id state;
+    int x, z, top, snowfall, tree_snowfall;
+} maage_tree_spawn_column;
+static int maage_tree_spawn_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
+    maage_tree_spawn_column *column = (maage_tree_spawn_column *) context;
+    const maage_block_state_definition *current;
+    if (x != column->x || z != column->z || y < column->top || rule != MAAGE_GENERATION_WRITE_FOLIAGE) return 0;
+    if (y == column->top) {
+        current = maage_block_registry_state(column->blocks, column->state);
+        if (column->state == state || !maage_tree_replaceable(current)) return 0;
+    }
+    column->top = y;
+    column->state = state;
+    column->snowfall = column->tree_snowfall;
     return 1;
 }
 int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y) {
     maage_generation_context context;
     maage_generation_sample column;
+    maage_tree_spawn_column exposed;
     const maage_tree_feature *tree;
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     unsigned long random;
-    int gx, gz, tx, tz, ground, tree_ground, height, dy, dx, dz, top, cactus, snow_support = 1;
+    int gx, gz, tx, tz, ground, tree_ground, height, cactus, snowfall;
     memset(&context, 0, sizeof(context));
     context.seed = seed;
     context.blocks = blocks;
     context.biomes = biomes;
     context.policy = policy;
     if (!feet_y || !maage_generation_sample_at(seed, biomes, policy, x, z, &column)) return 0;
-    top = ground = column.height;
     state = maage_block_registry_state(blocks, column.surface);
-    block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-    if (!block) return 0;
-    snow_support = state->block_id != MAAGE_BLOCK_ICE && (state->block_id == MAAGE_BLOCK_LEAVES || (block->opaque && block->material_solid));
+    if (!state || !maage_block_registry_block(blocks, state->block_id)) return 0;
+    ground = column.height;
+    exposed.blocks = blocks;
+    exposed.x = x;
+    exposed.z = z;
+    exposed.top = ground;
+    exposed.state = column.surface;
+    exposed.snowfall = column.rainfall > 0 && maage_generation_cold(&column, ground + 1);
+    exposed.tree_snowfall = 0;
     random = maage_generation_feature_hash(seed, x, z, 13000UL);
     cactus = maage_cactus_height(&context, x, ground, z, random);
     if (cactus) {
-        top = ground + cactus;
-        snow_support = 0;
+        exposed.top = ground + cactus;
+        exposed.state = MAAGE_STATE_CACTUS;
+        exposed.snowfall = 0;
     }
     for (gz = maage_generation_region(z, 8) - 1; gz <= maage_generation_region(z, 8) + 1; ++gz)
         for (gx = maage_generation_region(x, 8) - 1; gx <= maage_generation_region(x, 8) + 1; ++gx) {
-            if (!maage_tree_candidate(&context, gx, gz, &tx, &tree_ground, &tz, &tree, &random)) continue;
+            if (!maage_tree_candidate(&context, gx, gz, &tx, &tree_ground, &tz, &tree, &random, &snowfall)) continue;
             height = maage_tree_height(tree, random);
-            dx = x - tx;
-            dz = z - tz;
-            if (!dx && !dz && tree_ground + height > top) {
-                top = tree_ground + height;
-                snow_support = 1;
-            }
-            for (dy = tree->conical ? 2 : height - 3; dy <= height; ++dy) {
-                if (!maage_tree_leaf(tree, height, dy, dx, dz, random)) continue;
-                if (tree_ground + 1 + dy > top) {
-                    top = tree_ground + 1 + dy;
-                    snow_support = 1;
-                }
-            }
+            if (tree_ground + height + 2 >= 256) continue;
+            exposed.tree_snowfall = snowfall;
+            maage_tree_emit(tree, height, tx, tree_ground, tz, random, maage_tree_spawn_write, &exposed);
         }
-    *feet_y = top + 1.0;
-    if (ground > policy->sea_level && column.rainfall > 0 && snow_support && maage_generation_cold(&column, top + 1)) *feet_y += 0.125;
+    state = maage_block_registry_state(blocks, exposed.state);
+    block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    if (!block) return 0;
+    *feet_y = exposed.top + 1.0;
+    if ((ground > policy->sea_level || exposed.top > ground) && exposed.snowfall && state->block_id != MAAGE_BLOCK_ICE && (state->block_id == MAAGE_BLOCK_LEAVES || (block->opaque && block->material_solid))) *feet_y += 0.125;
     return 1;
 }
 maage_status maage_generation_vegetation(maage_generation_context *context) {
+    maage_tree_generation trees;
     const maage_tree_feature *tree;
     const maage_generation_sample *column;
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     unsigned long random;
-    int gx, gz, x, z, height, result, top, local_x, local_z;
+    int gx, gz, x, z, height, result, top, local_x, local_z, index, snowfall;
+    memset(&trees, 0, sizeof(trees));
+    trees.context = context;
     for (gz = context->chunk->z * 2 - 1; gz <= context->chunk->z * 2 + 2; ++gz)
         for (gx = context->chunk->x * 2 - 1; gx <= context->chunk->x * 2 + 2; ++gx) {
             if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
-            if (!maage_tree_candidate(context, gx, gz, &x, &height, &z, &tree, &random)) continue;
-            result = maage_tree_place(context, tree, x, height, z, random);
+            if (!maage_tree_candidate(context, gx, gz, &x, &height, &z, &tree, &random, &snowfall)) continue;
+            result = maage_tree_place(&trees, tree, x, height, z, random, snowfall);
             if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
             if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_VEGETATION];
         }
-    /* One climate decision covers exposed ground and the final canopy. Actual
-     * support/shade comes from this private output, never a loaded neighbor. */
+    /* Ground follows local climate/elevation; exposed tree cells retain their
+     * feature owner's snow decision instead of slicing the canopy by column.
+     * Actual support/shade comes only from this private output. */
     for (local_z = 0; local_z < 16; ++local_z) {
         if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
         for (local_x = 0; local_x < 16; ++local_x) {
             x = context->chunk->x * 16 + local_x;
             z = context->chunk->z * 16 + local_z;
-            column = &context->columns[local_z * 16 + local_x];
+            index = local_z * 16 + local_x;
+            column = &context->columns[index];
             height = column->height;
             top = 254;
             while (top > height && maage_chunk_get(context->chunk, local_x, top, local_z) == MAAGE_STATE_AIR)
@@ -407,7 +451,8 @@ maage_status maage_generation_vegetation(maage_generation_context *context) {
             block = state ? maage_block_registry_block(context->blocks, state->block_id) : NULL;
             if (!block) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_VEGETATION);
             random = maage_generation_feature_hash(context->seed, x, z, 14001UL);
-            if (height > context->policy->sea_level && column->rainfall > 0 && top < 255 && maage_generation_cold(column, top + 1) && state->block_id != MAAGE_BLOCK_ICE && (state->block_id == MAAGE_BLOCK_LEAVES || (block->opaque && block->material_solid))) {
+            snowfall = top == trees.top[index] ? trees.snow[index] : (column->rainfall > 0 && maage_generation_cold(column, top + 1));
+            if ((height > context->policy->sea_level || top == trees.top[index]) && snowfall && top < 255 && state->block_id != MAAGE_BLOCK_ICE && (state->block_id == MAAGE_BLOCK_LEAVES || (block->opaque && block->material_solid))) {
                 result = maage_generation_write(context, x, top + 1, z, MAAGE_STATE_SNOW, MAAGE_GENERATION_WRITE_AIR);
                 if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_VEGETATION);
                 if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_VEGETATION];
