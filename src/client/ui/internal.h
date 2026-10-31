@@ -82,6 +82,7 @@ struct maage_client_ui {
     int selected_keyboard;
     int primary_down, pointer_hover, cursor_unavailable;
     int debug, gui_scale, requested_scale, fps_step, vsync, vsync_supported, view_bobbing, dragging_fps, leaves_mode, biome_blend;
+    int render_distance, render_distance_max, dragging_distance;
     int audio_volume[7], dragging_volume;
     int dragging_fov, fov_degrees, video_first_row;
     int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;

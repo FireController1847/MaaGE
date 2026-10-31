@@ -38,6 +38,17 @@ share the inventory path. Text entry is ASCII with backspace and blinking cursor
 Unsupported controls remain disabled or absent. There is one Creative catalog,
 without fabricated category/search functionality.
 
+Video Settings includes a Render Distance slider in chunks, defaulting to 8 with
+a normal range of 1..32. Explicit larger `--render-distance` or INI choices remain
+representable by extending the slider range. `[video] render_distance` persists
+in the instance's atomic `config/options.ini` on normal Options exit/shutdown.
+An explicit startup CLI value overrides the loaded preference. Changes apply to
+Client mesh interest, camera/fog distance and authoritative column streaming while
+the World remains open, including while paused. Simulation distance stays independent.
+The World retains its Jobs pool and grows cache limits from the requested footprint;
+replicas retain Server residency plus in-flight capacity until ordered unloads arrive.
+Distance changes do not regenerate existing chunks or wait for background work.
+
 Catalog/admin I/O runs on bounded Jobs work. Title starts without a Server;
 Play starts the integrated runtime. Save/Quit flushes and joins before returning.
 Pause and Options stop gameplay; inventory and tables keep simulation/music active.
@@ -69,7 +80,7 @@ packet owns all necessary state. Ordered unload packets close an interest lifeti
 the replica retains bases until that removal arrives. Reentry starts with a complete
 column. Initial local capacity covers Server residency plus bounded packets in flight;
 remote transports must negotiate an equivalent bound. Packets contain no light arrays,
-scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 17;
+scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 18;
 remote encoding is not implemented.
 
 Snapshots include per-life raw travel/velocity observations and authoritative

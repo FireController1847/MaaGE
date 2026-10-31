@@ -108,6 +108,21 @@ struct maage_world {
 static int maage_world_resident_radius(const maage_world *world) {
     return world->config.render_distance > world->config.simulation_distance ? world->config.render_distance : world->config.simulation_distance;
 }
+static int maage_world_cache_bound(int radius, unsigned int configured, unsigned int *limit) {
+    size_t span = (size_t) radius * 2U + 3U, halo, footprint, extra;
+    if (span > (size_t) UINT_MAX / span) return 0;
+    if (configured) {
+        *limit = configured;
+        return 1;
+    }
+    footprint = span * span;
+    halo = span + 2U;
+    if (halo > (size_t) UINT_MAX / halo) return 0;
+    extra = halo * halo;
+    if (footprint > (size_t) UINT_MAX - extra) return 0;
+    *limit = (unsigned int) (footprint + extra);
+    return 1;
+}
 maage_status maage_world_config_init(maage_world_config *config) {
     if (!config) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     memset(config, 0, sizeof(*config));
@@ -1050,7 +1065,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     maage_world *world;
     maage_jobs_stats stats;
     unsigned workers, index, cache_limit, job_limit;
-    size_t span, halo, footprint, extra, automatic_jobs;
+    size_t span, automatic_jobs;
     int axis, resident_radius;
     maage_random_tick_state initial_random;
     maage_generation_policy policy;
@@ -1074,16 +1089,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     if (!maage_world_random_speed_valid(config->simulation_distance, config->random_tick_speed)) goto overflow;
     resident_radius = config->render_distance > config->simulation_distance ? config->render_distance : config->simulation_distance;
     span = (size_t) resident_radius * 2U + 3U;
-    if (span > (size_t) UINT_MAX / span) goto overflow;
-    footprint = span * span;
-    if (config->cache_capacity) cache_limit = config->cache_capacity;
-    else {
-        halo = span + 2U;
-        if (halo > (size_t) UINT_MAX / halo) goto overflow;
-        extra = halo * halo;
-        if (footprint > (size_t) UINT_MAX - extra) goto overflow;
-        cache_limit = (unsigned) (footprint + extra);
-    }
+    if (!maage_world_cache_bound(resident_radius, config->cache_capacity, &cache_limit)) goto overflow;
     workers = maage_jobs_resolve_workers(config->worker_count);
     if ((size_t) workers > (size_t) - 1 / 4U || (size_t) workers * 4U > (size_t) - 1 - span * 2U) goto overflow;
     automatic_jobs = (size_t) workers * 4U + span * 2U;
@@ -1178,6 +1184,30 @@ allocation_failed:
     return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
 invalid_spawn:
     return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
+}
+maage_status maage_world_set_render_distance(maage_world *world, int distance, unsigned int cache_capacity) {
+    maage_world_slot *slot;
+    unsigned int limit;
+    int previous, radius;
+    if (!world || world->stopped || world->failed || distance < 1 || distance > MAAGE_WORLD_MAX_RADIUS) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    radius = distance > world->config.simulation_distance ? distance : world->config.simulation_distance;
+    if (!maage_world_cache_bound(radius, cache_capacity, &limit)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    if (limit < world->cache_limit) limit = world->cache_limit;
+    previous = world->config.render_distance;
+    if (previous == distance && limit == world->cache_limit) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
+    world->config.render_distance = distance;
+    world->config.cache_capacity = cache_capacity;
+    world->cache_limit = limit;
+    if (previous != distance) {
+        for (slot = world->chunks; slot; slot = slot->next) {
+            radius = maage_world_distance(world, slot);
+            if (world->config.build_meshes && radius <= distance && radius > previous && maage_world_complete(slot)) maage_world_invalidate(world, slot, 0);
+            if (radius > distance && slot->work && slot->work->kind == MAAGE_JOB_MESH) maage_world_cancel(world, slot->work);
+        }
+        world->scan_ring = 0;
+        world->scan_step = 0;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode) {
     maage_world_slot *slot;

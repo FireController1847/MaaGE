@@ -442,11 +442,12 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
             !server_finite(command->view_yaw) ||
             fabs(command->view_yaw) > 1000000000.0)
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
-        /* World currently freezes the streaming radius at create; do not
-         * claim a changed radius took effect until World exposes its setter. */
-        if (command->render_radius != runtime->config.render_distance) return server_reject(runtime, MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_OPERATION_SET);
-        result = server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
-        if (!maage_status_failed(result)) runtime->yaw = command->view_yaw;
+        result = maage_world_set_render_distance(runtime->world, command->render_radius, 0);
+        if (!maage_status_failed(result)) {
+            if (command->render_radius != runtime->config.render_distance) runtime->publication_dirty = 1;
+            runtime->config.render_distance = command->render_radius;
+            runtime->yaw = command->view_yaw;
+        }
         break;
     case MAAGE_CMD_DISCONNECT:
         maage_server_runtime_request_stop(runtime);

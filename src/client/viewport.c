@@ -50,7 +50,7 @@ typedef struct maage_client_world_options {
     const char *id, *name;
     maage_world_seed seed;
     unsigned int workers;
-    int create, seeded, radius, mode;
+    int create, seeded, radius, radius_specified, mode;
     double reach, mesh_budget_ms, frame_target_ms;
 } maage_client_world_options;
 typedef struct maage_client_mesh_cache {
@@ -74,7 +74,7 @@ static maage_status maage_client_world_options_parse(int argc, char *const argv[
     long value;
     unsigned long workers;
     memset(options, 0, sizeof(*options));
-    options->radius = 8;
+    options->radius = MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT;
     options->mode = -1;
     options->frame_target_ms = 1000.0 / 60.0;
     for (i = 1; i < argc; ++i) {
@@ -96,8 +96,9 @@ static maage_status maage_client_world_options_parse(int argc, char *const argv[
         else if (!strncmp(argument, "--render-distance=", 18)) {
             errno = 0;
             value = strtol(argument + 18, &end, 10);
-            if (errno || !argument[18] || *end || value < 1 || value > INT_MAX) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
+            if (errno || !argument[18] || *end || value < 1 || value > MAAGE_WORLD_MAX_RADIUS) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PARSE, 0);
             options->radius = (int) value;
+            options->radius_specified = 1;
         } else if (!strncmp(argument, "--mesh-upload-budget-ms=", 24)) {
             errno = 0;
             options->mesh_budget_ms = strtod(argument + 24, &end);
@@ -646,6 +647,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_options_load(instance, &video_options);
     if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to read config/options.ini; using defaults.");
     saved_video_options = video_options;
+    if (options.radius_specified) video_options.render_distance = options.radius;
+    else options.radius = video_options.render_distance;
     strcpy(directory, maage_client_storage_data_root());
     maage_log_info("maage.client.instance", "Instance: %s (%s).", maage_instance_get_info(instance)->name, maage_instance_get_info(instance)->id);
     result = maage_window_system_create(MAAGE_WINDOW_AUTO, &system, trace);
@@ -771,6 +774,7 @@ choose_world:
         }
     }
     direct_world = 0;
+    options.radius = video_options.render_distance;
     has_last_input = 0;
     memset(&outbox, 0, sizeof(outbox));
     outbox.diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
@@ -960,6 +964,11 @@ choose_world:
                 maage_client_ui_notify(ui, operation, now);
                 maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to save config/options.ini.");
             }
+        }
+        video_options.render_distance = maage_client_ui_render_distance(ui);
+        if (options.radius != video_options.render_distance) {
+            options.radius = video_options.render_distance;
+            view_sent = 0;
         }
         if (!changing_mode && !was_changing_mode && ((was_focused && !input.focused) || (was_active && !input.captured))) {
             if (!maage_client_ui_modal(ui)) (void) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
@@ -1218,7 +1227,18 @@ choose_world:
         cz = maage_world_chunk_coordinate((int) floor(latest.player.player.position[2]));
         {
             unsigned int received = 0;
+            maage_local_session_backlog backlog;
             double receive_begin = maage_time_monotonic_seconds(), apply_begin;
+            /* Retain all acknowledged bases until ordered unloads arrive,
+             * including Server residency growth after a distance change. */
+            operation = maage_local_session_get_backlog(session, &backlog);
+            if (maage_status_failed(operation)) goto done;
+            if (!latest.world_stats.cache_capacity || backlog.column_capacity > UINT_MAX - latest.world_stats.cache_capacity) {
+                operation = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SET, 0);
+                goto done;
+            }
+            operation = maage_world_set_render_distance(visual_world, options.radius, latest.world_stats.cache_capacity + (unsigned int) backlog.column_capacity);
+            if (maage_status_failed(operation)) goto done;
             while (received++ < 16U) {
                 memset(&column_update, 0, sizeof(column_update));
                 operation = maage_local_session_take_column(session, cx, cz, &column_update);

@@ -39,10 +39,13 @@ typedef enum maage_client_audio_bus {
 #define MAAGE_CLIENT_AUDIO_KEY_WEATHER "weather"
 #define MAAGE_CLIENT_AUDIO_KEY_MUSIC "music"
 #define MAAGE_CLIENT_AUDIO_KEY_UI "ui"
+#define MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT 8
+#define MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX 32
 typedef struct maage_client_options {
     int audio_volume[MAAGE_CLIENT_AUDIO_BUS_COUNT]; /* Fixed numeric bus order; 0..100. */
     int fov_degrees;                                /* Vertical field of view, 30..110, default 70. */
     int max_fps;                                    /* 0 unlimited, otherwise 10..260 in increments of 10. */
+    int render_distance;                            /* Chunk radius; the normal slider spans 1..32. */
     int vsync;
     int view_bobbing;
     int gui_scale; /* 0 auto; 1..4 explicit. */

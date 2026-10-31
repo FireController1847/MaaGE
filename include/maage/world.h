@@ -224,6 +224,12 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
 /* Nonblocking owner pump: commit completed work and schedule near-player jobs.
  * Call regularly, including while simulation is paused; no frame-wide waits. */
 maage_status maage_world_stream(maage_world *world, double x, double z, double yaw, maage_status_trace *trace);
+/* Owner-only interest change; simulation distance and accepted Jobs stay fixed.
+ * Zero capacity derives the normal footprint bound; replicas supply negotiated
+ * source residency plus in-flight retention. Existing capacity never shrinks,
+ * so dirty columns and ordered replica bases survive until normal retirement.
+ * Does not allocate columns, wait for Jobs or regenerate existing terrain. */
+maage_status maage_world_set_render_distance(maage_world *world, int distance, unsigned int cache_capacity);
 /* Runtime visual change: invalidate meshes, preserve columns and lighting.
  * The next nonblocking World stream schedules replacement CPU mesh jobs. */
 maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode);
