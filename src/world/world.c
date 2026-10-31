@@ -498,8 +498,7 @@ static void maage_world_run(void *context, const maage_job_token *token) {
         }
     }
     if ((task->kind == MAAGE_JOB_LOAD || task->kind == MAAGE_JOB_GENERATE) &&
-        !maage_status_failed(task->status) && task->output &&
-        (!task->output->environment_initialized || task->output->updates_relative)) {
+        !maage_status_failed(task->status) && task->output) {
         task->status = maage_chunk_environment_initialize(task->output, task->blocks, task->tick_low, task->tick_high);
         if (maage_status_failed(task->status)) strcpy(task->error, "Initial block update initialization failed.");
         else

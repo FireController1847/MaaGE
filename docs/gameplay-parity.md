@@ -195,6 +195,18 @@ unknown terrain and ceilings obstruct it. Dry jump timing, friction and collisio
 remain on the ordinary movement path. These are source-reviewed rules, not evidence
 of observed gameplay fidelity.
 
+Water updates retain the deduplicated scheduled queue and five-tick delay. A bounded
+breadth-first footprint ranks horizontal outlets by nearby downward paths (up to
+five cells); tied directions spread together. Existing same-fluid cells are not
+overwritten by incoming flow. Decay observes neighboring levels and water above;
+two horizontal sources regenerate a source only over solid material or another
+source, including when water is above. Unknown supply/routing defers changes and
+retains one retry. Loading revisits active fluids and exposed boundaries on a
+worker, preserving pending delays. Replaceable vegetation drops are reserved
+before water replaces it. Water never displaces lava; water beside/above lava
+forms obsidian for sources and cobblestone only at levels 1–4, while lava falling
+into water forms stone. Comprehensive lava behavior remains outside this pass.
+
 ## Neighbor Support
 
 Immutable numeric survival callbacks serve placement and neighbor validation.
