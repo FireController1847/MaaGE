@@ -7,7 +7,7 @@
 
 /* Material classification uses numeric builtin definitions; unknown blocks
  * deliberately use DEFAULT. State metadata is resolved through the registry. */
-static unsigned int maage_gameplay_material(maage_block_id id) {
+unsigned int maage_gameplay_block_material(maage_block_id id) {
     switch (id) {
     case MAAGE_BLOCK_STONE:
     case MAAGE_BLOCK_COBBLESTONE:
@@ -92,7 +92,7 @@ static unsigned int maage_gameplay_state_material(const maage_world *world, maag
     if (!state) return MAAGE_MATERIAL_DEFAULT;
     if (state->fluid_kind == MAAGE_FLUID_WATER) return MAAGE_MATERIAL_WATER;
     if (state->fluid_kind == MAAGE_FLUID_LAVA) return MAAGE_MATERIAL_LAVA;
-    return maage_gameplay_material(state->block_id);
+    return maage_gameplay_block_material(state->block_id);
 }
 maage_status maage_gameplay_build_sound(maage_gameplay *game, maage_sound_event *event, unsigned int kind, unsigned int material, const double position[3], double intensity, double pitch) {
     if (!game || !event || !position || kind < MAAGE_SOUND_FOOTSTEP ||
@@ -373,7 +373,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     game->break_progress += progress;
     if (game->break_progress > 1) game->break_progress = 1;
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL && !(starting && progress >= 1)) {
-        if (game->dig_ticks == 0) maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_DIG, maage_gameplay_material(block->id), game->target.x + 0.5, game->target.y + 0.5, game->target.z + 0.5, 1.0, 1.0);
+        if (game->dig_ticks == 0) maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_DIG, maage_gameplay_block_material(block->id), game->target.x + 0.5, game->target.y + 0.5, game->target.z + 0.5, 1.0, 1.0);
         game->dig_ticks = (game->dig_ticks + 1U) % 4U;
     }
     if (game->break_progress < 1.0 - 1e-12) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
@@ -387,7 +387,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     }
     result = maage_world_set(world, game->target.x, game->target.y, game->target.z, game->target.state_id, MAAGE_STATE_AIR);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_BREAK, maage_gameplay_material(block->id), game->target.x + 0.5, game->target.y + 0.5, game->target.z + 0.5, 1.0, 1.0);
+    maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_BREAK, maage_gameplay_block_material(block->id), game->target.x + 0.5, game->target.y + 0.5, game->target.z + 0.5, 1.0, 1.0);
     for (i = 0; i < drops.count; ++i) {
         position[0] = game->target.x + 0.5;
         position[1] = game->target.y + 0.375;
@@ -581,7 +581,7 @@ static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *play
             maage_gameplay_sound(sink, damage > 4 ? MAAGE_SOUND_PLAYER_FALL_BIG : MAAGE_SOUND_PLAYER_FALL_SMALL, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 1.0, 1.0);
             maage_gameplay_hurt(game, player, damage, sink);
             surface = maage_gameplay_underfoot(world, player, 0);
-            if (surface) maage_gameplay_sound(sink, MAAGE_SOUND_PLAYER_LAND, maage_gameplay_material(surface->block_id), player->position[0], player->position[1], player->position[2], 1.0, 1.0);
+            if (surface) maage_gameplay_sound(sink, MAAGE_SOUND_PLAYER_LAND, maage_gameplay_block_material(surface->block_id), player->position[0], player->position[1], player->position[2], 1.0, 1.0);
         }
         game->fall_distance = 0;
     }
@@ -802,7 +802,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
             surface = maage_gameplay_underfoot(world, player, 2);
             /* A nearby surface can still be sampled after takeoff. Ground
              * steps require current contact; climbing keeps its own cadence. */
-            if (surface && surface->fluid_kind == MAAGE_FLUID_NONE && (player->grounded || surface->block_id == 65UL)) maage_gameplay_sound(&sink, MAAGE_SOUND_FOOTSTEP, maage_gameplay_material(surface->block_id), player->position[0], player->position[1], player->position[2], 1.0, 1.0);
+            if (surface && surface->fluid_kind == MAAGE_FLUID_NONE && (player->grounded || surface->block_id == 65UL)) maage_gameplay_sound(&sink, MAAGE_SOUND_FOOTSTEP, maage_gameplay_block_material(surface->block_id), player->position[0], player->position[1], player->position[2], 1.0, 1.0);
         }
     }
     if (!game->health && game->mode == MAAGE_GAME_MODE_SURVIVAL) {

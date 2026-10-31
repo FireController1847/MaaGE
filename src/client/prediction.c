@@ -144,7 +144,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     maage_client_chunk_mesh *column;
     maage_status result;
     unsigned int i, index, vacant = MAAGE_CLIENT_PREDICTIONS;
-    int dx, dz, ready;
+    int dx, dz, ready, started = 0;
     memset(command, 0, sizeof(*command));
     if (hotbar >= MAAGE_HOTBAR_SLOTS) return maage_prediction_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (prediction->session != snapshot->session_epoch || prediction->world != snapshot->world_epoch) {
@@ -182,7 +182,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                     column = maage_prediction_column(meshes, capacity, dx, dz);
                     if (maage_world_chunk_loaded(visual, dx, dz) && (!column || column->presentation_generation < prediction->entries[i].generation || !maage_world_mesh_current(visual, dx, dz, column->visual_revision))) ready = 0;
                 }
-            if (ready) {
+            if (ready && !prediction->entries[i].sound_pending) {
                 if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu accepted=%d reconciled_geometry_ms=%.3f frames=%lu", prediction->entries[i].id, prediction->entries[i].confirmed > 0, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, prediction->frame - prediction->entries[i].frame);
                 prediction->entries[i].active = 0;
                 ++prediction->generation;
@@ -192,6 +192,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     }
     result = maage_prediction_present(prediction, visual);
     if (maage_status_failed(result)) return result;
+    if (elapsed < 0) elapsed = 0;
     if (elapsed > 0.25) elapsed = 0.25;
     if (prediction->delay > 0) prediction->delay -= elapsed;
     if (pressed) prediction->delay = 0;
@@ -204,26 +205,40 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return result;
     if (!active || !held || !snapshot->player.health || maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
         prediction->targeting = 0;
-        prediction->progress = 0;
+        prediction->progress = prediction->mining_progress = prediction->mining_time = 0;
     } else {
         stack = &snapshot->player.inventory.slots[hotbar];
         if (!prediction->targeting || target.x != prediction->target.x || target.y != prediction->target.y || target.z != prediction->target.z || target.state_id != prediction->target.state_id || stack->item_id != prediction->held.item_id || stack->metadata != prediction->held.metadata || stack->damage != prediction->held.damage || pressed) {
+            started = 1;
             prediction->targeting = 1;
             prediction->target = target;
             prediction->held = *stack;
-            prediction->progress = 0;
+            prediction->progress = prediction->mining_progress = prediction->mining_time = 0;
         }
         block = maage_block_registry_block(blocks, target.block_id);
         tool = stack->count ? maage_item_registry_get(items, stack->item_id) : NULL;
         damage = snapshot->player.game_mode == MAAGE_GAME_MODE_CREATIVE ? 1 : maage_item_mining_damage(tool, block, snapshot->player.player.grounded, snapshot->player.submerged);
         if (prediction->delay <= 0) {
-            if (snapshot->player.breaking_active && snapshot->player.breaking.x == target.x && snapshot->player.breaking.y == target.y && snapshot->player.breaking.z == target.z && snapshot->player.breaking.state_id == target.state_id && snapshot->player.break_progress > prediction->progress) prediction->progress = snapshot->player.break_progress;
-            prediction->progress += damage * elapsed / 0.05;
-            if (damage >= 1) prediction->progress = 1;
-            if (prediction->progress >= 1 && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
+            /* Damage completes only on local 20 TPS boundaries. Cracks interpolate
+             * the next step, including its final interval, without removing early.
+             * Never import Server progress and add that same elapsed interval. */
+            if (started) {
+                if (pressed) prediction->mining_progress = damage;
+            } else prediction->mining_time += elapsed;
+            while (prediction->mining_time + 1e-12 >= 0.05) {
+                prediction->mining_time -= 0.05;
+                if (prediction->mining_time < 0) prediction->mining_time = 0;
+                prediction->mining_progress += damage;
+            }
+            if (damage >= 1) prediction->mining_progress = 1;
+            prediction->progress = prediction->mining_progress;
+            if (prediction->progress < 1) prediction->progress += (damage < 1 - prediction->progress ? damage : 1 - prediction->progress) * prediction->mining_time / 0.05;
+            if (prediction->progress > 1) prediction->progress = 1;
+            if (prediction->mining_progress >= 1 - 1e-12 && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
+                memset(&prediction->entries[vacant], 0, sizeof(prediction->entries[vacant]));
+                prediction->entries[vacant].sound_pending = 1;
                 prediction->entries[vacant].predicted_at = prediction->diagnostics ? maage_time_monotonic_seconds() : -1;
                 prediction->entries[vacant].frame = prediction->frame;
-                prediction->entries[vacant].submitted = 0;
                 if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu input_to_prediction_ms=%.3f predicted_at=%.6f", prediction->next_id + 1, (prediction->entries[vacant].predicted_at - prediction->input_at) * 1000, prediction->entries[vacant].predicted_at);
                 prediction->entries[vacant].active = 1;
                 prediction->entries[vacant].confirmed = 0;
@@ -234,7 +249,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                 command->kind = MAAGE_CMD_BREAK_PREVIEW;
                 command->prediction = prediction->next_id;
                 command->predicted_target = target;
-                prediction->progress = 0;
+                prediction->progress = prediction->mining_progress = prediction->mining_time = 0;
                 prediction->targeting = 0;
                 prediction->delay = snapshot->player.game_mode == MAAGE_GAME_MODE_CREATIVE || damage < 1 ? 0.25 : 0.05;
                 prediction->entries[vacant].generation = ++prediction->generation;
@@ -291,4 +306,45 @@ maage_status maage_client_prediction_destroy(maage_client_prediction *prediction
     result = maage_render_mesh_destroy(prediction->reveal);
     memset(prediction, 0, sizeof(*prediction));
     return result;
+}
+
+maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_session_event *event) {
+    unsigned int i;
+    if (event->kind != MAAGE_EVENT_SOUND || event->session_epoch != prediction->session || event->world_epoch != prediction->world || (event->sound.event_id != MAAGE_SOUND_BLOCK_BREAK && event->sound.event_id != MAAGE_SOUND_BLOCK_DIG)) return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)
+        if (prediction->entries[i].active && prediction->entries[i].confirmed >= 0 && prediction->entries[i].replacement == MAAGE_STATE_AIR &&
+            event->sound.position[0] == prediction->entries[i].target.x + 0.5 && event->sound.position[1] == prediction->entries[i].target.y + 0.5 && event->sound.position[2] == prediction->entries[i].target.z + 0.5) {
+            if (event->sound.event_id == MAAGE_SOUND_BLOCK_BREAK) {
+                if (prediction->entries[i].sound_echo) continue;
+                prediction->entries[i].sound_echo = 1;
+            } else if (prediction->entries[i].sound_echo) continue;
+            return maage_prediction_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
+        }
+    return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+}
+
+maage_status maage_client_prediction_take_break_sound(maage_client_prediction *prediction, const maage_block_registry *blocks, unsigned long tick, maage_sound_event *sound) {
+    unsigned int i;
+    const maage_block_state_definition *state;
+    for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i) {
+        if (!prediction->entries[i].sound_pending) continue;
+        if (!prediction->entries[i].active || prediction->entries[i].confirmed < 0) {
+            prediction->entries[i].sound_pending = 0;
+            continue;
+        }
+        if (prediction->applied_generation < prediction->entries[i].generation) continue;
+        state = maage_block_registry_state(blocks, prediction->entries[i].target.state_id);
+        if (!state) return maage_prediction_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_READ);
+        memset(sound, 0, sizeof(*sound));
+        sound->event_id = MAAGE_SOUND_BLOCK_BREAK;
+        sound->material = maage_gameplay_block_material(state->block_id);
+        sound->position[0] = prediction->entries[i].target.x + 0.5;
+        sound->position[1] = prediction->entries[i].target.y + 0.5;
+        sound->position[2] = prediction->entries[i].target.z + 0.5;
+        sound->tick = tick;
+        sound->intensity = sound->pitch = 1;
+        prediction->entries[i].sound_pending = 0;
+        return maage_prediction_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
+    }
+    return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);
 }

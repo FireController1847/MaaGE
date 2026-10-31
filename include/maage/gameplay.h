@@ -4,6 +4,9 @@
 #include "maage/crafting.h"
 #include "maage/player.h"
 
+/* Shared numeric sound classification for authoritative and predicted effects. */
+unsigned int maage_gameplay_block_material(maage_block_id block);
+
 /* Forward declaration avoids a cycle: session_protocol.h includes gameplay.h. */
 struct maage_sound_event;
 

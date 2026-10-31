@@ -344,3 +344,12 @@ ordinary cached model/scale; start/release/completion blend over 0.1 seconds.
 Third person raises the existing right arm and attached item toward the mouth.
 Both use shared mesh transforms across backends. No general food-fragment
 particle emitter exists, so food particles remain unimplemented.
+
+Client mining uses one local completion clock and shared tool damage values;
+Server progress is not added into that clock. Press/retarget initialization
+matches the owner damage cadence. Local crack stages cover the final progress
+interval, and predicted completion publishes the removal/light patch and one
+break cue together. Matching Server break echoes and trailing dig cues are
+consumed once; acknowledgment still determines acceptance/rejection. Resource
+preparation failure retains the previous complete visual and its pending cue.
+No general block-fragment particle emitter is currently implemented.
