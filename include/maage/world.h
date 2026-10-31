@@ -149,8 +149,8 @@ typedef struct maage_world_mesh_update {
     unsigned long revision;
     unsigned long state_revision, presentation_generation;
     int predicted;
-    double completed_at;    /* Local worker completion time, never a remote timestamp. */
-    maage_world_mesh *mesh; /* ownership transfers to caller */
+    double completed_at, initialized_at; /* Local completion/initial import times, never remote timestamps. */
+    maage_world_mesh *mesh;              /* ownership transfers to caller */
 } maage_world_mesh_update;
 typedef struct maage_world_target {
     int x, y, z;
@@ -180,7 +180,8 @@ unsigned long maage_world_column_revision(const maage_world *world, int x, int z
 maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_block_position *removed, size_t count, maage_mesh_data *data, unsigned int **indices);
 /* Exact geometry for the deduplicated 3x3x3 cells and axial foliage dependencies
  * around at most 32 edits.
- * Uses effective replica state immediately, independent of final light/jobs.
+ * Uses effective replica state immediately in prepared/presented columns,
+ * independent of subsequent lighting refinement.
  * Filter removes these same owner cells from cached complete meshes. */
 maage_status maage_world_mesh_patch(const maage_world *replica, const maage_block_position *centers, size_t count, maage_leaves_mode leaves, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace);
 unsigned long maage_world_presentation_revision(const maage_world *replica);
@@ -263,8 +264,20 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats);
  * No job submission, world lock, allocation or filesystem work. */
 int maage_world_observe(const maage_world *world, int x, int y, int z, maage_world_observation *observation);
 maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update);
-/* Validate a detached CPU mesh immediately before owner-thread GPU upload. */
+/* Before first presentation this also requires coherent current lighting and
+ * exact center/halo light inputs. Presented columns retain geometry validity
+ * while later lighting refines it. */
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision);
+/* Replica owner confirms complete GPU preparation for this CPU revision.
+ * Local patches may then accompany its first coherent whole-column frame.
+ * Revision zero revokes preparation when an unpresented GPU cache is dropped. */
+maage_status maage_world_mesh_prepared(maage_world *world, int x, int z, unsigned long revision);
+/* Replica owner acknowledges a successfully submitted first coherent frame,
+ * including an empty mesh. No GPU objects or renderer state enter World. */
+maage_status maage_world_mesh_presented(maage_world *world, int x, int z, unsigned long revision);
+/* Preparation failures can retry without losing previous geometry. A newer
+ * pending/running mesh wins; unchanged failures use a short retry backoff. */
+maage_status maage_world_retry_mesh(maage_world *world, int x, int z, unsigned long revision);
 int maage_world_chunk_loaded(const maage_world *world, int x, int z);
 /* Blocking lifecycle boundary only: cancel obsolete work, finish saves and join
  * the pool. Never call inside the render loop. Failures preserve dirty save data. */

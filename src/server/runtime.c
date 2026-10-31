@@ -654,7 +654,7 @@ static void server_offer_columns(maage_server_runtime *runtime) {
         accepted = *update; /* Copy identity before queue ownership can reach the Client. */
         result = maage_local_session_offer_column(runtime->config.session, &outgoing);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-            if (runtime->diagnostics) maage_log_info("maage.server.latency", "column=%d,%d revision=%lu offered_at=%.6f tick=%lu", accepted.x, accepted.z, accepted.revision, outgoing.offered_at, runtime->tick);
+            if (runtime->diagnostics) maage_log_info("maage.server.latency", "phase=column_offered initial=%d unload=%d column=%d,%d revision=%lu offered_at=%.6f tick=%lu", accepted.base_revision == 0, accepted.unload, accepted.x, accepted.z, accepted.revision, outgoing.offered_at, runtime->tick);
             result = maage_world_ack_column(runtime->world, &accepted);
         }
         maage_column_update_destroy(outgoing.column);

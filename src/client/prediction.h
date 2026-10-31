@@ -7,10 +7,12 @@
  * CPU sources transfer from the existing mesh mailbox; no World pointers. */
 typedef struct maage_client_chunk_mesh {
     int x, z, used, filtered, prepared_changed, prepared_filtered;
+    int presented, first_frame;
     unsigned long revision, visual_revision, presentation_generation, filtered_revision, filtered_generation;
     maage_render_mesh *mesh, *prediction, *prepared;
     maage_world_mesh *source;
     size_t vertices, indices;
+    double initialized_at, uploaded_at;
 } maage_client_chunk_mesh;
 typedef struct maage_client_prediction {
     struct {

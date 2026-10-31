@@ -105,23 +105,46 @@ no numerical light and are revisited when membership changes.
 Owner publication validates incarnation and local/facing opacity/emission epochs. Results
 from incompatible block inputs are discarded with their consumed dirty cells
 requeued; compatible auxiliary edits retain their current data while merging light.
-Changed facing boundaries request another pass. Geometry epochs are
-separate from light epochs: correct geometry with older illumination can upload
-while refinement stays pending. Block/membership changes still reject obsolete
-geometry. Cardinal and diagonal AO meshes refresh after relevant boundary changes.
+Changed facing boundaries request another pass. Geometry epochs are separate from
+light epochs. After a column's first coherent frame, correct geometry with older
+illumination can upload while refinement stays pending. Block/membership changes
+still reject obsolete geometry. Cardinal and diagonal AO meshes refresh after
+relevant boundary changes.
 No worker mutates published buffers, and no render-loop wait or global World lock
 is needed. Prior GPU data remains usable until replacement, with local edit patches
 covering interactions immediately.
 
 The Server independently schedules the same numerical solver for gameplay light.
 Growth, melting and survival defer while the queried cache or its input halo is
-unavailable/pending. This readiness gate does not apply to Client geometry. The Client
-samples its own light for player, hand, item entities, pickup effects and F3.
-Block, first-geometry, light-initialization, pending-light and GPU-ready states
-are separate. First geometry uses a roof-aware sky approximation until numerical
-light exists. Light queries distinguish calculated, retained/approximate and
-unavailable values; pending actor samples may use adjacent cached illumination.
-The initial sky approximation never enters propagation buffers. At an edited cell
+unavailable/pending. Initial column transfer also requires committed local lighting
+and current available cardinal inputs. This transfer gate applies only before a
+column has an acknowledged transport base; ordinary block deltas and ordered unloads
+do not wait for lighting. Server readiness has no GPU dependency.
+
+The Client imports numeric blocks without making them visible. First CPU meshing
+requires local lighting and available cardinal/diagonal inputs to be initialized
+and current. First results retain exact center/halo data epochs; collection, dequeue,
+GPU preparation and first-frame admission reject obsolete initial illumination.
+Only complete successfully prepared GPU geometry enters the cache. After an accepted
+whole-column frame, a replica-local presentation latch permits incremental geometry
+and local prediction to continue with retained/provisional light during refinement.
+Prediction patches cannot expose an unprepared new column on their own. Empty meshes
+complete the same preparation/submission contract. Full imports and ordered unloads
+reset the corresponding GPU cache lifetime.
+
+Lighting jobs never wait for publication or another column's readiness. Missing,
+incomplete and out-of-interest neighbors do not create readiness dependencies;
+arrivals and boundary changes schedule later refinement. There is no whole-region
+barrier, synchronous lighting, extra generation footprint or worker-to-worker wait.
+Optional CPU mesh and GPU preparation failures retain prior visuals and retry with
+a 250 ms backoff for unchanged failures; new revisions can retry sooner. Fatal job
+failures stop explicitly instead of leaving a permanently pending visual.
+
+The Client samples its own light for player, hand, item entities, pickup effects and
+F3. Light queries distinguish calculated, retained/approximate and unavailable values;
+pending actor samples may use adjacent cached illumination. A roof-aware approximation
+remains available to those queries but does not serve as a new column's first mesh.
+It never enters propagation buffers. At an edited cell
 with initialized light, a bounded sky-shaft/neighbor calculation seeds both channels
 from effective opacity/emission before its geometry is exposed. Other cells retain
 prior illumination until asynchronous propagation handles increases and decreases;
@@ -149,6 +172,11 @@ column/revision IDs join mutation, offer, receipt/application, worker dispositio
 GPU upload wait/API duration. Drop entity IDs join their creation tick/block to entity
 publication sequences, Client receipt, instance preparation and successful frame
 submission. Complete newer entity sets may coalesce; later sets retain live entities.
+Initial column records identify block/feature/update initialization, first local light
+commit, available-halo readiness, initial offer, first CPU mesh, complete GPU preparation
+and accepted first-frame submission. Each side measures from its own initialization
+or receipt timestamp. These are transient readiness/diagnostic fields, not save data
+or transported light. First-frame submission does not measure physical display scanout.
 World backlog summaries are limited to one per second. Records allocate no diagnostic
 history. Input timing begins at the native input poll, not physical device delivery;
 Survival timing includes intended mining duration. First successful frame submission

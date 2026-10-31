@@ -154,13 +154,19 @@ static maage_status maage_client_mesh_cache_grow(maage_client_mesh_cache *cache)
     cache->capacity = grown;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
-static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache) {
+static void maage_client_mesh_cache_drop(maage_client_mesh_cache *cache, size_t index, maage_world *visual) {
+    if (visual && cache->slots[index].used && !cache->slots[index].presented) (void) maage_world_mesh_prepared(visual, cache->slots[index].x, cache->slots[index].z, 0);
+    maage_render_mesh_destroy(cache->slots[index].prepared);
+    maage_render_mesh_destroy(cache->slots[index].prediction);
+    maage_world_mesh_destroy(cache->slots[index].source);
+    maage_render_mesh_destroy(cache->slots[index].mesh);
+    memset(&cache->slots[index], 0, sizeof(cache->slots[index]));
+    ++cache->generation;
+}
+static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache, maage_world *visual) {
     size_t i;
-    for (i = 0; i < cache->capacity; ++i) {
-        maage_render_mesh_destroy(cache->slots[i].prediction);
-        maage_world_mesh_destroy(cache->slots[i].source);
-        maage_render_mesh_destroy(cache->slots[i].mesh);
-    }
+    for (i = 0; i < cache->capacity; ++i)
+        maage_client_mesh_cache_drop(cache, i, visual);
     free(cache->slots);
     free(cache->draws);
     memset(cache, 0, sizeof(*cache));
@@ -232,11 +238,7 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
     activity->status.budget_ms = budget_ms;
     for (i = 0; i < cache->capacity; ++i) {
         if (cache->slots[i].used && (!maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z) || abs(cache->slots[i].x - center_x) > options->radius || abs(cache->slots[i].z - center_z) > options->radius)) {
-            maage_render_mesh_destroy(cache->slots[i].prediction);
-            maage_world_mesh_destroy(cache->slots[i].source);
-            maage_render_mesh_destroy(cache->slots[i].mesh);
-            memset(&cache->slots[i], 0, sizeof(cache->slots[i]));
-            ++cache->generation;
+            maage_client_mesh_cache_drop(cache, i, visual);
         }
     }
     begin = maage_time_monotonic_seconds();
@@ -291,7 +293,9 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
             maage_world_mesh_destroy(update.mesh);
             if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED || maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
                 activity->last_result = result;
-                continue;
+                result = maage_world_retry_mesh(visual, update.x, update.z, update.revision);
+                if (maage_status_failed(result)) return result;
+                break;
             }
             return result;
         }
@@ -338,17 +342,24 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
             maage_world_mesh_destroy(cache->slots[selected].source);
             cache->slots[selected].source = update.mesh;
             update.mesh = NULL;
+            cache->slots[selected].initialized_at = update.initialized_at;
+            cache->slots[selected].uploaded_at = diagnostics ? maage_time_monotonic_seconds() : -1;
+            result = maage_world_mesh_prepared(visual, update.x, update.z, update.revision);
+            if (maage_status_failed(result)) return result;
+            if (diagnostics && !cache->slots[selected].presented) maage_log_info("maage.client.latency", "phase=first_gpu_prepared column=%d,%d revision=%lu state=%lu initial_ms=%.3f", update.x, update.z, update.revision, update.state_revision, (cache->slots[selected].uploaded_at - update.initialized_at) * 1000);
             ++cache->generation;
         } else {
             maage_render_mesh_destroy(filtered_mesh);
             maage_render_mesh_destroy(replacement);
-            if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED) {
+            if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED || maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
                 if (activity->last_result != result) {
                     activity->last_result = result;
                     maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result, "GPU upload failed for column %d,%d; retaining old visual.", update.x, update.z);
                 }
                 maage_world_mesh_destroy(update.mesh);
-                continue;
+                result = maage_world_retry_mesh(visual, update.x, update.z, update.revision);
+                if (maage_status_failed(result)) return result;
+                break;
             }
             maage_world_mesh_destroy(update.mesh);
             return result;
@@ -604,7 +615,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
     float matrix[16];
     double camera_eye[3], camera_yaw, camera_pitch, camera_distance;
-    size_t draw_count, resident_count, slot_index;
+    size_t draw_count, resident_count, slot_index, first_count;
     int valid_snapshot = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0;
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
@@ -1136,7 +1147,7 @@ choose_world:
              incoming.world_epoch != latest.world_epoch ||
              incoming.sequence > latest.sequence)) {
             if (incoming.session_epoch != latest.session_epoch || incoming.world_epoch != latest.world_epoch) {
-                (void) maage_client_mesh_cache_clear(&cache);
+                (void) maage_client_mesh_cache_clear(&cache, visual_world);
                 previous = incoming;
                 received_time = now;
                 memset(&collision, 0, sizeof(collision));
@@ -1245,7 +1256,14 @@ choose_world:
                 if (maage_status_code(operation) == MAAGE_STATUS_NOOP || maage_status_code(operation) == MAAGE_STATUS_INVALID_STATE) break;
                 if (maage_status_failed(operation)) goto done;
                 apply_begin = prediction.diagnostics ? maage_time_monotonic_seconds() : -1;
-                if (column_update.world_epoch == world_epoch) operation = maage_world_apply_column(visual_world, column_update.column);
+                if (column_update.world_epoch == world_epoch) {
+                    operation = maage_world_apply_column(visual_world, column_update.column);
+                    if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS && (column_update.column->unload || !column_update.column->base_revision)) {
+                        size_t index;
+                        for (index = 0; index < cache.capacity; ++index)
+                            if (cache.slots[index].used && cache.slots[index].x == column_update.x && cache.slots[index].z == column_update.z) maage_client_mesh_cache_drop(&cache, index, visual_world);
+                    }
+                }
                 if (prediction.diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu local_transport_ms=%.3f applied_at=%.6f receive_apply_ms=%.3f", column_update.x, column_update.z, column_update.revision, column_update.offered_at >= 0 ? (maage_time_monotonic_seconds() - column_update.offered_at) * 1000 : -1, maage_time_monotonic_seconds(), (maage_time_monotonic_seconds() - apply_begin) * 1000);
                 maage_column_update_destroy(column_update.column);
                 if (maage_status_failed(operation)) goto done;
@@ -1392,11 +1410,18 @@ choose_world:
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;
         }
-        draw_count = resident_count = 0;
+        draw_count = resident_count = first_count = 0;
         memset(&mesh_stats, 0, sizeof(mesh_stats));
-        for (slot_index = 0; slot_index < cache.capacity; ++slot_index)
+        for (slot_index = 0; slot_index < cache.capacity; ++slot_index) {
+            cache.slots[slot_index].first_frame = 0;
             if (cache.slots[slot_index].used) {
                 ++resident_count;
+                if (!maage_world_chunk_loaded(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
+                if (!cache.slots[slot_index].presented) {
+                    if (!maage_world_mesh_current(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision)) continue;
+                    cache.slots[slot_index].first_frame = 1;
+                    ++first_count;
+                }
                 if (cache.slots[slot_index].filtered || cache.slots[slot_index].mesh) {
                     if (cache.slots[slot_index].filtered) {
                         if (cache.slots[slot_index].prediction) cache.draws[draw_count++] = cache.slots[slot_index].prediction;
@@ -1407,6 +1432,7 @@ choose_world:
                     mesh_stats.indices += cache.slots[slot_index].indices;
                 }
             }
+        }
         mesh_activity.status.gpu_resident = resident_count;
         mesh_activity.status.ready_waiting_estimate = latest.world_stats.ready > resident_count ? latest.world_stats.ready - resident_count : 0;
         if (prediction.reveal) {
@@ -1450,6 +1476,17 @@ choose_world:
             rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
         frame_end = maage_time_monotonic_seconds();
         if (frame_end < 0.0) goto clock_failed;
+        if (first_count && maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
+            for (slot_index = 0; slot_index < cache.capacity; ++slot_index)
+                if (cache.slots[slot_index].first_frame) {
+                    operation = maage_world_mesh_presented(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision);
+                    if (maage_status_failed(operation)) goto done;
+                    if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS) {
+                        cache.slots[slot_index].presented = 1;
+                        if (prediction.diagnostics) maage_log_info("maage.client.latency", "phase=first_visible_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f gpu_ready_to_submit_ms=%.3f", cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision, cache.slots[slot_index].revision, (frame_end - cache.slots[slot_index].initialized_at) * 1000, (frame_end - cache.slots[slot_index].uploaded_at) * 1000);
+                    }
+                }
+        }
         if (prediction.diagnostics && maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
             unsigned int action;
             for (action = 0; action < MAAGE_CLIENT_PREDICTIONS; ++action)
@@ -1524,7 +1561,7 @@ return_to_title:
     if (maage_status_failed(operation)) goto done;
     visual_world = NULL;
     maage_client_prediction_destroy(&prediction);
-    operation = maage_client_mesh_cache_clear(&cache);
+    operation = maage_client_mesh_cache_clear(&cache, NULL);
     if (maage_status_failed(operation)) goto done;
     maage_client_ui_get_options(ui, &video_options);
     rendered = maage_renderer_set_scene(renderer, 1, NULL, NULL);
@@ -1570,7 +1607,7 @@ done:
     maage_client_cleanup_result(maage_client_audio_service_destroy(audio, &cleanup_trace), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_world_destroy(visual_world), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_prediction_destroy(&prediction), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache), &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache, NULL), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_environment_destroy(environment_view), &outcome, &cleanup_trace, trace);
     if (renderer) maage_client_cleanup_result(maage_renderer_set_instances(renderer, NULL, 0), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_player_view_destroy(&player_view), &outcome, &cleanup_trace, trace);

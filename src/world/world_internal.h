@@ -156,6 +156,7 @@ int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_regist
 /* All inputs are pinned immutable snapshots. Client retains copied CPU/GPU
  * geometry, never borrowed columns. Cancellation leaves partial output private. */
 maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace);
-/* Owner-thread borrowed effective inputs for bounded presentation patches. */
+/* Owner-thread borrowed effective inputs for bounded presentation patches;
+ * a new column participates only after its whole mesh is prepared. */
 int maage_world_present_inputs(const maage_world *world, int x, int z, const maage_chunk **chunk, const maage_chunk *neighbors[8], const maage_block_registry **blocks, const maage_biome_registry **biomes);
 #endif
