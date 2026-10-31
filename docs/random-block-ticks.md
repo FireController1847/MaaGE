@@ -84,7 +84,7 @@ visual option supplies randomness.
 `maage_environment_state`. Distinct seed-mixing domains initialize selection and
 behavior; supplied saved states are copied unchanged. Weather initialization and
 its draw sequence are unchanged. Both random-tick words are explicitly encoded
-as four little-endian bytes after the environment payload in the sole `MGWORLD6`
+as four little-endian bytes after the environment payload in the sole `MGWORLD7`
 metadata encoding, before the CRC. Zero is valid for the coordinate LCG; a saved
 zero behavior/weather xorshift state or a word above 32 bits is rejected.
 The same atomic world checkpoint contains player, entities, weather and random
@@ -163,7 +163,7 @@ ordinary breaking drop table. Fortune and Silk Touch remain unsupported; there i
 ## Persistence and Review
 
 The seed domains are `0x41c64e6d` and `0x85ebca6b`; a new zero behavior seed
-normalizes to one. Resume never reseeds either saved stream. `MGWORLD6` stores
+normalizes to one. Resume never reseeds either saved stream. `MGWORLD7` stores
 both words before its CRC, atomically with player, entities and environment.
 Leaf states use the namespaced block/metadata chunk palette.
 

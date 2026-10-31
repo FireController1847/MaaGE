@@ -269,11 +269,12 @@ static void maage_store_gameplay_default(maage_gameplay_save *save) {
     memset(save, 0, sizeof(*save));
     save->mode = MAAGE_GAME_MODE_CREATIVE;
     save->health = save->hunger = 20;
+    save->air = 300;
     save->saturation = 5;
 }
 static int maage_store_gameplay_valid(const maage_gameplay_save *save, const maage_item_registry *items) {
     unsigned int i;
-    if (save->mode > MAAGE_GAME_MODE_CREATIVE || save->health > 20 || save->hunger > 20 ||
+    if (save->mode > MAAGE_GAME_MODE_CREATIVE || save->health > 20 || save->hunger > 20 || save->air < -19 || save->air > 300 ||
         save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
         !(save->exhaustion >= 0 && save->exhaustion <= 40) ||
@@ -343,6 +344,7 @@ static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gamep
     maage_store_put(bytes, save->mode, 1);
     maage_store_put(bytes, save->health, 1);
     maage_store_put(bytes, save->hunger, 1);
+    maage_store_put(bytes, (unsigned long) (save->air + 20), 2);
     maage_store_put(bytes, save->flying ? 1 : 0, 1);
     maage_store_put(bytes, save->inventory.selected, 1);
     maage_store_double_put(bytes, save->saturation);
@@ -356,10 +358,14 @@ static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gamep
 }
 static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_save *save, const maage_item_registry *items) {
     unsigned int i;
+    unsigned long air;
     memset(save, 0, sizeof(*save));
     save->mode = (unsigned int) maage_store_get(bytes, 1);
     save->health = (unsigned int) maage_store_get(bytes, 1);
     save->hunger = (unsigned int) maage_store_get(bytes, 1);
+    air = maage_store_get(bytes, 2);
+    if (air < 1 || air > 320) bytes->failed = 1;
+    save->air = air >= 1 && air <= 320 ? (int) air - 20 : 300;
     save->flying = (int) maage_store_get(bytes, 1);
     save->inventory.selected = (unsigned int) maage_store_get(bytes, 1);
     save->saturation = maage_store_double_get(bytes);
@@ -465,7 +471,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD6", 8);
+    maage_store_text_put(&bytes, "MGWORLD7", 8);
     maage_store_put(&bytes, record->seed.low, 4);
     maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1);
@@ -528,12 +534,12 @@ static maage_status maage_store_metadata_load(const maage_world_store *store, co
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD6", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD7", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD6");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD7");
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4);
         record->seed.high = maage_store_get(&bytes, 4);

@@ -170,6 +170,7 @@ static maage_status maage_gameplay_sound_result(maage_status outcome, const maag
 static void maage_gameplay_begin_life(maage_gameplay *game) {
     if (++game->life == 0) ++game->life;
     game->walk_distance = game->damage_yaw = 0;
+    game->air = 300;
     game->damage_sequence = game->damage_tick = game->death_tick = 0;
     game->jump_repeat_ticks = 0;
 }
@@ -193,6 +194,7 @@ maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode) {
     if (!game || mode > MAAGE_GAME_MODE_CREATIVE) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     game->mode = mode;
+    game->air = 300;
     game->breaking_active = 0;
     game->break_progress = 0;
     game->dig_ticks = game->attack_miss_delay = 0;
@@ -247,6 +249,7 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
     save->inventory = game->inventory;
     save->mode = game->mode;
     save->health = game->health;
+    save->air = game->air;
     save->hunger = game->hunger;
     save->saturation = game->saturation;
     save->exhaustion = game->exhaustion;
@@ -257,7 +260,7 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
 maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save) {
     unsigned int i;
     if (!game || !maage_item_registry_is_finalized(items) || !save || save->mode > MAAGE_GAME_MODE_CREATIVE ||
-        save->health > 20 || save->hunger > 20 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
+        save->health > 20 || save->hunger > 20 || save->air < -19 || save->air > 300 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
         !(save->exhaustion >= 0 && save->exhaustion <= 40) ||
         !(save->fall_distance >= 0 && save->fall_distance < MAAGE_WORLD_LIMIT) ||
@@ -277,6 +280,7 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
     game->inventory = save->inventory;
     game->mode = save->mode;
     game->health = save->health;
+    game->air = save->air;
     game->hunger = save->hunger;
     game->saturation = save->saturation;
     game->exhaustion = save->exhaustion;
@@ -358,10 +362,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     }
     if (game->mode == MAAGE_GAME_MODE_CREATIVE || block->hardness == 0) progress = 1;
     else if (block->hardness < 0) progress = 0;
-    else {
-        const maage_block_state_definition *eye = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, (int) floor(player->position[0]), (int) floor(player->position[1] + MAAGE_PLAYER_EYE_HEIGHT), (int) floor(player->position[2])));
-        progress = maage_item_mining_damage(tool, block, player->grounded, eye && eye->fluid_kind == MAAGE_FLUID_WATER);
-    }
+    else progress = maage_item_mining_damage(tool, block, player->grounded, maage_player_submerged(player, world));
     /* A changed held target initializes before the following damage updates
      * advance both crack progression and dig cadence. */
     if (starting && progress < 1 && !pressed) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
@@ -499,10 +500,24 @@ static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player
     game->health = damage >= game->health ? 0 : game->health - damage;
     if (++game->damage_sequence == 0) ++game->damage_sequence;
     game->damage_tick = game->ticks;
-    game->damage_yaw = 0; /* Current sources are fall impact and starvation, with no attacker. */
-    if (!game->health) game->death_tick = game->ticks;
+    game->damage_yaw = 0; /* Environmental damage has no attacker. */
+    if (!game->health) {
+        game->death_tick = game->ticks;
+        game->air = 300;
+    }
     maage_gameplay_sound(sink, game->health ? MAAGE_SOUND_PLAYER_HURT : MAAGE_SOUND_PLAYER_DEATH, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 1.0, maage_gameplay_sound_pitch(game, 0.2));
 }
+static void maage_gameplay_breathe(maage_gameplay *game, const maage_player *player, const maage_world *world, maage_gameplay_sound_sink *sink) {
+    if (!game->health || game->mode == MAAGE_GAME_MODE_CREATIVE || !maage_player_submerged(player, world)) {
+        game->air = 300;
+        return;
+    }
+    if (--game->air <= -20) {
+        game->air = 0;
+        maage_gameplay_hurt(game, player, 2, sink);
+    }
+}
+
 static void maage_gameplay_vitals(maage_gameplay *game, const maage_player *player, const maage_world *world, const double previous[3], int was_grounded, int jumped, int sprint_jump, int in_water, maage_gameplay_sound_sink *sink) {
     double dx = player->position[0] - previous[0], dz = player->position[2] - previous[2];
     const maage_block_state_definition *surface;
@@ -666,7 +681,8 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     }
     game->in_water = in_water;
     game->audio_initialized = 1;
-    maage_gameplay_vitals(game, player, world, previous, grounded, jumped, sprint_jump, in_water, &sink);
+    maage_gameplay_breathe(game, player, world, &sink);
+    maage_gameplay_vitals(game, player, world, previous, grounded, jumped, sprint_jump, in_water || fluid == MAAGE_FLUID_WATER, &sink);
     if (!game->health || (game->mode == MAAGE_GAME_MODE_SURVIVAL && game->hunger <= 6)) {
         player->sprinting = 0;
         game->sprint_ticks = 0;

@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 14U
+#define MAAGE_SESSION_PROTOCOL_VERSION 15U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -123,6 +123,7 @@ typedef struct maage_session_player_view {
     maage_inventory inventory;
     maage_crafting_container crafting; /* Copied authoritative temporary state. */
     unsigned int game_mode, health, hunger;
+    int air; /* Authoritative remaining breath and drowning phase, -19..300. */
     double saturation;
     int flying, sneaking;
     maage_session_player_motion motion;

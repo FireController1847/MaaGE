@@ -507,6 +507,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     runtime->publication_dirty = 0;
     snapshot.player.game_mode = runtime->game.mode;
     snapshot.player.health = runtime->game.health;
+    snapshot.player.air = runtime->game.air;
     snapshot.player.hunger = runtime->game.hunger;
     snapshot.player.saturation = runtime->game.saturation;
     snapshot.player.flying = runtime->game.flying;
@@ -521,10 +522,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.reach = runtime->game.reach > 0 ? runtime->game.reach : (runtime->game.mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5);
     snapshot.player.break_delay = runtime->game.break_delay;
     snapshot.player.attack_miss_delay = runtime->game.attack_miss_delay;
-    {
-        const maage_block_state_definition *eye_state = maage_block_registry_state(maage_content_blocks(runtime->content), maage_world_get(runtime->world, (int) floor(runtime->player.position[0]), (int) floor(runtime->player.position[1] + MAAGE_PLAYER_EYE_HEIGHT), (int) floor(runtime->player.position[2])));
-        snapshot.player.submerged = eye_state && eye_state->fluid_kind == MAAGE_FLUID_WATER;
-    }
+    snapshot.player.submerged = maage_player_submerged(&runtime->player, runtime->world);
     snapshot.player.target = runtime->game.target;
     snapshot.player.breaking = runtime->game.breaking;
     snapshot.player.break_progress = runtime->game.break_progress;

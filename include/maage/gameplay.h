@@ -16,6 +16,7 @@ typedef struct maage_gameplay_save {
     maage_inventory inventory;
     maage_item_stack crafting_inputs[MAAGE_CRAFTING_CELLS]; /* Unreturned inputs only; no saved container. */
     unsigned int mode, health, hunger;
+    int air; /* -19..300 owner ticks; negative phase precedes drowning damage. */
     double saturation, exhaustion, fall_distance;
     int flying;
 } maage_gameplay_save;
@@ -23,6 +24,7 @@ typedef struct maage_gameplay {
     maage_inventory inventory;
     maage_crafting_container crafting;
     unsigned int mode, health, hunger;
+    int air; /* -19..300 owner ticks; negative phase precedes drowning damage. */
     double saturation, exhaustion, fall_distance;
     int flying;
     unsigned int sprint_window, sprint_ticks;

@@ -73,6 +73,24 @@ static void maage_client_ui_status(maage_client_ui *ui, float x, float y, unsign
     }
 }
 
+static void maage_client_ui_air(maage_client_ui *ui, float x, float y) {
+    maage_client_ui_rect rectangle;
+    int filled, count, i;
+    float u, edge = (float) ui->resources.atlas_edge;
+    if (!ui->snapshot.player.submerged) return;
+    filled = (int) ceil((ui->snapshot.player.air - 2) / 30.0);
+    count = (int) ceil(ui->snapshot.player.air / 30.0);
+    if (filled < 0) filled = 0;
+    if (count > 10) count = 10;
+    rectangle.width = rectangle.height = 9;
+    rectangle.y = y;
+    for (i = 0; i < count; ++i) {
+        rectangle.x = x - i * 8;
+        u = (float) (i < filled ? 16 : 25) / edge;
+        maage_client_ui_rectangle(ui, rectangle, u, 18.0f / edge, u + 9.0f / edge, 27.0f / edge, 1, 1, 1, 1);
+    }
+}
+
 void maage_client_ui_gameplay_draw(maage_client_ui *ui) {
     maage_client_ui_rect rectangle;
     const maage_item_stack *selected;
@@ -98,6 +116,7 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui) {
         /* Vitals sit directly above the hotbar; no experience row is rendered. */
         maage_client_ui_status(ui, x, y - 11, ui->snapshot.player.health, 0);
         maage_client_ui_status(ui, x + 173, y - 11, ui->snapshot.player.hunger, 1);
+        maage_client_ui_air(ui, x + 173, y - 21);
     }
     selected = maage_inventory_selected(&ui->snapshot.player.inventory);
     item = selected && selected->count ? maage_item_registry_get(ui->items, selected->item_id) : NULL;

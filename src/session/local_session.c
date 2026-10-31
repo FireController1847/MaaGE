@@ -196,7 +196,7 @@ maage_status maage_local_session_publish_snapshot(maage_local_session *session, 
     maage_status result;
     if (!session) return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
     if (!snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        !session_motion_valid(&snapshot->player.motion) ||
+        !session_motion_valid(&snapshot->player.motion) || snapshot->player.air < -19 || snapshot->player.air > 300 ||
         snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick ||
         !(snapshot->player.damage_yaw >= -DBL_MAX && snapshot->player.damage_yaw <= DBL_MAX) ||
         (snapshot->paused != 0 && snapshot->paused != 1) ||
