@@ -140,7 +140,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view, maa
     if (relative > 1.308996938995747) relative = 1.308996938995747;
     if (relative < -1.308996938995747) relative = -1.308996938995747;
     maage_player_pose_calculate(resources->skin_model, phase, amount * view->gait_sign, age, relative, pitch, swing, item != NULL, snapshot->player.sneaking, &pose);
-    if (food && item && food->item == held->item_id && food->metadata == held->metadata) {
+    if (food && food->amount > 0 && (!item || (food->item == held->item_id && food->metadata == held->metadata))) {
         double weight = food->amount * (1 - pow(1 - food->progress, 27));
         double motion = fabs(cos(food->remaining * 0.7853981633974483)) * 0.08;
         pose.rotation[MAAGE_PLAYER_RIGHT_ARM][0] += (1.5 - pitch * 0.5 + motion - pose.rotation[MAAGE_PLAYER_RIGHT_ARM][0]) * weight;

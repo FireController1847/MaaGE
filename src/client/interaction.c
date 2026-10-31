@@ -205,9 +205,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     wave = sin(swing * 3.141592653589793);
     root_wave = sin(sqrt(swing) * 3.141592653589793);
     square_wave = sin(swing * swing * 3.141592653589793);
-    maage_first_person_translate(matrix, -root_wave * (visual->item_id ? 0.4 : 0.3),
-                                 sin(sqrt(swing) * 6.283185307179586) * (visual->item_id ? 0.2 : 0.4),
-                                 -wave * (visual->item_id ? 0.2 : 0.4));
+    maage_first_person_translate(matrix, -root_wave * (visual->item_id ? 0.4 : 0.3), sin(sqrt(swing) * 6.283185307179586) * (visual->item_id ? 0.2 : 0.4), -wave * (visual->item_id ? 0.2 : 0.4));
     if (eating > 0) {
         ease = (1 - pow(1 - food->progress, 27)) * eating;
         bounce = food->progress > 0.2 ? fabs(cos(food->remaining * 0.7853981633974483)) * 0.1 * eating : 0;
@@ -216,8 +214,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
         maage_first_person_rotate(matrix, 0, ease * 10);
         maage_first_person_rotate(matrix, 2, ease * 30);
     }
-    maage_first_person_translate(matrix, visual->item_id ? 0.56 : 0.64,
-                                 (visual->item_id ? -0.52 : -0.60) - (1 - visual->equipped) * 0.6, -0.72);
+    maage_first_person_translate(matrix, visual->item_id ? 0.56 : 0.64, (visual->item_id ? -0.52 : -0.60) - (1 - visual->equipped) * 0.6, -0.72);
     maage_first_person_rotate(matrix, 1, 45);
     if (visual->item_id) {
         maage_first_person_rotate(matrix, 1, -square_wave * 20);

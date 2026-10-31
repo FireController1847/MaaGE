@@ -133,8 +133,8 @@ pickup, placement and durability. Iron/gold ingots and charcoal are registered
 and visible in Creative, but Survival acquisition awaits smelting. Smelting is
 outside this feature; ores are not converted through fake crafting recipes.
 Diamond progression consequently still depends on supplied iron equipment.
-Bowl/stew items use existing stack/presentation/persistence contracts; food-use
-behavior remains part of the provisional food system. Hoes, swords, armor,
+Bowl/stew items use existing stack/presentation/persistence contracts; stew uses
+the shared owner-timed food action and returns its bowl on completion. Hoes, swords, armor,
 recipe books and container automation are outside the supported tool catalog.
 
 ## Manual Review

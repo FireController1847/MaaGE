@@ -225,8 +225,17 @@ static maage_status entity_fall_move(maage_entity *entity, maage_world *world) {
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
 
+static void entity_compact(maage_entities *entities) {
+    size_t i, output = 0;
+    /* Preserve identity order, including after a partially successful step. */
+    for (i = 0; i < entities->count; ++i)
+        if (entities->data[i].type == MAAGE_ENTITY_FALLING_BLOCK || (entities->data[i].type == MAAGE_ENTITY_ITEM && entities->data[i].payload.item.count))
+            entities->data[output++] = entities->data[i];
+    entities->count = output;
+}
+
 maage_status maage_entities_tick(maage_entities *entities, maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
-    size_t i, j, step, bucket, output = 0;
+    size_t i, j, step, bucket;
     int x, y, z, dx, dy, dz;
     unsigned int remaining, examined;
     maage_entity *entity, *other;
@@ -250,7 +259,10 @@ maage_status maage_entities_tick(maage_entities *entities, maage_world *world, c
         ++entity->age;
         if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
             result = entity_fall_move(entity, world);
-            if (maage_status_failed(result)) return result;
+            if (maage_status_failed(result)) {
+                entity_compact(entities);
+                return result;
+            }
             continue;
         }
         entity_move(entity, world);
@@ -269,7 +281,10 @@ maage_status maage_entities_tick(maage_entities *entities, maage_world *world, c
         entity = &entities->data[i];
         if (entity->type != MAAGE_ENTITY_ITEM || !entity->payload.item.count || !entity_loaded(world, entity)) continue;
         item = maage_item_registry_get(items, entity->payload.item.item_id);
-        if (!item) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_LOOKUP);
+        if (!item) {
+            entity_compact(entities);
+            return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_LOOKUP);
+        }
         x = (int) floor(entity->position[0]);
         y = (int) floor(entity->position[1]);
         z = (int) floor(entity->position[2]);
@@ -302,7 +317,10 @@ maage_status maage_entities_tick(maage_entities *entities, maage_world *world, c
             fabs(player->position[2] - entity->position[2]) < MAAGE_PLAYER_WIDTH * 0.5 + 1.125 &&
             entity->position[1] + 0.25 > player->position[1] - 0.5 && entity->position[1] < player->position[1] + MAAGE_PLAYER_HEIGHT + 0.5) {
             result = maage_inventory_add(inventory, items, &entity->payload.item, &remaining);
-            if (maage_status_failed(result)) return result;
+            if (maage_status_failed(result)) {
+                entity_compact(entities);
+                return result;
+            }
             if (remaining != entity->payload.item.count) {
                 maage_entity_pickup *pickup = &pickups[(*written)++];
                 pickup->entity = entity->id;
@@ -315,11 +333,7 @@ maage_status maage_entities_tick(maage_entities *entities, maage_world *world, c
             }
         }
     }
-    /* Preserve increasing identity order for binary search in presentation. */
-    for (i = 0; i < entities->count; ++i)
-        if (entities->data[i].type == MAAGE_ENTITY_FALLING_BLOCK || (entities->data[i].type == MAAGE_ENTITY_ITEM && entities->data[i].payload.item.count))
-            entities->data[output++] = entities->data[i];
-    entities->count = output;
+    entity_compact(entities);
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
 size_t maage_entities_count(const maage_entities *entities) {
