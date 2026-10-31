@@ -589,7 +589,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_fov fov = {0.0, 0, 0, 0, 0};
     double effective_fov;
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
-    double render_yaw = 0.0, render_pitch = 0.0, yaw_arc = 0.0;
+    double render_yaw = 0.0, render_pitch = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
     unsigned long sound_epoch = 0, sound_world_epoch = 0, frames = 0, tick_count = 0;
     float matrix[16];
@@ -1284,19 +1284,11 @@ choose_world:
         if (alpha < 0.0) alpha = 0.0;
         if (alpha > 1.0 || previous.tick == latest.tick) alpha = 1.0;
         if (previous.world_epoch != latest.world_epoch || previous.session_epoch != latest.session_epoch) alpha = 1.0;
-        /* Shortest-arc angular interpolation uses only copied authoritative
-         * snapshots. Local mouse-look is an independent presentation override
-         * while captured; it never changes the Server state in a snapshot. */
-        yaw_arc = atan2(sin(latest.player.yaw - previous.player.yaw), cos(latest.player.yaw - previous.player.yaw));
-        render_yaw = previous.player.yaw + yaw_arc * alpha;
-        render_pitch = previous.player.pitch + (latest.player.pitch - previous.player.pitch) * alpha;
-        if (active) {
-            render_yaw = yaw;
-            render_pitch = pitch;
-        } else {
-            yaw = render_yaw;
-            pitch = render_pitch;
-        }
+        /* Local look retains its last angles when capture is released. Delayed
+         * Server echoes must neither rotate the view nor feed back into input.
+         * Position still interpolates copied authoritative motion below. */
+        render_yaw = yaw;
+        render_pitch = pitch;
         for (axis = 0; axis < 3; ++axis)
             eye[axis] = previous.player.player.position[axis] + (latest.player.player.position[axis] - previous.player.player.position[axis]) * alpha;
         eye[1] += MAAGE_PLAYER_EYE_HEIGHT;

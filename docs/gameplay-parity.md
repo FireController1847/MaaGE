@@ -42,7 +42,9 @@ Catalog/admin I/O runs on bounded Jobs work. Title starts without a Server;
 Play starts the integrated runtime. Save/Quit flushes and joins before returning.
 Pause and Options stop gameplay; inventory and tables keep simulation/music active.
 The death screen keeps the owner clock running for the death transition and respawn.
-Modal screens release capture, and closure restores it when appropriate.
+Modal screens release capture, and closure restores it when appropriate. Local
+look angles stop immediately on release and remain fixed through menu closure;
+delayed Server angle echoes never rotate the view or become new input commands.
 
 ## State Transfer and Visual Lighting
 
