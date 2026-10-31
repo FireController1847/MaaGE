@@ -26,6 +26,7 @@ typedef struct maage_client_prediction {
     double input_at;
     int diagnostics;
     maage_leaves_mode leaves;
+    maage_biome_blend biome_blend;
     maage_world_target target;
     maage_item_stack held;
     double progress, delay, use_delay;
@@ -37,7 +38,7 @@ typedef struct maage_client_prediction {
 } maage_client_prediction;
 /* Resolve input/effective states without GPU work, so reliable commands can
  * be flushed before resource preparation and frame submission. */
-maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command);
+maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command);
 /* Atomically publish the prepared patch and filtered draw resources. */
 maage_status maage_client_prediction_prepare(maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, maage_world *visual, maage_client_chunk_mesh *meshes, size_t capacity, maage_status_trace *trace);
 /* Prepare a streamed source against exactly the currently published patch.

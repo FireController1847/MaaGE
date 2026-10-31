@@ -251,7 +251,8 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Sprint eligibility/tap timers are Server-owned; Player owns movement multiplier,
   jump impulse and collision cancellation. Dynamic sprint/world FOV stays independent
   of saved base and fixed hand projection; duplicate snapshots do not restart smoothing.
-  Death/food/respawn remain provisional; current respawn retains inventory at session spawn.
+  Food use is owner-timed with numeric item metadata and copied progress for Client poses;
+  current respawn retains inventory at session spawn.
 - Client screens/layout/input live under `src/client/ui/`, not controller `frontend.c`.
   Controller owns catalog Jobs, lifecycle and Options persistence. Reuse one numeric
   registry, stack, primitive/atlas/input system; no native widget or second game UI.
@@ -261,7 +262,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Startup-only Mojang splash uses the verified original 256x256 PNG on white before
   reveal; pump events during initialization, no minimum delay. Missing art logs/uses white.
   No Client asset acquisition or packaged Mojang artwork.
-- Per-instance atomic `config/options.ini` stores numeric FPS, VSync, GUI scale, Leaves,
+- Per-instance atomic `config/options.ini` stores numeric FPS, VSync, GUI scale, Leaves, Biome Blend,
   window mode and volume settings. Game mode is world data. New FPS defaults to 240;
   zero is Unlimited with resource/display backpressure. Carry monotonic pacing deadlines,
   rebase stalls/cap changes, use native whole-ms waits and bounded sub-ms final waits.

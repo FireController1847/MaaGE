@@ -91,7 +91,7 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
             centers[count++].z = prediction->entries[i].target.z;
         }
     if (count) {
-        result = maage_world_mesh_patch(visual, centers, count, prediction->leaves, &patch, trace);
+        result = maage_world_mesh_patch(visual, centers, count, prediction->leaves, prediction->biome_blend, &patch, trace);
         if (maage_status_failed(result)) return result;
         data = *maage_world_mesh_data(patch);
         if (data.index_count) result = maage_renderer_upload_geometry(renderer, &data, atlas, &reveal, trace);
@@ -134,7 +134,7 @@ failed:
     }
     return result;
 }
-maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command) {
+maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command) {
     maage_world_target target, destination;
     maage_block_state_id placed;
     double direction[3], damage;
@@ -156,7 +156,8 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     }
     ++prediction->frame;
     if (pressed || use_pressed) prediction->input_at = prediction->diagnostics ? input_time : -1;
-    if (prediction->leaves != leaves) {
+    if (prediction->leaves != leaves || prediction->biome_blend != blend) {
+        prediction->biome_blend = blend;
         prediction->leaves = leaves;
         ++prediction->generation;
     }

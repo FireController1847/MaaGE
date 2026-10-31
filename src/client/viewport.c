@@ -1225,6 +1225,9 @@ choose_world:
                 if (maage_status_is_success(maage_local_session_get_backlog(session, &backlog))) maage_log_info("maage.client.latency", "tick=%lu command_backlog=%lu event_backlog=%lu column_backlog=%lu", latest.tick, (unsigned long) backlog.commands, (unsigned long) backlog.events, (unsigned long) backlog.columns);
             }
             video_options.leaves = maage_client_ui_leaves_mode(ui);
+            video_options.biome_blend = maage_client_ui_biome_blend(ui);
+            operation = maage_world_set_biome_blend(visual_world, video_options.biome_blend);
+            if (maage_status_failed(operation)) goto done;
             operation = maage_world_set_leaves_mode(visual_world, video_options.leaves);
             if (maage_status_failed(operation)) goto done;
             operation = maage_world_stream(visual_world, latest.player.player.position[0], latest.player.player.position[2], yaw, trace);
@@ -1241,7 +1244,7 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, video_options.leaves, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, input.secondary_down || input.secondary_pressed, input.secondary_pressed, input.keys[MAAGE_INPUT_KEY_SHIFT], (unsigned int) selected_hotbar, &command);
+            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, input.secondary_down || input.secondary_pressed, input.secondary_pressed, input.keys[MAAGE_INPUT_KEY_SHIFT], (unsigned int) selected_hotbar, &command);
             if (!maage_status_failed(operation) && command.kind) {
                 delivery = maage_client_outbox_queue(&outbox, &command);
                 if (maage_status_failed(delivery)) {

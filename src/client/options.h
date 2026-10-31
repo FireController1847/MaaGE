@@ -47,6 +47,7 @@ typedef struct maage_client_options {
     int view_bobbing;
     int gui_scale; /* 0 auto; 1..4 explicit. */
     maage_leaves_mode leaves;
+    maage_biome_blend biome_blend;
     maage_client_window_choice window_mode;
     maage_client_window_choice fullscreen_style; /* Borderless or Fullscreen. */
 } maage_client_options;

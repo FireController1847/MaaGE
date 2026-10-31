@@ -111,6 +111,7 @@ int maage_client_ui_vsync(const maage_client_ui *ui);
 int maage_client_ui_view_bobbing(const maage_client_ui *ui);
 int maage_client_ui_gui_scale(const maage_client_ui *ui);
 maage_leaves_mode maage_client_ui_leaves_mode(const maage_client_ui *ui);
+maage_biome_blend maage_client_ui_biome_blend(const maage_client_ui *ui);
 float maage_client_ui_width(const maage_client_ui *ui);
 float maage_client_ui_height(const maage_client_ui *ui);
 

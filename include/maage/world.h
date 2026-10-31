@@ -48,6 +48,14 @@ typedef enum maage_leaves_mode {
     MAAGE_LEAVES_SMART,
     MAAGE_LEAVES_FANCY
 } maage_leaves_mode;
+/* Client visual quality; never affects authoritative biome identities. */
+typedef enum maage_biome_blend {
+    MAAGE_BIOME_BLEND_OFF = 0,
+    MAAGE_BIOME_BLEND_VANILLA,
+    MAAGE_BIOME_BLEND_SMOOTH_5,
+    MAAGE_BIOME_BLEND_SMOOTH_7,
+    MAAGE_BIOME_BLEND_SMOOTH_9
+} maage_biome_blend;
 typedef struct maage_world_store maage_world_store;
 struct maage_environment_state;
 struct maage_random_tick_state;
@@ -174,7 +182,7 @@ maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_b
  * around at most 32 edits.
  * Uses effective replica state immediately, independent of final light/jobs.
  * Filter removes these same owner cells from cached complete meshes. */
-maage_status maage_world_mesh_patch(const maage_world *replica, const maage_block_position *centers, size_t count, maage_leaves_mode leaves, maage_world_mesh **output, maage_status_trace *trace);
+maage_status maage_world_mesh_patch(const maage_world *replica, const maage_block_position *centers, size_t count, maage_leaves_mode leaves, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace);
 unsigned long maage_world_presentation_revision(const maage_world *replica);
 /* Owned numeric state transfer; no light, scheduling, entities or file data.
  * Ordered unloads retire an exact base after all preceding packets.
@@ -219,6 +227,8 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
 /* Runtime visual change: invalidate meshes, preserve columns and lighting.
  * The next nonblocking World stream schedules replacement CPU mesh jobs. */
 maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode);
+/* Presentation replicas only; invalidates geometry without scheduling light. */
+maage_status maage_world_set_biome_blend(maage_world *world, maage_biome_blend blend);
 /* One ordered 20 TPS environment phase, with bounded scheduled block work.
  * Call only while simulation is active; streaming continues while paused. */
 maage_status maage_world_tick(maage_world *world);

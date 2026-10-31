@@ -85,7 +85,11 @@ torches preserve direct sky; leaves attenuate by 1 and water/ice by 3. Day/night
 brightness changes do not trigger relighting or remeshing.
 
 Grass top/side overlays receive numeric biome tint while dirt/base sides remain
-neutral. Mesh workers average a 3x3 biome neighborhood; spruce/birch colors are
+neutral. Client mesh workers support OFF (1x1), Vanilla 3x3 and Smooth 5x5/7x7/9x9;
+Smooth 5x5 is the default. Vanilla retains one averaged color per block, including
+byte-channel truncation and local tall-grass tint. Smooth modes average the four
+adjacent box-filter centers at each world-space corner and interpolate those
+shared corner colors across faces, overlays and applicable plants. Spruce/birch colors are
 fixed. Snow-covered grass uses its own sides. Fast leaves use opaque textures and
 aggressive internal culling; Fancy preserves internal cutout faces; Smart retains
 an exposed plane and two interior cutout planes before suppressing deeper faces.
@@ -107,6 +111,28 @@ X=210° and Y=45°; ambient 0.4 plus two diffuse 0.6 lights shade them. Shared t
 alpha, partial-shape UVs, counts, durability and cursor handling serve all inventories.
 Cached world items use shared material traversal and transforms, without geometry
 uploads on movement. See [Item Entities](item-entities.md).
+
+The Video Settings Biome Blend control persists numeric mode 0..4 in
+`[video] biome_blend` in the instance's `config/options.ini`. It changes only the
+Client replica. Existing Server biome identities and colormap definitions remain
+unchanged; Server Worlds disable mesh production. No new Session data is needed.
+Changing quality advances mesh revisions, cancels pending mesh work and rejects
+results from obsolete settings without scheduling light. Old GPU geometry stays
+visible until an asynchronous replacement can publish. Prediction patches use
+the same setting and rebuild on a mode change.
+
+Each immutable meshing job lazily builds bounded summed-area grass/foliage/count
+samples (at most 26x26, with a five-cell halo), then caches at most 17x17 corner
+colors. Radius-dependent sampling and constant-time box queries avoid per-face
+neighborhood lookups. Patch cells group by column to reuse the same cache.
+Missing columns contribute no sample weight. Initial/imported biome changes and
+neighbor arrival/removal invalidate the existing eight-column visual halo; job
+input epochs reject obsolete neighbor sets. Once the same inputs are available,
+shared edge/corner samples agree across chunks regardless of job completion order.
+Newly available biome data can still refine edge colors during asynchronous
+replacement; no per-frame tint calculation or screen/texture blur is involved.
+Snow variants, fixed foliage colors and inventory/item preview tints retain their
+separate rules. Lighting/AO and their interpolation are unchanged.
 
 ## Column Lighting Ownership
 
@@ -232,8 +258,9 @@ notice. Resource bytes are never packaged or acquired by the Client.
 
 Exact lightmap/gamma/flicker matching, altitude/noise biome tint variation,
 randomized plant offsets, particles, clouds/stars and
-maps/bows/eating/enchantment effects remain incomplete or absent. Movement/fluid
-feel, blindness and item-use slowdowns remain provisional/unsupported.
+maps/bows/enchantment effects remain incomplete or absent. Eating uses shared
+first/third-person poses; food-fragment particles remain absent. Movement/fluid
+feel and blindness remain provisional/unsupported.
 Legacy OpenGL and Software retain their implemented subsets and reject unsupported draws.
 
 Pending programmer review: compare day/night/weather sky edges, foliage modes,

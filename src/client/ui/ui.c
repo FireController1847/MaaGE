@@ -111,6 +111,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->vsync = 1;
     ui->view_bobbing = 1;
     ui->leaves_mode = MAAGE_LEAVES_FANCY;
+    ui->biome_blend = MAAGE_BIOME_BLEND_SMOOTH_5;
     ui->fov_degrees = 70;
     ui->audio_volume[0] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
     ui->audio_volume[1] = MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS;
@@ -304,6 +305,8 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     ui->fps_step = options->max_fps ? options->max_fps / 10 - 1 : 26;
     ui->requested_scale = options->gui_scale;
     ui->leaves_mode = options->leaves;
+    ui->biome_blend = options->biome_blend;
+    if (ui->biome_blend < MAAGE_BIOME_BLEND_OFF || ui->biome_blend > MAAGE_BIOME_BLEND_SMOOTH_9) ui->biome_blend = MAAGE_BIOME_BLEND_SMOOTH_5;
     ui->view_bobbing = options->view_bobbing != 0;
     {
         unsigned int n;
@@ -335,6 +338,7 @@ void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options
     options->view_bobbing = ui->view_bobbing;
     options->gui_scale = ui->requested_scale;
     options->leaves = (maage_leaves_mode) ui->leaves_mode;
+    options->biome_blend = (maage_biome_blend) ui->biome_blend;
     {
         unsigned int n;
         for (n = 0; n < 7; ++n)
@@ -370,6 +374,9 @@ int maage_client_ui_gui_scale(const maage_client_ui *ui) {
 }
 maage_leaves_mode maage_client_ui_leaves_mode(const maage_client_ui *ui) {
     return ui ? (maage_leaves_mode) ui->leaves_mode : MAAGE_LEAVES_FANCY;
+}
+maage_biome_blend maage_client_ui_biome_blend(const maage_client_ui *ui) {
+    return ui ? (maage_biome_blend) ui->biome_blend : MAAGE_BIOME_BLEND_SMOOTH_5;
 }
 float maage_client_ui_width(const maage_client_ui *ui) {
     return ui ? ui->width : 0;

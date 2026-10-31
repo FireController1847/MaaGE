@@ -140,29 +140,73 @@ static void maage_mesh_fluid_lighting(const maage_block_registry *registry, cons
     }
 }
 
-static void maage_mesh_biome_colors(const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int z, float colors[4][3]) {
+/* A five-cell halo covers the largest box plus corner interpolation. Prefix
+ * sums reuse immutable samples across every height/face; missing columns carry
+ * zero weight, never an invented center-biome identity. */
+typedef struct maage_mesh_biome_cache {
+    double sums[27][27][7]; /* grass RGB, foliage RGB, available sample count */
+    float colors[17][17][4][3];
+    unsigned char ready[17][17];
+    int initialized, halo;
+} maage_mesh_biome_cache;
+
+static void maage_mesh_biome_cache_init(maage_mesh_biome_cache *cache, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_biome_blend blend) {
     const maage_chunk *sample;
     const maage_biome_definition *biome;
-    int dx, dz, sx, sz, component;
-    for (component = 0; component < 3; ++component) {
-        colors[MAAGE_BLOCK_TINT_NONE][component] = 1;
-        colors[MAAGE_BLOCK_TINT_GRASS][component] = 0;
-        colors[MAAGE_BLOCK_TINT_FOLIAGE][component] = 0;
-    }
-    biome = maage_biome_registry_get(biomes, chunk->biomes[z * 16 + x]);
-    for (component = 0; component < 3; ++component)
-        colors[MAAGE_BLOCK_TINT_GRASS_LOCAL][component] = biome ? biome->grass_color[component] : 1;
-    for (dz = -1; dz <= 1; ++dz)
-        for (dx = -1; dx <= 1; ++dx) {
-            sx = x + dx;
-            sz = z + dz;
+    double value;
+    int x, z, sx, sz, channel, edge;
+    memset(cache, 0, sizeof(*cache));
+    cache->halo = (int) blend + (blend >= MAAGE_BIOME_BLEND_SMOOTH_5 ? 1 : 0);
+    edge = 16 + cache->halo * 2;
+    for (z = 0; z < edge; ++z)
+        for (x = 0; x < edge; ++x) {
+            sx = x - cache->halo;
+            sz = z - cache->halo;
             sample = maage_mesh_neighbor(chunk, neighbors, &sx, &sz);
-            biome = maage_biome_registry_get(biomes, sample ? sample->biomes[sz * 16 + sx] : chunk->biomes[z * 16 + x]);
-            for (component = 0; component < 3; ++component) {
-                colors[MAAGE_BLOCK_TINT_GRASS][component] += (biome ? biome->grass_color[component] : 1) / 9.0f;
-                colors[MAAGE_BLOCK_TINT_FOLIAGE][component] += (biome ? biome->foliage_color[component] : 1) / 9.0f;
+            biome = sample ? maage_biome_registry_get(biomes, sample->biomes[sz * 16 + sx]) : NULL;
+            for (channel = 0; channel < 7; ++channel) {
+                value = !biome ? 0 : (channel == 6 ? 1 : (channel < 3 ? biome->grass_color[channel] : biome->foliage_color[channel - 3]));
+                cache->sums[z + 1][x + 1][channel] = value + cache->sums[z + 1][x][channel] + cache->sums[z][x + 1][channel] - cache->sums[z][x][channel];
             }
         }
+    cache->initialized = 1;
+}
+
+static const float (*maage_mesh_biome_colors(const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_biome_blend blend, maage_mesh_biome_cache *cache, int x, int z))[3] {
+    const maage_biome_definition *biome;
+    double sums[7] = {0, 0, 0, 0, 0, 0, 0};
+    int pass, channel, radius = (int) blend, smooth = blend >= MAAGE_BIOME_BLEND_SMOOTH_5;
+    int x0, z0, x1, z1, cx, cz;
+    float (*colors)[3];
+    if (!cache->initialized) maage_mesh_biome_cache_init(cache, biomes, chunk, neighbors, blend);
+    colors = cache->colors[z][x];
+    if (cache->ready[z][x]) return (const float (*)[3]) colors;
+    /* Smooth vertices average the four adjacent block-centered box filters.
+     * The world-space corner and its sample set are identical on either side
+     * of a block/chunk boundary. Count weights also interpolate availability. */
+    for (pass = 0; pass < (smooth ? 4 : 1); ++pass) {
+        cx = x - (smooth ? pass & 1 : 0);
+        cz = z - (smooth ? pass >> 1 : 0);
+        x0 = cx - radius + cache->halo;
+        z0 = cz - radius + cache->halo;
+        x1 = cx + radius + cache->halo + 1;
+        z1 = cz + radius + cache->halo + 1;
+        for (channel = 0; channel < 7; ++channel)
+            sums[channel] += cache->sums[z1][x1][channel] - cache->sums[z0][x1][channel] - cache->sums[z1][x0][channel] + cache->sums[z0][x0][channel];
+    }
+    biome = !smooth ? maage_biome_registry_get(biomes, chunk->biomes[z * 16 + x]) : NULL;
+    for (channel = 0; channel < 3; ++channel) {
+        colors[MAAGE_BLOCK_TINT_NONE][channel] = 1;
+        colors[MAAGE_BLOCK_TINT_GRASS][channel] = sums[6] > 0 ? (float) (sums[channel] / sums[6]) : 1;
+        colors[MAAGE_BLOCK_TINT_FOLIAGE][channel] = sums[6] > 0 ? (float) (sums[channel + 3] / sums[6]) : 1;
+        if (blend == MAAGE_BIOME_BLEND_VANILLA) {
+            colors[MAAGE_BLOCK_TINT_GRASS][channel] = (float) (floor(colors[MAAGE_BLOCK_TINT_GRASS][channel] * 255 + 0.0001) / 255);
+            colors[MAAGE_BLOCK_TINT_FOLIAGE][channel] = (float) (floor(colors[MAAGE_BLOCK_TINT_FOLIAGE][channel] * 255 + 0.0001) / 255);
+        }
+        colors[MAAGE_BLOCK_TINT_GRASS_LOCAL][channel] = smooth ? colors[MAAGE_BLOCK_TINT_GRASS][channel] : (biome ? biome->grass_color[channel] : 1);
+    }
+    cache->ready[z][x] = 1;
+    return (const float (*)[3]) colors;
 }
 
 /* Shared corner heights depend on the same four cells in either adjoining
@@ -220,7 +264,7 @@ static void maage_mesh_fluid_flow(const maage_block_registry *registry, const ma
     flow[1] = length > 0 ? (float) (vector[2] / length) : 0;
 }
 
-static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, size_t face_index, int x, int y, int z, unsigned int face, const maage_block_face_definition *definition, const float uv[4], const maage_block_shape *shape, unsigned int model, unsigned int metadata, int log_axis, float material, const float tint[3], const float animation[3], const float fluid_heights[4], const float fluid_flow[2], const maage_mesh_illumination *illumination) {
+static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, size_t face_index, int x, int y, int z, unsigned int face, const maage_block_face_definition *definition, const float uv[4], const maage_block_shape *shape, unsigned int model, unsigned int metadata, int log_axis, float material, float tint[4][3], int smooth_tint, const float animation[3], const float fluid_heights[4], const float fluid_flow[2], const maage_mesh_illumination *illumination) {
     static const unsigned int offsets[2][6] = {{0, 1, 2, 0, 2, 3}, {0, 1, 3, 1, 2, 3}};
     static const float shade[MAAGE_FACE_COUNT] = {0.6f, 0.6f, 0.5f, 1.0f, 0.8f, 0.8f};
     static const int cross_corners[4][4][3] = {
@@ -233,7 +277,7 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
     maage_mesh_vertex *vertex;
     unsigned int base, corner, component, alternate, source;
     const int *point;
-    float brightness, local[3], u, v, ao, weights, light[2], t, shear;
+    float brightness, local[3], u, v, ao, weights, light[2], t, shear, color;
     int axis, first, second;
     brightness = model == MAAGE_BLOCK_MESH_CUBE ? shade[face] : 1.0f;
     base = (unsigned int) (face_index * 4);
@@ -307,7 +351,9 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
         vertex->uv[0] = uv[0] + u * (uv[2] - uv[0]);
         vertex->uv[1] = uv[1] + v * (uv[3] - uv[1]);
         for (component = 0; component < 3; ++component) {
-            vertex->color[component] = definition->tint[component] * tint[component] * brightness * ao;
+            color = tint[0][component];
+            if (smooth_tint) color = tint[0][component] * (1 - local[0]) * (1 - local[2]) + tint[1][component] * local[0] * (1 - local[2]) + tint[2][component] * (1 - local[0]) * local[2] + tint[3][component] * local[0] * local[2];
+            vertex->color[component] = definition->tint[component] * color * brightness * ao;
             vertex->animation[component] = animation ? animation[component] : 0;
         }
         vertex->color[3] = definition->tint[3];
@@ -351,18 +397,19 @@ static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry, co
     return 1;
 }
 
-static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, maage_block_position *owners, maage_leaves_mode mode, const maage_job_token *token, const maage_block_position *cell, unsigned int *failure) {
+static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, maage_block_position *owners, maage_leaves_mode mode, maage_biome_blend blend, maage_mesh_biome_cache *cache, const maage_job_token *token, const maage_block_position *cell, unsigned int *failure) {
     const maage_block_state_definition *state, *neighbor, *above;
     const maage_block_definition *block, *current;
     const maage_block_face_definition *definition;
     const float *uv, *animation, *flow;
+    const float (*sample_colors)[3];
     maage_block_shape shape, face_shape;
     maage_mesh_illumination illumination;
     const maage_chunk *adjacent;
     maage_block_state_id id;
-    float colors[4][3], fluid_heights[4], fluid_flow[2], neutral[3] = {1, 1, 1}, material;
+    float colors[4][4][3], fluid_heights[4], fluid_flow[2], neutral[4][3] = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}, material;
     int x, y, z, section, nx, ny, nz, log_axis;
-    unsigned int face, axis, face_limit, model, tint_mode;
+    unsigned int face, axis, face_limit, model, tint_mode, corner, tint, component;
     int crossed, boundary, snowed, colors_ready, overlay, smooth, reverse;
     size_t face_count = 0;
     for (section = cell ? cell->y / 16 : 0; section < (cell ? cell->y / 16 + 1 : 16); ++section) {
@@ -461,14 +508,19 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                             }
                             if (mode == MAAGE_LEAVES_FAST && state->block_id == MAAGE_BLOCK_LEAVES && state->leaf_fast_uv[2] > state->leaf_fast_uv[0]) uv = state->leaf_fast_uv;
                             if (!colors_ready && (tint_mode || overlay)) {
-                                maage_mesh_biome_colors(biomes, chunk, neighbors, x, z, colors);
+                                for (corner = 0; corner < 4; ++corner) {
+                                    sample_colors = maage_mesh_biome_colors(biomes, chunk, neighbors, blend, cache, x + (blend >= MAAGE_BIOME_BLEND_SMOOTH_5 ? corner & 1 : 0), z + (blend >= MAAGE_BIOME_BLEND_SMOOTH_5 ? corner >> 1 : 0));
+                                    for (tint = 0; tint < 4; ++tint)
+                                        for (component = 0; component < 3; ++component)
+                                            colors[tint][corner][component] = sample_colors[tint][component];
+                                }
                                 colors_ready = 1;
                             }
                             smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && state->block_id != MAAGE_BLOCK_CACTUS;
                             if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, current->emitted_light, &illumination);
                             else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary, smooth, current->emitted_light, &illumination);
-                            maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
-                            if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], NULL, NULL, NULL, &illumination);
+                            maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
+                            if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], definition->overlay_tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, NULL, NULL, NULL, &illumination);
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));
                         }
                         if (owners) {
@@ -491,17 +543,19 @@ static maage_status maage_mesh_failure(maage_status_trace *trace, unsigned int c
     maage_status result = maage_status_make(code, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, code == MAAGE_STATUS_INTERRUPTED ? MAAGE_DETAIL_CANCELLED : 0);
     return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
 }
-maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace) {
+maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace) {
     maage_world_mesh *mesh;
+    maage_mesh_biome_cache cache;
     size_t faces, written, maximum = (size_t) - 1;
     unsigned int failure = MAAGE_STATUS_INVARIANT_VIOLATION;
     if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 5);
     *output = NULL;
-    if (mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
+    cache.initialized = 0;
+    if (mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY || blend < MAAGE_BIOME_BLEND_OFF || blend > MAAGE_BIOME_BLEND_SMOOTH_9) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
     if (!blocks || !biomes || !chunk || !neighbors) {
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, !blocks ? 0 : (!biomes ? 1 : (!chunk ? 2 : 3))), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
     }
-    faces = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, token, NULL, &failure);
+    faces = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, blend, &cache, token, NULL, &failure);
     if (faces == maximum) return maage_mesh_failure(trace, failure);
     if (faces > UINT_MAX / 4 ||
         faces > maximum / (4 * sizeof(maage_mesh_vertex)) ||
@@ -518,7 +572,7 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
         }
-        written = maage_mesh_generate(blocks, biomes, chunk, neighbors, mesh->vertices, mesh->indices, mesh->owners, mode, token, NULL, &failure);
+        written = maage_mesh_generate(blocks, biomes, chunk, neighbors, mesh->vertices, mesh->indices, mesh->owners, mode, blend, &cache, token, NULL, &failure);
         if (written != faces) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, failure);
@@ -568,11 +622,21 @@ maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_b
     data->index_count = written;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }
+static int maage_mesh_cell_order(const void *left, const void *right) {
+    const maage_block_position *a = (const maage_block_position *) left, *b = (const maage_block_position *) right;
+    int ax = maage_world_chunk_coordinate(a->x), bx = maage_world_chunk_coordinate(b->x);
+    int az = maage_world_chunk_coordinate(a->z), bz = maage_world_chunk_coordinate(b->z);
+    if (ax != bx) return ax < bx ? -1 : 1;
+    if (az != bz) return az < bz ? -1 : 1;
+    return 0;
+}
+
 /* The owner lends immutable effective snapshots only for this synchronous,
  * bounded patch. The ordinary face generator also handles fluids and cutouts. */
-maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_position *centers, size_t count, maage_leaves_mode mode, maage_world_mesh **output, maage_status_trace *trace) {
+maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_position *centers, size_t count, maage_leaves_mode mode, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace) {
     maage_block_position cells[32 * 39], cell;
-    const maage_chunk *chunk, *neighbors[8];
+    const maage_chunk *chunk, *neighbors[8], *cached_chunk = NULL;
+    maage_mesh_biome_cache cache;
     maage_world_mesh *mesh;
     size_t i, j, n = 0, faces = 0, written = 0, amount, index;
     int dx, dy, dz;
@@ -580,7 +644,7 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
     const maage_block_registry *blocks;
     const maage_biome_registry *biomes;
     if (output) *output = NULL;
-    if (!world || !output || count > 32 || (count && !centers) || mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
+    if (!world || !output || count > 32 || (count && !centers) || mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY || blend < MAAGE_BIOME_BLEND_OFF || blend > MAAGE_BIOME_BLEND_SMOOTH_9) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
     for (i = 0; i < count; ++i)
         if (centers[i].x <= -MAAGE_WORLD_LIMIT || centers[i].x >= MAAGE_WORLD_LIMIT || centers[i].z <= -MAAGE_WORLD_LIMIT || centers[i].z >= MAAGE_WORLD_LIMIT || centers[i].y < 0 || centers[i].y >= 256) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
     for (i = 0; i < count; ++i)
@@ -596,12 +660,13 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
                         if (cells[j].x == cell.x && cells[j].y == cell.y && cells[j].z == cell.z) break;
                     if (j == n) cells[n++] = cell;
                 }
+    qsort(cells, n, sizeof(*cells), maage_mesh_cell_order);
     for (i = 0; i < n; ++i) {
         if (!maage_world_present_inputs(world, cells[i].x, cells[i].z, &chunk, neighbors, &blocks, &biomes)) continue;
         cell.x = maage_world_local_coordinate(cells[i].x);
         cell.y = cells[i].y;
         cell.z = maage_world_local_coordinate(cells[i].z);
-        amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, NULL, &cell, &failure);
+        amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, blend, NULL, NULL, &cell, &failure);
         if (amount == (size_t) - 1) return maage_mesh_failure(trace, failure);
         faces += amount;
     }
@@ -621,7 +686,11 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
         cell.x = maage_world_local_coordinate(cells[i].x);
         cell.y = cells[i].y;
         cell.z = maage_world_local_coordinate(cells[i].z);
-        amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, faces ? mesh->vertices + written * 4 : NULL, faces ? mesh->indices + written * 6 : NULL, NULL, mode, NULL, &cell, &failure);
+        if (chunk != cached_chunk) {
+            cache.initialized = 0;
+            cached_chunk = chunk;
+        }
+        amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, faces ? mesh->vertices + written * 4 : NULL, faces ? mesh->indices + written * 6 : NULL, NULL, mode, blend, &cache, NULL, &cell, &failure);
         if (amount == (size_t) - 1 || amount > faces - written) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, failure);

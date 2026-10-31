@@ -47,6 +47,7 @@ struct maage_world_task {
     maage_job_id id;
     unsigned long incarnation, revision, light_epoch;
     maage_leaves_mode leaves_mode;
+    maage_biome_blend biome_blend;
     const maage_block_registry *blocks;
     const maage_biome_registry *biomes;
     maage_world_seed seed;
@@ -90,6 +91,7 @@ struct maage_world {
     size_t prediction_count;
     unsigned long prediction_generation, prediction_revisions[32];
     maage_leaves_mode leaves_mode;
+    maage_biome_blend biome_blend;
     double yaw, spawn[3];
     maage_world_stats stats;
     maage_status reported_failures[5]; /* One retained identity per task kind. */
@@ -485,7 +487,7 @@ static void maage_world_run(void *context, const maage_job_token *token) {
         for (side = 0; side < 8; ++side)
             neighbors[side] = task->inputs[side + 1] ? task->inputs[side + 1]->chunk : NULL;
         if (task->kind == MAAGE_JOB_MESH) {
-            task->status = maage_world_mesh_create_chunk_job(task->blocks, task->biomes, task->inputs[0]->chunk, neighbors, task->leaves_mode, token, &task->mesh, trace);
+            task->status = maage_world_mesh_create_chunk_job(task->blocks, task->biomes, task->inputs[0]->chunk, neighbors, task->leaves_mode, task->biome_blend, token, &task->mesh, trace);
             if (maage_status_failed(task->status)) strcpy(task->error, "Chunk CPU mesh construction failed.");
         } else if (task->kind == MAAGE_JOB_LIGHT) {
             task->status = maage_chunk_clone(task->inputs[0]->chunk, &task->output);
@@ -680,7 +682,7 @@ static maage_status maage_world_collect(maage_world *world) {
         } else if (stale || (obsolete && task->kind != MAAGE_JOB_SAVE)) {
             ++world->stats.stale_jobs;
             disposition = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_JOB, MAAGE_DETAIL_STALE);
-        } else if (task->kind == MAAGE_JOB_MESH && (!maage_world_inputs_current(world, slot, task, 1) || task->leaves_mode != world->leaves_mode)) {
+        } else if (task->kind == MAAGE_JOB_MESH && (!maage_world_inputs_current(world, slot, task, 1) || task->leaves_mode != world->leaves_mode || task->biome_blend != world->biome_blend)) {
             ++world->stats.stale_jobs;
             disposition = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_JOB, MAAGE_DETAIL_STALE);
             slot->mesh_dirty = 1;
@@ -793,6 +795,7 @@ static maage_status maage_world_submit(maage_world *world, maage_world_slot *slo
     task->store = world->config.store;
     task->generation_policy = world->config.generation_policy;
     task->leaves_mode = world->leaves_mode;
+    task->biome_blend = world->biome_blend;
     task->presentation_generation = world->prediction_generation;
     task->predicted = world->prediction_count != 0;
     if (kind == MAAGE_JOB_MESH) task->light_epoch = slot->block_revision;
@@ -1097,6 +1100,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->config = *config;
     world->config.generation_policy = policy;
     world->leaves_mode = MAAGE_LEAVES_FANCY;
+    world->biome_blend = MAAGE_BIOME_BLEND_VANILLA;
     world->cache_limit = cache_limit;
     world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
@@ -1181,6 +1185,20 @@ maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode m
         maage_world_invalidate(world, slot, 0);
         /* Pending mesh jobs hold the old mode by value. Cancel without waiting;
          * stale completions cannot publish across the new mesh revision. */
+        if (slot->work && slot->work->kind == MAAGE_JOB_MESH) maage_world_cancel(world, slot->work);
+    }
+    world->scan_ring = 0;
+    world->scan_step = 0;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+maage_status maage_world_set_biome_blend(maage_world *world, maage_biome_blend blend) {
+    maage_world_slot *slot;
+    if (!world || !world->config.presentation_only || world->stopped || world->failed || blend < MAAGE_BIOME_BLEND_OFF || blend > MAAGE_BIOME_BLEND_SMOOTH_9) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    if (world->biome_blend == blend) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
+    world->biome_blend = blend;
+    for (slot = world->chunks; slot; slot = slot->next) {
+        if (!maage_world_complete(slot)) continue;
+        maage_world_invalidate(world, slot, 0);
         if (slot->work && slot->work->kind == MAAGE_JOB_MESH) maage_world_cancel(world, slot->work);
     }
     world->scan_ring = 0;
@@ -2138,7 +2156,10 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
                 visual->heightmap[z * 16 + x] = (unsigned short) top;
             }
     }
-    if (update->biomes) memcpy(visual->biomes, update->biomes, sizeof(visual->biomes));
+    if (update->biomes) {
+        if (memcmp(visual->biomes, update->biomes, sizeof(visual->biomes))) slot->geometry_changed = 1;
+        memcpy(visual->biomes, update->biomes, sizeof(visual->biomes));
+    }
     for (i = 0; i < update->count; ++i) {
         result = maage_world_visual_cell(world, slot, visual, update->cells[i].cell, update->cells[i].state);
         if (maage_status_failed(result)) goto done;
