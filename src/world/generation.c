@@ -189,7 +189,8 @@ typedef struct maage_generation_environment {
 } maage_generation_environment;
 static maage_biome_id maage_generation_region_sample(maage_world_seed seed, int x, int z, maage_generation_environment *environment, maage_generation_region_cache *cache) {
     maage_generation_environment local, *sample = environment ? environment : &local;
-    double continental, region_x = x, region_z = z, dx, dz, distances[9], nearest = 0, gap, total = 0, land;
+    double continental, region_x = x, region_z = z, dx, dz, distances[9], scores[MAAGE_BIOME_COUNT], nearest = 0, gap, total = 0, land;
+    maage_biome_id biome;
     int gx, gz, ix, iz, i = 0, best = 0;
     memset(sample, 0, sizeof(*sample));
     continental = maage_generation_fractal(seed, x / 1100.0, z / 1100.0, 100UL, 3);
@@ -214,18 +215,26 @@ static maage_biome_id maage_generation_region_sample(maage_world_seed seed, int 
                 best = i;
             }
         }
+    /* Combine seeds of the same biome before categorical selection. This
+     * rounds joins between their cells instead of exposing individual-cell
+     * vertices. Compact support leaves every seed's pure interior intact. */
+    memset(scores, 0, sizeof(scores));
+    for (i = 0; i < 9; ++i) {
+        gap = (distances[i] - nearest) / (MAAGE_GENERATION_REGION_SCALE * MAAGE_GENERATION_REGION_BLEND);
+        sample->weights[i] = gap <= 0 ? 1 : (gap < 1 ? maage_generation_fade(1 - gap) : 0);
+        scores[sample->regions[i].supported_biome] += sample->weights[i];
+        total += sample->weights[i];
+    }
+    biome = sample->regions[best].supported_biome;
+    for (i = 0; i < MAAGE_BIOME_COUNT; ++i)
+        if (scores[i] > scores[biome]) biome = (maage_biome_id) i;
     if (environment) {
         land = maage_generation_transition(continental, -0.10);
         sample->ocean = 1 - land;
-        for (i = 0; i < 9; ++i) {
-            gap = (distances[i] - nearest) / (MAAGE_GENERATION_REGION_SCALE * MAAGE_GENERATION_REGION_BLEND);
-            sample->weights[i] = gap <= 0 ? 1 : (gap < 1 ? maage_generation_fade(1 - gap) : 0);
-            total += sample->weights[i];
-        }
         for (i = 0; i < 9; ++i)
             sample->weights[i] *= land / total;
     }
-    return continental < -0.10 ? MAAGE_BIOME_OCEAN : sample->regions[best].supported_biome;
+    return continental < -0.10 ? MAAGE_BIOME_OCEAN : biome;
 }
 
 typedef struct maage_generation_column {

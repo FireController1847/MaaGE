@@ -21,10 +21,14 @@ connected-component minimum. The lattice and bounded jitter give seeds spatial
 extent, so intersecting environmental thresholds cannot directly create an
 arbitrarily thin categorical strip at individual columns.
 
-The nearest supported seed selects one discrete regional biome. A shared coordinate
-deformation adds broad terrain-related shape and smaller eight-block edge detail.
-The same regional geometry drives surface identity and ecological influences;
-materials and individual features do not receive separate perturbations.
+Compact neighboring seed influences are summed by biome, and the strongest group
+selects one discrete regional identity. Combining seeds of the same biome rounds
+their cell joins instead of exposing individual nearest-seed vertices. Compact
+support preserves pure seed interiors. A shared coordinate deformation adds broad
+terrain-related shape and smaller eight-block edge detail. The same regional geometry
+drives surface identity and ecological influences; materials and individual features
+do not receive separate perturbations. Sampling uses World coordinates, including
+on opposite sides of chunk boundaries, without borrowing loaded neighbors.
 
 The continental field retains its undeformed coordinates, preserving its geographic
 boundary. The four corners of the existing 128-block terrain lattice also retain
