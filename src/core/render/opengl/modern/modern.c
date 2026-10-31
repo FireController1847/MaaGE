@@ -27,7 +27,7 @@ typedef struct maage_gl_target {
 } maage_gl_target;
 typedef struct maage_gl_program {
     GLuint name;
-    GLint matrix, lighting, parameters;
+    GLint matrix, lighting, parameters, fog;
 } maage_gl_program;
 typedef struct maage_gl_frame {
     maage_gl_sync fence;
@@ -122,9 +122,10 @@ static maage_status maage_gl_program_create(maage_renderer *renderer, maage_gl_p
     if (maage_status_failed(result)) return result;
     program->matrix = native->gl.GetUniformLocation(program->name, "maage.matrix");
     program->lighting = native->gl.GetUniformLocation(program->name, "maage.lighting");
+    program->fog = native->gl.GetUniformLocation(program->name, "maage.fog");
     program->parameters = native->gl.GetUniformLocation(program->name, "maage.parameters");
     sampler = native->gl.GetUniformLocation(program->name, "maage_source");
-    if (sampler < 0 || program->parameters < 0 || (mesh && (program->matrix < 0 || program->lighting < 0))) {
+    if (sampler < 0 || program->parameters < 0 || (mesh && (program->matrix < 0 || program->lighting < 0 || program->fog < 0))) {
         maage_log_warning("maage.render.opengl", "GLSL %s program is missing required active uniforms.", label);
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
@@ -329,6 +330,7 @@ static void maage_gl_uniforms(maage_gl_renderer *native, const maage_gl_program 
     }
     if (program->matrix >= 0) native->gl.UniformMatrix4fv(program->matrix, 1, GL_FALSE, uniforms->matrix);
     if (program->lighting >= 0) native->gl.Uniform4fv(program->lighting, 1, uniforms->lighting);
+    if (program->fog >= 0) native->gl.Uniform4fv(program->fog, 1, uniforms->fog);
     if (program->parameters >= 0) native->gl.Uniform4fv(program->parameters, 1, uniforms->parameters);
 }
 static void maage_gl_texture_bind(maage_gl_renderer *native, GLuint texture) {
@@ -463,6 +465,7 @@ static maage_status maage_gl_frame_render(maage_renderer *renderer, const maage_
     maage_gl_mesh_passes(native, plan, 0, native->slot);
     if (plan->panorama_count) {
         maage_gl_pass(native, frame->panorama[0].framebuffer, renderer->clear, 0);
+        if (plan->layers[1] && plan->layers[1]->after_foreground) maage_gl_ui_draw(native, &frame->ui[1], plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
         maage_gl_ui_draw(native, &frame->ui[2], plan->layers[2], 0, plan->panorama_count, 1);
         maage_gl_pass(native, frame->panorama[1].framebuffer, renderer->clear, 0);
         maage_gl_fullscreen(native, frame->panorama[0].color, 1.0f / state->framebuffer_width, 0, 1);
@@ -471,15 +474,15 @@ static maage_status maage_gl_frame_render(maage_renderer *renderer, const maage_
         native->gl.BindFramebuffer(MAAGE_GL_FRAMEBUFFER, frame->scene.framebuffer);
         maage_gl_fullscreen(native, frame->panorama[0].color, 0, 0, 0);
     }
-    /* Match the existing scene contract: environmental overlay, independent
-     * foreground depth, then crisp HUD/menu geometry. */
-    maage_gl_ui_draw(native, &frame->ui[1], plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
+    /* Weather precedes the hand; immersion overlays follow it. HUD stays crisp. */
+    if (!plan->layers[1] || !plan->layers[1]->after_foreground) maage_gl_ui_draw(native, &frame->ui[1], plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
     if (plan->foreground) {
         glDepthMask(GL_TRUE);
         glClear(GL_DEPTH_BUFFER_BIT);
         native->pipeline = -1;
         maage_gl_mesh_passes(native, plan, 1, native->slot);
     }
+    if (plan->layers[1] && plan->layers[1]->after_foreground) maage_gl_ui_draw(native, &frame->ui[1], plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
     maage_gl_ui_draw(native, &frame->ui[2], plan->layers[2], plan->panorama_count, plan->layers[2] ? plan->layers[2]->index_count - plan->panorama_count : 0, 0);
     native->gl.BindFramebuffer(MAAGE_GL_FRAMEBUFFER, 0);
     glDrawBuffer(GL_BACK);
@@ -633,7 +636,7 @@ static maage_status maage_gl_limits(maage_renderer *renderer) {
     MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_VERTEX_UNIFORM_COMPONENTS, "GL_MAX_VERTEX_UNIFORM_COMPONENTS", &vertex_uniforms));
     MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, "GL_MAX_FRAGMENT_UNIFORM_COMPONENTS", &fragment_uniforms));
     /* Forward-compatible core contexts remove the deprecated aggregate varying
-     * query. The mesh writes nine user components plus four for gl_Position. */
+     * query. The mesh writes ten user components plus four for gl_Position. */
     MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_VERTEX_OUTPUT_COMPONENTS, "GL_MAX_VERTEX_OUTPUT_COMPONENTS", &vertex_outputs));
     MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_FRAGMENT_INPUT_COMPONENTS, "GL_MAX_FRAGMENT_INPUT_COMPONENTS", &fragment_inputs));
     MAAGE_GL_TRY(maage_gl_limit(renderer, MAAGE_GL_MAX_RENDERBUFFER_SIZE, "GL_MAX_RENDERBUFFER_SIZE", &native->target_limit));
@@ -641,7 +644,7 @@ static maage_status maage_gl_limits(maage_renderer *renderer) {
     glGetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
     MAAGE_GL_TRY(maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE));
     maage_log_info("maage.render.opengl", "GLSL %.120s; profile 0x%lX; attributes %d; fragment textures %d; vertex/fragment uniform components %d/%d; vertex-output/fragment-input components %d/%d; max texture %u; renderbuffer %d; viewport %dx%d.", language ? language : "unavailable", (unsigned long) profile, attributes, units, vertex_uniforms, fragment_uniforms, vertex_outputs, fragment_inputs, renderer->capabilities.max_texture_dimension_2d, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
-    if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 7 || units < 1 || vertex_uniforms < 24 || fragment_uniforms < 24 || vertex_outputs < 13 || fragment_inputs < 9 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
+    if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 7 || units < 1 || vertex_uniforms < 24 || fragment_uniforms < 28 || vertex_outputs < 14 || fragment_inputs < 10 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
         maage_log_warning("maage.render.opengl", "Required GLSL 3.30, core profile, double buffering, vertex layout, uniform/varying capacity, or framebuffer limits are unavailable.");
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
@@ -703,7 +706,7 @@ static maage_status maage_opengl_modern_create(maage_renderer *renderer) {
     if (complete != MAAGE_GL_FRAMEBUFFER_COMPLETE) return maage_status_trace_record(renderer->operation_trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, __FILE__, __LINE__, (long) complete);
     glDisable(GL_DITHER);
     glDepthRange(0.0, 1.0);
-    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS | MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_STENCIL | MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
+    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS | MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_STENCIL | MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE | MAAGE_RENDER_CAP_FOG;
     renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_FENCE;
     renderer->capabilities.max_frames_in_flight = MAAGE_GL_FRAME_SLOTS;
     maage_status_trace_init(&vsync_trace);

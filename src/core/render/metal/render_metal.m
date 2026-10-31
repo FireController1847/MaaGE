@@ -341,7 +341,7 @@ static maage_status maage_metal_create(maage_renderer *renderer) {
     [native->view setLayer:native->layer];
     [native->view setWantsLayer:YES];
     native->installed = 1;
-    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS | MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_STENCIL | MAAGE_RENDER_CAP_INSTANCING | MAAGE_RENDER_CAP_COMPUTE | MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
+    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS | MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_STENCIL | MAAGE_RENDER_CAP_INSTANCING | MAAGE_RENDER_CAP_COMPUTE | MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE | MAAGE_RENDER_CAP_FOG;
     renderer->capabilities.texture_formats = MAAGE_RENDER_FORMAT_RGBA8 | MAAGE_RENDER_FORMAT_BGRA8;
     renderer->capabilities.synchronization = MAAGE_RENDER_SYNC_CPU_WAIT;
     renderer->capabilities.max_frames_in_flight = MAAGE_METAL_FRAME_SLOTS;
@@ -795,7 +795,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     }
     for (layer = 1; layer < 3; ++layer) {
         MTLViewport viewport = {0, 0, color.width, color.height, 0, 1};
-        if (layer == 2 && foreground) {
+        if (layer == (layers[1] && layers[1]->after_foreground ? 1 : 2) && foreground) {
             pass = [MTLRenderPassDescriptor renderPassDescriptor];
             pass.colorAttachments[0].texture = color;
             pass.colorAttachments[0].loadAction = MTLLoadActionLoad;

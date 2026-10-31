@@ -46,6 +46,7 @@ typedef struct maage_render_desc {
 #define MAAGE_RENDER_CAP_TEXTURED_MESH 0x1000UL
 #define MAAGE_RENDER_CAP_UI 0x2000UL
 #define MAAGE_RENDER_CAP_SCENE 0x4000UL
+#define MAAGE_RENDER_CAP_FOG 0x8000UL
 #define MAAGE_RENDER_FORMAT_RGBA8 0x01UL
 #define MAAGE_RENDER_FORMAT_BGRA8 0x02UL
 #define MAAGE_RENDER_SYNC_CPU_WAIT 0x01UL
@@ -96,6 +97,7 @@ typedef struct maage_render_ui_data {
      * screen-space interpolation; supplied depths preserve projective UVs.
      * Borrowed with vertices through draw_frame, then copied by the backend. */
     const float *projective_depth;
+    int after_foreground; /* Scene overlay only: draw after the hand, before HUD. */
 } maage_render_ui_data;
 
 const char *maage_render_backend_name(maage_render_backend backend);
@@ -130,6 +132,10 @@ maage_status maage_renderer_set_clear_color(maage_renderer *renderer, float red,
  * data/textures through subsequent draw_frame calls; clear before destruction.
  * Implemented mesh/UI backends only; others return UNSUPPORTED. */
 maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light, const maage_render_ui_data *background, const maage_render_ui_data *overlay);
+/* Exponential view-depth fog on scene meshes/instances; density zero disables.
+ * RGB stays in [0,1], density is finite/nonnegative. Foreground/UI stay clear.
+ * Nonzero density requires FOG support; no backend silently emulates it. */
+maage_status maage_renderer_set_fog(maage_renderer *renderer, float red, float green, float blue, float density);
 /* Borrow a camera-local presentation mesh until cleared/destroyed; copy its
  * column-major transform. Draw after the scene with independent depth, before
  * GUI. NULL clears the pass. Requires TEXTURED_MESH and SCENE support. */

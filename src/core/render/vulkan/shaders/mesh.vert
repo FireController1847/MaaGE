@@ -9,10 +9,12 @@ layout(location = 0) out vec2 maage_fragment_uv;
 layout(location = 1) out vec4 maage_fragment_color;
 layout(location = 2) out vec2 maage_fragment_light;
 layout(location = 3) flat out float maage_fragment_material;
+layout(location = 4) out float maage_fog_depth;
 
 void main()
 {
     gl_Position = maage.matrix * vec4(position, 1.0);
+    maage_fog_depth = gl_Position.w;
     /* The shared right-handed matrix already has Vulkan/Metal 0..W depth.
      * Positive Vulkan viewport height requires only this native Y inversion. */
     gl_Position.y = -gl_Position.y;

@@ -5,11 +5,12 @@
 #define MAAGE_RENDER_MESH_VERTEX_BYTES 72
 #define MAAGE_RENDER_UI_VERTEX_BYTES 32
 #define MAAGE_RENDER_UI_GPU_VERTEX_BYTES 36
-#define MAAGE_RENDER_UNIFORM_BYTES 96
+#define MAAGE_RENDER_UNIFORM_BYTES 112
 #define MAAGE_RENDER_UNIFORM_FIELDS(MATRIX, VECTOR) \
     MATRIX matrix;                                  \
     VECTOR lighting;                                \
-    VECTOR parameters;
+    VECTOR parameters;                             \
+    VECTOR fog;
 #define MAAGE_RENDER_MESH_POSITION_LOCATION 0
 #define MAAGE_RENDER_MESH_NORMAL_LOCATION 1
 #define MAAGE_RENDER_MESH_UV_LOCATION 2

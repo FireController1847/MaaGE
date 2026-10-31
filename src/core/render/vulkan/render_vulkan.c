@@ -852,6 +852,7 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
     if (plan->panorama_count) {
         vkCmdEndRenderPass(flight->command);
         maage_vulkan_pass_begin(renderer, flight->command, gpu->color_pass, frame->panorama_framebuffer[0]);
+        if (plan->layers[1] && plan->layers[1]->after_foreground) maage_vulkan_ui_draw(native, flight->command, frame, 1, plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
         maage_vulkan_ui_draw(native, flight->command, frame, 2, plan->layers[2], 0, plan->panorama_count, 1);
         vkCmdEndRenderPass(flight->command);
         maage_vulkan_pass_begin(renderer, flight->command, gpu->color_pass, frame->panorama_framebuffer[1]);
@@ -863,7 +864,7 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
         maage_vulkan_pass_begin(renderer, flight->command, gpu->scene_pass, frame->scene_framebuffer);
         maage_vulkan_fullscreen(native, flight->command, gpu->scene_composite, &frame->panorama[0], 0, 0, 0);
     }
-    maage_vulkan_ui_draw(native, flight->command, frame, 1, plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
+    if (!plan->layers[1] || !plan->layers[1]->after_foreground) maage_vulkan_ui_draw(native, flight->command, frame, 1, plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
     if (plan->foreground) {
         VkClearAttachment clear = {0};
         VkClearRect rect = {{{0, 0}, native->extent}, 0, 1};
@@ -872,6 +873,7 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
         vkCmdClearAttachments(flight->command, 1, &clear, 1, &rect);
         maage_vulkan_mesh_passes(native, flight->command, plan, 1, slot);
     }
+    if (plan->layers[1] && plan->layers[1]->after_foreground) maage_vulkan_ui_draw(native, flight->command, frame, 1, plan->layers[1], 0, plan->layers[1] ? plan->layers[1]->index_count : 0, 0);
     maage_vulkan_ui_draw(native, flight->command, frame, 2, plan->layers[2], plan->panorama_count, plan->layers[2] ? plan->layers[2]->index_count - plan->panorama_count : 0, 0);
     vkCmdEndRenderPass(flight->command);
     maage_vulkan_transition(native, flight->command, frame->scene.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
@@ -936,7 +938,7 @@ static maage_status maage_vulkan_create(maage_renderer *renderer) {
     pool.queueFamilyIndex = native->graphics_family;
     pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     MAAGE_VULKAN_TRY(maage_vulkan_result(vkCreateCommandPool(native->device, &pool, NULL, &gpu->upload_pool)));
-    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS | MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE;
+    renderer->capabilities.features |= MAAGE_RENDER_CAP_SHADERS | MAAGE_RENDER_CAP_VERTEX_BUFFERS | MAAGE_RENDER_CAP_INDEX_BUFFERS | MAAGE_RENDER_CAP_RENDER_TARGETS | MAAGE_RENDER_CAP_DEPTH | MAAGE_RENDER_CAP_TEXTURED_MESH | MAAGE_RENDER_CAP_UI | MAAGE_RENDER_CAP_SCENE | MAAGE_RENDER_CAP_FOG;
     renderer->capabilities.texture_formats = MAAGE_RENDER_FORMAT_RGBA8;
     renderer->capabilities.max_frames_in_flight = MAAGE_VULKAN_FRAME_SLOTS;
     return MAAGE_VULKAN_OK;

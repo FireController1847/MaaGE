@@ -196,10 +196,32 @@ upward takeoff, airborne motion and Creative flight bypass the guard. Unknown
 terrain retains the World collision contract. This uses registered collision
 geometry; slab/stair content and multibox shapes are not introduced here.
 
+## Underwater Presentation
+
+Client replica surfaces at the interpolated camera select water presentation.
+World and hand projection apply the existing 60/70 water FOV factor once; in
+third person the world FOV follows the boom camera. This is independent of the
+Server eye threshold used for breathing and mining. Exit restores the ordinary
+scene immediately. Water uses exponential view-depth fog with density 0.1 and
+base RGB (0.02, 0.02, 0.2), weighted by cached local light/daylight and view distance.
+It blends distant geometry toward blue, preserving ordinary lighting on nearby
+terrain and entities. The exact reference fog-light temporal smoothing is not
+implemented. Unknown light retains the last presentation value.
+
+One 112-byte shared uniform packet and shader equation serve Metal, Vulkan and
+modern OpenGL; native adapters bind/upload the additional fog vector. Fog applies
+to scene geometry and instances, with neutral fading for multiplicative damage
+cracks. Foreground and HUD are unfogged. Unsupported backends reject nonzero fog.
+The existing optional `textures/misc/underwater.png` loads once into the scene
+atlas. First-person immersion draws four repeats with orientation-linked UVs and
+half alpha after the hand, before the HUD, using at most 25 clipped quads. It adds
+no time-based wobble or refraction. Missing texture retains fog with one resource
+notice. Resource bytes are never packaged or acquired by the Client.
+
 ## Limits and Manual Review
 
 Exact lightmap/gamma/flicker matching, altitude/noise biome tint variation,
-randomized plant offsets, particles, underwater overlays/fog, clouds/stars and
+randomized plant offsets, particles, clouds/stars and
 maps/bows/eating/enchantment effects remain incomplete or absent. Movement/fluid
 feel, blindness and item-use slowdowns remain provisional/unsupported.
 Legacy OpenGL and Software retain their implemented subsets and reject unsupported draws.

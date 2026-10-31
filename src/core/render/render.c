@@ -246,6 +246,15 @@ maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light,
     renderer->overlay = overlay;
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
 }
+maage_status maage_renderer_set_fog(maage_renderer *renderer, float red, float green, float blue, float density) {
+    if (!renderer || !(red >= 0 && red <= 1 && green >= 0 && green <= 1 && blue >= 0 && blue <= 1 && density >= 0 && density <= FLT_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (density > 0 && !(renderer->capabilities.features & MAAGE_RENDER_CAP_FOG)) return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    renderer->fog[0] = red;
+    renderer->fog[1] = green;
+    renderer->fog[2] = blue;
+    renderer->fog[3] = density;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
 maage_status maage_renderer_set_foreground(maage_renderer *renderer, const maage_render_mesh *mesh, const float view_projection[16], float sky_light, float block_light) {
     int index;
     if (!renderer || !(sky_light >= 0 && sky_light <= 1 && block_light >= 0 && block_light <= 1) || (mesh && (mesh->renderer != renderer || !view_projection))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);

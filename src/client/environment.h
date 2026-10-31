@@ -10,6 +10,8 @@ maage_status maage_client_environment_destroy(maage_client_environment *presenta
 /* Owner-frame presentation from copied simulation state and the current world
  * view-projection matrix. Sky directions ignore its translation. Width/height
  * select logical drawing coordinates; the matrix supplies framebuffer aspect
- * and effective FOV. No allocation, synchronization, resource acquisition or I/O. */
-maage_status maage_client_environment_update(maage_client_environment *presentation, maage_renderer *renderer, const maage_session_snapshot *snapshot, float width, float height, const float view_projection[16]);
+ * and effective FOV. Immersion/light query only the Client replica at the rendered
+ * camera, independently of authoritative breathing. No allocation, synchronization,
+ * resource acquisition or I/O. */
+maage_status maage_client_environment_update(maage_client_environment *presentation, maage_renderer *renderer, const maage_session_snapshot *snapshot, float width, float height, const float view_projection[16], const maage_world *visual, const double camera[3], double yaw, double pitch, int first_person, int radius);
 #endif

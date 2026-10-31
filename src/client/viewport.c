@@ -1337,7 +1337,8 @@ choose_world:
         swing_progress = maage_client_swing_update(&local_swing, &latest, raw_elapsed, active, input.primary_down || input.primary_pressed, input.primary_pressed, visual_snapshot.player.has_target);
         rendered = maage_client_interaction_update(&interaction, renderer, atlas, blocks, &visual_snapshot, &prediction, trace);
         if (maage_status_failed(rendered)) goto done;
-        operation = maage_client_camera_effects_update(&camera_effects, &latest, alpha, latest.paused || maage_client_ui_pauses_game(ui), maage_client_ui_view_bobbing(ui));
+        visual_snapshot.player.submerged = maage_world_fluid_at(visual_world, eye) == MAAGE_FLUID_WATER;
+        operation = maage_client_camera_effects_update(&camera_effects, &visual_snapshot, alpha, latest.paused || maage_client_ui_pauses_game(ui), maage_client_ui_view_bobbing(ui));
         if (maage_status_failed(operation)) goto done;
         if (maage_status_is_warning(operation)) maage_client_ui_notify(ui, operation, now);
         effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed) * camera_effects.fov_scale;
@@ -1383,11 +1384,15 @@ choose_world:
             operation = maage_world_sample_camera(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &collision);
             if (maage_status_failed(operation)) goto done;
             camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch, latest.player.sneaking, camera_effects.eye_drop, (double) state.framebuffer_width / state.framebuffer_height, effective_fov, &collision, blocks, camera_eye, &camera_yaw, &camera_pitch);
+            if (camera_mode != MAAGE_CAMERA_FIRST) {
+                if (visual_snapshot.player.submerged) effective_fov *= 70.0 / 60.0;
+                if (maage_world_fluid_at(visual_world, camera_eye) == MAAGE_FLUID_WATER) effective_fov *= 60.0 / 70.0;
+            }
             maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
             rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, swing_progress, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
-            rendered = maage_client_environment_update(environment_view, renderer, &latest, maage_client_ui_width(ui), maage_client_ui_height(ui), matrix);
+            rendered = maage_client_environment_update(environment_view, renderer, &latest, maage_client_ui_width(ui), maage_client_ui_height(ui), matrix, visual_world, camera_eye, camera_yaw, camera_pitch, camera_mode == MAAGE_CAMERA_FIRST, options.radius);
             if (maage_status_failed(rendered)) goto done;
             rendered = maage_client_item_entities_update(item_entities, session, visual_world, &visual_snapshot, alpha, eye, now, player_view.draws, player_view.count, trace);
             if (maage_status_failed(rendered)) goto done;

@@ -7,9 +7,11 @@ out vec2 maage_uv;
 out vec4 maage_color;
 out vec2 maage_light;
 flat out float maage_material;
+out float maage_fog_depth;
 
 void main() {
     gl_Position = maage.matrix * vec4(position, 1.0);
+    maage_fog_depth = gl_Position.w;
     /* Shared depth 0..W becomes OpenGL -W..W; XY and CCW winding stay intact. */
     gl_Position.z = 2.0 * gl_Position.z - gl_Position.w;
     maage_uv = uv;

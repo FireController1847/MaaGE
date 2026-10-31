@@ -32,6 +32,11 @@ MAAGE_SHADER_VEC4 maage_shader_mesh_color(MAAGE_SHADER_VEC4 texel, MAAGE_SHADER_
     float alpha = material == float(MAAGE_MESH_MATERIAL_OPAQUE) ? 1.0 : texel.a * color.a;
     return MAAGE_SHADER_VEC4(texel.rgb * color.rgb * light, alpha);
 }
+MAAGE_SHADER_VEC4 maage_shader_fog(MAAGE_SHADER_VEC4 color, float depth, float material, MAAGE_SHADER_VEC4 fog) {
+    float visibility = exp(-fog.w * max(depth, 0.0));
+    MAAGE_SHADER_VEC3 target = material == float(MAAGE_MESH_MATERIAL_MULTIPLY) ? MAAGE_SHADER_VEC3(0.5) : fog.rgb;
+    return MAAGE_SHADER_VEC4(mix(target, color.rgb, visibility), color.a);
+}
 MAAGE_SHADER_VEC4 maage_shader_ui_position(MAAGE_SHADER_VEC2 position, MAAGE_SHADER_VEC2 logical_size, float depth) {
     MAAGE_SHADER_VEC2 point = position / logical_size;
     return MAAGE_SHADER_VEC4((point.x * 2.0 - 1.0) * depth, (1.0 - point.y * 2.0) * depth, 0.0, depth);

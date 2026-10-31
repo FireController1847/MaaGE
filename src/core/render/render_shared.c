@@ -203,7 +203,9 @@ maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maa
     if (matrix) memcpy(plan->world.matrix, matrix, sizeof(plan->world.matrix));
     plan->world.lighting[0] = renderer->sky_light;
     plan->world.parameters[0] = renderer->animation_tick;
+    memcpy(plan->world.fog, renderer->fog, sizeof(plan->world.fog));
     plan->hand = plan->world;
+    plan->hand.fog[3] = 0;
     memcpy(plan->hand.matrix, renderer->foreground_matrix, sizeof(plan->hand.matrix));
     plan->hand.lighting[1] = renderer->foreground_light[0];
     plan->hand.lighting[2] = renderer->foreground_light[1];
