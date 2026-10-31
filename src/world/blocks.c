@@ -5,6 +5,48 @@
 #include <string.h>
 #include <float.h>
 #include <limits.h>
+#include <math.h>
+
+double maage_block_fluid_height(const maage_block_state_definition *state) {
+    if (!state || !state->fluid_kind) return 0;
+    return 1.0 - ((state->fluid_level >= 8 ? 0 : state->fluid_level) + 1) / 9.0;
+}
+
+void maage_block_fluid_flow(const maage_block_registry *registry, const maage_block_state_definition *state, const maage_block_state_definition *sides[4], const maage_block_state_definition *below[4], const maage_block_state_definition *above[4], double flow[3]) {
+    static const int dx[4] = {-1, 1, 0, 0}, dz[4] = {0, 0, -1, 1};
+    const maage_block_definition *block;
+    const maage_block_state_definition *neighbor;
+    unsigned int side;
+    int level, difference, wall = 0;
+    double length;
+    flow[0] = flow[1] = flow[2] = 0;
+    if (!state || !state->fluid_kind) return;
+    level = state->fluid_level >= 8 ? 0 : (int) state->fluid_level;
+    for (side = 0; side < 4; ++side) {
+        neighbor = sides[side];
+        block = neighbor ? maage_block_registry_block(registry, neighbor->block_id) : NULL;
+        if (neighbor && neighbor->fluid_kind == state->fluid_kind) difference = (neighbor->fluid_level >= 8 ? 0 : (int) neighbor->fluid_level) - level;
+        else if (block && !block->material_solid && below[side] && below[side]->fluid_kind == state->fluid_kind) difference = (below[side]->fluid_level >= 8 ? 0 : (int) below[side]->fluid_level) - level + 8;
+        else difference = 0;
+        flow[0] += dx[side] * difference;
+        flow[2] += dz[side] * difference;
+        if (block && block->opaque && neighbor->block_id != MAAGE_BLOCK_ICE) wall = 1;
+        neighbor = above[side];
+        block = neighbor ? maage_block_registry_block(registry, neighbor->block_id) : NULL;
+        if (block && block->opaque && neighbor->block_id != MAAGE_BLOCK_ICE) wall = 1;
+    }
+    length = sqrt(flow[0] * flow[0] + flow[2] * flow[2]);
+    if (length > 0) {
+        flow[0] /= length;
+        flow[2] /= length;
+    }
+    if (state->fluid_level >= 8 && wall) {
+        flow[1] = -6;
+        length = sqrt(flow[0] * flow[0] + 36 + flow[2] * flow[2]);
+        for (side = 0; side < 3; ++side)
+            flow[side] /= length;
+    }
+}
 
 maage_status maage_block_leaves_state(unsigned int metadata, maage_block_state_id *state) {
     static const maage_block_state_id checked[3] = {

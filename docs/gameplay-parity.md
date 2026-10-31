@@ -182,6 +182,19 @@ crack stages, which are
 `floor(progress * 10) - 1` and clear locally on release/target change. See
 [Visual Rendering](visual-fidelity.md) for hand projection and material behavior.
 
+## Water Movement
+
+The owner samples the contracted player body against numeric fluid surfaces,
+independently of eye immersion. Water motion uses 0.02 horizontal acceleration,
+0.8 drag on all axes, then 0.02 downward gravity per tick. Held jump adds 0.04
+upward before movement; crouching reduces horizontal input and natural gravity
+provides descent. Water currents add a normalized 0.014 impulse, including falling
+water beside walls. Creative flight keeps its own movement. A horizontal collision
+permits a 0.3 ledge impulse only when the projected raised body is dry and clear;
+unknown terrain and ceilings obstruct it. Dry jump timing, friction and collision
+remain on the ordinary movement path. These are source-reviewed rules, not evidence
+of observed gameplay fidelity.
+
 ## Neighbor Support
 
 Immutable numeric survival callbacks serve placement and neighbor validation.

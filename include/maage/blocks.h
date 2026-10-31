@@ -239,6 +239,11 @@ maage_status maage_block_registry_resolve_name(const maage_block_registry *regis
  * IDs return NULL; they never alias air or another valid definition. */
 const maage_block_definition *maage_block_registry_block(const maage_block_registry *registry, maage_block_id id);
 const maage_block_state_definition *maage_block_registry_state(const maage_block_registry *registry, maage_block_state_id id);
+/* Pure numeric fluid observations. Neighbors use -X,+X,-Z,+Z order; NULL
+ * means unavailable, never air. Flow is a unit vector (or zero), including
+ * downward wall currents for falling fluid. Borrowed definitions stay immutable. */
+double maage_block_fluid_height(const maage_block_state_definition *state);
+void maage_block_fluid_flow(const maage_block_registry *registry, const maage_block_state_definition *state, const maage_block_state_definition *sides[4], const maage_block_state_definition *below[4], const maage_block_state_definition *above[4], double flow[3]);
 /* Stable names and (block name, metadata) are persistence/import identities.
  * These functions are for registration and file I/O, never gameplay loops.
  * Within one block, state metadata must be unique. */
