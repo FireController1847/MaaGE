@@ -252,7 +252,7 @@ maage_status maage_generation_underground(maage_generation_context *context) {
                     y = feature->minimum_y + (int) (maage_generation_feature_next(&random) % (feature->maximum_y - feature->minimum_y));
                     if (feature->triangular) y = (y + (int) (maage_generation_feature_next(&random) % 32UL)) / 2;
                     if (feature->emerald) {
-                        if (!maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, &sample)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
+                        if (!maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, &sample, context->regions)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
                         if ((maage_generation_feature_next(&random) & 65535UL) / 65536.0 >= sample.decoration.emeralds) continue;
                     }
                     result = maage_feature_vein(context, feature, x, y, z, maage_generation_feature_next(&random));
@@ -264,7 +264,7 @@ maage_status maage_generation_underground(maage_generation_context *context) {
             if (random % 4UL) continue;
             x = ox * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
             z = oz * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
-            if (!maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, &sample)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
+            if (!maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, &sample, context->regions)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
             height = sample.height;
             if (height <= context->policy->sea_level || (maage_generation_feature_next(&random) & 65535UL) / 65536.0 >= sample.decoration.lakes) continue;
             lava = (random & 32UL) != 0;

@@ -85,11 +85,22 @@ maage_status maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed,
 maage_status maage_generation_spawn(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, double feet[3]);
 /* Feature stages replay bounded regional owners in coordinate order and
  * clip writes to the private output column; no neighbor storage is borrowed. */
+#define MAAGE_GENERATION_REGION_CACHE_CAPACITY 64
+typedef struct maage_generation_region_seed {
+    int x, z, valid, supported;
+    maage_biome_id biome, climate, supported_biome, supported_climate;
+    double site_x, site_z;
+} maage_generation_region_seed;
+/* Zero-initialize for one seed/job. Eviction changes cost only; each entry is
+ * reproducible from coordinates, with no neighboring chunk dependency. */
+typedef struct maage_generation_region_cache {
+    maage_generation_region_seed entries[MAAGE_GENERATION_REGION_CACHE_CAPACITY];
+} maage_generation_region_cache;
 typedef struct maage_generation_sample {
     int height;
     maage_biome_id biome;
     maage_block_state_id surface, filler;
-    double temperature, rainfall;
+    double temperature, rainfall, lapse_offset;
     maage_biome_decoration decoration;
 } maage_generation_sample;
 typedef struct maage_generation_context {
@@ -102,6 +113,7 @@ typedef struct maage_generation_context {
     maage_status_trace *trace;
     maage_status failure;
     const maage_generation_sample *columns; /* Borrowed job-local cache of 256 profiles; NULL for spawn queries. */
+    maage_generation_region_cache *regions; /* Borrowed job-local regional memoization. */
 } maage_generation_context;
 enum {
     MAAGE_STRUCTURE_DUNGEON = 1
@@ -113,11 +125,11 @@ typedef enum maage_generation_write_rule {
     MAAGE_GENERATION_WRITE_AIR,
     MAAGE_GENERATION_WRITE_FOLIAGE
 } maage_generation_write_rule;
-int maage_generation_surface(maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, int *height, maage_biome_id *biome);
-/* Same discrete region and unchanged height function as surface(); climate
- * and decoration interpolate only near environmental classification thresholds.
- * Cached profiles and halo/spawn queries use the same coordinate functions. */
-int maage_generation_sample_at(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample);
+int maage_generation_surface(maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, int *height, maage_biome_id *biome, maage_generation_region_cache *regions);
+/* Same supported discrete region and unchanged height function as surface().
+ * Ecology uses compact influences near those region boundaries. Optional cache
+ * belongs to this seed/job; cache misses and halo/spawn queries are equivalent. */
+int maage_generation_sample_at(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions);
 int maage_generation_cold(const maage_generation_sample *sample, int y);
 unsigned long maage_generation_feature_hash(maage_world_seed seed, int x, int z, unsigned long salt);
 unsigned long maage_generation_feature_next(unsigned long *random);
@@ -139,8 +151,8 @@ maage_status maage_generation_grow_tree(maage_world *world, int x, int y, int z,
 /* Owner preflight on detached columns, then allocation-free publication. */
 maage_status maage_world_plant_tree(maage_world *world, const maage_tree_plan *plan);
 maage_status maage_generation_structures(maage_generation_context *context);
-int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z);
-int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y);
+int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_region_cache *regions);
+int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y, maage_generation_region_cache *regions);
 /* All inputs are pinned immutable snapshots. Client retains copied CPU/GPU
  * geometry, never borrowed columns. Cancellation leaves partial output private. */
 maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace);
