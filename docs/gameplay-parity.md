@@ -129,12 +129,19 @@ between columns never reorders a column's own state packets.
 ## Optional Pipeline Diagnostics
 
 `MAAGE_WORLD_DIAGNOSTICS=1` enables bounded records under `maage.world.latency`,
-`maage.server.latency` and `maage.client.latency`. Action IDs correlate prediction,
-Server admission/acknowledgment and confirmed geometry. Column/revision IDs correlate
-mutations, receipt, worker queue/execution/disposition and GPU upload wait/API duration.
+`maage.server.latency` and `maage.client.latency`. Command sequences correlate native
+input sampling, outbox enqueue/send, mailbox receipt, FIFO deferral and the first
+owner step consuming that input. Gameplay records include the scheduled/actual step
+boundaries, progress, cooldown, target and grounded/submerged conditions. Action IDs
+join predicted completion to the recorded mutation tick/time and acknowledgment;
+column/revision IDs join mutation, offer, receipt/application, worker disposition and
+GPU upload wait/API duration. Drop entity IDs join their creation tick/block to entity
+publication sequences, Client receipt, instance preparation and successful frame
+submission. Complete newer entity sets may coalesce; later sets retain live entities.
 World backlog summaries are limited to one per second. Records allocate no diagnostic
-history. Input timing begins at the native input poll; Survival timing includes
-intended mining duration. First successful frame submission is recorded separately.
+history. Input timing begins at the native input poll, not physical device delivery;
+Survival timing includes intended mining duration. First successful frame submission
+is recorded separately for predicted geometry and each received entity publication.
 Upload API duration excludes later asynchronous device execution; neither upload
 nor frame submission is display scanout timing.
 Local transport durations use one process monotonic clock; remote adapters must mark
@@ -173,10 +180,24 @@ Block availability gates prediction independently of full light convergence. The
 cell's provisional light belongs to the same effective snapshot as immediate geometry.
 Frame submission still precedes budgeted background uploads; the next prediction update
 refreshes affected views before those cache entries are drawn, advancing mining once.
-This frame's input and preview marker flush after local state resolution and before
-GPU preparation, so its own Server result cannot retarget that click or wait for
-resource uploads. No render-loop barrier, GPU synchronization or scheduler replacement
-is introduced.
+This frame's input and preview marker flush after copied-state action resolution,
+before replica streaming and GPU preparation. Its own instant Server mutation therefore
+cannot retarget that press during resolution. Neither waits for resource uploads.
+The owner waits on the command mailbox predicate, preserving the existing streaming
+pump interval between input wakeups. Each queued attack/use press retains its sampled
+view and selection until one gameplay step consumes it; later commands remain FIFO,
+while observation markers can be admitted alongside that press. No render-loop
+barrier or GPU synchronization is introduced.
+
+Preview markers carry the replica's authoritative column baseline and input sequence.
+A bounded ring of completed owner actions records expected/replacement states, consumed
+command sequence, mutation tick and affected column revisions. Each result confirms
+at most one matching preview newer than its baseline, including previews received
+after the owner has already retargeted or completed another action. Command-service
+raycasts do not reject input before gameplay consumes it. Unmatched previews still
+reject after the next owner step when attack/use, target, access or expected state
+no longer permits them. Accepted overlays retain their revision/mesh fences until
+complete geometry absorbs them; rejection rebuilds effective authoritative state.
 
 Overlapping edits compose in action-ID order. Accepted actions stop overriding authority
 at their acknowledged column revision, preventing an old break from hiding a later
@@ -346,11 +367,16 @@ Third person raises the existing right arm and attached item toward the mouth.
 Both use shared mesh transforms across backends. No general food-fragment
 particle emitter exists, so food particles remain unimplemented.
 
-Client mining uses one local completion clock and shared tool damage values;
-Server progress is not added into that clock. Press/retarget initialization
-matches the owner damage cadence. Local crack stages cover the final progress
-interval, and predicted completion publishes the removal/light patch and one
-break cue together. Matching Server break echoes and trailing dig cues are
-consumed once; acknowledgment still determines acceptance/rejection. Resource
-preparation failure retains the previous complete visual and its pending cue.
+Client mining rebases from completed owner steps, their consumed command fence and
+matching target/tool identity, including tool damage. The press can predict its first
+damage step immediately. Subsequent crack interpolation spans only the next published
+owner boundary; completion can extrapolate at most one step, and another removal
+requires that owner tick to arrive. Held retargeting, misses and repeat cooldowns use
+owner state rather than frame-time accumulation. Shared numeric item rules still own
+hardness, harvest and grounded/submerged penalties. An untranslated remote clock disables
+future-step extrapolation. Predicted completion publishes the removal/light patch and
+one break cue together. Matching Server break echoes and trailing dig cues are consumed
+once; an already played authoritative cue is not replayed by a late local completion.
+Acknowledgment still determines acceptance/rejection. Resource preparation failure
+retains the previous complete visual and its pending cue.
 No general block-fragment particle emitter is currently implemented.

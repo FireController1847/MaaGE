@@ -12,7 +12,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 17U
+#define MAAGE_SESSION_PROTOCOL_VERSION 18U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -81,7 +81,8 @@ typedef enum maage_session_material_id {
 typedef struct maage_session_command {
     unsigned int protocol_version;
     unsigned int kind;
-    unsigned long sequence; /* Nonzero and increasing within the session. */
+    unsigned long sequence;                /* Nonzero and increasing within the session. */
+    double sampled_at, queued_at, sent_at; /* Optional local diagnostic clock; -1 when unavailable. */
     maage_gameplay_intent intent;
     unsigned int hotbar_slot;
     unsigned int inventory_slot;
@@ -91,8 +92,10 @@ typedef struct maage_session_command {
     unsigned long container_identity, container_revision;
     unsigned int slot_group, container_slot, slot_action;
     unsigned long prediction;
-    maage_world_target predicted_target;  /* Request only; never a claimed mutation. */
-    maage_block_state_id predicted_state; /* PLACE_PREVIEW result to acknowledge, never execute. */
+    unsigned long prediction_revision;         /* Replica baseline before this expected-state edit. */
+    unsigned long prediction_command_sequence; /* Input anchor for action/tick diagnostics. */
+    maage_world_target predicted_target;       /* Request only; never a claimed mutation. */
+    maage_block_state_id predicted_state;      /* PLACE_PREVIEW result to acknowledge, never execute. */
     int secondary_click;
     maage_item_id item_id;
     unsigned int item_metadata;
@@ -137,6 +140,10 @@ typedef struct maage_session_player_view {
     unsigned int break_delay, attack_miss_delay;
     maage_world_target target, breaking;
     double break_progress;
+    maage_item_id breaking_item;
+    unsigned int breaking_metadata, breaking_damage;
+    unsigned long blocks_broken, last_break_tick;
+    maage_world_target last_break;
     unsigned long swing_tick;
     unsigned int swing_kind;
     double swing; /* Authoritative remaining six-tick arm swing, normalized 0..1. */
@@ -145,9 +152,13 @@ typedef struct maage_session_player_view {
 typedef struct maage_session_snapshot {
     unsigned int protocol_version;
     unsigned long session_epoch, world_epoch;
-    unsigned long tick, sequence;           /* Increasing within a session/world epoch. */
-    unsigned long applied_command_sequence; /* Acknowledges accepted or rejected FIFO actions. */
-    int paused;                             /* Integrated owner pause; presentation may continue. */
+    unsigned long tick, sequence;            /* Increasing within a session/world epoch. */
+    unsigned long applied_command_sequence;  /* Acknowledges accepted or rejected FIFO actions. */
+    unsigned long gameplay_command_sequence; /* Commands included in the last completed gameplay step. */
+    /* Next owner boundary on the local monotonic clock. A remote adapter must
+     * translate it or use -1; prediction never extrapolates beyond one step. */
+    double next_tick_at;
+    int paused; /* Integrated owner pause; presentation may continue. */
     maage_session_player_view player;
     maage_environment_state environment;
     int has_observation;
@@ -163,6 +174,7 @@ typedef struct maage_session_entities {
     unsigned long session_epoch, world_epoch, tick, sequence;
     maage_entity *entities;
     size_t count;
+    double offered_at; /* Optional local diagnostic clock, otherwise -1. */
 } maage_session_entities;
 
 typedef enum maage_session_event_kind {

@@ -35,6 +35,9 @@ typedef struct maage_local_column_update {
 maage_status maage_local_session_create(unsigned int command_capacity, unsigned int event_capacity, unsigned int column_capacity, maage_local_session **output);
 maage_status maage_local_session_send(maage_local_session *session, const maage_session_command *command);
 maage_status maage_local_session_take_command(maage_local_session *session, maage_session_command *command);
+/* Owner scheduler wait. Check the command predicate under the mailbox mutex;
+ * publication/receive traffic does not wake this wait. Close also wakes it. */
+maage_status maage_local_session_wait_commands(maage_local_session *session, unsigned long timeout_ms);
 maage_status maage_local_session_publish_snapshot(maage_local_session *session, const maage_session_snapshot *snapshot);
 maage_status maage_local_session_read_snapshot(maage_local_session *session, maage_session_snapshot *snapshot);
 maage_status maage_local_session_publish_event(maage_local_session *session, const maage_session_event *event);

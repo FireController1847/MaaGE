@@ -49,7 +49,7 @@ static int session_command_valid(const maage_session_command *command) {
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
     case MAAGE_CMD_BREAK_PREVIEW:
     case MAAGE_CMD_PLACE_PREVIEW:
-        return command->prediction != 0 && command->prediction <= 4294967295UL;
+        return command->prediction != 0 && command->prediction <= 4294967295UL && command->prediction_revision != 0 && command->prediction_command_sequence != 0 && command->prediction_command_sequence < command->sequence;
     case MAAGE_CMD_CONTAINER_OPEN:
         return 1;
     case MAAGE_CMD_CONTAINER_CLOSE:
@@ -184,10 +184,20 @@ maage_status maage_local_session_take_command(maage_local_session *session, maag
         *command = session->commands[session->command_head];
         session->command_head = session_next(session->command_head, session->command_capacity);
         --session->command_count;
-        maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
     } else
         result = session_status(session->closed ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);
+    maage_mutex_unlock(session->mutex);
+    return result;
+}
+
+maage_status maage_local_session_wait_commands(maage_local_session *session, unsigned long timeout_ms) {
+    maage_status result;
+    if (!session) return session_argument(MAAGE_OPERATION_WAIT, 0);
+    maage_mutex_lock(session->mutex);
+    if (session->closed) result = session_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_WAIT);
+    else if (session->command_count) result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_WAIT);
+    else result = maage_condition_timed_wait(session->changed, session->mutex, timeout_ms);
     maage_mutex_unlock(session->mutex);
     return result;
 }
@@ -198,7 +208,8 @@ maage_status maage_local_session_publish_snapshot(maage_local_session *session, 
     if (!snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         !session_motion_valid(&snapshot->player.motion) || snapshot->player.air < -19 || snapshot->player.air > 300 ||
         (snapshot->player.food.remaining && (!snapshot->player.food.stack.item_id || !snapshot->player.food.stack.count || snapshot->player.food.slot >= MAAGE_HOTBAR_SLOTS || snapshot->player.food.remaining > snapshot->player.food.duration || snapshot->player.food.started_tick > snapshot->tick)) ||
-        snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick ||
+        snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick || snapshot->player.last_break_tick > snapshot->tick ||
+        snapshot->gameplay_command_sequence > snapshot->applied_command_sequence || !(snapshot->next_tick_at == -1 || (snapshot->next_tick_at >= 0 && snapshot->next_tick_at <= DBL_MAX)) ||
         !(snapshot->player.damage_yaw >= -DBL_MAX && snapshot->player.damage_yaw <= DBL_MAX) ||
         (snapshot->paused != 0 && snapshot->paused != 1) ||
         (snapshot->has_observation != 0 && snapshot->has_observation != 1))
@@ -209,7 +220,6 @@ maage_status maage_local_session_publish_snapshot(maage_local_session *session, 
     else {
         session->snapshot = *snapshot;
         session->has_snapshot = 1;
-        maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
     }
     maage_mutex_unlock(session->mutex);
@@ -243,7 +253,6 @@ maage_status maage_local_session_publish_event(maage_local_session *session, con
         session->events[tail] = *event;
         if (!event->has_trace) maage_status_trace_init(&session->events[tail].trace);
         ++session->event_count;
-        maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
     }
     maage_mutex_unlock(session->mutex);
@@ -259,7 +268,6 @@ maage_status maage_local_session_take_event(maage_local_session *session, maage_
         *event = session->events[session->event_head];
         session->event_head = session_next(session->event_head, session->event_capacity);
         --session->event_count;
-        maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
     } else
         result = session_status(session->closed ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);
@@ -276,7 +284,6 @@ maage_status maage_local_session_offer_column(maage_local_session *session, maag
     else {
         session->columns[session->column_count++] = *update;
         update->column = NULL;
-        maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
     }
     maage_mutex_unlock(session->mutex);
@@ -307,7 +314,6 @@ maage_status maage_local_session_take_column(maage_local_session *session, int c
         --session->column_count;
         if (selected < session->column_count) memmove(session->columns + selected, session->columns + selected + 1, (session->column_count - selected) * sizeof(*session->columns));
         memset(&session->columns[session->column_count], 0, sizeof(*session->columns));
-        maage_condition_signal(session->changed);
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
     } else
         result = session_status(session->closed ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_READ);

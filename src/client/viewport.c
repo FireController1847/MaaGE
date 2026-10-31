@@ -447,7 +447,8 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
 typedef struct maage_client_outbox {
     maage_session_command commands[MAAGE_CLIENT_OUTBOX_CAPACITY];
     unsigned int head, count;
-    unsigned long next_sequence;
+    unsigned long next_sequence, input_sequence;
+    int diagnostics;
 } maage_client_outbox;
 
 static int maage_client_input_coalescible(const maage_session_command *command) {
@@ -470,6 +471,8 @@ static maage_status maage_client_outbox_queue(maage_client_outbox *outbox, const
     unsigned int tail, previous;
     if (!outbox || !input) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
     command = *input;
+    command.queued_at = outbox->diagnostics ? maage_time_monotonic_seconds() : -1;
+    command.sent_at = -1;
     command.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     if (outbox->count && maage_client_input_coalescible(&command)) {
         previous = (outbox->head + outbox->count - 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
@@ -485,12 +488,14 @@ static maage_status maage_client_outbox_queue(maage_client_outbox *outbox, const
              * No edge-triggered or authoritative command is overwritten. */
             command.sequence = outbox->commands[previous].sequence;
             outbox->commands[previous] = command;
+            outbox->input_sequence = command.sequence;
             return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
         }
     }
     if (outbox->count == MAAGE_CLIENT_OUTBOX_CAPACITY) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
     if (outbox->next_sequence == ULONG_MAX) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 1);
     command.sequence = ++outbox->next_sequence;
+    if (command.kind == MAAGE_CMD_INPUT) outbox->input_sequence = command.sequence;
     tail = (outbox->head + outbox->count) % MAAGE_CLIENT_OUTBOX_CAPACITY;
     outbox->commands[tail] = command;
     ++outbox->count;
@@ -503,10 +508,13 @@ static maage_status maage_client_outbox_flush(maage_client_outbox *outbox, maage
     maage_status result;
     if (!outbox || !session) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
     while (outbox->count) {
-        result = maage_local_session_send(session, &outbox->commands[outbox->head]);
+        maage_session_command *command = &outbox->commands[outbox->head];
+        command->sent_at = outbox->diagnostics ? maage_time_monotonic_seconds() : -1;
+        result = maage_local_session_send(session, command);
         if (maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) return result;
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
+        if (outbox->diagnostics && (command->prediction || command->intent.attack_pressed || command->intent.use_pressed)) maage_log_info("maage.client.latency", "action=%lu command_sequence=%lu kind=%u sampled_at=%.6f queued_at=%.6f sent_at=%.6f outbox_ms=%.3f", command->prediction, command->sequence, command->kind, command->sampled_at, command->queued_at, command->sent_at, (command->sent_at - command->queued_at) * 1000);
         outbox->head = (outbox->head + 1U) % MAAGE_CLIENT_OUTBOX_CAPACITY;
         --outbox->count;
     }
@@ -618,6 +626,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     memset(&collision, 0, sizeof(collision));
     memset(&debug, 0, sizeof(debug));
     memset(&outbox, 0, sizeof(outbox));
+    outbox.diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     memset(&latest, 0, sizeof(latest));
     memset(&previous, 0, sizeof(previous));
     memset(&server_config, 0, sizeof(server_config));
@@ -764,6 +773,7 @@ choose_world:
     direct_world = 0;
     has_last_input = 0;
     memset(&outbox, 0, sizeof(outbox));
+    outbox.diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     world_epoch = last_sound_sequence = last_seen_tick = sound_epoch = sound_world_epoch = 0;
     active = was_active = was_modal = was_focused = was_changing_mode = 0;
@@ -1077,6 +1087,7 @@ choose_world:
         if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
             memset(&command, 0, sizeof(command));
             command.kind = MAAGE_CMD_INPUT;
+            command.sampled_at = outbox.diagnostics ? now : -1;
             command.intent.movement.yaw = yaw;
             command.intent.pitch = pitch;
             if (active) {
@@ -1106,8 +1117,9 @@ choose_world:
              * command can be queued; never acknowledge an unsent click. */
             maage_client_ui_notify(ui, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0), now);
         }
-        /* Prepare local interaction against the received state before this
-         * frame's input can produce an authoritative mutation of its own. */
+        /* Resolve this frame's action from copied state before submitting
+         * its input. Its own instant Server break must not retarget the press
+         * onto the next block before local prediction observes that press. */
         operation = maage_local_session_read_snapshot(session, &incoming);
         if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS &&
             incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION &&
@@ -1183,12 +1195,11 @@ choose_world:
                 }
                 if (event.sequence > last_sound_sequence) {
                     last_sound_sequence = event.sequence;
-                    if (event.kind == MAAGE_EVENT_PICKUP && (latest.tick <= event.tick || latest.tick - event.tick <= MAAGE_CLIENT_SOUND_MAX_AGE_TICKS) && (event.emitted_at < 0 || now - event.emitted_at <= MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS)) (void) maage_client_item_entities_pickup(item_entities, &event, now);
-                    if (maage_status_code(maage_client_prediction_observe_sound(&prediction, &event)) == MAAGE_STATUS_SUCCESS) continue;
-                    if (audio && (latest.tick <= event.tick || latest.tick - event.tick <= MAAGE_CLIENT_SOUND_MAX_AGE_TICKS) &&
-                        (event.emitted_at < 0.0 || now - event.emitted_at <=
-                                                       MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS))
-                        (void) maage_client_audio_service_event(audio, &event.sound, trace);
+                    if ((latest.tick <= event.tick || latest.tick - event.tick <= MAAGE_CLIENT_SOUND_MAX_AGE_TICKS) && (event.emitted_at < 0 || now - event.emitted_at <= MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS)) {
+                        if (event.kind == MAAGE_EVENT_PICKUP) (void) maage_client_item_entities_pickup(item_entities, &event, now);
+                        if (maage_status_code(maage_client_prediction_observe_sound(&prediction, &event)) == MAAGE_STATUS_SUCCESS) continue;
+                        if (audio) (void) maage_client_audio_service_event(audio, &event.sound, trace);
+                    }
                 }
             } else if (event.kind == MAAGE_EVENT_STATUS) {
                 maage_client_ui_notify(ui, event.status, now);
@@ -1231,8 +1242,6 @@ choose_world:
             if (maage_status_failed(operation)) goto done;
             operation = maage_world_set_leaves_mode(visual_world, video_options.leaves);
             if (maage_status_failed(operation)) goto done;
-            operation = maage_world_stream(visual_world, latest.player.player.position[0], latest.player.player.position[2], yaw, trace);
-            if (maage_status_failed(operation)) goto done;
         }
         {
             double prediction_eye[3];
@@ -1245,8 +1254,9 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, input.secondary_down || input.secondary_pressed, input.secondary_pressed, input.keys[MAAGE_INPUT_KEY_SHIFT], (unsigned int) selected_hotbar, &command);
+            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, input.secondary_down || input.secondary_pressed, input.secondary_pressed, input.keys[MAAGE_INPUT_KEY_SHIFT], (unsigned int) selected_hotbar, &command);
             if (!maage_status_failed(operation) && command.kind) {
+                command.sampled_at = prediction.diagnostics ? prediction.input_at : -1;
                 delivery = maage_client_outbox_queue(&outbox, &command);
                 if (maage_status_failed(delivery)) {
                     operation = delivery;
@@ -1254,10 +1264,15 @@ choose_world:
                 }
                 preview_queued = 1;
             }
-            /* Send input and its observation marker before any GPU preparation.
-             * Resource failure cannot hold up the authoritative gameplay path. */
+            /* Flush input and its marker before replica streaming and GPU
+             * preparation. Resource failure cannot hold up gameplay commands. */
             delivery = maage_client_outbox_flush(&outbox, session);
             if (maage_status_failed(delivery) && maage_status_code(delivery) != MAAGE_STATUS_BUFFER_OVERFLOW) {
+                operation = delivery;
+                goto done;
+            }
+            delivery = maage_world_stream(visual_world, latest.player.player.position[0], latest.player.player.position[2], yaw, trace);
+            if (maage_status_failed(delivery)) {
                 operation = delivery;
                 goto done;
             }
@@ -1410,6 +1425,7 @@ choose_world:
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);
             rendered = maage_renderer_draw_frame(renderer, cache.draws, draw_count, matrix, ui_draw, trace);
             if (maage_status_failed(rendered)) goto done;
+            if (maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) maage_client_item_entities_submitted(item_entities);
         } else
             rendered = MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
         frame_end = maage_time_monotonic_seconds();

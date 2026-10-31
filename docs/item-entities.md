@@ -160,6 +160,16 @@ ticks and sequences are rejected. Arrays and copy work scale with the actual
 Future remote transport can fragment and atomically install the same complete
 revision semantics, but remote networking is not implemented.
 
+Successful mining publishes a complete entity set immediately after gameplay creates
+the drops, before entity physics, World scheduled/random work, streaming or additional
+catch-up steps. The ordinary snapshot publication refines movement and includes
+other World-created entities. Publication sequences are independent of player snapshots.
+The Client takes the newest entity set immediately before preparing instances for the
+current frame; first model creation/uploads are synchronous and cached thereafter.
+No speculative loot, duplicate drop identities, mesh-completion wait or pickup-delay
+visibility gate is involved. Optional latency records distinguish entity transport,
+model/instance preparation and frame submission; they do not measure display scanout.
+
 ## Shared presentation
 
 Item definitions resolve model category, texture and metadata consistently for
