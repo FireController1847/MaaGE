@@ -171,6 +171,7 @@ static void maage_gameplay_begin_life(maage_gameplay *game) {
     if (++game->life == 0) ++game->life;
     game->walk_distance = game->damage_yaw = 0;
     game->air = 300;
+    game->hurt_resistance = game->last_damage = 0;
     game->damage_sequence = game->damage_tick = game->death_tick = 0;
     game->jump_repeat_ticks = 0;
 }
@@ -195,6 +196,7 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode) {
     if (!game || mode > MAAGE_GAME_MODE_CREATIVE) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     game->mode = mode;
     game->air = 300;
+    game->hurt_resistance = game->last_damage = 0;
     game->breaking_active = 0;
     game->break_progress = 0;
     game->dig_ticks = game->attack_miss_delay = 0;
@@ -496,17 +498,56 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
 static void maage_gameplay_hurt(maage_gameplay *game, const maage_player *player, unsigned int damage, maage_gameplay_sound_sink *sink) {
-    if (!damage || !game->health) return;
-    game->health = damage >= game->health ? 0 : game->health - damage;
-    if (++game->damage_sequence == 0) ++game->damage_sequence;
-    game->damage_tick = game->ticks;
+    unsigned int applied = damage;
+    int occurrence = 1;
+    if (!damage || !game->health || game->mode == MAAGE_GAME_MODE_CREATIVE) return;
+    if (game->hurt_resistance > 10) {
+        if (damage <= game->last_damage) return;
+        applied = damage - game->last_damage;
+        occurrence = 0;
+    } else game->hurt_resistance = 20;
+    game->last_damage = damage;
+    game->health = applied >= game->health ? 0 : game->health - applied;
+    if (occurrence) {
+        if (++game->damage_sequence == 0) ++game->damage_sequence;
+        game->damage_tick = game->ticks;
+    }
     game->damage_yaw = 0; /* Environmental damage has no attacker. */
     if (!game->health) {
         game->death_tick = game->ticks;
         game->air = 300;
     }
-    maage_gameplay_sound(sink, game->health ? MAAGE_SOUND_PLAYER_HURT : MAAGE_SOUND_PLAYER_DEATH, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 1.0, maage_gameplay_sound_pitch(game, 0.2));
+    if (occurrence || !game->health) maage_gameplay_sound(sink, game->health ? MAAGE_SOUND_PLAYER_HURT : MAAGE_SOUND_PLAYER_DEATH, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1], player->position[2], 1.0, maage_gameplay_sound_pitch(game, 0.2));
 }
+static void maage_gameplay_contact(maage_gameplay *game, const maage_player *player, const maage_world *world, maage_gameplay_sound_sink *sink) {
+    const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    double low[3], high[3];
+    int first[3], last[3], cell[3], axis, overlap;
+    unsigned int damage = 0;
+    if (!game->health || game->mode != MAAGE_GAME_MODE_SURVIVAL) return;
+    for (axis = 0; axis < 3; ++axis) {
+        low[axis] = player->position[axis] - (axis == 1 ? 0 : MAAGE_PLAYER_WIDTH * 0.5) + 0.001;
+        high[axis] = player->position[axis] + (axis == 1 ? MAAGE_PLAYER_HEIGHT : MAAGE_PLAYER_WIDTH * 0.5) - 0.001;
+        first[axis] = (int) floor(low[axis]);
+        last[axis] = (int) floor(high[axis]);
+    }
+    for (cell[2] = first[2]; cell[2] <= last[2]; ++cell[2])
+        for (cell[0] = first[0]; cell[0] <= last[0]; ++cell[0]) {
+            if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(cell[0]), maage_world_chunk_coordinate(cell[2]))) continue;
+            for (cell[1] = first[1]; cell[1] <= last[1]; ++cell[1]) {
+                state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, cell[0], cell[1], cell[2]));
+                block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
+                if (!block || !block->contact_damage) continue;
+                overlap = 1;
+                for (axis = 0; axis < 3; ++axis)
+                    if (high[axis] <= cell[axis] + block->contact_shape.minimum[axis] || low[axis] >= cell[axis] + block->contact_shape.maximum[axis]) overlap = 0;
+                if (overlap && block->contact_damage > damage) damage = block->contact_damage;
+            }
+        }
+    maage_gameplay_hurt(game, player, damage, sink);
+}
+
 static void maage_gameplay_breathe(maage_gameplay *game, const maage_player *player, const maage_world *world, maage_gameplay_sound_sink *sink) {
     if (!game->health || game->mode == MAAGE_GAME_MODE_CREATIVE || !maage_player_submerged(player, world)) {
         game->air = 300;
@@ -624,6 +665,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     sink.capacity = capacity;
     sink.enabled = written != NULL;
     ++game->ticks;
+    if (game->hurt_resistance) --game->hurt_resistance;
     if (game->swing > 0) {
         game->swing -= 1.0 / 6.0;
         if (game->swing < 0) game->swing = 0;
@@ -683,6 +725,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     game->audio_initialized = 1;
     maage_gameplay_breathe(game, player, world, &sink);
     maage_gameplay_vitals(game, player, world, previous, grounded, jumped, sprint_jump, in_water || fluid == MAAGE_FLUID_WATER, &sink);
+    maage_gameplay_contact(game, player, world, &sink);
     if (!game->health || (game->mode == MAAGE_GAME_MODE_SURVIVAL && game->hunger <= 6)) {
         player->sprinting = 0;
         game->sprint_ticks = 0;

@@ -232,8 +232,9 @@ maage_status maage_block_registry_register_block(maage_block_registry *registry,
         definition->light_opacity > 15 || definition->mesh_shape > MAAGE_BLOCK_MESH_TORCH ||
         !maage_block_name_valid(external_name))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    if (!(definition->hardness >= -DBL_MAX && definition->hardness <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (!(definition->hardness >= -DBL_MAX && definition->hardness <= DBL_MAX) || (definition->falls != 0 && definition->falls != 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     for (axis = 0; axis < 3; ++axis) {
+        if (definition->contact_damage && !(definition->contact_shape.minimum[axis] >= 0.0 && definition->contact_shape.maximum[axis] <= 1.0 && definition->contact_shape.minimum[axis] < definition->contact_shape.maximum[axis])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         if (definition->solid && !(definition->collision_shape.minimum[axis] >= 0.0 &&
                                    definition->collision_shape.maximum[axis] <= 1.0 &&
                                    definition->collision_shape.minimum[axis] < definition->collision_shape.maximum[axis]))

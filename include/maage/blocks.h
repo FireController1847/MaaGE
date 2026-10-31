@@ -194,6 +194,8 @@ typedef struct maage_block_definition {
     unsigned long drop_item_id; /* Item domain, resolved at registration. */
     unsigned int drop_count;
     maage_block_shape collision_shape, selection_shape;
+    unsigned int contact_damage;
+    maage_block_shape contact_shape; /* Damaging shell may differ from physical collision. */
     /* Called only on the World owner for eligible states. NULL retains sampling
      * eligibility without behavior when a required system is unimplemented. */
     maage_block_random_tick_callback random_tick;

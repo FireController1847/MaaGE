@@ -186,6 +186,8 @@ static maage_status maage_content_blocks_create(const maage_content_config *conf
                 memset(&block.collision_shape, 0, sizeof(block.collision_shape));
                 block.replaceable = 1;
             } else if (block.id == MAAGE_BLOCK_CACTUS) {
+                block.contact_damage = 1;
+                block.contact_shape.maximum[0] = block.contact_shape.maximum[1] = block.contact_shape.maximum[2] = 1;
                 block.collision_shape.minimum[0] = block.collision_shape.minimum[2] = 0.0625;
                 block.collision_shape.maximum[0] = block.collision_shape.maximum[2] = 0.9375;
                 block.selection_shape = block.collision_shape;

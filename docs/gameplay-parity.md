@@ -196,6 +196,15 @@ crack stages, which are
 `floor(progress * 10) - 1` and clear locally on release/target change. See
 [Visual Rendering](visual-fidelity.md) for hand projection and material behavior.
 
+Contact hazards use registered numeric damaging bounds separately from physical
+collision. Cactus deals one health point when the player's contracted body enters
+its voxel shell around the inset collision prism, including its top. Merely nearby
+cells do not damage. Creative is immune. One shared per-life 20-tick resistance
+window serves cactus, falls, drowning and starvation: equal/weaker observations in
+the first ten ticks are ignored; stronger hits apply only the excess. New accepted
+occurrences feed the existing health/HUD/camera/sound/death markers. Overlapping
+hazards cannot each restart immunity. Resistance is ephemeral, like hurt animation.
+
 ## Water Movement
 
 The owner samples the contracted player body against numeric fluid surfaces,
