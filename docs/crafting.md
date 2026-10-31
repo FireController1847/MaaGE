@@ -103,7 +103,9 @@ Commands contain no recipe IDs, result quantities or cursor stacks.
 
 Snapshots carry the container identity, revision, inputs and result plus the last
 processed command sequence. Rejected actions are acknowledged too, allowing the
-Client to clear pending presentation without predicting gameplay. Table activation
+Client to clear pending actions without predicting gameplay. Ingredients, cursor
+and output always draw from that same copied snapshot; a pending command never
+hides the result alone. Result clicks remain revision-checked. Table activation
 continues through the established numeric use/raycast path.
 
 ## Recipe Catalog
