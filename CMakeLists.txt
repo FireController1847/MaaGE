@@ -13,6 +13,14 @@ set(MAAGE_EXPLICIT_TOOLCHAIN "${CMAKE_TOOLCHAIN_FILE}")
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
     set(MAAGE_EXPLICIT_TOOLCHAIN "$ENV{CMAKE_TOOLCHAIN_FILE}")
 endif()
+# Resolve the native macOS SDK through the selected developer tools. An empty
+# sysroot can pair Xcode's linker with an incompatible Command Line Tools SDK.
+# Preserve explicit SDKs, environment selection and custom/cross toolchains.
+if(CMAKE_HOST_APPLE AND NOT MAAGE_EXPLICIT_TOOLCHAIN AND
+        (NOT CMAKE_SYSTEM_NAME OR CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND
+        NOT CMAKE_OSX_SYSROOT AND "$ENV{SDKROOT}" STREQUAL "")
+    set(CMAKE_OSX_SYSROOT macosx CACHE STRING "macOS SDK selected by xcrun" FORCE)
+endif()
 get_filename_component(MAAGE_TOOLCHAIN_NAME "${MAAGE_EXPLICIT_TOOLCHAIN}" NAME)
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR
         (NOT CMAKE_SYSTEM_NAME AND CMAKE_HOST_WIN32 AND
