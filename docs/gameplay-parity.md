@@ -46,6 +46,18 @@ Modal screens release capture, and closure restores it when appropriate. Local
 look angles stop immediately on release and remain fixed through menu closure;
 delayed Server angle echoes never rotate the view or become new input commands.
 
+HUD damage flashes use the existing alternate heart outlines and pre-hit full/half
+heart sprites behind current health. A new authoritative damage occurrence starts
+the classic three-tick blink phases within its first ten ticks; duplicate snapshots
+never restart it. At four health or less, each heart jitters downward by zero or
+one logical pixel. Empty saturation shakes food icons by up to one pixel on the
+`food * 3 + 1` tick cadence. Cosmetic variation is stable within each owner tick,
+independent of render FPS and gameplay randomness; pause freezes it, and new
+worlds/lives/modes reset flash history. The accepted height−33 baseline is retained.
+Regeneration-potion waves and status-specific icons await those gameplay effects.
+Air bubbles already use the popping sprite for the last two ticks before each
+bubble disappears; resurfacing immediately hides the air row.
+
 ## State Transfer and Visual Lighting
 
 The Server publishes owned numeric block/biome columns initially, then changed

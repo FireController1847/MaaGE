@@ -55,17 +55,45 @@ static void maage_client_ui_stack(maage_client_ui *ui, const maage_item_stack *s
     }
 }
 
+/* Cosmetic variation depends only on the displayed owner tick and icon. It
+ * stays stable between snapshots and never consumes gameplay randomness. */
+static unsigned int maage_client_ui_vital_jitter(unsigned long tick, unsigned int icon, unsigned int range) {
+    unsigned long value = (tick ^ ((icon + 1UL) * 2654435761UL)) & 4294967295UL;
+    value ^= value >> 16;
+    value = (value * 1664525UL + 1013904223UL) & 4294967295UL;
+    return (unsigned int) ((value >> 16) % range);
+}
+
 static void maage_client_ui_status(maage_client_ui *ui, float x, float y, unsigned int value, int hunger) {
     maage_client_ui_rect rectangle;
-    unsigned int i, filled;
+    unsigned int i, filled, previous, remaining;
+    unsigned long age, tick = ui->snapshot.tick;
+    int flashing = 0;
     float v, u;
     if (value > 20) value = 20;
+    previous = ui->health_before_damage > 20 ? 20 : ui->health_before_damage;
+    if (!hunger && ui->health_flashing && tick >= ui->health_flash_tick) {
+        age = tick - ui->health_flash_tick;
+        if (age <= 10) {
+            remaining = 20U - (unsigned int) age;
+            flashing = (remaining / 3U) % 2U != 0;
+        }
+    }
     rectangle.width = rectangle.height = 9;
     v = (float) (hunger ? 27 : 0) / ui->resources.atlas_edge;
     for (i = 0; i < 10; ++i) {
         rectangle.x = hunger ? x - (float) i * 8 : x + (float) i * 8;
         rectangle.y = y;
-        maage_client_ui_rectangle(ui, rectangle, 16.0f / ui->resources.atlas_edge, v, 25.0f / ui->resources.atlas_edge, v + 9.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+        if (hunger) {
+            if (ui->snapshot.player.saturation <= 0 && tick % (value * 3UL + 1UL) == 0) rectangle.y += (int) maage_client_ui_vital_jitter(tick, i + 10, 3) - 1;
+        } else if (value <= 4) rectangle.y += maage_client_ui_vital_jitter(tick, i, 2);
+        u = (float) (flashing ? 25 : 16) / ui->resources.atlas_edge;
+        maage_client_ui_rectangle(ui, rectangle, u, v, u + 9.0f / ui->resources.atlas_edge, v + 9.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+        if (flashing && previous > i * 2) {
+            filled = previous - i * 2;
+            u = (float) (filled >= 2 ? 70 : 79) / ui->resources.atlas_edge;
+            maage_client_ui_rectangle(ui, rectangle, u, v, u + 9.0f / ui->resources.atlas_edge, v + 9.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+        }
         filled = value > i * 2 ? value - i * 2 : 0;
         if (!filled) continue;
         u = (float) (filled >= 2 ? 52 : 61) / ui->resources.atlas_edge;
@@ -420,6 +448,17 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_sessi
     if (!ui || !snapshot) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
     if (snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
     respawned = ui->has_snapshot && ui->snapshot.player.health == 0 && snapshot->player.health != 0;
+    if (!ui->has_snapshot || snapshot->session_epoch != ui->snapshot.session_epoch || snapshot->world_epoch != ui->snapshot.world_epoch || snapshot->player.motion.life != ui->snapshot.player.motion.life || snapshot->player.game_mode != ui->snapshot.player.game_mode || snapshot->tick < ui->snapshot.tick) {
+        ui->health_before_damage = snapshot->player.health;
+        ui->health_flash_tick = 0;
+        ui->health_flashing = 0;
+    } else if (snapshot->player.damage_sequence != ui->snapshot.player.damage_sequence) {
+        /* One occurrence starts one flash, even when snapshots repeat. Keep
+         * the pre-hit value so lost full/half hearts can flash behind live HP. */
+        ui->health_before_damage = ui->snapshot.player.health;
+        ui->health_flash_tick = snapshot->player.damage_tick;
+        ui->health_flashing = snapshot->player.damage_sequence != 0;
+    } else if (ui->health_flashing && snapshot->tick >= ui->health_flash_tick && snapshot->tick - ui->health_flash_tick > 10) ui->health_flashing = 0;
     {
         const maage_item_stack *selected = maage_inventory_selected(&snapshot->player.inventory);
         const maage_item_definition *definition = selected && ui->items ? maage_item_registry_get(ui->items, selected->item_id) : NULL;

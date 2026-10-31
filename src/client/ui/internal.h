@@ -52,6 +52,9 @@ struct maage_client_ui {
     const maage_block_registry *blocks;
     float inventory_grass_color[3];
     maage_session_snapshot snapshot; /* Value-only, no World pointers. */
+    unsigned int health_before_damage;
+    unsigned long health_flash_tick;
+    int health_flashing;
     maage_item_stack highlighted_item;
     double highlight_until;
     int has_snapshot, container_command_pending, container_close_requested;
