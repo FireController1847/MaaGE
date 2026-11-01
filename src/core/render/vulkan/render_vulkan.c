@@ -475,16 +475,17 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
         stages[index].pName = "main";
     }
     if (fullscreen) stages[1].pSpecializationInfo = &specialization;
-    binding.stride = ui ? sizeof(maage_render_ui_gpu_vertex) : sizeof(maage_mesh_vertex);
+    binding.stride = ui ? sizeof(maage_render_ui_gpu_vertex) : sizeof(maage_render_gpu_mesh_vertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     {
 #define MAAGE_VERTEX_VEC1 VK_FORMAT_R32_SFLOAT
 #define MAAGE_VERTEX_VEC2 VK_FORMAT_R32G32_SFLOAT
 #define MAAGE_VERTEX_VEC3 VK_FORMAT_R32G32B32_SFLOAT
 #define MAAGE_VERTEX_VEC4 VK_FORMAT_R32G32B32A32_SFLOAT
-#define MAAGE_VERTEX_FIELD(slot, format, name) {slot, 0, format, offsetof(maage_mesh_vertex, name)},
+#define MAAGE_VERTEX_BYTE4 VK_FORMAT_R8G8B8A8_UNORM
+#define MAAGE_VERTEX_FIELD(slot, format, name) {slot, 0, format, offsetof(maage_render_gpu_mesh_vertex, name)},
         static const VkVertexInputAttributeDescription mesh_fields[] = {
-            MAAGE_RENDER_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)};
+            MAAGE_RENDER_GPU_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)};
 #undef MAAGE_VERTEX_FIELD
 #define MAAGE_VERTEX_FIELD(slot, format, name) {slot, 0, format, offsetof(maage_render_ui_gpu_vertex, vertex.name)},
         static const VkVertexInputAttributeDescription ui_fields[] = {
@@ -494,12 +495,13 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
 #undef MAAGE_VERTEX_VEC2
 #undef MAAGE_VERTEX_VEC3
 #undef MAAGE_VERTEX_VEC4
+#undef MAAGE_VERTEX_BYTE4
         memcpy(attributes, ui ? ui_fields : mesh_fields, ui ? sizeof(ui_fields) : sizeof(mesh_fields));
     }
     vertices.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertices.vertexBindingDescriptionCount = fullscreen ? 0 : 1;
     vertices.pVertexBindingDescriptions = &binding;
-    vertices.vertexAttributeDescriptionCount = fullscreen ? 0 : (ui ? 4 : 7);
+    vertices.vertexAttributeDescriptionCount = fullscreen ? 0 : (ui ? 4 : 6);
     vertices.pVertexAttributeDescriptions = attributes;
     assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -904,8 +906,8 @@ static maage_status maage_vulkan_create(maage_renderer *renderer) {
     native = renderer->platform;
     if (!maage_render_gpu_layout_supported() ||
         native->properties.limits.maxPushConstantsSize < sizeof(maage_render_uniforms) ||
-        native->properties.limits.maxVertexInputAttributes < 7 ||
-        native->properties.limits.maxVertexInputBindingStride < sizeof(maage_mesh_vertex))
+        native->properties.limits.maxVertexInputAttributes < 6 ||
+        native->properties.limits.maxVertexInputBindingStride < sizeof(maage_render_gpu_mesh_vertex))
         return MAAGE_VULKAN_ERROR(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED);
     gpu = calloc(1, sizeof(*gpu));
     if (!gpu) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED);
@@ -992,7 +994,7 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
     maage_vulkan_rendering *gpu = native->rendering;
     maage_vulkan_mesh *geometry = mesh->platform;
     maage_vulkan_garbage *staging;
-    size_t vertex_bytes = data->vertex_count * sizeof(*data->vertices);
+    size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
     VkBufferCopy copy = {0};
     if (!geometry) {
         geometry = calloc(1, sizeof(*geometry));
@@ -1003,7 +1005,8 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
         MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, data->index_count * sizeof(*data->indices), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0, &geometry->indices));
     }
     MAAGE_VULKAN_TRY(maage_vulkan_staging(renderer, bytes, &staging));
-    memcpy(staging->buffer.mapped, offset < vertex_bytes ? (const unsigned char *) data->vertices + offset : (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
+    if (offset < vertex_bytes) maage_render_mesh_pack_span(data->vertices, offset, bytes, staging->buffer.mapped);
+    else memcpy(staging->buffer.mapped, (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
     MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &staging->buffer));
     MAAGE_VULKAN_TRY(maage_vulkan_upload_begin(renderer));
     copy.dstOffset = offset < vertex_bytes ? offset : offset - vertex_bytes;

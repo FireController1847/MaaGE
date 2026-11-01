@@ -194,9 +194,12 @@ disk operations, global barriers, or unconditional remeshing are introduced.
 
 ## Mesh Residency and Prediction
 
-Chunk mesh vertices contain position, atlas UV, precomputed tint/AO, light,
-material and animation attributes; unused vertex normals are omitted from the
-shared CPU and native GPU layouts. Once the base GPU upload finishes, the Client
+CPU mesh vertices contain position, atlas UV, precomputed tint/AO, light,
+material and animation attributes; unused vertex normals are omitted. Native
+GPU uploads encode color and both normalized light channels as 8-bit values
+while retaining full 32-bit precision for position, UV, material and animation.
+This reduces the native GPU vertex stride from 60 to 44 bytes without
+compressing the CPU mesher, geometry preparation or triangle metadata. Once the base GPU upload finishes, the Client
 discards its full CPU source vertex and index arrays. It retains only a 16-bit
 chunk-local owner and a byte of material/quad-winding information per face.
 Immediate local prediction reconstructs only the selected index list; the
@@ -212,12 +215,12 @@ SW (Server World retained storage), CW (Client World retained storage),
 and U (unattributed resident-memory remainder). World figures inspect the owner-thread's allocated
 column snapshots, packed sections, lighting, and indexing structures; detached
 worker outputs, external registries, and renderer allocations are not included.
-GPU bytes count base mesh vertex/index payloads, not native driver overhead,
-transparency sort buffers, prediction views, or other resources. The fourth
-number is a subtraction from the process resident count, not independently
-measured memory, and can be unknown if the GPU allocation footprint exceeds the
-reported resident memory. Compacting vertex attributes and pooling native
-allocations remain separate opportunities.
+GPU bytes count the actual compact 44-byte vertex stride and 32-bit base mesh
+index payloads, not native driver overhead, transparency sort buffers, prediction
+views or other resources. The fourth number is a subtraction from process
+resident memory, not an independent allocation measurement, and can be unknown
+if the GPU allocation footprint exceeds reported residency. Further GPU quad
+merging and pooling native allocations remain separate opportunities.
 
 Numerical direct-sky caches use two four-bit light values per byte, allocating
 32 KiB per initialized column instead of 64 KiB. The packed array is shared by

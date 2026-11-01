@@ -235,9 +235,16 @@ static maage_status maage_gl_unmap(maage_renderer *renderer, GLenum target) {
 #define MAAGE_VERTEX_VEC3 3
 #define MAAGE_VERTEX_VEC4 4
 static void maage_gl_mesh_attributes(maage_gl_renderer *native) {
-#define MAAGE_GL_ATTRIBUTE(slot, count, field) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_FLOAT, GL_FALSE, sizeof(maage_mesh_vertex), (const void *) offsetof(maage_mesh_vertex, field));
-    MAAGE_RENDER_MESH_ATTRIBUTES(MAAGE_GL_ATTRIBUTE)
-#undef MAAGE_GL_ATTRIBUTE
+#define MAAGE_GL_MESH_FLOAT(slot, count, name) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_FLOAT, GL_FALSE, sizeof(maage_render_gpu_mesh_vertex), (const void *) offsetof(maage_render_gpu_mesh_vertex, name));
+    MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_POSITION_LOCATION, 3, position)
+    MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_UV_LOCATION, 2, uv)
+    MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_MATERIAL_LOCATION, 1, material)
+    MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_ANIMATION_LOCATION, 3, animation)
+#undef MAAGE_GL_MESH_FLOAT
+#define MAAGE_GL_MESH_BYTE(slot, count, name) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(maage_render_gpu_mesh_vertex), (const void *) offsetof(maage_render_gpu_mesh_vertex, name));
+    MAAGE_GL_MESH_BYTE(MAAGE_RENDER_MESH_COLOR_LOCATION, 4, color)
+    MAAGE_GL_MESH_BYTE(MAAGE_RENDER_MESH_LIGHT_LOCATION, 2, light)
+#undef MAAGE_GL_MESH_BYTE
 }
 static void maage_gl_ui_attributes(maage_gl_renderer *native) {
 #define MAAGE_GL_ATTRIBUTE(slot, count, field) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_FLOAT, GL_FALSE, sizeof(maage_render_ui_gpu_vertex), (const void *) (offsetof(maage_render_ui_gpu_vertex, vertex) + offsetof(maage_render_ui_vertex, field)));
@@ -563,7 +570,7 @@ static void maage_gl_destroy_texture(maage_render_texture *resource) {
 static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data, size_t offset, size_t bytes) {
     maage_gl_renderer *native = maage_gl_gpu(renderer);
     maage_gl_mesh *geometry = mesh->platform;
-    size_t vertex_bytes = data->vertex_count * sizeof(*data->vertices), index_bytes = data->index_count * sizeof(*data->indices);
+    size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex), index_bytes = data->index_count * sizeof(*data->indices);
     MAAGE_GL_TRY(maage_opengl_context_bind(renderer));
     if ((ptrdiff_t) vertex_bytes <= 0 || (size_t) (ptrdiff_t) vertex_bytes != vertex_bytes || (ptrdiff_t) index_bytes <= 0 || (size_t) (ptrdiff_t) index_bytes != index_bytes) return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     if (!geometry) {
@@ -585,7 +592,12 @@ static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_ren
     native->gl.BindVertexArray(geometry->vao);
     if (offset < vertex_bytes) {
         native->gl.BindBuffer(MAAGE_GL_ARRAY_BUFFER, geometry->vertices);
-        native->gl.BufferSubData(MAAGE_GL_ARRAY_BUFFER, (ptrdiff_t) offset, (ptrdiff_t) bytes, (const unsigned char *) data->vertices + offset);
+        {
+            void *mapped = native->gl.MapBufferRange(MAAGE_GL_ARRAY_BUFFER, (ptrdiff_t) offset, (ptrdiff_t) bytes, MAAGE_GL_MAP_WRITE_BIT | MAAGE_GL_MAP_UNSYNCHRONIZED_BIT);
+            if (!mapped) return maage_gl_resource_failure(renderer, MAAGE_OPERATION_UPLOAD);
+            maage_render_mesh_pack_span(data->vertices, offset, bytes, mapped);
+            if (!native->gl.UnmapBuffer(MAAGE_GL_ARRAY_BUFFER)) return maage_gl_resource_failure(renderer, MAAGE_OPERATION_UPLOAD);
+        }
     } else {
         native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, geometry->indices);
         native->gl.BufferSubData(MAAGE_GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t) (offset - vertex_bytes), (ptrdiff_t) bytes, (const unsigned char *) data->indices + offset - vertex_bytes);

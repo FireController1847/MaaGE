@@ -10,14 +10,15 @@ using namespace metal;
 struct maage_uniforms {
     MAAGE_RENDER_UNIFORM_FIELDS(float4x4, float4)
 };
-/* Packed fields match maage_mesh_vertex without graphics types in the C API. */
+/* Native packed layout is 44 bytes; producer geometry remains 60 bytes. */
 #define MAAGE_VERTEX_VEC1 float
 #define MAAGE_VERTEX_VEC2 packed_float2
 #define MAAGE_VERTEX_VEC3 packed_float3
 #define MAAGE_VERTEX_VEC4 packed_float4
+#define MAAGE_VERTEX_BYTE4 uchar4
 #define MAAGE_VERTEX_FIELD(slot, type, name) type name;
 struct maage_vertex {
-    MAAGE_RENDER_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
+    MAAGE_RENDER_GPU_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
 };
 struct maage_fragment {
     float4 position [[position]];
@@ -33,8 +34,8 @@ vertex maage_fragment maage_mesh_vertex_shader(uint index [[vertex_id]], const d
     result.fog_position = result.position.xyw;
     result.uv = vertices[index].uv;
     result.uv.y += maage_shader_animation(vertices[index].animation, uniforms.parameters.x);
-    result.color = vertices[index].color;
-    result.light = vertices[index].light;
+    result.color = float4(vertices[index].color) / 255.0;
+    result.light = float2(vertices[index].light.xy) / 255.0;
     result.material = vertices[index].material;
     return result;
 }

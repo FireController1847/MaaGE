@@ -119,6 +119,8 @@ maage_status maage_render_desc_init(maage_render_desc *desc);
 maage_status maage_renderer_create(const maage_render_desc *desc, maage_renderer **renderer, maage_status_trace *trace);
 maage_status maage_renderer_destroy(maage_renderer *renderer, maage_status_trace *trace);
 maage_render_backend maage_renderer_get_backend(const maage_renderer *renderer);
+/* Resident vertex stride used by native mesh buffers; CPU geometry stays richer. */
+size_t maage_render_gpu_mesh_vertex_bytes(void);
 /* Runtime presentation synchronization. Disabling allows independently paced
  * rendering; the display may still present only the latest completed frame.
  * Unsupported implementations return NOT_IMPLEMENTED. */

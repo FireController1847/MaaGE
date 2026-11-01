@@ -2,8 +2,9 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 
+#define MAAGE_VERTEX_BYTE4 vec4
 #define MAAGE_VERTEX_FIELD(slot, type, name) layout(location = slot) in type name;
-MAAGE_RENDER_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
+MAAGE_RENDER_GPU_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
 #undef MAAGE_VERTEX_FIELD
 layout(location = 0) out vec2 maage_fragment_uv;
 layout(location = 1) out vec4 maage_fragment_color;
@@ -21,6 +22,6 @@ void main()
     maage_fragment_uv = uv;
     maage_fragment_uv.y += maage_shader_animation(animation, maage.parameters.x);
     maage_fragment_color = color;
-    maage_fragment_light = light;
+    maage_fragment_light = light.xy;
     maage_fragment_material = material;
 }

@@ -915,7 +915,7 @@ static void maage_metal_destroy_texture(maage_render_texture *texture) {
 static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data, size_t offset, size_t bytes) {
     maage_metal_renderer *native = renderer->platform;
     maage_metal_mesh *geometry = mesh->platform;
-    size_t vertex_bytes = data->vertex_count * sizeof(*data->vertices);
+    size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
     maage_status result;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, MAAGE_STATUS_INVALID_STATE);
     if (!maage_render_gpu_layout_supported()) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
@@ -931,7 +931,7 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
         geometry->indices = [native->device newBufferWithLength:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
         if (!geometry->vertices || !geometry->indices) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     }
-    if (offset < vertex_bytes) memcpy((unsigned char *) [geometry->vertices contents] + offset, (const unsigned char *) data->vertices + offset, bytes);
+    if (offset < vertex_bytes) maage_render_mesh_pack_span(data->vertices, offset, bytes, (unsigned char *) [geometry->vertices contents] + offset);
     else memcpy((unsigned char *) [geometry->indices contents] + offset - vertex_bytes, (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }

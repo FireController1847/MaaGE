@@ -293,9 +293,43 @@ void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foregro
     uniforms->lighting[2] = cursor->instance->block_light;
     uniforms->lighting[3] = 1;
 }
+/* Assemble an arbitrary byte range of the native stream, including the
+ * partial vertex ranges produced by budgeted incremental GPU uploads. */
+static unsigned char maage_render_unit_channel(float value) {
+    if (!(value > 0.0f)) return 0;
+    if (value >= 1.0f) return 255;
+    return (unsigned char) (value * 255.0f + 0.5f);
+}
+void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offset, size_t bytes, void *destination) {
+    unsigned char *target = (unsigned char *) destination;
+    while (bytes) {
+        maage_render_gpu_mesh_vertex packed;
+        const maage_mesh_vertex *source = &vertices[offset / sizeof(packed)];
+        size_t start = offset % sizeof(packed), part = sizeof(packed) - start;
+        int channel;
+        if (part > bytes) part = bytes;
+        memcpy(packed.position, source->position, sizeof(packed.position));
+        memcpy(packed.uv, source->uv, sizeof(packed.uv));
+        for (channel = 0; channel < 4; ++channel) packed.color[channel] = maage_render_unit_channel(source->color[channel]);
+        for (channel = 0; channel < 2; ++channel) packed.light[channel] = maage_render_unit_channel(source->light[channel]);
+        packed.light[2] = packed.light[3] = 0;
+        packed.material = source->material;
+        memcpy(packed.animation, source->animation, sizeof(packed.animation));
+        memcpy(target, (const unsigned char *) &packed + start, part);
+        target += part;
+        offset += part;
+        bytes -= part;
+    }
+}
 int maage_render_gpu_layout_supported(void) {
     return sizeof(float) == 4 && sizeof(unsigned int) == 4 &&
            sizeof(maage_mesh_vertex) == MAAGE_RENDER_MESH_VERTEX_BYTES &&
+           sizeof(maage_render_gpu_mesh_vertex) == MAAGE_RENDER_GPU_MESH_VERTEX_BYTES &&
+           offsetof(maage_render_gpu_mesh_vertex, uv) == 12 &&
+           offsetof(maage_render_gpu_mesh_vertex, color) == 20 &&
+           offsetof(maage_render_gpu_mesh_vertex, light) == 24 &&
+           offsetof(maage_render_gpu_mesh_vertex, material) == 28 &&
+           offsetof(maage_render_gpu_mesh_vertex, animation) == 32 &&
            sizeof(maage_render_ui_vertex) == MAAGE_RENDER_UI_VERTEX_BYTES &&
            sizeof(maage_render_ui_gpu_vertex) == MAAGE_RENDER_UI_GPU_VERTEX_BYTES &&
            sizeof(maage_render_uniforms) == MAAGE_RENDER_UNIFORM_BYTES;

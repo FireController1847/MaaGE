@@ -1471,7 +1471,7 @@ choose_world:
             if (cache.slots[slot_index].used) {
                 ++resident_count;
                 if (cache.slots[slot_index].mesh)
-                    mesh_stats.gpu_bytes += cache.slots[slot_index].vertices * sizeof(maage_mesh_vertex) + cache.slots[slot_index].indices * sizeof(unsigned int);
+                    mesh_stats.gpu_bytes += cache.slots[slot_index].vertices * maage_render_gpu_mesh_vertex_bytes() + cache.slots[slot_index].indices * sizeof(unsigned int);
                 /* Retain ready GPU meshes beyond a temporarily smaller view
                  * without drawing them. Server ownership/unload remains the
                  * authoritative lifetime boundary for cached replicas. */
