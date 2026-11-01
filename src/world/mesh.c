@@ -68,7 +68,7 @@ static unsigned char maage_mesh_sample(const maage_block_registry *registry, con
     return maage_chunk_presentation_light(sample, registry, x, y, z);
 }
 
-static void maage_mesh_lighting(const maage_block_registry *registry, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int y, int z, unsigned int face, int boundary, int smooth, unsigned int emission, maage_mesh_illumination *output) {
+static void maage_mesh_lighting(const maage_block_registry *registry, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int y, int z, unsigned int face, int outward, int smooth, unsigned int emission, maage_mesh_illumination *output) {
     unsigned char base, a, b, diagonal, own;
     int n[3], first[3], second[3], corner[3], axis, u, v, i, j;
     int center_opaque, side_a, side_b, diagonal_opaque;
@@ -77,7 +77,7 @@ static void maage_mesh_lighting(const maage_block_registry *registry, const maag
     n[0] = x;
     n[1] = y;
     n[2] = z;
-    if (boundary)
+    if (outward)
         for (i = 0; i < 3; ++i)
             n[i] += maage_face_neighbor[face][i];
     base = maage_mesh_sample(registry, chunk, neighbors, n[0], n[1], n[2], own, &center_opaque);
@@ -529,8 +529,11 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                                 colors_ready = 1;
                             }
                             smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && state->block_id != ids->block_cactus;
+                            /* A recessed top with neighbor brightness samples
+                             * above its surface, outside the opaque cell.
+                             * Geometric boundary checks still own face culling. */
                             if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, current->emitted_light, &illumination);
-                            else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary, smooth, current->emitted_light, &illumination);
+                            else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary || (model == MAAGE_BLOCK_MESH_CUBE && current->use_neighbor_brightness && face == MAAGE_FACE_POSITIVE_Y), smooth, current->emitted_light, &illumination);
                             maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
                             if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], definition->overlay_tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, NULL, NULL, NULL, &illumination);
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));

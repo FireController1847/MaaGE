@@ -83,6 +83,9 @@ calculated darkness is distinct from missing/pending data.
 Nonlinear light response and warm emission are shared shader behavior. Plants and
 torches preserve direct sky; leaves attenuate by 1 and water/ice by 3. Day/night
 brightness changes do not trigger relighting or remeshing.
+Recessed cube tops with neighbor brightness, including farmland, sample the light
+and AO plane above the cell independently of geometric face-culling boundaries.
+Their opaque interiors continue to block light.
 
 Grass top/side overlays receive numeric biome tint while dirt/base sides remain
 neutral. Client mesh workers support OFF (1x1), Vanilla 3x3 and Smooth 5x5/7x7/9x9;
