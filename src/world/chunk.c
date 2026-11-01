@@ -13,14 +13,16 @@ int maage_world_local_coordinate(int coordinate) {
 size_t maage_chunk_cell(int x, int y, int z) {
     return (size_t) (((y % 16) * 16 + z) * 16 + x);
 }
-maage_status maage_chunk_create(int x, int z, maage_chunk **output) {
+maage_status maage_chunk_create(int x, int z, maage_block_state_id air, maage_chunk **output) {
     maage_chunk *chunk;
     if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 2);
     *output = NULL;
+    if (air >= MAAGE_CONTENT_ID_INVALID) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 2);
     chunk = (maage_chunk *) calloc(1, sizeof(*chunk));
     if (chunk) {
         chunk->x = x;
         chunk->z = z;
+        chunk->air = air;
     }
     *output = chunk;
     return maage_status_make(chunk ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
@@ -43,7 +45,8 @@ maage_status maage_chunk_destroy(maage_chunk *chunk) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z) {
-    if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0 || y >= 256 || !chunk->sections[y / 16]) return MAAGE_STATE_AIR;
+    if (!chunk) return MAAGE_CONTENT_ID_INVALID;
+    if (x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0 || y >= 256 || !chunk->sections[y / 16]) return chunk->air;
     return chunk->sections[y / 16]->states[maage_chunk_cell(x, y, z)];
 }
 maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_block_state_id state) {
@@ -51,13 +54,14 @@ maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_bloc
     size_t cell;
     if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0 || y >= 256) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     section = chunk->sections[y / 16];
-    if (!section && state == MAAGE_STATE_AIR) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
+    if (!section && state == chunk->air) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
     if (!section) {
         section = (maage_section *) calloc(1, sizeof(*section));
         if (!section) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
-        if (chunk->direct_sky)
-            for (cell = 0; cell < 4096; ++cell)
-                section->light[cell] = (unsigned char) (chunk->direct_sky[(size_t) (y / 16) * 4096 + cell] << 4);
+        for (cell = 0; cell < 4096; ++cell) {
+            section->states[cell] = chunk->air;
+            if (chunk->direct_sky) section->light[cell] = (unsigned char) (chunk->direct_sky[(size_t) (y / 16) * 4096 + cell] << 4);
+        }
         chunk->sections[y / 16] = section;
     }
     if (section->states[maage_chunk_cell(x, y, z)] == state) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
@@ -73,6 +77,7 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z) {
 }
 
 maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage_block_registry *blocks, int *leaf_rechecks) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_block_state_id pending;
@@ -90,8 +95,8 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
             /* Detached load/generation output only. Rechecking natural leaves
              * catches support removals that occurred while this column was
              * absent, without retaining events or generating distant terrain. */
-            if (state->block_id == MAAGE_BLOCK_LEAVES && !(state->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) {
-                result = maage_block_leaves_state(state->metadata | MAAGE_LEAF_CHECK_DECAY, &pending);
+            if (state->block_id == ids->block_leaves && !(state->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) {
+                result = maage_block_leaves_state(blocks, state->metadata | MAAGE_LEAF_CHECK_DECAY, &pending);
                 if (maage_status_failed(result)) return result;
                 if (!maage_block_registry_state(blocks, pending)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
                 chunk->sections[section]->states[cell] = pending;

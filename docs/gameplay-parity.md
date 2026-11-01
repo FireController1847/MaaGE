@@ -295,7 +295,7 @@ Survival breathing uses the classic eye threshold (nominal fluid height plus
 tick underwater, and at −20 resets to zero and deals two damage through the
 existing environmental damage path. Surfacing restores 300 immediately; Creative,
 death and respawn reset breath. There are no enchantment/potion protections yet.
-The checkpoint retains air and its damage phase; `MGWORLD8` rejects older worlds
+The checkpoint retains air and its damage phase; `MGWRLD10` rejects older worlds
 without conversion. Protocol 17 copies air and eye immersion in ordinary snapshots.
 The Survival HUD draws up to ten filled/popping bubbles above hunger from the latest
 air value; it needs no per-bubble events. GUI scale and the accepted health/hunger
@@ -336,7 +336,7 @@ Capacity is reserved before removal and drops become item entities. Repeated
 notifications observe changed states and cannot drop the same block twice.
 [Random ticks and leaf support](random-block-ticks.md) describe separate decay rules.
 
-`MGWORLD8` metadata and `MGCHNK5` chunks are the sole current encodings. Chunks
+`MGWRLD10` metadata and `MGCHNK7` chunks are the sole current encodings. Chunks
 persist fluid/support kinds and remaining delays. Incompatible development worlds
 are rejected without conversion or automatic deletion.
 

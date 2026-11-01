@@ -26,7 +26,7 @@ typedef struct maage_front_shutdown {
 } maage_front_shutdown;
 typedef struct maage_front_io {
     const char *root;
-    const maage_item_registry *items;
+    const maage_content *content;
     maage_world_summary *entries;
     size_t count;
     char id[37], name[128], error[256];
@@ -37,7 +37,7 @@ struct maage_client_frontend {
     maage_client_ui *ui;
     maage_client_ui_frontend *view;
     const char *root;
-    const maage_item_registry *items;
+    const maage_content *content;
     maage_jobs *jobs, *shutdown_jobs;
     maage_front_shutdown shutdown;
     maage_front_options options;
@@ -58,7 +58,8 @@ static void front_options_run(void *context) {
     maage_status result;
     for (;;) {
         maage_mutex_lock(writer->mutex);
-        while (!writer->stop && !writer->pending) maage_condition_wait(writer->wake, writer->mutex);
+        while (!writer->stop && !writer->pending)
+            maage_condition_wait(writer->wake, writer->mutex);
         if (writer->stop && !writer->pending) {
             maage_mutex_unlock(writer->mutex);
             return;
@@ -131,12 +132,13 @@ static void front_io_run(void *context, const maage_job_token *token) {
     maage_front_io *io = (maage_front_io *) context;
     maage_status_trace *trace = maage_job_trace(token);
     io->result = 0;
-    if (io->operation == 2) io->result = maage_world_store_rename(io->root, io->id, io->name, io->items, io->error, trace);
+    if (io->operation == 2) io->result = maage_world_store_rename(io->root, io->id, io->name, io->content, io->error, trace);
     if (io->operation == 3) io->result = maage_world_store_delete(io->root, io->id, io->error, trace);
-    if (!maage_status_failed(io->result)) io->result = maage_world_store_list(io->root, io->items, &io->entries, &io->count, io->error, trace);
+    if (!maage_status_failed(io->result)) io->result = maage_world_store_list(io->root, io->content, &io->entries, &io->count, io->error, trace);
     maage_job_set_result(token, io->result);
 }
-maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_instance *instance, const maage_item_registry *items, maage_client_frontend **output, maage_status_trace *trace) {
+maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_instance *instance, const maage_content *content, maage_client_frontend **output, maage_status_trace *trace) {
+    const maage_item_registry *items = maage_content_items(content);
     maage_client_frontend *f;
     maage_status result;
     if (output) *output = NULL;
@@ -146,7 +148,7 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
     f->ui = ui;
     f->root = maage_instance_directory(instance);
     f->instance = instance;
-    f->items = items;
+    f->content = content;
     f->options.instance = instance;
     result = maage_mutex_create(&f->options.mutex);
     if (maage_status_failed(result)) {
@@ -333,7 +335,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
             if (request.action <= 3 && !f->busy) {
                 memset(&f->io, 0, sizeof(f->io));
                 f->io.root = f->root;
-                f->io.items = f->items;
+                f->io.content = f->content;
                 f->io.operation = request.action;
                 if (request.selected < f->count) strcpy(f->io.id, f->entries[request.selected].id);
                 strcpy(f->io.name, request.name);

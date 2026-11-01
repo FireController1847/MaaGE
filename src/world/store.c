@@ -11,18 +11,42 @@
 #include <errno.h>
 #include <zlib.h>
 
-/* Chunk palettes contain at most 65536 namespaced state identities.
+/* Chunk palettes contain at most 65536 numeric saved state identities.
  * Reads allocate only the actual validated file size, not this maximum. */
 #define MAAGE_STORE_CHUNK_MAX 18000000UL
 /* Explicit file/address-space bound, not an entity-content limit. */
 #define MAAGE_STORE_METADATA_MAX 4294967295UL
 #define MAAGE_STORE_WORD 4294967295UL
+typedef struct maage_store_identity {
+    unsigned long runtime, block, metadata;
+    char *name;
+} maage_store_identity;
+typedef struct maage_store_domain {
+    maage_store_identity *entries;
+    unsigned long *inverse;
+    size_t count, capacity, runtime_count;
+} maage_store_domain;
+enum {
+    MAAGE_STORE_BLOCK,
+    MAAGE_STORE_STATE,
+    MAAGE_STORE_ITEM,
+    MAAGE_STORE_BIOME,
+    MAAGE_STORE_DOMAINS
+};
 struct maage_world_store {
     char directory[MAAGE_PATH_CAPACITY], regions_dir[MAAGE_PATH_CAPACITY];
     maage_storage_lock *lock;
     maage_region_store *regions;
     maage_world_record record;
-    const maage_item_registry *items; /* borrowed after finalize */
+    const maage_content *content;
+    const maage_block_registry *blocks;
+    const maage_biome_registry *biomes;
+    const maage_item_registry *items;
+    maage_store_domain domains[MAAGE_STORE_DOMAINS];
+    char map_id[37];
+    unsigned char *map_bytes;
+    size_t map_length;
+    int map_extended;
 };
 typedef struct maage_store_bytes {
     unsigned char *data;
@@ -271,6 +295,192 @@ static void maage_store_checksum_put(maage_store_bytes *bytes) {
     unsigned long crc = maage_store_crc(bytes->data, bytes->position);
     maage_store_put(bytes, crc, 4);
 }
+static int maage_store_identity_get(maage_store_bytes *bytes, char name[256]) {
+    unsigned long length = maage_store_get(bytes, 1);
+    size_t i;
+    if (!length || bytes->failed || length > bytes->length - bytes->position) {
+        bytes->failed = 1;
+        return 0;
+    }
+    for (i = 0; i < length; ++i) {
+        name[i] = (char) maage_store_get(bytes, 1);
+        if (!name[i]) bytes->failed = 1;
+    }
+    name[length] = 0;
+    return !bytes->failed;
+}
+static void maage_store_identity_put(maage_store_bytes *bytes, const char *name) {
+    size_t length;
+    if (!name) {
+        bytes->failed = 1;
+        return;
+    }
+    length = strlen(name);
+    if (!length || length > 255) {
+        bytes->failed = 1;
+        return;
+    }
+    maage_store_put(bytes, (unsigned long) length, 1);
+    maage_store_text_put(bytes, name, length);
+}
+/* Only map initialization resolves names. Both directions are immutable before
+ * any World worker can borrow the store; extension preserves every saved ID. */
+static void maage_store_map_clear(maage_world_store *store) {
+    unsigned int domain;
+    size_t i;
+    for (domain = 0; domain < MAAGE_STORE_DOMAINS; ++domain) {
+        maage_store_domain *map = &store->domains[domain];
+        for (i = 0; i < map->count; ++i)
+            free(map->entries[i].name);
+        free(map->entries);
+        free(map->inverse);
+        memset(map, 0, sizeof(*map));
+    }
+    free(store->map_bytes);
+    store->map_bytes = NULL;
+    store->map_length = 0;
+}
+static maage_status maage_store_map_open(maage_world_store *store, unsigned char *data, size_t length, const char *world_id) {
+    maage_store_bytes input, output;
+    maage_store_domain *map;
+    maage_store_identity *entry;
+    const maage_block_state_definition *state;
+    const char *name;
+    char identity[256], saved_world[37];
+    size_t counts[MAAGE_STORE_DOMAINS], saved[MAAGE_STORE_DOMAINS];
+    size_t i, j, capacity = 8 + 36 + 36 + 16 + 4;
+    unsigned int domain;
+    unsigned long runtime, value, block;
+    maage_status result;
+    if (store->map_bytes) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_INITIALIZE, 0);
+    counts[MAAGE_STORE_BLOCK] = maage_block_registry_block_count(store->blocks);
+    counts[MAAGE_STORE_STATE] = maage_block_registry_state_count(store->blocks);
+    counts[MAAGE_STORE_ITEM] = maage_item_registry_count(store->items);
+    counts[MAAGE_STORE_BIOME] = maage_biome_registry_count(store->biomes);
+    memset(saved, 0, sizeof(saved));
+    memset(&input, 0, sizeof(input));
+    input.data = data;
+    input.length = length;
+    if (data) {
+        if (length < capacity || !maage_store_checksum(&input) || !maage_store_magic(&input, "MGIDMAP1")) goto malformed;
+        for (i = 0; i < 36; ++i)
+            store->map_id[i] = (char) maage_store_get(&input, 1);
+        store->map_id[36] = 0;
+        for (i = 0; i < 36; ++i)
+            saved_world[i] = (char) maage_store_get(&input, 1);
+        saved_world[36] = 0;
+        if (!maage_storage_uuid_valid(store->map_id) || !maage_storage_uuid_valid(saved_world) || strcmp(world_id, saved_world)) goto malformed;
+        for (domain = 0; domain < MAAGE_STORE_DOMAINS; ++domain) {
+            value = maage_store_get(&input, 4);
+            if (value > (size_t) - 1 || value > input.length / (domain == MAAGE_STORE_STATE ? 8UL : 4UL)) goto malformed;
+            saved[domain] = (size_t) value;
+        }
+    } else {
+        result = maage_storage_uuid_generate(store->map_id);
+        if (maage_status_failed(result)) return result;
+    }
+    for (domain = 0; domain < MAAGE_STORE_DOMAINS; ++domain) {
+        map = &store->domains[domain];
+        if (counts[domain] > MAAGE_STORE_WORD) goto overflow;
+        if (saved[domain] > counts[domain]) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+        map->capacity = counts[domain];
+        map->runtime_count = counts[domain];
+        if (domain == MAAGE_STORE_ITEM) {
+            if (map->runtime_count == (size_t) - 1) goto overflow;
+            ++map->runtime_count;
+        }
+        if (map->capacity > (size_t) - 1 / sizeof(*map->entries) || map->runtime_count > (size_t) - 1 / sizeof(*map->inverse)) goto overflow;
+        map->entries = (maage_store_identity *) calloc(map->capacity ? map->capacity : 1, sizeof(*map->entries));
+        map->inverse = (unsigned long *) calloc(map->runtime_count ? map->runtime_count : 1, sizeof(*map->inverse));
+        if (!map->entries || !map->inverse) goto allocation;
+        for (i = 0; i < saved[domain]; ++i) {
+            entry = &map->entries[map->count++];
+            if (domain == MAAGE_STORE_STATE) {
+                entry->block = maage_store_get(&input, 4);
+                entry->metadata = maage_store_get(&input, 4);
+                if (!entry->block || entry->block > saved[MAAGE_STORE_BLOCK] || entry->metadata > UINT_MAX) goto malformed;
+                block = store->domains[MAAGE_STORE_BLOCK].entries[entry->block - 1].runtime;
+                result = maage_block_registry_resolve_state(store->blocks, block, (unsigned int) entry->metadata, &runtime);
+            } else {
+                if (!maage_store_identity_get(&input, identity)) goto malformed;
+                entry->name = (char *) malloc(strlen(identity) + 1);
+                if (!entry->name) goto allocation;
+                strcpy(entry->name, identity);
+                if (domain == MAAGE_STORE_BLOCK) result = maage_block_registry_resolve_name(store->blocks, identity, &runtime);
+                else if (domain == MAAGE_STORE_ITEM) result = maage_item_registry_resolve_name(store->items, identity, &runtime);
+                else result = maage_biome_registry_resolve_name(store->biomes, identity, &runtime);
+            }
+            if (maage_status_failed(result)) return result;
+            if (input.failed || runtime >= map->runtime_count || map->inverse[runtime] || (domain == MAAGE_STORE_ITEM && !runtime)) goto malformed;
+            entry->runtime = runtime;
+            map->inverse[runtime] = (unsigned long) map->count;
+        }
+        /* Enumerating the finalized dense allocation sequence happens once.
+         * Sparse pages still own ID-to-definition access in the registries. */
+        for (j = domain == MAAGE_STORE_ITEM ? 1 : 0; j < map->runtime_count; ++j) {
+            if (map->inverse[j]) continue;
+            entry = &map->entries[map->count++];
+            entry->runtime = (unsigned long) j;
+            map->inverse[j] = (unsigned long) map->count;
+            store->map_extended = data != NULL;
+            if (domain == MAAGE_STORE_STATE) {
+                state = maage_block_registry_state(store->blocks, entry->runtime);
+                if (!state || state->block_id >= store->domains[MAAGE_STORE_BLOCK].runtime_count) goto malformed;
+                entry->block = store->domains[MAAGE_STORE_BLOCK].inverse[state->block_id];
+                entry->metadata = state->metadata;
+                if (!entry->block || entry->metadata > MAAGE_STORE_WORD) goto overflow;
+            } else {
+                if (domain == MAAGE_STORE_BLOCK) name = maage_block_registry_block_name(store->blocks, entry->runtime);
+                else if (domain == MAAGE_STORE_ITEM) name = maage_item_registry_name(store->items, entry->runtime);
+                else name = maage_biome_registry_name(store->biomes, entry->runtime);
+                if (!name || !strlen(name) || strlen(name) > 255) goto malformed;
+                entry->name = (char *) malloc(strlen(name) + 1);
+                if (!entry->name) goto allocation;
+                strcpy(entry->name, name);
+            }
+        }
+        for (i = 0; i < map->count; ++i) {
+            size_t addition = domain == MAAGE_STORE_STATE ? 8 : strlen(map->entries[i].name) + 1;
+            if (addition > MAAGE_STORE_WORD - capacity || addition > (size_t) - 1 - capacity) goto overflow;
+            capacity += addition;
+        }
+    }
+    if (data && (input.failed || input.position != input.length)) goto malformed;
+    memset(&output, 0, sizeof(output));
+    output.length = capacity;
+    output.data = (unsigned char *) malloc(capacity);
+    if (!output.data) goto allocation;
+    maage_store_text_put(&output, "MGIDMAP1", 8);
+    maage_store_text_put(&output, store->map_id, 36);
+    maage_store_text_put(&output, world_id, 36);
+    for (domain = 0; domain < MAAGE_STORE_DOMAINS; ++domain)
+        maage_store_put(&output, (unsigned long) store->domains[domain].count, 4);
+    for (domain = 0; domain < MAAGE_STORE_DOMAINS; ++domain) {
+        map = &store->domains[domain];
+        for (i = 0; i < map->count; ++i) {
+            entry = &map->entries[i];
+            if (domain == MAAGE_STORE_STATE) {
+                maage_store_put(&output, entry->block, 4);
+                maage_store_put(&output, entry->metadata, 4);
+            } else maage_store_identity_put(&output, entry->name);
+        }
+    }
+    maage_store_checksum_put(&output);
+    if (output.failed || output.position != capacity) {
+        free(output.data);
+        goto malformed;
+    }
+    store->map_bytes = output.data;
+    store->map_length = capacity;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
+malformed:
+    return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
+overflow:
+    return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_INITIALIZE, 0);
+allocation:
+    return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_INITIALIZE, 0);
+}
+
 static void maage_store_gameplay_default(maage_gameplay_save *save) {
     memset(save, 0, sizeof(*save));
     save->mode = MAAGE_GAME_MODE_CREATIVE;
@@ -294,57 +504,48 @@ static int maage_store_gameplay_valid(const maage_gameplay_save *save, const maa
         if (!maage_item_stack_valid(items, &save->crafting_inputs[i])) return 0;
     return 1;
 }
-/* Persist complete stable item names rather than transient numeric IDs.
- * Names are resolved only at import/save boundaries; no gameplay string work. */
-static void maage_store_stack_put(maage_store_bytes *bytes, const maage_item_stack *stack, const maage_item_registry *items) {
-    const char *name = stack->count ? maage_item_registry_name(items, stack->item_id) : NULL;
-    size_t length = name ? strlen(name) : 0;
-    if (stack->count && (!name || !length || length > 255)) {
+/* Every ordinary record uses the immutable open-World numeric maps. */
+static unsigned long maage_store_saved(const maage_world_store *store, unsigned int domain, unsigned long runtime, maage_store_bytes *bytes) {
+    const maage_store_domain *map = &store->domains[domain];
+    if (runtime >= map->runtime_count || !map->inverse[runtime]) {
         bytes->failed = 1;
-        return;
+        return 0;
     }
+    return map->inverse[runtime];
+}
+static unsigned long maage_store_runtime(const maage_world_store *store, unsigned int domain, unsigned long saved, maage_store_bytes *bytes) {
+    const maage_store_domain *map = &store->domains[domain];
+    if (!saved || saved > map->count) {
+        bytes->failed = 1;
+        return 0;
+    }
+    return map->entries[saved - 1].runtime;
+}
+static void maage_store_stack_put(maage_store_bytes *bytes, const maage_item_stack *stack, const maage_world_store *store) {
     if ((unsigned long) stack->metadata > MAAGE_STORE_WORD || (unsigned long) stack->damage > MAAGE_STORE_WORD) {
         bytes->failed = 1;
         return;
     }
-    maage_store_put(bytes, (unsigned long) length, 1);
-    if (length) maage_store_text_put(bytes, name, length);
+    maage_store_put(bytes, stack->count ? maage_store_saved(store, MAAGE_STORE_ITEM, stack->item_id, bytes) : 0, 4);
     maage_store_put(bytes, stack->count, 1);
     maage_store_put(bytes, stack->metadata, 4);
     maage_store_put(bytes, stack->damage, 4);
 }
-static void maage_store_stack_get(maage_store_bytes *bytes, maage_item_stack *stack, const maage_item_registry *items) {
-    unsigned long length, value;
-    char name[256];
-    size_t i;
+static void maage_store_stack_get(maage_store_bytes *bytes, maage_item_stack *stack, const maage_world_store *store) {
+    unsigned long saved, value;
     memset(stack, 0, sizeof(*stack));
-    length = maage_store_get(bytes, 1);
-    if (bytes->failed || length > bytes->length - bytes->position) {
-        bytes->failed = 1;
-        return;
-    }
-    if (length) {
-        for (i = 0; i < length; ++i) {
-            name[i] = (char) maage_store_get(bytes, 1);
-            if (!name[i]) bytes->failed = 1;
-        }
-        name[length] = 0;
-        if (bytes->failed) return;
-        bytes->failure = maage_item_registry_resolve_name(items, name, &stack->item_id);
-        if (maage_status_failed(bytes->failure)) {
-            bytes->failed = 1;
-            return;
-        }
-    }
+    saved = maage_store_get(bytes, 4);
     stack->count = (unsigned int) maage_store_get(bytes, 1);
+    if (saved) stack->item_id = maage_store_runtime(store, MAAGE_STORE_ITEM, saved, bytes);
+    if ((!saved) != (!stack->count)) bytes->failed = 1;
     value = maage_store_get(bytes, 4);
     stack->metadata = (unsigned int) value;
     if ((unsigned long) stack->metadata != value) bytes->failed = 1;
     value = maage_store_get(bytes, 4);
     stack->damage = (unsigned int) value;
-    if ((unsigned long) stack->damage != value || !maage_item_stack_valid(items, stack)) bytes->failed = 1;
+    if ((unsigned long) stack->damage != value || !maage_item_stack_valid(store->items, stack)) bytes->failed = 1;
 }
-static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gameplay_save *save, const maage_item_registry *items) {
+static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gameplay_save *save, const maage_world_store *store) {
     unsigned int i;
 
     maage_store_put(bytes, save->mode, 1);
@@ -357,12 +558,12 @@ static void maage_store_gameplay_put(maage_store_bytes *bytes, const maage_gamep
     maage_store_double_put(bytes, save->exhaustion);
     maage_store_double_put(bytes, save->fall_distance);
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
-        maage_store_stack_put(bytes, &save->inventory.slots[i], items);
-    maage_store_stack_put(bytes, &save->inventory.cursor, items);
+        maage_store_stack_put(bytes, &save->inventory.slots[i], store);
+    maage_store_stack_put(bytes, &save->inventory.cursor, store);
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
-        maage_store_stack_put(bytes, &save->crafting_inputs[i], items);
+        maage_store_stack_put(bytes, &save->crafting_inputs[i], store);
 }
-static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_save *save, const maage_item_registry *items) {
+static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_save *save, const maage_world_store *store) {
     unsigned int i;
     unsigned long air;
     memset(save, 0, sizeof(*save));
@@ -378,13 +579,13 @@ static void maage_store_gameplay_get(maage_store_bytes *bytes, maage_gameplay_sa
     save->exhaustion = maage_store_double_get(bytes);
     save->fall_distance = maage_store_double_get(bytes);
     for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
-        maage_store_stack_get(bytes, &save->inventory.slots[i], items);
-    maage_store_stack_get(bytes, &save->inventory.cursor, items);
+        maage_store_stack_get(bytes, &save->inventory.slots[i], store);
+    maage_store_stack_get(bytes, &save->inventory.cursor, store);
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
-        maage_store_stack_get(bytes, &save->crafting_inputs[i], items);
-    if (!maage_store_gameplay_valid(save, items)) bytes->failed = 1;
+        maage_store_stack_get(bytes, &save->crafting_inputs[i], store);
+    if (!maage_store_gameplay_valid(save, store->items)) bytes->failed = 1;
 }
-static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entity_save *save, const maage_item_registry *items) {
+static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entity_save *save, const maage_world_store *store) {
     size_t i;
     unsigned int axis;
     unsigned long previous = 0;
@@ -398,7 +599,7 @@ static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entit
     maage_store_put(bytes, (unsigned long) save->count, 4);
     for (i = 0; i < save->count; ++i) {
         entity = &save->entities[i];
-        if (!maage_entity_valid(entity, items) || entity->id <= previous || entity->id >= save->next_id) {
+        if (!maage_entity_valid(entity, store->items) || entity->id <= previous || entity->id >= save->next_id) {
             bytes->failed = 1;
             return;
         }
@@ -412,13 +613,15 @@ static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entit
             maage_store_double_put(bytes, entity->position[axis]);
         for (axis = 0; axis < 3; ++axis)
             maage_store_double_put(bytes, entity->velocity[axis]);
-        maage_store_stack_put(bytes, maage_entity_stack(entity), items);
-        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK)
+        maage_store_stack_put(bytes, maage_entity_stack(entity), store);
+        if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
+            maage_store_put(bytes, maage_store_saved(store, MAAGE_STORE_STATE, entity->payload.falling.state, bytes), 4);
             for (axis = 0; axis < 3; ++axis)
                 maage_store_put(bytes, (unsigned long) ((long) entity->payload.falling.source[axis] + MAAGE_WORLD_LIMIT), 4);
+        }
     }
 }
-static void maage_store_entities_get(maage_store_bytes *bytes, maage_entity_save *save, const maage_item_registry *items) {
+static void maage_store_entities_get(maage_store_bytes *bytes, maage_entity_save *save, const maage_world_store *store) {
     unsigned long count, previous = 0, coordinate;
     const maage_item_definition *item;
     size_t i;
@@ -429,7 +632,7 @@ static void maage_store_entities_get(maage_store_bytes *bytes, maage_entity_save
     save->random = maage_store_get(bytes, 4);
     count = maage_store_get(bytes, 4);
     /* Validate counts against actual bytes before allocating. */
-    if (bytes->failed || !save->next_id || count > (bytes->length - bytes->position) / 70 || count > (size_t) - 1 / sizeof(*save->entities)) {
+    if (bytes->failed || !save->next_id || count > (bytes->length - bytes->position) / 73 || count > (size_t) - 1 / sizeof(*save->entities)) {
         bytes->failed = 1;
         return;
     }
@@ -455,16 +658,17 @@ static void maage_store_entities_get(maage_store_bytes *bytes, maage_entity_save
             entity->velocity[axis] = maage_store_double_get(bytes);
         memcpy(entity->previous, entity->position, sizeof(entity->previous));
         if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
-            maage_store_stack_get(bytes, &entity->payload.falling.stack, items);
-            item = maage_item_registry_get(items, entity->payload.falling.stack.item_id);
-            if (!item || maage_status_failed(maage_item_placement_state(item, entity->payload.falling.stack.metadata, MAAGE_FACE_POSITIVE_Y, 0, &entity->payload.falling.state))) bytes->failed = 1;
+            maage_store_stack_get(bytes, &entity->payload.falling.stack, store);
+            item = maage_item_registry_get(store->items, entity->payload.falling.stack.item_id);
+            entity->payload.falling.state = maage_store_runtime(store, MAAGE_STORE_STATE, maage_store_get(bytes, 4), bytes);
+            if (!item) bytes->failed = 1;
             for (axis = 0; axis < 3; ++axis) {
                 coordinate = maage_store_get(bytes, 4);
                 if (coordinate >= 2UL * MAAGE_WORLD_LIMIT) bytes->failed = 1;
                 entity->payload.falling.source[axis] = coordinate < 2UL * MAAGE_WORLD_LIMIT ? (int) ((long) coordinate - MAAGE_WORLD_LIMIT) : 0;
             }
-        } else maage_store_stack_get(bytes, &entity->payload.item, items);
-        if (!maage_entity_valid(entity, items) || entity->id <= previous || entity->id >= save->next_id) bytes->failed = 1;
+        } else maage_store_stack_get(bytes, &entity->payload.item, store);
+        if (!maage_entity_valid(entity, store->items) || entity->id <= previous || entity->id >= save->next_id) bytes->failed = 1;
         previous = entity->id;
     }
 }
@@ -478,10 +682,12 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     if (!maage_store_gameplay_valid(&record->gameplay, store->items)) return maage_store_fail(error, "Player gameplay identity or pickup data is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     if (!maage_random_tick_state_valid(&record->random_ticks)) return maage_store_fail(error, "World random-tick checkpoint is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
     if (!maage_environment_state_valid(&record->environment)) return maage_store_fail(error, "World environment snapshot is invalid.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE, trace);
-    /* Each entity uses at most 352 bytes including its 255-byte item identity.
+    /* Each entity uses at most 96 bytes including its numeric item/state IDs.
      * The inventory/header reserve is independent of world entity count. */
-    if (record->entities.count > ((size_t) - 1 - 16384UL) / 352UL) return maage_store_fail(error, "Entity checkpoint exceeds addressable memory.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
-    capacity = 16384UL + record->entities.count * 352UL;
+    if (record->entities.count > ((size_t) - 1 - 16384UL) / 96UL) return maage_store_fail(error, "Entity checkpoint exceeds addressable memory.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
+    capacity = 16384UL + record->entities.count * 96UL;
+    if (store->map_length > (size_t) - 1 - capacity) return maage_store_fail(error, "World ID map exceeds addressable memory.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
+    capacity += store->map_length;
     if (capacity > MAAGE_STORE_METADATA_MAX) return maage_store_fail(error, "Entity checkpoint exceeds file encoding capacity.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
     data = (unsigned char *) malloc(capacity);
     if (!data) return maage_store_fail(error, "Not enough memory to encode player metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
@@ -490,7 +696,9 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD9", 8);
+    maage_store_text_put(&bytes, "MGWRLD10", 8);
+    maage_store_put(&bytes, (unsigned long) store->map_length, 4);
+    maage_store_text_put(&bytes, (const char *) store->map_bytes, store->map_length);
     maage_store_put(&bytes, record->seed.low, 4);
     maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1);
@@ -504,8 +712,8 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
         maage_store_double_put(&bytes, record->position[i]);
     maage_store_double_put(&bytes, record->yaw);
     maage_store_double_put(&bytes, record->pitch);
-    maage_store_gameplay_put(&bytes, &record->gameplay, store->items);
-    maage_store_entities_put(&bytes, &record->entities, store->items);
+    maage_store_gameplay_put(&bytes, &record->gameplay, store);
+    maage_store_entities_put(&bytes, &record->entities, store);
     maage_store_put(&bytes, (unsigned long) record->generation_policy.sea_level, 4);
     maage_store_put(&bytes, (unsigned long) record->generation_policy.spawn_search_radius, 4);
     maage_store_put(&bytes, (unsigned long) record->generation_policy.spawn_search_step, 4);
@@ -539,7 +747,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
     }
 }
-static maage_status maage_store_metadata_load(const maage_world_store *store, const char *expected_id, maage_world_record *record, char error[256], maage_status_trace *trace) {
+static maage_status maage_store_metadata_load(maage_world_store *store, const char *expected_id, maage_world_record *record, char error[256], maage_status_trace *trace) {
     char path[MAAGE_PATH_CAPACITY];
     maage_store_bytes bytes;
     unsigned long lengths[3], value;
@@ -553,12 +761,24 @@ static maage_status maage_store_metadata_load(const maage_world_store *store, co
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD9", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD10", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD9");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD10");
+    if (ok) {
+        unsigned long map_length = maage_store_get(&bytes, 4);
+        if (bytes.failed || map_length > bytes.length - bytes.position) ok = 0;
+        else {
+            result = maage_store_map_open(store, bytes.data + bytes.position, (size_t) map_length, expected_id);
+            if (maage_status_failed(result)) {
+                bytes.failure = result;
+                ok = 0;
+            }
+            bytes.position += (size_t) map_length;
+        }
+    }
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4);
         record->seed.high = maage_store_get(&bytes, 4);
@@ -581,8 +801,8 @@ static maage_status maage_store_metadata_load(const maage_world_store *store, co
             record->position[i] = maage_store_double_get(&bytes);
         record->yaw = maage_store_double_get(&bytes);
         record->pitch = maage_store_double_get(&bytes);
-        maage_store_gameplay_get(&bytes, &record->gameplay, store->items);
-        maage_store_entities_get(&bytes, &record->entities, store->items);
+        maage_store_gameplay_get(&bytes, &record->gameplay, store);
+        maage_store_entities_get(&bytes, &record->entities, store);
         gameplay_read = 1;
         value = maage_store_get(&bytes, 4);
         if (value > INT_MAX) bytes.failed = 1;
@@ -628,7 +848,7 @@ static maage_status maage_store_metadata_load(const maage_world_store *store, co
     }
     return maage_store_fail(error, "World metadata is corrupt or uses an unsupported format.", MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD, trace);
 }
-maage_status maage_world_store_open(const char *instance_root, const char *id, int create, const char *name, const maage_world_seed *seed, const maage_generation_policy *generation_policy, const maage_item_registry *items, maage_world_store **output, maage_world_record *record, char error[256], maage_status_trace *trace) {
+maage_status maage_world_store_open(const char *instance_root, const char *id, int create, const char *name, const maage_world_seed *seed, const maage_generation_policy *generation_policy, const maage_content *content, maage_world_store **output, maage_world_record *record, char error[256], maage_status_trace *trace) {
     char worlds[MAAGE_PATH_CAPACITY], config[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY];
     char last[MAAGE_PATH_CAPACITY], chosen[37];
     maage_world_store *store = NULL;
@@ -641,10 +861,10 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
     maage_status result;
     if (output) *output = NULL;
     if (error) error[0] = 0;
-    if (!instance_root || !output || !record || !items) return maage_store_fail(error, "Missing world storage initialization arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+    if (!instance_root || !output || !record || !content) return maage_store_fail(error, "Missing world storage initialization arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
     if ((!create && id && seed) || (name && !create && !seed)) return maage_store_fail(error, "A seed or world name requires world creation; saved worlds cannot be overridden.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
     if (generation_policy && !maage_generation_policy_valid(generation_policy)) return maage_store_fail(error, "Invalid generation policy.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
-    if (!maage_item_registry_is_finalized(items)) return maage_store_fail(error, "World storage requires finalized item definitions.", MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_LOAD, trace);
+    if (!maage_item_registry_is_finalized(maage_content_items(content))) return maage_store_fail(error, "World storage requires finalized item definitions.", MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_LOAD, trace);
     if ((id && !maage_storage_uuid_valid(id)) || (name && !maage_store_name(name))) return maage_store_fail(error, "World IDs must be canonical UUIDs; world names are separate display metadata.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
     if (!maage_folder_link_managed_path(instance_root, 0)) return maage_store_fail(error, "World storage requires a physical instance root.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
 #define MAAGE_STORE_STEP(expression, message)    \
@@ -698,7 +918,10 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
         result = maage_store_fail(error, "Not enough memory to open world storage.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_LOAD, trace);
         goto done;
     }
-    store->items = items;
+    store->content = content;
+    store->blocks = maage_content_blocks(content);
+    store->biomes = maage_content_biomes(content);
+    store->items = maage_content_items(content);
     MAAGE_STORE_STEP(maage_storage_join(store->directory, sizeof(store->directory), worlds, chosen), "World path is too long.");
     kind = maage_storage_status(store->directory);
     if (create ? kind != 0 : kind != 2) {
@@ -743,12 +966,14 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
         }
         MAAGE_STORE_STEP(maage_environment_default(store->record.seed, &store->record.environment), "Could not initialize environment.");
         MAAGE_STORE_STEP(maage_random_tick_default(store->record.seed, &store->record.random_ticks), "Could not initialize random-tick streams.");
+        MAAGE_STORE_STEP(maage_store_map_open(store, NULL, 0, chosen), "Could not initialize World ID map.");
         MAAGE_STORE_STEP(maage_store_metadata_write(store, &store->record, error, trace), "Could not save new world metadata.");
     } else
         MAAGE_STORE_STEP(maage_store_metadata_load(store, chosen, &store->record, error, trace), "Could not load world metadata.");
+    if (store->map_extended) MAAGE_STORE_STEP(maage_store_metadata_write(store, &store->record, error, trace), "Could not extend World ID map safely.");
     MAAGE_STORE_STEP(maage_storage_join(store->regions_dir, sizeof(store->regions_dir), store->directory, "regions"), "Region storage path is too long.");
     MAAGE_STORE_STEP(maage_storage_directories(store->regions_dir), "Could not prepare region storage.");
-    MAAGE_STORE_STEP(maage_region_store_create(store->regions_dir, &store->regions), "Could not initialize indexed region storage.");
+    MAAGE_STORE_STEP(maage_region_store_create(store->regions_dir, store->map_id, &store->regions), "Could not initialize indexed region storage.");
     length = strlen(chosen);
     chosen[length++] = '\n';
     MAAGE_STORE_STEP(maage_store_write(last, (const unsigned char *) chosen, length, error, trace), "Could not persist world selection.");
@@ -797,6 +1022,7 @@ maage_status maage_world_store_close(maage_world_store *store) {
         maage_status released = maage_storage_release(store->lock);
         if (!maage_status_failed(result)) result = released;
     }
+    maage_store_map_clear(store);
     free(store);
     return maage_status_failed(result) ? result : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CLOSE, 0);
 }
@@ -834,35 +1060,8 @@ static size_t maage_store_biome_index(const maage_biome_id *biomes, size_t count
     }
     return left < count && biomes[left] == value ? left : count;
 }
-static int maage_store_identity_get(maage_store_bytes *bytes, char name[256]) {
-    unsigned long length = maage_store_get(bytes, 1);
-    size_t i;
-    if (!length || bytes->failed || length > bytes->length - bytes->position) {
-        bytes->failed = 1;
-        return 0;
-    }
-    for (i = 0; i < length; ++i) {
-        name[i] = (char) maage_store_get(bytes, 1);
-        if (!name[i]) bytes->failed = 1;
-    }
-    name[length] = 0;
-    return !bytes->failed;
-}
-static void maage_store_identity_put(maage_store_bytes *bytes, const char *name) {
-    size_t length;
-    if (!name) {
-        bytes->failed = 1;
-        return;
-    }
-    length = strlen(name);
-    if (!length || length > 255) {
-        bytes->failed = 1;
-        return;
-    }
-    maage_store_put(bytes, (unsigned long) length, 1);
-    maage_store_text_put(bytes, name, length);
-}
 static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chunk *chunk, const maage_block_registry *blocks) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     maage_scheduled_update update;
     maage_block_entity *entity;
     unsigned char occupied[8192];
@@ -907,7 +1106,7 @@ static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chun
         length = maage_store_get(bytes, 4);
         if (bytes->failed || !entity->type || !entity->version || length > 65536UL || length > bytes->length - bytes->position || (occupied[entity->cell / 8] & (1U << (entity->cell % 8)))) return 0;
         state = maage_block_registry_state(blocks, maage_chunk_get(chunk, (int) (entity->cell % 16), (int) (entity->cell / 256), (int) ((entity->cell / 16) % 16)));
-        if (!state || state->block_id == MAAGE_BLOCK_AIR) return 0;
+        if (!state || state->block_id == ids->block_air) return 0;
         occupied[entity->cell / 8] |= (unsigned char) (1U << (entity->cell % 8));
         entity->length = (size_t) length;
         if (length) {
@@ -924,6 +1123,7 @@ static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chun
     return !bytes->failed;
 }
 static int maage_store_chunk_simulation_size(const maage_chunk *chunk, const maage_block_registry *blocks, size_t *length) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     unsigned char occupied[16384];
     const maage_block_entity *entity;
     const maage_block_state_definition *state;
@@ -945,7 +1145,7 @@ static int maage_store_chunk_simulation_size(const maage_chunk *chunk, const maa
             entity->version > MAAGE_STORE_WORD || entity->length > 65536UL || (entity->length && !entity->data) ||
             (occupied[entity->cell / 8] & (1U << (entity->cell % 8))) || entity->length > MAAGE_STORE_CHUNK_MAX - size) return 0;
         state = maage_block_registry_state(blocks, maage_chunk_get(chunk, (int) (entity->cell % 16), (int) (entity->cell / 256), (int) ((entity->cell / 16) % 16)));
-        if (!state || state->block_id == MAAGE_BLOCK_AIR) return 0;
+        if (!state || state->block_id == ids->block_air) return 0;
         occupied[entity->cell / 8] |= (unsigned char) (1U << (entity->cell % 8));
         size += entity->length;
     }
@@ -990,18 +1190,15 @@ static void maage_store_chunk_simulation_put(maage_store_bytes *bytes, const maa
             maage_store_put(bytes, entity->data[j], 1);
     }
 }
-static maage_status maage_store_chunk_decode(unsigned char *data, size_t length, int x, int z, const maage_block_registry *blocks, const maage_biome_registry *biomes, maage_chunk **output, maage_status_trace *trace) {
+static maage_status maage_store_chunk_decode(const maage_world_store *store, unsigned char *data, size_t length, int x, int z, const maage_block_registry *blocks, maage_chunk **output, maage_status_trace *trace) {
     maage_store_bytes bytes;
     maage_chunk *chunk = NULL;
-    maage_block_state_id *palette = NULL, state;
-    maage_biome_id biome_palette[256], biome;
-    maage_block_id block;
+    maage_block_state_id *palette = NULL;
+    maage_biome_id biome_palette[256];
     unsigned long mask, stored_x, stored_z, expected_x, expected_z, value;
     unsigned long state_count, biome_count;
     size_t i, section, payload_length = 768UL + 45UL;
     size_t active_cells = 0;
-    unsigned int metadata;
-    char name[256];
     maage_status result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
     *output = NULL;
     bytes.data = data;
@@ -1009,7 +1206,7 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (length < 845UL || !maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK6\0")) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
+    if (length < 845UL || !maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK7\0")) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
     stored_x = maage_store_get(&bytes, 4);
     stored_z = maage_store_get(&bytes, 4);
     expected_x = (unsigned long) x & MAAGE_STORE_WORD;
@@ -1027,7 +1224,7 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
     if (maage_store_get(&bytes, 2) != 0 || bytes.failed ||
         state_count > active_cells || (active_cells && !state_count) ||
         biome_count == 0 || biome_count > 256 ||
-        bytes.length - bytes.position < payload_length + state_count * 6UL + biome_count * 2UL)
+        bytes.length - bytes.position < payload_length + state_count * 4UL + biome_count * 4UL)
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
     if (state_count) {
         if (state_count > (size_t) - 1 / sizeof(*palette)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
@@ -1037,27 +1234,12 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
             return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
         }
     }
-    for (i = 0; i < state_count; ++i) {
-        if (!maage_store_identity_get(&bytes, name)) goto failed;
-        value = maage_store_get(&bytes, 4);
-        metadata = (unsigned int) value;
-        if ((unsigned long) metadata != value) goto failed;
-        result = maage_block_registry_resolve_name(blocks, name, &block);
-        if (maage_status_failed(result)) goto failed;
-        result = maage_block_registry_resolve_state(blocks, block, metadata, &state);
-        if (maage_status_failed(result)) goto failed;
-        result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
-        palette[i] = state;
-    }
-    for (i = 0; i < biome_count; ++i) {
-        if (!maage_store_identity_get(&bytes, name)) goto failed;
-        result = maage_biome_registry_resolve_name(biomes, name, &biome);
-        if (maage_status_failed(result)) goto failed;
-        result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
-        biome_palette[i] = biome;
-    }
+    for (i = 0; i < state_count; ++i)
+        palette[i] = maage_store_runtime(store, MAAGE_STORE_STATE, maage_store_get(&bytes, 4), &bytes);
+    for (i = 0; i < biome_count; ++i)
+        biome_palette[i] = maage_store_runtime(store, MAAGE_STORE_BIOME, maage_store_get(&bytes, 4), &bytes);
     if (bytes.failed || bytes.length - bytes.position < payload_length) goto failed;
-    result = maage_chunk_create(x, z, &chunk);
+    result = maage_chunk_create(x, z, maage_block_registry_builtin_ids(blocks)->state_air, &chunk);
     if (maage_status_failed(result)) goto failed;
     result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
     for (i = 0; i < 256; ++i) {
@@ -1107,7 +1289,7 @@ maage_status maage_world_store_load_chunk(maage_world_store *store, int x, int z
     size_t length;
     maage_status result;
     if (chunk) *chunk = NULL;
-    if (!chunk || !store || !blocks || !biomes) return maage_store_fail(error, "Missing chunk load arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+    if (!chunk || !store || !blocks || !biomes || blocks != store->blocks || biomes != store->biomes) return maage_store_fail(error, "Missing chunk load arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
     if (!maage_store_coordinates(x, z)) return maage_store_fail(error, "Chunk coordinates exceed the world format bounds.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
     result = maage_region_store_load(store->regions, x, z, &data, &length);
     if (maage_status_code(result) == MAAGE_STATUS_NOT_FOUND) return result;
@@ -1115,7 +1297,7 @@ maage_status maage_world_store_load_chunk(maage_world_store *store, int x, int z
         maage_store_error(error, "Region entry could not be read or decompressed; authoritative data preserved.");
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    result = maage_store_chunk_decode(data, length, x, z, blocks, biomes, chunk, trace);
+    result = maage_store_chunk_decode(store, data, length, x, z, blocks, chunk, trace);
     free(data);
     if (maage_status_failed(result)) {
         maage_store_error(error, "Chunk data is corrupt, unmapped, incompatible, or could not be allocated; the save was preserved.");
@@ -1130,13 +1312,11 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     size_t *state_slots = NULL, slot_capacity = 1;
     unsigned char *encoded = NULL;
     maage_biome_id biome_ids[256];
-    const maage_block_state_definition *definition;
-    const char *name;
     unsigned long mask = 0;
     size_t i, section, j, unique = 0, biome_count = 0, cells = 0;
     size_t capacity = 800UL, simulation_length;
     maage_status result;
-    if (!store || !chunk || !blocks || !biomes || !maage_store_coordinates(chunk->x, chunk->z)) {
+    if (!store || !chunk || !blocks || !biomes || blocks != store->blocks || biomes != store->biomes || !maage_store_coordinates(chunk->x, chunk->z)) {
         maage_store_error(error, "Chunk coordinates or path exceed the world format bounds.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, !store ? 0 : (!chunk ? 1 : (!blocks ? 2 : (!biomes ? 3 : 1)))), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
     }
@@ -1154,12 +1334,12 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
             cells += MAAGE_SECTION_VOLUME;
         }
     if (cells) {
-        if (cells > (size_t) -1 / sizeof(*states) || cells > (size_t) -1 / 2U) goto incompatible;
+        if (cells > (size_t) - 1 / sizeof(*states) || cells > (size_t) - 1 / 2U) goto incompatible;
         while (slot_capacity < cells * 2U) {
-            if (slot_capacity > (size_t) -1 / 2U) goto incompatible;
+            if (slot_capacity > (size_t) - 1 / 2U) goto incompatible;
             slot_capacity *= 2U;
         }
-        if (slot_capacity > (size_t) -1 / sizeof(*state_slots)) goto incompatible;
+        if (slot_capacity > (size_t) - 1 / sizeof(*state_slots)) goto incompatible;
         states = (maage_block_state_id *) malloc(cells * sizeof(*states));
         state_slots = (size_t *) calloc(slot_capacity, sizeof(*state_slots));
         if (!states || !state_slots) {
@@ -1197,19 +1377,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     for (i = 0; i < 256; ++i)
         if (!biome_count || biome_ids[i] != biome_ids[biome_count - 1])
             biome_ids[biome_count++] = biome_ids[i];
-    /* Size this save from actual palette names and occupied sections. */
-    capacity += cells * 3UL;
-    for (i = 0; i < unique; ++i) {
-        definition = maage_block_registry_state(blocks, states[i]);
-        name = definition ? maage_block_registry_block_name(blocks, definition->block_id) : NULL;
-        if (!name || !strlen(name) || strlen(name) > 255 || (unsigned long) definition->metadata > MAAGE_STORE_WORD) goto incompatible;
-        capacity += strlen(name) + 5UL;
-    }
-    for (i = 0; i < biome_count; ++i) {
-        name = maage_biome_registry_name(biomes, biome_ids[i]);
-        if (!name || !strlen(name) || strlen(name) > 255) goto incompatible;
-        capacity += strlen(name) + 1UL;
-    }
+    capacity += cells * 3UL + unique * 4UL + biome_count * 4UL;
     if (capacity > MAAGE_STORE_CHUNK_MAX) goto incompatible;
     encoded = (unsigned char *) malloc(capacity);
     bytes.data = encoded;
@@ -1222,7 +1390,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGCHNK6\0", 8);
+    maage_store_text_put(&bytes, "MGCHNK7\0", 8);
     maage_store_put(&bytes, (unsigned long) chunk->x, 4);
     maage_store_put(&bytes, (unsigned long) chunk->z, 4);
     maage_store_put(&bytes, mask, 2);
@@ -1230,16 +1398,10 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     maage_store_put(&bytes, (unsigned long) unique, 4);
     maage_store_put(&bytes, (unsigned long) biome_count, 2);
     maage_store_put(&bytes, 0, 2);
-    for (i = 0; i < unique; ++i) {
-        definition = maage_block_registry_state(blocks, states[i]);
-        if (!definition) goto incompatible;
-        name = maage_block_registry_block_name(blocks, definition->block_id);
-        if (!name || (unsigned long) definition->metadata > MAAGE_STORE_WORD) goto incompatible;
-        maage_store_identity_put(&bytes, name);
-        maage_store_put(&bytes, (unsigned long) definition->metadata, 4);
-    }
+    for (i = 0; i < unique; ++i)
+        maage_store_put(&bytes, maage_store_saved(store, MAAGE_STORE_STATE, states[i], &bytes), 4);
     for (i = 0; i < biome_count; ++i)
-        maage_store_identity_put(&bytes, maage_biome_registry_name(biomes, biome_ids[i]));
+        maage_store_put(&bytes, maage_store_saved(store, MAAGE_STORE_BIOME, biome_ids[i], &bytes), 4);
     for (i = 0; i < 256; ++i) {
         j = maage_store_biome_index(biome_ids, biome_count, chunk->biomes[i]);
         if (j == biome_count) goto incompatible;
@@ -1277,7 +1439,7 @@ incompatible:
 /* Catalog reads use the same current-format decoder as authoritative startup. */
 typedef struct maage_store_catalog {
     const char *root;
-    const maage_item_registry *items;
+    const maage_content *content;
     maage_world_summary *entries;
     size_t count, capacity;
     maage_status result;
@@ -1299,7 +1461,10 @@ static int maage_store_catalog_entry(const char *name, maage_folder_link_kind ki
     }
     store = (maage_world_store *) calloc(1, sizeof(*store));
     if (!store) goto memory;
-    store->items = catalog->items;
+    store->content = catalog->content;
+    store->blocks = maage_content_blocks(store->content);
+    store->biomes = maage_content_biomes(store->content);
+    store->items = maage_content_items(store->content);
     entry = &catalog->entries[catalog->count++];
     memset(entry, 0, sizeof(*entry));
     strcpy(entry->id, name);
@@ -1313,6 +1478,7 @@ static int maage_store_catalog_entry(const char *name, maage_folder_link_kind ki
     }
     maage_entity_save_clear(&store->record.entities);
     maage_gameplay_save_clear(&store->record.gameplay);
+    maage_store_map_clear(store);
     free(store);
     return 1;
 memory:
@@ -1325,11 +1491,11 @@ static int maage_store_catalog_order(const void *left, const void *right) {
     int order = strcmp(b->created_utc, a->created_utc);
     return order ? order : strcmp(a->id, b->id);
 }
-maage_status maage_world_store_list(const char *instance_root, const maage_item_registry *items, maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace) {
+maage_status maage_world_store_list(const char *instance_root, const maage_content *content, maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace) {
     maage_store_catalog catalog;
     char path[MAAGE_PATH_CAPACITY];
     maage_status result;
-    if (!entries || !count || !items || !maage_item_registry_is_finalized(items) || !maage_folder_link_managed_path(instance_root, 0)) return maage_store_fail(error, "Invalid world catalog arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+    if (!entries || !count || !content || !maage_item_registry_is_finalized(maage_content_items(content)) || !maage_folder_link_managed_path(instance_root, 0)) return maage_store_fail(error, "Invalid world catalog arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
     *entries = NULL;
     *count = 0;
     result = maage_storage_join(path, sizeof(path), instance_root, "instance.json");
@@ -1340,7 +1506,7 @@ maage_status maage_world_store_list(const char *instance_root, const maage_item_
     if (!maage_storage_status(path)) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
     memset(&catalog, 0, sizeof(catalog));
     catalog.root = path;
-    catalog.items = items;
+    catalog.content = content;
     result = maage_folder_link_list(path, maage_store_catalog_entry, &catalog);
     if (maage_status_failed(catalog.result)) result = catalog.result;
     if (maage_status_failed(result)) {
@@ -1352,18 +1518,21 @@ maage_status maage_world_store_list(const char *instance_root, const maage_item_
     *count = catalog.count;
     return result;
 }
-maage_status maage_world_store_rename(const char *instance_root, const char *id, const char *name, const maage_item_registry *items, char error[256], maage_status_trace *trace) {
+maage_status maage_world_store_rename(const char *instance_root, const char *id, const char *name, const maage_content *content, char error[256], maage_status_trace *trace) {
     maage_world_store *store;
     char worlds[MAAGE_PATH_CAPACITY], path[MAAGE_PATH_CAPACITY];
     maage_storage_lock *selection = NULL;
     maage_status result, closed;
     if (!name || !maage_store_name(name) || !id || !maage_storage_uuid_valid(id) ||
-        !items || !maage_item_registry_is_finalized(items) ||
+        !content || !maage_item_registry_is_finalized(maage_content_items(content)) ||
         !maage_folder_link_managed_path(instance_root, 0))
         return maage_store_fail(error, "Invalid world rename arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SAVE, trace);
     store = (maage_world_store *) calloc(1, sizeof(*store));
     if (!store) return maage_store_fail(error, "Cannot allocate world metadata.", MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE, trace);
-    store->items = items;
+    store->content = content;
+    store->blocks = maage_content_blocks(content);
+    store->biomes = maage_content_biomes(content);
+    store->items = maage_content_items(content);
     result = maage_storage_join(path, sizeof(path), instance_root, "instance.json");
     if (!maage_status_failed(result) && maage_storage_status(path) != 1) result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_VALIDATE, 0);
     if (!maage_status_failed(result)) result = maage_storage_join(worlds, sizeof(worlds), instance_root, "worlds");

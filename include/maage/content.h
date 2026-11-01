@@ -46,7 +46,7 @@ typedef struct maage_content maage_content;
  * authoritative and must not change.
  * state_id, block_id, metadata and face are numeric; no graphics headers needed.
  * The callback and its context are never retained by finalized content. */
-typedef maage_status (*maage_content_presentation_resolver)(void *context, maage_block_state_id state_id, maage_block_id block_id, unsigned int metadata, maage_block_face face, maage_block_face_definition *presentation, float leaf_fast_uv[4]);
+typedef maage_status (*maage_content_presentation_resolver)(void *context, const maage_builtin_ids *ids, maage_block_state_id state_id, maage_block_id block_id, unsigned int metadata, maage_block_face face, maage_block_face_definition *presentation, float leaf_fast_uv[4]);
 
 typedef struct maage_content_config {
     maage_content_presentation_resolver resolver; /* NULL = headless */

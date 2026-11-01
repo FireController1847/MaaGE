@@ -16,31 +16,12 @@ enum {
     MAAGE_ITEM_MODEL_BLOCK = 0,
     MAAGE_ITEM_MODEL_SPRITE = 1
 };
-/* Item identities are independent of the block/state domains. */
-enum {
-    MAAGE_ITEM_TOOL_BASE = 1024,
-    MAAGE_ITEM_SHEARS = 1039,
-    MAAGE_ITEM_COAL = 1040,
-    MAAGE_ITEM_DIAMOND,
-    MAAGE_ITEM_REDSTONE,
-    MAAGE_ITEM_LAPIS,
-    MAAGE_ITEM_EMERALD,
-    MAAGE_ITEM_FLINT,
-    MAAGE_ITEM_APPLE,
-    MAAGE_ITEM_SAPLING,
-    MAAGE_ITEM_SNOWBALL,
-    MAAGE_ITEM_SEEDS,
-    MAAGE_ITEM_STICK,
-    MAAGE_ITEM_IRON_INGOT,
-    MAAGE_ITEM_GOLD_INGOT,
-    MAAGE_ITEM_GOLD_NUGGET,
-    MAAGE_ITEM_BOWL,
-    MAAGE_ITEM_MUSHROOM_STEW
-};
+/* Item identities are allocated independently of blocks and states. */
 #define MAAGE_ITEM_TEXTURE_COUNT 35U
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
 typedef struct maage_item_definition {
+    const maage_builtin_ids *builtins; /* Registry-owned. */
     maage_item_id id;
     int has_block;
     maage_block_id block_id;
@@ -70,14 +51,18 @@ typedef struct maage_item_registry maage_item_registry;
 
 /* Definitions and both names are copied. Finalization makes sparse-paged,
  * 32-bit numeric lookup immutable and O(1), independent of highest ID;
- * strings are used only at registration/UI boundaries. */
+ * strings are used only at registration/UI boundaries. Registration returns
+ * the next ID in definition.id; zero is reserved for an empty stack. */
 maage_status maage_item_registry_create(size_t capacity, maage_item_registry **output);
 maage_status maage_item_registry_destroy(maage_item_registry *registry);
-maage_status maage_item_registry_register(maage_item_registry *registry, const char *external_name, const maage_item_definition *definition);
+maage_status maage_item_registry_register(maage_item_registry *registry, const char *external_name, maage_item_definition *definition);
 maage_status maage_item_registry_finalize(maage_item_registry *registry);
 int maage_item_registry_is_finalized(const maage_item_registry *registry);
 const maage_item_definition *maage_item_registry_get(const maage_item_registry *registry, maage_item_id id);
 size_t maage_item_registry_count(const maage_item_registry *registry);
+const maage_builtin_ids *maage_item_registry_builtin_ids(const maage_item_registry *registry);
+/* First registered placeable item for this block, or zero if absent. */
+maage_item_id maage_item_registry_block_item(const maage_item_registry *registry, maage_block_id block);
 const maage_item_definition *maage_item_registry_at(const maage_item_registry *registry, size_t index);
 /* For persistence/import only, never the fixed-step simulation. */
 const char *maage_item_registry_name(const maage_item_registry *registry, maage_item_id id);

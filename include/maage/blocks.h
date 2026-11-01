@@ -2,6 +2,7 @@
 #define MAAGE_BLOCKS_H
 
 #include <stddef.h>
+#include "maage/content_ids.h"
 #include "maage/status.h"
 
 #ifdef __cplusplus
@@ -15,109 +16,8 @@ typedef unsigned long maage_block_id;
 typedef unsigned long maage_block_state_id;
 typedef unsigned long maage_texture_id;
 
-enum {
-    MAAGE_BLOCK_AIR = 0,
-    MAAGE_BLOCK_STONE = 1,
-    MAAGE_BLOCK_GRASS = 2,
-    MAAGE_BLOCK_DIRT = 3,
-    MAAGE_BLOCK_COBBLESTONE = 4,
-    MAAGE_BLOCK_PLANKS = 5,
-    MAAGE_BLOCK_SAPLING = 6,
-    MAAGE_BLOCK_BEDROCK = 7,
-    MAAGE_BLOCK_WATER = 9,
-    MAAGE_BLOCK_LAVA = 11,
-    MAAGE_BLOCK_SAND = 12,
-    MAAGE_BLOCK_GRAVEL = 13,
-    MAAGE_BLOCK_GOLD_ORE = 14,
-    MAAGE_BLOCK_IRON_ORE = 15,
-    MAAGE_BLOCK_COAL_ORE = 16,
-    MAAGE_BLOCK_LOG = 17,
-    MAAGE_BLOCK_LEAVES = 18,
-    MAAGE_BLOCK_LAPIS_ORE = 21,
-    MAAGE_BLOCK_SANDSTONE = 24,
-    MAAGE_BLOCK_TALL_GRASS = 31,
-    MAAGE_BLOCK_DEAD_BUSH = 32,
-    MAAGE_BLOCK_DANDELION = 37,
-    MAAGE_BLOCK_POPPY = 38,
-    MAAGE_BLOCK_BROWN_MUSHROOM = 39,
-    MAAGE_BLOCK_RED_MUSHROOM = 40,
-    MAAGE_BLOCK_MOSSY_COBBLESTONE = 48,
-    MAAGE_BLOCK_OBSIDIAN = 49,
-    MAAGE_BLOCK_TORCH = 50,
-    MAAGE_BLOCK_CRAFTING_TABLE = 58,
-    MAAGE_BLOCK_GOLD_BLOCK = 41,
-    MAAGE_BLOCK_IRON_BLOCK = 42,
-    MAAGE_BLOCK_DIAMOND_BLOCK = 57,
-    MAAGE_BLOCK_LAPIS_BLOCK = 22,
-    MAAGE_BLOCK_EMERALD_BLOCK = 133,
-    MAAGE_BLOCK_REDSTONE_BLOCK = 152,
-    MAAGE_BLOCK_COAL_BLOCK = 173,
-    MAAGE_BLOCK_SNOW_BLOCK = 80,
-    MAAGE_BLOCK_DIAMOND_ORE = 56,
-    MAAGE_BLOCK_REDSTONE_ORE = 73,
-    MAAGE_BLOCK_SNOW = 78,
-    MAAGE_BLOCK_ICE = 79,
-    MAAGE_BLOCK_CACTUS = 81,
-    MAAGE_BLOCK_EMERALD_ORE = 129
-};
-enum {
-    MAAGE_STATE_AIR = 0,
-    MAAGE_STATE_STONE = 1,
-    MAAGE_STATE_GRASS = 2,
-    MAAGE_STATE_DIRT = 3,
-    MAAGE_STATE_COBBLESTONE = 4,
-    MAAGE_STATE_PLANKS = 5,
-    MAAGE_STATE_SAPLING = 6,
-    MAAGE_STATE_BEDROCK = 7,
-    MAAGE_STATE_WATER = 9,
-    MAAGE_STATE_LAVA = 11,
-    MAAGE_STATE_SAND = 12,
-    MAAGE_STATE_GRAVEL = 13,
-    MAAGE_STATE_GOLD_ORE = 14,
-    MAAGE_STATE_IRON_ORE = 15,
-    MAAGE_STATE_COAL_ORE = 16,
-    MAAGE_STATE_LOG = 17,
-    MAAGE_STATE_LEAVES = 18,
-    MAAGE_STATE_LAPIS_ORE = 21,
-    MAAGE_STATE_SANDSTONE = 24,
-    MAAGE_STATE_TALL_GRASS = 31,
-    MAAGE_STATE_DEAD_BUSH = 32,
-    MAAGE_STATE_DANDELION = 37,
-    MAAGE_STATE_POPPY = 38,
-    MAAGE_STATE_BROWN_MUSHROOM = 39,
-    MAAGE_STATE_RED_MUSHROOM = 40,
-    MAAGE_STATE_MOSSY_COBBLESTONE = 48,
-    MAAGE_STATE_OBSIDIAN = 49,
-    MAAGE_STATE_TORCH = 50,
-    MAAGE_STATE_CRAFTING_TABLE = 58,
-    MAAGE_STATE_DIAMOND_ORE = 56,
-    MAAGE_STATE_REDSTONE_ORE = 73,
-    MAAGE_STATE_SNOW = 78,
-    MAAGE_STATE_ICE = 79,
-    MAAGE_STATE_CACTUS = 81,
-    MAAGE_STATE_EMERALD_ORE = 129,
-    MAAGE_STATE_SPRUCE_LOG = 272,
-    MAAGE_STATE_BIRCH_LOG = 273,
-    MAAGE_STATE_SPRUCE_LEAVES = 274,
-    MAAGE_STATE_BIRCH_LEAVES = 275,
-    MAAGE_STATE_TORCH_NEGATIVE_X = 276,
-    MAAGE_STATE_TORCH_POSITIVE_X = 277,
-    MAAGE_STATE_TORCH_NEGATIVE_Z = 278,
-    MAAGE_STATE_TORCH_POSITIVE_Z = 279,
-    MAAGE_STATE_LOG_X_BASE = 280,
-    MAAGE_STATE_LOG_Z_BASE = 283,
-    MAAGE_STATE_SPRUCE_PLANKS = 286,
-    MAAGE_STATE_BIRCH_PLANKS = 287,
-    MAAGE_STATE_SPRUCE_SAPLING = 288,
-    MAAGE_STATE_BIRCH_SAPLING = 289,
-    MAAGE_STATE_GROWING_SAPLING_BASE = 590, /* Oak/spruce/birch, growth-stage bit 8. */
-    MAAGE_STATE_WATER_FLOW_BASE = 512,
-    MAAGE_STATE_LAVA_FLOW_BASE = 528,
-    MAAGE_STATE_CACTUS_AGE_BASE = 544, /* Ages 1..15; age zero is CACTUS. */
-    MAAGE_STATE_PERSISTENT_LEAVES_BASE = 576,
-    MAAGE_STATE_CHECK_LEAVES_BASE = 579,
-    MAAGE_STATE_PERSISTENT_CHECK_LEAVES_BASE = 582
-};
+typedef struct maage_block_registry maage_block_registry;
+
 enum {
     MAAGE_LEAF_SPECIES_MASK = 3U,
     MAAGE_LEAF_PERSISTENT = 4U,
@@ -125,9 +25,9 @@ enum {
 };
 /* Oak/spruce/birch, with all four flag combinations. Direct numeric mapping;
  * unsupported species/metadata fail explicitly. */
-maage_status maage_block_leaves_state(unsigned int metadata, maage_block_state_id *state);
+maage_status maage_block_leaves_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state);
 /* Species 0..2 plus stage bit 8; unsupported metadata fails explicitly. */
-maage_status maage_block_sapling_state(unsigned int metadata, maage_block_state_id *state);
+maage_status maage_block_sapling_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state);
 enum {
     MAAGE_BLOCK_MESH_CUBE = 0,
     MAAGE_BLOCK_MESH_CROSS = 1,
@@ -185,6 +85,7 @@ typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *wor
 typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
 
 typedef struct maage_block_definition {
+    const maage_builtin_ids *builtins; /* Registry-owned immutable references. */
     maage_block_id id;
     int solid;
     int opaque;
@@ -198,7 +99,7 @@ typedef struct maage_block_definition {
     double hardness;         /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
     int harvest_requires_tool;  /* Effectiveness and harvest eligibility differ. */
-    unsigned long drop_item_id; /* Item domain, resolved at registration. */
+    unsigned long drop_item_id; /* Independent item domain; bound before finalize. */
     unsigned int drop_count;
     maage_block_shape collision_shape, selection_shape;
     unsigned int contact_damage;
@@ -210,6 +111,7 @@ typedef struct maage_block_definition {
 } maage_block_definition;
 
 typedef struct maage_block_state_definition {
+    const maage_builtin_ids *builtins;
     maage_block_state_id id;
     maage_block_id block_id;
     /* Numeric property payload; no text at runtime. */
@@ -224,22 +126,24 @@ typedef struct maage_block_state_definition {
     float leaf_fast_uv[4];
 } maage_block_state_definition;
 
-typedef struct maage_block_registry maage_block_registry;
-
 /* Capacities are initial expected-registration-count hints (zero selects a small
  * default). Sparse paged numeric indexing allocates only occupied ID paths;
  * a high numeric ID never forces allocations up to that ID.
  *
  * The caller owns the registry. Definitions are borrowed until its destruction;
- * after finalize they are immutable. Registration copies names and definitions. */
+ * after finalize they are immutable. Registration copies names and definitions,
+ * ignores incoming definition.id and returns the allocated ID in that field.
+ * Block and state sequences are independent; air is resolved during registration
+ * and implicit empty sections retain its actual assigned state. */
 maage_status maage_block_registry_create(size_t block_capacity, size_t state_capacity, maage_block_registry **output);
 maage_status maage_block_registry_destroy(maage_block_registry *registry);
-maage_status maage_block_registry_register_block(maage_block_registry *registry, const char *external_name, const maage_block_definition *definition);
-maage_status maage_block_registry_register_state(maage_block_registry *registry, const maage_block_state_definition *definition);
+maage_status maage_block_registry_register_block(maage_block_registry *registry, const char *external_name, maage_block_definition *definition);
+maage_status maage_block_registry_register_state(maage_block_registry *registry, maage_block_state_definition *definition);
 maage_status maage_block_registry_finalize(maage_block_registry *registry);
 int maage_block_registry_is_finalized(const maage_block_registry *registry);
 size_t maage_block_registry_block_count(const maage_block_registry *registry);
 size_t maage_block_registry_state_count(const maage_block_registry *registry);
+const maage_builtin_ids *maage_block_registry_builtin_ids(const maage_block_registry *registry);
 
 /* Registration / explicit import boundary only. Open-addressed hashing gives
  * expected O(1) lookup with exact collision checks, not worst-case O(1). */

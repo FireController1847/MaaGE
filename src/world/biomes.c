@@ -33,40 +33,47 @@ maage_status maage_biome_registry_init(maage_biome_registry *registry) {
     static const char *const names[MAAGE_BIOME_COUNT] = {
         "minecraft:ocean", "minecraft:plains", "minecraft:desert",
         "minecraft:hills", "minecraft:forest", "minecraft:taiga"};
+    maage_builtin_ids *ids;
     maage_biome_definition *definition;
+    unsigned long *references[MAAGE_BIOME_COUNT];
     unsigned int id, component;
     if (!registry) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
     memset(registry, 0, sizeof(*registry));
+    ids = &registry->ids;
+    references[0] = &ids->biome_ocean;
+    references[1] = &ids->biome_plains;
+    references[2] = &ids->biome_desert;
+    references[3] = &ids->biome_hills;
+    references[4] = &ids->biome_forest;
+    references[5] = &ids->biome_taiga;
+
     for (id = 0; id < MAAGE_BIOME_COUNT; ++id) {
         definition = &registry->builtin_definitions[id];
-        definition->id = id;
+        definition->id = (unsigned long) registry->count++;
+        *references[id] = definition->id;
         definition->base_height = parameters[id][0];
         definition->variation = parameters[id][1];
         definition->temperature = parameters[id][2];
         definition->rainfall = parameters[id][3];
-        definition->surface = MAAGE_STATE_BIOME_GRASS(id);
-        definition->filler = MAAGE_STATE_DIRT;
+        definition->surface = 0;
+        definition->filler = 0;
         definition->decoration.lakes = 1.0;
         definition->decoration.grass = 0.25;
         definition->decoration.flowers = 1.0 / 97.0;
-        if (id == MAAGE_BIOME_DESERT) {
-            definition->surface = MAAGE_STATE_SAND;
-            definition->filler = MAAGE_STATE_SAND;
+        if (references[id] == &ids->biome_desert) {
             definition->decoration.grass = definition->decoration.flowers = 0;
             definition->decoration.dead_bushes = 1.0 / 43.0;
             definition->decoration.cacti = 1.0 / 64.0;
-        } else if (id == MAAGE_BIOME_OCEAN) {
-            definition->surface = MAAGE_STATE_GRAVEL;
-            definition->filler = MAAGE_STATE_DIRT;
+        } else if (references[id] == &ids->biome_ocean) {
             definition->aquatic = 1;
             memset(&definition->decoration, 0, sizeof(definition->decoration));
-        } else if (id == MAAGE_BIOME_FOREST) {
+        } else if (references[id] == &ids->biome_forest) {
             definition->decoration.trees[0] = 0.64;
             definition->decoration.trees[2] = 0.16;
             definition->decoration.mushrooms = 1.0 / 73.0;
-        } else if (id == MAAGE_BIOME_TAIGA) definition->decoration.trees[1] = 0.70;
-        else if (id == MAAGE_BIOME_PLAINS) definition->decoration.trees[0] = 0.04;
-        else if (id == MAAGE_BIOME_HILLS) {
+        } else if (references[id] == &ids->biome_taiga) definition->decoration.trees[1] = 0.70;
+        else if (references[id] == &ids->biome_plains) definition->decoration.trees[0] = 0.04;
+        else if (references[id] == &ids->biome_hills) {
             definition->decoration.trees[0] = 0.09;
             definition->decoration.emeralds = 1.0;
         }
@@ -95,17 +102,18 @@ maage_status maage_biome_registry_destroy(maage_biome_registry *registry) {
     memset(registry, 0, sizeof(*registry));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
-maage_status maage_biome_registry_register(maage_biome_registry *registry, const char *name, const maage_biome_definition *definition) {
+maage_status maage_biome_registry_register(maage_biome_registry *registry, const char *name, maage_biome_definition *definition) {
     maage_biome_extension *node, *existing;
     maage_registry_pages *pages;
     void **entry;
     size_t length;
     unsigned int id;
     if (!registry || !definition || !maage_biome_name_valid(name) ||
-        !registry->builtin_names[0] || definition->id < MAAGE_BIOME_COUNT ||
-        (unsigned long) definition->id > 4294967295UL)
+        !registry->builtin_names[0])
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (registry->count >= 4294967295UL) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    definition->id = (unsigned long) registry->count;
     for (id = 0; id < MAAGE_BIOME_COUNT; ++id)
         if (!strcmp(registry->builtin_names[id], name))
             return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -140,9 +148,10 @@ maage_status maage_biome_registry_register(maage_biome_registry *registry, const
     *entry = node;
     node->next = (maage_biome_extension *) registry->extensions;
     registry->extensions = node;
+    ++registry->count;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
-static int maage_biome_valid(const maage_biome_definition *definition) {
+static int maage_biome_valid(maage_biome_definition *definition) {
     unsigned int component;
     const maage_biome_decoration *decoration = &definition->decoration;
     double trees = 0;
@@ -171,6 +180,13 @@ maage_status maage_biome_registry_finalize(maage_biome_registry *registry) {
     unsigned int id;
     if (!registry || !registry->builtin_names[0]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_FINALIZE, 0);
+    for (id = 0; id < MAAGE_BIOME_COUNT; ++id) {
+        maage_biome_definition *definition = &registry->builtin_definitions[id];
+        definition->surface = registry->ids.biome_grass[id];
+        definition->filler = registry->ids.state_dirt;
+        if (definition->id == registry->ids.biome_desert) definition->surface = definition->filler = registry->ids.state_sand;
+        if (definition->id == registry->ids.biome_ocean) definition->surface = registry->ids.state_gravel;
+    }
     for (id = 0; id < MAAGE_BIOME_COUNT; ++id)
         if (!registry->builtin_names[id] || registry->builtin_definitions[id].id != id || !maage_biome_valid(&registry->builtin_definitions[id]))
             return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
@@ -213,4 +229,8 @@ maage_status maage_biome_registry_resolve_name(const maage_biome_registry *regis
             return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
         }
     return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+}
+
+size_t maage_biome_registry_count(const maage_biome_registry *registry) {
+    return registry ? registry->count : 0;
 }

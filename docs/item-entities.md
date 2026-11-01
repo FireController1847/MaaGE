@@ -129,21 +129,20 @@ Landing attempts block restoration over non-fall-through support in a replaceabl
 cell. Failed publication retains the falling entity; invalid/expired landing
 converts its owned stack in place to an ordinary item without allocation or a
 second quantity. Gravel landing failure yields gravel, not a mining flint roll.
-The named block-item identity plus metadata reconstructs the exact current falling
-state on load; source revisions reset because they belong to the old World epoch.
+Numeric saved item and state IDs preserve the exact falling state on load; source revisions reset because they belong to the old World epoch.
 Client instances borrow cached full-sized block geometry with fixed orientation,
 interpolated motion and replica light. Source-column GPU revisions gate takeover
 from stationary geometry; async mesh latency can delay that visual handoff.
 
 ## Storage and publication
 
-The sole metadata encoding is `MGWORLD8`; earlier development worlds are rejected
+The sole metadata encoding is `MGWRLD10`; earlier development worlds are rejected
 and must be recreated. Files are never deleted or converted automatically.
 `world.bin` atomically checkpoints player/inventory, environment and all active
 or dormant item entities after successful World flush. Unreturned temporary
 crafting inputs share that checkpoint only when closure cannot complete; see
 [Crafting](crafting.md) for ownership and lifecycle. Entity fields are explicitly
-encoded: instance ID/type, namespaced item name, quantity, metadata, damage,
+encoded: instance ID/type, numeric saved item/state IDs, quantity, metadata, damage,
 position, velocity, age, pickup delay and grounded state. The next instance ID
 and drop random state persist. CRC, actual byte lengths, stack validity,
 increasing unique IDs and finite coordinate/velocity ranges are checked before

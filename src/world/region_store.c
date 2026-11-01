@@ -13,11 +13,11 @@
  * reopen and truncated before the next write. No old format is recognized. */
 #define MAAGE_REGION_EDGE 32
 #define MAAGE_REGION_SLOTS 1024
-#define MAAGE_REGION_HEADER 16L
+#define MAAGE_REGION_HEADER 56L
 #define MAAGE_REGION_RECORD 24L
 #define MAAGE_REGION_FOOTER 4L
 #define MAAGE_REGION_CHUNK_MAX 18000000UL
-#define MAAGE_REGION_MAGIC "MGRGN1\0"
+#define MAAGE_REGION_MAGIC "MGRGN2\0"
 #define MAAGE_REGION_RECORD_MAGIC "MGR1"
 #define MAAGE_REGION_END "DONE"
 
@@ -34,6 +34,7 @@ typedef struct maage_region {
     struct maage_region *next;
 } maage_region;
 struct maage_region_store {
+    char map_id[37];
     char directory[MAAGE_PATH_CAPACITY];
     maage_mutex *mutex;
     maage_region *regions;
@@ -45,7 +46,8 @@ static maage_status region_status(unsigned char code, unsigned char operation) {
 static unsigned long region_word(const unsigned char *data, unsigned count) {
     unsigned long value = 0;
     unsigned i;
-    for (i = 0; i < count; ++i) value |= (unsigned long) data[i] << (i * 8U);
+    for (i = 0; i < count; ++i)
+        value |= (unsigned long) data[i] << (i * 8U);
     return value;
 }
 static void region_put(unsigned char *data, unsigned long value, unsigned count) {
@@ -104,8 +106,8 @@ static maage_status region_path(const maage_region_store *store, const maage_reg
     sprintf(filename, "r.%d.%d.mgr", region->x, region->z);
     return maage_storage_join(path, MAAGE_PATH_CAPACITY, store->directory, filename);
 }
-static maage_status region_scan(maage_region *region) {
-    unsigned char header[MAAGE_REGION_RECORD], footer[MAAGE_REGION_FOOTER];
+static maage_status region_scan(const maage_region_store *store, maage_region *region) {
+    unsigned char header[MAAGE_REGION_HEADER], footer[MAAGE_REGION_FOOTER];
     long end, position;
     unsigned slot;
     unsigned long raw_size, zip_size;
@@ -116,7 +118,8 @@ static maage_status region_scan(maage_region *region) {
         return region_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
     if (memcmp(header, MAAGE_REGION_MAGIC, 8) ||
         region_word(header + 8, 4) != ((unsigned long) region->x & 0xffffffffUL) ||
-        region_word(header + 12, 4) != ((unsigned long) region->z & 0xffffffffUL))
+        region_word(header + 12, 4) != ((unsigned long) region->z & 0xffffffffUL) ||
+        memcmp(header + 16, store->map_id, 36) || region_word(header + 52, 4) != region_crc(header, 52))
         return region_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
     position = MAAGE_REGION_HEADER;
     while (position < end) {
@@ -173,6 +176,8 @@ static maage_status region_open(maage_region_store *store, maage_region *region,
         memcpy(header, MAAGE_REGION_MAGIC, 8);
         region_put(header + 8, (unsigned long) region->x & 0xffffffffUL, 4);
         region_put(header + 12, (unsigned long) region->z & 0xffffffffUL, 4);
+        memcpy(header + 16, store->map_id, 36);
+        region_put(header + 52, region_crc(header, 52), 4);
         if (fwrite(header, 1, sizeof(header), region->file) != sizeof(header)) {
             fclose(region->file);
             region->file = NULL;
@@ -186,7 +191,7 @@ static maage_status region_open(maage_region_store *store, maage_region *region,
         }
         region->valid_end = MAAGE_REGION_HEADER;
     } else {
-        result = region_scan(region);
+        result = region_scan(store, region);
         if (maage_status_failed(result)) {
             fclose(region->file);
             region->file = NULL;
@@ -196,14 +201,15 @@ static maage_status region_open(maage_region_store *store, maage_region *region,
     region->initialized = 1;
     return region_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_OPEN);
 }
-maage_status maage_region_store_create(const char *directory, maage_region_store **output) {
+maage_status maage_region_store_create(const char *directory, const char *map_id, maage_region_store **output) {
     maage_region_store *store;
     maage_status result;
     if (output) *output = NULL;
-    if (!directory || !output || strlen(directory) >= MAAGE_PATH_CAPACITY) return region_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    if (!directory || !output || !maage_storage_uuid_valid(map_id) || strlen(directory) >= MAAGE_PATH_CAPACITY) return region_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     store = (maage_region_store *) calloc(1, sizeof(*store));
     if (!store) return region_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     strcpy(store->directory, directory);
+    strcpy(store->map_id, map_id);
     result = maage_mutex_create(&store->mutex);
     if (maage_status_failed(result)) {
         free(store);
@@ -250,6 +256,8 @@ static maage_status region_compact_on_close(const maage_region_store *store, maa
     memcpy(header, MAAGE_REGION_MAGIC, 8);
     region_put(header + 8, (unsigned long) region->x & 0xffffffffUL, 4);
     region_put(header + 12, (unsigned long) region->z & 0xffffffffUL, 4);
+    memcpy(header + 16, store->map_id, 36);
+    region_put(header + 52, region_crc(header, 52), 4);
     if (fwrite(header, 1, sizeof(header), output) != sizeof(header)) {
         result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_WRITE);
         goto failed;

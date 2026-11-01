@@ -1,6 +1,7 @@
 #ifndef MAAGE_WORLD_STORE_H
 #define MAAGE_WORLD_STORE_H
 #include "maage/world.h"
+#include "maage/content.h"
 #include "maage/gameplay.h"
 #include "maage/environment.h"
 #include "maage/entities.h"
@@ -28,8 +29,8 @@ typedef struct maage_world_summary {
     unsigned int game_mode;
     maage_status status;
 } maage_world_summary;
-maage_status maage_world_store_list(const char *instance_root, const maage_item_registry *items, maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace);
-maage_status maage_world_store_rename(const char *instance_root, const char *id, const char *name, const maage_item_registry *items, char error[256], maage_status_trace *trace);
+maage_status maage_world_store_list(const char *instance_root, const maage_content *content, maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace);
+maage_status maage_world_store_rename(const char *instance_root, const char *id, const char *name, const maage_content *content, char error[256], maage_status_trace *trace);
 maage_status maage_world_store_delete(const char *instance_root, const char *id, char error[256], maage_status_trace *trace);
 /* Metadata/import boundary only. instance_root is an absolute physical instance
  * directory containing instance.json; global application-data roots are rejected.
@@ -38,17 +39,19 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
  * new world. create requests a new world; existing IDs are never overwritten.
  * generation_policy supplies creation defaults only; resumed worlds always use
  * their saved policy. An explicit existing id requires NULL policy.
- * Borrows finalized item definitions until close. Owns an exclusive world lock
+ * Resolves the World identity map once and borrows finalized content until close. Owns an exclusive world lock
  * until close. Returned records borrow the store's initial entity array.
  * Errors are static, credential-free text (256 bytes); optional traces are
  * caller-owned. Only the current metadata/chunk encodings are accepted. */
-maage_status maage_world_store_open(const char *instance_root, const char *id, int create, const char *name, const maage_world_seed *seed, const maage_generation_policy *generation_policy, const maage_item_registry *items, maage_world_store **store, maage_world_record *record, char error[256], maage_status_trace *trace);
+maage_status maage_world_store_open(const char *instance_root, const char *id, int create, const char *name, const maage_world_seed *seed, const maage_generation_policy *generation_policy, const maage_content *content, maage_world_store **store, maage_world_record *record, char error[256], maage_status_trace *trace);
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
  * independent region files may be written concurrently; each region serializes
  * its own index and append operations without a global World lock. Player inventories and
- * World entities use stable namespaced item identities; no numeric mapping is persisted.
- * Environment, the World's independent random-tick checkpoint and generation
- * settings share the same atomic metadata replacement (MGWORLD8 only). */
+ * World entities use numeric saved IDs. The cached, checksummed MGIDMAP1 header
+ * retains stable saved IDs and both numeric translation directions. Dictionary
+ * extensions publish atomically before new IDs can be saved by workers.
+ * Environment, random ticks, generation settings and gameplay share the same
+ * atomic metadata replacement (MGWRLD10 only). */
 maage_status maage_world_store_save(maage_world_store *store, const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world, const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);
@@ -59,8 +62,10 @@ maage_status maage_world_store_close(maage_world_store *store);
  * parallel, with a short per-region lock for indexed reads and appends.
  * Detached loaded columns transfer to caller. Only WORLD_IO/LOAD/NOT_FOUND
  * permits generation; registry NOT_FOUND means an unmapped save identity.
- * Per-column namespaced biome/block+metadata palettes resolve at I/O boundaries;
- * 8-bit biome/16-bit state indices are file-local rather than runtime IDs.
+ * MGCHNK7 palettes contain numeric saved IDs, remapped through the open store;
+ * 8-bit biome/16-bit state indices are local palette indices. No names are
+ * resolved or dictionaries rebuilt during chunk I/O. MGRGN2 headers bind the
+ * World map UUID; passed registries must be the ones borrowed at open.
  * Columns retain completed generation stages, relative pending fluid delays and
  * chunk-owned numeric block entities with checked versioned opaque payloads.
  * A missing region/index entry alone permits generation. Corrupt or incompatible

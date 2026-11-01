@@ -10,14 +10,15 @@ static maage_status maage_leaves_noop(void) {
 }
 
 maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const maage_block_state_definition *before, const maage_block_state_definition *after) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *leaf;
     maage_block_state_id marked;
     maage_status result;
     int radius, dx, dy, dz, nx, ny, nz;
     if (before->block_id == after->block_id) return maage_leaves_noop();
-    if (before->block_id == MAAGE_BLOCK_LOG) radius = 4;
-    else if (before->block_id == MAAGE_BLOCK_LEAVES) radius = 1;
+    if (before->block_id == ids->block_log) radius = 4;
+    else if (before->block_id == ids->block_leaves) radius = 1;
     else
         return maage_leaves_noop();
     /* The mutation already owns an edit batch. Flag-only recursive mutations
@@ -32,8 +33,8 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const
                 if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) continue;
                 leaf = maage_block_registry_state(blocks, maage_world_get(world, nx, ny, nz));
                 if (!leaf) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-                if (leaf->block_id != MAAGE_BLOCK_LEAVES || (leaf->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) continue;
-                result = maage_block_leaves_state(leaf->metadata | MAAGE_LEAF_CHECK_DECAY, &marked);
+                if (leaf->block_id != ids->block_leaves || (leaf->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) continue;
+                result = maage_block_leaves_state(maage_world_registry(world), leaf->metadata | MAAGE_LEAF_CHECK_DECAY, &marked);
                 if (!maage_status_failed(result)) result = maage_world_set(world, nx, ny, nz, leaf->id, marked);
                 if (maage_status_failed(result)) return result;
             }
@@ -42,6 +43,7 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const
 }
 
 maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     static const int steps[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *neighbor;
@@ -67,8 +69,8 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
                 cell = ((dy + 4) * MAAGE_LEAF_EDGE + dz + 4) * MAAGE_LEAF_EDGE + dx + 4;
                 neighbor = maage_block_registry_state(blocks, maage_world_get(world, x + dx, y + dy, z + dz));
                 if (!neighbor) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-                support[cell] = neighbor->block_id == MAAGE_BLOCK_LEAVES ? -2 : -1;
-                if (neighbor->block_id == MAAGE_BLOCK_LOG) {
+                support[cell] = neighbor->block_id == ids->block_leaves ? -2 : -1;
+                if (neighbor->block_id == ids->block_log) {
                     support[cell] = 0;
                     queue[tail++] = (unsigned short) cell;
                 }
@@ -94,7 +96,7 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
         }
     }
     if (support[MAAGE_LEAF_CENTER] >= 0) {
-        result = maage_block_leaves_state(state->metadata & ~MAAGE_LEAF_CHECK_DECAY, &checked);
+        result = maage_block_leaves_state(maage_world_registry(world), state->metadata & ~MAAGE_LEAF_CHECK_DECAY, &checked);
         return maage_status_failed(result) ? result : maage_world_set(world, x, y, z, state->id, checked);
     }
     /* Reuse the established ordinary-drop rules without consuming the player
@@ -103,11 +105,11 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
     result = maage_item_generate_drops(blocks, maage_world_item_registry(world), state->id, NULL, &drop_random, &drops);
     if (!maage_status_failed(result)) result = maage_entities_reserve(maage_world_entities(world), drops.count);
     if (maage_status_failed(result)) return result;
-    mutation = maage_world_set(world, x, y, z, state->id, MAAGE_STATE_AIR);
+    mutation = maage_world_set(world, x, y, z, state->id, ids->state_air);
     if (maage_status_code(mutation) != MAAGE_STATUS_SUCCESS &&
         (maage_status_code(mutation) == MAAGE_STATUS_INTERRUPTED ||
          !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z)) ||
-         maage_world_get(world, x, y, z) != MAAGE_STATE_AIR)) return mutation;
+         maage_world_get(world, x, y, z) != ids->state_air)) return mutation;
     /* A post-mutation scheduling failure must not discard reserved quantities.
      * Preserve that original result after completing the infallible spawns. */
     for (i = 0; i < drops.count; ++i) {

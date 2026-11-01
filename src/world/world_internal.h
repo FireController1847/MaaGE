@@ -1,5 +1,6 @@
 #ifndef MAAGE_WORLD_INTERNAL_H
 #define MAAGE_WORLD_INTERNAL_H
+
 #include "maage/world.h"
 #include "maage/biome.h"
 #include "maage/seed.h"
@@ -7,6 +8,9 @@
 #include "maage/environment.h"
 #include "maage/random_ticks.h"
 #define MAAGE_SECTION_VOLUME 4096
+
+maage_builtin_ids *maage_block_registry_initialize_ids(maage_block_registry *registry);
+maage_status maage_block_registry_bind_items(maage_block_registry *registry, const struct maage_item_registry *items);
 
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit light uses cached direct sky when initialized, otherwise
@@ -21,6 +25,7 @@ typedef struct maage_update_index {
 } maage_update_index;
 struct maage_chunk {
     int x, z;
+    maage_block_state_id air;  /* Implicit empty sections use the registered state. */
     unsigned char *direct_sky; /* Client light cache; absent from persistence. */
     maage_section *sections[16];
     maage_biome_id biomes[256];
@@ -44,7 +49,7 @@ maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output);
  * retained neighboring light. The asynchronous solver still owns convergence. */
 maage_status maage_light_provisional_cell(maage_chunk *chunk, const maage_chunk *neighbors[4], const maage_block_registry *blocks, int x, int y, int z);
 maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neighbors[4], const unsigned char dirty[8192], unsigned boundaries, const maage_block_registry *blocks, const maage_job_token *token, maage_status_trace *trace);
-maage_status maage_chunk_create(int x, int z, maage_chunk **output);
+maage_status maage_chunk_create(int x, int z, maage_block_state_id air, maage_chunk **output);
 maage_status maage_chunk_destroy(maage_chunk *chunk);
 size_t maage_chunk_cell(int x, int y, int z);
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z);

@@ -460,6 +460,7 @@ static unsigned int maage_environment_outlet(const maage_world *world, int x, in
 }
 
 static maage_status maage_environment_flow(maage_environment *environment, maage_world *world, const maage_block_state_definition *source, int x, int y, int z, unsigned int level, int downward, int *flowed) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *target;
     const maage_block_definition *block;
     const maage_item_registry *items = maage_world_item_registry(world);
@@ -481,12 +482,12 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
         if (source->fluid_kind != MAAGE_FLUID_LAVA) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
         if (downward) {
             *flowed = 1;
-            return maage_world_set(world, x, y, z, old, MAAGE_STATE_STONE);
+            return maage_world_set(world, x, y, z, old, ids->state_stone);
         }
     }
     if (block->material_solid || !block->replaceable) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     memset(&drops, 0, sizeof(drops));
-    if (source->fluid_kind == MAAGE_FLUID_WATER && target->block_id != MAAGE_BLOCK_AIR) {
+    if (source->fluid_kind == MAAGE_FLUID_WATER && target->block_id != ids->block_air) {
         random = maage_entities_random(entities);
         result = maage_item_generate_drops(maage_world_registry(world), items, old, NULL, &random, &drops);
         if (maage_status_failed(result)) return result;
@@ -511,6 +512,7 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
     return maage_environment_schedule(environment, world, x, y, z, source->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U);
 }
 static maage_status maage_environment_fluid_update(maage_environment *environment, maage_world *world, int x, int y, int z) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     static const int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *state, *neighbor, *above, *under;
     const maage_block_definition *below;
@@ -532,14 +534,14 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
         }
         neighbor = maage_environment_fluid(world, nx, y, nz);
         if (!neighbor) continue;
-        if (state->fluid_kind == MAAGE_FLUID_LAVA && neighbor->fluid_kind == MAAGE_FLUID_WATER && level <= 4) return maage_world_set(world, x, y, z, old, level == 0 ? MAAGE_STATE_OBSIDIAN : MAAGE_STATE_COBBLESTONE);
+        if (state->fluid_kind == MAAGE_FLUID_LAVA && neighbor->fluid_kind == MAAGE_FLUID_WATER && level <= 4) return maage_world_set(world, x, y, z, old, level == 0 ? ids->state_obsidian : ids->state_cobblestone);
         if (neighbor->fluid_kind != state->fluid_kind) continue;
         if (neighbor->fluid_level == 0) ++sources;
         next = neighbor->fluid_level >= 8 ? 0 : neighbor->fluid_level;
         if (next < minimum) minimum = next;
     }
     above = y + 1 < MAAGE_WORLD_HEIGHT ? maage_environment_fluid(world, x, y + 1, z) : NULL;
-    if (state->fluid_kind == MAAGE_FLUID_LAVA && above && above->fluid_kind == MAAGE_FLUID_WATER && level <= 4) return maage_world_set(world, x, y, z, old, level == 0 ? MAAGE_STATE_OBSIDIAN : MAAGE_STATE_COBBLESTONE);
+    if (state->fluid_kind == MAAGE_FLUID_LAVA && above && above->fluid_kind == MAAGE_FLUID_WATER && level <= 4) return maage_world_set(world, x, y, z, old, level == 0 ? ids->state_obsidian : ids->state_cobblestone);
     if (level) {
         if (waiting) return maage_environment_schedule(environment, world, x, y, z, delay);
         next = minimum + (state->fluid_kind == MAAGE_FLUID_LAVA ? 2U : 1U);
@@ -551,7 +553,7 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
             below = under ? maage_block_registry_block(maage_world_registry(world), under->block_id) : NULL;
             if ((below && below->material_solid) || (under && under->fluid_kind == MAAGE_FLUID_WATER && !under->fluid_level)) next = 0;
         }
-        if (next >= 8 && !(above && above->fluid_kind == state->fluid_kind)) return maage_world_set(world, x, y, z, old, MAAGE_STATE_AIR);
+        if (next >= 8 && !(above && above->fluid_kind == state->fluid_kind)) return maage_world_set(world, x, y, z, old, ids->state_air);
         if (next != level) {
             replacement = state->fluid_states[next];
             result = maage_world_set(world, x, y, z, old, replacement);

@@ -165,8 +165,8 @@ worker waits for a ring, neighbor or render-frame barrier.
 
 ## Storage Codec Performance
 
-Current MGCHNK6 region records use a portable, named-state encoding and
-existing CRC32 integrity checks. The encoder now discovers the small set of
+Current `MGCHNK7` region records use numeric saved state/biome IDs and
+CRC32 integrity checks. The encoder now discovers the small set of
 distinct block identities using an allocated per-save hash table, sorting only
 unique entries instead of all occupied cells. The decoder copies validated
 section lighting in bulk, and the shared CRC implementation uses zlib's
@@ -174,7 +174,17 @@ optimized tables while retaining the same CRC32 polynomial for corruption detect
 No second filesystem metadata query is made by the general file reader
 after its caller has already checked missing chunk paths.
 
-Chunks are grouped into 32x32 region files. Each region holds an append-only
+`world.bin` contains one checksummed `MGIDMAP1` dictionary: block, item and
+biome names occur once per identity; state entries reference a saved block ID
+plus numeric metadata. Opening resolves these identities once and retains both
+saved-to-runtime and runtime-to-saved tables. Registration sequences may change
+between sessions. Existing saved IDs retain their meanings; new definitions append
+to each domain and the complete extension publishes atomically before chunk jobs
+start. Missing definitions and duplicate, invalid or incomplete maps reject opening.
+The encoded dictionary is cached for metadata saves, without repeated name work.
+
+Chunks are grouped into 32x32 region files. Each region header binds the World dictionary UUID and its own coordinates/checksum.
+Each region holds an append-only
 sequence of independently zlib-compressed, CRC-verified chunk records and an
 in-memory latest-record index. A complete footer commits each record; an
 incomplete final append is ignored and truncated before the next save.
@@ -202,7 +212,7 @@ detached output column. Tree snow ownership uses two small job-local arrays of
 256 entries, with no persisted tree records or neighbor access. Spawn floor queries
 replay the same tree emitter and snow decisions.
 
-`MGWORLD9` and `MGCHNK6` are the current formats. Existing saved chunks load
+`MGWRLD10`, `MGCHNK7` and `MGRGN2` are the current formats. Existing saved chunks load
 their authoritative blocks and biome identities; they are not regenerated or
 rewritten to adopt a new region model. Only missing chunks use current generation.
 Existing-to-new material, decoration or biome-tint seams can therefore remain,

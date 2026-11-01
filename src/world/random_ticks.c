@@ -89,6 +89,7 @@ static maage_status maage_random_grass_light(const maage_world *world, int x, in
 }
 
 maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *cover, *destination;
     const maage_block_definition *block;
     unsigned int attempt;
@@ -98,7 +99,7 @@ maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, co
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     result = maage_random_grass_light(world, x, y + 1, z, block, context, &brightness);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (brightness < 4 && block->light_opacity > 2) return maage_world_set(world, x, y, z, state->id, MAAGE_STATE_DIRT);
+    if (brightness < 4 && block->light_opacity > 2) return maage_world_set(world, x, y, z, state->id, ids->state_dirt);
     if (brightness < 9) return outcome;
     for (attempt = 0; attempt < 4; ++attempt) {
         nx = x + (int) maage_random_tick_next(context, 3) - 1;
@@ -107,14 +108,14 @@ maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, co
         if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) continue;
         result = maage_random_block(world, nx, ny, nz, &destination, &block);
         if (maage_status_failed(result)) return result;
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || destination->block_id != MAAGE_BLOCK_DIRT || destination->metadata != 0) continue;
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || destination->block_id != ids->block_dirt || destination->metadata != 0) continue;
         result = maage_random_block(world, nx, ny + 1, nz, &cover, &block);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || block->light_opacity > 2) continue;
         result = maage_random_grass_light(world, nx, ny + 1, nz, block, context, &brightness);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || brightness < 4) continue;
-        result = maage_world_set(world, nx, ny, nz, destination->id, MAAGE_STATE_GRASS);
+        result = maage_world_set(world, nx, ny, nz, destination->id, ids->state_grass);
         if (maage_status_failed(result)) return result;
         outcome = result;
     }
@@ -122,6 +123,7 @@ maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, co
 }
 
 maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     maage_block_state_id staged, reset[4];
@@ -138,7 +140,7 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (maage_random_light_value(light, context) < 9 || maage_random_tick_next(context, 7)) return maage_random_noop();
     if (!(state->metadata & 8U)) {
-        result = maage_block_sapling_state(state->metadata | 8U, &staged);
+        result = maage_block_sapling_state(maage_world_registry(world), state->metadata | 8U, &staged);
         return maage_status_failed(result) ? result : maage_world_set(world, x, y, z, state->id, staged);
     }
     if (species == 1) {
@@ -154,7 +156,7 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
                 for (dz = 0; dz < 2; ++dz)
                     for (dx = 0; dx < 2; ++dx) {
                         neighbor = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x + ox + dx, y, z + oz + dz));
-                        if (!neighbor || neighbor->block_id != MAAGE_BLOCK_SAPLING || (neighbor->metadata & 7U) != species) match = 0;
+                        if (!neighbor || neighbor->block_id != ids->block_sapling || (neighbor->metadata & 7U) != species) match = 0;
                     }
                 if (match) {
                     x += ox;
@@ -169,7 +171,7 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
     if (maage_status_code(result) != MAAGE_STATUS_NOOP || !attempted) return result;
     /* A known obstruction restarts the two-stage cycle. Operational failure
      * and unavailable terrain keep every original sapling/stage untouched. */
-    result = maage_block_sapling_state(species, &staged);
+    result = maage_block_sapling_state(maage_world_registry(world), species, &staged);
     if (maage_status_failed(result)) return result;
     reset[0] = reset[1] = reset[2] = reset[3] = staged;
     plan.x = x;
@@ -182,6 +184,7 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
 }
 
 maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
@@ -193,14 +196,14 @@ maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, c
     if (y >= MAAGE_WORLD_HEIGHT - 1) return maage_random_noop();
     result = maage_random_block(world, x, y + 1, z, &neighbor, &block);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (neighbor->block_id != MAAGE_BLOCK_AIR) return maage_random_noop();
+    if (neighbor->block_id != ids->block_air) return maage_random_noop();
     for (height = 1; height < 3; ++height) {
         result = maage_random_block(world, x, y - (int) height, z, &neighbor, &block);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-        if (neighbor->block_id != MAAGE_BLOCK_CACTUS) break;
+        if (neighbor->block_id != ids->block_cactus) break;
     }
     if (height >= 3) return maage_random_noop();
-    if (state->metadata < 15) return maage_world_set(world, x, y, z, state->id, MAAGE_STATE_CACTUS_AGE_BASE + state->metadata);
+    if (state->metadata < 15) return maage_world_set(world, x, y, z, state->id, ids->cactus[state->metadata + 1]);
     /* Preflight new-growth side support before publishing geometry. */
     for (side = 0; side < 4; ++side) {
         result = maage_random_block(world, x + sides[side][0], y + 1, z + sides[side][1], &neighbor, &block);
@@ -217,10 +220,10 @@ maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, c
         result = maage_entities_reserve(maage_world_entities(world), 1);
         if (maage_status_failed(result)) return result;
     } else {
-        result = maage_world_set(world, x, y + 1, z, MAAGE_STATE_AIR, MAAGE_STATE_CACTUS);
+        result = maage_world_set(world, x, y + 1, z, ids->state_air, ids->state_cactus);
         if (maage_status_failed(result)) return result;
     }
-    result = maage_world_set(world, x, y, z, state->id, MAAGE_STATE_CACTUS);
+    result = maage_world_set(world, x, y, z, state->id, ids->state_cactus);
     if (maage_status_failed(result) || !obstructed) return result;
     return maage_random_tick_spawn_drop(world, x, y + 1, z, &drop, context);
 }
@@ -232,6 +235,7 @@ maage_status maage_random_tick_bush(maage_world *world, int x, int y, int z, con
 }
 
 static maage_status maage_random_mushroom_site(const maage_world *world, int x, int y, int z, int *valid) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     unsigned char light;
@@ -239,7 +243,7 @@ static maage_status maage_random_mushroom_site(const maage_world *world, int x, 
     *valid = 0;
     if (y <= 0 || y >= MAAGE_WORLD_HEIGHT) return maage_random_noop();
     result = maage_random_block(world, x, y, z, &state, &block);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || state->block_id != MAAGE_BLOCK_AIR) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || state->block_id != ids->block_air) return result;
     result = maage_random_block(world, x, y - 1, z, &state, &block);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || !block->opaque) return result;
     result = maage_world_sample_light(world, x, y, z, &light);
@@ -250,6 +254,7 @@ static maage_status maage_random_mushroom_site(const maage_world *world, int x, 
 }
 
 maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     int dx, dy, dz, count = 0, attempt, nx, ny, nz, valid;
@@ -270,7 +275,7 @@ maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z,
         nz = z + (int) maage_random_tick_next(context, 3) - 1;
         result = maage_random_mushroom_site(world, nx, ny, nz, &valid);
         if (maage_status_failed(result)) return result;
-        if (attempt == 4) return valid ? maage_world_set(world, nx, ny, nz, MAAGE_STATE_AIR, state->block_id == MAAGE_BLOCK_BROWN_MUSHROOM ? MAAGE_STATE_BROWN_MUSHROOM : MAAGE_STATE_RED_MUSHROOM)
+        if (attempt == 4) return valid ? maage_world_set(world, nx, ny, nz, ids->state_air, state->block_id == ids->block_brown_mushroom ? ids->state_brown_mushroom : ids->state_red_mushroom)
                                        : maage_random_noop();
         if (valid) {
             x = nx;
@@ -282,19 +287,21 @@ maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z,
 }
 
 maage_status maage_random_tick_snow(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     unsigned char light;
     maage_status result = maage_world_sample_light(world, x, y, z, &light);
     (void) context;
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    return (light & 15) > 11 ? maage_world_set(world, x, y, z, state->id, MAAGE_STATE_AIR) : maage_random_noop();
+    return (light & 15) > 11 ? maage_world_set(world, x, y, z, state->id, ids->state_air) : maage_random_noop();
 }
 
 maage_status maage_random_tick_ice(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_definition *block = maage_block_registry_block(maage_world_registry(world), state->block_id);
     unsigned char light;
     maage_status result = maage_world_sample_light(world, x, y, z, &light);
     (void) context;
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-    return (int) (light & 15) > 11 - (int) block->light_opacity ? maage_world_set(world, x, y, z, state->id, MAAGE_STATE_WATER) : maage_random_noop();
+    return (int) (light & 15) > 11 - (int) block->light_opacity ? maage_world_set(world, x, y, z, state->id, ids->state_water) : maage_random_noop();
 }

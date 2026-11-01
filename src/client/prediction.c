@@ -135,6 +135,7 @@ failed:
     return result;
 }
 maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, unsigned long input_sequence, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(visual));
     maage_world_target target, destination;
     maage_block_state_id placed;
     double direction[3], damage, progress, phase;
@@ -256,7 +257,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
             prediction->entries[vacant].active = 1;
             prediction->entries[vacant].id = ++prediction->next_id;
             prediction->entries[vacant].target = target;
-            prediction->entries[vacant].replacement = MAAGE_STATE_AIR;
+            prediction->entries[vacant].replacement = ids->state_air;
             command->kind = MAAGE_CMD_BREAK_PREVIEW;
             command->prediction = prediction->next_id;
             command->prediction_revision = prediction->started_revision;
@@ -275,7 +276,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             stack = &snapshot->player.inventory.slots[hotbar];
-            if (target.block_id == MAAGE_BLOCK_CRAFTING_TABLE && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+            if (target.block_id == ids->block_crafting_table && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
             else result = maage_gameplay_placement(&snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 memset(&prediction->entries[vacant], 0, sizeof(prediction->entries[vacant]));
@@ -323,11 +324,12 @@ maage_status maage_client_prediction_destroy(maage_client_prediction *prediction
     return result;
 }
 
-maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_session_event *event) {
+maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_block_registry *blocks, const maage_session_event *event) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     unsigned int i;
     if (event->kind != MAAGE_EVENT_SOUND || event->session_epoch != prediction->session || event->world_epoch != prediction->world || (event->sound.event_id != MAAGE_SOUND_BLOCK_BREAK && event->sound.event_id != MAAGE_SOUND_BLOCK_DIG)) return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)
-        if (prediction->entries[i].active && prediction->entries[i].confirmed >= 0 && prediction->entries[i].replacement == MAAGE_STATE_AIR &&
+        if (prediction->entries[i].active && prediction->entries[i].confirmed >= 0 && prediction->entries[i].replacement == ids->state_air &&
             event->sound.position[0] == prediction->entries[i].target.x + 0.5 && event->sound.position[1] == prediction->entries[i].target.y + 0.5 && event->sound.position[2] == prediction->entries[i].target.z + 0.5) {
             if (event->sound.event_id == MAAGE_SOUND_BLOCK_BREAK) {
                 if (prediction->entries[i].sound_echo) continue;
@@ -354,7 +356,7 @@ maage_status maage_client_prediction_take_break_sound(maage_client_prediction *p
         if (!state) return maage_prediction_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_READ);
         memset(sound, 0, sizeof(*sound));
         sound->event_id = MAAGE_SOUND_BLOCK_BREAK;
-        sound->material = maage_gameplay_block_material(state->block_id);
+        sound->material = maage_gameplay_block_material(maage_block_registry_block(blocks, state->block_id));
         sound->position[0] = prediction->entries[i].target.x + 0.5;
         sound->position[1] = prediction->entries[i].target.y + 0.5;
         sound->position[2] = prediction->entries[i].target.z + 0.5;

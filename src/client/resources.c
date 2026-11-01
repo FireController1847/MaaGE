@@ -429,7 +429,7 @@ done:
 
 /* Presentation is resolved once from the Client-owned atlas. All block and
  * state identity, geometry, gameplay and persistence fields are World-owned. */
-static maage_status maage_client_content_resolve(void *context, maage_block_state_id state_id, maage_block_id block, unsigned int metadata, maage_block_face face, maage_block_face_definition *presentation, float leaf_fast_uv[4]) {
+static maage_status maage_client_content_resolve(void *context, const maage_builtin_ids *ids, maage_block_state_id state_id, maage_block_id block, unsigned int metadata, maage_block_face face, maage_block_face_definition *presentation, float leaf_fast_uv[4]) {
     const maage_client_resources *resources = (const maage_client_resources *) context;
     static const unsigned long leaf_colors[2] = {6396257UL, 8431445UL};
     unsigned long color;
@@ -440,7 +440,7 @@ static maage_status maage_client_content_resolve(void *context, maage_block_stat
     /* Preserve the canonical fallback's magenta/black texels without biome
      * multiplication or decorative overlays. */
     if (presentation->texture_id == MAAGE_CONTENT_TEXTURE_MISSING || maage_status_failed(resources->source_results[maage_client_texture_source((int) presentation->texture_id)])) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
-    if (block == MAAGE_BLOCK_GRASS) {
+    if (block == ids->block_grass) {
         if (face == MAAGE_FACE_POSITIVE_Y) presentation->tint_mode = MAAGE_BLOCK_TINT_GRASS;
         else if (face != MAAGE_FACE_NEGATIVE_Y) {
             if (!maage_status_failed(resources->source_results[4])) {
@@ -449,13 +449,13 @@ static maage_status maage_client_content_resolve(void *context, maage_block_stat
             }
             if (!maage_status_failed(resources->source_results[61])) memcpy(presentation->snow_uv, resources->uv[MAAGE_CONTENT_TEXTURE_GRASS_SIDE_SNOW], sizeof(presentation->snow_uv));
         }
-    } else if (block == MAAGE_BLOCK_TALL_GRASS && metadata) presentation->tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
-    else if (block == MAAGE_BLOCK_WATER || block == MAAGE_BLOCK_LAVA) {
-        memcpy(presentation->animation, resources->fluid_animation[block == MAAGE_BLOCK_LAVA], sizeof(presentation->animation));
-        memcpy(presentation->flow_uv, resources->fluid_flow_uv[block == MAAGE_BLOCK_LAVA], sizeof(presentation->flow_uv));
-        memcpy(presentation->flow_animation, resources->fluid_flow_animation[block == MAAGE_BLOCK_LAVA], sizeof(presentation->flow_animation));
+    } else if (block == ids->block_tall_grass && metadata) presentation->tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
+    else if (block == ids->block_water || block == ids->block_lava) {
+        memcpy(presentation->animation, resources->fluid_animation[block == ids->block_lava], sizeof(presentation->animation));
+        memcpy(presentation->flow_uv, resources->fluid_flow_uv[block == ids->block_lava], sizeof(presentation->flow_uv));
+        memcpy(presentation->flow_animation, resources->fluid_flow_animation[block == ids->block_lava], sizeof(presentation->flow_animation));
     }
-    if (block == MAAGE_BLOCK_LEAVES) {
+    if (block == ids->block_leaves) {
         metadata &= MAAGE_LEAF_SPECIES_MASK;
         if (metadata == 1 || metadata == 2) {
             color = leaf_colors[metadata - 1];
@@ -499,12 +499,13 @@ void maage_client_item_face_tint(const float grass_color[3], const maage_block_f
 }
 
 const maage_block_state_definition *maage_client_item_icon_state(const maage_block_registry *blocks, const maage_item_definition *item, unsigned int metadata) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     const maage_block_state_definition *state;
     unsigned int species = metadata & 3;
     if (!item) return NULL;
     state = maage_block_registry_state(blocks, item->icon_state_id);
-    if (state && (state->block_id == MAAGE_BLOCK_LOG || state->block_id == MAAGE_BLOCK_LEAVES) && (species == 1 || species == 2)) state = maage_block_registry_state(blocks, (state->block_id == MAAGE_BLOCK_LOG ? MAAGE_STATE_SPRUCE_LOG : MAAGE_STATE_SPRUCE_LEAVES) + species - 1);
-    if (state && state->block_id == MAAGE_BLOCK_PLANKS && (species == 1 || species == 2)) state = maage_block_registry_state(blocks, MAAGE_STATE_SPRUCE_PLANKS + species - 1);
+    if (state && (state->block_id == ids->block_log || state->block_id == ids->block_leaves) && (species == 1 || species == 2)) state = maage_block_registry_state(blocks, state->block_id == ids->block_log ? ids->logs[species] : ids->leaves[species]);
+    if (state && state->block_id == ids->block_planks && (species == 1 || species == 2)) state = maage_block_registry_state(blocks, ids->planks[species]);
     return state;
 }
 
@@ -516,13 +517,15 @@ maage_status maage_client_resources_destroy(maage_client_resources *resources) {
 }
 
 maage_texture_id maage_client_item_texture(const maage_item_definition *item, unsigned int metadata) {
+    const maage_builtin_ids *ids = item ? item->builtins : NULL;
     if (!item) return MAAGE_CONTENT_TEXTURE_MISSING;
-    if (item->id == MAAGE_ITEM_SAPLING && (metadata == 1 || metadata == 2)) return MAAGE_CONTENT_TEXTURE_ITEMS + 25 + metadata;
-    if (item->id == MAAGE_ITEM_COAL && metadata == 1) return MAAGE_CONTENT_TEXTURE_ITEMS + 34;
+    if (item->id == ids->item_sapling && (metadata == 1 || metadata == 2)) return MAAGE_CONTENT_TEXTURE_ITEMS + 25 + metadata;
+    if (item->id == ids->item_coal && metadata == 1) return MAAGE_CONTENT_TEXTURE_ITEMS + 34;
     return item->texture_id;
 }
 
 const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack) {
+    const maage_builtin_ids *ids = maage_item_registry_builtin_ids(items);
     static const char *const logs[] = {"Oak Log", "Spruce Log", "Birch Log"};
     static const char *const leaves[] = {"Oak Leaves", "Spruce Leaves", "Birch Leaves"};
     static const char *const planks[] = {"Oak Planks", "Spruce Planks", "Birch Planks"};
@@ -530,11 +533,11 @@ const char *maage_client_item_name(const maage_item_registry *items, const maage
     const maage_item_definition *item = stack ? maage_item_registry_get(items, stack->item_id) : NULL;
     if (!item) return "";
     if (stack->metadata <= 2) {
-        if (item->has_block && item->block_id == MAAGE_BLOCK_LOG) return logs[stack->metadata];
-        if (item->has_block && item->block_id == MAAGE_BLOCK_LEAVES) return leaves[stack->metadata];
-        if (item->has_block && item->block_id == MAAGE_BLOCK_PLANKS) return planks[stack->metadata];
-        if (item->id == MAAGE_ITEM_COAL && stack->metadata == 1) return "Charcoal";
-        if (item->id == MAAGE_ITEM_SAPLING) return saplings[stack->metadata];
+        if (item->has_block && item->block_id == ids->block_log) return logs[stack->metadata];
+        if (item->has_block && item->block_id == ids->block_leaves) return leaves[stack->metadata];
+        if (item->has_block && item->block_id == ids->block_planks) return planks[stack->metadata];
+        if (item->id == ids->item_coal && stack->metadata == 1) return "Charcoal";
+        if (item->id == ids->item_sapling) return saplings[stack->metadata];
     }
     return item->display_name;
 }

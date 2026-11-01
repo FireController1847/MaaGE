@@ -104,6 +104,7 @@ static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *i
 }
 
 maage_status maage_client_item_model(const maage_client_resources *resources, const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, maage_mesh_vertex *vertices, unsigned int *indices, maage_mesh_data *data) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     const maage_item_definition *item;
     const maage_block_state_definition *state;
     const maage_block_definition *block;
@@ -132,7 +133,7 @@ maage_status maage_client_item_model(const maage_client_resources *resources, co
             maximum[axis] = block->selection_shape.maximum[axis] - 0.5;
         }
         material = block->opaque ? MAAGE_MESH_MATERIAL_OPAQUE : MAAGE_MESH_MATERIAL_CUTOUT;
-        if (block->id == MAAGE_BLOCK_ICE) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
+        if (block->id == ids->block_ice) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
         maage_client_item_box(resources->inventory_grass_color, vertices, indices, &faces, minimum, maximum, state, material);
     }
     data->vertices = vertices;

@@ -4,16 +4,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define MAAGE_BIOME_OCEAN 0
-#define MAAGE_BIOME_PLAINS 1
-#define MAAGE_BIOME_DESERT 2
-#define MAAGE_BIOME_HILLS 3
-#define MAAGE_BIOME_FOREST 4
-#define MAAGE_BIOME_TAIGA 5
 #define MAAGE_BIOME_COUNT 6
-#define MAAGE_STATE_BIOME_GRASS_BASE 256UL
-#define MAAGE_STATE_BIOME_GRASS(id) (MAAGE_STATE_BIOME_GRASS_BASE + (id))
-typedef unsigned int maage_biome_id;
+typedef unsigned long maage_biome_id;
 /* Generation probabilities, independent of Client color blending. Trees are
  * oak/spruce/birch probabilities per jittered eight-block candidate; their sum
  * is at most one. Other densities are per eligible decoration/feature attempt.
@@ -32,6 +24,8 @@ typedef struct maage_biome_definition {
     float grass_color[3], foliage_color[3];
 } maage_biome_definition;
 typedef struct maage_biome_registry {
+    maage_builtin_ids ids;
+    size_t count;
     /* Builtins are inline; extensions use a private sparse numeric index.
      * Names/definitions remain immutable after finalization. */
     maage_biome_definition builtin_definitions[MAAGE_BIOME_COUNT];
@@ -41,10 +35,13 @@ typedef struct maage_biome_registry {
     int finalized;
 } maage_biome_registry;
 /* Initialize classic biomes, register additional stable names before finalizing.
- * Every registered biome has a unique namespaced persistence identity. */
+ * Every registered biome has a unique namespaced persistence identity. Registration
+ * returns the allocated ID in definition.id. Shared content binds numeric surface
+ * references before finalization; unbound initialization also serves color loading. */
 maage_status maage_biome_registry_init(maage_biome_registry *registry);
 maage_status maage_biome_registry_destroy(maage_biome_registry *registry);
-maage_status maage_biome_registry_register(maage_biome_registry *registry, const char *external_name, const maage_biome_definition *definition);
+maage_status maage_biome_registry_register(maage_biome_registry *registry, const char *external_name, maage_biome_definition *definition);
+size_t maage_biome_registry_count(const maage_biome_registry *registry);
 maage_status maage_biome_registry_finalize(maage_biome_registry *registry);
 const maage_biome_definition *maage_biome_registry_get(const maage_biome_registry *registry, maage_biome_id id);
 const char *maage_biome_registry_name(const maage_biome_registry *registry, maage_biome_id id);

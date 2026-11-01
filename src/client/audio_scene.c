@@ -322,6 +322,7 @@ maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene, cons
     return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_INITIALIZE);
 }
 static maage_status sc_observe(maage_client_audio_scene *scene, const maage_world *visual, const maage_session_snapshot *snapshot, const double listener[3], maage_client_audio_scene_observation *audio, maage_status_trace *trace) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(visual));
     const maage_block_registry *registry = maage_world_registry(visual);
     const maage_block_state_definition *state, *above;
     const maage_block_definition *block;
@@ -354,7 +355,7 @@ static maage_status sc_observe(maage_client_audio_scene *scene, const maage_worl
             }
         } else if (state->fluid_kind == MAAGE_FLUID_LAVA) {
             above = maage_block_registry_state(registry, maage_world_get(visual, x, y + 1, z));
-            if (above && above->block_id == MAAGE_BLOCK_AIR && sc_bounded(scene, ++lava_count) == 0) {
+            if (above && above->block_id == ids->block_air && sc_bounded(scene, ++lava_count) == 0) {
                 audio->lava_available = 1;
                 audio->lava_position[0] = x;
                 audio->lava_position[1] = y;
@@ -381,7 +382,7 @@ static maage_status sc_observe(maage_client_audio_scene *scene, const maage_worl
         if (!maage_world_observe(visual, x, y, z, &observation) || observation.rainfall <= 0.0 || observation.temperature < 0.15) continue;
         state = maage_block_registry_state(registry, maage_world_get(visual, x, y - 1, z));
         block = state ? maage_block_registry_block(registry, state->block_id) : NULL;
-        if (!block || state->block_id == MAAGE_BLOCK_AIR || state->fluid_kind == MAAGE_FLUID_LAVA) continue;
+        if (!block || state->block_id == ids->block_air || state->fluid_kind == MAAGE_FLUID_LAVA) continue;
         if (sc_bounded(scene, ++rain_count) != 0) continue;
         audio->rain_available = 1;
         audio->rain_position[0] = x + sc_bounded(scene, 65536) / 65536.0;
@@ -408,7 +409,7 @@ static maage_status sc_observe(maage_client_audio_scene *scene, const maage_worl
             dy = position[1] - listener[1];
             dz = position[2] - listener[2];
             if (dx * dx + dy * dy + dz * dz <= 4.0 || dx * dx + dy * dy + dz * dz > 64.0) continue;
-            if (maage_world_get(visual, x, y, z) != MAAGE_STATE_AIR ||
+            if (maage_world_get(visual, x, y, z) != ids->state_air ||
                 !maage_world_observe(visual, x, y, z, &observation) ||
                 maage_status_code(maage_world_present_light(visual, x, y, z, &observation.light)) != MAAGE_STATUS_SUCCESS || (observation.light >> 4) != 0 ||
                 (observation.light & 15) > sc_bounded(scene, 8)) continue;

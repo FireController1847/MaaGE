@@ -159,8 +159,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 
 ## Numeric Identity and Content
 
-- Block types, states, items and biomes are distinct numeric domains. Finalize immutable
-  registries before gameplay; ID-to-definition access is deterministic direct O(1).
+- Block types, states, items and biomes are distinct automatically allocated numeric
+  domains. Registration assigns IDs and captures built-in references; finalized
+  tables are immutable. ID-to-definition access is deterministic direct O(1).
   Unknown/unregistered IDs fail explicitly rather than substituting unrelated blocks.
 - Resolve external namespaced names at registration/import/I/O boundaries only. Name
   hashing is collision-checked expected O(1), not worst-case O(1). No identifier strings,
@@ -226,11 +227,15 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
   never acquire plant support requirements. Preserve each block's distinct rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWORLD9` metadata and `MGCHNK6` compressed region chunks are the
-  sole encodings; private identifiers reject prior data. Use named item identities and
-  chunk-local named biome/block palettes plus metadata, explicit lengths/coordinates/
-  identities/CRC validation, per-region synchronized append commits and verified record checksums. Store open borrows
-  finalized items; save writes one complete player/entity/environment/RNG checkpoint.
+  worlds. Canonical UUIDs identify them. `MGWRLD10` metadata embeds one checksummed
+  `MGIDMAP1` World dictionary for blocks, states (block identity plus metadata), items
+  and biomes; `MGRGN2` region headers bind its UUID. `MGCHNK7` palettes, stacks and
+  entities carry numeric saved IDs only. Resolve names once at open, retain both
+  numeric translation directions, and atomically publish map extensions before jobs
+  can save new IDs. Never reinterpret saved IDs or duplicate dictionaries per chunk.
+  Reject missing content, incompatible/corrupt bytes and duplicate identities. Keep
+  per-region synchronized append commits/compression/checksums. Store open borrows
+  finalized content; save writes one complete player/entity/environment/RNG checkpoint.
 
 ## Gameplay and Client Contracts
 

@@ -29,6 +29,7 @@ int maage_generation_region(int coordinate, int edge) {
     return coordinate % edge < 0 ? result - 1 : result;
 }
 int maage_generation_write(maage_generation_context *context, int x, int y, int z, maage_block_state_id replacement, maage_generation_write_rule rule) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_block_state_id current;
@@ -39,20 +40,20 @@ int maage_generation_write(maage_generation_context *context, int x, int y, int 
     if (current == replacement) return 0;
     state = maage_block_registry_state(context->blocks, current);
     block = state ? maage_block_registry_block(context->blocks, state->block_id) : NULL;
-    if (!block || block->id == MAAGE_BLOCK_BEDROCK) return 0;
-    if (rule == MAAGE_GENERATION_WRITE_STONE && block->id != MAAGE_BLOCK_STONE) return 0;
-    if (rule == MAAGE_GENERATION_WRITE_NATURAL && block->id != MAAGE_BLOCK_STONE &&
-        block->id != MAAGE_BLOCK_DIRT && block->id != MAAGE_BLOCK_GRASS &&
-        block->id != MAAGE_BLOCK_GRAVEL && block->id != MAAGE_BLOCK_SANDSTONE &&
-        block->id != MAAGE_BLOCK_SAND && block->id != MAAGE_BLOCK_COAL_ORE &&
-        block->id != MAAGE_BLOCK_IRON_ORE && block->id != MAAGE_BLOCK_GOLD_ORE &&
-        block->id != MAAGE_BLOCK_REDSTONE_ORE && block->id != MAAGE_BLOCK_LAPIS_ORE &&
-        block->id != MAAGE_BLOCK_DIAMOND_ORE && block->id != MAAGE_BLOCK_EMERALD_ORE) return 0;
-    if (rule == MAAGE_GENERATION_WRITE_AIR && block->id != MAAGE_BLOCK_AIR) return 0;
-    if (rule == MAAGE_GENERATION_WRITE_FOLIAGE && block->id != MAAGE_BLOCK_AIR &&
-        block->id != MAAGE_BLOCK_LEAVES && block->id != MAAGE_BLOCK_TALL_GRASS &&
-        block->id != MAAGE_BLOCK_DANDELION && block->id != MAAGE_BLOCK_POPPY &&
-        block->id != MAAGE_BLOCK_SNOW) return 0;
+    if (!block || block->id == ids->block_bedrock) return 0;
+    if (rule == MAAGE_GENERATION_WRITE_STONE && block->id != ids->block_stone) return 0;
+    if (rule == MAAGE_GENERATION_WRITE_NATURAL && block->id != ids->block_stone &&
+        block->id != ids->block_dirt && block->id != ids->block_grass &&
+        block->id != ids->block_gravel && block->id != ids->block_sandstone &&
+        block->id != ids->block_sand && block->id != ids->block_coal_ore &&
+        block->id != ids->block_iron_ore && block->id != ids->block_gold_ore &&
+        block->id != ids->block_redstone_ore && block->id != ids->block_lapis_ore &&
+        block->id != ids->block_diamond_ore && block->id != ids->block_emerald_ore) return 0;
+    if (rule == MAAGE_GENERATION_WRITE_AIR && block->id != ids->block_air) return 0;
+    if (rule == MAAGE_GENERATION_WRITE_FOLIAGE && block->id != ids->block_air &&
+        block->id != ids->block_leaves && block->id != ids->block_tall_grass &&
+        block->id != ids->block_dandelion && block->id != ids->block_poppy &&
+        block->id != ids->block_snow) return 0;
     context->failure = maage_chunk_set(context->chunk, x, y, z, replacement);
     if (maage_status_failed(context->failure)) {
         MAAGE_STATUS_TRACE(context->trace, context->failure, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET);
@@ -61,16 +62,34 @@ int maage_generation_write(maage_generation_context *context, int x, int y, int 
     return maage_status_code(context->failure) == MAAGE_STATUS_NOOP ? 0 : 1;
 }
 int maage_generation_features_valid(const maage_block_registry *blocks) {
-    static const maage_block_state_id required[] = {
-        MAAGE_STATE_COAL_ORE, MAAGE_STATE_IRON_ORE, MAAGE_STATE_GOLD_ORE,
-        MAAGE_STATE_REDSTONE_ORE, MAAGE_STATE_LAPIS_ORE, MAAGE_STATE_DIAMOND_ORE,
-        MAAGE_STATE_EMERALD_ORE, MAAGE_STATE_LAVA, MAAGE_STATE_LOG, MAAGE_STATE_LEAVES,
-        MAAGE_STATE_SPRUCE_LOG, MAAGE_STATE_BIRCH_LOG, MAAGE_STATE_SPRUCE_LEAVES,
-        MAAGE_STATE_BIRCH_LEAVES, MAAGE_STATE_TALL_GRASS, MAAGE_STATE_DEAD_BUSH,
-        MAAGE_STATE_DANDELION, MAAGE_STATE_POPPY, MAAGE_STATE_BROWN_MUSHROOM,
-        MAAGE_STATE_RED_MUSHROOM, MAAGE_STATE_SNOW, MAAGE_STATE_ICE, MAAGE_STATE_CACTUS,
-        MAAGE_STATE_COBBLESTONE, MAAGE_STATE_MOSSY_COBBLESTONE};
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    maage_block_state_id required[25];
     size_t index;
+    required[0] = ids->state_coal_ore;
+    required[1] = ids->state_iron_ore;
+    required[2] = ids->state_gold_ore;
+    required[3] = ids->state_redstone_ore;
+    required[4] = ids->state_lapis_ore;
+    required[5] = ids->state_diamond_ore;
+    required[6] = ids->state_emerald_ore;
+    required[7] = ids->state_lava;
+    required[8] = ids->state_log;
+    required[9] = ids->state_leaves;
+    required[10] = ids->state_spruce_log;
+    required[11] = ids->state_birch_log;
+    required[12] = ids->state_spruce_leaves;
+    required[13] = ids->state_birch_leaves;
+    required[14] = ids->state_tall_grass;
+    required[15] = ids->state_dead_bush;
+    required[16] = ids->state_dandelion;
+    required[17] = ids->state_poppy;
+    required[18] = ids->state_brown_mushroom;
+    required[19] = ids->state_red_mushroom;
+    required[20] = ids->state_snow;
+    required[21] = ids->state_ice;
+    required[22] = ids->state_cactus;
+    required[23] = ids->state_cobblestone;
+    required[24] = ids->state_mossy_cobblestone;
     for (index = 0; index < sizeof(required) / sizeof(required[0]); ++index)
         if (!maage_block_registry_state(blocks, required[index])) return 0;
     return 1;
@@ -79,6 +98,7 @@ int maage_generation_features_valid(const maage_block_registry *blocks) {
 /* Each region owns finite tunnels; every intersecting column replays the same
  * complete paths and clips writes. Region halo 2 covers all 88-block paths. */
 static int maage_feature_carve_ball(maage_generation_context *context, double cx, double cy, double cz, double rx, double ry, double rz) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
     double dx, dy, dz;
     int x, y, z, low_x, high_x, low_z, high_z, low_y, high_y, result, changed = 0;
     int origin_x = context->chunk->x * 16, origin_z = context->chunk->z * 16;
@@ -104,7 +124,7 @@ static int maage_feature_carve_ball(maage_generation_context *context, double cx
                 if (y > context->columns[(z - origin_z) * 16 + x - origin_x].height - 3) continue;
                 dy = (y + 0.5 - cy) / ry;
                 if (dx * dx + dy * dy + dz * dz >= 1.0) continue;
-                result = maage_generation_write(context, x, y, z, y < 10 ? MAAGE_STATE_LAVA : MAAGE_STATE_AIR, MAAGE_GENERATION_WRITE_NATURAL);
+                result = maage_generation_write(context, x, y, z, y < 10 ? ids->state_lava : ids->state_air, MAAGE_GENERATION_WRITE_NATURAL);
                 if (result < 0) return -1;
                 changed |= result;
             }
@@ -173,26 +193,27 @@ maage_status maage_generation_carve(maage_generation_context *context) {
 }
 
 typedef struct maage_ore_feature {
-    maage_block_state_id state;
+    size_t state;
     unsigned int attempts, size, minimum_y, maximum_y;
     int emerald, triangular;
 } maage_ore_feature;
 /* Ore definitions specify height bands, attempt counts and vein sizes. */
 static const maage_ore_feature maage_ore_features[] = {
-    {MAAGE_STATE_DIRT, 20, 32, 0, 256, 0, 0},
-    {MAAGE_STATE_GRAVEL, 10, 32, 0, 256, 0, 0},
-    {MAAGE_STATE_COAL_ORE, 20, 17, 0, 128, 0, 0},
-    {MAAGE_STATE_IRON_ORE, 20, 9, 0, 64, 0, 0},
-    {MAAGE_STATE_GOLD_ORE, 2, 9, 0, 32, 0, 0},
-    {MAAGE_STATE_REDSTONE_ORE, 8, 8, 0, 16, 0, 0},
-    {MAAGE_STATE_DIAMOND_ORE, 1, 8, 0, 16, 0, 0},
-    {MAAGE_STATE_LAPIS_ORE, 1, 7, 0, 32, 0, 1},
-    {MAAGE_STATE_EMERALD_ORE, 5, 1, 4, 32, 1, 0}};
+    {offsetof(maage_builtin_ids, state_dirt), 20, 32, 0, 256, 0, 0},
+    {offsetof(maage_builtin_ids, state_gravel), 10, 32, 0, 256, 0, 0},
+    {offsetof(maage_builtin_ids, state_coal_ore), 20, 17, 0, 128, 0, 0},
+    {offsetof(maage_builtin_ids, state_iron_ore), 20, 9, 0, 64, 0, 0},
+    {offsetof(maage_builtin_ids, state_gold_ore), 2, 9, 0, 32, 0, 0},
+    {offsetof(maage_builtin_ids, state_redstone_ore), 8, 8, 0, 16, 0, 0},
+    {offsetof(maage_builtin_ids, state_diamond_ore), 1, 8, 0, 16, 0, 0},
+    {offsetof(maage_builtin_ids, state_lapis_ore), 1, 7, 0, 32, 0, 1},
+    {offsetof(maage_builtin_ids, state_emerald_ore), 5, 1, 4, 32, 1, 0}};
 static int maage_feature_vein(maage_generation_context *context, const maage_ore_feature *feature, int cx, int cy, int cz, unsigned long random) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
     double angle, x1, x2, z1, z2, y1, y2, fraction, x, y, z, radius, dx, dy, dz;
     int step, bx, by, bz, min_x, max_x, min_z, max_z, min_y, max_y, result, changed = 0;
     int origin_x = context->chunk->x * 16, origin_z = context->chunk->z * 16;
-    if (feature->size == 1) return maage_generation_write(context, cx, cy, cz, feature->state, MAAGE_GENERATION_WRITE_STONE);
+    if (feature->size == 1) return maage_generation_write(context, cx, cy, cz, MAAGE_CONTENT_ID(ids, feature->state), MAAGE_GENERATION_WRITE_STONE);
     angle = (maage_generation_feature_next(&random) % 65536UL) * MAAGE_FEATURE_PI / 65536.0;
     x1 = cx + sin(angle) * feature->size / 8.0;
     x2 = cx - sin(angle) * feature->size / 8.0;
@@ -225,7 +246,7 @@ static int maage_feature_vein(maage_generation_context *context, const maage_ore
                     dy = (by + 0.5 - y) / radius;
                     dz = (bz + 0.5 - z) / radius;
                     if (dx * dx + dy * dy + dz * dz >= 1.0) continue;
-                    result = maage_generation_write(context, bx, by, bz, feature->state, MAAGE_GENERATION_WRITE_STONE);
+                    result = maage_generation_write(context, bx, by, bz, MAAGE_CONTENT_ID(ids, feature->state), MAAGE_GENERATION_WRITE_STONE);
                     if (result < 0) return -1;
                     changed |= result;
                 }
@@ -233,6 +254,7 @@ static int maage_feature_vein(maage_generation_context *context, const maage_ore
     return changed;
 }
 maage_status maage_generation_underground(maage_generation_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
     const maage_ore_feature *feature;
     unsigned long random;
     size_t index;
@@ -278,7 +300,7 @@ maage_status maage_generation_underground(maage_generation_context *context) {
                         local_x = x + dx - context->chunk->x * 16;
                         local_z = z + dz - context->chunk->z * 16;
                         if (local_x < 0 || local_x >= 16 || local_z < 0 || local_z >= 16 || y + dy < 5 || y + dy >= context->columns[local_z * 16 + local_x].height - 1) continue;
-                        result = maage_generation_write(context, x + dx, y + dy, z + dz, dy >= 0 ? MAAGE_STATE_AIR : (lava ? MAAGE_STATE_LAVA : MAAGE_STATE_WATER), MAAGE_GENERATION_WRITE_NATURAL);
+                        result = maage_generation_write(context, x + dx, y + dy, z + dz, dy >= 0 ? ids->state_air : (lava ? ids->state_lava : ids->state_water), MAAGE_GENERATION_WRITE_NATURAL);
                         if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
                         changed |= result;
                     }

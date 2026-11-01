@@ -150,13 +150,14 @@ maage_status maage_crafting_click(maage_crafting_container *container, maage_inv
     return maage_status_failed(result) ? result : outcome;
 }
 int maage_crafting_accessible(const maage_crafting_container *container, const maage_player *player, const maage_world *world) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *state;
     double dx, dy, dz;
     if (!container || !player || !world || container->closing) return 0;
     if (container->kind == MAAGE_CONTAINER_PLAYER) return 1;
     if (container->kind != MAAGE_CONTAINER_TABLE || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(container->x), maage_world_chunk_coordinate(container->z))) return 0;
     state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, container->x, container->y, container->z));
-    if (!state || state->block_id != MAAGE_BLOCK_CRAFTING_TABLE) return 0;
+    if (!state || state->block_id != ids->block_crafting_table) return 0;
     dx = player->position[0] - (container->x + 0.5);
     dy = player->position[1] - (container->y + 0.5);
     dz = player->position[2] - (container->z + 0.5);

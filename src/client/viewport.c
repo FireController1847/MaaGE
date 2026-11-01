@@ -721,7 +721,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_set_content(ui, items, blocks, resources.inventory_grass_color, resources.uv);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_frontend_create(ui, instance, items, &frontend, trace);
+    operation = maage_client_frontend_create(ui, instance, content, &frontend, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_finalize(ui);
     if (maage_status_failed(operation)) goto done;
@@ -1217,7 +1217,7 @@ choose_world:
                     last_sound_sequence = event.sequence;
                     if ((latest.tick <= event.tick || latest.tick - event.tick <= MAAGE_CLIENT_SOUND_MAX_AGE_TICKS) && (event.emitted_at < 0 || now - event.emitted_at <= MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS)) {
                         if (event.kind == MAAGE_EVENT_PICKUP) (void) maage_client_item_entities_pickup(item_entities, &event, now);
-                        if (maage_status_code(maage_client_prediction_observe_sound(&prediction, &event)) == MAAGE_STATUS_SUCCESS) continue;
+                        if (maage_status_code(maage_client_prediction_observe_sound(&prediction, blocks, &event)) == MAAGE_STATUS_SUCCESS) continue;
                         if (audio) (void) maage_client_audio_service_event(audio, &event.sound, trace);
                     }
                 }

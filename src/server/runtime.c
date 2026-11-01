@@ -229,6 +229,7 @@ static void server_service_container(maage_server_runtime *runtime) {
 }
 
 static void server_record_action(maage_server_runtime *runtime, int placing) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_content_blocks(runtime->content));
     unsigned int i = runtime->action_cursor, n;
     int dx, dz;
     maage_world_target *target = &runtime->actions[i].target;
@@ -236,7 +237,7 @@ static void server_record_action(maage_server_runtime *runtime, int placing) {
     runtime->actions[i].available = 1;
     runtime->actions[i].placing = placing;
     *target = placing ? runtime->game.last_place : runtime->game.last_break;
-    runtime->actions[i].replacement = placing ? runtime->game.last_placed_state : MAAGE_STATE_AIR;
+    runtime->actions[i].replacement = placing ? runtime->game.last_placed_state : ids->state_air;
     runtime->actions[i].tick = runtime->game.ticks;
     runtime->actions[i].command_sequence = runtime->gameplay_command_sequence;
     runtime->actions[i].completed_at = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
@@ -683,7 +684,7 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     items = maage_content_items(runtime->content);
     memset(&runtime->record, 0, sizeof(runtime->record));
     error[0] = 0;
-    result = maage_world_store_open(runtime->config.instance_root, runtime->config.world_id, runtime->config.create_world, runtime->config.world_name, runtime->config.has_seed ? &runtime->config.seed : NULL, runtime->config.generation_policy, items, &runtime->store, &runtime->record, error, trace);
+    result = maage_world_store_open(runtime->config.instance_root, runtime->config.world_id, runtime->config.create_world, runtime->config.world_name, runtime->config.has_seed ? &runtime->config.seed : NULL, runtime->config.generation_policy, runtime->content, &runtime->store, &runtime->record, error, trace);
     if (maage_status_failed(result)) {
         maage_log_trace_status(MAAGE_LOG_ERROR, "maage.server.world", result, trace, "%s", error);
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_OPEN);

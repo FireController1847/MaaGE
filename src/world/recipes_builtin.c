@@ -25,63 +25,80 @@ static maage_status builtin_recipe(maage_recipe_registry *registry, unsigned int
     return maage_recipe_registry_register(registry, &recipe, NULL);
 }
 maage_status maage_recipe_registry_create_builtin(const maage_item_registry *items, maage_recipe_registry **output) {
-    static const maage_item_id materials[5] = {MAAGE_BLOCK_PLANKS, MAAGE_BLOCK_COBBLESTONE,
-                                               MAAGE_ITEM_IRON_INGOT, MAAGE_ITEM_DIAMOND, MAAGE_ITEM_GOLD_INGOT};
-    static const maage_item_id blocks[8] = {MAAGE_BLOCK_GOLD_BLOCK, MAAGE_BLOCK_IRON_BLOCK,
-                                            MAAGE_BLOCK_DIAMOND_BLOCK, MAAGE_BLOCK_LAPIS_BLOCK, MAAGE_BLOCK_EMERALD_BLOCK,
-                                            MAAGE_BLOCK_REDSTONE_BLOCK, MAAGE_BLOCK_COAL_BLOCK, MAAGE_BLOCK_SNOW_BLOCK};
-    static const maage_item_id resources[8] = {MAAGE_ITEM_GOLD_INGOT, MAAGE_ITEM_IRON_INGOT,
-                                               MAAGE_ITEM_DIAMOND, MAAGE_ITEM_LAPIS, MAAGE_ITEM_EMERALD, MAAGE_ITEM_REDSTONE,
-                                               MAAGE_ITEM_COAL, MAAGE_ITEM_SNOWBALL};
+    const maage_builtin_ids *ids = maage_item_registry_builtin_ids(items);
+    maage_item_id materials[5];
+    maage_item_id blocks[8];
+    maage_item_id resources[8];
     static const char *const patterns[3] = {"AAA B  B ", "ABB", "AAAB B"};
     static const unsigned int widths[3] = {3, 1, 2};
     maage_recipe_choice choices[3];
     maage_recipe_registry *registry;
     maage_status result;
     unsigned int i, family;
-    if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
-    *output = NULL;
+    if (output) *output = NULL;
+    if (!ids || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
+    resources[0] = ids->item_gold_ingot;
+    resources[1] = ids->item_iron_ingot;
+    resources[2] = ids->item_diamond;
+    resources[3] = ids->item_lapis;
+    resources[4] = ids->item_emerald;
+    resources[5] = ids->item_redstone;
+    resources[6] = ids->item_coal;
+    resources[7] = ids->item_snowball;
+    blocks[0] = ids->item_gold_block;
+    blocks[1] = ids->item_iron_block;
+    blocks[2] = ids->item_diamond_block;
+    blocks[3] = ids->item_lapis_block;
+    blocks[4] = ids->item_emerald_block;
+    blocks[5] = ids->item_redstone_block;
+    blocks[6] = ids->item_coal_block;
+    blocks[7] = ids->item_snow_block;
+    materials[0] = ids->item_planks;
+    materials[1] = ids->item_cobblestone;
+    materials[2] = ids->item_iron_ingot;
+    materials[3] = ids->item_diamond;
+    materials[4] = ids->item_gold_ingot;
     result = maage_recipe_registry_create(items, &registry);
     if (maage_status_failed(result)) return result;
     memset(choices, 0, sizeof(choices));
     for (i = 0; i < 3; ++i) {
-        choices[0].item = MAAGE_BLOCK_LOG;
+        choices[0].item = ids->item_log;
         choices[0].metadata = i;
-        result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 1, "A", choices, MAAGE_BLOCK_PLANKS, 4, i);
+        result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 1, "A", choices, ids->item_planks, 4, i);
         if (maage_status_failed(result)) goto failed;
     }
-    choices[0].item = MAAGE_BLOCK_PLANKS;
+    choices[0].item = ids->item_planks;
     choices[0].metadata = MAAGE_RECIPE_METADATA_ANY;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 2, "AA", choices, MAAGE_ITEM_STICK, 4, 0);
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 2, "AA", choices, ids->item_stick, 4, 0);
     if (maage_status_failed(result)) goto failed;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, "AAAA", choices, MAAGE_BLOCK_CRAFTING_TABLE, 1, 0);
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, "AAAA", choices, ids->item_crafting_table, 1, 0);
     if (maage_status_failed(result)) goto failed;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 3, 2, "A A A ", choices, MAAGE_ITEM_BOWL, 4, 0);
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 3, 2, "A A A ", choices, ids->item_bowl, 4, 0);
     if (maage_status_failed(result)) goto failed;
-    choices[1].item = MAAGE_ITEM_STICK;
+    choices[1].item = ids->item_stick;
     for (i = 0; i < 5; ++i) {
         choices[0].item = materials[i];
         choices[0].metadata = i == 0 ? MAAGE_RECIPE_METADATA_ANY : 0;
         for (family = 0; family < 3; ++family) {
-            result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, widths[family], 3, patterns[family], choices, MAAGE_ITEM_TOOL_BASE + i * 3 + family, 1, 0);
+            result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, widths[family], 3, patterns[family], choices, ids->tools[i][family], 1, 0);
             if (maage_status_failed(result)) goto failed;
         }
     }
-    choices[0].item = MAAGE_ITEM_COAL;
+    choices[0].item = ids->item_coal;
     choices[0].metadata = MAAGE_RECIPE_METADATA_ANY;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 2, "AB", choices, MAAGE_BLOCK_TORCH, 4, 0);
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 2, "AB", choices, ids->item_torch, 4, 0);
     if (maage_status_failed(result)) goto failed;
-    choices[0].item = MAAGE_BLOCK_SAND;
+    choices[0].item = ids->item_sand;
     choices[0].metadata = 0;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, "AAAA", choices, MAAGE_BLOCK_SANDSTONE, 1, 0);
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, "AAAA", choices, ids->item_sandstone, 1, 0);
     if (maage_status_failed(result)) goto failed;
-    choices[0].item = MAAGE_ITEM_IRON_INGOT;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, " AA ", choices, MAAGE_ITEM_SHEARS, 1, 0);
+    choices[0].item = ids->item_iron_ingot;
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, " AA ", choices, ids->item_shears, 1, 0);
     if (maage_status_failed(result)) goto failed;
-    choices[0].item = MAAGE_BLOCK_BROWN_MUSHROOM;
-    choices[1].item = MAAGE_BLOCK_RED_MUSHROOM;
-    choices[2].item = MAAGE_ITEM_BOWL;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPELESS, 3, 1, "ABC", choices, MAAGE_ITEM_MUSHROOM_STEW, 1, 0);
+    choices[0].item = ids->item_brown_mushroom;
+    choices[1].item = ids->item_red_mushroom;
+    choices[2].item = ids->item_bowl;
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPELESS, 3, 1, "ABC", choices, ids->item_mushroom_stew, 1, 0);
     if (maage_status_failed(result)) goto failed;
     for (i = 0; i < 8; ++i) {
         choices[0].item = resources[i];
@@ -94,11 +111,11 @@ maage_status maage_recipe_registry_create_builtin(const maage_item_registry *ite
         result = builtin_recipe(registry, MAAGE_RECIPE_SHAPELESS, 1, 1, "A", choices, resources[i], 9, 0);
         if (maage_status_failed(result)) goto failed;
     }
-    choices[0].item = MAAGE_ITEM_GOLD_NUGGET;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 3, 3, "AAAAAAAAA", choices, MAAGE_ITEM_GOLD_INGOT, 1, 0);
+    choices[0].item = ids->item_gold_nugget;
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 3, 3, "AAAAAAAAA", choices, ids->item_gold_ingot, 1, 0);
     if (maage_status_failed(result)) goto failed;
-    choices[0].item = MAAGE_ITEM_GOLD_INGOT;
-    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPELESS, 1, 1, "A", choices, MAAGE_ITEM_GOLD_NUGGET, 9, 0);
+    choices[0].item = ids->item_gold_ingot;
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPELESS, 1, 1, "A", choices, ids->item_gold_nugget, 9, 0);
     if (maage_status_failed(result)) goto failed;
     result = maage_recipe_registry_finalize(registry);
     if (maage_status_failed(result)) goto failed;
