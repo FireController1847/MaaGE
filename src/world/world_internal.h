@@ -7,7 +7,13 @@
 #include "maage/jobs.h"
 #include "maage/environment.h"
 #include "maage/random_ticks.h"
+#include "maage/content.h"
+#include "maage/furnace.h"
 #define MAAGE_SECTION_VOLUME 4096
+maage_status maage_content_register_state(maage_block_registry *registry, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, unsigned int metadata, int texture);
+maage_status maage_furnace_content_blocks(maage_block_registry *registry, const maage_content_config *config);
+maage_status maage_item_builtin_placement(const maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
+maage_status maage_furnace_content_items(maage_item_registry *registry, const maage_block_registry *blocks, maage_builtin_ids *ids);
 
 maage_builtin_ids *maage_block_registry_initialize_ids(maage_block_registry *registry);
 maage_status maage_block_registry_bind_items(maage_block_registry *registry, const struct maage_item_registry *items);

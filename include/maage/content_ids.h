@@ -10,6 +10,54 @@
  * this table through const accessors; publication/finalization ends mutation.
  * Array indices below describe properties, never content identities. */
 typedef struct maage_builtin_ids {
+    unsigned long state_red_sand;
+    unsigned long block_furnace, block_lit_furnace, item_furnace, furnaces[2][4];
+    unsigned long block_glass, state_glass, item_glass;
+    unsigned long block_clay, state_clay, item_clay;
+    unsigned long block_hardened_clay, state_hardened_clay, item_hardened_clay;
+    unsigned long block_netherrack, state_netherrack, item_netherrack;
+    unsigned long block_nether_brick, state_nether_brick, item_nether_brick;
+    unsigned long block_quartz_ore, state_quartz_ore, item_quartz_ore;
+    unsigned long block_log2, state_log2, item_log2;
+    unsigned long block_chest, state_chest, item_chest;
+    unsigned long block_trapped_chest, state_trapped_chest, item_trapped_chest;
+    unsigned long block_bookshelf, state_bookshelf, item_bookshelf;
+    unsigned long block_fence, state_fence, item_fence;
+    unsigned long block_fence_gate, state_fence_gate, item_fence_gate;
+    unsigned long block_wooden_pressure_plate, state_wooden_pressure_plate, item_wooden_pressure_plate;
+    unsigned long block_trapdoor, state_trapdoor, item_trapdoor;
+    unsigned long block_wooden_slab, state_wooden_slab, item_wooden_slab;
+    unsigned long block_oak_stairs, state_oak_stairs, item_oak_stairs;
+    unsigned long block_spruce_stairs, state_spruce_stairs, item_spruce_stairs;
+    unsigned long block_birch_stairs, state_birch_stairs, item_birch_stairs;
+    unsigned long block_jungle_stairs, state_jungle_stairs, item_jungle_stairs;
+    unsigned long block_acacia_stairs, state_acacia_stairs, item_acacia_stairs;
+    unsigned long block_dark_oak_stairs, state_dark_oak_stairs, item_dark_oak_stairs;
+    unsigned long block_jukebox, state_jukebox, item_jukebox;
+    unsigned long block_noteblock, state_noteblock, item_noteblock;
+    unsigned long block_daylight_detector, state_daylight_detector, item_daylight_detector;
+    unsigned long block_brown_mushroom_block, state_brown_mushroom_block, item_brown_mushroom_block;
+    unsigned long block_red_mushroom_block, state_red_mushroom_block, item_red_mushroom_block;
+    unsigned long item_clay_ball;
+    unsigned long item_brick;
+    unsigned long item_netherbrick;
+    unsigned long item_dye;
+    unsigned long item_quartz;
+    unsigned long item_porkchop;
+    unsigned long item_cooked_porkchop;
+    unsigned long item_beef;
+    unsigned long item_cooked_beef;
+    unsigned long item_chicken;
+    unsigned long item_cooked_chicken;
+    unsigned long item_fish;
+    unsigned long item_cooked_fish;
+    unsigned long item_potato;
+    unsigned long item_baked_potato;
+    unsigned long item_blaze_rod;
+    unsigned long item_bucket;
+    unsigned long item_lava_bucket;
+    unsigned long item_wooden_sword;
+    unsigned long item_wooden_hoe;
     unsigned long block_air;
     unsigned long block_stone;
     unsigned long block_grass;
@@ -162,7 +210,7 @@ typedef struct maage_builtin_ids {
     unsigned long state_redstone_block;
     unsigned long state_coal_block;
     unsigned long state_snow_block;
-    unsigned long leaves[16], saplings[16], planks[3], torches[6], logs[12];
+    unsigned long leaves[16], saplings[16], planks[6], torches[6], logs[12], logs2[12];
     unsigned long water[16], lava[16], cactus[16], biome_grass[6], tools[5][3];
 } maage_builtin_ids;
 

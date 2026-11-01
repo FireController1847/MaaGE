@@ -3,21 +3,24 @@
 #include "maage/minecraft_assets.h"
 #include "maage/storage.h"
 #include "maage/log.h"
+#include "maage/time.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MAAGE_ENVIRONMENT_QUADS 64
+#define MAAGE_ENVIRONMENT_PARTICLES 256U
+#define MAAGE_ENVIRONMENT_QUADS (MAAGE_ENVIRONMENT_PARTICLES + 64U)
 typedef struct maage_client_environment_resource {
     const char *name;
     int x, y, width, height;
 } maage_client_environment_resource;
-static const maage_client_environment_resource maage_client_environment_resources[5] = {
+static const maage_client_environment_resource maage_client_environment_resources[6] = {
     {"sun", 0, 64, 32, 32},
     {"moon_phases", 0, 0, 128, 64},
     {"rain", 128, 0, 64, 256},
     {"snow", 192, 0, 64, 256},
-    {"underwater", 32, 64, 16, 16}};
+    {"underwater", 32, 64, 16, 16},
+    {"particles", 0, 96, 128, 128}};
 struct maage_client_environment {
     maage_renderer *renderer;
     maage_render_texture *texture;
@@ -27,7 +30,14 @@ struct maage_client_environment {
     maage_render_ui_data sky, weather;
     maage_status load_status;
     unsigned int failed_resources;
-    unsigned char available[5];
+    unsigned char available[6];
+    struct {
+        double position[3], age, lifetime;
+        int x, y, z, smoke, active;
+    } particles[MAAGE_ENVIRONMENT_PARTICLES];
+    unsigned int particle_cursor;
+    unsigned long particle_random, particle_tick_low, particle_tick_high, particle_session, particle_world;
+    double particle_time;
     float water_brightness;
 };
 static void maage_client_environment_quad(maage_render_ui_data *batch, float x, float y, float width, float height, float u, float v, float uv_width, float uv_height, float alpha) {
@@ -71,12 +81,12 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
     atlas.pixels = (unsigned char *) calloc(256, atlas.stride);
     if (!atlas.pixels) goto done;
     view->water_brightness = 1;
-    for (i = 0; i < 5; ++i) {
+    for (i = 0; i < 6; ++i) {
         maage_status_trace_init(&source_trace);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS);
         resource = &maage_client_environment_resources[i];
-        strcpy(name, i == 4 ? "minecraft/textures/misc/" : "minecraft/textures/environment/");
+        strcpy(name, i == 5 ? "minecraft/textures/particle/" : (i == 4 ? "minecraft/textures/misc/" : "minecraft/textures/environment/"));
         strcat(name, resource->name);
         strcat(name, ".png");
         status = maage_minecraft_asset_path(application_data, name, path, sizeof(path), &source_trace);
@@ -258,6 +268,109 @@ static void maage_client_environment_water(maage_client_environment *view, float
         }
 }
 
+static unsigned long maage_client_particle_random(maage_client_environment *view, unsigned long bound) {
+    view->particle_random = (view->particle_random * 1664525UL + 1013904223UL) & 0xffffffffUL;
+    return (view->particle_random >> 8) % bound;
+}
+/* Display sampling is bounded and independent of Server simulation. Only the
+ * presentation replica is read; paused/duplicate snapshots never emit twice.
+ * This visual pool limits particles, never the number of simulated furnaces. */
+static void maage_client_environment_particles(maage_client_environment *view, const maage_session_snapshot *snapshot, const maage_world *visual, const double camera[3], const float matrix[16], float width, float height) {
+    const maage_block_registry *blocks = maage_world_registry(visual);
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    const maage_block_state_definition *state;
+    maage_world_target hit;
+    maage_status result;
+    double now = maage_time_monotonic_seconds(), dt = now - view->particle_time;
+    double direction[3], projected[3], distance, size, fade, offset;
+    float u, v;
+    unsigned int i, axis, pair, index, frame;
+    int x, y, z;
+    size_t first;
+    if (!view->available[5]) return;
+    if (view->particle_session != snapshot->session_epoch || view->particle_world != snapshot->world_epoch || snapshot->environment.ticks_high < view->particle_tick_high || (snapshot->environment.ticks_high == view->particle_tick_high && snapshot->environment.ticks_low < view->particle_tick_low)) {
+        memset(view->particles, 0, sizeof(view->particles));
+        view->particle_session = snapshot->session_epoch;
+        view->particle_world = snapshot->world_epoch;
+        view->particle_random = 0x7427UL;
+        dt = 0;
+    }
+    view->particle_time = now;
+    if (dt < 0 || snapshot->paused) dt = 0;
+    if (dt > 0.2) dt = 0.2;
+    if (!snapshot->paused && (view->particle_tick_low != snapshot->environment.ticks_low || view->particle_tick_high != snapshot->environment.ticks_high)) {
+        view->particle_tick_low = snapshot->environment.ticks_low;
+        view->particle_tick_high = snapshot->environment.ticks_high;
+        for (i = 0; i < 1000U; ++i) {
+            x = (int) floor(snapshot->player.player.position[0]) + (int) maage_client_particle_random(view, 16);
+            x -= (int) maage_client_particle_random(view, 16);
+            y = (int) floor(snapshot->player.player.position[1]) + (int) maage_client_particle_random(view, 16);
+            y -= (int) maage_client_particle_random(view, 16);
+            z = (int) floor(snapshot->player.player.position[2]) + (int) maage_client_particle_random(view, 16);
+            z -= (int) maage_client_particle_random(view, 16);
+            if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
+            state = maage_block_registry_state(blocks, maage_world_get(visual, x, y, z));
+            if (!state || state->block_id != ids->block_lit_furnace) continue;
+            offset = maage_client_particle_random(view, 65536UL) / 65536.0 * 0.6 - 0.3;
+            for (pair = 0; pair < 2; ++pair) {
+                index = view->particle_cursor++ % MAAGE_ENVIRONMENT_PARTICLES;
+                view->particles[index].x = x;
+                view->particles[index].y = y;
+                view->particles[index].z = z;
+                view->particles[index].position[0] = x + 0.5;
+                view->particles[index].position[1] = y + maage_client_particle_random(view, 65536UL) / 65536.0 * 0.375;
+                view->particles[index].position[2] = z + 0.5;
+                if (state->metadata & 1U) {
+                    view->particles[index].position[0] += state->metadata == 1 ? 0.52 : -0.52;
+                    view->particles[index].position[2] += offset;
+                } else {
+                    view->particles[index].position[2] += state->metadata == 2 ? 0.52 : -0.52;
+                    view->particles[index].position[0] += offset;
+                }
+                view->particles[index].age = 0;
+                view->particles[index].lifetime = 0.4 + maage_client_particle_random(view, 65536UL) / 65536.0 * 1.2;
+                view->particles[index].smoke = pair == 0;
+                view->particles[index].active = 1;
+            }
+        }
+    }
+    for (i = 0; i < MAAGE_ENVIRONMENT_PARTICLES; ++i) {
+        if (!view->particles[i].active) continue;
+        state = maage_block_registry_state(blocks, maage_world_get(visual, view->particles[i].x, view->particles[i].y, view->particles[i].z));
+        view->particles[i].age += dt;
+        if (!state || state->block_id != ids->block_lit_furnace || view->particles[i].age >= view->particles[i].lifetime || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(view->particles[i].x), maage_world_chunk_coordinate(view->particles[i].z))) {
+            view->particles[i].active = 0;
+            continue;
+        }
+        view->particles[i].position[1] += dt * (view->particles[i].smoke ? 0.4 : 0.05);
+        for (axis = 0; axis < 3; ++axis)
+            direction[axis] = view->particles[i].position[axis] - camera[axis];
+        distance = sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+        if (distance < 0.05 || distance > 24) continue;
+        result = maage_world_raycast(visual, camera, direction, distance - 0.02, &hit);
+        if (maage_status_failed(result) || maage_status_code(result) == MAAGE_STATUS_SUCCESS) continue;
+        projected[0] = matrix[12];
+        projected[1] = matrix[13];
+        projected[2] = matrix[15];
+        for (axis = 0; axis < 3; ++axis) {
+            projected[0] += matrix[axis * 4] * view->particles[i].position[axis];
+            projected[1] += matrix[axis * 4 + 1] * view->particles[i].position[axis];
+            projected[2] += matrix[axis * 4 + 3] * view->particles[i].position[axis];
+        }
+        if (projected[2] < 0.1) continue;
+        fade = view->particles[i].age / view->particles[i].lifetime;
+        size = width * sqrt(matrix[0] * matrix[0] + matrix[4] * matrix[4] + matrix[8] * matrix[8]) * (view->particles[i].smoke ? 0.1 * (1 + fade) : 0.1 * (1 - fade * fade * 0.5)) / projected[2];
+        frame = view->particles[i].smoke ? 7U - (unsigned int) (fade * 8) : 48U;
+        u = (float) (frame % 16U) * 8 / 256;
+        v = (96.0f + (float) (frame / 16U) * 8) / 256;
+        first = view->weather.vertex_count;
+        maage_client_environment_quad(&view->weather, (float) (width * 0.5 * (1 + projected[0] / projected[2]) - size * 0.5), (float) (height * 0.5 * (1 - projected[1] / projected[2]) - size * 0.5), (float) size, (float) size, u, v, 8.0f / 256, 8.0f / 256, 1);
+        if (view->particles[i].smoke)
+            for (axis = 0; axis < 4; ++axis)
+                view->weather_vertices[first + axis].color[0] = view->weather_vertices[first + axis].color[1] = view->weather_vertices[first + axis].color[2] = 0.3f;
+    }
+}
+
 maage_status maage_client_environment_update(maage_client_environment *view, maage_renderer *renderer, const maage_session_snapshot *snapshot, float width, float height, const float view_projection[16], const maage_world *visual, const double camera[3], double yaw, double pitch, int first_person, int radius) {
     const maage_client_environment_resource *resource;
     const maage_environment_state *state;
@@ -299,6 +412,7 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
         if (maage_status_failed(result)) return result;
         view->weather.after_foreground = 1;
         if (first_person && view->available[4]) maage_client_environment_water(view, width, height, yaw, pitch, view->water_brightness);
+        maage_client_environment_particles(view, snapshot, visual, camera, view_projection, width, height);
         return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);
     }
     result = maage_renderer_set_fog(renderer, 0, 0, 0, 0);
@@ -334,5 +448,6 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
             if (cold) x += (float) sin(phase + i) * 4;
             maage_client_environment_quad(&view->weather, x, y, size, cold ? size : 18, (float) resource->x / 256, (float) resource->y / 256, (float) resource->width / 256, (float) resource->height / 256, alpha);
         }
+    maage_client_environment_particles(view, snapshot, visual, camera, view_projection, width, height);
     return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);
 }

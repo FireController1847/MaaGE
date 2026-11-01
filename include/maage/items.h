@@ -17,7 +17,7 @@ enum {
     MAAGE_ITEM_MODEL_SPRITE = 1
 };
 /* Item identities are allocated independently of blocks and states. */
-#define MAAGE_ITEM_TEXTURE_COUNT 35U
+#define MAAGE_ITEM_TEXTURE_COUNT 59U
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
 typedef struct maage_item_definition {
@@ -26,13 +26,14 @@ typedef struct maage_item_definition {
     int has_block;
     maage_block_id block_id;
     maage_block_state_id placement_state_id, icon_state_id;
+    unsigned long fuel_ticks; /* Initialization hint used to populate the separate fuel registry. */
     unsigned int max_stack, durability, tool_class, tool_level, max_metadata;
     /* Nonzero durability is the inclusive maximum usable damage value. */
     double mining_speed;
     unsigned int food_hunger, food_ticks; /* food_ticks == 0 is not edible. */
     double food_saturation;
     int food_always_edible;
-    maage_item_id food_remainder; /* Optional single-stack food remainder; max_stack must be one. */
+    maage_item_id container_item; /* Optional consumption remainder (food/fuel); max_stack must be one. */
     unsigned int model;           /* Shared numeric presentation category. */
     unsigned int texture_index;   /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;

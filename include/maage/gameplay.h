@@ -18,6 +18,7 @@ enum {
 typedef struct maage_gameplay_save {
     maage_inventory inventory;
     maage_item_stack crafting_inputs[MAAGE_CRAFTING_CELLS]; /* Unreturned inputs only; no saved container. */
+    unsigned long experience, experience_random;
     unsigned int mode, health, hunger;
     int air; /* -19..300 owner ticks; negative phase precedes drowning damage. */
     double saturation, exhaustion, fall_distance;
@@ -32,6 +33,7 @@ typedef struct maage_gameplay {
     maage_inventory inventory;
     maage_crafting_container crafting;
     maage_food_use food;
+    unsigned long experience, experience_random;
     unsigned int mode, health, hunger;
     int air; /* -19..300 owner ticks; negative phase precedes drowning damage. */
     double saturation, exhaustion, fall_distance;
@@ -78,9 +80,12 @@ maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
 /* Foundation respawn returns to the session's start and retains inventory;
  * persistent spawn points and full death-drop rules are deferred. */
 maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player, const maage_world *world);
-/* Player-only checkpoint; World owns and checkpoints entities independently. */
+/* Owner-only award with independent persistent fractional rounding. */
+maage_status maage_gameplay_add_experience(maage_gameplay *game, double amount);
+void maage_gameplay_experience_level(unsigned long experience, unsigned long *level, double *progress);
 maage_status maage_gameplay_destroy(maage_gameplay *game);
 maage_status maage_gameplay_save_clear(maage_gameplay_save *save);
+/* Player-only checkpoint; World owns and checkpoints entities independently. */
 maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
 maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save);
 /* Slot == MAAGE_INVENTORY_SLOTS selects the inventory cursor. */

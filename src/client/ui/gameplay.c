@@ -141,10 +141,25 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui) {
     for (i = 0; i < MAAGE_HOTBAR_SLOTS; ++i)
         maage_client_ui_stack(ui, &ui->snapshot.player.inventory.slots[i], x + 3 + (float) i * 20, y + 3);
     if (ui->snapshot.player.game_mode == MAAGE_GAME_MODE_SURVIVAL) {
-        /* Vitals sit directly above the hotbar; no experience row is rendered. */
-        maage_client_ui_status(ui, x, y - 11, ui->snapshot.player.health, 0);
-        maage_client_ui_status(ui, x + 173, y - 11, ui->snapshot.player.hunger, 1);
-        maage_client_ui_air(ui, x + 173, y - 21);
+        unsigned long level;
+        double progress;
+        char label[16];
+        float edge = (float) ui->resources.atlas_edge;
+        maage_gameplay_experience_level(ui->snapshot.player.experience, &level, &progress);
+        rectangle.x = x;
+        rectangle.y = y - 7;
+        rectangle.width = 182;
+        rectangle.height = 5;
+        maage_client_ui_rectangle(ui, rectangle, 0, 64.0f / edge, 182.0f / edge, 69.0f / edge, 1, 1, 1, 1);
+        rectangle.width = (float) (unsigned int) (progress * 183.0);
+        if (rectangle.width > 0) maage_client_ui_rectangle(ui, rectangle, 0, 69.0f / edge, rectangle.width / edge, 74.0f / edge, 1, 1, 1, 1);
+        if (level) {
+            sprintf(label, "%lu", level);
+            maage_client_ui_text(ui, label, x + 91, y - 13, MAAGE_CLIENT_UI_CENTER, 0.5f, 1, 0.125f);
+        }
+        maage_client_ui_status(ui, x, y - 17, ui->snapshot.player.health, 0);
+        maage_client_ui_status(ui, x + 173, y - 17, ui->snapshot.player.hunger, 1);
+        maage_client_ui_air(ui, x + 173, y - 27);
     }
     selected = maage_inventory_selected(&ui->snapshot.player.inventory);
     item = selected && selected->count ? maage_item_registry_get(ui->items, selected->item_id) : NULL;
@@ -182,13 +197,17 @@ static int maage_client_ui_slot_contains(const maage_client_ui *ui, maage_client
 }
 
 static int maage_client_ui_creative_catalog(const maage_client_ui *ui) {
-    return ui->snapshot.player.game_mode == MAAGE_GAME_MODE_CREATIVE && ui->snapshot.player.crafting.kind != MAAGE_CONTAINER_TABLE;
+    return ui->snapshot.player.game_mode == MAAGE_GAME_MODE_CREATIVE && ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_PLAYER;
 }
 static maage_client_ui_rect maage_client_ui_crafting_slot(maage_client_ui_rect frame, int table, unsigned int slot, int result) {
     maage_client_ui_rect rectangle;
     rectangle.width = rectangle.height = 16;
     rectangle.x = frame.x + (result ? (table ? 124 : 144) : (table ? 30 : 88) + (float) (slot % (table ? 3U : 2U)) * 18);
     rectangle.y = frame.y + (result ? (table ? 35 : 36) : (table ? 17 : 26) + (float) (slot / (table ? 3U : 2U)) * 18);
+    if (table == 2) {
+        rectangle.x = frame.x + (result ? 116 : 56);
+        rectangle.y = frame.y + (result ? 35 : (slot ? 53 : 17));
+    }
     return rectangle;
 }
 static void maage_client_ui_container_slot(maage_client_ui *ui, const maage_client_ui_input *input, unsigned int group, unsigned int slot) {
@@ -241,9 +260,9 @@ static unsigned int maage_client_ui_inventory_input(maage_client_ui *ui, const m
             return 0;
         }
     }
-    table = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE;
+    table = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_FURNACE ? 2 : ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE;
     if (!maage_client_ui_creative_catalog(ui)) {
-        for (slot = 0; slot < (table ? 9U : 4U); ++slot) {
+        for (slot = 0; slot < (table == 2 ? 2U : (table ? 9U : 4U)); ++slot) {
             rectangle = maage_client_ui_crafting_slot(frame, table, slot, 0);
             if (maage_client_ui_slot_contains(ui, rectangle)) {
                 maage_client_ui_container_slot(ui, input, MAAGE_SLOT_CRAFT_INPUT, slot);
@@ -303,8 +322,10 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context) {
     if (!ui->has_snapshot || !ui->items) return;
     frame = maage_client_ui_inventory_frame(ui);
     {
-        float atlas_x = maage_client_ui_creative_catalog(ui) ? 1792.0f : (ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE ? 1536.0f : 256.0f);
-        maage_client_ui_rectangle(ui, frame, atlas_x / ui->resources.atlas_edge, 256.0f / ui->resources.atlas_edge, (atlas_x + frame.width) / ui->resources.atlas_edge, (256.0f + frame.height) / ui->resources.atlas_edge, 1, 1, 1, 1);
+        int furnace = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_FURNACE;
+        float atlas_y = furnace ? 0 : 256;
+        float atlas_x = furnace ? 1536.0f : (maage_client_ui_creative_catalog(ui) ? 1792.0f : (ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE ? 1536.0f : 256.0f));
+        maage_client_ui_rectangle(ui, frame, atlas_x / ui->resources.atlas_edge, atlas_y / ui->resources.atlas_edge, (atlas_x + frame.width) / ui->resources.atlas_edge, (atlas_y + frame.height) / ui->resources.atlas_edge, 1, 1, 1, 1);
     }
     if (maage_client_ui_creative_catalog(ui)) {
         maage_client_ui_text(ui, "Items", frame.x + 8, frame.y + 6, MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
@@ -333,15 +354,38 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context) {
             maage_client_ui_rectangle(ui, rectangle, u / ui->resources.atlas_edge, 0, (u + 12) / ui->resources.atlas_edge, 15.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
         }
     } else {
-        int table = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE;
+        int table = ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_FURNACE ? 2 : ui->snapshot.player.crafting.kind == MAAGE_CONTAINER_TABLE;
         const maage_item_stack *source;
-        maage_client_ui_text(ui, "Crafting", frame.x + (table ? 28 : 86), frame.y + (table ? 6 : 16),
-                             MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
+        maage_client_ui_text(ui, table == 2 ? "Furnace" : "Crafting", frame.x + (table == 2 ? 88 : (table ? 28 : 86)), frame.y + (table ? 6 : 16), table == 2 ? MAAGE_CLIENT_UI_CENTER : MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
         if (table) maage_client_ui_text(ui, "Inventory", frame.x + 8, frame.y + 72, MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);
         else
             maage_client_ui_player_preview(ui, frame);
-        for (slot = 0; slot <= (table ? 9U : 4U); ++slot) {
-            int result = slot == (table ? 9U : 4U);
+        if (table == 2) {
+            const maage_furnace_state *furnace = &ui->snapshot.player.furnace;
+            double fraction = ui->snapshot.paused ? 0 : (maage_time_monotonic_seconds() - (ui->snapshot.next_tick_at - 0.05)) * 20.0;
+            float edge = (float) ui->resources.atlas_edge;
+            float flame, arrow;
+            if (fraction < 0) fraction = 0;
+            if (fraction > 1) fraction = 1;
+            flame = furnace->duration ? (float) ((furnace->burn > fraction ? furnace->burn - fraction : 0) * 12.0 / furnace->duration) : 0;
+            arrow = (float) ((furnace->cook + (furnace->cook && furnace->burn ? fraction : 0)) * 24.0 / MAAGE_FURNACE_COOK_TICKS);
+            if (furnace->burn) {
+                rectangle.x = frame.x + 56;
+                rectangle.y = frame.y + 48 - flame;
+                rectangle.width = 14;
+                rectangle.height = flame + 1;
+                maage_client_ui_rectangle(ui, rectangle, (1536.0f + 176) / edge, (12 - flame) / edge, (1536.0f + 190) / edge, 13.0f / edge, 1, 1, 1, 1);
+            }
+            if (arrow > 0) {
+                rectangle.x = frame.x + 79;
+                rectangle.y = frame.y + 34;
+                rectangle.width = arrow + 1;
+                rectangle.height = 16;
+                maage_client_ui_rectangle(ui, rectangle, (1536.0f + 176) / edge, 14.0f / edge, (1536.0f + 177 + arrow) / edge, 30.0f / edge, 1, 1, 1, 1);
+            }
+        }
+        for (slot = 0; slot <= (table == 2 ? 2U : (table ? 9U : 4U)); ++slot) {
+            int result = slot == (table == 2 ? 2U : (table ? 9U : 4U));
             rectangle = maage_client_ui_crafting_slot(frame, table, result ? 0 : slot, result);
             source = result ? &ui->snapshot.player.crafting.output : &ui->snapshot.player.crafting.inputs[slot];
             /* Inputs and result belong to one copied revision. Pending input
@@ -486,7 +530,7 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_sessi
         }
     }
     if (snapshot->player.crafting.kind) {
-        maage_client_ui_screen_id desired = snapshot->player.crafting.kind == MAAGE_CONTAINER_TABLE ? MAAGE_CLIENT_UI_CRAFTING_TABLE : MAAGE_CLIENT_UI_INVENTORY;
+        maage_client_ui_screen_id desired = (snapshot->player.crafting.kind == MAAGE_CONTAINER_TABLE || snapshot->player.crafting.kind == MAAGE_CONTAINER_FURNACE) ? MAAGE_CLIENT_UI_CRAFTING_TABLE : MAAGE_CLIENT_UI_INVENTORY;
         if (maage_client_ui_current(ui) != desired) {
             maage_status result;
             /* The Server opens containers only from gameplay; a late snapshot

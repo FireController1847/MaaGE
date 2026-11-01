@@ -24,7 +24,7 @@ typedef struct maage_client_ui_resources {
     unsigned char glyph_width[256];
     int atlas_edge, block_atlas_width, block_atlas_height;
     maage_status load_status, recovery_status;
-    maage_status source_results[7];
+    maage_status source_results[8];
     unsigned int skin_model;
     float skin_uv[4];
     unsigned int failed_resources;

@@ -60,6 +60,8 @@ typedef struct maage_world_store maage_world_store;
 struct maage_environment_state;
 struct maage_random_tick_state;
 struct maage_item_registry;
+struct maage_smelting_registry;
+struct maage_fuel_registry;
 typedef enum maage_chunk_state {
     MAAGE_CHUNK_REQUESTED = 0,
     MAAGE_CHUNK_LOADING,
@@ -75,6 +77,8 @@ typedef enum maage_chunk_state {
 typedef struct maage_world_config {
     const maage_block_registry *registry;
     const struct maage_item_registry *items; /* finalized; borrowed for block drops */
+    const struct maage_smelting_registry *smelting;
+    const struct maage_fuel_registry *fuels;
     const maage_biome_registry *biomes;
     maage_world_seed seed;
     maage_world_store *store; /* borrowed; close after world destruction */

@@ -13,7 +13,7 @@ audio and cross-platform completion require programmer verification.
 | Platform | C90 shared libraries; native Window/Input/Storage/Jobs/Status/Log; Metal/Vulkan rendering and a modern OpenGL scene/UI backend | Modern OpenGL awaits compilation and programmer runtime/platform validation; legacy OpenGL/Software implement smaller subsets; Wayland lacks Client relative capture. |
 | Applications | Independent native Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote transport, administration GUI and Launcher Server management are absent. |
 | World | Numeric registries, deterministic staged generation with coherent biome regions and shared boundary ecology, sparse columns, immutable asynchronous I/O/jobs, environment, scheduled fluids/support and random ticks | Six selected biome categories; transition visuals/runtime costs await programmer verification; no Java seed/save interoperability or migration. |
-| Gameplay | Movement/collision, breaking/placement, provisional vitals, inventory, typed item/falling-block entities, cactus contact damage, sapling/tree growth, food use, transactional 2x2/3x3 crafting | Full Survival progression, mobs, combat and smelting remain incomplete/absent. |
+| Gameplay | Movement/collision, breaking/placement, provisional vitals, inventory, typed item/falling-block entities, cactus contact damage, sapling/tree growth, food use, transactional 2x2/3x3 crafting, persistent furnaces and extraction XP | Full Survival progression, mobs and combat remain incomplete/absent. |
 | Presentation | Title/world management, gameplay/settings/inventory screens, local visual light/meshing, break/placement prediction, shared player skins/perspectives, eating poses, configurable biome blending, audio | Creative has one catalog; unavailable settings/content remain disabled or absent. |
 | Launcher/resources | Microsoft authentication/access verification, encrypted account records, verified local resources, UUID instances and exact local Client selection | No remote distribution or modpack installation system. |
 
@@ -59,10 +59,9 @@ responsive scenes on the primary renderers, not just available textures/shaders.
 
 ### Core Gameplay Completion — Phase 10
 
-Build complete Survival progression on the existing Server: furnaces/smelting,
-food/equipment, damage/combat, experience, passive/hostile mobs, spawning, AI and
-navigation. Reuse current entities, drops, recipes and persistence. Current ingot/
-charcoal crafting availability does not imply Survival smelting exists.
+Build complete Survival progression on the existing Server: broader
+food/equipment, damage/combat, experience orbs/enchanting, passive/hostile mobs, spawning, AI and
+navigation. Reuse current entities, drops, recipes and persistence. Furnaces provide ore/charcoal processing; remaining progression still needs the listed systems.
 
 ### Advanced Gameplay — Phase 11
 

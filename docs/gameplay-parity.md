@@ -12,7 +12,7 @@ the frontend root. Unknown IDs and cycles fail explicitly.
 
 | ID | Screen | Current Layout and Behavior |
 | --- | --- | --- |
-| 0 | Gameplay HUD | Centered hotbar, 24x22 selection, health/hunger at height−33 (no experience row), right-aligned counts and a 16x16 destination-inverted crosshair. Held names last two seconds with a final half-second fade. |
+| 0 | Gameplay HUD | Centered hotbar, 24x22 selection, health/hunger at height−39, experience bar at height−29, right-aligned counts and a 16x16 destination-inverted crosshair. Held names last two seconds with a final half-second fade. |
 | 1 | Pause | Title at Y=40; quarter-height rows for Resume, Options and Save/Quit. |
 | 2 | Options | Two 150-pixel columns, FOV endpoint labels, persistent supported settings and Done navigation. |
 | 3 | Inventory | Survival panel 176x166; player preview at (51,75), 2x2 inputs and result. Creative uses a 195x136 panel, five rows of nine catalog items, hotbar at (9,112), wheel/drag scrollbar. |
@@ -80,7 +80,7 @@ packet owns all necessary state. Ordered unload packets close an interest lifeti
 the replica retains bases until that removal arrives. Reentry starts with a complete
 column. Initial local capacity covers Server residency plus bounded packets in flight;
 remote transports must negotiate an equivalent bound. Packets contain no light arrays,
-scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 18;
+scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 19;
 remote encoding is not implemented.
 
 Snapshots include per-life raw travel/velocity observations and authoritative
@@ -295,8 +295,8 @@ Survival breathing uses the classic eye threshold (nominal fluid height plus
 tick underwater, and at −20 resets to zero and deals two damage through the
 existing environmental damage path. Surfacing restores 300 immediately; Creative,
 death and respawn reset breath. There are no enchantment/potion protections yet.
-The checkpoint retains air and its damage phase; `MGWRLD10` rejects older worlds
-without conversion. Protocol 17 copies air and eye immersion in ordinary snapshots.
+The checkpoint retains air and its damage phase; `MGWRLD11` rejects older worlds
+without conversion. Protocol 19 copies air and eye immersion in ordinary snapshots.
 The Survival HUD draws up to ten filled/popping bubbles above hunger from the latest
 air value; it needs no per-bubble events. GUI scale and the accepted health/hunger
 alignment are unchanged.
@@ -336,9 +336,13 @@ Capacity is reserved before removal and drops become item entities. Repeated
 notifications observe changed states and cannot drop the same block twice.
 [Random ticks and leaf support](random-block-ticks.md) describe separate decay rules.
 
-`MGWRLD10` metadata and `MGCHNK7` chunks are the sole current encodings. Chunks
+`MGWRLD11` metadata and `MGCHNK8` chunks are the sole current encodings. Chunks
 persist fluid/support kinds and remaining delays. Incompatible development worlds
 are rejected without conversion or automatic deletion.
+
+Furnaces reuse screen 12 with the original 176×166 furnace texture, input at
+(56,17), fuel at (56,53), output at (116,35), and authoritative flame/arrow
+progress interpolated by at most one tick. Inventory remains non-pausing.
 
 ## Manual Review
 

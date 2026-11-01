@@ -463,9 +463,16 @@ maage_status maage_block_registry_bind_items(maage_block_registry *registry, con
     for (i = 0; i < registry->block_count; ++i) {
         entry = maage_registry_pages_find(&registry->blocks, (unsigned long) i);
         block = &((maage_block_slot *) *entry)->definition;
+        if (block->id == ids->block_glass) block->drop_count = 0;
+        if (block->id == ids->block_clay) {
+            block->drop_item_id = ids->item_clay_ball;
+            block->drop_count = 4;
+        }
+        if (block->id == ids->block_quartz_ore) block->drop_item_id = ids->item_quartz;
         if (!block->drop_count) continue;
         if (!block->drop_item_id) {
-            if (block->id == ids->block_stone) block->drop_item_id = ids->item_cobblestone;
+            if (block->id == ids->block_lit_furnace) block->drop_item_id = ids->item_furnace;
+            else if (block->id == ids->block_stone) block->drop_item_id = ids->item_cobblestone;
             else if (block->id == ids->block_grass) block->drop_item_id = ids->item_dirt;
             else if (block->id == ids->block_snow_block) block->drop_item_id = ids->item_snowball;
             else block->drop_item_id = maage_item_registry_block_item(items, block->id);

@@ -227,9 +227,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
   never acquire plant support requirements. Preserve each block's distinct rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD10` metadata embeds one checksummed
+  worlds. Canonical UUIDs identify them. `MGWRLD11` metadata embeds one checksummed
   `MGIDMAP1` World dictionary for blocks, states (block identity plus metadata), items
-  and biomes; `MGRGN2` region headers bind its UUID. `MGCHNK7` palettes, stacks and
+  and biomes; `MGRGN2` region headers bind its UUID. `MGCHNK8` palettes, stacks and
   entities carry numeric saved IDs only. Resolve names once at open, retain both
   numeric translation directions, and atomically publish map extensions before jobs
   can save new IDs. Never reinterpret saved IDs or duplicate dictionaries per chunk.
@@ -254,7 +254,10 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   health, loaded table and range. Preflight complete outputs/remainders; bound shift
   crafting. Closure returns inventory then reserved entity overflow; checkpoint only
   unreturned inputs on allocation failure, never an open table/derived result. No table
-  storage, smelting or recipe book is implied. See [crafting](docs/crafting.md).
+  storage or recipe book is implied. Furnace inventories are persistent World-owned
+  block entities; shared container actions never transfer their ownership on closure.
+  Separate finalized numeric smelting/fuel registries drive 200-tick owner processing,
+  with extraction-only fractional XP, lit-state preservation and periodic save snapshots. See [crafting](docs/crafting.md).
 - Sprint eligibility/tap timers are Server-owned; Player owns movement multiplier,
   jump impulse and collision cancellation. Dynamic sprint/world FOV stays independent
   of saved base and fixed hand projection; duplicate snapshots do not restart smoothing.

@@ -174,7 +174,7 @@ disk operations, global barriers, or unconditional remeshing are introduced.
 
 ## Storage Codec Performance
 
-Current `MGCHNK7` region records use numeric saved state/biome IDs and
+Current `MGCHNK8` region records use numeric saved state/biome IDs and
 CRC32 integrity checks. The encoder now discovers the small set of
 distinct block identities using an allocated per-save hash table, sorting only
 unique entries instead of all occupied cells. The decoder copies validated
@@ -221,7 +221,7 @@ detached output column. Tree snow ownership uses two small job-local arrays of
 256 entries, with no persisted tree records or neighbor access. Spawn floor queries
 replay the same tree emitter and snow decisions.
 
-`MGWRLD10`, `MGCHNK7` and `MGRGN2` are the current formats. Existing saved chunks load
+`MGWRLD11`, `MGCHNK8` and `MGRGN2` are the current formats. Existing saved chunks load
 their authoritative blocks and biome identities; they are not regenerated or
 rewritten to adopt a new region model. Only missing chunks use current generation.
 Existing-to-new material, decoration or biome-tint seams can therefore remain,

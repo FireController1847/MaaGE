@@ -1,5 +1,6 @@
 #include "maage/crafting.h"
 #include "maage/entities.h"
+#include "maage/furnace.h"
 #include <string.h>
 
 static maage_status crafting_status(unsigned char code, unsigned char operation) {
@@ -10,7 +11,7 @@ static int stacks_equal(const maage_item_stack *a, const maage_item_stack *b) {
 }
 maage_status maage_crafting_open(maage_crafting_container *container, unsigned int kind, int x, int y, int z) {
     unsigned int i;
-    if (!container || (kind != MAAGE_CONTAINER_PLAYER && kind != MAAGE_CONTAINER_TABLE)) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_OPEN);
+    if (!container || (kind != MAAGE_CONTAINER_PLAYER && kind != MAAGE_CONTAINER_TABLE && kind != MAAGE_CONTAINER_FURNACE)) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_OPEN);
     if (container->kind || container->closing) return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_OPEN);
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
         if (container->inputs[i].count)
@@ -19,6 +20,7 @@ maage_status maage_crafting_open(maage_crafting_container *container, unsigned i
     ++container->identity;
     container->revision = 1;
     container->kind = kind;
+    container->block_identity = 0;
     container->x = x;
     container->y = y;
     container->z = z;
@@ -30,7 +32,7 @@ maage_status maage_crafting_refresh(maage_crafting_container *container, const m
     maage_status result;
     if (!container) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     memset(&container->output, 0, sizeof(container->output));
-    if (!container->kind || container->closing) return crafting_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    if (!container->kind || container->closing || container->kind == MAAGE_CONTAINER_FURNACE) return crafting_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     result = maage_recipe_find(recipes, container->inputs, container->kind == MAAGE_CONTAINER_TABLE ? 3U : 2U, &match);
     if (!maage_status_failed(result)) container->output = match.output;
     return maage_status_failed(result) ? result : crafting_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
@@ -108,7 +110,7 @@ maage_status maage_crafting_click(maage_crafting_container *container, maage_inv
     maage_status result, outcome;
     unsigned int i, width;
     if (!container || !inventory || action < MAAGE_SLOT_PRIMARY || action > MAAGE_SLOT_QUICK_MOVE || group < MAAGE_SLOT_INVENTORY || group > MAAGE_SLOT_CRAFT_RESULT) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
-    if (!container->kind || container->closing) return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MUTATE);
+    if (!container->kind || container->closing || container->kind == MAAGE_CONTAINER_FURNACE) return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MUTATE);
     if (container->revision >= 4294967295UL - 64UL) return crafting_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_MUTATE);
     width = container->kind == MAAGE_CONTAINER_TABLE ? 3U : 2U;
     if ((group == MAAGE_SLOT_INVENTORY && slot >= MAAGE_INVENTORY_SLOTS) ||
@@ -155,9 +157,14 @@ int maage_crafting_accessible(const maage_crafting_container *container, const m
     double dx, dy, dz;
     if (!container || !player || !world || container->closing) return 0;
     if (container->kind == MAAGE_CONTAINER_PLAYER) return 1;
-    if (container->kind != MAAGE_CONTAINER_TABLE || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(container->x), maage_world_chunk_coordinate(container->z))) return 0;
+    if ((container->kind != MAAGE_CONTAINER_TABLE && container->kind != MAAGE_CONTAINER_FURNACE) || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(container->x), maage_world_chunk_coordinate(container->z))) return 0;
     state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, container->x, container->y, container->z));
-    if (!state || state->block_id != ids->block_crafting_table) return 0;
+    if (!state) return 0;
+    if (container->kind == MAAGE_CONTAINER_TABLE && state->block_id != ids->block_crafting_table) return 0;
+    if (container->kind == MAAGE_CONTAINER_FURNACE) {
+        maage_furnace_state furnace;
+        if ((state->block_id != ids->block_furnace && state->block_id != ids->block_lit_furnace) || maage_status_failed(maage_world_furnace_get(world, container->x, container->y, container->z, &furnace)) || furnace.identity != container->block_identity) return 0;
+    }
     dx = player->position[0] - (container->x + 0.5);
     dy = player->position[1] - (container->y + 0.5);
     dz = player->position[2] - (container->z + 0.5);

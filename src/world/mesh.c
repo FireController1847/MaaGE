@@ -438,7 +438,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                     face_limit = crossed ? 4 : MAAGE_FACE_COUNT;
                     material = MAAGE_MESH_MATERIAL_OPAQUE;
                     if (state->fluid_kind == MAAGE_FLUID_WATER || state->block_id == ids->block_ice) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
-                    else if (model != MAAGE_BLOCK_MESH_CUBE || state->block_id == ids->block_cactus || (state->block_id == ids->block_leaves && mode != MAAGE_LEAVES_FAST)) material = MAAGE_MESH_MATERIAL_CUTOUT;
+                    else if (model != MAAGE_BLOCK_MESH_CUBE || state->block_id == ids->block_glass || state->block_id == ids->block_cactus || (state->block_id == ids->block_leaves && mode != MAAGE_LEAVES_FAST)) material = MAAGE_MESH_MATERIAL_CUTOUT;
                     for (axis = 0; axis < 3; ++axis) {
                         shape.minimum[axis] = 0;
                         shape.maximum[axis] = 1;

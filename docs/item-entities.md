@@ -110,9 +110,9 @@ allocation leaves the block intact. Drops never enter inventory directly.
 | Ice, bedrock, air, fluids | No normal item drop |
 
 Registered resources include coal, diamond, redstone, lapis, emerald, flint, apple,
-oak/spruce/birch saplings, snowball and seeds. Sapling growth/placement, crops,
-eating, thrown projectiles, enchantments, XP orbs, fire/lava item damage,
-smelting, mobs and combat are not implemented currently.
+oak/spruce/birch saplings, snowball and seeds. Saplings and eating use owner
+gameplay. Crops, thrown projectiles, enchantments, XP orbs, fire/lava item damage,
+mobs and combat remain future work. Furnace extraction awards player XP directly.
 [Crafting](crafting.md) consumes these registered resources through Server-owned containers.
 
 ## Falling Blocks
@@ -136,7 +136,7 @@ from stationary geometry; async mesh latency can delay that visual handoff.
 
 ## Storage and publication
 
-The sole metadata encoding is `MGWRLD10`; earlier development worlds are rejected
+The sole metadata encoding is `MGWRLD11`; earlier development worlds are rejected
 and must be recreated. Files are never deleted or converted automatically.
 `world.bin` atomically checkpoints player/inventory, environment and all active
 or dormant item entities after successful World flush. Unreturned temporary

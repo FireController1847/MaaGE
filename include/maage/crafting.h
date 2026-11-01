@@ -49,7 +49,8 @@ maage_status maage_recipe_find(const maage_recipe_registry *registry, const maag
 enum {
     MAAGE_CONTAINER_CLOSED = 0,
     MAAGE_CONTAINER_PLAYER = 1,
-    MAAGE_CONTAINER_TABLE = 2
+    MAAGE_CONTAINER_TABLE = 2,
+    MAAGE_CONTAINER_FURNACE = 3
 };
 enum {
     MAAGE_SLOT_INVENTORY = 1,
@@ -62,7 +63,7 @@ enum {
     MAAGE_SLOT_QUICK_MOVE = 3
 };
 typedef struct maage_crafting_container {
-    unsigned long identity, revision;
+    unsigned long identity, revision, block_identity;
     unsigned int kind;
     int closing, x, y, z;
     maage_item_stack inputs[MAAGE_CRAFTING_CELLS], output;

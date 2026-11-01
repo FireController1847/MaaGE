@@ -276,7 +276,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             stack = &snapshot->player.inventory.slots[hotbar];
-            if (target.block_id == ids->block_crafting_table && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+            if ((target.block_id == ids->block_crafting_table || target.block_id == ids->block_furnace || target.block_id == ids->block_lit_furnace) && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
             else result = maage_gameplay_placement(&snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 memset(&prediction->entries[vacant], 0, sizeof(prediction->entries[vacant]));

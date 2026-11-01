@@ -5,6 +5,7 @@
 #include "maage/biome.h"
 #include "maage/items.h"
 #include "maage/crafting.h"
+#include "maage/smelting.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,7 +37,10 @@ extern "C" {
 #define MAAGE_CONTENT_TEXTURE_SPRUCE_PLANKS (MAAGE_CONTENT_TEXTURE_MISSING + 4)
 #define MAAGE_CONTENT_TEXTURE_BIRCH_PLANKS (MAAGE_CONTENT_TEXTURE_MISSING + 5)
 #define MAAGE_CONTENT_TEXTURE_STORAGE (MAAGE_CONTENT_TEXTURE_MISSING + 6)
-#define MAAGE_CONTENT_TEXTURE_ITEMS (MAAGE_CONTENT_TEXTURE_STORAGE + 8)
+#define MAAGE_CONTENT_TEXTURE_FURNACE (MAAGE_CONTENT_TEXTURE_STORAGE + 8)
+#define MAAGE_CONTENT_TEXTURE_FURNACE_EXTRA (MAAGE_CONTENT_TEXTURE_FURNACE + 4)
+#define MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS (MAAGE_CONTENT_TEXTURE_FURNACE_EXTRA + 26)
+#define MAAGE_CONTENT_TEXTURE_ITEMS (MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS + 9)
 #define MAAGE_CONTENT_TEXTURE_COUNT (MAAGE_CONTENT_TEXTURE_ITEMS + MAAGE_ITEM_TEXTURE_COUNT)
 
 typedef struct maage_content maage_content;
@@ -67,6 +71,8 @@ const maage_block_registry *maage_content_blocks(const maage_content *content);
 const maage_biome_registry *maage_content_biomes(const maage_content *content);
 const maage_item_registry *maage_content_items(const maage_content *content);
 const maage_recipe_registry *maage_content_recipes(const maage_content *content);
+const maage_smelting_registry *maage_content_smelting(const maage_content *content);
+const maage_fuel_registry *maage_content_fuels(const maage_content *content);
 maage_status maage_content_destroy(maage_content *content);
 
 #ifdef __cplusplus

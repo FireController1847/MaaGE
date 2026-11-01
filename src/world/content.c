@@ -6,7 +6,7 @@
 /* Shared content definitions serve headless and graphical initialization.
  * Both visit the same numeric registration
  * path; only the optional initialization-time presentation resolver differs. */
-static maage_status maage_content_register_state(maage_block_registry *registry, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, unsigned int metadata, int texture) {
+maage_status maage_content_register_state(maage_block_registry *registry, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, unsigned int metadata, int texture) {
     maage_builtin_ids *ids = maage_block_registry_initialize_ids(registry);
     maage_block_state_definition state;
     const maage_block_definition *definition;
@@ -48,12 +48,24 @@ static maage_status maage_content_register_state(maage_block_registry *registry,
         if (block == ids->block_crafting_table) {
             selected = face == MAAGE_FACE_POSITIVE_Y ? MAAGE_CONTENT_TEXTURE_CRAFTING_TOP : (face == MAAGE_FACE_NEGATIVE_Y ? MAAGE_CONTENT_TEXTURE_EXTRA + 1 : ((face == MAAGE_FACE_NEGATIVE_X || face == MAAGE_FACE_NEGATIVE_Z) ? MAAGE_CONTENT_TEXTURE_CRAFTING_FRONT : MAAGE_CONTENT_TEXTURE_CRAFTING_SIDE));
         }
-        if (block == ids->block_planks && metadata) selected = metadata == 1 ? MAAGE_CONTENT_TEXTURE_SPRUCE_PLANKS : MAAGE_CONTENT_TEXTURE_BIRCH_PLANKS;
+        if (block == ids->block_furnace || block == ids->block_lit_furnace) {
+            static const unsigned int fronts[4] = {MAAGE_FACE_NEGATIVE_Z, MAAGE_FACE_POSITIVE_X, MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_NEGATIVE_X};
+            selected = MAAGE_CONTENT_TEXTURE_FURNACE;
+            if (face == MAAGE_FACE_NEGATIVE_Y || face == MAAGE_FACE_POSITIVE_Y) selected += 1;
+            else if ((unsigned int) face == fronts[metadata]) selected += block == ids->block_lit_furnace ? 3 : 2;
+        }
+        if (block == ids->block_sand && metadata == 1) selected = MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS;
+        if (block == ids->block_planks && metadata) selected = metadata >= 3 ? MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS + 6 + (int) metadata - 3 : (metadata == 1 ? MAAGE_CONTENT_TEXTURE_SPRUCE_PLANKS : MAAGE_CONTENT_TEXTURE_BIRCH_PLANKS);
         if (block == ids->block_log) {
             species = metadata & 3;
-            selected = MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 26 : (species == 2 ? 29 : 6));
+            selected = species == 3 ? MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS + 1 : MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 26 : (species == 2 ? 29 : 6));
             log_axis = (metadata & 12) == 4 ? 0 : ((metadata & 12) == 8 ? 2 : 1);
             if (face / 2 == log_axis) ++selected;
+        } else if (block == ids->block_log2) {
+            species = metadata & 1U;
+            log_axis = (metadata & 12) == 4 ? 0 : ((metadata & 12) == 8 ? 2 : 1);
+            selected = species ? MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS + 3 : MAAGE_CONTENT_TEXTURE_FURNACE_EXTRA + 6;
+            if (face / 2 == log_axis) selected = MAAGE_CONTENT_TEXTURE_FURNACE_VARIANTS + (species ? 4 : 5);
         } else if (block == ids->block_leaves) {
             species = metadata & MAAGE_LEAF_SPECIES_MASK;
             selected = MAAGE_CONTENT_TEXTURE_EXTRA + (species == 1 ? 28 : (species == 2 ? 31 : 8));
@@ -296,6 +308,8 @@ static maage_status maage_content_blocks_create(const maage_content_config *conf
             if (maage_status_failed(result)) goto failed;
         }
     ids->state_sapling = ids->saplings[0];
+    result = maage_furnace_content_blocks(registry, config);
+    if (maage_status_failed(result)) goto failed;
     *output = registry;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
 failed:
@@ -309,6 +323,8 @@ struct maage_content {
     maage_block_registry *blocks;
     maage_item_registry *items;
     maage_recipe_registry *recipes;
+    maage_smelting_registry *smelting;
+    maage_fuel_registry *fuels;
 };
 
 maage_status maage_content_create(const maage_content_config *config, maage_content **output, maage_status_trace *trace) {
@@ -347,6 +363,8 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     if (maage_status_failed(result)) goto failed;
     result = maage_recipe_registry_create_builtin(content->items, &content->recipes);
     if (maage_status_failed(result)) goto failed;
+    result = maage_smelting_create_builtin(content->items, &content->smelting, &content->fuels);
+    if (maage_status_failed(result)) goto failed;
     *output = content;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 failed:
@@ -370,9 +388,17 @@ const maage_recipe_registry *maage_content_recipes(const maage_content *content)
     return content ? content->recipes : NULL;
 }
 
+const maage_smelting_registry *maage_content_smelting(const maage_content *content) {
+    return content ? content->smelting : NULL;
+}
+const maage_fuel_registry *maage_content_fuels(const maage_content *content) {
+    return content ? content->fuels : NULL;
+}
 maage_status maage_content_destroy(maage_content *content) {
     if (!content) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     /* No borrowed World/job/gameplay readers may remain at this boundary. */
+    maage_smelting_destroy(content->smelting);
+    maage_fuel_destroy(content->fuels);
     maage_recipe_registry_destroy(content->recipes);
     maage_item_registry_destroy(content->items);
     maage_block_registry_destroy(content->blocks);

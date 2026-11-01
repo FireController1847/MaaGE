@@ -84,7 +84,7 @@ overflow becomes existing authoritative item entities. All overflow capacity is
 reserved before transferring items. Allocation failure leaves unreturned inputs
 owned and blocks further container edits; the owner retries closure.
 
-The single current metadata encoding is `MGWRLD10`. Normal shutdown closes the
+The single current metadata encoding is `MGWRLD11`. Normal shutdown closes the
 container before World flush and the atomic player/entity checkpoint. If closure
 cannot allocate overflow entities, that same checkpoint retains only the still
 unreturned input stacks. Loading returns those stacks before allowing another
@@ -132,12 +132,49 @@ appropriate.
 
 The tree-to-wooden-tools-to-stone-tools chain uses existing harvesting, drops,
 pickup, placement and durability. Iron/gold ingots and charcoal are registered
-and visible in Creative, but Survival acquisition awaits smelting. Smelting is
-outside this feature; ores are not converted through fake crafting recipes.
-Diamond progression consequently still depends on supplied iron equipment.
+and obtainable from the furnace registry. Ores are not converted through crafting recipes.
 Bowl/stew items use existing stack/presentation/persistence contracts; stew uses
-the shared owner-timed food action and returns its bowl on completion. Hoes, swords, armor,
-recipe books and container automation are outside the supported tool catalog.
+the shared owner-timed food action and returns its bowl on completion. Farming/combat actions for hoes/swords, armor,
+recipe books and container automation remain future work.
+
+## Furnaces
+
+Eight cobblestone around an empty center craft a furnace. Placement faces its
+front toward the placer; normal use opens it, while crouching with an item
+retains placement. Both lit/unlit numeric block types share one entity lifetime,
+orientation and inventory. Only visible ignition/extinction changes geometry
+and emission (0/13). Breaking reserves and drops all contents once; container
+lifetime checks reject viewers of a removed/replaced furnace.
+
+Separate finalized hash registries own numeric item/metadata smelting and fuel
+definitions. The builtins cover iron/gold/diamond/emerald/coal/redstone/lapis/quartz
+ore, stone, glass (both sands), all log species to charcoal, brick/hardened clay,
+cactus green, nether brick, pork/beef/chicken, cod/salmon and baked potato.
+Fuel durations are 1600 coal/charcoal, 16000 coal block, 2400 blaze rod, 20000
+lava bucket, 300 wooden blocks, 150 wooden slabs, 200 wooden tools and 100
+sticks/saplings. The shared consumption remainder returns an empty lava bucket.
+
+The World owner ticks resident furnace entity lists only inside its simulation
+square, independently of viewers. Cooking takes 200 steps; interruption resets
+progress immediately. Fuel keeps burning without usable input/output and new
+fuel requires a complete output fit. No per-step allocation or block scans are
+needed. Owner-local state copies into immutable column snapshots at ordinary
+edits, at five-second progress intervals, before retirement and during shutdown.
+Workers never borrow mutable furnace state. Auxiliary changes preserve geometry
+and light epochs; region compression/indexing and single-writer saves are shared.
+
+`MGCHNK8` stores explicit numeric stacks through the World item translation map,
+burn remaining/duration, progress and inventory revision. Records validate type,
+location, bounds and lit state; missing/duplicate/malformed records fail loading.
+`MGWRLD11` adds player experience and an independent fractional-rounding RNG.
+Extraction awards only the removed quantity's registered output XP; no historical
+recipe-use bank exists. The HUD uses the pre-1.8 level costs. Player inventory,
+output splitting/merging, cursor handling and shift-click use the existing stack
+and container operations. The original furnace GUI samples authoritative progress
+in the existing Session snapshot and interpolates by at most one tick. Smoke and
+flame use bounded Client display sampling and the shared presentation batch.
+Remote transport, experience orbs, hopper automation and specialized behaviors
+of newly registered wooden fuel blocks remain outside the current runtime.
 
 ## Manual Review
 

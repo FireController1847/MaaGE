@@ -61,10 +61,16 @@ maage_status maage_recipe_registry_create_builtin(const maage_item_registry *ite
     result = maage_recipe_registry_create(items, &registry);
     if (maage_status_failed(result)) return result;
     memset(choices, 0, sizeof(choices));
-    for (i = 0; i < 3; ++i) {
+    for (i = 0; i < 4; ++i) {
         choices[0].item = ids->item_log;
         choices[0].metadata = i;
         result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 1, "A", choices, ids->item_planks, 4, i);
+        if (maage_status_failed(result)) goto failed;
+    }
+    for (i = 0; i < 2; ++i) {
+        choices[0].item = ids->item_log2;
+        choices[0].metadata = i;
+        result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 1, 1, "A", choices, ids->item_planks, 4, i + 4);
         if (maage_status_failed(result)) goto failed;
     }
     choices[0].item = ids->item_planks;
@@ -73,6 +79,12 @@ maage_status maage_recipe_registry_create_builtin(const maage_item_registry *ite
     if (maage_status_failed(result)) goto failed;
     result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 2, 2, "AAAA", choices, ids->item_crafting_table, 1, 0);
     if (maage_status_failed(result)) goto failed;
+    choices[0].item = ids->item_cobblestone;
+    choices[0].metadata = 0;
+    result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 3, 3, "AAAA AAAA", choices, ids->item_furnace, 1, 0);
+    if (maage_status_failed(result)) goto failed;
+    choices[0].item = ids->item_planks;
+    choices[0].metadata = MAAGE_RECIPE_METADATA_ANY;
     result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, 3, 2, "A A A ", choices, ids->item_bowl, 4, 0);
     if (maage_status_failed(result)) goto failed;
     choices[1].item = ids->item_stick;

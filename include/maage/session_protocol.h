@@ -3,6 +3,7 @@
 
 #include "maage/environment.h"
 #include "maage/gameplay.h"
+#include "maage/furnace.h"
 #include "maage/entities.h"
 #include "maage/status.h"
 
@@ -12,7 +13,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 18U
+#define MAAGE_SESSION_PROTOCOL_VERSION 19U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -127,7 +128,9 @@ typedef struct maage_session_player_view {
     double yaw, pitch;
     maage_inventory inventory;
     maage_crafting_container crafting; /* Copied authoritative temporary state. */
-    maage_food_use food;               /* Copied active consumption; animation remains Client-owned. */
+    maage_furnace_state furnace;       /* Open container only; Server-owned progress sampled in the existing snapshot. */
+    unsigned long experience;
+    maage_food_use food; /* Copied active consumption; animation remains Client-owned. */
     unsigned int game_mode, health, hunger;
     int air; /* Authoritative remaining breath and drowning phase, -19..300. */
     double saturation;

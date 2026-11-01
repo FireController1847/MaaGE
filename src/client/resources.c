@@ -144,6 +144,30 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/items/bowl.png",
     "minecraft/textures/items/mushroom_stew.png",
     "minecraft/textures/items/charcoal.png",
+    "minecraft/textures/items/clay_ball.png",
+    "minecraft/textures/items/brick.png",
+    "minecraft/textures/items/netherbrick.png",
+    "minecraft/textures/items/dye_powder_green.png",
+    "minecraft/textures/items/quartz.png",
+    "minecraft/textures/items/porkchop_raw.png",
+    "minecraft/textures/items/porkchop_cooked.png",
+    "minecraft/textures/items/beef_raw.png",
+    "minecraft/textures/items/beef_cooked.png",
+    "minecraft/textures/items/chicken_raw.png",
+    "minecraft/textures/items/chicken_cooked.png",
+    "minecraft/textures/items/fish_cod_raw.png",
+    "minecraft/textures/items/fish_cod_cooked.png",
+    "minecraft/textures/items/potato.png",
+    "minecraft/textures/items/potato_baked.png",
+    "minecraft/textures/items/blaze_rod.png",
+    "minecraft/textures/items/bucket_empty.png",
+    "minecraft/textures/items/bucket_lava.png",
+    "minecraft/textures/items/wood_sword.png",
+    "minecraft/textures/items/wood_hoe.png",
+    "minecraft/textures/items/fish_salmon_raw.png",
+    "minecraft/textures/items/fish_clownfish_raw.png",
+    "minecraft/textures/items/fish_pufferfish_raw.png",
+    "minecraft/textures/items/fish_salmon_cooked.png",
     "minecraft/textures/blocks/crafting_table_top.png",
     "minecraft/textures/blocks/crafting_table_side.png",
     "minecraft/textures/blocks/crafting_table_front.png",
@@ -156,7 +180,46 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/blocks/emerald_block.png",
     "minecraft/textures/blocks/redstone_block.png",
     "minecraft/textures/blocks/coal_block.png",
-    "minecraft/textures/blocks/snow.png"};
+    "minecraft/textures/blocks/snow.png",
+    "minecraft/textures/blocks/furnace_side.png",
+    "minecraft/textures/blocks/furnace_top.png",
+    "minecraft/textures/blocks/furnace_front_off.png",
+    "minecraft/textures/blocks/furnace_front_on.png",
+    "minecraft/textures/blocks/glass.png",
+    "minecraft/textures/blocks/clay.png",
+    "minecraft/textures/blocks/hardened_clay.png",
+    "minecraft/textures/blocks/netherrack.png",
+    "minecraft/textures/blocks/nether_brick.png",
+    "minecraft/textures/blocks/quartz_ore.png",
+    "minecraft/textures/blocks/log_acacia.png",
+    "minecraft/textures/entity/chest/normal.png",
+    "minecraft/textures/entity/chest/normal.png",
+    "minecraft/textures/blocks/bookshelf.png",
+    "minecraft/textures/blocks/planks_oak.png",
+    "minecraft/textures/blocks/planks_oak.png",
+    "minecraft/textures/blocks/planks_oak.png",
+    "minecraft/textures/blocks/trapdoor.png",
+    "minecraft/textures/blocks/planks_oak.png",
+    "minecraft/textures/blocks/planks_oak.png",
+    "minecraft/textures/blocks/planks_spruce.png",
+    "minecraft/textures/blocks/planks_birch.png",
+    "minecraft/textures/blocks/planks_jungle.png",
+    "minecraft/textures/blocks/planks_acacia.png",
+    "minecraft/textures/blocks/planks_big_oak.png",
+    "minecraft/textures/blocks/jukebox_side.png",
+    "minecraft/textures/blocks/noteblock.png",
+    "minecraft/textures/blocks/daylight_detector_side.png",
+    "minecraft/textures/blocks/mushroom_block_skin_brown.png",
+    "minecraft/textures/blocks/mushroom_block_skin_red.png",
+    "minecraft/textures/blocks/red_sand.png",
+    "minecraft/textures/blocks/log_jungle.png",
+    "minecraft/textures/blocks/log_jungle_top.png",
+    "minecraft/textures/blocks/log_big_oak.png",
+    "minecraft/textures/blocks/log_big_oak_top.png",
+    "minecraft/textures/blocks/log_acacia_top.png",
+    "minecraft/textures/blocks/planks_jungle.png",
+    "minecraft/textures/blocks/planks_acacia.png",
+    "minecraft/textures/blocks/planks_big_oak.png"};
 
 static int maage_client_texture_source(int texture) {
     static const int base[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};
@@ -504,8 +567,10 @@ const maage_block_state_definition *maage_client_item_icon_state(const maage_blo
     unsigned int species = metadata & 3;
     if (!item) return NULL;
     state = maage_block_registry_state(blocks, item->icon_state_id);
-    if (state && (state->block_id == ids->block_log || state->block_id == ids->block_leaves) && (species == 1 || species == 2)) state = maage_block_registry_state(blocks, state->block_id == ids->block_log ? ids->logs[species] : ids->leaves[species]);
-    if (state && state->block_id == ids->block_planks && (species == 1 || species == 2)) state = maage_block_registry_state(blocks, ids->planks[species]);
+    if (state && (state->block_id == ids->block_log || state->block_id == ids->block_leaves) && species && species <= (state->block_id == ids->block_log ? 3U : 2U)) state = maage_block_registry_state(blocks, state->block_id == ids->block_log ? ids->logs[species] : ids->leaves[species]);
+    if (state && state->block_id == ids->block_planks && metadata < 6) state = maage_block_registry_state(blocks, metadata ? ids->planks[metadata] : ids->state_planks);
+    if (state && state->block_id == ids->block_log2 && metadata <= 1) state = maage_block_registry_state(blocks, ids->logs2[metadata]);
+    if (state && state->block_id == ids->block_sand && metadata == 1) state = maage_block_registry_state(blocks, ids->state_red_sand);
     return state;
 }
 
@@ -520,18 +585,27 @@ maage_texture_id maage_client_item_texture(const maage_item_definition *item, un
     const maage_builtin_ids *ids = item ? item->builtins : NULL;
     if (!item) return MAAGE_CONTENT_TEXTURE_MISSING;
     if (item->id == ids->item_sapling && (metadata == 1 || metadata == 2)) return MAAGE_CONTENT_TEXTURE_ITEMS + 25 + metadata;
+    if (item->id == ids->item_fish && metadata) return MAAGE_CONTENT_TEXTURE_ITEMS + 55 + metadata - 1;
+    if (item->id == ids->item_cooked_fish && metadata == 1) return MAAGE_CONTENT_TEXTURE_ITEMS + 58;
     if (item->id == ids->item_coal && metadata == 1) return MAAGE_CONTENT_TEXTURE_ITEMS + 34;
     return item->texture_id;
 }
 
 const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack) {
     const maage_builtin_ids *ids = maage_item_registry_builtin_ids(items);
-    static const char *const logs[] = {"Oak Log", "Spruce Log", "Birch Log"};
+    static const char *const logs[] = {"Oak Log", "Spruce Log", "Birch Log", "Jungle Log"};
     static const char *const leaves[] = {"Oak Leaves", "Spruce Leaves", "Birch Leaves"};
-    static const char *const planks[] = {"Oak Planks", "Spruce Planks", "Birch Planks"};
+    static const char *const planks[] = {"Oak Planks", "Spruce Planks", "Birch Planks", "Jungle Planks", "Acacia Planks", "Dark Oak Planks"};
     static const char *const saplings[] = {"Oak Sapling", "Spruce Sapling", "Birch Sapling"};
     const maage_item_definition *item = stack ? maage_item_registry_get(items, stack->item_id) : NULL;
     if (!item) return "";
+    if (item->has_block && item->block_id == ids->block_sand && stack->metadata == 1) return "Red Sand";
+    if (item->has_block && item->block_id == ids->block_log2) return stack->metadata ? "Dark Oak Log" : "Acacia Log";
+    if (item->has_block && item->block_id == ids->block_log && stack->metadata < 4) return logs[stack->metadata];
+    if (item->has_block && item->block_id == ids->block_planks && stack->metadata < 6) return planks[stack->metadata];
+    if (item->id == ids->item_dye && stack->metadata == 2) return "Cactus Green";
+    if (item->id == ids->item_fish && stack->metadata == 1) return "Raw Salmon";
+    if (item->id == ids->item_cooked_fish && stack->metadata == 1) return "Cooked Salmon";
     if (stack->metadata <= 2) {
         if (item->has_block && item->block_id == ids->block_log) return logs[stack->metadata];
         if (item->has_block && item->block_id == ids->block_leaves) return leaves[stack->metadata];

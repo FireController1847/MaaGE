@@ -1,4 +1,5 @@
 #include "maage/gameplay.h"
+#include "maage/furnace.h"
 #include "maage/entities.h"
 #include "maage/session_protocol.h"
 #include <math.h>
@@ -12,14 +13,14 @@ unsigned int maage_gameplay_block_material(const maage_block_definition *block) 
     maage_block_id id;
     if (!block || !ids) return MAAGE_MATERIAL_DEFAULT;
     id = block->id;
-    if (id == ids->block_stone || id == ids->block_cobblestone || id == ids->block_bedrock || id == ids->block_gold_ore || id == ids->block_iron_ore || id == ids->block_coal_ore || id == ids->block_lapis_ore || id == ids->block_sandstone || id == ids->block_mossy_cobblestone || id == ids->block_obsidian || id == ids->block_diamond_ore || id == ids->block_redstone_ore || id == ids->block_emerald_ore) return MAAGE_MATERIAL_STONE;
+    if (id == ids->block_furnace || id == ids->block_lit_furnace || id == ids->block_stone || id == ids->block_cobblestone || id == ids->block_bedrock || id == ids->block_gold_ore || id == ids->block_iron_ore || id == ids->block_coal_ore || id == ids->block_lapis_ore || id == ids->block_sandstone || id == ids->block_mossy_cobblestone || id == ids->block_obsidian || id == ids->block_diamond_ore || id == ids->block_redstone_ore || id == ids->block_emerald_ore) return MAAGE_MATERIAL_STONE;
     if (id == ids->block_grass) return MAAGE_MATERIAL_GRASS;
     if (id == ids->block_dirt) return MAAGE_MATERIAL_DIRT;
-    if (id == ids->block_crafting_table || id == ids->block_planks || id == ids->block_log || id == ids->block_torch) return MAAGE_MATERIAL_WOOD;
+    if (id == ids->block_crafting_table || id == ids->block_planks || id == ids->block_log2 || id == ids->block_log || id == ids->block_torch) return MAAGE_MATERIAL_WOOD;
     if (id == ids->block_sand) return MAAGE_MATERIAL_SAND;
     if (id == ids->block_gravel) return MAAGE_MATERIAL_GRAVEL;
     if (id == ids->block_snow || id == ids->block_snow_block) return MAAGE_MATERIAL_SNOW;
-    if (id == ids->block_ice) return MAAGE_MATERIAL_GLASS;
+    if (id == ids->block_ice || id == ids->block_glass) return MAAGE_MATERIAL_GLASS;
     if (id == ids->block_gold_block || id == ids->block_iron_block || id == ids->block_diamond_block || id == ids->block_emerald_block) return MAAGE_MATERIAL_METAL;
     if (id == ids->block_water) return MAAGE_MATERIAL_WATER;
     if (id == ids->block_lava) return MAAGE_MATERIAL_LAVA;
@@ -187,6 +188,8 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
     if (!game || !save) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     memset(save, 0, sizeof(*save));
     memcpy(save->crafting_inputs, game->crafting.inputs, sizeof(save->crafting_inputs));
+    save->experience = game->experience;
+    save->experience_random = game->experience_random;
     save->inventory = game->inventory;
     save->mode = game->mode;
     save->health = game->health;
@@ -200,7 +203,7 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
 }
 maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save) {
     unsigned int i;
-    if (!game || !maage_item_registry_is_finalized(items) || !save || save->mode > MAAGE_GAME_MODE_CREATIVE ||
+    if (!game || !maage_item_registry_is_finalized(items) || !save || save->experience > 4294967295UL || save->experience_random > 4294967295UL || save->mode > MAAGE_GAME_MODE_CREATIVE ||
         save->health > 20 || save->hunger > 20 || save->air < -19 || save->air > 300 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
         !(save->exhaustion >= 0 && save->exhaustion <= 40) ||
@@ -218,6 +221,8 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
     maage_gameplay_begin_life(game);
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
         if (game->crafting.inputs[i].count) game->crafting.closing = 1;
+    game->experience = save->experience;
+    game->experience_random = save->experience_random;
     game->inventory = save->inventory;
     game->mode = save->mode;
     game->health = save->health;
@@ -425,6 +430,17 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     if (!game->has_target) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     if (maage_world_get(world, game->target.x, game->target.y, game->target.z) != game->target.state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     held = &game->inventory.slots[game->inventory.selected];
+    if ((game->target.block_id == ids->block_furnace || game->target.block_id == ids->block_lit_furnace) && (!sneaking || !held->count)) {
+        maage_furnace_state furnace;
+        const maage_block_state_definition *above = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, game->target.x, game->target.y + 1, game->target.z));
+        const maage_block_definition *cover = above ? maage_block_registry_block(maage_world_registry(world), above->block_id) : NULL;
+        if (cover && cover->opaque) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_OPEN, 0);
+        result = maage_world_furnace_get(world, game->target.x, game->target.y, game->target.z, &furnace);
+        if (maage_status_failed(result)) return result;
+        result = maage_crafting_open(&game->crafting, MAAGE_CONTAINER_FURNACE, game->target.x, game->target.y, game->target.z);
+        if (!maage_status_failed(result)) game->crafting.block_identity = furnace.identity;
+        return result;
+    }
     if (game->target.block_id == ids->block_crafting_table && (!sneaking || !held->count)) return maage_crafting_open(&game->crafting, MAAGE_CONTAINER_TABLE, game->target.x, game->target.y, game->target.z);
     result = maage_gameplay_placement(player, world, items, held, &game->target, yaw, &destination, &placed);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
@@ -570,7 +586,7 @@ static void maage_gameplay_food(maage_gameplay *game, const maage_player *player
         *handled = 1;
         return;
     }
-    if (!active && game->has_target && game->target.block_id == ids->block_crafting_table && !intent->descend) return;
+    if (!active && game->has_target && (game->target.block_id == ids->block_crafting_table || game->target.block_id == ids->block_furnace || game->target.block_id == ids->block_lit_furnace) && !intent->descend) return;
     *handled = 1;
     if (!active) {
         if (game->use_delay) return;
@@ -586,9 +602,9 @@ static void maage_gameplay_food(maage_gameplay *game, const maage_player *player
         maage_gameplay_sound(sink, MAAGE_SOUND_EAT, MAAGE_MATERIAL_DEFAULT, player->position[0], player->position[1] + MAAGE_PLAYER_EYE_HEIGHT, player->position[2], volume, pitch);
     }
     if (--game->food.remaining) return;
-    if (item->food_remainder) {
+    if (item->container_item) {
         memset(held, 0, sizeof(*held));
-        held->item_id = item->food_remainder;
+        held->item_id = item->container_item;
         held->count = 1;
     } else if (!--held->count) memset(held, 0, sizeof(*held));
     game->hunger += item->food_hunger;
@@ -813,4 +829,37 @@ maage_status maage_gameplay_drop(maage_gameplay *game, const maage_player *playe
     source->count -= stack.count;
     if (!source->count) memset(source, 0, sizeof(*source));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
+}
+
+maage_status maage_gameplay_add_experience(maage_gameplay *game, double amount) {
+    unsigned long whole, random;
+    double fraction;
+    if (!game || game->experience > 4294967295UL || game->experience_random > 4294967295UL || !(amount >= 0 && amount <= 4294967295.0)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    whole = (unsigned long) amount;
+    fraction = amount - whole;
+    random = game->experience_random;
+    if (fraction > 0) {
+        random = (random * 1664525UL + 1013904223UL) & 0xffffffffUL;
+        if ((double) (random >> 8) / 16777216.0 < fraction) ++whole;
+    }
+    if (whole > 4294967295UL - game->experience) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    game->experience += whole;
+    game->experience_random = random;
+    return maage_status_make(whole ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+}
+static double maage_experience_base(unsigned long level) {
+    double value = (double) level;
+    if (level <= 16UL) return value * 17.0;
+    if (level <= 31UL) return 1.5 * value * value - 29.5 * value + 360.0;
+    return 3.5 * value * value - 151.5 * value + 2220.0;
+}
+void maage_gameplay_experience_level(unsigned long experience, unsigned long *level, double *progress) {
+    unsigned long low = 0, high = 65536UL, middle;
+    while (low + 1 < high) {
+        middle = low + (high - low) / 2;
+        if (maage_experience_base(middle) <= (double) experience) low = middle;
+        else high = middle;
+    }
+    *level = low;
+    *progress = ((double) experience - maage_experience_base(low)) / (maage_experience_base(low + 1) - maage_experience_base(low));
 }

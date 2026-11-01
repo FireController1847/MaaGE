@@ -393,7 +393,20 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
                 server_service_container(runtime);
                 return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
             }
-            result = maage_crafting_click(&runtime->game.crafting, &runtime->game.inventory, items, maage_content_recipes(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action);
+            if (runtime->game.crafting.kind == MAAGE_CONTAINER_FURNACE) {
+                maage_furnace_state furnace;
+                maage_gameplay next = runtime->game;
+                double experience = 0;
+                result = maage_world_furnace_get(runtime->world, next.crafting.x, next.crafting.y, next.crafting.z, &furnace);
+                if (!maage_status_failed(result)) result = maage_furnace_click(&furnace, &next.inventory, items, maage_content_smelting(runtime->content), maage_content_fuels(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action, &experience);
+                if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+                    result = maage_gameplay_add_experience(&next, experience);
+                    if (!maage_status_failed(result)) result = maage_world_furnace_set(runtime->world, next.crafting.x, next.crafting.y, next.crafting.z, &furnace);
+                    if (!maage_status_failed(result)) runtime->game = next;
+                }
+            } else {
+                result = maage_crafting_click(&runtime->game.crafting, &runtime->game.inventory, items, maage_content_recipes(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action);
+            }
         }
         runtime->publication_dirty = 1;
         break;
@@ -562,6 +575,7 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
 static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     maage_session_snapshot snapshot;
     int cell_x, cell_y, cell_z;
+    maage_status result;
     if (!runtime->config.session || !runtime->world || !runtime->game_ready) return;
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
@@ -577,6 +591,19 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.pitch = runtime->pitch;
     snapshot.player.inventory = runtime->game.inventory;
     snapshot.player.crafting = runtime->game.crafting;
+    snapshot.player.experience = runtime->game.experience;
+    if (snapshot.player.crafting.kind == MAAGE_CONTAINER_FURNACE) {
+        maage_crafting_container *container = &snapshot.player.crafting;
+        result = maage_world_furnace_get(runtime->world, container->x, container->y, container->z, &snapshot.player.furnace);
+        if (maage_status_failed(result)) {
+            server_status_event(runtime, result, NULL);
+            return;
+        }
+        container->revision = snapshot.player.furnace.revision;
+        container->inputs[0] = snapshot.player.furnace.slots[0];
+        container->inputs[1] = snapshot.player.furnace.slots[1];
+        container->output = snapshot.player.furnace.slots[2];
+    }
     snapshot.player.food = runtime->game.food;
     runtime->publication_dirty = 0;
     snapshot.player.game_mode = runtime->game.mode;
@@ -693,6 +720,8 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     if (maage_status_failed(result)) return result;
     world_config.registry = maage_content_blocks(runtime->content);
     world_config.items = items;
+    world_config.smelting = maage_content_smelting(runtime->content);
+    world_config.fuels = maage_content_fuels(runtime->content);
     world_config.biomes = maage_content_biomes(runtime->content);
     world_config.seed = runtime->record.seed;
     runtime->effect_random = (runtime->record.seed.low ^ runtime->record.seed.high ^ runtime->record.environment.ticks_low ^ 0x9e3779b9UL) & 0xffffffffUL;
