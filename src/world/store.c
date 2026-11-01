@@ -1386,7 +1386,7 @@ maage_status maage_world_store_rename(const char *instance_root, const char *id,
 
 typedef struct maage_store_remove {
     const char *path;
-    int chunks;
+    int inside_storage;
     maage_status result;
 } maage_store_remove;
 static int maage_store_remove_entry(const char *name, maage_folder_link_kind kind, void *context) {
@@ -1396,9 +1396,13 @@ static int maage_store_remove_entry(const char *name, maage_folder_link_kind kin
     remove->result = maage_storage_join(path, sizeof(path), remove->path, name);
     if (maage_status_failed(remove->result)) return 0;
     if (kind == MAAGE_FOLDER_LINK_FILE) remove->result = maage_storage_remove(path);
-    else if (!remove->chunks && kind == MAAGE_FOLDER_LINK_DIRECTORY && !strcmp(name, "chunks")) {
+    else if (!remove->inside_storage && kind == MAAGE_FOLDER_LINK_DIRECTORY && (!strcmp(name, "regions") || !strcmp(name, "chunks"))) {
+        /* A world may contain the current region directory or disposable
+         * pre-alpha chunk files. Neither format may be loaded interchangeably,
+         * but deletion must safely remove the entire selected world. Only one
+         * level of named storage is traversable; links/nested dirs are denied. */
         child.path = path;
-        child.chunks = 1;
+        child.inside_storage = 1;
         child.result = 0;
         remove->result = maage_folder_link_list(path, maage_store_remove_entry, &child);
         if (maage_status_failed(child.result)) remove->result = child.result;
@@ -1424,7 +1428,7 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
     if (!maage_status_failed(result)) result = maage_storage_acquire(path, &lock, trace);
     if (!maage_status_failed(result)) {
         remove.path = directory;
-        remove.chunks = 0;
+        remove.inside_storage = 0;
         remove.result = 0;
         result = maage_folder_link_list(directory, maage_store_remove_entry, &remove);
         if (maage_status_failed(remove.result)) result = remove.result;
