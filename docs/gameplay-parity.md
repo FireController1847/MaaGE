@@ -342,7 +342,7 @@ are rejected without conversion or automatic deletion.
 
 Furnaces reuse screen 12 with the original 176×166 furnace texture, input at
 (56,17), fuel at (56,53), output at (116,35), and authoritative flame/arrow
-progress interpolated by at most one tick. Inventory remains non-pausing.
+progress drawn in discrete integer pixels from the latest snapshot. Inventory remains non-pausing.
 
 ## Manual Review
 

@@ -171,7 +171,7 @@ Extraction awards only the removed quantity's registered output XP; no historica
 recipe-use bank exists. The HUD uses the pre-1.8 level costs. Player inventory,
 output splitting/merging, cursor handling and shift-click use the existing stack
 and container operations. The original furnace GUI samples authoritative progress
-in the existing Session snapshot and interpolates by at most one tick. Smoke and
+in the existing Session snapshot and scales it into discrete integer pixels. Smoke and
 flame use bounded Client display sampling and the shared presentation batch.
 Remote transport, experience orbs, hopper automation and specialized behaviors
 of newly registered wooden fuel blocks remain outside the current runtime.

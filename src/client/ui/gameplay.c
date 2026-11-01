@@ -362,21 +362,22 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context) {
             maage_client_ui_player_preview(ui, frame);
         if (table == 2) {
             const maage_furnace_state *furnace = &ui->snapshot.player.furnace;
-            double fraction = ui->snapshot.paused ? 0 : (maage_time_monotonic_seconds() - (ui->snapshot.next_tick_at - 0.05)) * 20.0;
+            unsigned long duration = furnace->duration ? furnace->duration : MAAGE_FURNACE_COOK_TICKS;
+            unsigned long quotient = duration / 13UL, remainder = duration % 13UL;
             float edge = (float) ui->resources.atlas_edge;
-            float flame, arrow;
-            if (fraction < 0) fraction = 0;
-            if (fraction > 1) fraction = 1;
-            flame = furnace->duration ? (float) ((furnace->burn > fraction ? furnace->burn - fraction : 0) * 12.0 / furnace->duration) : 0;
-            arrow = (float) ((furnace->cook + (furnace->cook && furnace->burn ? fraction : 0)) * 24.0 / MAAGE_FURNACE_COOK_TICKS);
+            int flame = 13, arrow = (int) (furnace->cook * 24U / MAAGE_FURNACE_COOK_TICKS), top;
+            /* Integer pixel thresholds avoid overflowing 32-bit burn counters. */
+            while (flame && furnace->burn < quotient * (unsigned int) flame + (remainder * (unsigned int) flame + 12UL) / 13UL)
+                --flame;
             if (furnace->burn) {
+                /* Omit the transparent wrap row above the flame's atlas tile. */
+                top = 12 - flame;
+                if (top < 0) top = 0;
                 rectangle.x = frame.x + 56;
-                rectangle.y = frame.y + 48 - flame;
+                rectangle.y = frame.y + 36 + top;
                 rectangle.width = 14;
-                rectangle.height = flame + 1;
-                maage_client_ui_rectangle(ui, rectangle, (1536.0f + 176) / edge, (12 - flame) / edge, (1536.0f + 190) / edge, 13.0f / edge, 1, 1, 1, 1);
-            }
-            if (arrow > 0) {
+                rectangle.height = 13 - top;
+                maage_client_ui_rectangle(ui, rectangle, (1536.0f + 176) / edge, top / edge, (1536.0f + 190) / edge, 13.0f / edge, 1, 1, 1, 1);
                 rectangle.x = frame.x + 79;
                 rectangle.y = frame.y + 34;
                 rectangle.width = arrow + 1;
