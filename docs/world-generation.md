@@ -235,8 +235,10 @@ and excludes detached worker-owned copies.
 
 ## Runtime Section Storage
 
-A 16x16x16 populated section retains its byte-per-cell calculated lighting
-separately from block identities. Mutable jobs use direct 32-bit numeric state
+A 16x16x16 populated section keeps calculated light in a separately allocated
+4 KiB byte array. Its light buffer is reference-counted independently of block
+identities and detached by the first mutation in a private lighting job or
+compatible snapshot merge. Mutable jobs use direct 32-bit numeric state
 arrays, while immutable published section snapshots use an adaptive bit-packed
 palette: uniform (zero-bit), 1-, 2-, 4-, 8-, or 16-bit indices. At most 4096
 distinct states can physically occur inside a section; palette width does not
@@ -246,13 +248,16 @@ Workers compact completed generated/loaded columns before publication; other
 private edits compact at owner publication. If optional palette allocation
 fails, direct state storage remains valid. Each compacted palette and packed
 index array lives in a single immutable reference-counted allocation. Chunk
-clones share that block payload while copying only their independently mutable
-4 KiB section lighting and section metadata. Mutating a block expands and
-detaches only that section's palette; mutation never writes into a shared payload.
+clones share both the immutable block payload and the separately reference-counted
+lighting array, copying only their small section metadata until a write requires
+a private copy. Mutating a block expands and detaches only that section's
+palette, while relighting detaches only the affected light array; neither
+operation writes into shared payloads.
 References use platform-native atomic operations because independent workers
 clone and retire payloads concurrently. On the first Client import the immutable
-authoritative block palettes are shared with the visual replica; subsequent
-prediction edits detach only the affected section. The Server and Client remain
+authoritative block palettes and initially zeroed lighting are shared with the
+visual replica; subsequent prediction and lighting edits detach only the affected
+section storage. The Server and Client remain
 independently owned across the Local Session boundary.
 
 ## Storage Codec Performance

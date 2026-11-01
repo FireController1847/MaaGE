@@ -19,6 +19,10 @@ struct maage_sky_payload {
     volatile long references;
     unsigned char *cells; /* Exact 32 KiB allocation, no size-class bump. */
 };
+struct maage_section_light_payload {
+    volatile long references;
+    unsigned char *cells; /* Exact 4 KiB allocation, independently copy-on-write. */
+};
 static long maage_payload_retain(volatile long *references) {
 #ifdef _WIN32
     return (long) InterlockedIncrement((volatile LONG *) references);
@@ -39,6 +43,37 @@ static long maage_payload_references(volatile long *references) {
 #else
     return __sync_add_and_fetch(references, 0L);
 #endif
+}
+static void maage_section_light_payload_release(maage_section_light_payload *payload) {
+    if (payload && !maage_payload_release(&payload->references)) {
+        free(payload->cells);
+        free(payload);
+    }
+}
+size_t maage_section_light_resident_bytes(const maage_section *section) {
+    long references;
+    if (!section || !section->light_payload) return 0;
+    references = maage_payload_references(&section->light_payload->references);
+    return references > 0 ? (sizeof(*section->light_payload) + MAAGE_SECTION_VOLUME) / (size_t) references : 0;
+}
+maage_status maage_section_light_writable(maage_section *section) {
+    maage_section_light_payload *copy;
+    if (!section) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    if (section->light_payload && maage_payload_references(&section->light_payload->references) == 1)
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
+    copy = (maage_section_light_payload *) malloc(sizeof(*copy));
+    if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    copy->cells = (unsigned char *) calloc(MAAGE_SECTION_VOLUME, 1);
+    if (!copy->cells) {
+        free(copy);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    }
+    copy->references = 1;
+    if (section->light) memcpy(copy->cells, section->light, MAAGE_SECTION_VOLUME);
+    maage_section_light_payload_release(section->light_payload);
+    section->light_payload = copy;
+    section->light = copy->cells;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
 }
 static void maage_section_payload_release(maage_section_payload *payload) {
     if (payload && !maage_payload_release(&payload->references)) free(payload);
@@ -100,9 +135,13 @@ maage_section *maage_section_create(maage_block_state_id air) {
     size_t i;
     section = (maage_section *) calloc(1, sizeof(*section));
     if (!section) return NULL;
+    if (maage_status_failed(maage_section_light_writable(section))) {
+        free(section);
+        return NULL;
+    }
     section->states = (unsigned int *) malloc(MAAGE_SECTION_VOLUME * sizeof(*section->states));
     if (!section->states) {
-        free(section);
+        maage_section_destroy(section);
         return NULL;
     }
     for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) section->states[i] = (unsigned int) air;
@@ -111,6 +150,7 @@ maage_section *maage_section_create(maage_block_state_id air) {
 void maage_section_destroy(maage_section *section) {
     if (!section) return;
     free(section->states);
+    maage_section_light_payload_release(section->light_payload);
     if (section->payload) maage_section_payload_release(section->payload);
     else {
         free(section->palette);
@@ -164,7 +204,9 @@ maage_section *maage_section_clone(const maage_section *source) {
     size_t bytes;
     copy = (maage_section *) calloc(1, sizeof(*copy));
     if (!copy) return NULL;
-    memcpy(copy->light, source->light, sizeof(copy->light));
+    copy->light_payload = source->light_payload;
+    if (copy->light_payload) maage_payload_retain(&copy->light_payload->references);
+    copy->light = source->light;
     copy->palette_count = source->palette_count;
     copy->bits = source->bits;
     if (source->payload) {

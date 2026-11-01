@@ -43,6 +43,10 @@ static maage_status maage_light_write(maage_chunk *chunk, int x, int y, int z, u
             section->light[cell] = (unsigned char) (maage_chunk_direct_sky_get(chunk, (size_t) (y / 16) * MAAGE_SECTION_VOLUME + cell) << 4);
         chunk->sections[y / 16] = section;
     }
+    {
+        maage_status result = maage_section_light_writable(section);
+        if (maage_status_failed(result)) return result;
+    }
     section->light[maage_chunk_cell(x, y % 16, z)] = light;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
 }

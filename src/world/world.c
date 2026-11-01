@@ -801,7 +801,7 @@ static int maage_world_light_inputs_current(const maage_world *world, const maag
 /* Rebase numerical output only across light-compatible auxiliary edits.
  * Collection rejects results whose opacity/emission epoch changed. */
 static maage_status maage_world_merge_light(maage_chunk *current, const maage_chunk *source) {
-    maage_status sky_status;
+    maage_status sky_status, light_status;
     int section;
     size_t cell;
     sky_status = maage_chunk_sky_writable(current);
@@ -815,9 +815,11 @@ static maage_status maage_world_merge_light(maage_chunk *current, const maage_ch
             if (source->sections[section]) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
             continue;
         }
-        if (source->sections[section]) memcpy(current->sections[section]->light, source->sections[section]->light, 4096);
+        light_status = maage_section_light_writable(current->sections[section]);
+        if (maage_status_failed(light_status)) return light_status;
+        if (source->sections[section]) memcpy(current->sections[section]->light, source->sections[section]->light, MAAGE_SECTION_VOLUME);
         else
-            for (cell = 0; cell < 4096; ++cell)
+            for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
                 current->sections[section]->light[cell] = (unsigned char) (maage_chunk_direct_sky_get(source, (size_t) section * MAAGE_SECTION_VOLUME + cell) << 4);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
@@ -1738,7 +1740,7 @@ static size_t maage_world_chunk_storage_bytes(const maage_chunk *chunk) {
     for (section = 0; section < 16; ++section) {
         const maage_section *part = chunk->sections[section];
         if (!part) continue;
-        bytes += sizeof(*part);
+        bytes += sizeof(*part) + maage_section_light_resident_bytes(part);
         if (part->states) bytes += MAAGE_SECTION_VOLUME * sizeof(*part->states);
         if (part->payload) bytes += maage_section_payload_resident_bytes(part);
         else {
@@ -2974,9 +2976,9 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
     result = slot->data && update->base_revision ? maage_chunk_clone(slot->data->chunk, &visual) : maage_chunk_clone(authority, &visual);
     if (maage_status_failed(result)) goto done;
     if (!update->base_revision) {
-        int sy;
-        for (sy = 0; sy < 16; ++sy)
-            if (visual->sections[sy]) memset(visual->sections[sy]->light, 0, 4096);
+        /* Authoritative initial sections were freshly created with zero light;
+         * retain those immutable arrays in the visual clone until the first
+         * independently calculated Client lighting pass actually writes. */
         slot->geometry_changed = slot->light_changed = 1;
         memset(slot->light_cells, 255, sizeof(slot->light_cells));
     }

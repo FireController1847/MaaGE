@@ -20,9 +20,11 @@
  * A physical section has at most 4096 unique states; registries remain unbounded
  * within their existing 32-bit identity domain. */
 typedef struct maage_section_payload maage_section_payload;
+typedef struct maage_section_light_payload maage_section_light_payload;
 typedef struct maage_sky_payload maage_sky_payload;
 typedef struct maage_section {
-    unsigned char light[MAAGE_SECTION_VOLUME];
+    unsigned char *light; /* Private on first mutation; shared across immutable snapshots. */
+    maage_section_light_payload *light_payload;
     maage_section_payload *payload; /* Immutable shared block palette, never lighting. */
     unsigned int *states;
     unsigned int *palette;
@@ -37,6 +39,8 @@ maage_status maage_section_set(maage_section *section, size_t cell, maage_block_
 maage_status maage_section_expand(maage_section *section);
 void maage_chunk_compact(maage_chunk *chunk);
 size_t maage_section_payload_resident_bytes(const maage_section *section);
+size_t maage_section_light_resident_bytes(const maage_section *section);
+maage_status maage_section_light_writable(maage_section *section);
 size_t maage_chunk_sky_resident_bytes(const maage_chunk *chunk);
 maage_status maage_chunk_sky_writable(maage_chunk *chunk);
 void maage_chunk_sky_share(maage_chunk *destination, const maage_chunk *source);

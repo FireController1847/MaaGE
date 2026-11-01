@@ -98,7 +98,9 @@ anchor expected-state prediction overlays. Block revisions are independent of
 light/mesh epochs, so relighting creates no state traffic.
 
 Visual lighting has one exclusive output column per job and immutable facing
-boundary inputs. Multiple columns and their mesh jobs run independently on the
+boundary inputs. Its light arrays share snapshots until the first private write;
+both channels still converge independently of authoritative Client blocks.
+Multiple columns and their mesh jobs run independently on the
 existing bounded Jobs pool. Dirty-cell bitsets and four boundary masks coalesce
 work; packed four-bit direct-sky caches restrict rescans to affected X/Z shafts. Both channels
 retain the attenuating removal/addition fixed point. Missing boundaries contribute
