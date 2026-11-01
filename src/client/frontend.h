@@ -6,6 +6,7 @@
 #include "maage/server_runtime.h"
 #include "maage/local_session.h"
 #include "maage/world.h"
+#include "options.h"
 typedef struct maage_client_frontend maage_client_frontend;
 typedef struct maage_client_world_choice {
     char id[37], name[128], seed[64];
@@ -21,5 +22,7 @@ maage_status maage_client_frontend_loading(maage_client_frontend *front, maage_s
  * to a background cleanup job. The menu remains live while its authoritative
  * Server flushes; starting another world waits for release of its file locks. */
 maage_status maage_client_frontend_leave_world(maage_client_frontend *front, maage_server_runtime *server, maage_local_session *session, maage_world *visual, maage_status_trace *trace);
+/* Coalesce latest Client options on one independently owned disk writer. */
+maage_status maage_client_frontend_save_options(maage_client_frontend *front, const maage_client_options *options);
 maage_status maage_client_frontend_destroy(maage_client_frontend *front);
 #endif

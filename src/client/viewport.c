@@ -176,12 +176,12 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
  * outcome. Each independent cleanup occurrence gets its own bounded trace. */
 /* Save only at explicit option boundaries, never from the rendering path.
  * A snapshot uses the last confirmed window mode during AppKit transitions. */
-static maage_status maage_client_options_store(const maage_instance *instance, const maage_client_ui *ui, maage_client_options *saved, int force) {
+static maage_status maage_client_options_store(maage_client_frontend *frontend, const maage_client_ui *ui, maage_client_options *saved, int force) {
     maage_client_options current;
     maage_status result;
     maage_client_ui_get_options(ui, &current);
     if (!force && maage_client_options_equal(&current, saved)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SAVE, 0);
-    result = maage_client_options_save(instance, &current);
+    result = maage_client_frontend_save_options(frontend, &current);
     if (!maage_status_failed(result)) *saved = current;
     return result;
 }
@@ -772,7 +772,7 @@ choose_world:
         }
         if (maage_status_failed(operation)) goto done;
         maage_client_ui_get_options(ui, &video_options);
-        operation = maage_client_options_store(instance, ui, &saved_video_options, 1);
+        operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);
         if (maage_status_failed(operation)) goto done;
         options.id = choice.create ? NULL : choice.id;
         options.name = choice.create ? choice.name : NULL;
@@ -969,7 +969,7 @@ choose_world:
             options_save_needed = 1;
         }
         if (options_save_needed && !changing_mode) {
-            operation = maage_client_options_store(instance, ui, &saved_video_options, 0);
+            operation = maage_client_options_store(frontend, ui, &saved_video_options, 0);
             options_save_needed = 0;
             if (maage_status_failed(operation)) {
                 maage_client_ui_notify(ui, operation, now);
@@ -1584,7 +1584,7 @@ window_failed:
 done:
     if (splash.close_requested) ok = 1;
     if (options_ready && ui) {
-        operation = maage_client_options_store(instance, ui, &saved_video_options, 1);
+        operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);
         if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to persist config/options.ini during shutdown.");
     }
     if (ok) outcome = maage_status_make(maage_status_is_success(resource_notice) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);

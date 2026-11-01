@@ -3,12 +3,21 @@
 #include "ui/front.h"
 #include "maage/world_store.h"
 #include "maage/jobs.h"
+#include "maage/thread.h"
 #include "maage/input.h"
 #include "maage/time.h"
 #include "maage/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+typedef struct maage_front_options {
+    const maage_instance *instance;
+    maage_mutex *mutex;
+    maage_condition *wake;
+    maage_thread *thread;
+    maage_client_options latest;
+    int pending, stop;
+} maage_front_options;
 typedef struct maage_front_shutdown {
     maage_server_runtime *server;
     maage_local_session *session;
@@ -31,6 +40,7 @@ struct maage_client_frontend {
     const maage_item_registry *items;
     maage_jobs *jobs, *shutdown_jobs;
     maage_front_shutdown shutdown;
+    maage_front_options options;
     int shutdown_active;
     maage_front_io io;
     maage_world_summary *entries;
@@ -42,6 +52,44 @@ struct maage_client_frontend {
 /* Server owns final saving; the Client drops all owner references before this
  * worker joins the Server and releases its replica. Neither work item needs a
  * renderer, window, or event pump. */
+static void front_options_run(void *context) {
+    maage_front_options *writer = (maage_front_options *) context;
+    maage_client_options options;
+    maage_status result;
+    for (;;) {
+        maage_mutex_lock(writer->mutex);
+        while (!writer->stop && !writer->pending) maage_condition_wait(writer->wake, writer->mutex);
+        if (writer->stop && !writer->pending) {
+            maage_mutex_unlock(writer->mutex);
+            return;
+        }
+        options = writer->latest;
+        writer->pending = 0;
+        maage_mutex_unlock(writer->mutex);
+        result = maage_client_options_save(writer->instance, &options);
+        if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", result, "Background config/options.ini save failed.");
+    }
+}
+static maage_status front_options_destroy(maage_front_options *writer) {
+    maage_status result;
+    if (writer->mutex) {
+        maage_mutex_lock(writer->mutex);
+        writer->stop = 1;
+        if (writer->wake) maage_condition_broadcast(writer->wake);
+        maage_mutex_unlock(writer->mutex);
+    }
+    if (writer->thread) {
+        result = maage_thread_join(writer->thread);
+        if (maage_status_failed(result)) return result;
+        writer->thread = NULL;
+    }
+    result = writer->wake ? maage_condition_destroy(writer->wake) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    if (maage_status_failed(result)) return result;
+    writer->wake = NULL;
+    result = writer->mutex ? maage_mutex_destroy(writer->mutex) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    if (!maage_status_failed(result)) writer->mutex = NULL;
+    return result;
+}
 static void front_shutdown_run(void *context, const maage_job_token *token) {
     maage_front_shutdown *shutdown = (maage_front_shutdown *) context;
     maage_status result, operation;
@@ -89,14 +137,34 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
     f->root = maage_instance_directory(instance);
     f->instance = instance;
     f->items = items;
+    f->options.instance = instance;
+    result = maage_mutex_create(&f->options.mutex);
+    if (maage_status_failed(result)) {
+        free(f);
+        return result;
+    }
+    result = maage_condition_create(&f->options.wake);
+    if (maage_status_failed(result)) {
+        front_options_destroy(&f->options);
+        free(f);
+        return result;
+    }
+    result = maage_thread_start(front_options_run, &f->options, &f->options.thread);
+    if (maage_status_failed(result)) {
+        front_options_destroy(&f->options);
+        free(f);
+        return result;
+    }
     result = maage_jobs_create(1, 1, &f->jobs, trace);
     if (maage_status_failed(result)) {
+        front_options_destroy(&f->options);
         free(f);
         return result;
     }
     result = maage_jobs_create(1, 1, &f->shutdown_jobs, trace);
     if (maage_status_failed(result)) {
         maage_jobs_destroy(f->jobs, NULL);
+        front_options_destroy(&f->options);
         free(f);
         return result;
     }
@@ -104,6 +172,7 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
     if (maage_status_failed(result)) {
         maage_jobs_destroy(f->shutdown_jobs, NULL);
         maage_jobs_destroy(f->jobs, NULL);
+        front_options_destroy(&f->options);
         free(f);
         return result;
     }
@@ -181,7 +250,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if ((was_options && !maage_client_ui_options_visible(ui)) || (was_transitioning && !maage_client_ui_window_mode_changing(ui))) {
             maage_client_ui_get_options(ui, &options);
             if (!maage_client_options_equal(&options, &f->saved_options)) {
-                result = maage_client_options_save(f->instance, &options);
+                result = maage_client_frontend_save_options(f, &options);
                 if (maage_status_failed(result)) maage_client_ui_notify(ui, result, start);
                 else
                     f->saved_options = options;
@@ -261,6 +330,15 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (maage_status_failed(result)) return result;
     }
 }
+maage_status maage_client_frontend_save_options(maage_client_frontend *f, const maage_client_options *options) {
+    if (!f || !options || !f->options.mutex) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
+    maage_mutex_lock(f->options.mutex);
+    f->options.latest = *options;
+    f->options.pending = 1;
+    maage_condition_signal(f->options.wake);
+    maage_mutex_unlock(f->options.mutex);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+}
 maage_status maage_client_frontend_leave_world(maage_client_frontend *f, maage_server_runtime *server, maage_local_session *session, maage_world *visual, maage_status_trace *trace) {
     maage_job_id job;
     maage_status result;
@@ -290,6 +368,8 @@ maage_status maage_client_frontend_destroy(maage_client_frontend *f) {
     result = maage_jobs_destroy(f->shutdown_jobs, NULL);
     if (maage_status_failed(result)) return result;
     result = maage_jobs_destroy(f->jobs, NULL);
+    if (maage_status_failed(result)) return result;
+    result = front_options_destroy(&f->options);
     if (maage_status_failed(result)) return result;
     maage_client_ui_front_destroy(f->view);
     free(f->entries);
