@@ -14,6 +14,12 @@
 #define MAAGE_JOB_MESH 4
 #define MAAGE_JOB_SAVE 5
 #define MAAGE_WORLD_MESH_RETRY_SECONDS 0.25
+/* First display is grouped by two rings across eight independent directional
+ * sectors. Four groups can be visible-ready ahead of a sector's earliest
+ * incomplete group; no global ring barrier is imposed on independent workers. */
+#define MAAGE_WORLD_REVEAL_SECTORS 8U
+#define MAAGE_WORLD_REVEAL_BATCH_RINGS 2
+#define MAAGE_WORLD_REVEAL_CONCURRENT_BATCHES 4
 
 /* Only the World owner changes membership, revisions and reference counts.
  * Workers borrow immutable payloads; references are released AFTER completion.
@@ -85,7 +91,7 @@ struct maage_world {
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
     unsigned scan_step, mesh_turn, column_turn;
-    int scan_ring, save_turn, visual_frontier;
+    int scan_ring, save_turn, visual_frontier[MAAGE_WORLD_REVEAL_SECTORS];
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
     int center_x, center_z, retained_radius, stopped, failed, diagnostics;
@@ -246,6 +252,16 @@ static maage_world_slot *maage_world_insert(maage_world *world, int x, int z) {
     ++world->count;
     return slot;
 }
+/* Eight disjoint octants, each containing an outward two-ring reveal lane.
+ * Ties on diagonals consistently belong to a single sector. */
+static unsigned maage_world_visual_sector(int dx, int dz) {
+    if (dx >= 0) {
+        if (dz >= 0) return dx >= dz ? 0U : 1U;
+        return dx >= -dz ? 7U : 6U;
+    }
+    if (dz >= 0) return -dx > dz ? 3U : 2U;
+    return -dx >= -dz ? 4U : 5U;
+}
 static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
     size_t bucket = maage_world_bucket(slot->x, slot->z, world->bucket_count), destination;
     maage_world_slot *displaced;
@@ -286,11 +302,14 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
         world->chunks = slot->next;
     if (slot->next) slot->next->previous = slot->previous;
     --world->count;
-    /* Removing a previously acknowledged inner column reopens that ring. */
+    /* A removed column reopens its two-ring group, but not the other
+     * seven sectors. Cached presentation elsewhere remains independent. */
     {
-        int dx = abs(slot->x - world->center_x), dz = abs(slot->z - world->center_z);
-        int ring = dx > dz ? dx : dz;
-        if (ring < world->visual_frontier) world->visual_frontier = ring;
+        int dx = slot->x - world->center_x, dz = slot->z - world->center_z;
+        int ring = abs(dx) > abs(dz) ? abs(dx) : abs(dz);
+        unsigned sector = maage_world_visual_sector(dx, dz);
+        int group = ring / MAAGE_WORLD_REVEAL_BATCH_RINGS * MAAGE_WORLD_REVEAL_BATCH_RINGS;
+        if (group < world->visual_frontier[sector]) world->visual_frontier[sector] = group;
     }
     if (world->save_cursor == slot) world->save_cursor = slot->next ? slot->next : world->chunks;
     maage_world_release(slot->data);
@@ -313,28 +332,39 @@ static void maage_world_scan_revisit(maage_world *world, const maage_world_slot 
         world->scan_step = 0;
     }
 }
-/* Only first visual presentation respects a monotonic square-ring frontier.
- * Loads, transfers, CPU meshes and GPU uploads are independently prepared.
- * Previously presented columns can always refine without waiting. */
-static void maage_world_advance_frontier(maage_world *world) {
-    int *frontier = &world->visual_frontier;
+/* A sector advances only when its current two-ring group has appeared.
+ * Other sectors, and the next four groups within this sector, are free to
+ * display already prepared geometry without waiting for this group. */
+static void maage_world_advance_frontier(maage_world *world, unsigned sector) {
+    int *frontier = &world->visual_frontier[sector];
     int radius = world->config.render_distance;
     int bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
-    int ring, dx, dz, x, z;
+    int ring, end_ring, dx, dz, x, z;
     maage_world_slot *slot;
     while (*frontier <= radius) {
-        ring = *frontier;
-        for (dz = -ring; dz <= ring; ++dz)
-            for (dx = -ring; dx <= ring; ++dx) {
-                if (abs(dx) != ring && abs(dz) != ring) continue;
-                x = world->center_x + dx;
-                z = world->center_z + dz;
-                if (x < -bound || x > bound || z < -bound || z > bound) continue;
-                slot = maage_world_find(world, x, z);
-                if (!slot || !slot->presented) return;
-            }
-        ++*frontier;
+        end_ring = *frontier + MAAGE_WORLD_REVEAL_BATCH_RINGS;
+        if (end_ring > radius + 1) end_ring = radius + 1;
+        for (ring = *frontier; ring < end_ring; ++ring)
+            for (dz = -ring; dz <= ring; ++dz)
+                for (dx = -ring; dx <= ring; ++dx) {
+                    if (abs(dx) != ring && abs(dz) != ring) continue;
+                    if (maage_world_visual_sector(dx, dz) != sector) continue;
+                    x = world->center_x + dx;
+                    z = world->center_z + dz;
+                    if (x < -bound || x > bound || z < -bound || z > bound) continue;
+                    slot = maage_world_find(world, x, z);
+                    if (!slot || !slot->presented) return;
+                }
+        *frontier = end_ring;
     }
+}
+/* Camera and radius rebases preserve completed cached groups; only unseen
+ * geometry belongs to a fresh reveal window. */
+static void maage_world_reset_visual_frontiers(maage_world *world) {
+    unsigned sector;
+    memset(world->visual_frontier, 0, sizeof(world->visual_frontier));
+    if (!world->config.presentation_only) return;
+    for (sector = 0; sector < MAAGE_WORLD_REVEAL_SECTORS; ++sector) maage_world_advance_frontier(world, sector);
 }
 static int maage_world_complete(const maage_world_slot *slot) {
     return slot && slot->data && !slot->failed;
@@ -1307,8 +1337,7 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
         }
         world->scan_ring = 0;
         world->scan_step = 0;
-        world->visual_frontier = 0;
-        if (world->config.presentation_only) maage_world_advance_frontier(world);
+        maage_world_reset_visual_frontiers(world);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -1357,9 +1386,8 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     world->center_z = cz;
     world->yaw = yaw;
     if (cx != old_x || cz != old_z) {
-        world->visual_frontier = 0;
+        maage_world_reset_visual_frontiers(world);
         world->retained_radius = world->config.render_distance;
-        if (world->config.presentation_only) maage_world_advance_frontier(world);
     }
     maage_world_collect(world);
     if (cx != old_x || cz != old_z) {
@@ -1702,12 +1730,18 @@ maage_status maage_world_sample_camera(const maage_world *world, int x, int y, i
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
 
-/* Only first presentation is ring-gated; an existing visible column must not
- * disappear when the player moves or a neighboring mesh is being refined. */
+/* The eight sector frontiers admit four two-ring batches apiece. A slow
+ * column blocks only later groups in its own sector, not peers in the same
+ * group or neighboring octants. Previously displayed meshes never disappear. */
 int maage_world_mesh_can_present(const maage_world *world, int x, int z) {
     maage_world_slot *slot = world ? maage_world_find(world, x, z) : NULL;
-    return world && world->config.presentation_only && maage_world_complete(slot) &&
-           (slot->presented || maage_world_distance(world, slot) <= world->visual_frontier);
+    unsigned sector;
+    int ring;
+    if (!world || !world->config.presentation_only || !maage_world_complete(slot)) return 0;
+    if (slot->presented) return 1;
+    sector = maage_world_visual_sector(x - world->center_x, z - world->center_z);
+    ring = maage_world_distance(world, slot);
+    return ring < world->visual_frontier[sector] + MAAGE_WORLD_REVEAL_BATCH_RINGS * MAAGE_WORLD_REVEAL_CONCURRENT_BATCHES;
 }
 int maage_world_mesh_current(const maage_world *world, int x, int z, unsigned long revision) {
     maage_world_slot *slot, *neighbors[8];
@@ -1743,7 +1777,7 @@ maage_status maage_world_mesh_presented(maage_world *world, int x, int z, unsign
     if (!maage_world_complete(slot) || slot->mesh_prepared_revision != revision || !maage_world_mesh_current(world, x, z, revision) || !maage_world_mesh_can_present(world, x, z)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
     if (!slot->presented) {
         slot->presented = 1;
-        maage_world_advance_frontier(world);
+        maage_world_advance_frontier(world, maage_world_visual_sector(x - world->center_x, z - world->center_z));
         if (world->diagnostics) maage_log_info("maage.world.latency", "owner=client phase=first_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f", x, z, revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
@@ -1766,9 +1800,12 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     fair = ++world->mesh_turn % 8U == 0;
-    /* Already-presented inner rings must advance after a camera/view rebase,
-     * even when all of their cached meshes have already been uploaded. */
-    if (world->config.presentation_only) maage_world_advance_frontier(world);
+    /* A cached inner group may already be complete after a rebase. Advance
+     * each independent lane without tying mesh upload to presentation. */
+    if (world->config.presentation_only) {
+        unsigned sector;
+        for (sector = 0; sector < MAAGE_WORLD_REVEAL_SECTORS; ++sector) maage_world_advance_frontier(world, sector);
+    }
     link = &world->mesh_head;
     while ((slot = *link) != NULL) {
         if (!slot->pending_mesh || !maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {

@@ -137,21 +137,23 @@ it so later expansion does not repeat the initial transfer. Cached chunks are
 hidden outside the view and released through ordinary unloads on movement or
 cache pressure.
 
-The Client freely uploads completed meshes to its GPU cache ahead of the
-first-presentation ring. Only the first *draw* of a mesh waits for its ring.
-Its first mesh waits for stable local lighting, not neighboring
-columns to finish their light jobs; immutable halo snapshots and epochs reject
-outdated geometry, and later arrivals cause normal lighting/mesh refinement.
-It keeps prepared, never-presented GPU meshes hidden outside that ring.
-A successful first frame advances the frontier; already presented geometry
-remains visible and can update independently. The Client's only visual
-frontier rebases when the player changes chunk or render distance changes,
-advancing past already-presented inner rings without re-uploading them;
-missing columns reopen their ring. Submission stays outward-prioritized,
-completion and transport
-remain independent, and only first display follows the outward frontier. Workers remain
-parallel per column; no subcolumn synchronization, neighbor wait or render-frame
-barrier is introduced.
+The Client freely uploads completed meshes to its GPU cache ahead of first
+display. Its first mesh waits for stable local lighting, not neighboring
+columns to finish light jobs; immutable halo snapshots and epochs reject stale
+geometry, and later arrivals trigger normal refinement.
+
+First presentation uses eight independent directional sectors around the
+player rather than a global one-ring barrier. Each sector tracks complete
+two-ring groups, allowing four groups (up to eight rings of lookahead) to
+become visible whenever individual GPU meshes are ready. An unfinished
+chunk delays only future groups in its own sector; other sectors and chunks
+within the four active groups can appear immediately. Existing presented
+geometry remains visible and can update independently. Each sector's
+frontier rebases across already-presented cached geometry after player
+movement or render-distance changes, and missing columns reopen only their
+own two-ring group. Submission stays outward-prioritized, while completion,
+transport, lighting, meshing and GPU preparation remain independent; no
+worker waits for a ring, neighbor or render-frame barrier.
 
 ## Determinism and Persistence
 
