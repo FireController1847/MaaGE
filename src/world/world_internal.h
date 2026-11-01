@@ -19,8 +19,11 @@
  * dynamically sized, bit-packed palette. Lighting remains independently mutable.
  * A physical section has at most 4096 unique states; registries remain unbounded
  * within their existing 32-bit identity domain. */
+typedef struct maage_section_payload maage_section_payload;
+typedef struct maage_sky_payload maage_sky_payload;
 typedef struct maage_section {
     unsigned char light[MAAGE_SECTION_VOLUME];
+    maage_section_payload *payload; /* Immutable shared block palette, never lighting. */
     unsigned int *states;
     unsigned int *palette;
     unsigned char *packed;
@@ -33,6 +36,10 @@ maage_block_state_id maage_section_get(const maage_section *section, size_t cell
 maage_status maage_section_set(maage_section *section, size_t cell, maage_block_state_id state);
 maage_status maage_section_expand(maage_section *section);
 void maage_chunk_compact(maage_chunk *chunk);
+size_t maage_section_payload_resident_bytes(const maage_section *section);
+size_t maage_chunk_sky_resident_bytes(const maage_chunk *chunk);
+maage_status maage_chunk_sky_writable(maage_chunk *chunk);
+void maage_chunk_sky_share(maage_chunk *destination, const maage_chunk *source);
 typedef struct maage_update_index {
     unsigned int kind, cell;
     size_t heap_index; /* index+1, 0 empty, (size_t)-1 tombstone */
@@ -41,6 +48,7 @@ struct maage_chunk {
     int x, z;
     maage_block_state_id air;  /* Implicit empty sections use the registered state. */
     unsigned char *direct_sky; /* Packed 4-bit values (32 KiB); absent from persistence. */
+    maage_sky_payload *sky_payload; /* Shared until lighting explicitly detaches. */
     maage_section *sections[16];
     maage_biome_id biomes[256];
     unsigned short heightmap[256]; /* first air Y, 0..256 */

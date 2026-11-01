@@ -151,13 +151,13 @@ generation, lighting and mesh jobs execute in parallel, including farther work
 while nearby jobs are still running.
 Server columns transfer whenever their independent load/generation finishes;
 there is no initial packet ring barrier. Local Session transport retains
-per-column revision baselines and prioritizes nearer packets, while far columns
+per-column acknowledged revision identities and prioritizes nearer packets, while far columns
 can be received, lit, and meshed before their first visible turn. Initial
 block/biome transfer does not wait for Server lighting. The Server and Client
 retain previously viewed columns and GPU meshes when render distance temporarily
 shrinks at the same player chunk. The Server streams new/changed chunks only
-within the *current* view radius, while retaining acknowledged bases just outside
-it so later expansion does not repeat the initial transfer. Cached chunks are
+within the *current* view radius, while retaining acknowledged revision identities
+just outside it so later expansion does not repeat the initial transfer. Cached chunks are
 hidden outside the view. On movement, stale acknowledged Server columns receive
 regular unload publication opportunities alongside new front-facing terrain,
 and eligible old columns retire as soon as their unload is acknowledged. The
@@ -220,12 +220,18 @@ reported resident memory. Compacting vertex attributes and pooling native
 allocations remain separate opportunities.
 
 Numerical direct-sky caches use two four-bit light values per byte, allocating
-32 KiB per fully lit column instead of 64 KiB. All sky initialization, cloning,
-merging and comparisons operate on this same packed layout. The independent
-per-column replication-change bitmap is allocated only after a block mutation,
-and released when the matching Client update is acknowledged; new columns and
-clean Client visual columns do not carry an idle 8 KiB replication bitmap.
-Owner-thread World memory accounting includes these dynamic buffers.
+32 KiB per initialized column instead of 64 KiB. The packed array is shared by
+reference between immutable chunk snapshots and detached by the lighting worker
+on its first actual sky write. Its small reference-count header is allocated
+separately to avoid moving the 32 KiB array to a larger native malloc size class.
+The independent per-column replication-change bitmap is allocated only after a
+block mutation and released when the matching Client update is acknowledged;
+new columns and clean Client visual columns do not carry an idle 8 KiB map.
+The Server retains only the acknowledged block revision and dirty-cell bitmap
+for replication: the complete old chunk snapshot (including lighting) is no
+longer pinned solely as an update baseline. Owner-thread World accounting
+reports shared payload allocations proportionally across their live references
+and excludes detached worker-owned copies.
 
 ## Runtime Section Storage
 
@@ -238,8 +244,16 @@ cap the global runtime block registry. Section expansion happens only on a
 private mutation, never in a render-frame read or in a shared worker snapshot.
 Workers compact completed generated/loaded columns before publication; other
 private edits compact at owner publication. If optional palette allocation
-fails, direct state storage remains valid. Chunk snapshots copy compact sections
-rather than inflating palette indices into a full state array.
+fails, direct state storage remains valid. Each compacted palette and packed
+index array lives in a single immutable reference-counted allocation. Chunk
+clones share that block payload while copying only their independently mutable
+4 KiB section lighting and section metadata. Mutating a block expands and
+detaches only that section's palette; mutation never writes into a shared payload.
+References use platform-native atomic operations because independent workers
+clone and retire payloads concurrently. On the first Client import the immutable
+authoritative block palettes are shared with the visual replica; subsequent
+prediction edits detach only the affected section. The Server and Client remain
+independently owned across the Local Session boundary.
 
 ## Storage Codec Performance
 

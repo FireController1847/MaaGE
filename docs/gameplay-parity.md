@@ -74,6 +74,8 @@ bubble disappears; resurfacing immediately hides the air row.
 The Server publishes owned numeric block/biome columns initially, then changed
 cells against exact acknowledged block revisions. Per-column FIFO never coalesces away
 a required delta base; backpressure retains unsent state and changed-cell bits.
+The Server retains only the acknowledged revision and changed-cell map, not a
+second full chunk snapshot; redundant reverted-cell updates are harmless.
 Subsequent packets enumerate deduplicated mutated cells rather than comparing every
 section. A successful queue transfer advances the producer base only after the
 packet owns all necessary state. Ordered unload packets close an interest lifetime;

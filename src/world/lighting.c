@@ -97,7 +97,7 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
     unsigned char shafts[256], previous, light, adjacent;
     unsigned int cell, side, sky, emitted, opacity, value, bit;
     size_t byte, steps = 0;
-    int x, y, z, initial, changed = 0;
+    int x, y, z, initial, changed = 0, sky_writable = 0;
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
     if (!chunk || !neighbors || !dirty || !maage_block_registry_is_finalized(blocks)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT);
     memset(&work, 0, sizeof(work));
@@ -105,10 +105,14 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
     work.neighbors = neighbors;
     work.queue = (unsigned int *) malloc(65536UL * sizeof(*work.queue));
     initial = chunk->direct_sky == NULL;
-    if (initial) chunk->direct_sky = (unsigned char *) calloc(MAAGE_DIRECT_SKY_BYTES, 1);
-    if (!work.queue || !chunk->direct_sky) {
+    if (!work.queue) {
         result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
         goto done;
+    }
+    if (initial) {
+        result = maage_chunk_sky_writable(chunk);
+        if (maage_status_failed(result)) goto done;
+        sky_writable = 1;
     }
     memset(shafts, initial ? 1 : 0, sizeof(shafts));
     /* Skip empty dirty bytes. A small edit visits its cells and sky shafts,
@@ -143,6 +147,11 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
                     sky = sky > opacity ? sky - opacity : 0;
                     cell = (unsigned int) ((y * 16 + z) * 16 + x);
                     if (maage_chunk_direct_sky_get(chunk, cell) != sky) {
+                        if (!sky_writable) {
+                            result = maage_chunk_sky_writable(chunk);
+                            if (maage_status_failed(result)) goto done;
+                            sky_writable = 1;
+                        }
                         maage_chunk_direct_sky_set(chunk, cell, (unsigned char) sky);
                         maage_light_enqueue(&work, x, y, z);
                         for (side = 0; side < 6; ++side)
