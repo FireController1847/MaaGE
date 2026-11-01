@@ -6,7 +6,7 @@
 typedef struct maage_geometry_triangle {
     unsigned int indices[3];
     float center[3], depth;
-    size_t order;
+    unsigned int order; /* Source triangle order fits the validated 32-bit mesh index domain. */
 } maage_geometry_triangle;
 typedef struct maage_geometry {
     size_t solid_count, translucent_count, multiply_count;

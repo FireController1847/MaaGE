@@ -460,7 +460,7 @@ maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maag
 /* GPU variants reuse immutable source vertices; only indices and their
  * transparency metadata are prepared and uploaded. The source stays alive
  * until all its derived views have been retired. */
-maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, const maage_mesh_data *data, maage_render_mesh **output, maage_status_trace *trace) {
+maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, const maage_mesh_data *data, const unsigned char *face_flags, maage_render_mesh **output, maage_status_trace *trace) {
     maage_renderer *renderer;
     maage_mesh_preparation *prepared = NULL;
     maage_render_mesh *mesh;
@@ -472,7 +472,7 @@ maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, c
     renderer = source->renderer;
     if (maage_status_failed(renderer->failure)) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     if (!renderer->api->upload_geometry) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
-    result = maage_mesh_prepare(data, &prepared);
+    result = maage_mesh_prepare_index_view(data, face_flags, &source->geometry, &prepared);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh = (maage_render_mesh *) calloc(1, sizeof(*mesh));
     if (!mesh) {

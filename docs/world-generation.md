@@ -196,13 +196,15 @@ disk operations, global barriers, or unconditional remeshing are introduced.
 
 Chunk mesh vertices contain position, atlas UV, precomputed tint/AO, light,
 material and animation attributes; unused vertex normals are omitted from the
-shared CPU and native GPU layouts. For block prediction, the Client retains the
-immutable CPU source and compact 16-bit chunk-local face-owner tags instead of
-three world-coordinate integers per quad. A derived GPU prediction view retains
-the base vertex buffer and uploads only filtered indices plus the transparent
-triangle metadata needed to sort that view. Source resource ownership is
-reference-counted through the renderer: retiring an old mesh does not free
-its native vertex allocation while any derived view still uses it.
+shared CPU and native GPU layouts. Once the base GPU upload finishes, the Client
+discards its full CPU source vertex and index arrays. It retains only a 16-bit
+chunk-local owner and a byte of material/quad-winding information per face.
+Immediate local prediction reconstructs only the selected index list; the
+renderer groups its draw passes and reuses original GPU vertex data and
+transparent triangle centers without rehydrating CPU vertex arrays.
+Source resource ownership is reference-counted through the renderer: retiring
+an old mesh does not free its native vertex allocation while a derived view
+still uses it.
 
 The debug overlay reports retained CPU source mesh payload and estimated native
 base vertex/index payload separately. These are payload estimates, not total

@@ -100,6 +100,108 @@ maage_status maage_mesh_prepare(const maage_mesh_data *data, maage_mesh_preparat
     *output = prepared;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
+/* Index-only views are derived from a source mesh whose CPU vertex array
+ * has already been released. Every generated quad owns four vertices, and
+ * its six indices remain in source-face order. The base renderer geometry
+ * retains translucent triangle centers and original order even after camera
+ * sorting shuffles its triangle array. */
+maage_status maage_mesh_prepare_index_view(const maage_mesh_data *data, const unsigned char *face_flags, const maage_geometry *base, maage_mesh_preparation **output) {
+    maage_mesh_preparation *prepared = NULL;
+    const maage_geometry_triangle **original = NULL;
+    size_t source_faces, source_triangles, faces, counts[3] = {0, 0, 0}, destination[3];
+    size_t face, previous = 0, ordinal = 0, written = 0, source, triangle, axis, category, corner;
+    maage_status result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+    if (output) *output = NULL;
+    if (!data || !face_flags || !base || !output || !data->indices || !data->index_count ||
+        data->index_count % 6 || !data->vertex_count || data->vertex_count % 4 ||
+        data->vertex_count > UINT_MAX || data->index_count > (size_t) - 1 / sizeof(unsigned int))
+        return result;
+    source_faces = data->vertex_count / 4;
+    faces = data->index_count / 6;
+    if (source_faces > (size_t) - 1 / 6 || base->solid_count > (size_t) - 1 - base->translucent_count ||
+        base->solid_count + base->translucent_count > (size_t) - 1 - base->multiply_count ||
+        base->solid_count + base->translucent_count + base->multiply_count != source_faces * 6 ||
+        base->translucent_count % 6 || (base->translucent_count && !base->triangles)) return result;
+    source_triangles = base->translucent_count / 3;
+    for (face = 0; face < faces; ++face) {
+        source = data->indices[face * 6] / 4;
+        if (source >= source_faces || (face && source <= previous)) return result;
+        category = face_flags[source] & 3U;
+        if (category > 2) return result;
+        for (corner = 0; corner < 6; ++corner)
+            if (data->indices[face * 6 + corner] / 4 != source) return result;
+        counts[category] += 6;
+        previous = source;
+    }
+    prepared = (maage_mesh_preparation *) calloc(1, sizeof(*prepared));
+    if (!prepared) goto allocation_failed;
+    prepared->indices = (unsigned int *) malloc(data->index_count * sizeof(*prepared->indices));
+    if (!prepared->indices) goto allocation_failed;
+    prepared->geometry.solid_count = counts[0];
+    prepared->geometry.translucent_count = counts[1];
+    prepared->geometry.multiply_count = counts[2];
+    if (counts[1]) {
+        if (counts[1] / 3 > (size_t) - 1 / sizeof(*prepared->geometry.triangles)) goto overflow;
+        prepared->geometry.triangles = (maage_geometry_triangle *) calloc(counts[1] / 3, sizeof(*prepared->geometry.triangles));
+        if (!prepared->geometry.triangles) goto allocation_failed;
+    }
+    if (source_triangles) {
+        if (source_triangles > (size_t) - 1 / sizeof(*original)) goto overflow;
+        original = (const maage_geometry_triangle **) calloc(source_triangles, sizeof(*original));
+        if (!original) goto allocation_failed;
+        for (triangle = 0; triangle < source_triangles; ++triangle) {
+            source = base->triangles[triangle].order;
+            if (source >= source_triangles || original[source]) goto malformed;
+            original[source] = &base->triangles[triangle];
+        }
+    }
+    destination[0] = 0;
+    destination[1] = counts[0];
+    destination[2] = counts[0] + counts[1];
+    previous = ordinal = 0;
+    for (face = 0; face < faces; ++face) {
+        source = data->indices[face * 6] / 4;
+        while (previous < source) {
+            if ((face_flags[previous] & 3U) == 1U) ordinal += 2;
+            ++previous;
+        }
+        category = face_flags[source] & 3U;
+        memcpy(prepared->indices + destination[category], data->indices + face * 6, 6 * sizeof(*prepared->indices));
+        destination[category] += 6;
+        if (category == 1U) {
+            for (triangle = 0; triangle < 2; ++triangle) {
+                maage_geometry_triangle *target;
+                if (ordinal + triangle >= source_triangles || !original[ordinal + triangle]) goto malformed;
+                target = &prepared->geometry.triangles[written];
+                *target = *original[ordinal + triangle];
+                memcpy(target->indices, data->indices + face * 6 + triangle * 3, sizeof(target->indices));
+                target->order = written++;
+                for (axis = 0; axis < 3; ++axis)
+                    prepared->geometry.center[axis] += target->center[axis] / (counts[1] / 3);
+            }
+            ordinal += 2;
+        }
+        previous = source + 1;
+    }
+    free(original);
+    prepared->data = *data;
+    prepared->data.indices = prepared->indices;
+    *output = prepared;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
+malformed:
+    result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+    goto failed;
+overflow:
+    result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+    goto failed;
+allocation_failed:
+    result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+failed:
+    free(original);
+    maage_mesh_preparation_destroy(prepared);
+    return result;
+}
+
 maage_status maage_mesh_preparation_destroy(maage_mesh_preparation *prepared) {
     if (!prepared) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_geometry_dispose(&prepared->geometry);

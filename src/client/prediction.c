@@ -45,7 +45,7 @@ static maage_status maage_prediction_filter(const maage_render_mesh *gpu_source,
     result = maage_world_mesh_filter(source, centers, count, &data, &indices);
     if (!maage_status_failed(result) && data.index_count) {
         if (!gpu_source) result = maage_prediction_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MESH);
-        else result = maage_renderer_upload_index_view(gpu_source, &data, replacement, trace);
+        else result = maage_renderer_upload_index_view(gpu_source, &data, maage_world_mesh_face_flags(source), replacement, trace);
     }
     free(indices);
     if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *filtered = 1;

@@ -181,8 +181,9 @@ typedef struct maage_world_camera_sample {
 } maage_world_camera_sample;
 maage_status maage_world_sample_camera(const maage_world *world, int x, int y, int z, maage_world_camera_sample *sample);
 unsigned long maage_world_column_revision(const maage_world *world, int x, int z);
-/* Source quads retain numeric voxel ownership. Filtering produces only owned
- * scratch indices; vertices remain borrowed from the immutable source mesh. */
+/* Source quads retain compact ownership and per-face draw metadata. Filtering
+ * regenerates owned scratch indices; resident source vertices are optional
+ * after a successful Client upload. */
 maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_block_position *removed, size_t count, maage_mesh_data *data, unsigned int **indices);
 /* Exact geometry for the deduplicated 3x3x3 cells and axial foliage dependencies
  * around at most 32 edits.
@@ -330,6 +331,12 @@ int maage_world_collision_shape(const maage_world *world, int x, int y, int z, m
  * Destroy/cancel the upload before destroying its source mesh. */
 maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh);
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh);
+/* Two-bit material category plus quad winding in one byte per source face.
+ * Available for full chunk meshes, not temporary patch meshes. */
+const unsigned char *maage_world_mesh_face_flags(const maage_world_mesh *mesh);
+/* Release CPU vertices and indices only once the native base upload completes.
+ * Filtered index views still work from retained owners and face flags. */
+void maage_world_mesh_release_upload_data(maage_world_mesh *mesh);
 /* Resident CPU source payload (including owner tags); excludes upload
  * preparations and renderer-owned native buffers. Constant-time query. */
 size_t maage_world_mesh_cpu_bytes(const maage_world_mesh *mesh);

@@ -188,8 +188,10 @@ maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maag
 /* An index-only view borrows the original immutable GPU vertices and retains
  * its source until the view is destroyed. Data indices must address the same
  * vertices as source; only grouped/filtered indices and sort data are uploaded.
- * This avoids allocating another full vertex buffer for local predictions. */
-maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, const maage_mesh_data *data, maage_render_mesh **mesh, maage_status_trace *trace);
+ * face_flags identifies each source quad's material category in its low two
+ * bits; the remaining bits encode its original index winding. The original
+ * geometry holds transparent-triangle centers even after GPU upload. */
+maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, const maage_mesh_data *data, const unsigned char *face_flags, maage_render_mesh **mesh, maage_status_trace *trace);
 /* Begin consumes preparation on SUCCESS. Vertices stay borrowed until step
  * returns SUCCESS or the mesh is destroyed. Step copies at most byte_budget
  * bytes on the window/renderer thread; NOOP means more work remains. Native

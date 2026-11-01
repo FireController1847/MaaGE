@@ -11,9 +11,17 @@ struct maage_world_mesh {
     maage_mesh_vertex *vertices;
     unsigned int *indices;
     unsigned short *owners;
+    unsigned char *face_flags; /* Material category and quad winding per face. */
     int chunk_x, chunk_z;
 };
 
+/* Each generated face has four private vertices; all four quad windings
+ * produced by the regular and reverse-face paths fit into two bits. */
+static const unsigned char maage_mesh_quad_indices[4][6] = {
+    {0, 1, 2, 0, 2, 3},
+    {0, 1, 3, 1, 2, 3},
+    {0, 2, 1, 0, 3, 2},
+    {0, 3, 1, 1, 3, 2}};
 static const int maage_face_neighbor[MAAGE_FACE_COUNT][3] = {
     {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
 /* Bottom-left, bottom-right, top-right, top-left viewed from outside. */
@@ -577,7 +585,8 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
         mesh->vertices = (maage_mesh_vertex *) malloc(faces * 4 * sizeof(*mesh->vertices));
         mesh->indices = (unsigned int *) malloc(faces * 6 * sizeof(*mesh->indices));
         mesh->owners = (unsigned short *) malloc(faces * sizeof(*mesh->owners));
-        if (!mesh->vertices || !mesh->indices || !mesh->owners) {
+        mesh->face_flags = (unsigned char *) malloc(faces * sizeof(*mesh->face_flags));
+        if (!mesh->vertices || !mesh->indices || !mesh->owners || !mesh->face_flags) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
         }
@@ -597,6 +606,24 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
             maage_world_mesh_destroy(mesh);
             return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
         }
+        /* The validated quad geometry is only needed until the GPU upload.
+         * Preserve all information used by later prediction filtering in a
+         * single byte for each face. */
+        for (written = 0; written < faces; ++written) {
+            unsigned int pattern, corner, category;
+            float material = mesh->vertices[written * 4].material;
+            for (pattern = 0; pattern < 4; ++pattern) {
+                for (corner = 0; corner < 6; ++corner)
+                    if (mesh->indices[written * 6 + corner] != (unsigned int) (written * 4) + maage_mesh_quad_indices[pattern][corner]) break;
+                if (corner == 6) break;
+            }
+            if (pattern == 4) {
+                maage_world_mesh_destroy(mesh);
+                return maage_mesh_failure(trace, MAAGE_STATUS_INVARIANT_VIOLATION);
+            }
+            category = material == MAAGE_MESH_MATERIAL_TRANSLUCENT ? 1U : (material == MAAGE_MESH_MATERIAL_MULTIPLY ? 2U : 0U);
+            mesh->face_flags[written] = (unsigned char) (category | (pattern << 2));
+        }
     }
     *output = mesh;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
@@ -611,14 +638,29 @@ maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh) {
     return mesh ? &mesh->data : NULL;
 }
+const unsigned char *maage_world_mesh_face_flags(const maage_world_mesh *mesh) {
+    return mesh ? mesh->face_flags : NULL;
+}
+void maage_world_mesh_release_upload_data(maage_world_mesh *mesh) {
+    if (!mesh || mesh->prepared || !mesh->face_flags) return;
+    /* Only the Client calls this after a successful native upload. A future
+     * index view reconstructs the original quad winding without CPU vertices. */
+    free(mesh->indices);
+    free(mesh->vertices);
+    mesh->indices = NULL;
+    mesh->vertices = NULL;
+    mesh->data.indices = NULL;
+    mesh->data.vertices = NULL;
+}
 size_t maage_world_mesh_cpu_bytes(const maage_world_mesh *mesh) {
     if (!mesh) return 0;
-    return sizeof(*mesh) + mesh->data.vertex_count * sizeof(*mesh->vertices) + mesh->data.index_count * sizeof(*mesh->indices) + (mesh->owners ? mesh->data.vertex_count / 4 * sizeof(*mesh->owners) : 0);
+    return sizeof(*mesh) + (mesh->vertices ? mesh->data.vertex_count * sizeof(*mesh->vertices) : 0) + (mesh->indices ? mesh->data.index_count * sizeof(*mesh->indices) : 0) + (mesh->owners ? mesh->data.vertex_count / 4 * sizeof(*mesh->owners) : 0) + (mesh->face_flags ? mesh->data.vertex_count / 4 * sizeof(*mesh->face_flags) : 0);
 }
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh) {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_mesh_preparation_destroy(mesh->prepared);
     free(mesh->owners);
+    free(mesh->face_flags);
     free(mesh->indices);
     free(mesh->vertices);
     free(mesh);
@@ -632,21 +674,28 @@ static int maage_mesh_removed(const maage_block_position *removed, size_t count,
     return 0;
 }
 maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_block_position *removed, size_t count, maage_mesh_data *data, unsigned int **indices) {
-    size_t face, written = 0;
-    if (!mesh || !data || !indices || (count && !removed)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
+    size_t face, retained = 0, written = 0;
+    unsigned int corner, base, pattern;
+    if (!mesh || !data || !indices || (count && !removed) || (mesh->data.index_count && (!mesh->owners || !mesh->face_flags)))
+        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     *indices = NULL;
     *data = mesh->data;
-    if (mesh->data.index_count) {
-        *indices = (unsigned int *) malloc(mesh->data.index_count * sizeof(**indices));
+    for (face = 0; face < mesh->data.index_count / 6; ++face)
+        if (!maage_mesh_removed(removed, count, mesh->chunk_x * 16 + (mesh->owners[face] & 15U), mesh->owners[face] >> 8, mesh->chunk_z * 16 + ((mesh->owners[face] >> 4) & 15U))) ++retained;
+    if (retained) {
+        *indices = (unsigned int *) malloc(retained * 6 * sizeof(**indices));
         if (!*indices) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     }
     for (face = 0; face < mesh->data.index_count / 6; ++face) {
         if (maage_mesh_removed(removed, count, mesh->chunk_x * 16 + (mesh->owners[face] & 15U), mesh->owners[face] >> 8, mesh->chunk_z * 16 + ((mesh->owners[face] >> 4) & 15U))) continue;
-        memcpy(*indices + written, mesh->indices + face * 6, 6 * sizeof(**indices));
-        written += 6;
+        pattern = mesh->face_flags[face] >> 2;
+        base = (unsigned int) (face * 4);
+        for (corner = 0; corner < 6; ++corner)
+            (*indices)[written * 6 + corner] = base + maage_mesh_quad_indices[pattern][corner];
+        ++written;
     }
     data->indices = *indices;
-    data->index_count = written;
+    data->index_count = written * 6;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }
 static int maage_mesh_cell_order(const void *left, const void *right) {

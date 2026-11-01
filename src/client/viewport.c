@@ -345,6 +345,9 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
             if (maage_status_code(result) == MAAGE_STATUS_NOOP) continue;
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto upload_failed;
         }
+        /* Finished uploads no longer require the complete CPU vertex/index
+         * arrays. Future local predictions reconstruct only filtered indices. */
+        maage_world_mesh_release_upload_data(update->mesh);
         selected = vacant = cache->capacity;
         for (i = 0; i < cache->capacity; ++i) {
             if (cache->slots[i].used && cache->slots[i].x == update->x && cache->slots[i].z == update->z) {
