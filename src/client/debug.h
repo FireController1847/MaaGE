@@ -28,8 +28,8 @@ typedef struct maage_client_debug {
 /* Copied player/target observations are read from the latest Server snapshot. Performance uses
  * a 0.75-second exponential history, displayed at 250 ms intervals; native memory
  * is sampled at that interval. F3 shows process resident/peak memory and one
- * unlabeled breakdown line: base GPU mesh payload / Server World retained
- * storage / Client World retained storage / unattributed resident remainder.
+ * breakdown line: GPU base mesh payload / SW Server World retained storage /
+ * CW Client World retained storage / U unattributed resident remainder.
  * World counts exclude detached jobs and resources outside owned chunk arrays;
  * GPU base bytes exclude other driver resources. The remainder is derived, not
  * separately measured, and may be unknown for discrete/nonresident GPUs.

@@ -207,9 +207,9 @@ an old mesh does not free its native vertex allocation while a derived view
 still uses it.
 
 The debug overlay displays one process resident-memory number followed by an
-unlabeled memory breakdown (MiB), ordered left to right: base mesh GPU payload,
-Server World retained storage, Client World retained storage, and unattributed
-resident-memory remainder. World figures inspect the owner-thread's allocated
+memory breakdown (MiB), ordered left to right: GPU (base mesh payload),
+SW (Server World retained storage), CW (Client World retained storage),
+and U (unattributed resident-memory remainder). World figures inspect the owner-thread's allocated
 column snapshots, packed sections, lighting, and indexing structures; detached
 worker outputs, external registries, and renderer allocations are not included.
 GPU bytes count base mesh vertex/index payloads, not native driver overhead,
