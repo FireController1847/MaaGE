@@ -1072,19 +1072,19 @@ typedef struct maage_store_entity_codec {
 } maage_store_entity_codec;
 static maage_status maage_store_entity_word(void *context, unsigned long *word, unsigned int width) {
     maage_store_entity_codec *codec = (maage_store_entity_codec *) context;
-    if (!width || width > 4) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
-    if (codec->writing && *word > (width == 4 ? MAAGE_STORE_WORD : ((1UL << (width * 8U)) - 1UL))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_ENCODE, 0);
+    if (!width || width > 4) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_WRITE : MAAGE_OPERATION_DECODE, 0);
+    if (codec->writing && *word > (width == 4 ? MAAGE_STORE_WORD : ((1UL << (width * 8U)) - 1UL))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_WRITE, 0);
     if (codec->writing) maage_store_put(codec->bytes, *word, width);
     else *word = maage_store_get(codec->bytes, width);
     if (maage_status_failed(codec->bytes->failure)) return codec->bytes->failure;
-    return maage_status_make(codec->bytes->failed ? MAAGE_STATUS_MALFORMED_INPUT : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_ENCODE : MAAGE_OPERATION_DECODE, 0);
+    return maage_status_make(codec->bytes->failed ? MAAGE_STATUS_MALFORMED_INPUT : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_WRITE : MAAGE_OPERATION_DECODE, 0);
 }
 static maage_status maage_store_entity_stack(void *context, maage_item_stack *stack) {
     maage_store_entity_codec *codec = (maage_store_entity_codec *) context;
     if (codec->writing) maage_store_stack_put(codec->bytes, stack, codec->store);
     else maage_store_stack_get(codec->bytes, stack, codec->store);
     if (maage_status_failed(codec->bytes->failure)) return codec->bytes->failure;
-    return maage_status_make(codec->bytes->failed ? MAAGE_STATUS_MALFORMED_INPUT : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_ENCODE : MAAGE_OPERATION_DECODE, 0);
+    return maage_status_make(codec->bytes->failed ? MAAGE_STATUS_MALFORMED_INPUT : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_WRITE : MAAGE_OPERATION_DECODE, 0);
 }
 static const maage_block_entity_handler *maage_store_entity_handler(const maage_block_registry *blocks, const maage_block_state_definition *state) {
     const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
