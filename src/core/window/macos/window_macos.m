@@ -493,6 +493,8 @@ static void maage_cocoa_destroy(maage_window *window) {
     if (!native) return;
     maage_window_input_focus(window, 0);
     [native->handle setDelegate:nil];
+    [native->bitmap_view release];
+    native->bitmap_view = nil;
     [native->handle orderOut:nil];
     [native->handle close];
     [native->handle release];
@@ -681,6 +683,7 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event) 
     return 0;
 }
 static maage_status maage_cocoa_poll(maage_window_system *system, int timeout_ms) {
+    maage_cocoa_system *native = system->platform;
     NSAutoreleasePool *pool;
     NSEvent *event;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, MAAGE_DETAIL_WRONG_THREAD);
@@ -692,6 +695,10 @@ static maage_status maage_cocoa_poll(maage_window_system *system, int timeout_ms
     }
     [NSApp updateWindows];
     [pool drain];
+    /* Native state/cursor/context calls also occur between event pumps. Their
+     * autoreleased objects must not accumulate in the application-lifetime pool. */
+    [native->pool drain];
+    native->pool = [[NSAutoreleasePool alloc] init];
     return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_POLL, 0);
 }
 static maage_status maage_cocoa_state(maage_window *window) {

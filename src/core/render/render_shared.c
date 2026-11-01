@@ -50,49 +50,6 @@ static float maage_render_depth(const float center[3], const float matrix[16], c
     }
     return depth > FLT_MAX ? FLT_MAX : (depth < -FLT_MAX ? -FLT_MAX : (float) depth);
 }
-maage_status maage_render_geometry_prepare(maage_render_geometry *geometry, const maage_mesh_data *data, unsigned int *grouped_indices) {
-    size_t index, destination[3], category, triangle_count = 0, axis, corner;
-    maage_render_triangle *triangle;
-    float material;
-    if (!geometry || !data || !grouped_indices || !data->vertices || !data->indices || !data->index_count || data->index_count % 3 || geometry->triangles) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-    for (index = 0; index < data->index_count; index += 3) {
-        material = data->vertices[data->indices[index]].material;
-        if (material == MAAGE_MESH_MATERIAL_TRANSLUCENT) geometry->translucent_count += 3;
-        else if (material == MAAGE_MESH_MATERIAL_MULTIPLY) geometry->multiply_count += 3;
-        else
-            geometry->solid_count += 3;
-    }
-    if (geometry->translucent_count) {
-        if (geometry->translucent_count / 3 > (size_t) - 1 / sizeof(*geometry->triangles)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-        geometry->triangles = (maage_render_triangle *) calloc(geometry->translucent_count / 3, sizeof(*geometry->triangles));
-        if (!geometry->triangles) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-    }
-    destination[0] = 0;
-    destination[1] = geometry->solid_count;
-    destination[2] = geometry->solid_count + geometry->translucent_count;
-    for (index = 0; index < data->index_count; index += 3) {
-        material = data->vertices[data->indices[index]].material;
-        category = material == MAAGE_MESH_MATERIAL_TRANSLUCENT ? 1 : (material == MAAGE_MESH_MATERIAL_MULTIPLY ? 2 : 0);
-        memcpy(grouped_indices + destination[category], data->indices + index, 3 * sizeof(*grouped_indices));
-        destination[category] += 3;
-        if (category != 1) continue;
-        triangle = &geometry->triangles[triangle_count];
-        memcpy(triangle->indices, data->indices + index, sizeof(triangle->indices));
-        triangle->order = triangle_count++;
-        for (axis = 0; axis < 3; ++axis) {
-            for (corner = 0; corner < 3; ++corner)
-                triangle->center[axis] += data->vertices[triangle->indices[corner]].position[axis] / 3;
-            geometry->center[axis] += triangle->center[axis] / (geometry->translucent_count / 3);
-        }
-    }
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
-}
-maage_status maage_render_geometry_dispose(maage_render_geometry *geometry) {
-    if (!geometry) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
-    free(geometry->triangles);
-    memset(geometry, 0, sizeof(*geometry));
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
-}
 static maage_status maage_render_geometry_sort(maage_render_geometry *geometry, const float matrix[16]) {
     double origin[3], movement = 0;
     int perspective, axis;
@@ -141,7 +98,7 @@ maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maa
     if (!preparing && renderer->instance_count && (!matrix || renderer->instance_count > (size_t) - 1 - count)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     memset(plan, 0, sizeof(*plan));
     for (index = 0; index < count; ++index)
-        if (!meshes[index] || meshes[index]->renderer != renderer)
+        if (!meshes[index] || meshes[index]->renderer != renderer || meshes[index]->upload)
             return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
     if (matrix)
         for (axis = 0; axis < 16; ++axis)
@@ -342,36 +299,6 @@ int maage_render_gpu_layout_supported(void) {
            sizeof(maage_render_ui_vertex) == MAAGE_RENDER_UI_VERTEX_BYTES &&
            sizeof(maage_render_ui_gpu_vertex) == MAAGE_RENDER_UI_GPU_VERTEX_BYTES &&
            sizeof(maage_render_uniforms) == MAAGE_RENDER_UNIFORM_BYTES;
-}
-maage_status maage_render_mesh_validate(const maage_mesh_data *data) {
-    size_t index, axis;
-    if (!data || !data->vertices || !data->indices || !data->vertex_count ||
-        !data->index_count || data->index_count % 3 || data->vertex_count > UINT_MAX ||
-        data->vertex_count > (size_t) - 1 / sizeof(*data->vertices) ||
-        data->index_count > (size_t) - 1 / sizeof(*data->indices))
-        return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-    for (index = 0; index < data->index_count; ++index)
-        if (data->indices[index] >= data->vertex_count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-    for (index = 0; index < data->index_count; index += 3) {
-        float material = data->vertices[data->indices[index]].material;
-        if (!(material == MAAGE_MESH_MATERIAL_OPAQUE || material == MAAGE_MESH_MATERIAL_CUTOUT ||
-              material == MAAGE_MESH_MATERIAL_TRANSLUCENT || material == MAAGE_MESH_MATERIAL_MULTIPLY) ||
-            data->vertices[data->indices[index + 1]].material != material ||
-            data->vertices[data->indices[index + 2]].material != material)
-            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
-    }
-    for (index = 0; index < data->vertex_count; ++index) {
-        const float *animation = data->vertices[index].animation;
-        if (!(animation[0] >= 0 && animation[0] <= 1 &&
-              animation[1] >= -FLT_MAX && animation[1] <= FLT_MAX &&
-              animation[2] >= 0 && animation[2] <= FLT_MAX) ||
-            (animation[1] != 0 && !(animation[2] >= 1)))
-            return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
-        for (axis = 0; axis < 3; ++axis)
-            if (!(data->vertices[index].position[axis] >= -FLT_MAX && data->vertices[index].position[axis] <= FLT_MAX))
-                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
-    }
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
 static maage_status maage_render_ui_validate(const maage_renderer *renderer, const maage_render_ui_data *batch) {
     size_t index;

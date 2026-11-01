@@ -923,8 +923,8 @@ static void server_thread_entry(void *context) {
     last_published = -1.0;
     next_stream = now;
     while (!server_stop_requested(runtime)) {
-        /* A stream pump runs even when paused or awaiting the initial spawn
-         * column; job completions precede all collision queries each step. */
+        /* Streaming continues while paused or awaiting spawn. Due simulation
+         * uses already published columns before servicing background work. */
         maage_status_trace_init(&trace);
         server_service_container(runtime);
         result = server_take_commands(runtime);
@@ -937,25 +937,6 @@ static void server_thread_entry(void *context) {
         if (now < 0.0) {
             server_capture_failure(runtime, server_status(MAAGE_STATUS_ERROR, MAAGE_OPERATION_QUERY), NULL);
             break;
-        }
-        /* Command wakeups can exceed the streaming service cadence. Preserve
-         * the existing bounded pump interval and collect before every due
-         * collision/gameplay step, without rescanning World on each mouse move. */
-        if (now >= next_stream || now >= deadline) {
-            result = maage_world_stream(runtime->world, runtime->player.position[0], runtime->player.position[2], runtime->yaw, &trace);
-            if (maage_status_failed(result)) {
-                server_capture_failure(runtime, result, &trace);
-                break;
-            }
-            if (maage_world_failed(runtime->world)) {
-                server_capture_failure(runtime, maage_world_status(runtime->world), maage_world_trace(runtime->world));
-                break;
-            }
-            if (maage_world_status(runtime->world) != runtime->last_world_notice) {
-                runtime->last_world_notice = maage_world_status(runtime->world);
-                server_status_event(runtime, runtime->last_world_notice, maage_world_trace(runtime->world));
-            }
-            next_stream = maage_time_monotonic_seconds() + MAAGE_SERVER_WAIT_MS / 1000.0;
         }
         server_publish_status(runtime);
         if (maage_status_failed(runtime->result)) break;
@@ -1007,6 +988,27 @@ static void server_thread_entry(void *context) {
                 server_status_event(runtime, server_status(MAAGE_STATUS_WARNING, MAAGE_OPERATION_TICK), NULL);
                 if (runtime->overloads == 1UL || runtime->overloads % 100UL == 0UL) maage_log_warning("maage.server.tick", "20 TPS scheduler overloaded (%lu bounded catch-ups); simulation time was not accelerated.", runtime->overloads);
             }
+        }
+        /* Due authoritative ticks run before bounded streaming maintenance.
+         * Collision uses published columns and conservatively rejects missing
+         * terrain; it never waits for a worker or Client presentation. */
+        /* Command wakeups can exceed this cadence; mouse input alone does
+         * not force another World scan. */
+        if (now >= next_stream || now >= deadline) {
+            result = maage_world_stream(runtime->world, runtime->player.position[0], runtime->player.position[2], runtime->yaw, &trace);
+            if (maage_status_failed(result)) {
+                server_capture_failure(runtime, result, &trace);
+                break;
+            }
+            if (maage_world_failed(runtime->world)) {
+                server_capture_failure(runtime, maage_world_status(runtime->world), maage_world_trace(runtime->world));
+                break;
+            }
+            if (maage_world_status(runtime->world) != runtime->last_world_notice) {
+                runtime->last_world_notice = maage_world_status(runtime->world);
+                server_status_event(runtime, runtime->last_world_notice, maage_world_trace(runtime->world));
+            }
+            next_stream = maage_time_monotonic_seconds() + MAAGE_SERVER_WAIT_MS / 1000.0;
         }
         server_service_container(runtime);
         server_predictions(runtime);

@@ -326,6 +326,9 @@ maage_status maage_world_can_survive(const maage_world *world, int x, int y, int
 maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_block_state_id expected, maage_block_state_id replacement);
 /* Local AABB; unavailable cells are full-cube collision barriers. */
 int maage_world_collision_shape(const maage_world *world, int x, int y, int z, maage_block_shape *shape);
+/* Transfers worker-prepared upload data; it borrows this mesh's vertices.
+ * Destroy/cancel the upload before destroying its source mesh. */
+maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh);
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh);
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh);
 #ifdef __cplusplus

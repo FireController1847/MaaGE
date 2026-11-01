@@ -7,6 +7,7 @@
 
 struct maage_world_mesh {
     maage_mesh_data data;
+    maage_mesh_preparation *prepared;
     maage_mesh_vertex *vertices;
     unsigned int *indices;
     maage_block_position *owners;
@@ -595,8 +596,21 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
     mesh->data.indices = mesh->indices;
     mesh->data.vertex_count = faces * 4;
     mesh->data.index_count = faces * 6;
+    if (faces) {
+        maage_status result = maage_mesh_prepare(&mesh->data, &mesh->prepared);
+        if (maage_status_failed(result)) {
+            maage_world_mesh_destroy(mesh);
+            return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
+        }
+    }
     *output = mesh;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
+
+maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh) {
+    maage_mesh_preparation *prepared = mesh ? mesh->prepared : NULL;
+    if (mesh) mesh->prepared = NULL;
+    return prepared;
 }
 
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh) {
@@ -604,6 +618,7 @@ const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh) {
 }
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh) {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    maage_mesh_preparation_destroy(mesh->prepared);
     free(mesh->owners);
     free(mesh->indices);
     free(mesh->vertices);

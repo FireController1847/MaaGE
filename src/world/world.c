@@ -101,7 +101,7 @@ struct maage_world {
     maage_job_observation *observations;
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
-    unsigned scan_step, mesh_turn, column_turn;
+    unsigned scan_step, mesh_turn, column_turn, collect_turn;
     int scan_ring, save_turn, front_loading_pending, visual_frontier[MAAGE_WORLD_REVEAL_SECTORS];
     unsigned facing_sector;
     unsigned long clock, rate_generated, entity_identity;
@@ -857,6 +857,12 @@ static maage_status maage_world_publish_light(maage_world *world, maage_world_sl
         const maage_section *after = task->output->sections[side];
         if ((before == NULL) != (after == NULL) || (before && memcmp(before->light, after->light, 4096))) changed = 1;
     }
+    if (!changed && slot->data->chunk->direct_sky && !memcmp(slot->data->chunk->direct_sky, task->output->direct_sky, 65536UL)) {
+        /* A completed boundary check with identical output needs no new
+         * persistent snapshot or save. Task disposal releases its private copy. */
+        maage_world_light_neighbors(world, slot->x, slot->z, boundaries);
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_LIGHT, 0);
+    }
     result = maage_world_snapshot(task->output, &snapshot);
     if (maage_status_failed(result)) return result;
     task->output = NULL;
@@ -898,22 +904,31 @@ static maage_status maage_world_publish(maage_world *world, maage_world_slot *sl
     maage_world_update_membership(world, slot);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
-static maage_status maage_world_collect(maage_world *world) {
+static maage_status maage_world_collect(maage_world *world, unsigned budget) {
     maage_job_completion completion;
     maage_world_task *task;
     maage_world_slot *slot;
     int stale, obsolete, owns;
     maage_status result, disposition, outcome = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_POLL, 0);
     unsigned long failures = world->stats.failure_reports;
-    while (1) {
-        result = maage_jobs_poll(world->jobs, &completion);
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP && world->io_jobs) result = maage_jobs_poll(world->io_jobs, &completion);
+    unsigned collected = 0;
+    double began = budget ? maage_time_monotonic_seconds() : -1;
+    while (!budget || collected < budget) {
+        maage_jobs *first = world->jobs, *second = world->io_jobs;
+        if (world->io_jobs && ++world->collect_turn % 2U) {
+            first = world->io_jobs;
+            second = world->jobs;
+        }
+        if (collected && budget && began >= 0 && maage_time_monotonic_seconds() - began >= 0.002) break;
+        result = maage_jobs_poll(first, &completion);
+        if (maage_status_code(result) == MAAGE_STATUS_NOOP && second) result = maage_jobs_poll(second, &completion);
         if (maage_status_failed(result)) {
             maage_world_failure_status(world, NULL, result, "World completion poll failed.");
             return result;
         }
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) break;
         outcome = result;
+        ++collected;
         task = (maage_world_task *) completion.context;
         task->status = completion.operation_result;
         disposition = completion.result;
@@ -1534,7 +1549,7 @@ maage_status maage_world_set_biome_blend(maage_world *world, maage_biome_blend b
 }
 maage_status maage_world_stream(maage_world *world, double x, double z, double yaw, maage_status_trace *trace) {
     maage_world_slot *slot;
-    int cx, cz, old_x, old_z, radius, facing_changed;
+    int cx, cz, old_x, old_z, facing_changed;
     unsigned facing_sector;
     unsigned long failures;
     if (!world || world->stopped || !(x > -MAAGE_WORLD_LIMIT && x < MAAGE_WORLD_LIMIT && z > -MAAGE_WORLD_LIMIT && z < MAAGE_WORLD_LIMIT)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE);
@@ -1543,7 +1558,6 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     cz = maage_world_chunk_coordinate((int) floor(z));
     old_x = world->center_x;
     old_z = world->center_z;
-    radius = world->config.render_distance;
     facing_sector = maage_world_facing_sector(yaw);
     facing_changed = facing_sector != world->facing_sector;
     world->center_x = cx;
@@ -1554,7 +1568,7 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
         maage_world_reset_visual_frontiers(world);
         world->retained_radius = world->config.render_distance;
     }
-    maage_world_collect(world);
+    maage_world_collect(world, world->task_limit);
     if (cx != old_x || cz != old_z || facing_changed) {
         unsigned index;
         double forward_x = sin(yaw), forward_z = -cos(yaw);
@@ -1567,11 +1581,6 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
         }
         world->scan_ring = 0;
         world->scan_step = 0;
-    }
-    if (cx != old_x || cz != old_z) {
-        for (slot = world->chunks; slot; slot = slot->next) {
-            if (maage_world_distance(world, slot) <= radius && (abs(slot->x - old_x) > radius || abs(slot->z - old_z) > radius)) maage_world_invalidate(world, slot, 0);
-        }
     }
     if (!world->config.presentation_only || cx != old_x || cz != old_z) maage_world_retire(world);
     maage_world_schedule(world);
@@ -2590,7 +2599,7 @@ maage_status maage_world_flush(maage_world *world, maage_status_trace *trace) {
     while (world->active) {
         result = maage_world_wait_active(world);
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_STOP);
-        maage_world_collect(world);
+        maage_world_collect(world, 0);
     }
     for (slot = world->chunks; slot; slot = slot->next)
         slot->stage = 0;
@@ -2613,7 +2622,7 @@ maage_status maage_world_flush(maage_world *world, maage_status_trace *trace) {
         if (!world->active) break;
         result = maage_world_wait_active(world);
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_STOP);
-        maage_world_collect(world);
+        maage_world_collect(world, 0);
     }
     result = maage_jobs_stop(world->jobs);
     if (!maage_status_failed(result) && world->io_jobs) result = maage_jobs_stop(world->io_jobs);

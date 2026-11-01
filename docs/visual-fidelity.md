@@ -296,3 +296,9 @@ biome seams, torch orientations, log axes, partial shapes, cave AO, fluid animat
 ice/translucency and cracks. Exercise sprint activation/cancellation, exhaustion,
 FPS/FOV changes and fixed hand framing. Compare the same scene on Metal and Vulkan;
 compilation alone establishes none of these outcomes.
+
+### Streaming Mesh Ownership
+
+Chunk mesh workers validate geometry, group material indices and prepare transparent triangle metadata through the CPU-only Geometry library. The Client owns one pending chunk upload, borrowing its immutable CPU mesh until completion or cancellation. Metal, Vulkan and modern OpenGL copy at most 256 KiB per upload step on the renderer thread, with time-budget checks between steps. The previous mesh stays drawable until its replacement is complete; presentation verification skips the in-progress handoff. Native allocation, prediction filtering and driver calls still have platform-dependent latency, so the copy budget is not a hard frame-time guarantee. Legacy OpenGL and Software retain their existing capability limits.
+
+World completion collection uses a two-millisecond service budget between completions, alternates CPU and I/O polling, and drains fully at shutdown. Server ticks due at a scheduler wake precede streaming maintenance; missing collision terrain remains unavailable. Paused sessions continue servicing streaming. Unchanged lighting results retain the existing immutable snapshot, and moving cached columns back into view does not itself invalidate their geometry.

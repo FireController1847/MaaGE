@@ -11,6 +11,7 @@ typedef struct __GLsync *maage_gl_sync;
     F(void, DeleteBuffers, (GLsizei, const GLuint *)) \
     F(void, BindBuffer, (GLenum, GLuint)) \
     F(void, BufferData, (GLenum, ptrdiff_t, const void *, GLenum)) \
+    F(void, BufferSubData, (GLenum, ptrdiff_t, ptrdiff_t, const void *)) \
     F(void *, MapBufferRange, (GLenum, ptrdiff_t, ptrdiff_t, GLbitfield)) \
     F(GLboolean, UnmapBuffer, (GLenum)) \
     F(void, GenVertexArrays, (GLsizei, GLuint *)) \

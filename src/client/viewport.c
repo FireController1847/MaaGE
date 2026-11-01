@@ -63,11 +63,13 @@ typedef struct maage_client_mesh_cache {
     const maage_render_mesh **draws;
     size_t capacity;
     unsigned long generation;
+    maage_world_mesh_update uploading;
+    maage_render_mesh *upload_mesh;
 } maage_client_mesh_cache;
 typedef struct maage_client_mesh_activity {
     maage_client_mesh_diagnostics status;
     maage_status last_result;
-    double sample_start, previous_upload_ms, expected_upload_ms;
+    double sample_start, previous_upload_ms;
     unsigned long sample_uploads, sample_vertices;
 } maage_client_mesh_activity;
 typedef struct maage_client_mesh_verifier {
@@ -177,6 +179,8 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
     size_t i;
     for (i = 0; i < cache->capacity; ++i)
         maage_client_mesh_cache_drop(cache, i, visual);
+    maage_render_mesh_destroy(cache->upload_mesh);
+    maage_world_mesh_destroy(cache->uploading.mesh);
     free(cache->slots);
     free(cache->draws);
     memset(cache, 0, sizeof(*cache));
@@ -211,6 +215,7 @@ static maage_status maage_client_verify_meshes(maage_world *visual, const maage_
         x = cx + (int) (index % span) - radius;
         z = cz + (int) (index / span) - radius;
         if (!maage_world_chunk_loaded(visual, x, z)) continue;
+        if (cache->uploading.mesh && cache->uploading.x == x && cache->uploading.z == z) continue;
         revision = 0;
         for (i = 0; i < cache->capacity; ++i)
             if (cache->slots[i].used && cache->slots[i].x == x && cache->slots[i].z == z) {
@@ -269,161 +274,144 @@ static void maage_client_mesh_rates(maage_client_mesh_activity *activity, double
     activity->sample_uploads = activity->sample_vertices = 0;
     activity->sample_start = now;
 }
-/* Drain ready World meshes as long as measured work fits the millisecond
- * budget. The first attempt ensures progress even after an expensive frame;
- * later attempts predict cost to avoid repeatedly overrunning frame pacing.
- * No CPU mesh or render handle survives a failed/stale transfer. */
-/* Client replica jobs transfer detached CPU ownership to the GPU cache. */
+/* Worker-prepared geometry is copied in bounded byte slices on the renderer
+ * thread. One pending upload borrows its CPU source until completion/cancel;
+ * previous presentation stays intact throughout the handoff. Driver allocation
+ * latency is still platform-dependent, independent of the copy budget. */
 static maage_status maage_client_stream_meshes(maage_world *visual, maage_renderer *renderer, maage_render_texture *atlas, maage_client_mesh_cache *cache, maage_client_mesh_activity *activity, const maage_client_prediction *prediction, const maage_client_world_options *options, const maage_client_debug *debug, int center_x, int center_z) {
-    maage_world_mesh_update update;
+    maage_world_mesh_update *update = &cache->uploading;
     const maage_mesh_data *geometry;
-    maage_render_mesh *replacement, *filtered_mesh;
+    maage_mesh_preparation *prepared;
+    maage_render_mesh *filtered_mesh;
     maage_status result;
     int filtered;
-    double begin, current, upload_begin, upload_ms;
-    double budget_ms = maage_client_mesh_budget(options, debug, activity);
+    double begin, current, budget_ms = maage_client_mesh_budget(options, debug, activity);
     size_t i, selected, vacant;
-    unsigned int processed = 0;
-    int diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
+    unsigned processed = 0;
     activity->status.uploaded_this_frame = 0;
     activity->status.frame_upload_ms = 0;
     activity->status.budget_ms = budget_ms;
+    begin = maage_time_monotonic_seconds();
+    if (begin < 0) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
     for (i = 0; i < cache->capacity; ++i) {
         if (cache->slots[i].used && !maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z)) {
             maage_client_mesh_cache_drop(cache, i, visual);
+            processed = 1;
+            if ((maage_time_monotonic_seconds() - begin) * 1000 >= budget_ms) break;
         }
     }
-    begin = maage_time_monotonic_seconds();
-    if (begin < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
     for (;;) {
         current = maage_time_monotonic_seconds();
-        if (current < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
-        if (processed && ((current - begin) * 1000.0 >= budget_ms || (current - begin) * 1000.0 + activity->expected_upload_ms > budget_ms)) break;
-        memset(&update, 0, sizeof(update));
-        result = maage_world_take_mesh(visual, &update);
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP || maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) break;
-        if (maage_status_failed(result)) return result;
+        if (current < 0) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
+        if (processed && (current - begin) * 1000 >= budget_ms) break;
+        if (!update->mesh) {
+            result = maage_world_take_mesh(visual, update);
+            if (maage_status_code(result) == MAAGE_STATUS_NOOP || maage_status_code(result) == MAAGE_STATUS_INVALID_STATE) break;
+            if (maage_status_failed(result)) return result;
+        }
         ++processed;
-        if (!update.mesh || !maage_world_mesh_current(visual, update.x, update.z, update.revision) || abs(update.x - center_x) > options->radius || abs(update.z - center_z) > options->radius) {
+        if (!update->mesh || !maage_world_mesh_current(visual, update->x, update->z, update->revision) || abs(update->x - center_x) > options->radius || abs(update->z - center_z) > options->radius) {
             ++activity->status.rejected;
-            maage_world_mesh_destroy(update.mesh);
+            maage_render_mesh_destroy(cache->upload_mesh);
+            cache->upload_mesh = NULL;
+            maage_world_mesh_destroy(update->mesh);
+            memset(update, 0, sizeof(*update));
             continue;
+        }
+        if (!cache->upload_mesh) {
+            for (i = 0; i < cache->capacity; ++i)
+                if (cache->slots[i].used && cache->slots[i].x == update->x && cache->slots[i].z == update->z && cache->slots[i].visual_revision >= update->revision) break;
+            if (i < cache->capacity) {
+                ++activity->status.rejected;
+                maage_world_mesh_destroy(update->mesh);
+                memset(update, 0, sizeof(*update));
+                continue;
+            }
+        }
+        geometry = maage_world_mesh_data(update->mesh);
+        if (geometry->index_count) {
+            if (!cache->upload_mesh) {
+                prepared = maage_world_mesh_take_preparation(update->mesh);
+                result = maage_renderer_begin_geometry(renderer, &prepared, atlas, &cache->upload_mesh, NULL);
+                maage_mesh_preparation_destroy(prepared);
+                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto upload_failed;
+            }
+            result = maage_render_mesh_upload_step(cache->upload_mesh, 262144U, NULL);
+            if (maage_status_code(result) == MAAGE_STATUS_NOOP) continue;
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto upload_failed;
         }
         selected = vacant = cache->capacity;
         for (i = 0; i < cache->capacity; ++i) {
-            if (cache->slots[i].used && cache->slots[i].x == update.x && cache->slots[i].z == update.z) {
+            if (cache->slots[i].used && cache->slots[i].x == update->x && cache->slots[i].z == update->z) {
                 selected = i;
                 break;
             }
             if (!cache->slots[i].used && vacant == cache->capacity) vacant = i;
         }
-        if (selected != cache->capacity && cache->slots[selected].visual_revision >= update.revision) {
-            ++activity->status.rejected;
-            maage_world_mesh_destroy(update.mesh);
-            continue;
-        }
         if (selected == cache->capacity) {
             selected = vacant;
             if (selected == cache->capacity) {
-                selected = cache->capacity;
                 result = maage_client_mesh_cache_grow(cache);
-                if (maage_status_failed(result)) {
-                    maage_world_mesh_destroy(update.mesh);
-                    return result;
-                }
+                if (maage_status_failed(result)) goto upload_failed;
             }
-        }
-        upload_begin = maage_time_monotonic_seconds();
-        if (upload_begin < 0.0) {
-            maage_world_mesh_destroy(update.mesh);
-            return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
         }
         filtered_mesh = NULL;
-        result = maage_client_prediction_mesh(prediction, renderer, atlas, update.mesh, update.x, update.z, &filtered_mesh, &filtered, NULL);
+        result = maage_client_prediction_mesh(prediction, renderer, atlas, update->mesh, update->x, update->z, &filtered_mesh, &filtered, NULL);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
             maage_render_mesh_destroy(filtered_mesh);
-            maage_world_mesh_destroy(update.mesh);
-            if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED || maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
-                activity->last_result = result;
-                result = maage_world_retry_mesh(visual, update.x, update.z, update.revision);
-                if (maage_status_failed(result)) return result;
-                break;
-            }
-            return result;
+            goto upload_failed;
         }
-        geometry = maage_world_mesh_data(update.mesh);
-        replacement = NULL;
-        result = MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SUBMIT, 0);
-        if (geometry && geometry->index_count) {
-            result = maage_renderer_upload_geometry(renderer, geometry, atlas, &replacement, NULL);
-            current = maage_time_monotonic_seconds();
-            if (current < 0.0) {
-                maage_render_mesh_destroy(filtered_mesh);
-                maage_render_mesh_destroy(replacement);
-                maage_world_mesh_destroy(update.mesh);
-                return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
-            }
-            upload_ms = (current - upload_begin) * 1000.0;
-            if (diagnostics) maage_log_info("maage.client.latency", "column=%d,%d revision=%lu state=%lu upload_wait_ms=%.3f upload_api_ms=%.3f", update.x, update.z, update.revision, update.state_revision, update.completed_at >= 0 ? (upload_begin - update.completed_at) * 1000 : -1, upload_ms);
-            activity->status.frame_upload_ms += upload_ms;
-            if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-                activity->expected_upload_ms = activity->status.gpu_uploads ? activity->expected_upload_ms * 0.75 + upload_ms * 0.25 : upload_ms;
-                ++activity->status.gpu_uploads;
-                ++activity->sample_uploads;
-                activity->status.vertices_uploaded += (unsigned long) geometry->vertex_count;
-                activity->sample_vertices += (unsigned long) geometry->vertex_count;
-                ++activity->status.uploaded_this_frame;
-            }
+        maage_render_mesh_destroy(cache->slots[selected].prediction);
+        maage_render_mesh_destroy(cache->slots[selected].mesh);
+        maage_world_mesh_destroy(cache->slots[selected].source);
+        cache->slots[selected].prediction = filtered_mesh;
+        cache->slots[selected].filtered = filtered;
+        cache->slots[selected].filtered_revision = update->revision;
+        cache->slots[selected].filtered_generation = prediction->applied_generation;
+        cache->slots[selected].mesh = cache->upload_mesh;
+        cache->upload_mesh = NULL;
+        cache->slots[selected].source = update->mesh;
+        cache->slots[selected].used = 1;
+        cache->slots[selected].x = update->x;
+        cache->slots[selected].z = update->z;
+        cache->slots[selected].visual_revision = update->revision;
+        cache->slots[selected].revision = update->state_revision;
+        cache->slots[selected].presentation_generation = update->presentation_generation;
+        cache->slots[selected].vertices = geometry->vertex_count;
+        cache->slots[selected].indices = geometry->index_count;
+        cache->slots[selected].initialized_at = update->initialized_at;
+        cache->slots[selected].uploaded_at = maage_time_monotonic_seconds();
+        result = maage_world_mesh_prepared(visual, update->x, update->z, update->revision);
+        memset(update, 0, sizeof(*update));
+        if (maage_status_failed(result)) return result;
+        ++cache->generation;
+        ++activity->status.gpu_uploads;
+        ++activity->sample_uploads;
+        ++activity->status.uploaded_this_frame;
+        activity->status.vertices_uploaded += (unsigned long) geometry->vertex_count;
+        activity->sample_vertices += (unsigned long) geometry->vertex_count;
+        continue;
+    upload_failed:
+        maage_render_mesh_destroy(cache->upload_mesh);
+        cache->upload_mesh = NULL;
+        maage_world_mesh_destroy(update->mesh);
+        update->mesh = NULL;
+        if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
+        if (activity->last_result != result) {
+            activity->last_result = result;
+            maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result, "Chunk upload unavailable; retaining previous presentation and retrying.");
         }
-        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-            maage_render_mesh_destroy(cache->slots[selected].prediction);
-            cache->slots[selected].prediction = filtered_mesh;
-            cache->slots[selected].filtered = filtered;
-            cache->slots[selected].filtered_revision = update.revision;
-            cache->slots[selected].filtered_generation = prediction->applied_generation;
-            maage_render_mesh_destroy(cache->slots[selected].mesh);
-            cache->slots[selected].mesh = replacement;
-            cache->slots[selected].used = 1;
-            cache->slots[selected].x = update.x;
-            cache->slots[selected].z = update.z;
-            cache->slots[selected].visual_revision = update.revision;
-            cache->slots[selected].revision = update.state_revision;
-            cache->slots[selected].presentation_generation = update.presentation_generation;
-            cache->slots[selected].vertices = geometry ? geometry->vertex_count : 0;
-            cache->slots[selected].indices = geometry ? geometry->index_count : 0;
-            maage_world_mesh_destroy(cache->slots[selected].source);
-            cache->slots[selected].source = update.mesh;
-            update.mesh = NULL;
-            cache->slots[selected].initialized_at = update.initialized_at;
-            cache->slots[selected].uploaded_at = diagnostics ? maage_time_monotonic_seconds() : -1;
-            result = maage_world_mesh_prepared(visual, update.x, update.z, update.revision);
-            if (maage_status_failed(result)) return result;
-            if (diagnostics && !cache->slots[selected].presented) maage_log_info("maage.client.latency", "phase=first_gpu_prepared column=%d,%d revision=%lu state=%lu initial_ms=%.3f", update.x, update.z, update.revision, update.state_revision, (cache->slots[selected].uploaded_at - update.initialized_at) * 1000);
-            ++cache->generation;
-        } else {
-            maage_render_mesh_destroy(filtered_mesh);
-            maage_render_mesh_destroy(replacement);
-            if (maage_status_code(result) == MAAGE_STATUS_ALLOCATION_FAILED || maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) {
-                if (activity->last_result != result) {
-                    activity->last_result = result;
-                    maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result, "GPU upload failed for column %d,%d; retaining old visual.", update.x, update.z);
-                }
-                maage_world_mesh_destroy(update.mesh);
-                result = maage_world_retry_mesh(visual, update.x, update.z, update.revision);
-                if (maage_status_failed(result)) return result;
-                break;
-            }
-            maage_world_mesh_destroy(update.mesh);
-            return result;
-        }
-        maage_world_mesh_destroy(update.mesh);
+        result = maage_world_retry_mesh(visual, update->x, update->z, update->revision);
+        memset(update, 0, sizeof(*update));
+        if (maage_status_failed(result)) return result;
+        break;
     }
     current = maage_time_monotonic_seconds();
-    if (current < 0.0) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
+    activity->status.stream_ms = (current - begin) * 1000;
+    activity->status.frame_upload_ms = activity->status.stream_ms;
     activity->previous_upload_ms = activity->status.frame_upload_ms;
-    activity->status.stream_ms = (current - begin) * 1000.0;
     maage_client_mesh_rates(activity, current);
-    return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
 
 typedef struct maage_client_fov {

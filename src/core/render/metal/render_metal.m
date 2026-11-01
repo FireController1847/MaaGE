@@ -912,37 +912,28 @@ static void maage_metal_destroy_texture(maage_render_texture *texture) {
     [(id<MTLTexture>) texture->platform release];
     texture->platform = NULL;
 }
-static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data) {
+static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data, size_t offset, size_t bytes) {
     maage_metal_renderer *native = renderer->platform;
-    maage_metal_mesh *geometry;
-    NSAutoreleasePool *pool;
+    maage_metal_mesh *geometry = mesh->platform;
+    size_t vertex_bytes = data->vertex_count * sizeof(*data->vertices);
     maage_status result;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, MAAGE_STATUS_INVALID_STATE);
     if (!maage_render_gpu_layout_supported()) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-    pool = [[NSAutoreleasePool alloc] init];
-    /* Clear-only renderers do not need the mesh shaders or depth state. */
-    if (!native->pipelines[MAAGE_RENDER_SOLID]) {
-        result = maage_metal_pipeline(renderer);
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
-            [pool drain];
-            return result;
-        }
-    }
-    geometry = calloc(1, sizeof(*geometry));
     if (!geometry) {
-        [pool drain];
-        return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+        if (!native->pipelines[MAAGE_RENDER_SOLID]) {
+            result = maage_metal_pipeline(renderer);
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        }
+        geometry = calloc(1, sizeof(*geometry));
+        if (!geometry) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+        mesh->platform = geometry;
+        geometry->vertices = [native->device newBufferWithLength:vertex_bytes options:MTLResourceStorageModeShared];
+        geometry->indices = [native->device newBufferWithLength:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
+        if (!geometry->vertices || !geometry->indices) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     }
-    mesh->platform = geometry;
-    geometry->vertices = [native->device newBufferWithBytes:data->vertices length:data->vertex_count * sizeof(*data->vertices) options:MTLResourceStorageModeShared];
-    geometry->indices = [native->device newBufferWithLength:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
-    if (!geometry->vertices || !geometry->indices) {
-        [pool drain];
-        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
-    }
-    result = maage_render_geometry_prepare(&mesh->geometry, data, [geometry->indices contents]);
-    [pool drain];
-    return result;
+    if (offset < vertex_bytes) memcpy((unsigned char *) [geometry->vertices contents] + offset, (const unsigned char *) data->vertices + offset, bytes);
+    else memcpy((unsigned char *) [geometry->indices contents] + offset - vertex_bytes, (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
 static void maage_metal_destroy_mesh(maage_render_mesh *mesh) {
     maage_metal_mesh *geometry = mesh->platform;

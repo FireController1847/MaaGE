@@ -1,6 +1,7 @@
 #ifndef MAAGE_GEOMETRY_H
 #define MAAGE_GEOMETRY_H
 #include <stddef.h>
+#include "maage/status.h"
 #include "maage/geometry_materials.h"
 /* CPU geometry shared by mesh producers and graphics backends. UVs address a
  * top-left-origin straight-alpha RGBA texture; colors multiply sampled texels. */
@@ -21,4 +22,9 @@ typedef struct maage_mesh_data {
     const unsigned int *indices;
     size_t index_count;
 } maage_mesh_data;
+/* CPU-only preparation may run on workers. It owns grouped indices and
+ * transparent triangle metadata, borrowing immutable vertices through upload. */
+typedef struct maage_mesh_preparation maage_mesh_preparation;
+maage_status maage_mesh_prepare(const maage_mesh_data *data, maage_mesh_preparation **output);
+maage_status maage_mesh_preparation_destroy(maage_mesh_preparation *prepared);
 #endif

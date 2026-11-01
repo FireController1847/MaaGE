@@ -269,7 +269,7 @@ maage_status maage_renderer_set_distance_fog(maage_renderer *renderer, float red
 }
 maage_status maage_renderer_set_foreground(maage_renderer *renderer, const maage_render_mesh *mesh, const float view_projection[16], float sky_light, float block_light) {
     int index;
-    if (!renderer || !(sky_light >= 0 && sky_light <= 1 && block_light >= 0 && block_light <= 1) || (mesh && (mesh->renderer != renderer || !view_projection))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (!renderer || !(sky_light >= 0 && sky_light <= 1 && block_light >= 0 && block_light <= 1) || (mesh && (mesh->renderer != renderer || mesh->upload || !view_projection))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_TEXTURED_MESH) || !(renderer->capabilities.features & MAAGE_RENDER_CAP_SCENE)) return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     if (mesh) {
         for (index = 0; index < 16; ++index)
@@ -287,7 +287,7 @@ maage_status maage_renderer_set_instances(maage_renderer *renderer, const maage_
     if (!renderer || count > (size_t) - 1 / sizeof(*instances) || (count && !instances)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     if (count && (renderer->capabilities.features & MAAGE_RENDER_CAP_SCENE) == 0) return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     for (i = 0; i < count; ++i) {
-        if (!instances[i].mesh || instances[i].mesh->renderer != renderer ||
+        if (!instances[i].mesh || instances[i].mesh->renderer != renderer || instances[i].mesh->upload ||
             !(instances[i].sky_light >= 0 && instances[i].sky_light <= 1) ||
             !(instances[i].block_light >= 0 && instances[i].block_light <= 1))
             return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
@@ -384,36 +384,76 @@ maage_status maage_render_texture_destroy(maage_render_texture *texture) {
     maage_render_texture_release(texture);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
-maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maage_mesh_data *data, maage_render_texture *texture, maage_render_mesh **output, maage_status_trace *trace) {
+maage_status maage_renderer_begin_geometry(maage_renderer *renderer, maage_mesh_preparation **preparation, maage_render_texture *texture, maage_render_mesh **output, maage_status_trace *trace) {
     maage_render_mesh *mesh;
-    maage_status result;
-    if (!output) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
-    *output = NULL;
-    if (!renderer || !texture || texture->renderer != renderer || !texture->owned) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    size_t vertex_bytes, index_bytes;
+    if (output) *output = NULL;
+    if (!output || !renderer || !preparation || !*preparation || !texture || texture->renderer != renderer || !texture->owned) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     if (maage_status_code(renderer->failure) != MAAGE_STATUS_SUCCESS) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
-    if (!renderer->api->upload_geometry) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
-    result = maage_render_mesh_validate(data);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    if (!renderer->api->upload_geometry) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    vertex_bytes = (*preparation)->data.vertex_count * sizeof(maage_mesh_vertex);
+    index_bytes = (*preparation)->data.index_count * sizeof(unsigned int);
+    if (vertex_bytes > (size_t) - 1 - index_bytes) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh = (maage_render_mesh *) calloc(1, sizeof(*mesh));
-    if (!mesh) return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    if (!mesh) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh->renderer = renderer;
     mesh->texture = texture;
-    renderer->operation_trace = trace;
-    renderer->trace_operation = MAAGE_OPERATION_UPLOAD;
-    result = renderer->api->upload_geometry(renderer, mesh, data);
-    renderer->operation_trace = NULL;
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
-        renderer->api->destroy_mesh(mesh);
-        maage_render_geometry_dispose(&mesh->geometry);
-        free(mesh);
-        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
-    }
+    mesh->upload = *preparation;
+    *preparation = NULL;
     ++texture->references;
     mesh->next = renderer->meshes;
     if (mesh->next) mesh->next->previous = mesh;
     renderer->meshes = mesh;
     *output = mesh;
-    return MAAGE_STATUS_PROPAGATE(trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
+}
+maage_status maage_render_mesh_upload_step(maage_render_mesh *mesh, size_t byte_budget, maage_status_trace *trace) {
+    maage_renderer *renderer;
+    const maage_mesh_data *data;
+    size_t vertex_bytes, total, bytes;
+    maage_status result;
+    if (!mesh || byte_budget < 4) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    if (!mesh->upload) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
+    renderer = mesh->renderer;
+    if (maage_status_failed(renderer->failure)) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    data = &mesh->upload->data;
+    vertex_bytes = data->vertex_count * sizeof(*data->vertices);
+    total = vertex_bytes + data->index_count * sizeof(*data->indices);
+    bytes = (mesh->upload_offset < vertex_bytes ? vertex_bytes : total) - mesh->upload_offset;
+    byte_budget -= byte_budget % 4;
+    if (bytes > byte_budget) bytes = byte_budget;
+    renderer->operation_trace = trace;
+    renderer->trace_operation = MAAGE_OPERATION_UPLOAD;
+    result = renderer->api->upload_geometry(renderer, mesh, data, mesh->upload_offset, bytes);
+    renderer->operation_trace = NULL;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    mesh->upload_offset += bytes;
+    if (mesh->upload_offset != total) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPLOAD, 0);
+    mesh->geometry = mesh->upload->geometry;
+    memset(&mesh->upload->geometry, 0, sizeof(mesh->upload->geometry));
+    maage_mesh_preparation_destroy(mesh->upload);
+    mesh->upload = NULL;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
+}
+maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maage_mesh_data *data, maage_render_texture *texture, maage_render_mesh **output, maage_status_trace *trace) {
+    maage_mesh_preparation *prepared = NULL;
+    maage_render_mesh *mesh = NULL;
+    maage_status result;
+    if (!output) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    *output = NULL;
+    result = maage_mesh_prepare(data, &prepared);
+    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) result = maage_renderer_begin_geometry(renderer, &prepared, texture, &mesh, trace);
+    maage_mesh_preparation_destroy(prepared);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    do {
+        result = maage_render_mesh_upload_step(mesh, (size_t) - 1, trace);
+    } while (maage_status_code(result) == MAAGE_STATUS_NOOP);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
+        maage_render_mesh_destroy(mesh);
+        return result;
+    }
+    *output = mesh;
+    return result;
 }
 maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_mesh_data *data, const maage_pixel_buffer *atlas, maage_render_mesh **output, maage_status_trace *trace) {
     maage_render_texture *texture;
@@ -430,7 +470,8 @@ maage_status maage_render_mesh_destroy(maage_render_mesh *mesh) {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     if (mesh->renderer->foreground == mesh) mesh->renderer->foreground = NULL;
     mesh->renderer->api->destroy_mesh(mesh);
-    maage_render_geometry_dispose(&mesh->geometry);
+    maage_geometry_dispose(&mesh->geometry);
+    maage_mesh_preparation_destroy(mesh->upload);
     if (mesh->previous) mesh->previous->next = mesh->next;
     else
         mesh->renderer->meshes = mesh->next;

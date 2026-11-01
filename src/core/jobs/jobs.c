@@ -411,9 +411,9 @@ maage_status maage_jobs_stop(maage_jobs *jobs) {
     maage_mutex_unlock(jobs->mutex);
     for (index = 0; index < jobs->workers; ++index) {
         result = maage_thread_join(jobs->threads[index]);
-        if (maage_status_failed(result) && !maage_status_failed(failure)) failure = result;
-        else
-            jobs->threads[index] = NULL;
+        if (maage_status_failed(result)) {
+            if (!maage_status_failed(failure)) failure = result;
+        } else jobs->threads[index] = NULL;
     }
     return failure;
 }

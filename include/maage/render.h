@@ -185,6 +185,14 @@ maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_me
 maage_status maage_renderer_create_texture(maage_renderer *renderer, const maage_pixel_buffer *atlas, maage_render_texture **texture, maage_status_trace *trace);
 maage_status maage_render_texture_destroy(maage_render_texture *texture);
 maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maage_mesh_data *data, maage_render_texture *texture, maage_render_mesh **mesh, maage_status_trace *trace);
+/* Begin consumes preparation on SUCCESS. Vertices stay borrowed until step
+ * returns SUCCESS or the mesh is destroyed. Step copies at most byte_budget
+ * bytes on the window/renderer thread; NOOP means more work remains. Native
+ * allocation/driver calls have no hard wall-time guarantee. Pending handles
+ * cannot be drawn. On a failed step, destroy the handle before retrying.
+ * Destroy cancels pending work without waiting for the GPU. */
+maage_status maage_renderer_begin_geometry(maage_renderer *renderer, maage_mesh_preparation **preparation, maage_render_texture *texture, maage_render_mesh **mesh, maage_status_trace *trace);
+maage_status maage_render_mesh_upload_step(maage_render_mesh *mesh, size_t byte_budget, maage_status_trace *trace);
 maage_status maage_render_mesh_destroy(maage_render_mesh *mesh);
 /* Clears, draws, and presents one mesh. Uses the same visibility/error behavior
  * as present, nearest texture sampling, depth testing and CCW front faces.

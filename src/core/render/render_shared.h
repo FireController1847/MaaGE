@@ -1,21 +1,12 @@
 #ifndef MAAGE_RENDER_SHARED_H
 #define MAAGE_RENDER_SHARED_H
 #include "maage/render.h"
+#include "maage/internal/geometry.h"
 #include "render_shader_defs.h"
 
 /* Owned CPU preparation; GPU objects and retired-frame tracking stay native. */
-typedef struct maage_render_triangle {
-    unsigned int indices[3];
-    float center[3], depth;
-    size_t order;
-} maage_render_triangle;
-typedef struct maage_render_geometry {
-    size_t solid_count, translucent_count, multiply_count;
-    maage_render_triangle *triangles;
-    float center[3];
-    double sort_origin[3];
-    unsigned long revision;
-} maage_render_geometry;
+typedef maage_geometry_triangle maage_render_triangle;
+typedef maage_geometry maage_render_geometry;
 typedef struct maage_render_ordered_mesh {
     const maage_render_mesh *mesh;
     const maage_render_instance *instance;
@@ -81,10 +72,6 @@ typedef struct maage_render_mesh_cursor {
     size_t triangle;
 } maage_render_mesh_cursor;
 
-/* Input passed mesh_validate; destination holds index_count indices and geometry
- * starts zeroed. Native mapped destinations avoid an intermediate CPU copy. */
-maage_status maage_render_geometry_prepare(maage_render_geometry *geometry, const maage_mesh_data *data, unsigned int *grouped_indices);
-maage_status maage_render_geometry_dispose(maage_render_geometry *geometry);
 /* Half-block movement gates perspective re-sorts. SUCCESS needs a native upload;
  * mark revisions[slot] only after it succeeds. NOOP keeps the slot unchanged. */
 maage_status maage_render_geometry_sort_slot(const maage_render_mesh *mesh, const float matrix[16], unsigned long *revisions, size_t slots, size_t slot);
@@ -92,7 +79,6 @@ maage_status maage_render_geometry_write_sorted(const maage_render_geometry *geo
 size_t maage_render_geometry_range(const maage_render_geometry *geometry, unsigned int layer, size_t *first);
 size_t maage_render_transient_capacity(size_t current, size_t required);
 maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count, const float matrix[16], const maage_render_ui_data *ui, int preparing, maage_render_frame_plan *plan);
-maage_status maage_render_mesh_validate(const maage_mesh_data *data);
 void maage_render_ui_uniforms(const maage_render_ui_data *batch, maage_render_uniforms *uniforms);
 maage_status maage_render_ui_pack(const maage_render_ui_data *batch, maage_render_ui_gpu_vertex *vertices, unsigned int *indices);
 /* Zero the cursor first. Visits nonempty material ranges in canonical order;

@@ -987,31 +987,27 @@ static maage_status maage_vulkan_destroy(maage_renderer *renderer) {
     released = maage_vulkan_platform_destroy(renderer);
     return maage_status_failed(result) ? result : released;
 }
-static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data) {
+static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data, size_t offset, size_t bytes) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_rendering *gpu = native->rendering;
-    maage_vulkan_mesh *geometry;
+    maage_vulkan_mesh *geometry = mesh->platform;
     maage_vulkan_garbage *staging;
     size_t vertex_bytes = data->vertex_count * sizeof(*data->vertices);
-    size_t index_bytes = data->index_count * sizeof(*data->indices);
     VkBufferCopy copy = {0};
-    if (vertex_bytes > (size_t) - 1 - index_bytes) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_BUFFER_OVERFLOW);
-    geometry = calloc(1, sizeof(*geometry));
-    if (!geometry) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED);
-    mesh->platform = geometry;
-    MAAGE_VULKAN_TRY(maage_vulkan_staging(renderer, vertex_bytes + index_bytes, &staging));
-    memcpy(staging->buffer.mapped, data->vertices, vertex_bytes);
-    MAAGE_VULKAN_TRY(maage_render_geometry_prepare(&mesh->geometry, data, (unsigned int *) ((unsigned char *) staging->buffer.mapped + vertex_bytes)));
+    if (!geometry) {
+        geometry = calloc(1, sizeof(*geometry));
+        if (!geometry) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED);
+        mesh->platform = geometry;
+        MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, vertex_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0, &geometry->vertices));
+        MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, data->index_count * sizeof(*data->indices), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0, &geometry->indices));
+    }
+    MAAGE_VULKAN_TRY(maage_vulkan_staging(renderer, bytes, &staging));
+    memcpy(staging->buffer.mapped, offset < vertex_bytes ? (const unsigned char *) data->vertices + offset : (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
     MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &staging->buffer));
-    MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, vertex_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0, &geometry->vertices));
-    MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, index_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0, &geometry->indices));
     MAAGE_VULKAN_TRY(maage_vulkan_upload_begin(renderer));
-    copy.size = vertex_bytes;
-    vkCmdCopyBuffer(gpu->upload, staging->buffer.buffer, geometry->vertices.buffer, 1, &copy);
-    copy.srcOffset = vertex_bytes;
-    copy.size = index_bytes;
-    vkCmdCopyBuffer(gpu->upload, staging->buffer.buffer, geometry->indices.buffer, 1, &copy);
-    /* The batched upload submission publishes all transfer writes together. */
+    copy.dstOffset = offset < vertex_bytes ? offset : offset - vertex_bytes;
+    copy.size = bytes;
+    vkCmdCopyBuffer(gpu->upload, staging->buffer.buffer, offset < vertex_bytes ? geometry->vertices.buffer : geometry->indices.buffer, 1, &copy);
     return MAAGE_VULKAN_OK;
 }
 static void maage_vulkan_destroy_mesh(maage_render_mesh *mesh) {
