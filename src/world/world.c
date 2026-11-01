@@ -1308,6 +1308,7 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
         world->scan_ring = 0;
         world->scan_step = 0;
         world->visual_frontier = 0;
+        if (world->config.presentation_only) maage_world_advance_frontier(world);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -1358,6 +1359,7 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     if (cx != old_x || cz != old_z) {
         world->visual_frontier = 0;
         world->retained_radius = world->config.render_distance;
+        if (world->config.presentation_only) maage_world_advance_frontier(world);
     }
     maage_world_collect(world);
     if (cx != old_x || cz != old_z) {
@@ -1764,7 +1766,9 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     fair = ++world->mesh_turn % 8U == 0;
-    /* Meshing uploads may precede the visible frontier; only drawing waits. */
+    /* Already-presented inner rings must advance after a camera/view rebase,
+     * even when all of their cached meshes have already been uploaded. */
+    if (world->config.presentation_only) maage_world_advance_frontier(world);
     link = &world->mesh_head;
     while ((slot = *link) != NULL) {
         if (!slot->pending_mesh || !maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {
@@ -1778,7 +1782,7 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
             continue;
         }
         distance = maage_world_distance(world, slot);
-         if (!chosen || (!fair && distance < best)) {
+        if (!chosen || (!fair && distance < best)) {
             chosen = slot;
             best = distance;
         }

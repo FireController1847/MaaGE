@@ -142,9 +142,11 @@ columns to finish their light jobs; immutable halo snapshots and epochs reject
 outdated geometry, and later arrivals cause normal lighting/mesh refinement.
 It keeps prepared, never-presented GPU meshes hidden outside that ring.
 A successful first frame advances the frontier; already presented geometry
-remains visible and can update independently. Both frontiers rebase when the
-player changes chunk or render distance changes, and missing columns reopen
-their ring. Submission stays outward-prioritized, completion and transport
+remains visible and can update independently. The Client's only visual
+frontier rebases when the player changes chunk or render distance changes,
+advancing past already-presented inner rings without re-uploading them;
+missing columns reopen their ring. Submission stays outward-prioritized,
+completion and transport
 remain independent, and only first display follows the outward frontier. Workers remain
 parallel per column; no subcolumn synchronization, neighbor wait or render-frame
 barrier is introduced.
