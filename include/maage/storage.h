@@ -12,7 +12,8 @@ maage_status maage_storage_directories(const char *path);
 int maage_storage_directory_exists(const char *path);
 /* FILE* is the deliberate standard-library interop contract; callers translate
  * a NULL with maage_status_from_errno and capture errno before other I/O.
- * Binary read ("rb") or binary replacement ("wb"). */
+ * Binary read ("rb"), replacement ("wb"), or owner-serialized update
+ * ("r+b"/"w+b") for indexed region storage. */
 FILE *maage_storage_open(const char *path, const char *mode);
 /* No-follow status: 0 missing, 1 regular file, 2 directory, -1 unsafe/error. */
 int maage_storage_status(const char *path);
@@ -24,6 +25,8 @@ int maage_storage_uuid_valid(const char *uuid);
 maage_status maage_storage_uuid_generate(char uuid[37]);
 /* Flush stdio and the underlying regular file before atomic promotion. */
 maage_status maage_storage_sync(FILE *file);
+/* Truncate a validated, owner-held regular FILE* to a committed record boundary. */
+maage_status maage_storage_truncate(FILE *file, long length);
 /* Restricts an existing regular file to the current user (0600 / protected DACL). */
 maage_status maage_storage_private_file(const char *path);
 maage_status maage_storage_remove(const char *path);

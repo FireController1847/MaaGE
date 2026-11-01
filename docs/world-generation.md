@@ -165,20 +165,22 @@ worker waits for a ring, neighbor or render-frame barrier.
 
 ## Storage Codec Performance
 
-Current MGCHNK5 saves use an unchanged portable, named-state encoding and
+Current MGCHNK6 region records use a portable, named-state encoding and
 existing CRC32 integrity checks. The encoder now discovers the small set of
 distinct block identities using an allocated per-save hash table, sorting only
 unique entries instead of all occupied cells. The decoder copies validated
 section lighting in bulk, and the shared CRC implementation uses zlib's
-optimized tables without changing file bytes or requiring a migration.
+optimized tables while retaining the same CRC32 polynomial for corruption detection.
 No second filesystem metadata query is made by the general file reader
 after its caller has already checked missing chunk paths.
 
-Region-indexed storage remains an architectural option. A 32x32 region
-would need independent compressed per-chunk records and an atomic, recoverable
-index; rewriting an entire region whenever one chunk changes would regress
-save throughput and crash recovery. The current changes do not alter the
-existing world's format or file ownership.
+Chunks are grouped into 32x32 region files. Each region holds an append-only
+sequence of independently zlib-compressed, CRC-verified chunk records and an
+in-memory latest-record index. A complete footer commits each record; an
+incomplete final append is ignored and truncated before the next save. Region
+mutexes serialize overlapping operations while independent region files run
+on different I/O workers. The disk layout deliberately rejects legacy
+per-chunk files and old metadata: worlds are recreated during pre-alpha.
 
 ## Determinism and Persistence
 
@@ -195,7 +197,7 @@ detached output column. Tree snow ownership uses two small job-local arrays of
 256 entries, with no persisted tree records or neighbor access. Spawn floor queries
 replay the same tree emitter and snow decisions.
 
-`MGWORLD8` and `MGCHNK5` remain the current formats. Existing saved chunks load
+`MGWORLD9` and `MGCHNK6` are the current formats. Existing saved chunks load
 their authoritative blocks and biome identities; they are not regenerated or
 rewritten to adopt a new region model. Only missing chunks use current generation.
 Existing-to-new material, decoration or biome-tint seams can therefore remain,

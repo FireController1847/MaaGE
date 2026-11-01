@@ -44,7 +44,8 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
  * caller-owned. Only the current metadata/chunk encodings are accepted. */
 maage_status maage_world_store_open(const char *instance_root, const char *id, int create, const char *name, const maage_world_seed *seed, const maage_generation_policy *generation_policy, const maage_item_registry *items, maage_world_store **store, maage_world_record *record, char error[256], maage_status_trace *trace);
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
- * independent chunk files may be written concurrently. Player inventories and
+ * independent region files may be written concurrently; each region serializes
+ * its own index and append operations without a global World lock. Player inventories and
  * World entities use stable namespaced item identities; no numeric mapping is persisted.
  * Environment, the World's independent random-tick checkpoint and generation
  * settings share the same atomic metadata replacement (MGWORLD8 only). */
@@ -54,15 +55,16 @@ maage_status maage_world_store_close(maage_world_store *store);
 /* Distinct coordinates may load/save concurrently: each job owns its buffers,
  * error storage and an immutable chunk snapshot, borrowing finalized registries.
  * The task owner serializes/coalesces writes to the same coordinate and keeps
- * store/registries alive until completion; no store-wide I/O mutex is needed.
+ * store/registries alive until completion; unrelated region files run in
+ * parallel, with a short per-region lock for indexed reads and appends.
  * Detached loaded columns transfer to caller. Only WORLD_IO/LOAD/NOT_FOUND
  * permits generation; registry NOT_FOUND means an unmapped save identity.
  * Per-column namespaced biome/block+metadata palettes resolve at I/O boundaries;
  * 8-bit biome/16-bit state indices are file-local rather than runtime IDs.
  * Columns retain completed generation stages, relative pending fluid delays and
  * chunk-owned numeric block entities with checked versioned opaque payloads.
- * Malformed/unmapped saves and inaccessible files remain failures and preserve
- * the original data. Old MaaGE encodings are rejected without conversion. */
+ * A missing region/index entry alone permits generation. Corrupt or incompatible
+ * regions/chunks are rejected without conversion and without deleting files. */
 maage_status maage_world_store_load_chunk(maage_world_store *store, int x, int z, const maage_block_registry *blocks, const maage_biome_registry *biomes, maage_chunk **chunk, char error[256], maage_status_trace *trace);
 /* Snapshot clock is captured when the async save is submitted. Pending updates
  * serialize remaining delays, so an older clock checkpoint after a crash cannot

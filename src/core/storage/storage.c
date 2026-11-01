@@ -140,7 +140,7 @@ int maage_storage_directory_exists(const char *path) {
     return !maage_status_failed(maage_storage_check_directories(path, 0));
 }
 FILE *maage_storage_open(const char *path, const char *mode) {
-    if (!path || !mode || (strcmp(mode, "rb") && strcmp(mode, "wb"))) {
+    if (!path || !mode || (strcmp(mode, "rb") && strcmp(mode, "wb") && strcmp(mode, "r+b") && strcmp(mode, "w+b"))) {
         errno = EINVAL;
         return NULL;
     }
@@ -159,13 +159,13 @@ FILE *maage_storage_open(const char *path, const char *mode) {
             errno = EACCES;
             return NULL;
         }
-        file = _wfopen(wide, !strcmp(mode, "rb") ? L"rb" : L"wb");
+        file = _wfopen(wide, !strcmp(mode, "rb") ? L"rb" : (!strcmp(mode, "wb") ? L"wb" : (!strcmp(mode, "r+b") ? L"r+b" : L"w+b")));
         free(wide);
         return file;
     }
 #else
     {
-        int flags = !strcmp(mode, "rb") ? O_RDONLY : O_WRONLY | O_CREAT | O_TRUNC;
+        int flags = !strcmp(mode, "rb") ? O_RDONLY : (!strcmp(mode, "wb") ? O_WRONLY | O_CREAT | O_TRUNC : (!strcmp(mode, "r+b") ? O_RDWR : O_RDWR | O_CREAT | O_TRUNC));
         int fd = open(path, flags | O_NOFOLLOW, 0600), native;
         FILE *file;
         struct stat information;
@@ -289,6 +289,19 @@ maage_status maage_storage_sync(FILE *file) {
     if (fsync(fileno(file))) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_WRITE);
 #endif
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_WRITE, 0);
+}
+maage_status maage_storage_truncate(FILE *file, long length) {
+    int native = 0;
+    if (!file || length < 0) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESIZE, 0);
+    if (fflush(file)) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESIZE);
+#ifdef _WIN32
+    native = _chsize_s(_fileno(file), (__int64) length);
+    if (native) return maage_status_from_errno(native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESIZE);
+#else
+    if (ftruncate(fileno(file), (off_t) length)) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESIZE);
+#endif
+    if (fseek(file, length, SEEK_SET)) return maage_status_from_errno(errno, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RESIZE);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESIZE, 0);
 }
 maage_status maage_storage_private_file(const char *path) {
     if (!path) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_SET, 0);

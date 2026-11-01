@@ -1,4 +1,5 @@
 #include "world_internal.h"
+#include "region_store.h"
 #include "maage/world_store.h"
 #include "maage/storage.h"
 #include "maage/folder_link.h"
@@ -17,8 +18,9 @@
 #define MAAGE_STORE_METADATA_MAX 4294967295UL
 #define MAAGE_STORE_WORD 4294967295UL
 struct maage_world_store {
-    char directory[MAAGE_PATH_CAPACITY], chunks[MAAGE_PATH_CAPACITY];
+    char directory[MAAGE_PATH_CAPACITY], regions_dir[MAAGE_PATH_CAPACITY];
     maage_storage_lock *lock;
+    maage_region_store *regions;
     maage_world_record record;
     const maage_item_registry *items; /* borrowed after finalize */
 };
@@ -488,7 +490,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWORLD8", 8);
+    maage_store_text_put(&bytes, "MGWORLD9", 8);
     maage_store_put(&bytes, record->seed.low, 4);
     maage_store_put(&bytes, record->seed.high, 4);
     maage_store_put(&bytes, strlen(record->id), 1);
@@ -551,12 +553,12 @@ static maage_status maage_store_metadata_load(const maage_world_store *store, co
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD8", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWORLD9", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD8");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWORLD9");
     if (ok) {
         record->seed.low = maage_store_get(&bytes, 4);
         record->seed.high = maage_store_get(&bytes, 4);
@@ -744,8 +746,9 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
         MAAGE_STORE_STEP(maage_store_metadata_write(store, &store->record, error, trace), "Could not save new world metadata.");
     } else
         MAAGE_STORE_STEP(maage_store_metadata_load(store, chosen, &store->record, error, trace), "Could not load world metadata.");
-    MAAGE_STORE_STEP(maage_storage_join(store->chunks, sizeof(store->chunks), store->directory, "chunks"), "Chunk path is too long.");
-    MAAGE_STORE_STEP(maage_storage_directories(store->chunks), "Could not prepare chunk storage.");
+    MAAGE_STORE_STEP(maage_storage_join(store->regions_dir, sizeof(store->regions_dir), store->directory, "regions"), "Region storage path is too long.");
+    MAAGE_STORE_STEP(maage_storage_directories(store->regions_dir), "Could not prepare region storage.");
+    MAAGE_STORE_STEP(maage_region_store_create(store->regions_dir, &store->regions), "Could not initialize indexed region storage.");
     length = strlen(chosen);
     chosen[length++] = '\n';
     MAAGE_STORE_STEP(maage_store_write(last, (const unsigned char *) chosen, length, error, trace), "Could not persist world selection.");
@@ -789,19 +792,17 @@ maage_status maage_world_store_close(maage_world_store *store) {
     if (!store) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CLOSE, 0);
     maage_entity_save_clear(&store->record.entities);
     maage_gameplay_save_clear(&store->record.gameplay);
-    result = maage_storage_release(store->lock);
+    result = maage_region_store_destroy(store->regions);
+    {
+        maage_status released = maage_storage_release(store->lock);
+        if (!maage_status_failed(result)) result = released;
+    }
     free(store);
     return maage_status_failed(result) ? result : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CLOSE, 0);
 }
 static int maage_store_coordinates(int x, int z) {
     int limit = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE;
     return x >= -limit && x <= limit && z >= -limit && z <= limit;
-}
-static int maage_store_chunk_path(maage_world_store *store, int x, int z, char path[MAAGE_PATH_CAPACITY]) {
-    char relative[80];
-    if (!maage_store_coordinates(x, z)) return 0;
-    sprintf(relative, "%d_%d.chunk", x, z);
-    return !maage_status_failed(maage_storage_join(path, MAAGE_PATH_CAPACITY, store->chunks, relative));
 }
 static int maage_store_state_compare(const void *left, const void *right) {
     maage_block_state_id a = *(const maage_block_state_id *) left;
@@ -1008,7 +1009,7 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (length < 845UL || !maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK5\0")) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
+    if (length < 845UL || !maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK6\0")) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
     stored_x = maage_store_get(&bytes, 4);
     stored_z = maage_store_get(&bytes, 4);
     expected_x = (unsigned long) x & MAAGE_STORE_WORD;
@@ -1102,16 +1103,18 @@ failed:
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
 }
 maage_status maage_world_store_load_chunk(maage_world_store *store, int x, int z, const maage_block_registry *blocks, const maage_biome_registry *biomes, maage_chunk **chunk, char error[256], maage_status_trace *trace) {
-    char path[MAAGE_PATH_CAPACITY];
     unsigned char *data;
     size_t length;
     maage_status result;
     if (chunk) *chunk = NULL;
     if (!chunk || !store || !blocks || !biomes) return maage_store_fail(error, "Missing chunk load arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
-    if (!maage_store_chunk_path(store, x, z, path)) return maage_store_fail(error, "Chunk coordinates or path exceed the world format bounds.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
-    if (maage_storage_status(path) == 0) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, 0);
-    result = maage_store_read(path, MAAGE_STORE_CHUNK_MAX, &data, &length, error, trace);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
+    if (!maage_store_coordinates(x, z)) return maage_store_fail(error, "Chunk coordinates exceed the world format bounds.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_LOAD, trace);
+    result = maage_region_store_load(store->regions, x, z, &data, &length);
+    if (maage_status_code(result) == MAAGE_STATUS_NOT_FOUND) return result;
+    if (maage_status_failed(result)) {
+        maage_store_error(error, "Region entry could not be read or decompressed; authoritative data preserved.");
+        return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
+    }
     result = maage_store_chunk_decode(data, length, x, z, blocks, biomes, chunk, trace);
     free(data);
     if (maage_status_failed(result)) {
@@ -1122,9 +1125,7 @@ maage_status maage_world_store_load_chunk(maage_world_store *store, int x, int z
 }
 
 maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maage_chunk *chunk, const maage_block_registry *blocks, const maage_biome_registry *biomes, unsigned long tick_low, unsigned long tick_high, char error[256], maage_status_trace *trace) {
-    char path[MAAGE_PATH_CAPACITY];
     maage_store_bytes bytes;
-    maage_chunk *existing = NULL;
     maage_block_state_id *states = NULL;
     size_t *state_slots = NULL, slot_capacity = 1;
     unsigned char *encoded = NULL;
@@ -1134,8 +1135,8 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     unsigned long mask = 0;
     size_t i, section, j, unique = 0, biome_count = 0, cells = 0;
     size_t capacity = 800UL, simulation_length;
-    maage_status result, load_result;
-    if (!store || !chunk || !blocks || !biomes || !maage_store_chunk_path(store, chunk->x, chunk->z, path)) {
+    maage_status result;
+    if (!store || !chunk || !blocks || !biomes || !maage_store_coordinates(chunk->x, chunk->z)) {
         maage_store_error(error, "Chunk coordinates or path exceed the world format bounds.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, !store ? 0 : (!chunk ? 1 : (!blocks ? 2 : (!biomes ? 3 : 1)))), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
     }
@@ -1144,11 +1145,6 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     if (chunk->generation_stages != (1U << MAAGE_GENERATION_STAGE_COUNT) - 1U) {
         maage_store_error(error, "Refusing to persist a column with incomplete generation stages.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
-    }
-    if (maage_storage_status(path) != 0) {
-        load_result = maage_world_store_load_chunk(store, chunk->x, chunk->z, blocks, biomes, &existing, error, trace);
-        if (maage_status_failed(load_result)) return MAAGE_STATUS_PROPAGATE(trace, load_result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
-        maage_chunk_destroy(existing);
     }
     if (tick_low > MAAGE_STORE_WORD || tick_high > MAAGE_STORE_WORD || !maage_store_chunk_simulation_size(chunk, blocks, &simulation_length)) goto incompatible;
     capacity += simulation_length;
@@ -1226,7 +1222,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGCHNK5\0", 8);
+    maage_store_text_put(&bytes, "MGCHNK6\0", 8);
     maage_store_put(&bytes, (unsigned long) chunk->x, 4);
     maage_store_put(&bytes, (unsigned long) chunk->z, 4);
     maage_store_put(&bytes, mask, 2);
@@ -1265,7 +1261,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     }
     maage_store_chunk_simulation_put(&bytes, chunk, tick_low, tick_high);
     maage_store_checksum_put(&bytes);
-    result = !bytes.failed && bytes.position == capacity ? maage_store_write(path, bytes.data, bytes.position, error, trace) : maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0);
+    result = !bytes.failed && bytes.position == capacity ? maage_region_store_save(store->regions, chunk->x, chunk->z, bytes.data, bytes.position) : maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0);
     free(encoded);
     free(states);
     if (maage_status_failed(result)) maage_store_error(error, "Chunk save failed; the previous file was preserved.");
