@@ -109,6 +109,7 @@ static maage_status region_scan(maage_region *region) {
     long end, position;
     unsigned slot;
     unsigned long raw_size, zip_size;
+    unsigned long maximum_zip = (unsigned long) compressBound((uLong) MAAGE_REGION_CHUNK_MAX);
     maage_region_entry *entry;
     if (fseek(region->file, 0L, SEEK_END) || (end = ftell(region->file)) < MAAGE_REGION_HEADER ||
         fseek(region->file, 0L, SEEK_SET) || fread(header, 1, MAAGE_REGION_HEADER, region->file) != MAAGE_REGION_HEADER)
@@ -128,7 +129,7 @@ static maage_status region_scan(maage_region *region) {
         zip_size = region_word(header + 12, 4);
         if (memcmp(header, MAAGE_REGION_RECORD_MAGIC, 4) || slot >= MAAGE_REGION_SLOTS ||
             region_word(header + 6, 2) || !raw_size || raw_size > MAAGE_REGION_CHUNK_MAX ||
-            !zip_size || zip_size > MAAGE_REGION_CHUNK_MAX)
+            !zip_size || zip_size > maximum_zip)
             return region_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
         if (zip_size > (unsigned long) (end - position - MAAGE_REGION_RECORD) ||
             end - position - MAAGE_REGION_RECORD - (long) zip_size < MAAGE_REGION_FOOTER) break;
@@ -386,7 +387,10 @@ maage_status maage_region_store_save(maage_region_store *store, int x, int z, co
     unsigned slot;
     if (!store || !data || !length || length > MAAGE_REGION_CHUNK_MAX) return region_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SAVE);
     capacity = compressBound((uLong) length);
-    if (capacity > MAAGE_REGION_CHUNK_MAX) return region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
+    /* Compression can add framing overhead to an incompressible maximal
+     * raw chunk. Bound stored size by the format's uint32 length field,
+     * not the uncompressed payload ceiling. */
+    if (capacity > 0xffffffffUL) return region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
     compressed = (unsigned char *) malloc((size_t) capacity);
     if (!compressed) return region_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE);
     compressed_size = capacity;
