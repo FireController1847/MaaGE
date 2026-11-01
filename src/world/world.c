@@ -85,7 +85,7 @@ struct maage_world {
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
     unsigned scan_step, mesh_turn, column_turn;
-    int scan_ring, save_turn, send_frontier, visual_frontier;
+    int scan_ring, save_turn, visual_frontier;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
     int center_x, center_z, retained_radius, stopped, failed, diagnostics;
@@ -290,7 +290,6 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
     {
         int dx = abs(slot->x - world->center_x), dz = abs(slot->z - world->center_z);
         int ring = dx > dz ? dx : dz;
-        if (ring < world->send_frontier) world->send_frontier = ring;
         if (ring < world->visual_frontier) world->visual_frontier = ring;
     }
     if (world->save_cursor == slot) world->save_cursor = slot->next ? slot->next : world->chunks;
@@ -314,13 +313,12 @@ static void maage_world_scan_revisit(maage_world *world, const maage_world_slot 
         world->scan_step = 0;
     }
 }
-/* Workers remain independent; only initial owner-to-client delivery and first
- * visual presentation respect a monotonic square-ring frontier. Recheck one
- * incomplete ring, not the full view square, when acknowledgements arrive.
- * Already delivered/presented columns may refine without waiting. */
-static void maage_world_advance_frontier(maage_world *world, int presentation) {
-    int *frontier = presentation ? &world->visual_frontier : &world->send_frontier;
-    int radius = world->config.render_distance + (presentation ? 0 : 1);
+/* Only first visual presentation respects a monotonic square-ring frontier.
+ * Loads, transfers, CPU meshes and GPU uploads are independently prepared.
+ * Previously presented columns can always refine without waiting. */
+static void maage_world_advance_frontier(maage_world *world) {
+    int *frontier = &world->visual_frontier;
+    int radius = world->config.render_distance;
     int bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
     int ring, dx, dz, x, z;
     maage_world_slot *slot;
@@ -333,7 +331,7 @@ static void maage_world_advance_frontier(maage_world *world, int presentation) {
                 z = world->center_z + dz;
                 if (x < -bound || x > bound || z < -bound || z > bound) continue;
                 slot = maage_world_find(world, x, z);
-                if (!slot || (presentation ? !slot->presented : !slot->sent)) return;
+                if (!slot || !slot->presented) return;
             }
         ++*frontier;
     }
@@ -1304,12 +1302,12 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
             radius = maage_world_distance(world, slot);
             /* Changing the view radius does not change existing geometry.
              * Previously published meshes are reusable without a rebuild. */
-            if (world->config.build_meshes && radius <= distance && radius > previous && maage_world_complete(slot) && !slot->presented && !slot->mesh_dirty && !slot->pending_mesh) maage_world_invalidate(world, slot, 0);
+            if (world->config.build_meshes && radius <= distance && radius > previous && maage_world_complete(slot) && !slot->presented && !slot->mesh_dirty && !slot->pending_mesh && !slot->mesh_prepared_revision) maage_world_invalidate(world, slot, 0);
             if (radius > distance && slot->work && slot->work->kind == MAAGE_JOB_MESH) maage_world_cancel(world, slot->work);
         }
         world->scan_ring = 0;
         world->scan_step = 0;
-        world->send_frontier = world->visual_frontier = 0;
+        world->visual_frontier = 0;
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -1358,7 +1356,7 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     world->center_z = cz;
     world->yaw = yaw;
     if (cx != old_x || cz != old_z) {
-        world->send_frontier = world->visual_frontier = 0;
+        world->visual_frontier = 0;
         world->retained_radius = world->config.render_distance;
     }
     maage_world_collect(world);
@@ -1743,7 +1741,7 @@ maage_status maage_world_mesh_presented(maage_world *world, int x, int z, unsign
     if (!maage_world_complete(slot) || slot->mesh_prepared_revision != revision || !maage_world_mesh_current(world, x, z, revision) || !maage_world_mesh_can_present(world, x, z)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
     if (!slot->presented) {
         slot->presented = 1;
-        maage_world_advance_frontier(world, 1);
+        maage_world_advance_frontier(world);
         if (world->diagnostics) maage_log_info("maage.world.latency", "owner=client phase=first_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f", x, z, revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
@@ -1766,7 +1764,7 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     fair = ++world->mesh_turn % 8U == 0;
-    if (world->config.presentation_only) maage_world_advance_frontier(world, 1);
+    /* Meshing uploads may precede the visible frontier; only drawing waits. */
     link = &world->mesh_head;
     while ((slot = *link) != NULL) {
         if (!slot->pending_mesh || !maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {
@@ -1780,12 +1778,7 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
             continue;
         }
         distance = maage_world_distance(world, slot);
-        if (world->config.presentation_only && !slot->presented && distance > world->visual_frontier) {
-            previous = slot;
-            link = &slot->mesh_next;
-            continue;
-        }
-        if (!chosen || (!fair && distance < best)) {
+         if (!chosen || (!fair && distance < best)) {
             chosen = slot;
             best = distance;
         }
@@ -2475,23 +2468,24 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
         }
         result = maage_chunk_set(authority, cell % 16, cell / 256, (cell / 16) % 16, update->cells[i].state);
         if (maage_status_failed(result)) goto done;
+        /* Initial packets are sorted by height-major cell index and contain
+         * every non-air state. Derive the heightmap during this mandatory
+         * pass instead of rescanning 256 full vertical shafts on the UI. */
+        if (!update->base_revision && update->cells[i].state != MAAGE_STATE_AIR) {
+            unsigned int column = (cell / 16) % 16 * 16 + cell % 16;
+            unsigned int height = cell / 256 + 1;
+            if (height > authority->heightmap[column]) authority->heightmap[column] = (unsigned short) height;
+        }
     }
     /* Keep locally calculated light and its direct-sky cache across deltas. */
     result = slot->data && update->base_revision ? maage_chunk_clone(slot->data->chunk, &visual) : maage_chunk_clone(authority, &visual);
     if (maage_status_failed(result)) goto done;
     if (!update->base_revision) {
-        int sy, x, z, top;
+        int sy;
         for (sy = 0; sy < 16; ++sy)
             if (visual->sections[sy]) memset(visual->sections[sy]->light, 0, 4096);
         slot->geometry_changed = slot->light_changed = 1;
         memset(slot->light_cells, 255, sizeof(slot->light_cells));
-        for (z = 0; z < 16; ++z)
-            for (x = 0; x < 16; ++x) {
-                top = 256;
-                while (top > 0 && maage_chunk_get(visual, x, top - 1, z) == MAAGE_STATE_AIR)
-                    --top;
-                visual->heightmap[z * 16 + x] = (unsigned short) top;
-            }
     }
     if (update->biomes) {
         if (memcmp(visual->biomes, update->biomes, sizeof(visual->biomes))) slot->geometry_changed = 1;

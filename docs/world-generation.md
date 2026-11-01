@@ -135,11 +135,12 @@ shrinks at the same player chunk. They are hidden outside the current view and
 released through normal unloads when the player moves away or cache pressure
 requires eviction.
 
-The Client likewise keeps completed meshes pending until their first-presentation
-ring is eligible. Its first mesh waits for stable local lighting, not neighboring
+The Client freely uploads completed meshes to its GPU cache ahead of the
+first-presentation ring. Only the first *draw* of a mesh waits for its ring.
+Its first mesh waits for stable local lighting, not neighboring
 columns to finish their light jobs; immutable halo snapshots and epochs reject
 outdated geometry, and later arrivals cause normal lighting/mesh refinement.
-It does not draw previously prepared, never-presented meshes outside that ring.
+It keeps prepared, never-presented GPU meshes hidden outside that ring.
 A successful first frame advances the frontier; already presented geometry
 remains visible and can update independently. Both frontiers rebase when the
 player changes chunk or render distance changes, and missing columns reopen
