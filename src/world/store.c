@@ -8,6 +8,7 @@
 #include <time.h>
 #include <limits.h>
 #include <errno.h>
+#include <zlib.h>
 
 /* Chunk palettes contain at most 65536 namespaced state identities.
  * Reads allocate only the actual validated file size, not this maximum. */
@@ -32,16 +33,18 @@ static int maage_store_error(char error[256], const char *message) {
     if (error) strcpy(error, message);
     return 0;
 }
+/* The on-disk CRC polynomial and byte ordering are unchanged. The existing
+ * zlib dependency uses table-based CRC32 instead of eight divisions per byte;
+ * process inputs in portable uInt-sized pieces for 32-bit target builds. */
 static unsigned long maage_store_crc(const unsigned char *data, size_t length) {
-    unsigned long crc = MAAGE_STORE_WORD;
-    size_t i;
-    unsigned int bit;
-    for (i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1) ? 3988292384UL : 0UL);
+    uLong crc = crc32(0L, Z_NULL, 0);
+    while (length) {
+        uInt count = length > (size_t) UINT_MAX ? UINT_MAX : (uInt) length;
+        crc = crc32(crc, data, count);
+        data += count;
+        length -= count;
     }
-    return (crc ^ MAAGE_STORE_WORD) & MAAGE_STORE_WORD;
+    return (unsigned long) crc & MAAGE_STORE_WORD;
 }
 static void maage_store_put(maage_store_bytes *bytes, unsigned long value, size_t count) {
     size_t i;
@@ -174,7 +177,8 @@ static maage_status maage_store_read(const char *path, size_t maximum, unsigned 
     if (!output || !length || !path) return maage_store_fail(error, "Missing world file read arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_READ, trace);
     *output = NULL;
     *length = 0;
-    if (maage_storage_status(path) != 1) return maage_store_fail(error, "World file is missing, unsafe, or inaccessible.", MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_READ, trace);
+    /* Storage opens verify no-follow regular files. Avoid a separate status
+     * probe for every read; the caller retains missing-chunk detection. */
     errno = 0;
     file = maage_storage_open(path, "rb");
     if (!file) {
@@ -1072,13 +1076,18 @@ static maage_status maage_store_chunk_decode(unsigned char *data, size_t length,
             result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
             goto failed;
         }
+        /* Bulk-validate the remaining payload before decoding section
+         * indices. Lighting is already a byte-for-byte serialized array. */
+        if (bytes.position > bytes.length || bytes.length - bytes.position < MAAGE_SECTION_VOLUME * 3UL) goto failed;
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
-            value = maage_store_get(&bytes, 2);
+            size_t offset = bytes.position + i * 2UL;
+            value = (unsigned long) bytes.data[offset] | ((unsigned long) bytes.data[offset + 1] << 8);
             if (value >= state_count) goto failed;
             chunk->sections[section]->states[i] = palette[value];
         }
-        for (i = 0; i < MAAGE_SECTION_VOLUME; ++i)
-            chunk->sections[section]->light[i] = (unsigned char) maage_store_get(&bytes, 1);
+        bytes.position += MAAGE_SECTION_VOLUME * 2UL;
+        memcpy(chunk->sections[section]->light, bytes.data + bytes.position, MAAGE_SECTION_VOLUME);
+        bytes.position += MAAGE_SECTION_VOLUME;
     }
     if (!maage_store_chunk_simulation_get(&bytes, chunk, blocks) ||
         chunk->generation_stages != (1U << MAAGE_GENERATION_STAGE_COUNT) - 1U ||
@@ -1117,12 +1126,13 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     maage_store_bytes bytes;
     maage_chunk *existing = NULL;
     maage_block_state_id *states = NULL;
+    size_t *state_slots = NULL, slot_capacity = 1;
     unsigned char *encoded = NULL;
     maage_biome_id biome_ids[256];
     const maage_block_state_definition *definition;
     const char *name;
     unsigned long mask = 0;
-    size_t i, section, j, count = 0, unique = 0, biome_count = 0, cells = 0;
+    size_t i, section, j, unique = 0, biome_count = 0, cells = 0;
     size_t capacity = 800UL, simulation_length;
     maage_status result, load_result;
     if (!store || !chunk || !blocks || !biomes || !maage_store_chunk_path(store, chunk->x, chunk->z, path)) {
@@ -1148,26 +1158,41 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
             cells += MAAGE_SECTION_VOLUME;
         }
     if (cells) {
+        if (cells > (size_t) -1 / sizeof(*states) || cells > (size_t) -1 / 2U) goto incompatible;
+        while (slot_capacity < cells * 2U) {
+            if (slot_capacity > (size_t) -1 / 2U) goto incompatible;
+            slot_capacity *= 2U;
+        }
+        if (slot_capacity > (size_t) -1 / sizeof(*state_slots)) goto incompatible;
         states = (maage_block_state_id *) malloc(cells * sizeof(*states));
-        if (!states) {
+        state_slots = (size_t *) calloc(slot_capacity, sizeof(*state_slots));
+        if (!states || !state_slots) {
+            free(states);
+            free(state_slots);
             maage_store_error(error, "Not enough memory for the chunk identity palette.");
             return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
         }
     }
+    /* Hash only unique identities; sorting up to 65,536 repeated block
+     * values per save added unnecessary O(n log n) CPU work. The final sorted
+     * palette remains byte-for-byte deterministic across platforms. */
     for (section = 0; section < 16; ++section) {
         if (!chunk->sections[section]) continue;
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
             maage_block_state_id id = chunk->sections[section]->states[i];
+            size_t bucket = (size_t) ((id ^ (id >> 16)) * 2654435761UL) & (slot_capacity - 1U);
             if (!maage_block_registry_state(blocks, id)) goto incompatible;
-            states[count++] = id;
+            while (state_slots[bucket] && states[state_slots[bucket] - 1U] != id)
+                bucket = (bucket + 1U) & (slot_capacity - 1U);
+            if (!state_slots[bucket]) {
+                states[unique] = id;
+                state_slots[bucket] = ++unique;
+            }
         }
     }
-    if (count) {
-        qsort(states, count, sizeof(*states), maage_store_state_compare);
-        for (i = 0; i < count; ++i)
-            if (!unique || states[i] != states[unique - 1])
-                states[unique++] = states[i];
-    }
+    free(state_slots);
+    state_slots = NULL;
+    if (unique) qsort(states, unique, sizeof(*states), maage_store_state_compare);
     for (i = 0; i < 256; ++i) {
         if (!maage_biome_registry_get(biomes, chunk->biomes[i])) goto incompatible;
         biome_ids[i] = chunk->biomes[i];
@@ -1248,6 +1273,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
 incompatible:
     free(encoded);
     free(states);
+    free(state_slots);
     maage_store_error(error, "Chunk has invalid heights or unresolved registered content identities.");
     return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE, 0), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
 }

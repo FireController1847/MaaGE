@@ -163,6 +163,23 @@ own two-ring group. Submission stays outward-prioritized, while completion,
 transport, lighting, meshing and GPU preparation remain independent; no
 worker waits for a ring, neighbor or render-frame barrier.
 
+## Storage Codec Performance
+
+Current MGCHNK5 saves use an unchanged portable, named-state encoding and
+existing CRC32 integrity checks. The encoder now discovers the small set of
+distinct block identities using an allocated per-save hash table, sorting only
+unique entries instead of all occupied cells. The decoder copies validated
+section lighting in bulk, and the shared CRC implementation uses zlib's
+optimized tables without changing file bytes or requiring a migration.
+No second filesystem metadata query is made by the general file reader
+after its caller has already checked missing chunk paths.
+
+Region-indexed storage remains an architectural option. A 32x32 region
+would need independent compressed per-chunk records and an atomic, recoverable
+index; rewriting an entire region whenever one chunk changes would regress
+save throughput and crash recovery. The current changes do not alter the
+existing world's format or file ownership.
+
 ## Determinism and Persistence
 
 Each generation job caches 256 profiles and up to 64 regional seed records in its
