@@ -1141,7 +1141,7 @@ static maage_status maage_world_schedule_saves(maage_world *world, unsigned rese
 static maage_status maage_world_schedule(maage_world *world) {
     maage_world_slot *slot;
     int radius = maage_world_resident_radius(world) + 1;
-    int dx, dz, x, z, kind, ring, no_room = 0;
+    int dx, dz, x, z, kind, no_room = 0;
     size_t span = (size_t) radius * 2U + 1U;
     unsigned limit, reserve, work_limit, budget, examined;
     unsigned priority;
@@ -1216,7 +1216,6 @@ static maage_status maage_world_schedule(maage_world *world) {
         if (!kind) continue;
         if (!slot) slot = maage_world_insert(world, x, z);
         if (!slot) break;
-        ring = abs(dx) > abs(dz) ? abs(dx) : abs(dz);
         priority = maage_world_job_priority(world, dx, dz, kind, forward_x, forward_z);
         if (kind == MAAGE_JOB_LIGHT && !slot->light_ready) priority += 2U;
         result = maage_world_submit(world, slot, kind, priority);
@@ -1859,10 +1858,13 @@ maage_status maage_world_retry_mesh(maage_world *world, int x, int z, unsigned l
 }
 maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *update) {
     maage_world_slot *slot, *chosen = NULL, *previous = NULL, **link;
-    int distance, best = INT_MAX, fair;
+    int distance, best = INT_MAX, fair, behind, chosen_behind = 0;
+    double forward_x, forward_z;
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     fair = ++world->mesh_turn % 8U == 0;
+    forward_x = sin(world->yaw);
+    forward_z = -cos(world->yaw);
     /* GPU uploads never wait for or advance first-display sector windows.
      * Frontiers advance only on presentation/removal/rebase events. */
     link = &world->mesh_head;
@@ -1878,8 +1880,13 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
             continue;
         }
         distance = maage_world_distance(world, slot);
-        if (!chosen || (!fair && distance < best)) {
+        behind = (slot->x - world->center_x) * forward_x + (slot->z - world->center_z) * forward_z < 0.0 && distance > 1;
+        /* Upload available forward geometry before rear geometry. The old
+         * periodic FIFO bypass remains within the same facing hemisphere,
+         * keeping accepted work from starving under continuous movement. */
+        if (!chosen || behind < chosen_behind || (behind == chosen_behind && !fair && distance < best)) {
             chosen = slot;
+            chosen_behind = behind;
             best = distance;
         }
         previous = slot;

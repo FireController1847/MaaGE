@@ -123,7 +123,9 @@ initial loads are deferred until the current requested forward range has blocks;
 already loaded rear data remains resident and can still receive gameplay/light
 updates. Completed column transfers favor the forward direction as well.
 Accepted jobs are prioritized by facing hemisphere, then distance; changing
-the facing octant reprioritizes pending jobs without cancelling running work. Authoritative disk loads and durable saves run on a
+the facing octant reprioritizes pending jobs without cancelling running work.
+Client CPU jobs and completed GPU mesh uploads also favor ready forward
+geometry, with the one-chunk collision halo and existing fairness retained. Authoritative disk loads and durable saves run on a
 separate I/O worker pool, so blocking filesystem operations never occupy a
 generation/lighting/meshing CPU worker. Both pools share bounded owner-managed
 task contexts, immutable snapshots and completion handling; shutdown drains
