@@ -281,6 +281,11 @@ maage_status maage_world_mesh_presented(maage_world *world, int x, int z, unsign
 /* Preparation failures can retry without losing previous geometry. A newer
  * pending/running mesh wins; unchanged failures use a short retry backoff. */
 maage_status maage_world_retry_mesh(maage_world *world, int x, int z, unsigned long revision);
+/* Client replica owner only: reconcile an imported column with the actual
+ * Client GPU cache revision (zero when missing). Skip unloaded, out-of-view
+ * and in-flight columns. SUCCESS queues missing light/mesh work or restores
+ * first-frame preparation; no generation, saving, or worker waits. */
+maage_status maage_world_reconcile_mesh(maage_world *world, int x, int z, unsigned long cached_revision);
 int maage_world_chunk_loaded(const maage_world *world, int x, int z);
 /* Blocking lifecycle boundary only: cancel obsolete work, finish saves and join
  * the pool. Never call inside the render loop. Failures preserve dirty save data. */

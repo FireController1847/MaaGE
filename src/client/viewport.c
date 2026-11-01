@@ -45,6 +45,10 @@
  * catch-up window instead of replaying a stale burst after a Client stall. */
 #define MAAGE_CLIENT_SOUND_MAX_AGE_TICKS 4UL
 #define MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS 0.2
+/* Bounded, recurring audit. Each visit checks one loaded column and
+ * searches the Client GPU cache; rebuilding happens on normal World jobs. */
+#define MAAGE_CLIENT_MESH_VERIFY_INTERVAL 0.025
+#define MAAGE_CLIENT_MESH_VERIFY_BUDGET 96U
 
 typedef struct maage_client_world_options {
     const char *id, *name;
@@ -65,6 +69,11 @@ typedef struct maage_client_mesh_activity {
     double sample_start, previous_upload_ms, expected_upload_ms;
     unsigned long sample_uploads, sample_vertices;
 } maage_client_mesh_activity;
+typedef struct maage_client_mesh_verifier {
+    size_t cursor;
+    int center_x, center_z, radius;
+    double next_at;
+} maage_client_mesh_verifier;
 
 /* Textual options are resolved before any world/runtime work begins. */
 static maage_status maage_client_world_options_parse(int argc, char *const argv[], maage_client_world_options *options) {
@@ -171,6 +180,48 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
     free(cache->draws);
     memset(cache, 0, sizeof(*cache));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+}
+/* Periodically compare each loaded, requested column with the Client's
+ * owned GPU mesh. A valid empty mesh still occupies a used cache slot, so
+ * there is no false repair loop for legitimately invisible geometry.
+ * The replica World owns retry/backoff and decides which job, if any,
+ * needs resubmission. No disk or GPU calls happen in this audit. */
+static maage_status maage_client_verify_meshes(maage_world *visual, const maage_client_mesh_cache *cache, maage_client_mesh_verifier *verifier, int cx, int cz, int radius, double now) {
+    size_t span, total, index, i;
+    unsigned examined;
+    int x, z;
+    unsigned long revision;
+    maage_status result;
+    if (!visual || !cache || !verifier || radius < 1) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_VERIFY, 0);
+    if (verifier->center_x != cx || verifier->center_z != cz || verifier->radius != radius) {
+        verifier->center_x = cx;
+        verifier->center_z = cz;
+        verifier->radius = radius;
+        verifier->cursor = 0;
+        verifier->next_at = 0.0;
+    }
+    if (now < verifier->next_at) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_VERIFY, 0);
+    verifier->next_at = now + MAAGE_CLIENT_MESH_VERIFY_INTERVAL;
+    span = (size_t) radius * 2U + 1U;
+    total = span * span; /* bounded by the validated World render distance */
+    for (examined = 0; examined < MAAGE_CLIENT_MESH_VERIFY_BUDGET; ++examined) {
+        index = verifier->cursor++;
+        if (verifier->cursor >= total) verifier->cursor = 0;
+        x = cx + (int) (index % span) - radius;
+        z = cz + (int) (index / span) - radius;
+        if (!maage_world_chunk_loaded(visual, x, z)) continue;
+        revision = 0;
+        for (i = 0; i < cache->capacity; ++i)
+            if (cache->slots[i].used && cache->slots[i].x == x && cache->slots[i].z == z) {
+                revision = cache->slots[i].visual_revision;
+                break;
+            }
+        result = maage_world_reconcile_mesh(visual, x, z, revision);
+        if (maage_status_failed(result)) return result;
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
+            maage_log_verbose("maage.client.mesh", "Reconciled incomplete Client presentation for column %d,%d; cached GPU revision=%lu; operation=%u.", x, z, revision, (unsigned) maage_status_operation(result));
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_VERIFY, 0);
 }
 /* Cleanup continues after a reported failure while retaining the first failed
  * outcome. Each independent cleanup occurrence gets its own bounded trace. */
@@ -571,6 +622,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_prediction prediction;
     unsigned long prediction_mesh_generation = 0;
     maage_client_mesh_activity mesh_activity;
+    maage_client_mesh_verifier mesh_verifier;
     maage_client_world_options options;
     maage_client_options video_options, saved_video_options, current_options;
     maage_client_interaction_visual interaction;
@@ -631,6 +683,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     memset(&local_swing, 0, sizeof(local_swing));
     memset(&food_animation, 0, sizeof(food_animation));
     memset(&mesh_activity, 0, sizeof(mesh_activity));
+    memset(&mesh_verifier, 0, sizeof(mesh_verifier));
     memset(&interaction, 0, sizeof(interaction));
     memset(&first_person, 0, sizeof(first_person));
     memset(&camera_effects, 0, sizeof(camera_effects));
@@ -1498,6 +1551,12 @@ choose_world:
                     prediction.entries[action].submitted = 1;
                     maage_log_info("maage.client.latency", "action=%lu prediction_to_frame_submit_ms=%.3f frames=%lu", prediction.entries[action].id, (frame_end - prediction.entries[action].predicted_at) * 1000, prediction.frame - prediction.entries[action].frame);
                 }
+        }
+        /* Post-generation reconciliation runs only after a successful
+         * displayed frame. It does not block rendering or touch the Server. */
+        if (maage_status_code(rendered) == MAAGE_STATUS_SUCCESS) {
+            operation = maage_client_verify_meshes(visual_world, &cache, &mesh_verifier, cx, cz, options.radius, now);
+            if (maage_status_failed(operation)) goto done;
         }
         /* Submit interaction presentation first. Budgeted background uploads
          * prepare the next frame; the next prediction update refreshes any

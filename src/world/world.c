@@ -1924,6 +1924,43 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
     }
     return maage_status_make(chosen ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
 }
+/* Client-only reconciliation: the CPU mesh handoff can finish without
+ * creating a GPU cache entry (e.g. out-of-radius upload rejection). Normal
+ * scheduling then sees mesh_dirty=0 and cannot detect that presentation is
+ * missing. The Client alone supplies the actual cached GPU revision. */
+maage_status maage_world_reconcile_mesh(maage_world *world, int x, int z, unsigned long cached_revision) {
+    maage_world_slot *slot;
+    if (!world || !world->config.presentation_only || world->stopped) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
+    slot = maage_world_find(world, x, z);
+    if (!maage_world_complete(slot) || maage_world_distance(world, slot) > world->config.render_distance) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
+    /* If initial lighting was lost too, requeue light first. Never interrupt
+     * an active light pass or use an unlit first mesh as the substitute. */
+    if ((!slot->initial_light || !slot->light_ready) && !slot->light_dirty && !slot->light_work) {
+        slot->light_dirty = 1;
+        slot->light_boundaries |= 15U;
+        maage_world_scan_revisit(world, slot);
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
+    }
+    if (cached_revision && maage_world_mesh_current(world, x, z, cached_revision)) {
+        /* Empty geometry is also represented by a used GPU cache slot. If
+         * the first-frame preparation ack was lost, restore only that ack. */
+        if (!slot->presented && slot->mesh_prepared_revision != cached_revision) {
+            slot->mesh_prepared_revision = cached_revision;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+        }
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
+    }
+    if (slot->mesh_dirty || slot->pending_mesh || slot->work || slot->light_dirty || slot->light_work ||
+        (!slot->presented && !maage_world_initial_ready(slot)) || !maage_world_mesh_retry_ready(slot))
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
+    /* No GPU revision matches, and neither a worker nor the upload queue
+     * owns the missing mesh. Rebuild this revision without invalidating
+     * unrelated columns or clearing a previous successful presentation. */
+    if (!cached_revision) slot->mesh_prepared_revision = 0;
+    slot->mesh_dirty = 1;
+    maage_world_scan_revisit(world, slot);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
 int maage_world_chunk_loaded(const maage_world *world, int x, int z) {
     return world && maage_world_complete(maage_world_find(world, x, z));
 }

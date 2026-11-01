@@ -163,6 +163,15 @@ own two-ring group. Submission stays outward-prioritized, while completion,
 transport, lighting, meshing and GPU preparation remain independent; no
 worker waits for a ring, neighbor or render-frame barrier.
 
+The Client additionally performs a bounded post-load presentation audit.
+It incrementally checks visible imported columns against the Client-owned
+GPU cache, including an explicit cache entry for valid empty meshes. If a
+loaded column has neither current cached geometry nor pending mesh work, the
+replica requeues its existing revision for background meshing. Lost initial
+light requests and missing first-frame preparation acknowledgments are also
+reconciled. Ready and in-flight geometry is left intact; no Server generation,
+disk operations, global barriers, or unconditional remeshing are introduced.
+
 ## Storage Codec Performance
 
 Current `MGCHNK7` region records use numeric saved state/biome IDs and
