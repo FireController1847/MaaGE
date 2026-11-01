@@ -41,7 +41,7 @@ struct maage_client_frontend {
     maage_jobs *jobs, *shutdown_jobs;
     maage_front_shutdown shutdown;
     maage_front_options options;
-    int shutdown_active;
+    int shutdown_active, shutdown_unsafe;
     maage_front_io io;
     maage_world_summary *entries;
     size_t count;
@@ -109,10 +109,20 @@ static void front_shutdown_run(void *context, const maage_job_token *token) {
     operation = maage_local_session_close(shutdown->session);
     if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
     operation = maage_local_session_destroy(shutdown->session);
-    if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
+    if (maage_status_failed(operation)) {
+        if (!maage_status_failed(result)) result = operation;
+        shutdown->result = result;
+        maage_job_set_result(token, result);
+        return; /* Keep both borrowed objects alive for owner recovery. */
+    }
     shutdown->session = NULL;
     operation = maage_world_destroy(shutdown->visual);
-    if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
+    if (maage_status_failed(operation)) {
+        if (!maage_status_failed(result)) result = operation;
+        shutdown->result = result;
+        maage_job_set_result(token, result);
+        return; /* A failed worker drain still owns its snapshots. */
+    }
     shutdown->visual = NULL;
     shutdown->result = result;
     maage_job_set_result(token, result);
@@ -265,7 +275,9 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         }
         if (f->shutdown_active && maage_status_code(maage_jobs_poll(f->shutdown_jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
             f->shutdown_active = 0;
-            if (maage_status_failed(completion.result)) maage_client_ui_front_error(f->view, "World shutdown failed; see logs/client.log");
+            f->shutdown_unsafe = f->shutdown.server || f->shutdown.session || f->shutdown.visual;
+            if (f->shutdown_unsafe) maage_client_ui_front_error(f->view, "World cleanup incomplete; restart required.");
+            else if (maage_status_failed(completion.result)) maage_client_ui_front_error(f->view, "World shutdown failed; see logs/client.log");
         }
         if (f->busy && maage_status_code(maage_jobs_poll(f->jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
             f->busy = 0;
@@ -284,6 +296,10 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         }
         if (maage_client_ui_front_take(f->view, &request)) {
             if (request.action == 6) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
+            if (f->shutdown_unsafe) {
+                maage_client_ui_front_error(f->view, "World resources remain owned; restart required.");
+                continue;
+            }
             if ((request.action == 4 || request.action == 5) && !f->busy) {
                 if (f->shutdown_active) {
                     maage_client_ui_front_error(f->view, "Saving previous world; world entry is available when complete.");
@@ -342,7 +358,7 @@ maage_status maage_client_frontend_save_options(maage_client_frontend *f, const 
 maage_status maage_client_frontend_leave_world(maage_client_frontend *f, maage_server_runtime *server, maage_local_session *session, maage_world *visual, maage_status_trace *trace) {
     maage_job_id job;
     maage_status result;
-    if (!f || !server || !session || !visual || f->shutdown_active) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
+    if (!f || !server || !session || !visual || f->shutdown_active || f->shutdown_unsafe) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
     f->shutdown.server = server;
     f->shutdown.session = session;
     f->shutdown.visual = visual;
@@ -365,6 +381,7 @@ maage_status maage_client_frontend_destroy(maage_client_frontend *f) {
         if (maage_status_code(maage_jobs_poll(f->shutdown_jobs, &completion)) != MAAGE_STATUS_SUCCESS) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
         f->shutdown_active = 0;
     }
+    if (f->shutdown.server || f->shutdown.session || f->shutdown.visual) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_DESTROY, 0);
     result = maage_jobs_destroy(f->shutdown_jobs, NULL);
     if (maage_status_failed(result)) return result;
     result = maage_jobs_destroy(f->jobs, NULL);
