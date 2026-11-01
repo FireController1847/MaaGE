@@ -1582,6 +1582,10 @@ window_failed:
     outcome = MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     failure_message = "Native window/input cannot continue.";
 done:
+    /* Window teardown must not wait on a saving Server, draining Client
+     * World workers, or a disk sync. Retain all borrowed resources until
+     * their background operations finish after the UI is hidden. */
+    if (window) (void) maage_window_set_visible(window, 0);
     if (splash.close_requested) ok = 1;
     if (options_ready && ui) {
         operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);

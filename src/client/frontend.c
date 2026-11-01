@@ -227,7 +227,11 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (maage_status_failed(result)) return result;
         result = maage_window_get_state(maage_client_ui_window(ui), &state);
         if (maage_status_failed(result)) return result;
-        if (state.close_requested) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
+        if (state.close_requested) {
+            /* A pending Server save may outlive the visible title window. */
+            (void) maage_window_set_visible(maage_client_ui_window(ui), 0);
+            return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
+        }
         result = maage_window_get_input(maage_client_ui_window(ui), &input);
         if (maage_status_failed(result)) return result;
         was_transitioning = maage_client_ui_window_mode_changing(ui);
@@ -295,7 +299,12 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
             }
         }
         if (maage_client_ui_front_take(f->view, &request)) {
-            if (request.action == 6) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
+            if (request.action == 6) {
+                /* Quit closes the visible app immediately. The remaining
+                 * lifecycle worker and its immutable saves finish unseen. */
+                (void) maage_window_set_visible(maage_client_ui_window(ui), 0);
+                return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
+            }
             if (f->shutdown_unsafe) {
                 maage_client_ui_front_error(f->view, "World resources remain owned; restart required.");
                 continue;

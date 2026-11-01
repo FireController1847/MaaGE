@@ -260,7 +260,10 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   registry, stack, primitive/atlas/input system; no native widget or second game UI.
   [UI contracts](docs/gameplay-parity.md) list current IDs/layouts and modal behavior.
 - Default startup shows Title; catalog/admin work uses bounded Jobs and current storage.
-  Save/Quit joins/flushes before returning. Explicit world/creation CLI bypasses Title.
+  Save/Quit to Title uses an independent lifecycle worker. Quit Game hides the
+  native window before waiting for pending world saves or worker teardown; the
+  process remains alive invisibly until authoritative persistence finishes.
+  Explicit world/creation CLI bypasses Title.
   Startup-only Mojang splash uses the verified original 256x256 PNG on white before
   reveal; pump events during initialization, no minimum delay. Missing art logs/uses white.
   No Client asset acquisition or packaged Mojang artwork.
