@@ -1,6 +1,7 @@
 #include "region_store.h"
 #include "maage/storage.h"
 #include "maage/thread.h"
+#include "maage/log.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,7 +26,7 @@ typedef struct maage_region_entry {
     unsigned long raw_size, compressed_size, raw_crc, compressed_crc;
 } maage_region_entry;
 typedef struct maage_region {
-    int x, z, initialized, broken;
+    int x, z, initialized, broken, needs_trim;
     FILE *file;
     long valid_end;
     maage_mutex *mutex;
@@ -145,6 +146,7 @@ static maage_status region_scan(maage_region *region) {
         position += MAAGE_REGION_RECORD + (long) zip_size + MAAGE_REGION_FOOTER;
     }
     region->valid_end = position;
+    region->needs_trim = position < end;
     return region_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOAD);
 }
 static maage_status region_open(maage_region_store *store, maage_region *region, int create) {
@@ -209,12 +211,113 @@ maage_status maage_region_store_create(const char *directory, maage_region_store
     *output = store;
     return region_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
 }
+/* Copy only the latest committed record of each slot to a fresh private
+ * region. Compaction runs after all World I/O jobs have drained; the old file
+ * stays intact until the complete, synced replacement is atomically promoted.
+ * Rewriting the region on each chunk save would defeat incremental storage. */
+static maage_status region_compact_on_close(const maage_region_store *store, maage_region *region) {
+    char path[MAAGE_PATH_CAPACITY], temporary[MAAGE_PATH_CAPACITY];
+    unsigned char header[MAAGE_REGION_HEADER], *record = NULL;
+    FILE *output = NULL;
+    maage_status result;
+    size_t length;
+    unsigned slot;
+    long live = MAAGE_REGION_HEADER;
+
+    if (!region->file || region->broken) return region_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_CLOSE);
+    for (slot = 0; slot < MAAGE_REGION_SLOTS; ++slot) {
+        const maage_region_entry *entry = &region->entries[slot];
+        if (!entry->offset) continue;
+        if (entry->compressed_size > (unsigned long) LONG_MAX - (unsigned long) live - MAAGE_REGION_RECORD - MAAGE_REGION_FOOTER)
+            return region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
+        live += MAAGE_REGION_RECORD + (long) entry->compressed_size + MAAGE_REGION_FOOTER;
+    }
+    /* Compact when stale records exceed both live data and a modest seek/
+     * synchronization threshold; this is not a storage capacity limit. */
+    if (region->valid_end - live <= live || region->valid_end - live <= 1048576L)
+        return region_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_CLOSE);
+    result = region_path(store, region, path);
+    if (maage_status_failed(result)) return result;
+    if (strlen(path) + 5U > sizeof(temporary)) return region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
+    strcpy(temporary, path);
+    strcat(temporary, ".tmp");
+    result = maage_storage_remove(temporary);
+    if (maage_status_failed(result)) return result;
+    output = maage_storage_open(temporary, "wb");
+    if (!output) return region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_OPEN);
+    memset(header, 0, sizeof(header));
+    memcpy(header, MAAGE_REGION_MAGIC, 8);
+    region_put(header + 8, (unsigned long) region->x & 0xffffffffUL, 4);
+    region_put(header + 12, (unsigned long) region->z & 0xffffffffUL, 4);
+    if (fwrite(header, 1, sizeof(header), output) != sizeof(header)) {
+        result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_WRITE);
+        goto failed;
+    }
+    for (slot = 0; slot < MAAGE_REGION_SLOTS; ++slot) {
+        const maage_region_entry *entry = &region->entries[slot];
+        if (!entry->offset) continue;
+        length = (size_t) entry->compressed_size + MAAGE_REGION_RECORD + MAAGE_REGION_FOOTER;
+        record = (unsigned char *) malloc(length);
+        if (!record) {
+            result = region_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE);
+            goto failed;
+        }
+        if (fseek(region->file, entry->offset - MAAGE_REGION_RECORD, SEEK_SET) ||
+            fread(record, 1, length, region->file) != length) {
+            result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_READ);
+            goto failed;
+        }
+        if (memcmp(record, MAAGE_REGION_RECORD_MAGIC, 4) ||
+            region_word(record + 4, 2) != slot ||
+            region_word(record + 8, 4) != entry->raw_size ||
+            region_word(record + 12, 4) != entry->compressed_size ||
+            memcmp(record + length - MAAGE_REGION_FOOTER, MAAGE_REGION_END, MAAGE_REGION_FOOTER) ||
+            region_crc(record + MAAGE_REGION_RECORD, (size_t) entry->compressed_size) != entry->compressed_crc) {
+            result = region_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_SAVE);
+            goto failed;
+        }
+        if (fwrite(record, 1, length, output) != length) {
+            result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_WRITE);
+            goto failed;
+        }
+        free(record);
+        record = NULL;
+    }
+    result = maage_storage_sync(output);
+    if (fclose(output) && !maage_status_failed(result)) result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_CLOSE);
+    output = NULL;
+    if (maage_status_failed(result)) goto failed;
+    result = maage_storage_private_file(temporary);
+    if (maage_status_failed(result)) goto failed;
+    if (fclose(region->file)) {
+        region->file = NULL;
+        result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_CLOSE);
+        goto failed;
+    }
+    region->file = NULL;
+    result = maage_storage_replace(temporary, path);
+    if (maage_status_failed(result)) goto failed;
+    return region_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SAVE);
+failed:
+    free(record);
+    if (output) fclose(output);
+    (void) maage_storage_remove(temporary);
+    /* A failed replacement never discards the previously committed region.
+     * Once the old descriptor is closed, no further I/O uses this instance. */
+    return result;
+}
 maage_status maage_region_store_destroy(maage_region_store *store) {
     maage_region *region, *next;
     maage_status result = region_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CLOSE);
     if (!store) return region_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_CLOSE);
     for (region = store->regions; region; region = next) {
+        maage_status operation;
         next = region->next;
+        operation = region_compact_on_close(store, region);
+        if (maage_status_failed(operation)) {
+            maage_log_status(MAAGE_LOG_WARNING, "maage.world.storage", operation, "Region compaction could not complete; the previously committed region remains authoritative.");
+            if (!maage_status_failed(result)) result = operation;
+        }
         if (region->file && fclose(region->file)) result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_CLOSE);
         maage_mutex_destroy(region->mutex);
         free(region);
@@ -306,11 +409,17 @@ maage_status maage_region_store_save(maage_region_store *store, int x, int z, co
         result = region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
         goto done;
     }
-    /* A prior process may have left an incomplete final record. A verified
-     * committed prefix survives; never append behind a torn suffix. */
-    result = maage_storage_truncate(region->file, position);
-    if (maage_status_failed(result)) {
-        region->broken = 1;
+    /* Only a torn final append needs a filesystem truncate. Normal appends
+     * seek to the indexed end without an unnecessary metadata/sync operation. */
+    if (region->needs_trim) {
+        result = maage_storage_truncate(region->file, position);
+        if (maage_status_failed(result)) {
+            region->broken = 1;
+            goto done;
+        }
+        region->needs_trim = 0;
+    } else if (fseek(region->file, position, SEEK_SET)) {
+        result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_WRITE);
         goto done;
     }
     memset(header, 0, sizeof(header));

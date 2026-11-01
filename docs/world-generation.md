@@ -177,7 +177,12 @@ after its caller has already checked missing chunk paths.
 Chunks are grouped into 32x32 region files. Each region holds an append-only
 sequence of independently zlib-compressed, CRC-verified chunk records and an
 in-memory latest-record index. A complete footer commits each record; an
-incomplete final append is ignored and truncated before the next save. Region
+incomplete final append is ignored and truncated before the next save.
+Regular appends avoid redundant truncation calls. After all I/O jobs drain,
+region close compacts substantially stale append logs by copying only the
+latest verified compressed record of each slot to a synced temporary file,
+then atomically replacing the old region. The original file survives any
+failed pre-replacement compaction. Region
 mutexes serialize overlapping operations while independent region files run
 on different I/O workers. The disk layout deliberately rejects legacy
 per-chunk files and old metadata: worlds are recreated during pre-alpha.
