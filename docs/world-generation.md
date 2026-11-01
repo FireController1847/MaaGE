@@ -117,8 +117,12 @@ The World scheduler admits independent jobs through one progressing square-ring
 spiral, without waiting for earlier rings to finish. Completed loads, generation,
 lighting and changed neighbor inputs immediately reopen the closest eligible ring
 for its next job rather than waiting for a full scan around the view. Jobs remain
-prioritized by distance, while asynchronous saves use reserved queue slots and
-the scheduler's oldest-job fairness at background priority. Independent load,
+prioritized by distance. Authoritative disk loads and durable saves run on a
+separate I/O worker pool, so blocking filesystem operations never occupy a
+generation/lighting/meshing CPU worker. Both pools share bounded owner-managed
+task contexts, immutable snapshots and completion handling; shutdown drains
+both before closing the world store. Asynchronous saves retain reserved task
+contexts and oldest-job fairness at background priority. Independent load,
 generation, lighting and mesh jobs execute in parallel, including farther work
 while nearby jobs are still running.
 Server columns transfer whenever their independent load/generation finishes;
