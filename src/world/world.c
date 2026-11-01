@@ -88,7 +88,7 @@ struct maage_world {
     int scan_ring, save_turn, send_frontier, visual_frontier;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
-    int center_x, center_z, stopped, failed, diagnostics;
+    int center_x, center_z, retained_radius, stopped, failed, diagnostics;
     double diagnostic_at;
     maage_block_position predictions[32];
     maage_block_state_id prediction_states[32], prediction_replacements[32];
@@ -956,7 +956,12 @@ static maage_status maage_world_cancel(maage_world *world, maage_world_task *tas
 }
 static void maage_world_retire(maage_world *world) {
     maage_world_slot *slot, *next;
-    int radius = maage_world_resident_radius(world) + 2;
+    /* Preserve previously viewed columns when distance alone shrinks. On
+     * movement the retained horizon rebases to the requested view, and the
+     * normal ordered unload packets release old Client replicas. */
+    int radius = maage_world_resident_radius(world);
+    if (world->retained_radius > radius) radius = world->retained_radius;
+    radius += 2;
     if (world->config.presentation_only) return;
     for (slot = world->chunks; slot; slot = next) {
         int x, z;
@@ -1210,6 +1215,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     }
     world->center_x = maage_world_chunk_coordinate((int) floor(world->spawn[0]));
     world->center_z = maage_world_chunk_coordinate((int) floor(world->spawn[2]));
+    world->retained_radius = config->render_distance;
     world->tasks = (maage_world_task *) calloc(job_limit, sizeof(*world->tasks));
     world->observations = (maage_job_observation *) malloc((size_t) job_limit * sizeof(*world->observations));
     world->free_tasks = (unsigned *) malloc((size_t) job_limit * sizeof(*world->free_tasks));
@@ -1274,12 +1280,15 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
     previous = world->config.render_distance;
     if (previous == distance && limit == world->cache_limit) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
     world->config.render_distance = distance;
+    if (distance > world->retained_radius) world->retained_radius = distance;
     world->config.cache_capacity = cache_capacity;
     world->cache_limit = limit;
     if (previous != distance) {
         for (slot = world->chunks; slot; slot = slot->next) {
             radius = maage_world_distance(world, slot);
-            if (world->config.build_meshes && radius <= distance && radius > previous && maage_world_complete(slot)) maage_world_invalidate(world, slot, 0);
+            /* Changing the view radius does not change existing geometry.
+             * Previously published meshes are reusable without a rebuild. */
+            if (world->config.build_meshes && radius <= distance && radius > previous && maage_world_complete(slot) && !slot->presented && !slot->mesh_dirty && !slot->pending_mesh) maage_world_invalidate(world, slot, 0);
             if (radius > distance && slot->work && slot->work->kind == MAAGE_JOB_MESH) maage_world_cancel(world, slot->work);
         }
         world->scan_ring = 0;
@@ -1332,7 +1341,10 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     world->center_x = cx;
     world->center_z = cz;
     world->yaw = yaw;
-    if (cx != old_x || cz != old_z) world->send_frontier = world->visual_frontier = 0;
+    if (cx != old_x || cz != old_z) {
+        world->send_frontier = world->visual_frontier = 0;
+        world->retained_radius = world->config.render_distance;
+    }
     maage_world_collect(world);
     if (cx != old_x || cz != old_z) {
         unsigned index;
@@ -2240,12 +2252,13 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     if (output) *output = NULL;
     if (!world || !output || world->config.presentation_only) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     fair = ++world->column_turn % 8U == 0;
-    maage_world_advance_frontier(world, 0);
+    /* Transfer completed columns freely; only the Client's initial mesh
+     * presentation frontier is ordered. This allows far work to be prepared
+     * while an earlier ring is still lighting or meshing. */
     for (slot = world->chunks; slot; slot = slot->next) {
         distance = maage_world_distance(world, slot);
         if (!maage_world_complete(slot)) continue;
-        if (distance <= world->config.render_distance + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
-        if (!slot->sent && distance > world->send_frontier) continue;
+        if (distance <= world->retained_radius + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
         if (chosen && (fair ? slot->block_revision >= chosen->block_revision : distance >= best)) continue;
         /* Transfer only blocks and biomes; Server lighting is neither copied
          * nor needed to begin Client-owned lighting and meshing. */
@@ -2254,7 +2267,7 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     }
     if (!chosen) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SNAPSHOT, 0);
     if (!chosen->sent) maage_world_initial_report(world, chosen);
-    if (maage_world_distance(world, chosen) > world->config.render_distance + 1) {
+    if (maage_world_distance(world, chosen) > world->retained_radius + 1) {
         update = (maage_column_update *) calloc(1, sizeof(*update));
         if (!update) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
         update->x = chosen->x;
@@ -2324,7 +2337,8 @@ maage_status maage_world_ack_column(maage_world *world, const maage_column_updat
         slot->sent = slot->data;
         ++slot->sent->references;
         slot->sent_revision = update->revision;
-        if (!update->base_revision) maage_world_advance_frontier(world, 0);
+        /* Client acknowledgements retain per-column delta baselines, but do
+         * not gate initial delivery of other completed columns. */
     }
     memset(slot->transfer_cells, 0, sizeof(slot->transfer_cells));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);

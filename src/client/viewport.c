@@ -237,7 +237,7 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
     activity->status.frame_upload_ms = 0;
     activity->status.budget_ms = budget_ms;
     for (i = 0; i < cache->capacity; ++i) {
-        if (cache->slots[i].used && (!maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z) || abs(cache->slots[i].x - center_x) > options->radius || abs(cache->slots[i].z - center_z) > options->radius)) {
+        if (cache->slots[i].used && !maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z)) {
             maage_client_mesh_cache_drop(cache, i, visual);
         }
     }
@@ -1416,6 +1416,10 @@ choose_world:
             cache.slots[slot_index].first_frame = 0;
             if (cache.slots[slot_index].used) {
                 ++resident_count;
+                /* Retain ready GPU meshes beyond a temporarily smaller view
+                 * without drawing them. Server ownership/unload remains the
+                 * authoritative lifetime boundary for cached replicas. */
+                if (abs(cache.slots[slot_index].x - cx) > options.radius || abs(cache.slots[slot_index].z - cz) > options.radius) continue;
                 if (!maage_world_chunk_loaded(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
                 if (!cache.slots[slot_index].presented) {
                     if (!maage_world_mesh_current(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision) || !maage_world_mesh_can_present(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;

@@ -121,12 +121,15 @@ prioritized by distance, while asynchronous saves use reserved queue slots and
 the scheduler's oldest-job fairness at background priority. Independent load,
 generation, lighting and mesh jobs execute in parallel, including farther work
 while nearby jobs are still running.
-The initial Server column-transfer frontier advances only when every valid column
-of the current ring has been acknowledged, so distant completed jobs cannot
-overtake missing near-player chunks on the wire. Initial block/biome transfer
-starts as soon as the authoritative column is generated or loaded: Server
-lighting is not transmitted and no longer delays the first packet. Subsequent
-deltas and unloads are not held behind first-time transfers.
+Server columns transfer whenever their independent load/generation finishes;
+there is no initial packet ring barrier. Local Session transport retains
+per-column revision baselines and prioritizes nearer packets, while far columns
+can be received, lit, and meshed before their first visible turn. Initial
+block/biome transfer does not wait for Server lighting. The Server and Client
+retain previously viewed columns and GPU meshes when render distance temporarily
+shrinks at the same player chunk. They are hidden outside the current view and
+released through normal unloads when the player moves away or cache pressure
+requires eviction.
 
 The Client likewise keeps completed meshes pending until their first-presentation
 ring is eligible. Its first mesh waits for stable local lighting, not neighboring
@@ -136,8 +139,8 @@ It does not draw previously prepared, never-presented meshes outside that ring.
 A successful first frame advances the frontier; already presented geometry
 remains visible and can update independently. Both frontiers rebase when the
 player changes chunk or render distance changes, and missing columns reopen
-their ring. Submission stays outward-prioritized, completion remains
-independent, and first display follows the outward frontier. Workers remain
+their ring. Submission stays outward-prioritized, completion and transport
+remain independent, and only first display follows the outward frontier. Workers remain
 parallel per column; no subcolumn synchronization, neighbor wait or render-frame
 barrier is introduced.
 
