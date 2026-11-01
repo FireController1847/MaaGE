@@ -206,11 +206,18 @@ Source resource ownership is reference-counted through the renderer: retiring
 an old mesh does not free its native vertex allocation while a derived view
 still uses it.
 
-The debug overlay reports estimated resident base vertex/index payload as
-`Mesh GPU`. The count is not total GPU allocation or total process memory:
-transient uploads, driver allocation rounding, transparency sort buffers and
-prediction index views are excluded. Compacting vertex attributes further and
-pooling native allocations remain separate opportunities.
+The debug overlay displays one process resident-memory number followed by an
+unlabeled memory breakdown (MiB), ordered left to right: base mesh GPU payload,
+Server World retained storage, Client World retained storage, and unattributed
+resident-memory remainder. World figures inspect the owner-thread's allocated
+column snapshots, packed sections, lighting, and indexing structures; detached
+worker outputs, external registries, and renderer allocations are not included.
+GPU bytes count base mesh vertex/index payloads, not native driver overhead,
+transparency sort buffers, prediction views, or other resources. The fourth
+number is a subtraction from the process resident count, not independently
+measured memory, and can be unknown if the GPU allocation footprint exceeds the
+reported resident memory. Compacting vertex attributes and pooling native
+allocations remain separate opportunities.
 
 ## Runtime Section Storage
 

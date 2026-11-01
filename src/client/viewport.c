@@ -1506,7 +1506,7 @@ choose_world:
             }
             cache.draws[draw_count++] = interaction.mesh;
         }
-        debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, &visual_snapshot, options.radius, !active, renderer, &mesh_stats, maage_content_biomes(content)) : NULL;
+        debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, &visual_snapshot, options.radius, !active, renderer, &mesh_stats, visual_stats.resident_storage_bytes, maage_content_biomes(content)) : NULL;
         maage_client_ui_notice_time(ui, now);
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;

@@ -140,6 +140,7 @@ typedef struct maage_world_stats {
     maage_status last_job_result;           /* Owner disposition, including cancellation/stale. */
     maage_status last_job_operation_result; /* Original callback outcome survives disposition. */
     unsigned long failure_reports;          /* Owner failures; cancellation/staleness excluded. */
+    size_t resident_storage_bytes; /* Owner-indexed slots, chunk snapshots and backing arrays; excludes in-flight worker outputs. */
 } maage_world_stats;
 typedef struct maage_world_observation {
     maage_biome_id biome_id;

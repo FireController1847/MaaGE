@@ -1731,6 +1731,33 @@ maage_status maage_world_random_tick_snapshot(const maage_world *world, maage_ra
     *state = world->random_ticks.state;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
+/* Owner-thread payload accounting: count retained chunks and their owned arrays
+ * from allocation sizes, not an assumed number of sections or block states.
+ * Immutable snapshot pointers may be shared across local slot roles, so count
+ * each distinct pointer once. Detached worker outputs are deliberately excluded. */
+static size_t maage_world_chunk_storage_bytes(const maage_chunk *chunk) {
+    size_t bytes, section, i;
+    if (!chunk) return 0;
+    bytes = sizeof(*chunk);
+    if (chunk->direct_sky) bytes += 65536UL;
+    for (section = 0; section < 16; ++section) {
+        const maage_section *part = chunk->sections[section];
+        if (!part) continue;
+        bytes += sizeof(*part);
+        if (part->states) bytes += MAAGE_SECTION_VOLUME * sizeof(*part->states);
+        if (part->palette) bytes += part->palette_count * sizeof(*part->palette);
+        if (part->packed) bytes += (MAAGE_SECTION_VOLUME * (size_t) part->bits + 7) / 8;
+    }
+    if (chunk->updates) bytes += chunk->update_capacity * sizeof(*chunk->updates);
+    if (chunk->update_index) bytes += chunk->update_index_capacity * sizeof(*chunk->update_index);
+    if (chunk->entities) bytes += chunk->entity_capacity * sizeof(*chunk->entities);
+    for (i = 0; i < chunk->entity_count; ++i)
+        if (chunk->entities[i].data) bytes += chunk->entities[i].length;
+    return bytes;
+}
+static size_t maage_world_snapshot_storage_bytes(const maage_chunk_snapshot *snapshot) {
+    return snapshot ? sizeof(*snapshot) + maage_world_chunk_storage_bytes(snapshot->chunk) : 0;
+}
 void maage_world_get_stats(maage_world *world, maage_world_stats *stats) {
     maage_world_slot *slot;
     const maage_world_task *task;
@@ -1746,6 +1773,8 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats) {
     stats->resident_columns = world->count;
     stats->cache_capacity = world->cache_limit;
     stats->job_capacity = world->task_limit;
+    stats->resident_storage_bytes = sizeof(*world) + world->bucket_count * sizeof(*world->buckets) +
+        (size_t) world->task_limit * (sizeof(*world->tasks) + sizeof(*world->observations) + sizeof(*world->free_tasks));
     radius = world->config.render_distance + 1;
     bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
     lower_x = world->center_x - radius;
@@ -1758,6 +1787,16 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats) {
     if (upper_z > bound) upper_z = bound;
     pending = (size_t) (upper_x - lower_x + 1) * (size_t) (upper_z - lower_z + 1);
     for (slot = world->chunks; slot; slot = slot->next) {
+        stats->resident_storage_bytes += sizeof(*slot);
+        stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->data);
+        if (slot->authority != slot->data) stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->authority);
+        if (slot->sent != slot->data && slot->sent != slot->authority) stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->sent);
+        if (slot->edit_publication != slot->data && slot->edit_publication != slot->authority && slot->edit_publication != slot->sent)
+            stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->edit_publication);
+        if (slot->edit && (!slot->edit_publication || slot->edit != slot->edit_publication->chunk) &&
+            (!slot->data || slot->edit != slot->data->chunk) && (!slot->authority || slot->edit != slot->authority->chunk) &&
+            (!slot->sent || slot->edit != slot->sent->chunk))
+            stats->resident_storage_bytes += maage_world_chunk_storage_bytes(slot->edit);
         if (slot->dirty) ++stats->dirty_columns;
         if (maage_world_complete(slot)) {
             ++stats->loaded;

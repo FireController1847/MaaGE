@@ -22,16 +22,20 @@ typedef struct maage_client_debug {
     char gpu[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
     char performance[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
     char memory[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
+    char breakdown[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
     char workers[MAAGE_CLIENT_UI_DEBUG_CHARACTERS];
 } maage_client_debug;
 /* Copied player/target observations are read from the latest Server snapshot. Performance uses
  * a 0.75-second exponential history, displayed at 250 ms intervals; native memory
- * is sampled at that interval. On macOS F3 estimates non-reusable resident
- * memory / total resident memory; other platforms display the available single
- * resident or peak figure. These are process metrics, not allocator heap totals.
+ * is sampled at that interval. F3 shows process resident/peak memory and one
+ * unlabeled breakdown line: base GPU mesh payload / Server World retained
+ * storage / Client World retained storage / unattributed resident remainder.
+ * World counts exclude detached jobs and resources outside owned chunk arrays;
+ * GPU base bytes exclude other driver resources. The remainder is derived, not
+ * separately measured, and may be unknown for discrete/nonresident GPUs.
  * Static identity is formatted on renderer changes.
  * latest_frame_ms remains unsmoothed for upload scheduling. Owner-thread only:
  * no heap allocation, disk I/O, World lock or worker wait. */
 void maage_client_debug_frame(maage_client_debug *debug, double now, double elapsed, int presented, unsigned long ticks, double tick_seconds);
-const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, const maage_biome_registry *biomes);
+const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, size_t client_world_bytes, const maage_biome_registry *biomes);
 #endif
