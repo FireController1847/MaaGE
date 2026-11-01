@@ -37,12 +37,10 @@ static maage_status maage_light_write(maage_chunk *chunk, int x, int y, int z, u
     maage_section *section = chunk->sections[y / 16];
     size_t cell;
     if (!section) {
-        section = (maage_section *) calloc(1, sizeof(*section));
+        section = maage_section_create(chunk->air);
         if (!section) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
-        for (cell = 0; cell < 4096; ++cell) {
-            section->states[cell] = chunk->air;
-            section->light[cell] = (unsigned char) (chunk->direct_sky[(size_t) (y / 16) * 4096 + cell] << 4);
-        }
+        for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
+            section->light[cell] = (unsigned char) (chunk->direct_sky[(size_t) (y / 16) * MAAGE_SECTION_VOLUME + cell] << 4);
         chunk->sections[y / 16] = section;
     }
     section->light[maage_chunk_cell(x, y % 16, z)] = light;

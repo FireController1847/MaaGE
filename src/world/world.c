@@ -600,12 +600,11 @@ maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output) 
     }
     for (section = 0; section < 16; ++section)
         if (source->sections[section]) {
-            copy->sections[section] = (maage_section *) malloc(sizeof(maage_section));
+            copy->sections[section] = maage_section_clone(source->sections[section]);
             if (!copy->sections[section]) {
                 maage_chunk_destroy(copy);
                 return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
             }
-            memcpy(copy->sections[section], source->sections[section], sizeof(maage_section));
         }
     if (source->direct_sky) {
         copy->direct_sky = (unsigned char *) malloc(65536UL);
@@ -673,6 +672,9 @@ static void maage_world_commit_edits(maage_world *world) {
         maage_world_live_entities_copy(slot, slot->edit);
         snapshot = slot->edit_publication;
         slot->edit_publication = NULL;
+        /* Edit publications reserve the snapshot before mutation; pack the
+         * final private state now, after all changes have been committed. */
+        maage_chunk_compact(slot->edit);
         maage_world_release(slot->data);
         slot->data = snapshot;
         slot->edit = NULL;
@@ -765,6 +767,9 @@ static void maage_world_run(void *context, const maage_job_token *token) {
         }
     }
 finished:
+    if (!maage_status_failed(task->status) && task->output &&
+        (task->kind == MAAGE_JOB_LOAD || task->kind == MAAGE_JOB_GENERATE || task->kind == MAAGE_JOB_LIGHT))
+        maage_chunk_compact(task->output);
     if (!maage_status_is_success(task->status))
         MAAGE_STATUS_TRACE(trace, task->status, MAAGE_CONTEXT_WORLD,
                            task->kind == MAAGE_JOB_GENERATE ? MAAGE_OPERATION_GENERATE : (task->kind == MAAGE_JOB_LIGHT ? MAAGE_OPERATION_LIGHT : (task->kind == MAAGE_JOB_MESH ? MAAGE_OPERATION_MESH : (task->kind == MAAGE_JOB_SAVE ? MAAGE_OPERATION_SAVE : MAAGE_OPERATION_LOAD))));
@@ -809,10 +814,7 @@ static maage_status maage_world_merge_light(maage_chunk *current, const maage_ch
     memcpy(current->direct_sky, source->direct_sky, 65536UL);
     for (section = 0; section < 16; ++section) {
         if (!current->sections[section] && source->sections[section]) {
-            current->sections[section] = (maage_section *) calloc(1, sizeof(maage_section));
-            if (current->sections[section])
-                for (cell = 0; cell < 4096; ++cell)
-                    current->sections[section]->states[cell] = current->air;
+            current->sections[section] = maage_section_create(current->air);
         }
         if (!current->sections[section]) {
             if (source->sections[section]) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
@@ -2680,12 +2682,12 @@ maage_status maage_column_update_destroy(maage_column_update *update) {
 }
 maage_status maage_world_next_column(maage_world *world, maage_column_update **output) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
-    maage_world_slot *slot, *chosen = NULL;
+    maage_world_slot *slot, *chosen = NULL, *obsolete = NULL;
     maage_column_update *update;
     const maage_chunk *chunk, *before;
     size_t count = 0, index = 0, byte;
     unsigned int bit, cell;
-    int x, y, z, best = INT_MAX, distance, fair, behind, chosen_behind = 0;
+    int x, y, z, best = INT_MAX, distance, fair, behind, chosen_behind = 0, obsolete_distance = -1;
     double forward_x, forward_z;
     maage_block_state_id state;
     if (output) *output = NULL;
@@ -2704,6 +2706,10 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
          * for instant re-expansion, but receive no unnecessary deltas. */
         if (distance > world->config.render_distance + 1 && distance <= world->retained_radius + 1) continue;
         if (distance <= world->config.render_distance + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
+        if (distance > world->retained_radius + 1 && slot->sent && distance > obsolete_distance) {
+            obsolete = slot;
+            obsolete_distance = distance;
+        }
         behind = (slot->x - world->center_x) * forward_x + (slot->z - world->center_z) * forward_z < 0.0 && distance > 1;
         /* Never release a new rear initial packet ahead of the requested
          * forward terrain; rear deltas and unloads retain their obligations. */
@@ -2716,6 +2722,9 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
         chosen_behind = behind;
         best = distance;
     }
+    /* At least every other publication can retire an obsolete acknowledged
+     * base; new front-facing columns still receive independent opportunities. */
+    if (obsolete && (!chosen || (world->column_turn & 1U) == 0U)) chosen = obsolete;
     if (!chosen) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SNAPSHOT, 0);
     if (!chosen->sent) maage_world_initial_report(world, chosen);
     if (maage_world_distance(world, chosen) > world->retained_radius + 1) {
@@ -2792,6 +2801,15 @@ maage_status maage_world_ack_column(maage_world *world, const maage_column_updat
          * not gate initial delivery of other completed columns. */
     }
     memset(slot->transfer_cells, 0, sizeof(slot->transfer_cells));
+    if (update->unload && !slot->dirty && !slot->entity_dirty && !slot->save &&
+        maage_world_distance(world, slot) > world->retained_radius + 2) {
+        int x = slot->x, z = slot->z;
+        maage_world_cancel(world, slot->work);
+        maage_world_cancel(world, slot->light_work);
+        maage_world_remove(world, slot);
+        maage_world_invalidate_neighbors(world, x, z, 15U);
+        maage_world_light_neighbors(world, x, z, 15U);
+    }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
 static void maage_world_visual_changed(maage_world *world, maage_world_slot *slot) {
@@ -2920,6 +2938,8 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
                 if (maage_status_failed(result)) goto done;
             }
         }
+    maage_chunk_compact(authority);
+    maage_chunk_compact(visual);
     result = maage_world_snapshot(authority, &auth_snapshot);
     if (maage_status_failed(result)) goto done;
     authority = NULL;
@@ -2991,6 +3011,7 @@ maage_status maage_world_present_predictions(maage_world *world, const maage_blo
             maage_chunk_destroy(copy);
             return result;
         }
+        maage_chunk_compact(copy);
         result = maage_world_snapshot(copy, &snapshot);
         if (maage_status_failed(result)) {
             maage_chunk_destroy(copy);

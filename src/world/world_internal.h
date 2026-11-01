@@ -13,10 +13,24 @@
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit light uses cached direct sky when initialized, otherwise
  * the initial heightmap sky seed. */
+/* Mutable sections have direct 32-bit state arrays; published sections use a
+ * dynamically sized, bit-packed palette. Lighting remains independently mutable.
+ * A physical section has at most 4096 unique states; registries remain unbounded
+ * within their existing 32-bit identity domain. */
 typedef struct maage_section {
-    maage_block_state_id states[MAAGE_SECTION_VOLUME];
     unsigned char light[MAAGE_SECTION_VOLUME];
+    unsigned int *states;
+    unsigned int *palette;
+    unsigned char *packed;
+    unsigned int palette_count, bits;
 } maage_section;
+maage_section *maage_section_create(maage_block_state_id air);
+void maage_section_destroy(maage_section *section);
+maage_section *maage_section_clone(const maage_section *section);
+maage_block_state_id maage_section_get(const maage_section *section, size_t cell);
+maage_status maage_section_set(maage_section *section, size_t cell, maage_block_state_id state);
+maage_status maage_section_expand(maage_section *section);
+void maage_chunk_compact(maage_chunk *chunk);
 typedef struct maage_update_index {
     unsigned int kind, cell;
     size_t heap_index; /* index+1, 0 empty, (size_t)-1 tombstone */

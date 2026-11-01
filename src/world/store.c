@@ -1343,7 +1343,7 @@ static maage_status maage_store_chunk_decode(const maage_world_store *store, uns
     }
     for (section = 0; section < 16; ++section) {
         if (!(mask & (1UL << section))) continue;
-        chunk->sections[section] = (maage_section *) malloc(sizeof(maage_section));
+        chunk->sections[section] = maage_section_create(chunk->air);
         if (!chunk->sections[section]) {
             result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
             goto failed;
@@ -1449,7 +1449,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     for (section = 0; section < 16; ++section) {
         if (!chunk->sections[section]) continue;
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
-            maage_block_state_id id = chunk->sections[section]->states[i];
+            maage_block_state_id id = maage_section_get(chunk->sections[section], i);
             size_t bucket = (size_t) ((id ^ (id >> 16)) * 2654435761UL) & (slot_capacity - 1U);
             const maage_block_state_definition *state = maage_block_registry_state(blocks, id);
             if (!state) goto incompatible;
@@ -1513,7 +1513,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     for (section = 0; section < 16; ++section) {
         if (!chunk->sections[section]) continue;
         for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) {
-            j = maage_store_state_index(states, unique, chunk->sections[section]->states[i]);
+            j = maage_store_state_index(states, unique, maage_section_get(chunk->sections[section], i));
             if (j == unique || j > 65535UL) goto incompatible;
             maage_store_put(&bytes, (unsigned long) j, 2);
         }

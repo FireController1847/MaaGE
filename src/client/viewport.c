@@ -294,7 +294,12 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
     begin = maage_time_monotonic_seconds();
     if (begin < 0) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
     for (i = 0; i < cache->capacity; ++i) {
-        if (cache->slots[i].used && !maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z)) {
+        if (cache->slots[i].used &&
+            (!maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z) ||
+             abs(cache->slots[i].x - center_x) > options->radius + 1 ||
+             abs(cache->slots[i].z - center_z) > options->radius + 1)) {
+            /* A remote unload can lag behind camera movement and the Server's
+             * save/replica queue. Release off-screen CPU and GPU meshes now. */
             maage_client_mesh_cache_drop(cache, i, visual);
             processed = 1;
             if ((maage_time_monotonic_seconds() - begin) * 1000 >= budget_ms) break;

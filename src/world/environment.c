@@ -329,6 +329,13 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
     for (section = 0; section < 16; ++section)
         if (source->sections[section] && !destination->sections[section])
             return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    /* Expand private destination sections before replacing environment metadata,
+     * so any allocation failure preserves the current published state. */
+    for (section = 0; section < 16; ++section)
+        if (source->sections[section]) {
+            result = maage_section_expand(destination->sections[section]);
+            if (maage_status_failed(result)) return result;
+        }
     memset(&temporary, 0, sizeof(temporary));
     result = maage_chunk_copy_environment(&temporary, source);
     if (maage_status_failed(result)) {
@@ -354,8 +361,14 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
      * flags along with queues/entities; only the worker's light bytes replace
      * the published lighting. Flag-only edits never rebuild GPU geometry. */
     for (section = 0; section < 16; ++section)
-        if (source->sections[section])
-            memcpy(destination->sections[section]->states, source->sections[section]->states, sizeof(destination->sections[section]->states));
+        if (source->sections[section]) {
+            size_t cell;
+            if (source->sections[section]->states)
+                memcpy(destination->sections[section]->states, source->sections[section]->states, MAAGE_SECTION_VOLUME * sizeof(*destination->sections[section]->states));
+            else
+                for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
+                    destination->sections[section]->states[cell] = (unsigned int) maage_section_get(source->sections[section], cell);
+        }
     memcpy(destination->random_tick_counts, source->random_tick_counts, sizeof(destination->random_tick_counts));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
 }

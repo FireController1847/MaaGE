@@ -158,8 +158,12 @@ retain previously viewed columns and GPU meshes when render distance temporarily
 shrinks at the same player chunk. The Server streams new/changed chunks only
 within the *current* view radius, while retaining acknowledged bases just outside
 it so later expansion does not repeat the initial transfer. Cached chunks are
-hidden outside the view and released through ordinary unloads on movement or
-cache pressure.
+hidden outside the view. On movement, stale acknowledged Server columns receive
+regular unload publication opportunities alongside new front-facing terrain,
+and eligible old columns retire as soon as their unload is acknowledged. The
+Client drops off-screen CPU source meshes and native GPU geometry as soon as
+they leave the visual radius plus a one-column margin, without waiting for the
+transport's ordered unload; the data replica can remain until the unload arrives.
 
 The Client freely uploads completed meshes to its GPU cache ahead of first
 display. Its first mesh waits for stable local lighting, not neighboring
@@ -187,6 +191,20 @@ replica requeues its existing revision for background meshing. Lost initial
 light requests and missing first-frame preparation acknowledgments are also
 reconciled. Ready and in-flight geometry is left intact; no Server generation,
 disk operations, global barriers, or unconditional remeshing are introduced.
+
+## Runtime Section Storage
+
+A 16x16x16 populated section retains its byte-per-cell calculated lighting
+separately from block identities. Mutable jobs use direct 32-bit numeric state
+arrays, while immutable published section snapshots use an adaptive bit-packed
+palette: uniform (zero-bit), 1-, 2-, 4-, 8-, or 16-bit indices. At most 4096
+distinct states can physically occur inside a section; palette width does not
+cap the global runtime block registry. Section expansion happens only on a
+private mutation, never in a render-frame read or in a shared worker snapshot.
+Workers compact completed generated/loaded columns before publication; other
+private edits compact at owner publication. If optional palette allocation
+fails, direct state storage remains valid. Chunk snapshots copy compact sections
+rather than inflating palette indices into a full state array.
 
 ## Storage Codec Performance
 
