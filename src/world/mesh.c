@@ -652,10 +652,6 @@ void maage_world_mesh_release_upload_data(maage_world_mesh *mesh) {
     mesh->data.indices = NULL;
     mesh->data.vertices = NULL;
 }
-size_t maage_world_mesh_cpu_bytes(const maage_world_mesh *mesh) {
-    if (!mesh) return 0;
-    return sizeof(*mesh) + (mesh->vertices ? mesh->data.vertex_count * sizeof(*mesh->vertices) : 0) + (mesh->indices ? mesh->data.index_count * sizeof(*mesh->indices) : 0) + (mesh->owners ? mesh->data.vertex_count / 4 * sizeof(*mesh->owners) : 0) + (mesh->face_flags ? mesh->data.vertex_count / 4 * sizeof(*mesh->face_flags) : 0);
-}
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh) {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_mesh_preparation_destroy(mesh->prepared);

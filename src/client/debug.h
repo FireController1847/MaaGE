@@ -6,7 +6,7 @@
 typedef struct maage_client_mesh_stats {
     unsigned int meshes;
     size_t vertices, indices;
-    size_t source_bytes, base_gpu_bytes; /* CPU source and GPU base payload, excluding native overhead. */
+    size_t gpu_bytes; /* Base vertex/index payload estimate, excludes native GPU overhead. */
 } maage_client_mesh_stats;
 typedef struct maage_client_debug {
     maage_client_ui_debug text;

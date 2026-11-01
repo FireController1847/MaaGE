@@ -1470,9 +1470,8 @@ choose_world:
             cache.slots[slot_index].first_frame = 0;
             if (cache.slots[slot_index].used) {
                 ++resident_count;
-                mesh_stats.source_bytes += maage_world_mesh_cpu_bytes(cache.slots[slot_index].source);
                 if (cache.slots[slot_index].mesh)
-                    mesh_stats.base_gpu_bytes += cache.slots[slot_index].vertices * sizeof(maage_mesh_vertex) + cache.slots[slot_index].indices * sizeof(unsigned int);
+                    mesh_stats.gpu_bytes += cache.slots[slot_index].vertices * sizeof(maage_mesh_vertex) + cache.slots[slot_index].indices * sizeof(unsigned int);
                 /* Retain ready GPU meshes beyond a temporarily smaller view
                  * without drawing them. Server ownership/unload remains the
                  * authoritative lifetime boundary for cached replicas. */

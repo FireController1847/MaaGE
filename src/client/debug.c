@@ -133,8 +133,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     }
     if (snapshot->player.has_target) sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu", snapshot->player.target.x, snapshot->player.target.y, snapshot->player.target.z, snapshot->player.target.block_id, snapshot->player.target.state_id);
     if (debug->memory[0]) strcpy(text->right[right++], debug->memory);
-    sprintf(text->right[right++], "Mesh CPU: %.1f MiB", (double) meshes->source_bytes / 1048576.0);
-    sprintf(text->right[right++], "Mesh GPU base: %.1f MiB", (double) meshes->base_gpu_bytes / 1048576.0);
+    sprintf(text->right[right++], "Mesh GPU: %.1f MiB", (double) meshes->gpu_bytes / 1048576.0);
     strcpy(text->right[right++], debug->system);
     strcpy(text->right[right++], debug->renderer);
     if (debug->gpu[0]) strcpy(text->right[right++], debug->gpu);

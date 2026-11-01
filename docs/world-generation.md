@@ -206,12 +206,11 @@ Source resource ownership is reference-counted through the renderer: retiring
 an old mesh does not free its native vertex allocation while a derived view
 still uses it.
 
-The debug overlay reports retained CPU source mesh payload and estimated native
-base vertex/index payload separately. These are payload estimates, not total
-process or GPU allocation measurements: transient uploads, driver allocation
-rounding, transparency sort buffers and prediction index views are excluded.
-Compacting vertex attributes further and pooling native allocations remain
-separate opportunities.
+The debug overlay reports estimated resident base vertex/index payload as
+`Mesh GPU`. The count is not total GPU allocation or total process memory:
+transient uploads, driver allocation rounding, transparency sort buffers and
+prediction index views are excluded. Compacting vertex attributes further and
+pooling native allocations remain separate opportunities.
 
 ## Runtime Section Storage
 

@@ -337,9 +337,6 @@ const unsigned char *maage_world_mesh_face_flags(const maage_world_mesh *mesh);
 /* Release CPU vertices and indices only once the native base upload completes.
  * Filtered index views still work from retained owners and face flags. */
 void maage_world_mesh_release_upload_data(maage_world_mesh *mesh);
-/* Resident CPU source payload (including owner tags); excludes upload
- * preparations and renderer-owned native buffers. Constant-time query. */
-size_t maage_world_mesh_cpu_bytes(const maage_world_mesh *mesh);
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh);
 #ifdef __cplusplus
 }
