@@ -365,6 +365,7 @@ typedef struct maage_tree_spawn_column {
 } maage_tree_spawn_column;
 static int maage_tree_spawn_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
     maage_tree_spawn_column *column = (maage_tree_spawn_column *) context;
+    const maage_base_ids *ids = maage_base_references(column->blocks);
     const maage_block_state_definition *current;
     if (x != column->x || z != column->z || y < column->top || rule != MAAGE_GENERATION_WRITE_FOLIAGE) return 0;
     if (y == column->top) {

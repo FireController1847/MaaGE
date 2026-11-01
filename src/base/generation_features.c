@@ -248,9 +248,9 @@ maage_status maage_generation_underground(maage_generation_context *context) {
     for (oz = context->output.z - 1; oz <= context->output.z + 1; ++oz)
         for (ox = context->output.x - 1; ox <= context->output.x + 1; ++ox) {
             if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
-            for (index = 0; index < sizeof(maage_ore_definitions) / sizeof(maage_ore_definitions[0]); ++index) {
+            for (index = 0; index < maage_generation_ore_count(context->blocks); ++index) {
                 if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
-                feature = &maage_ore_definitions[index];
+                feature = maage_generation_ore_at(context->blocks, index);
                 random = maage_generation_feature_hash(context->seed, ox, oz, feature->salt);
                 for (attempt = 0; attempt < (int) feature->attempts; ++attempt) {
                     x = ox * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
