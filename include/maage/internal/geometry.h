@@ -22,4 +22,7 @@ struct maage_mesh_preparation {
     maage_geometry geometry;
 };
 maage_status maage_geometry_dispose(maage_geometry *geometry);
+/* Prepare filtered, index-only geometry from a retained GPU mesh's immutable
+ * triangle metadata after the source CPU vertex arrays have been released. */
+maage_status maage_mesh_prepare_index_view(const maage_mesh_data *data, const unsigned char *face_flags, const maage_geometry *base, maage_mesh_preparation **output);
 #endif
