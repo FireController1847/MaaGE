@@ -131,9 +131,11 @@ per-column revision baselines and prioritizes nearer packets, while far columns
 can be received, lit, and meshed before their first visible turn. Initial
 block/biome transfer does not wait for Server lighting. The Server and Client
 retain previously viewed columns and GPU meshes when render distance temporarily
-shrinks at the same player chunk. They are hidden outside the current view and
-released through normal unloads when the player moves away or cache pressure
-requires eviction.
+shrinks at the same player chunk. The Server streams new/changed chunks only
+within the *current* view radius, while retaining acknowledged bases just outside
+it so later expansion does not repeat the initial transfer. Cached chunks are
+hidden outside the view and released through ordinary unloads on movement or
+cache pressure.
 
 The Client freely uploads completed meshes to its GPU cache ahead of the
 first-presentation ring. Only the first *draw* of a mesh waits for its ring.

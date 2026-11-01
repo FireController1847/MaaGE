@@ -2296,7 +2296,11 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     for (slot = world->chunks; slot; slot = slot->next) {
         distance = maage_world_distance(world, slot);
         if (!maage_world_complete(slot)) continue;
-        if (distance <= world->retained_radius + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
+        /* Active interest controls traffic. Retained columns outside the
+         * selected view keep their acknowledged bases and GPU counterparts
+         * for instant re-expansion, but receive no unnecessary deltas. */
+        if (distance > world->config.render_distance + 1 && distance <= world->retained_radius + 1) continue;
+        if (distance <= world->config.render_distance + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
         if (chosen && (fair ? slot->block_revision >= chosen->block_revision : distance >= best)) continue;
         /* Transfer only blocks and biomes; Server lighting is neither copied
          * nor needed to begin Client-owned lighting and meshing. */

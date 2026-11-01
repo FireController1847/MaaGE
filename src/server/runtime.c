@@ -444,7 +444,10 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
             return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
         result = maage_world_set_render_distance(runtime->world, command->render_radius, 0);
         if (!maage_status_failed(result)) {
-            if (command->render_radius != runtime->config.render_distance) runtime->publication_dirty = 1;
+            if (command->render_radius != runtime->config.render_distance) {
+                maage_log_info("maage.server.view", "Render distance updated from %d to %d chunks.", runtime->config.render_distance, command->render_radius);
+                runtime->publication_dirty = 1;
+            }
             runtime->config.render_distance = command->render_radius;
             runtime->yaw = command->view_yaw;
         }
