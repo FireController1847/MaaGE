@@ -187,6 +187,15 @@ maage_status maage_chunk_destroy(maage_chunk *chunk) {
     free(chunk);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
+unsigned char maage_chunk_direct_sky_get(const maage_chunk *chunk, size_t cell) {
+    unsigned char packed = chunk->direct_sky[cell >> 1];
+    return (unsigned char) ((cell & 1U) ? packed >> 4 : packed & 15U);
+}
+void maage_chunk_direct_sky_set(maage_chunk *chunk, size_t cell, unsigned char value) {
+    unsigned char *packed = &chunk->direct_sky[cell >> 1];
+    if (cell & 1U) *packed = (unsigned char) ((*packed & 15U) | (value << 4));
+    else *packed = (unsigned char) ((*packed & 240U) | (value & 15U));
+}
 maage_block_state_id maage_chunk_get(const maage_chunk *chunk, int x, int y, int z) {
     if (!chunk) return MAAGE_CONTENT_ID_INVALID;
     if (x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0 || y >= 256 || !chunk->sections[y / 16]) return chunk->air;
@@ -203,7 +212,7 @@ maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_bloc
         if (!section) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
         if (chunk->direct_sky)
             for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
-                section->light[cell] = (unsigned char) (chunk->direct_sky[(size_t) (y / 16) * MAAGE_SECTION_VOLUME + cell] << 4);
+                section->light[cell] = (unsigned char) (maage_chunk_direct_sky_get(chunk, (size_t) (y / 16) * MAAGE_SECTION_VOLUME + cell) << 4);
         chunk->sections[y / 16] = section;
     }
     return maage_section_set(section, maage_chunk_cell(x, y, z), state);
@@ -212,7 +221,7 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z) {
     if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0) return 0;
     if (y >= 256) return 0xf0;
     if (chunk->sections[y / 16]) return chunk->sections[y / 16]->light[maage_chunk_cell(x, y, z)];
-    if (chunk->direct_sky) return (unsigned char) (chunk->direct_sky[(size_t) (y * 16 + z) * 16 + x] << 4);
+    if (chunk->direct_sky) return (unsigned char) (maage_chunk_direct_sky_get(chunk, (size_t) (y * 16 + z) * 16 + x) << 4);
     return y >= chunk->heightmap[z * 16 + x] ? 0xf0 : 0;
 }
 

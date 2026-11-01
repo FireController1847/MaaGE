@@ -40,7 +40,7 @@ static maage_status maage_light_write(maage_chunk *chunk, int x, int y, int z, u
         section = maage_section_create(chunk->air);
         if (!section) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
         for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
-            section->light[cell] = (unsigned char) (chunk->direct_sky[(size_t) (y / 16) * MAAGE_SECTION_VOLUME + cell] << 4);
+            section->light[cell] = (unsigned char) (maage_chunk_direct_sky_get(chunk, (size_t) (y / 16) * MAAGE_SECTION_VOLUME + cell) << 4);
         chunk->sections[y / 16] = section;
     }
     section->light[maage_chunk_cell(x, y % 16, z)] = light;
@@ -105,7 +105,7 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
     work.neighbors = neighbors;
     work.queue = (unsigned int *) malloc(65536UL * sizeof(*work.queue));
     initial = chunk->direct_sky == NULL;
-    if (initial) chunk->direct_sky = (unsigned char *) calloc(65536UL, 1);
+    if (initial) chunk->direct_sky = (unsigned char *) calloc(MAAGE_DIRECT_SKY_BYTES, 1);
     if (!work.queue || !chunk->direct_sky) {
         result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
         goto done;
@@ -142,8 +142,8 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
                     if (!opacity && sky < 15) opacity = 1;
                     sky = sky > opacity ? sky - opacity : 0;
                     cell = (unsigned int) ((y * 16 + z) * 16 + x);
-                    if (chunk->direct_sky[cell] != sky) {
-                        chunk->direct_sky[cell] = (unsigned char) sky;
+                    if (maage_chunk_direct_sky_get(chunk, cell) != sky) {
+                        maage_chunk_direct_sky_set(chunk, cell, (unsigned char) sky);
                         maage_light_enqueue(&work, x, y, z);
                         for (side = 0; side < 6; ++side)
                             maage_light_enqueue(&work, x + offsets[side][0], y + offsets[side][1], z + offsets[side][2]);
@@ -176,7 +176,7 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
             result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
             goto done;
         }
-        sky = chunk->direct_sky[cell];
+        sky = maage_chunk_direct_sky_get(chunk, cell);
         emitted = block->emitted_light;
         opacity = block->light_opacity;
         if (!opacity || (opacity >= 15 && emitted)) opacity = 1;

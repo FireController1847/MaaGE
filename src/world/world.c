@@ -52,7 +52,8 @@ typedef struct maage_world_slot {
     int mesh_predicted, light_changed, geometry_changed;
     double mesh_completed_at, initialized_at, mesh_retry_at;
     maage_chunk_snapshot *sent, *authority;
-    unsigned char light_cells[8192], transfer_cells[8192];
+    unsigned char light_cells[8192];
+    unsigned char *transfer_cells; /* Lazy 8 KiB delta map; only dirty Server columns need one. */
     maage_chunk_snapshot *data;
     maage_world_task *work, *light_work, *save;
     maage_world_mesh *pending_mesh;
@@ -403,6 +404,7 @@ static void maage_world_remove(maage_world *world, maage_world_slot *slot) {
     maage_world_release(slot->authority);
     maage_world_mesh_destroy(slot->pending_mesh);
     maage_world_live_entities_destroy(slot);
+    free(slot->transfer_cells);
     free(slot);
 }
 static int maage_world_distance(const maage_world *world, const maage_world_slot *slot) {
@@ -607,12 +609,12 @@ maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output) 
             }
         }
     if (source->direct_sky) {
-        copy->direct_sky = (unsigned char *) malloc(65536UL);
+        copy->direct_sky = (unsigned char *) malloc(MAAGE_DIRECT_SKY_BYTES);
         if (!copy->direct_sky) {
             maage_chunk_destroy(copy);
             return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
         }
-        memcpy(copy->direct_sky, source->direct_sky, 65536UL);
+        memcpy(copy->direct_sky, source->direct_sky, MAAGE_DIRECT_SKY_BYTES);
     }
     *output = copy;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
@@ -809,9 +811,9 @@ static int maage_world_light_inputs_current(const maage_world *world, const maag
 static maage_status maage_world_merge_light(maage_chunk *current, const maage_chunk *source) {
     int section;
     size_t cell;
-    if (!current->direct_sky) current->direct_sky = (unsigned char *) malloc(65536UL);
+    if (!current->direct_sky) current->direct_sky = (unsigned char *) malloc(MAAGE_DIRECT_SKY_BYTES);
     if (!current->direct_sky) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LIGHT, 0);
-    memcpy(current->direct_sky, source->direct_sky, 65536UL);
+    memcpy(current->direct_sky, source->direct_sky, MAAGE_DIRECT_SKY_BYTES);
     for (section = 0; section < 16; ++section) {
         if (!current->sections[section] && source->sections[section]) {
             current->sections[section] = maage_section_create(current->air);
@@ -823,7 +825,7 @@ static maage_status maage_world_merge_light(maage_chunk *current, const maage_ch
         if (source->sections[section]) memcpy(current->sections[section]->light, source->sections[section]->light, 4096);
         else
             for (cell = 0; cell < 4096; ++cell)
-                current->sections[section]->light[cell] = (unsigned char) (source->direct_sky[(size_t) section * 4096 + cell] << 4);
+                current->sections[section]->light[cell] = (unsigned char) (maage_chunk_direct_sky_get(source, (size_t) section * MAAGE_SECTION_VOLUME + cell) << 4);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
 }
@@ -859,7 +861,7 @@ static maage_status maage_world_publish_light(maage_world *world, maage_world_sl
         const maage_section *after = task->output->sections[side];
         if ((before == NULL) != (after == NULL) || (before && memcmp(before->light, after->light, 4096))) changed = 1;
     }
-    if (!changed && slot->data->chunk->direct_sky && !memcmp(slot->data->chunk->direct_sky, task->output->direct_sky, 65536UL)) {
+    if (!changed && slot->data->chunk->direct_sky && !memcmp(slot->data->chunk->direct_sky, task->output->direct_sky, MAAGE_DIRECT_SKY_BYTES)) {
         /* A completed boundary check with identical output needs no new
          * persistent snapshot or save. Task disposal releases its private copy. */
         maage_world_light_neighbors(world, slot->x, slot->z, boundaries);
@@ -1739,7 +1741,7 @@ static size_t maage_world_chunk_storage_bytes(const maage_chunk *chunk) {
     size_t bytes, section, i;
     if (!chunk) return 0;
     bytes = sizeof(*chunk);
-    if (chunk->direct_sky) bytes += 65536UL;
+    if (chunk->direct_sky) bytes += MAAGE_DIRECT_SKY_BYTES;
     for (section = 0; section < 16; ++section) {
         const maage_section *part = chunk->sections[section];
         if (!part) continue;
@@ -1787,7 +1789,7 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats) {
     if (upper_z > bound) upper_z = bound;
     pending = (size_t) (upper_x - lower_x + 1) * (size_t) (upper_z - lower_z + 1);
     for (slot = world->chunks; slot; slot = slot->next) {
-        stats->resident_storage_bytes += sizeof(*slot);
+        stats->resident_storage_bytes += sizeof(*slot) + (slot->transfer_cells ? 8192UL : 0UL);
         stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->data);
         if (slot->authority != slot->data) stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->authority);
         if (slot->sent != slot->data && slot->sent != slot->authority) stats->resident_storage_bytes += maage_world_snapshot_storage_bytes(slot->sent);
@@ -2239,6 +2241,15 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
     entity = maage_world_entity_node(slot, entity_cell);
     if ((old_entity != (entity != NULL)) || (entity && entity->handler != old_handler)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     flags_only = old_state->block_id == new_state->block_id && old_state->geometry_grouped && new_state->geometry_grouped && old_state->geometry_key == new_state->geometry_key;
+    /* A replication delta map is needed only for columns with actual changes.
+     * Reserve it before any private mutation or support-side effects. */
+    if (!slot->transfer_cells) {
+        slot->transfer_cells = (unsigned char *) calloc(8192UL, 1);
+        if (!slot->transfer_cells) {
+            ++world->stats.rejected_mutations;
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+        }
+    }
     /* Queue allocations precede the state mutation and any reserved drop.
      * Existing fluid/support entries are deduplicated without allocation. */
     ++world->edit_depth;
@@ -2431,6 +2442,19 @@ maage_status maage_world_apply_plan(maage_world *world, const maage_block_plan *
                 result = maage_world_set(staged, plan->x + x, plan->y + y, plan->z + z, expected, replacement);
                 if (maage_status_failed(result)) goto done;
             }
+    /* Reserve every receiving delta map before replacing any owner snapshot,
+     * preserving all-or-nothing block-plan publication under allocation failure. */
+    for (slot = staged->chunks; slot; slot = slot->next) {
+        if (!slot->transfer_cells) continue;
+        source = maage_world_find(world, slot->x, slot->z);
+        if (!source->transfer_cells) {
+            source->transfer_cells = (unsigned char *) calloc(8192UL, 1);
+            if (!source->transfer_cells) {
+                result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+                goto done;
+            }
+        }
+    }
     /* All columns, sections, neighbor queues and publication handles exist.
      * Replace private owner edits without allocation; ordinary phase commit
      * publishes them together before any worker, save or Session observation. */
@@ -2448,10 +2472,11 @@ maage_status maage_world_apply_plan(maage_world *world, const maage_block_plan *
         source->edit_blocks |= slot->edit_blocks;
         source->edit_states |= slot->edit_states;
         source->edit_light |= slot->edit_light;
-        for (byte = 0; byte < sizeof(source->light_cells); ++byte) {
+        for (byte = 0; byte < sizeof(source->light_cells); ++byte)
             source->light_cells[byte] |= slot->light_cells[byte];
-            source->transfer_cells[byte] |= slot->transfer_cells[byte];
-        }
+        if (slot->transfer_cells)
+            for (byte = 0; byte < 8192UL; ++byte)
+                source->transfer_cells[byte] |= slot->transfer_cells[byte];
         maage_world_update_membership(world, source);
     }
     world->stats.mutations += staged->stats.mutations;
@@ -2461,6 +2486,7 @@ done:
     for (slot = staged->chunks; slot; slot = next) {
         next = slot->next;
         maage_world_release(slot->edit_publication);
+        free(slot->transfer_cells);
         free(slot);
     }
     free(staged->buckets);
@@ -2696,6 +2722,7 @@ maage_status maage_world_destroy(maage_world *world) {
         maage_world_release(slot->authority);
         maage_world_mesh_destroy(slot->pending_mesh);
         maage_world_live_entities_destroy(slot);
+        free(slot->transfer_cells);
         free(slot);
     }
     free(world->buckets);
@@ -2780,7 +2807,7 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     chunk = chosen->data->chunk;
     before = chosen->sent ? chosen->sent->chunk : NULL;
     for (byte = 0; byte < 8192; ++byte) {
-        if (before ? !chosen->transfer_cells[byte] : !chunk->sections[byte / 512]) continue;
+        if (before ? (!chosen->transfer_cells || !chosen->transfer_cells[byte]) : !chunk->sections[byte / 512]) continue;
         for (bit = 0; bit < 8; ++bit) {
             if (before && !(chosen->transfer_cells[byte] & (1U << bit))) continue;
             cell = (unsigned int) (byte * 8 + bit);
@@ -2807,7 +2834,7 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     update->count = count;
     if (update->biomes) memcpy(update->biomes, chunk->biomes, sizeof(chunk->biomes));
     for (byte = 0; byte < 8192; ++byte) {
-        if (before ? !chosen->transfer_cells[byte] : !chunk->sections[byte / 512]) continue;
+        if (before ? (!chosen->transfer_cells || !chosen->transfer_cells[byte]) : !chunk->sections[byte / 512]) continue;
         for (bit = 0; bit < 8; ++bit) {
             if (before && !(chosen->transfer_cells[byte] & (1U << bit))) continue;
             cell = (unsigned int) (byte * 8 + bit);
@@ -2839,7 +2866,8 @@ maage_status maage_world_ack_column(maage_world *world, const maage_column_updat
         /* Client acknowledgements retain per-column delta baselines, but do
          * not gate initial delivery of other completed columns. */
     }
-    memset(slot->transfer_cells, 0, sizeof(slot->transfer_cells));
+    free(slot->transfer_cells);
+    slot->transfer_cells = NULL;
     if (update->unload && !slot->dirty && !slot->entity_dirty && !slot->save &&
         maage_world_distance(world, slot) > world->retained_radius + 2) {
         int x = slot->x, z = slot->z;

@@ -10,6 +10,8 @@
 #include "maage/random_ticks.h"
 #include "maage/content.h"
 #define MAAGE_SECTION_VOLUME 4096
+/* Every direct-sky value is in 0..15; two shafts cells share one byte. */
+#define MAAGE_DIRECT_SKY_BYTES (MAAGE_WORLD_HEIGHT * MAAGE_CHUNK_EDGE * MAAGE_CHUNK_EDGE / 2)
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit light uses cached direct sky when initialized, otherwise
  * the initial heightmap sky seed. */
@@ -38,7 +40,7 @@ typedef struct maage_update_index {
 struct maage_chunk {
     int x, z;
     maage_block_state_id air;  /* Implicit empty sections use the registered state. */
-    unsigned char *direct_sky; /* Client light cache; absent from persistence. */
+    unsigned char *direct_sky; /* Packed 4-bit values (32 KiB); absent from persistence. */
     maage_section *sections[16];
     maage_biome_id biomes[256];
     unsigned short heightmap[256]; /* first air Y, 0..256 */
@@ -56,6 +58,8 @@ struct maage_chunk {
     unsigned int generation_stages;
     unsigned long generation_features[8];
 };
+unsigned char maage_chunk_direct_sky_get(const maage_chunk *chunk, size_t cell);
+void maage_chunk_direct_sky_set(maage_chunk *chunk, size_t cell, unsigned char value);
 maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output);
 /* Seed one edited cell from effective opacity/emission, its sky shaft and
  * retained neighboring light. The asynchronous solver still owns convergence. */

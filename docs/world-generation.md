@@ -206,7 +206,7 @@ Source resource ownership is reference-counted through the renderer: retiring
 an old mesh does not free its native vertex allocation while a derived view
 still uses it.
 
-The debug overlay displays one process resident-memory number followed by an
+The debug overlay displays one process resident-memory number followed by a
 memory breakdown (MiB), ordered left to right: GPU (base mesh payload),
 SW (Server World retained storage), CW (Client World retained storage),
 and U (unattributed resident-memory remainder). World figures inspect the owner-thread's allocated
@@ -218,6 +218,14 @@ number is a subtraction from the process resident count, not independently
 measured memory, and can be unknown if the GPU allocation footprint exceeds the
 reported resident memory. Compacting vertex attributes and pooling native
 allocations remain separate opportunities.
+
+Numerical direct-sky caches use two four-bit light values per byte, allocating
+32 KiB per fully lit column instead of 64 KiB. All sky initialization, cloning,
+merging and comparisons operate on this same packed layout. The independent
+per-column replication-change bitmap is allocated only after a block mutation,
+and released when the matching Client update is acknowledged; new columns and
+clean Client visual columns do not carry an idle 8 KiB replication bitmap.
+Owner-thread World memory accounting includes these dynamic buffers.
 
 ## Runtime Section Storage
 
