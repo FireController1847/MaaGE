@@ -29,8 +29,8 @@ maage_status maage_recipe_registry_create_builtin(const maage_item_registry *ite
     maage_item_id materials[5];
     maage_item_id blocks[8];
     maage_item_id resources[8];
-    static const char *const patterns[3] = {"AAA B  B ", "ABB", "AAAB B"};
-    static const unsigned int widths[3] = {3, 1, 2};
+    static const char *const patterns[4] = {"AAA B  B ", "ABB", "AAAB B", "AA B B"};
+    static const unsigned int widths[4] = {3, 1, 2, 2};
     maage_recipe_choice choices[3];
     maage_recipe_registry *registry;
     maage_status result;
@@ -91,7 +91,7 @@ maage_status maage_recipe_registry_create_builtin(const maage_item_registry *ite
     for (i = 0; i < 5; ++i) {
         choices[0].item = materials[i];
         choices[0].metadata = i == 0 ? MAAGE_RECIPE_METADATA_ANY : 0;
-        for (family = 0; family < 3; ++family) {
+        for (family = 0; family < 4; ++family) {
             result = builtin_recipe(registry, MAAGE_RECIPE_SHAPED, widths[family], 3, patterns[family], choices, ids->tools[i][family], 1, 0);
             if (maage_status_failed(result)) goto failed;
         }

@@ -41,6 +41,7 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_CONTENT_TEXTURE_DIRT;
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_CONTENT_TEXTURE_GRASS_TOP;
         }
+        if (block == ids->block_farmland) selected = face == MAAGE_FACE_POSITIVE_Y ? MAAGE_CONTENT_TEXTURE_FARMLAND + (metadata ? 1 : 0) : MAAGE_CONTENT_TEXTURE_DIRT;
         if (block == ids->block_sandstone) {
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_CONTENT_TEXTURE_SANDSTONE_TOP;
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_CONTENT_TEXTURE_SANDSTONE_BOTTOM;
@@ -308,6 +309,39 @@ static maage_status maage_content_blocks_create(const maage_content_config *conf
             if (maage_status_failed(result)) goto failed;
         }
     ids->state_sapling = ids->saplings[0];
+    memset(&block, 0, sizeof(block));
+    block.solid = block.material_solid = block.selectable = block.use_neighbor_brightness = 1;
+    block.light_opacity = 15;
+    block.hardness = 0.6;
+    block.required_tool = MAAGE_TOOL_SHOVEL;
+    block.drop_count = 1;
+    block.random_tick = maage_random_tick_farmland;
+    block.survives = maage_support_rule;
+    block.collision_shape.maximum[0] = block.collision_shape.maximum[2] = 1;
+    block.collision_shape.maximum[1] = 15.0 / 16.0;
+    block.selection_shape = block.collision_shape;
+    result = maage_block_registry_register_block(registry, "minecraft:farmland", &block);
+    if (maage_status_failed(result)) goto failed;
+    ids->block_farmland = block.id;
+    for (i = 0; i < 8; ++i) {
+        result = maage_content_register_state(registry, config, &ids->farmland[i], block.id, (unsigned int) i, MAAGE_CONTENT_TEXTURE_FARMLAND);
+        if (maage_status_failed(result)) goto failed;
+    }
+    memset(&block, 0, sizeof(block));
+    block.selectable = block.use_neighbor_brightness = 1;
+    block.mesh_shape = MAAGE_BLOCK_MESH_CROSS;
+    block.drop_count = 1;
+    block.random_tick = maage_random_tick_wheat;
+    block.survives = maage_support_rule;
+    block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 1;
+    block.selection_shape.maximum[1] = 0.25;
+    result = maage_block_registry_register_block(registry, "minecraft:wheat", &block);
+    if (maage_status_failed(result)) goto failed;
+    ids->block_wheat = block.id;
+    for (i = 0; i < 8; ++i) {
+        result = maage_content_register_state(registry, config, &ids->wheat[i], block.id, (unsigned int) i, MAAGE_CONTENT_TEXTURE_WHEAT + i);
+        if (maage_status_failed(result)) goto failed;
+    }
     result = maage_furnace_content_blocks(registry, config);
     if (maage_status_failed(result)) goto failed;
     *output = registry;

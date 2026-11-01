@@ -122,6 +122,101 @@ maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, co
     return outcome;
 }
 
+maage_status maage_random_tick_farmland(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_block_state_definition *neighbor;
+    const maage_block_definition *block;
+    maage_environment_state environment;
+    maage_world_observation observation;
+    int dx, dz, dy, valid, hydrated = 0, unavailable = 0, exposed = 1;
+    unsigned int moisture;
+    maage_status result;
+    (void) context;
+    if (state->metadata > 7) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
+    result = maage_world_can_survive(world, x, y, z, state->id, &valid);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (!valid) return maage_support_update(world, x, y, z);
+    /* Water at soil height or one cell above hydrates the radius-four square.
+     * A known water source suffices even if another part is unavailable. */
+    for (dz = -4; dz <= 4 && !hydrated; ++dz)
+        for (dx = -4; dx <= 4 && !hydrated; ++dx)
+            for (dy = 0; dy <= 1; ++dy) {
+                result = maage_random_block(world, x + dx, y + dy, z + dz, &neighbor, &block);
+                if (maage_status_failed(result)) return result;
+                if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) unavailable = 1;
+                else if (neighbor->fluid_kind == MAAGE_FLUID_WATER) {
+                    hydrated = 1;
+                    break;
+                }
+            }
+    if (!hydrated && y < MAAGE_WORLD_HEIGHT - 1) {
+        maage_world_environment(world, &environment);
+        if (environment.rain_intensity > 0.2) {
+            if (!maage_world_observe(world, x, y + 1, z, &observation)) return maage_random_noop();
+            if (observation.rainfall > 0 && observation.temperature >= 0.15) {
+                /* The ordinary heightmap includes nonblocking plants. Rain
+                 * passes through them, but solid material and fluids shelter. */
+                for (dy = y + 1; dy < observation.precipitation_height; ++dy) {
+                    result = maage_random_block(world, x, dy, z, &neighbor, &block);
+                    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+                    if (block->material_solid || neighbor->fluid_kind) {
+                        exposed = 0;
+                        break;
+                    }
+                }
+                hydrated = exposed;
+            }
+        }
+    }
+    if (!hydrated && unavailable) return maage_random_noop();
+    moisture = hydrated ? 7U : (state->metadata ? state->metadata - 1U : 0U);
+    if (!hydrated && !state->metadata) {
+        result = maage_random_block(world, x, y + 1, z, &neighbor, &block);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        if (neighbor->block_id != ids->block_wheat) return maage_world_set(world, x, y, z, state->id, ids->state_dirt);
+    }
+    return moisture == state->metadata ? maage_random_noop() : maage_world_set(world, x, y, z, state->id, ids->farmland[moisture]);
+}
+
+maage_status maage_random_tick_wheat(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
+    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_block_state_definition *neighbor;
+    const maage_block_definition *block;
+    unsigned char light;
+    int dx, dz, valid, across_x = 0, across_z = 0, diagonal = 0;
+    double speed = 1, contribution;
+    maage_status result;
+    if (state->metadata > 7) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
+    result = maage_world_can_survive(world, x, y, z, state->id, &valid);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (!valid) return maage_support_update(world, x, y, z);
+    if (state->metadata == 7) return maage_random_noop();
+    result = maage_world_sample_light(world, x, y + 1, z, &light);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (maage_random_light_value(light, context) < 9) return maage_random_noop();
+    /* Center soil contributes fully; the other eight contribute a quarter.
+     * Crossed rows or diagonal wheat halve the resulting opportunity rate. */
+    for (dz = -1; dz <= 1; ++dz)
+        for (dx = -1; dx <= 1; ++dx) {
+            result = maage_random_block(world, x + dx, y - 1, z + dz, &neighbor, &block);
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+            if (neighbor->block_id == ids->block_farmland) {
+                contribution = neighbor->metadata ? 3.0 : 1.0;
+                speed += dx || dz ? contribution * 0.25 : contribution;
+            } else if (!dx && !dz) return maage_random_noop();
+            if (!dx && !dz) continue;
+            result = maage_random_block(world, x + dx, y, z + dz, &neighbor, &block);
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+            if (neighbor->block_id != ids->block_wheat) continue;
+            if (dx && dz) diagonal = 1;
+            else if (dx) across_x = 1;
+            else across_z = 1;
+        }
+    if (diagonal || (across_x && across_z)) speed *= 0.5;
+    if (maage_random_tick_next(context, (unsigned int) (25.0 / speed) + 1U)) return maage_random_noop();
+    return maage_world_set(world, x, y, z, state->id, ids->wheat[state->metadata + 1U]);
+}
+
 maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
     const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
     const maage_block_state_definition *neighbor;

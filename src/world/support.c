@@ -30,6 +30,11 @@ maage_status maage_support_rule(const maage_world *world, int x, int y, int z, c
     maage_status result;
     *valid = 0;
     if (y < 0 || y >= 256) return maage_support_status(MAAGE_STATUS_SUCCESS);
+    if (state->block_id == ids->block_farmland) {
+        result = maage_support_block(world, x, y + 1, z, &neighbor, &block);
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = !block->material_solid;
+        return result;
+    }
     if (state->block_id == ids->block_torch) {
         if (state->metadata < 1 || state->metadata > 5) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
         result = maage_support_block(world, x + torch_support[state->metadata][0], y + torch_support[state->metadata][1], z + torch_support[state->metadata][2], &neighbor, &block);
@@ -38,7 +43,15 @@ maage_status maage_support_rule(const maage_world *world, int x, int y, int z, c
     }
     result = maage_support_block(world, x, y - 1, z, &below, &block);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (state->block_id == ids->block_sapling || state->block_id == ids->block_tall_grass || state->block_id == ids->block_dandelion || state->block_id == ids->block_poppy) {
+    if (state->block_id == ids->block_wheat) {
+        maage_environment_state environment;
+        *valid = below->block_id == ids->block_farmland;
+        if (!*valid) return maage_support_status(MAAGE_STATUS_SUCCESS);
+        result = maage_world_sample_light(world, x, y, z, &light);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        maage_world_environment(world, &environment);
+        *valid = (light >> 4) == 15 || (light & 15) >= 8 || (int) (light >> 4) - (int) maage_environment_sky_subtracted(&environment) >= 8;
+    } else if (state->block_id == ids->block_sapling || state->block_id == ids->block_tall_grass || state->block_id == ids->block_dandelion || state->block_id == ids->block_poppy) {
         *valid = below->block_id == ids->block_dirt || below->block_id == ids->block_grass;
     } else if (state->block_id == ids->block_dead_bush) {
         *valid = below->block_id == ids->block_dirt || below->block_id == ids->block_sand;
@@ -141,6 +154,7 @@ maage_status maage_support_update(maage_world *world, int x, int y, int z) {
     result = maage_world_can_survive(world, x, y, z, state->id, &valid);
     if (maage_status_code(result) == MAAGE_STATUS_NOOP) return maage_support_schedule(world, x, y, z, 1);
     if (maage_status_failed(result) || valid) return result;
+    if (state->block_id == ids->block_farmland) return maage_world_set(world, x, y, z, state->id, ids->state_dirt);
     memset(&drops, 0, sizeof(drops));
     random = maage_entities_random(entities);
     /* Snow's neighbor callback removes it without harvesting snowballs.

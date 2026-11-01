@@ -34,6 +34,10 @@ static int maage_player_plane_solid(const maage_world *world, const double minim
                     if (maximum[transverse] <= coordinate[transverse] + shape.minimum[transverse] + MAAGE_PLAYER_COLLISION_EPSILON || minimum[transverse] >= coordinate[transverse] + shape.maximum[transverse] - MAAGE_PLAYER_COLLISION_EPSILON) intersects = 0;
                 }
                 if (!intersects) continue;
+                /* Cross the small lip beside lowered soil; the next vertical
+                 * sweep resolves feet onto its top. Unknown terrain still
+                 * blocks every axis rather than acquiring a step exception. */
+                if (axis != 1 && shape.maximum[1] + y - minimum[1] <= 1.0 / 16.0 + MAAGE_PLAYER_COLLISION_EPSILON && maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
                 if (displacement > 0) {
                     face = cell + shape.minimum[axis];
                     distance = face - maximum[axis];
@@ -42,8 +46,16 @@ static int maage_player_plane_solid(const maage_world *world, const double minim
                 } else {
                     face = cell + shape.maximum[axis];
                     distance = face - minimum[axis];
-                    if (distance > MAAGE_PLAYER_COLLISION_EPSILON || distance < *allowed) continue;
-                    *allowed = distance > 0 ? 0 : distance;
+                    /* A lowered floor can become full-height dirt between
+                     * movement steps. Resolve that shallow vertical overlap
+                     * through the same sweep instead of falling through it. */
+                    if (distance > MAAGE_PLAYER_COLLISION_EPSILON) {
+                        if (axis != 1 || distance > 1.0 / 16.0 + MAAGE_PLAYER_COLLISION_EPSILON || distance < *allowed || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
+                        *allowed = distance;
+                    } else {
+                        if (distance < *allowed) continue;
+                        *allowed = distance > 0 ? 0 : distance;
+                    }
                 }
                 collided = 1;
             }

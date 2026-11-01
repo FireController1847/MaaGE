@@ -329,6 +329,8 @@ Loading/generation schedules validation to catch edits missed while absent.
 | Snow layer | Valid opaque solid ground, leaves or a full snow layer; excludes ice | None. |
 | Brown/red mushroom | Opaque substrate and full sky/block light below 13 | Matching mushroom; no mycelium/podzol content exists. |
 | Leaves | Natural/persistent flags and deferred random support evaluation | Existing leaf drops; no immediate removal. |
+| Farmland | No solid material above | Becomes dirt in place, without an item drop. |
+| Wheat | Farmland below and direct sky or combined light at least 8 | One seed while immature; mature wheat plus randomized seeds. |
 
 Ordinary grass blocks do not require plant support. Environmental loss can create
 drops when Creative removes support; direct Creative mining still creates none.

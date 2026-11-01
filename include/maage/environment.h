@@ -48,6 +48,8 @@ maage_status maage_environment_tick(maage_environment *environment, maage_world 
 void maage_environment_snapshot(const maage_environment *environment, maage_environment_state *state);
 unsigned int maage_environment_weather(const maage_environment_state *state);
 double maage_environment_sunlight(const maage_environment_state *state);
+/* Gameplay subtracts 0..11 from saved sky light, without an ambient floor. */
+unsigned int maage_environment_sky_subtracted(const maage_environment_state *state);
 /* Current day phase in turns, with the eased celestial orbit shared by sky
  * presentation and daylight. Pure numeric calculation; no World access. */
 double maage_environment_celestial_angle(const maage_environment_state *state);

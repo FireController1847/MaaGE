@@ -391,8 +391,9 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
     {
         static const char *const tier[] = {"wooden", "stone", "iron", "diamond", "golden"};
         static const char *const title[] = {"Wooden", "Stone", "Iron", "Diamond", "Golden"};
-        static const char *const family[] = {"pickaxe", "shovel", "axe"};
-        static const char *const label[] = {"Pickaxe", "Shovel", "Axe"};
+        static const char *const family[] = {"pickaxe", "shovel", "axe", "hoe"};
+        static const char *const label[] = {"Pickaxe", "Shovel", "Axe", "Hoe"};
+        static const unsigned int classes[] = {MAAGE_TOOL_PICKAXE, MAAGE_TOOL_SHOVEL, MAAGE_TOOL_AXE, MAAGE_TOOL_HOE};
         static const unsigned int durability[] = {59, 131, 250, 1561, 32};
         static const unsigned int level[] = {0, 1, 2, 3, 0};
         static const double speed[] = {2, 4, 6, 8, 12};
@@ -403,16 +404,16 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
         char name[80], display[80];
         unsigned int t, f;
         for (t = 0; t < 5; ++t)
-            for (f = 0; f < 3; ++f) {
+            for (f = 0; f < 4; ++f) {
                 memset(&item, 0, sizeof(item));
                 item.max_stack = 1;
                 item.durability = durability[t];
                 if (!t) item.fuel_ticks = 200;
-                item.tool_class = f + 1;
+                item.tool_class = classes[f];
                 item.tool_level = level[t];
-                item.mining_speed = speed[t];
+                item.mining_speed = f == 3 ? 1 : speed[t];
                 item.model = MAAGE_ITEM_MODEL_SPRITE;
-                item.texture_index = t * 3 + f;
+                item.texture_index = f == 3 ? (t ? 58 + t : 54) : t * 3 + f;
                 item.texture_id = MAAGE_CONTENT_TEXTURE_ITEMS + item.texture_index;
                 sprintf(name, "minecraft:%s_%s", tier[t], family[f]);
                 sprintf(display, "%s %s", title[t], label[f]);
@@ -421,6 +422,7 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
                 if (maage_status_failed(result)) goto failed;
                 ids->tools[t][f] = item.id;
             }
+        ids->item_wooden_hoe = ids->tools[0][3];
         {
             maage_item_id *resources[11];
             resources[0] = &ids->item_shears;
@@ -448,6 +450,11 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
                     item.block_id = ids->block_sapling;
                     item.placement_state_id = item.icon_state_id = ids->state_sapling;
                     item.placement = maage_item_builtin_placement;
+                }
+                if (t == 10) {
+                    item.has_block = 1;
+                    item.block_id = ids->block_wheat;
+                    item.placement_state_id = item.icon_state_id = ids->wheat[0];
                 }
                 if (t == 1) {
                     item.max_metadata = 1;
@@ -505,6 +512,16 @@ maage_status maage_item_registry_create_builtin(const maage_block_registry *bloc
     }
     result = maage_furnace_content_items(registry, blocks, ids);
     if (maage_status_failed(result)) goto failed;
+    memset(&item, 0, sizeof(item));
+    item.max_stack = 64;
+    item.mining_speed = 1;
+    item.model = MAAGE_ITEM_MODEL_SPRITE;
+    item.texture_index = 63;
+    item.texture_id = MAAGE_CONTENT_TEXTURE_ITEMS + item.texture_index;
+    item.display_name = "Wheat";
+    result = maage_item_registry_register(registry, "minecraft:wheat", &item);
+    if (maage_status_failed(result)) goto failed;
+    ids->item_wheat = item.id;
     result = maage_item_registry_finalize(registry);
     if (!maage_status_failed(result)) {
         *output = registry;
@@ -655,7 +672,15 @@ maage_status maage_item_generate_drops(const maage_block_registry *blocks, const
     stack = &drops->stacks[0];
     stack->item_id = block->drop_item_id;
     stack->count = block->drop_count;
-    if (block->id == ids->block_stone) {
+    if (block->id == ids->block_wheat) {
+        stack->item_id = state->metadata == 7 ? ids->item_wheat : ids->item_seeds;
+        stack->count = 1;
+        if (state->metadata == 7) {
+            drops->stacks[1].item_id = ids->item_seeds;
+            for (i = 0; i < 3; ++i)
+                if (maage_drop_random(random, 15) <= state->metadata) ++drops->stacks[1].count;
+        }
+    } else if (block->id == ids->block_stone) {
         stack->item_id = ids->item_cobblestone;
     } else if (block->id == ids->block_coal_ore) {
         stack->item_id = ids->item_coal;

@@ -473,7 +473,7 @@ maage_status maage_block_registry_bind_items(maage_block_registry *registry, con
         if (!block->drop_item_id) {
             if (block->id == ids->block_lit_furnace) block->drop_item_id = ids->item_furnace;
             else if (block->id == ids->block_stone) block->drop_item_id = ids->item_cobblestone;
-            else if (block->id == ids->block_grass) block->drop_item_id = ids->item_dirt;
+            else if (block->id == ids->block_grass || block->id == ids->block_farmland) block->drop_item_id = ids->item_dirt;
             else if (block->id == ids->block_snow_block) block->drop_item_id = ids->item_snowball;
             else block->drop_item_id = maage_item_registry_block_item(items, block->id);
         }

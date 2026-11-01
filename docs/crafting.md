@@ -110,8 +110,7 @@ continues through the established numeric use/raycast path.
 
 ## Recipe Catalog
 
-There are 42 registered recipes; metadata alternatives share definitions where
-appropriate.
+Metadata alternatives share registered recipe definitions where appropriate.
 
 | Inputs | Output |
 | --- | --- |
@@ -119,7 +118,7 @@ appropriate.
 | Two vertically arranged planks, including mixed species | Four sticks |
 | Four planks in a square | One Crafting Table |
 | Three planks in a bowl pattern | Four bowls |
-| Planks, cobblestone, iron, diamond or gold plus sticks | Pickaxe, shovel and axe for each tier (15 recipes) |
+| Planks, cobblestone, iron, diamond or gold plus sticks | Pickaxe, shovel, axe and hoe for each tier (20 recipes) |
 | Coal or charcoal over a stick | Four torches |
 | Four sand in a square | One sandstone |
 | Two diagonally arranged iron ingots | Shears |
@@ -134,7 +133,9 @@ The tree-to-wooden-tools-to-stone-tools chain uses existing harvesting, drops,
 pickup, placement and durability. Iron/gold ingots and charcoal are registered
 and obtainable from the furnace registry. Ores are not converted through crafting recipes.
 Bowl/stew items use existing stack/presentation/persistence contracts; stew uses
-the shared owner-timed food action and returns its bowl on completion. Farming/combat actions for hoes/swords, armor,
+the shared owner-timed food action and returns its bowl on completion. Hoes use
+the existing placement pathway for tilling; [wheat farming](random-block-ticks.md#wheat-farming)
+uses ordinary registered states and random ticks. Combat actions for swords, armor,
 recipe books and container automation remain future work.
 
 ## Furnaces

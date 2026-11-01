@@ -159,8 +159,7 @@ maage_status maage_furnace_content_items(maage_item_registry *registry, const ma
         {ID_OFFSET(item_blaze_rod), "minecraft:blaze_rod", "Blaze Rod", 64, 0, 0, 2400},
         {ID_OFFSET(item_bucket), "minecraft:bucket", "Bucket", 16, 0, 0, 0},
         {ID_OFFSET(item_lava_bucket), "minecraft:lava_bucket", "Lava Bucket", 1, 0, 0, 20000},
-        {ID_OFFSET(item_wooden_sword), "minecraft:wooden_sword", "Wooden Sword", 1, 0, 0, 200},
-        {ID_OFFSET(item_wooden_hoe), "minecraft:wooden_hoe", "Wooden Hoe", 1, 0, 0, 200}};
+        {ID_OFFSET(item_wooden_sword), "minecraft:wooden_sword", "Wooden Sword", 1, 0, 0, 200}};
     maage_item_definition item;
     const maage_block_state_definition *state;
     maage_status result;
@@ -212,7 +211,7 @@ maage_status maage_furnace_content_items(maage_item_registry *registry, const ma
         if (resources[i].item == ID_OFFSET(item_fish)) item.max_metadata = 3;
         if (resources[i].item == ID_OFFSET(item_cooked_fish)) item.max_metadata = 1;
         if (resources[i].item == ID_OFFSET(item_lava_bucket)) item.container_item = ids->item_bucket;
-        if (resources[i].item == ID_OFFSET(item_wooden_sword) || resources[i].item == ID_OFFSET(item_wooden_hoe)) item.durability = 59;
+        if (resources[i].item == ID_OFFSET(item_wooden_sword)) item.durability = 59;
         result = maage_item_registry_register(registry, resources[i].name, &item);
         if (maage_status_failed(result)) return result;
         *furnace_id(ids, resources[i].item) = item.id;

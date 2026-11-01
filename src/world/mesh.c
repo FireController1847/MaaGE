@@ -447,6 +447,16 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                     if (crossed) {
                         shape.minimum[0] = shape.minimum[2] = 0.05;
                         shape.maximum[0] = shape.maximum[2] = 0.95;
+                        /* Anchor crossed plants to a lowered solid substrate.
+                         * Full-height quads retain each texture's authored
+                         * transparent stage height without stretching it. */
+                        neighbor = maage_block_registry_state(registry, maage_chunk_get(chunk, x, y - 1, z));
+                        block = neighbor ? maage_block_registry_block(registry, neighbor->block_id) : NULL;
+                        if (!block) return (size_t) - 1;
+                        if (block->solid) {
+                            shape.minimum[1] = block->collision_shape.maximum[1] - 1;
+                            shape.maximum[1] = block->collision_shape.maximum[1];
+                        }
                     } else if (model == MAAGE_BLOCK_MESH_TORCH) {
                         shape.minimum[0] = shape.minimum[2] = 7.0 / 16.0;
                         shape.maximum[0] = shape.maximum[2] = 9.0 / 16.0;

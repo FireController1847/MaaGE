@@ -49,6 +49,8 @@ string lookup or job wait is introduced.
 | --- | --- |
 | Grass | Decays to dirt when light above is below 4 and cover opacity exceeds 2. With source light at least 9, makes four spread attempts: X/Z offsets -1..1, Y offsets -3..1. Destination must be metadata-zero dirt, with light above at least 4 and opacity at most 2. No tall grass is created. |
 | Saplings | Oak/spruce/birch require valid soil and light above at least 9. A 1/7 opportunity advances the stage bit, then attempts growth on a later opportunity. See Sapling Growth below. |
+| Farmland | Water in the radius-four square at soil Y or Y+1, or exposed rain in a warm rainy biome, sets moisture to 7. Otherwise moisture decreases one step; already-dry soil without wheat becomes dirt. Unavailable water-search terrain defers drying. Solid material above also converts farmland to dirt through neighbor support. |
+| Wheat | Eight numeric stages 0..7. Light above must be at least 9 after daylight/weather subtraction. A successful random opportunity advances one stage; mature wheat retains support checks. See Wheat Farming below. |
 | Cactus | An exposed top shorter than three blocks increments age 0..15; a subsequent tick at age 15 grows one block and resets the old top. New-growth side obstruction produces the normal item drop after capacity preflight. Ages are numeric registered states and persist in chunk palettes. |
 | Brown/red mushrooms | One-in-25 spread chance; stops with five of the same mushroom in the 9x3x9 density neighborhood. Four candidate-walk steps precede one final placement attempt. Current supported substrates require an opaque top and full saved light below 13. |
 | Flowers, tall grass, dead bush | Random substrate check; plants without valid support disappear with their ordinary drops (including the 1/8 tall-grass seed chance and no ordinary dead-bush drop). This does not spawn vegetation. |
@@ -64,7 +66,7 @@ missing light is never treated as darkness. Cross-column destinations and all
 required neighborhoods must be loaded. No sample triggers synchronous relighting.
 
 Immediate plant/cactus support reactions now use the persistent neighbor-update
-queue described in [Client UI and Visual World](gameplay-parity.md). Crops, bone meal, lava
+queue described in [Client UI and Visual World](gameplay-parity.md). Other crops, bone meal, lava
 fire ignition, weather-driven snow accumulation/freezing and Nether-specific ice
 behavior remain unsupported. Mycelium and podzol are absent from the catalog, so their mushroom
 light exceptions do not apply. Dirt and full snow blocks have no random callback.
@@ -128,6 +130,36 @@ drops and Client biome tinting. Sapling stage-only edits preserve geometry/light
 Tree selection consumes only the saved behavior stream. Feature-local shape choices
 are derived from that attempt's seed; they do not reseed coordinate/weather streams.
 No scan of all saplings or scheduled growth timer is added.
+
+## Wheat Farming
+
+Hoes till grass/dirt only with air above and a face other than the underside.
+The shared placement query serves Client prediction and the Server's authoritative
+raycast/use path. Successful Survival tilling wears the hoe once; failed use and
+Creative use do not. Seeds place stage-zero wheat only in air above the selected
+farmland's top face, consuming one seed only after a successful Survival mutation.
+
+Wheat requires farmland and either direct sky or combined light at least 8 to
+survive. Unavailable support/light defers validation. Growth uses light above and
+the ordinary section sampler. Its speed starts at 1; farmland contributes 1 when
+dry or 3 when moist, fully for the plant's own soil and one quarter for each of
+the other eight cells in the 3x3 soil neighborhood. Diagonal wheat, or wheat on
+both horizontal axes, halves speed. Each opportunity advances one stage with
+probability `1 / (floor(25 / speed) + 1)`. Required missing neighbors defer the
+opportunity without loading terrain. Growth has no per-plant timer or allocation.
+
+Farmland has 15/16 collision/selection height. Crossed plants anchor to the lowered
+surface; each original stage texture supplies its visible height. Landing falls
+trample with probability clamped from `fall_distance - 0.5`; ordinary walking and
+flight do not trample. Reversion to dirt queues the existing crop support checks.
+Immature wheat drops one seed. Mature wheat drops one wheat plus three independent
+seed trials, each succeeding with probability 8/15. Environmental support loss
+uses the same capacity-preflighted drops; direct Creative harvesting drops nothing.
+
+Moisture and growth are ordinary registered metadata states. Numeric palettes,
+the World ID dictionary, copied block deltas and asynchronous region saves carry
+them without farming-specific data or a format change. This foundation includes
+only wheat, with no additional crops, bone meal or wheat-dependent recipes.
 
 ## Leaf Support
 

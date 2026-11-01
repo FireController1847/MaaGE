@@ -58,6 +58,8 @@ typedef struct maage_builtin_ids {
     unsigned long item_lava_bucket;
     unsigned long item_wooden_sword;
     unsigned long item_wooden_hoe;
+    unsigned long block_farmland, block_wheat, item_wheat;
+    unsigned long farmland[8], wheat[8];
     unsigned long block_air;
     unsigned long block_stone;
     unsigned long block_grass;
@@ -211,7 +213,7 @@ typedef struct maage_builtin_ids {
     unsigned long state_coal_block;
     unsigned long state_snow_block;
     unsigned long leaves[16], saplings[16], planks[6], torches[6], logs[12], logs2[12];
-    unsigned long water[16], lava[16], cactus[16], biome_grass[6], tools[5][3];
+    unsigned long water[16], lava[16], cactus[16], biome_grass[6], tools[5][4];
 } maage_builtin_ids;
 
 #endif

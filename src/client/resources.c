@@ -168,6 +168,11 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/items/fish_clownfish_raw.png",
     "minecraft/textures/items/fish_pufferfish_raw.png",
     "minecraft/textures/items/fish_salmon_cooked.png",
+    "minecraft/textures/items/stone_hoe.png",
+    "minecraft/textures/items/iron_hoe.png",
+    "minecraft/textures/items/diamond_hoe.png",
+    "minecraft/textures/items/gold_hoe.png",
+    "minecraft/textures/items/wheat.png",
     "minecraft/textures/blocks/crafting_table_top.png",
     "minecraft/textures/blocks/crafting_table_side.png",
     "minecraft/textures/blocks/crafting_table_front.png",
@@ -219,7 +224,17 @@ static const char *const maage_client_texture_names[MAAGE_CLIENT_SOURCE_COUNT] =
     "minecraft/textures/blocks/log_acacia_top.png",
     "minecraft/textures/blocks/planks_jungle.png",
     "minecraft/textures/blocks/planks_acacia.png",
-    "minecraft/textures/blocks/planks_big_oak.png"};
+    "minecraft/textures/blocks/planks_big_oak.png",
+    "minecraft/textures/blocks/farmland_dry.png",
+    "minecraft/textures/blocks/farmland_wet.png",
+    "minecraft/textures/blocks/wheat_stage_0.png",
+    "minecraft/textures/blocks/wheat_stage_1.png",
+    "minecraft/textures/blocks/wheat_stage_2.png",
+    "minecraft/textures/blocks/wheat_stage_3.png",
+    "minecraft/textures/blocks/wheat_stage_4.png",
+    "minecraft/textures/blocks/wheat_stage_5.png",
+    "minecraft/textures/blocks/wheat_stage_6.png",
+    "minecraft/textures/blocks/wheat_stage_7.png"};
 
 static int maage_client_texture_source(int texture) {
     static const int base[11] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 12, 13};

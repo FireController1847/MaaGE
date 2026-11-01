@@ -82,6 +82,15 @@ double maage_environment_sunlight(const maage_environment_state *state) {
     if (light > 1) light = 1;
     return 0.2 + 0.8 * light * (1.0 - state->rain_intensity * 5.0 / 16.0) * (1.0 - state->thunder_intensity * state->rain_intensity * 5.0 / 16.0);
 }
+unsigned int maage_environment_sky_subtracted(const maage_environment_state *state) {
+    double light;
+    if (!state) return 0;
+    light = cos(maage_environment_celestial_angle(state) * 6.283185307179586) * 2.0 + 0.5;
+    if (light < 0) light = 0;
+    if (light > 1) light = 1;
+    light *= (1.0 - state->rain_intensity * 5.0 / 16.0) * (1.0 - state->thunder_intensity * state->rain_intensity * 5.0 / 16.0);
+    return (unsigned int) ((1.0 - light) * 11.0);
+}
 static int maage_update_before(const maage_scheduled_update *a, const maage_scheduled_update *b) {
     if (a->due_high != b->due_high) return a->due_high < b->due_high;
     if (a->due_low != b->due_low) return a->due_low < b->due_low;

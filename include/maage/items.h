@@ -10,14 +10,15 @@ enum {
     MAAGE_TOOL_PICKAXE,
     MAAGE_TOOL_SHOVEL,
     MAAGE_TOOL_AXE,
-    MAAGE_TOOL_SHEARS
+    MAAGE_TOOL_SHEARS,
+    MAAGE_TOOL_HOE
 };
 enum {
     MAAGE_ITEM_MODEL_BLOCK = 0,
     MAAGE_ITEM_MODEL_SPRITE = 1
 };
 /* Item identities are allocated independently of blocks and states. */
-#define MAAGE_ITEM_TEXTURE_COUNT 59U
+#define MAAGE_ITEM_TEXTURE_COUNT 64U
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
 typedef struct maage_item_definition {

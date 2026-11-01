@@ -1594,17 +1594,12 @@ static maage_status maage_world_random_ticks(maage_world *world) {
     unsigned int attempt, speed = world->config.random_tick_speed;
     unsigned long sample;
     int dx, dz, section, x, y, z, radius = world->config.simulation_distance;
-    double sunlight;
     world->stats.random_tick_attempts = world->stats.random_tick_callbacks = 0;
     if (!speed) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_TICK, 0);
     maage_environment_snapshot(world->environment, &environment);
     /* Gameplay daylight uses a 0.5 phase offset and subtracts 0..11 from
      * stored sky light, independently of rendering's ambient floor. */
-    sunlight = cos(maage_environment_celestial_angle(&environment) * 6.283185307179586) * 2.0 + 0.5;
-    if (sunlight < 0) sunlight = 0;
-    if (sunlight > 1) sunlight = 1;
-    sunlight *= (1.0 - environment.rain_intensity * 5.0 / 16.0) * (1.0 - environment.thunder_intensity * environment.rain_intensity * 5.0 / 16.0);
-    world->random_ticks.sky_subtracted = (unsigned int) ((1.0 - sunlight) * 11.0);
+    world->random_ticks.sky_subtracted = maage_environment_sky_subtracted(&environment);
     /* Stable coordinate order avoids cache/hash/worker-completion ordering.
      * Only resident active columns participate; sampling never requests I/O. */
     for (dz = -radius; dz <= radius; ++dz)
@@ -1849,7 +1844,7 @@ int maage_world_observe(const maage_world *world, int x, int y, int z, maage_wor
     if (!world || y < 0 || y >= MAAGE_WORLD_HEIGHT || x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return 0;
     slot = maage_world_find(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
     if (!maage_world_complete(slot)) return 0;
-    chunk = slot->data->chunk;
+    chunk = slot->edit ? slot->edit : slot->data->chunk;
     local_x = maage_world_local_coordinate(x);
     local_z = maage_world_local_coordinate(z);
     observation->biome_id = chunk->biomes[local_z * 16 + local_x];
@@ -2162,7 +2157,8 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
     if ((old_furnace != (furnace != NULL)) || (!old_furnace && new_state->block_id == ids->block_lit_furnace)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     flags_only = old_state->block_id == new_state->block_id &&
                  ((old_state->block_id == ids->block_leaves && (old_state->metadata & MAAGE_LEAF_SPECIES_MASK) == (new_state->metadata & MAAGE_LEAF_SPECIES_MASK)) ||
-                  (old_state->block_id == ids->block_sapling && (old_state->metadata & 7U) == (new_state->metadata & 7U)));
+                  (old_state->block_id == ids->block_sapling && (old_state->metadata & 7U) == (new_state->metadata & 7U)) ||
+                  (old_state->block_id == ids->block_farmland && (old_state->metadata != 0) == (new_state->metadata != 0)));
     /* Queue allocations precede the state mutation and any reserved drop.
      * Existing fluid/support entries are deduplicated without allocation. */
     ++world->edit_depth;
@@ -2794,7 +2790,8 @@ static maage_status maage_world_visual_cell(const maage_world *world, maage_worl
     }
     if (before->block_id != after->block_id ||
         !((before->block_id == ids->block_leaves && (before->metadata & MAAGE_LEAF_SPECIES_MASK) == (after->metadata & MAAGE_LEAF_SPECIES_MASK)) ||
-          (before->block_id == ids->block_sapling && (before->metadata & 7U) == (after->metadata & 7U)))) slot->geometry_changed = 1;
+          (before->block_id == ids->block_sapling && (before->metadata & 7U) == (after->metadata & 7U)) ||
+          (before->block_id == ids->block_farmland && (before->metadata != 0) == (after->metadata != 0)))) slot->geometry_changed = 1;
     if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
         slot->light_changed = 1;

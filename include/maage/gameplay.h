@@ -70,7 +70,7 @@ typedef struct maage_gameplay_intent {
     int attack_pressed, use_pressed; /* Latched input edges, consumed once. */
 } maage_gameplay_intent;
 
-/* Read-only ordinary block placement rules, shared by Server authority and
+/* Read-only block placement and hoe tilling rules, shared by Server authority and
  * Client presentation. SUCCESS returns the expected destination and new state;
  * NOOP defers unavailable/invalid placement or non-block interaction. The caller
  * resolves block activation first, including the held-item crouch bypass. */

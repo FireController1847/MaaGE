@@ -77,7 +77,9 @@ with regeneration and later mining charges retained for the following step.
 | Diamond | 3 | 8 | 1561 |
 | Golden | 0 | 12 | 32 |
 
-All five tiers have pickaxes, shovels and axes. Shears have durability 238, speed
+All five tiers have pickaxes, shovels, axes and hoes. Hoes use the same durability
+values, wear only on successful Survival tilling, and have no mining-speed bonus.
+Shears have durability 238, speed
 15 on leaves and vegetation-specific harvesting. Ordinary mining-tool durability changes after a successful Survival destruction,
 including wrong-tool destruction of nonzero hardness blocks. Breaking a
 zero-hardness block does not wear ordinary tools; shears wear on supported
@@ -104,6 +106,9 @@ allocation leaves the block intact. Drops never enter inventory directly.
 | Leaves | Sapling chance 1/20, matching species; independent oak apple chance 1/200 |
 | Leaves with shears | One matching leaf item |
 | Tall grass | Seed chance 1/8; shears yield the grass item |
+| Farmland | One dirt item, discarding moisture metadata |
+| Wheat stages 0–6 | One wheat seed |
+| Wheat stage 7 | One wheat plus 0–3 seeds (three independent 8/15 trials) |
 | Dead bush | Nothing; shears yield the bush item |
 | Flowers, mushrooms, torches | One corresponding item |
 | Snow layer | One snowball with a shovel |
