@@ -1550,19 +1550,13 @@ return_to_title:
     result = maage_window_capture_mouse(window, 0);
     if (maage_status_failed(result)) goto window_failed;
     maage_server_runtime_request_stop(server);
-    operation = maage_server_runtime_join(server, trace);
-    if (maage_status_failed(operation)) goto done;
-    operation = maage_server_runtime_destroy(server);
+    /* The Server flushes and the Client replica workers drain on a separate
+     * lifecycle Jobs worker. Do not join a saving world on the UI thread. */
+    operation = maage_client_frontend_leave_world(frontend, server, session, visual_world, trace);
     if (maage_status_failed(operation)) goto done;
     server = NULL;
     server_started = 0;
-    operation = maage_local_session_close(session);
-    if (maage_status_failed(operation)) goto done;
-    operation = maage_local_session_destroy(session);
-    if (maage_status_failed(operation)) goto done;
     session = NULL;
-    operation = maage_world_destroy(visual_world);
-    if (maage_status_failed(operation)) goto done;
     visual_world = NULL;
     maage_client_prediction_destroy(&prediction);
     operation = maage_client_mesh_cache_clear(&cache, NULL);

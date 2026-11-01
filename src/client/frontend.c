@@ -9,6 +9,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+typedef struct maage_front_shutdown {
+    maage_server_runtime *server;
+    maage_local_session *session;
+    maage_world *visual;
+    maage_status result;
+} maage_front_shutdown;
 typedef struct maage_front_io {
     const char *root;
     const maage_item_registry *items;
@@ -23,7 +29,9 @@ struct maage_client_frontend {
     maage_client_ui_frontend *view;
     const char *root;
     const maage_item_registry *items;
-    maage_jobs *jobs;
+    maage_jobs *jobs, *shutdown_jobs;
+    maage_front_shutdown shutdown;
+    int shutdown_active;
     maage_front_io io;
     maage_world_summary *entries;
     size_t count;
@@ -31,6 +39,36 @@ struct maage_client_frontend {
     const maage_instance *instance;
     int busy;
 };
+/* Server owns final saving; the Client drops all owner references before this
+ * worker joins the Server and releases its replica. Neither work item needs a
+ * renderer, window, or event pump. */
+static void front_shutdown_run(void *context, const maage_job_token *token) {
+    maage_front_shutdown *shutdown = (maage_front_shutdown *) context;
+    maage_status result, operation;
+    maage_status_trace trace;
+    maage_status_trace_init(&trace);
+    result = maage_server_runtime_join(shutdown->server, &trace);
+    if (maage_status_failed(result)) maage_log_trace_status(MAAGE_LOG_ERROR, "maage.client.server", result, &trace, "Background world shutdown/save reported a failure.");
+    operation = maage_server_runtime_destroy(shutdown->server);
+    if (maage_status_failed(operation)) {
+        maage_log_status(MAAGE_LOG_FATAL, "maage.client.server", operation, "Unable to release stopped Server; borrowed world resources retained.");
+        if (!maage_status_failed(result)) result = operation;
+        shutdown->result = result;
+        maage_job_set_result(token, result);
+        return;
+    }
+    shutdown->server = NULL;
+    operation = maage_local_session_close(shutdown->session);
+    if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
+    operation = maage_local_session_destroy(shutdown->session);
+    if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
+    shutdown->session = NULL;
+    operation = maage_world_destroy(shutdown->visual);
+    if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
+    shutdown->visual = NULL;
+    shutdown->result = result;
+    maage_job_set_result(token, result);
+}
 static void front_io_run(void *context, const maage_job_token *token) {
     maage_front_io *io = (maage_front_io *) context;
     maage_status_trace *trace = maage_job_trace(token);
@@ -56,8 +94,15 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
         free(f);
         return result;
     }
+    result = maage_jobs_create(1, 1, &f->shutdown_jobs, trace);
+    if (maage_status_failed(result)) {
+        maage_jobs_destroy(f->jobs, NULL);
+        free(f);
+        return result;
+    }
     result = maage_client_ui_front_register(ui, &f->view);
     if (maage_status_failed(result)) {
+        maage_jobs_destroy(f->shutdown_jobs, NULL);
         maage_jobs_destroy(f->jobs, NULL);
         free(f);
         return result;
@@ -149,6 +194,10 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
             (void) maage_client_audio_service_apply_options(audio, &options);
             (void) maage_client_audio_service_update(audio, NULL, NULL, menu_listener, menu_forward, start, NULL);
         }
+        if (f->shutdown_active && maage_status_code(maage_jobs_poll(f->shutdown_jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
+            f->shutdown_active = 0;
+            if (maage_status_failed(completion.result)) maage_client_ui_front_error(f->view, "World shutdown failed; see logs/client.log");
+        }
         if (f->busy && maage_status_code(maage_jobs_poll(f->jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
             f->busy = 0;
             if (maage_status_failed(completion.result)) {
@@ -167,6 +216,10 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (maage_client_ui_front_take(f->view, &request)) {
             if (request.action == 6) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
             if ((request.action == 4 || request.action == 5) && !f->busy) {
+                if (f->shutdown_active) {
+                    maage_client_ui_front_error(f->view, "Saving previous world; world entry is available when complete.");
+                    continue;
+                }
                 if (request.action == 4) {
                     if (request.selected >= f->count) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SELECT, 0);
                     strcpy(choice->id, f->entries[request.selected].id);
@@ -208,9 +261,34 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (maage_status_failed(result)) return result;
     }
 }
+maage_status maage_client_frontend_leave_world(maage_client_frontend *f, maage_server_runtime *server, maage_local_session *session, maage_world *visual, maage_status_trace *trace) {
+    maage_job_id job;
+    maage_status result;
+    if (!f || !server || !session || !visual || f->shutdown_active) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
+    f->shutdown.server = server;
+    f->shutdown.session = session;
+    f->shutdown.visual = visual;
+    f->shutdown.result = 0;
+    result = maage_jobs_submit(f->shutdown_jobs, 0, front_shutdown_run, &f->shutdown, &job, trace);
+    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) f->shutdown_active = 1;
+    else memset(&f->shutdown, 0, sizeof(f->shutdown));
+    return result;
+}
 maage_status maage_client_frontend_destroy(maage_client_frontend *f) {
+    maage_job_completion completion;
     maage_status result;
     if (!f) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    /* If the application itself closes during a pending world save, preserve
+     * its completion rather than cancelling a queued authoritative shutdown.
+     * This final join occurs only after the menu/event loop has ended. */
+    if (f->shutdown_active) {
+        result = maage_jobs_wait(f->shutdown_jobs);
+        if (maage_status_failed(result)) return result;
+        if (maage_status_code(maage_jobs_poll(f->shutdown_jobs, &completion)) != MAAGE_STATUS_SUCCESS) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
+        f->shutdown_active = 0;
+    }
+    result = maage_jobs_destroy(f->shutdown_jobs, NULL);
+    if (maage_status_failed(result)) return result;
     result = maage_jobs_destroy(f->jobs, NULL);
     if (maage_status_failed(result)) return result;
     maage_client_ui_front_destroy(f->view);
