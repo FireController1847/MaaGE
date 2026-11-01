@@ -332,29 +332,38 @@ static void maage_world_scan_revisit(maage_world *world, const maage_world_slot 
         world->scan_step = 0;
     }
 }
-/* A sector advances only when its current two-ring group has appeared.
- * Other sectors, and the next four groups within this sector, are free to
- * display already prepared geometry without waiting for this group. */
+/* Scan a ring's perimeter in linear time instead of revisiting the entire
+ * square for each of eight sectors and every newly presented mesh. */
+static int maage_world_visual_ring_complete(const maage_world *world, unsigned sector, int ring) {
+    int bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
+    int side, offset, dx, dz, x, z;
+    maage_world_slot *slot;
+    for (side = 0; side < 4; ++side)
+        for (offset = -ring; offset <= ring; ++offset) {
+            if (side >= 2 && (offset == -ring || offset == ring)) continue;
+            dx = side < 2 ? offset : (side == 2 ? -ring : ring);
+            dz = side < 2 ? (side == 0 ? -ring : ring) : offset;
+            if (maage_world_visual_sector(dx, dz) != sector) continue;
+            x = world->center_x + dx;
+            z = world->center_z + dz;
+            if (x < -bound || x > bound || z < -bound || z > bound) continue;
+            slot = maage_world_find(world, x, z);
+            if (!slot || !slot->presented) return 0;
+        }
+    return 1;
+}
+/* Four two-ring groups may reveal concurrently within each of the eight
+ * directional sectors. Only complete earliest groups advance that sector's
+ * window; no worker, other sector or later group waits for the slowest mesh. */
 static void maage_world_advance_frontier(maage_world *world, unsigned sector) {
     int *frontier = &world->visual_frontier[sector];
     int radius = world->config.render_distance;
-    int bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
-    int ring, end_ring, dx, dz, x, z;
-    maage_world_slot *slot;
+    int ring, end_ring;
     while (*frontier <= radius) {
         end_ring = *frontier + MAAGE_WORLD_REVEAL_BATCH_RINGS;
         if (end_ring > radius + 1) end_ring = radius + 1;
         for (ring = *frontier; ring < end_ring; ++ring)
-            for (dz = -ring; dz <= ring; ++dz)
-                for (dx = -ring; dx <= ring; ++dx) {
-                    if (abs(dx) != ring && abs(dz) != ring) continue;
-                    if (maage_world_visual_sector(dx, dz) != sector) continue;
-                    x = world->center_x + dx;
-                    z = world->center_z + dz;
-                    if (x < -bound || x > bound || z < -bound || z > bound) continue;
-                    slot = maage_world_find(world, x, z);
-                    if (!slot || !slot->presented) return;
-                }
+            if (!maage_world_visual_ring_complete(world, sector, ring)) return;
         *frontier = end_ring;
     }
 }
@@ -1800,12 +1809,8 @@ maage_status maage_world_take_mesh(maage_world *world, maage_world_mesh_update *
     if (update) memset(update, 0, sizeof(*update));
     if (!world || !update) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     fair = ++world->mesh_turn % 8U == 0;
-    /* A cached inner group may already be complete after a rebase. Advance
-     * each independent lane without tying mesh upload to presentation. */
-    if (world->config.presentation_only) {
-        unsigned sector;
-        for (sector = 0; sector < MAAGE_WORLD_REVEAL_SECTORS; ++sector) maage_world_advance_frontier(world, sector);
-    }
+    /* GPU uploads never wait for or advance first-display sector windows.
+     * Frontiers advance only on presentation/removal/rebase events. */
     link = &world->mesh_head;
     while ((slot = *link) != NULL) {
         if (!slot->pending_mesh || !maage_world_mesh_current(world, slot->x, slot->z, slot->mesh_revision)) {
