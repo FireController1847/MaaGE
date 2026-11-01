@@ -81,7 +81,7 @@ static maage_status smelting_expand(smelting_table *table, smelting_entry *entry
 }
 maage_status maage_smelting_registry_create(const maage_item_registry *items, maage_smelting_registry **output) {
     if (output) *output = NULL;
-    if (!output || !maage_item_registry_is_finalized(items)) return smelting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    if (!output || !items) return smelting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     *output = (maage_smelting_registry *) calloc(1, sizeof(**output));
     if (!*output) return smelting_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     (*output)->inputs.items = (*output)->outputs.items = items;
@@ -131,7 +131,7 @@ double maage_smelting_experience(const maage_smelting_registry *registry, maage_
 }
 maage_status maage_fuel_registry_create(const maage_item_registry *items, maage_fuel_registry **output) {
     if (output) *output = NULL;
-    if (!output || !maage_item_registry_is_finalized(items)) return smelting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    if (!output || !items) return smelting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     *output = (maage_fuel_registry *) calloc(1, sizeof(**output));
     if (!*output) return smelting_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     (*output)->table.items = items;

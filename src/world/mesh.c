@@ -381,7 +381,6 @@ static void maage_mesh_reverse_face(maage_mesh_vertex *vertices, unsigned int *i
 
 /* Preserve exposed foliage and two interior cutout planes per direction. */
 static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry, const maage_chunk *chunk, const maage_chunk *neighbors[8], int x, int y, int z, unsigned int face) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
     const maage_chunk *sample;
     const maage_block_state_definition *state;
     int distance, nx, ny, nz;
@@ -393,13 +392,13 @@ static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry, co
         sample = maage_mesh_neighbor(chunk, neighbors, &nx, &nz);
         if (!sample) return 0;
         state = maage_block_registry_state(registry, maage_chunk_get(sample, nx, ny, nz));
-        if (!state || state->block_id != ids->block_leaves) return 0;
+        if (!state || !maage_block_registry_block(registry, state->block_id)->foliage) return 0;
     }
     return 1;
 }
 
 static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, maage_block_position *owners, maage_leaves_mode mode, maage_biome_blend blend, maage_mesh_biome_cache *cache, const maage_job_token *token, const maage_block_position *cell, unsigned int *failure) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
+    const maage_registry_bindings *ids = maage_block_registry_bindings(registry);
     const maage_block_state_definition *state, *neighbor, *above;
     const maage_block_definition *block, *current;
     const maage_block_face_definition *definition;
@@ -436,9 +435,8 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                     model = current->mesh_shape;
                     crossed = model == MAAGE_BLOCK_MESH_CROSS;
                     face_limit = crossed ? 4 : MAAGE_FACE_COUNT;
-                    material = MAAGE_MESH_MATERIAL_OPAQUE;
-                    if (state->fluid_kind == MAAGE_FLUID_WATER || state->block_id == ids->block_ice) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
-                    else if (model != MAAGE_BLOCK_MESH_CUBE || state->block_id == ids->block_glass || state->block_id == ids->block_cactus || (state->block_id == ids->block_leaves && mode != MAAGE_LEAVES_FAST)) material = MAAGE_MESH_MATERIAL_CUTOUT;
+                    material = current->mesh_material;
+                    if (current->foliage) material = mode == MAAGE_LEAVES_FAST ? MAAGE_MESH_MATERIAL_OPAQUE : MAAGE_MESH_MATERIAL_CUTOUT;
                     for (axis = 0; axis < 3; ++axis) {
                         shape.minimum[axis] = 0;
                         shape.maximum[axis] = 1;
@@ -461,7 +459,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                         shape.minimum[0] = shape.minimum[2] = 7.0 / 16.0;
                         shape.maximum[0] = shape.maximum[2] = 9.0 / 16.0;
                         shape.maximum[1] = 10.0 / 16.0;
-                    } else if (state->block_id == ids->block_cactus) {
+                    } else if (current->mesh_inset) {
                         shape.minimum[0] = shape.minimum[2] = 0;
                         shape.maximum[0] = shape.maximum[2] = 1;
                     }
@@ -473,9 +471,9 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                         }
                         maage_mesh_fluid_flow(registry, chunk, neighbors, x, y, z, state, fluid_flow);
                     }
-                    snowed = above && above->block_id == ids->block_snow;
+                    snowed = above && maage_block_registry_block(registry, above->block_id)->snow_cover;
                     colors_ready = 0;
-                    log_axis = state->block_id == ids->block_log ? ((state->metadata & 12) == 4 ? 0 : ((state->metadata & 12) == 8 ? 2 : 1)) : -1;
+                    log_axis = (int) state->texture_axis - 1;
                     for (face = 0; face < face_limit; ++face) {
                         face_shape = shape;
                         nx = x + (crossed ? 0 : maage_face_neighbor[face][0]);
@@ -488,13 +486,13 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                         if (!block) return (size_t) - 1;
                         axis = face / 2;
                         boundary = model == MAAGE_BLOCK_MESH_CUBE && (face & 1 ? shape.maximum[axis] == 1 : shape.minimum[axis] == 0);
-                        if (state->block_id == ids->block_cactus && axis != 1) {
+                        if (current->mesh_inset && axis != 1) {
                             face_shape.minimum[axis] = face_shape.maximum[axis] = face & 1 ? 0.9375 : 0.0625;
                             boundary = 0;
                         }
-                        if (boundary && (!state->fluid_kind || face != MAAGE_FACE_POSITIVE_Y) && (block->opaque || (mode == MAAGE_LEAVES_FAST && neighbor->block_id == ids->block_leaves))) continue;
-                        if (boundary && state->block_id == ids->block_ice && neighbor->block_id == ids->block_ice) continue;
-                        if (state->block_id == ids->block_leaves && neighbor->block_id == ids->block_leaves && boundary) {
+                        if (boundary && (!state->fluid_kind || face != MAAGE_FACE_POSITIVE_Y) && (block->opaque || (mode == MAAGE_LEAVES_FAST && block->foliage))) continue;
+                        if (boundary && current->cull_same && state->block_id == neighbor->block_id) continue;
+                        if (current->foliage && block->foliage && boundary) {
                             if (mode == MAAGE_LEAVES_FAST) continue;
                             if (mode == MAAGE_LEAVES_SMART && maage_mesh_smart_leaf_hidden(registry, chunk, neighbors, x, y, z, face)) continue;
                         }
@@ -518,7 +516,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                                 uv = definition->snow_uv;
                                 tint_mode = MAAGE_BLOCK_TINT_NONE;
                             }
-                            if (mode == MAAGE_LEAVES_FAST && state->block_id == ids->block_leaves && state->leaf_fast_uv[2] > state->leaf_fast_uv[0]) uv = state->leaf_fast_uv;
+                            if (mode == MAAGE_LEAVES_FAST && current->foliage && state->leaf_fast_uv[2] > state->leaf_fast_uv[0]) uv = state->leaf_fast_uv;
                             if (!colors_ready && (tint_mode || overlay)) {
                                 for (corner = 0; corner < 4; ++corner) {
                                     sample_colors = maage_mesh_biome_colors(biomes, chunk, neighbors, blend, cache, x + (blend >= MAAGE_BIOME_BLEND_SMOOTH_5 ? corner & 1 : 0), z + (blend >= MAAGE_BIOME_BLEND_SMOOTH_5 ? corner >> 1 : 0));
@@ -528,7 +526,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                                 }
                                 colors_ready = 1;
                             }
-                            smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && state->block_id != ids->block_cactus;
+                            smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && !current->mesh_inset;
                             /* A recessed top with neighbor brightness samples
                              * above its surface, outside the opaque cell.
                              * Geometric boundary checks still own face culling. */

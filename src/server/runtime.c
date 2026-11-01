@@ -1,3 +1,4 @@
+#include "maage/base.h"
 #include "maage/server_runtime.h"
 #include "maage/content.h"
 #include "maage/gameplay.h"
@@ -229,7 +230,7 @@ static void server_service_container(maage_server_runtime *runtime) {
 }
 
 static void server_record_action(maage_server_runtime *runtime, int placing) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_content_blocks(runtime->content));
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_content_blocks(runtime->content));
     unsigned int i = runtime->action_cursor, n;
     int dx, dz;
     maage_world_target *target = &runtime->actions[i].target;
@@ -333,6 +334,7 @@ static maage_status server_predict_request(maage_server_runtime *runtime, const 
 static maage_status server_apply_command(maage_server_runtime *runtime, const maage_session_command *command) {
     maage_status result;
     const maage_item_registry *items = maage_content_items(runtime->content);
+    const maage_block_registry *blocks = maage_content_blocks(runtime->content);
     if (command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
     /* Reject missing, stale or replayed command identities. */
     if (!command->sequence || command->sequence <= runtime->last_command_sequence) return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
@@ -389,21 +391,17 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         if (!command->container_identity || command->container_identity != runtime->game.crafting.identity || !runtime->game.crafting.kind) return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
         if (command->kind == MAAGE_CMD_CONTAINER_CLOSE) result = server_close_container(runtime);
         else {
+            const maage_crafting_container *container = &runtime->game.crafting;
+            const maage_block_state_definition *state;
+            const maage_block_definition *block;
             if (!runtime->game.health || !maage_crafting_accessible(&runtime->game.crafting, &runtime->player, runtime->world)) {
                 server_service_container(runtime);
                 return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
             }
-            if (runtime->game.crafting.kind == MAAGE_CONTAINER_FURNACE) {
-                maage_furnace_state furnace;
-                maage_gameplay next = runtime->game;
-                double experience = 0;
-                result = maage_world_furnace_get(runtime->world, next.crafting.x, next.crafting.y, next.crafting.z, &furnace);
-                if (!maage_status_failed(result)) result = maage_furnace_click(&furnace, &next.inventory, items, maage_content_smelting(runtime->content), maage_content_fuels(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action, &experience);
-                if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-                    result = maage_gameplay_add_experience(&next, experience);
-                    if (!maage_status_failed(result)) result = maage_world_furnace_set(runtime->world, next.crafting.x, next.crafting.y, next.crafting.z, &furnace);
-                    if (!maage_status_failed(result)) runtime->game = next;
-                }
+            state = maage_block_registry_state(blocks, maage_world_get(runtime->world, container->x, container->y, container->z));
+            block = state && container->kind != MAAGE_CONTAINER_PLAYER ? maage_block_registry_block(blocks, state->block_id) : NULL;
+            if (block && block->container_action) {
+                result = block->container_action(runtime->world, &runtime->game, command->container_revision, command->slot_group, command->container_slot, command->slot_action);
             } else {
                 result = maage_crafting_click(&runtime->game.crafting, &runtime->game.inventory, items, maage_content_recipes(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action);
             }
@@ -592,17 +590,17 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.inventory = runtime->game.inventory;
     snapshot.player.crafting = runtime->game.crafting;
     snapshot.player.experience = runtime->game.experience;
-    if (snapshot.player.crafting.kind == MAAGE_CONTAINER_FURNACE) {
+    if (snapshot.player.crafting.kind && snapshot.player.crafting.kind != MAAGE_CONTAINER_PLAYER) {
         maage_crafting_container *container = &snapshot.player.crafting;
-        result = maage_world_furnace_get(runtime->world, container->x, container->y, container->z, &snapshot.player.furnace);
-        if (maage_status_failed(result)) {
-            server_status_event(runtime, result, NULL);
-            return;
+        const maage_block_state_definition *state = maage_block_registry_state(maage_content_blocks(runtime->content), maage_world_get(runtime->world, container->x, container->y, container->z));
+        const maage_block_definition *block = state ? maage_block_registry_block(maage_content_blocks(runtime->content), state->block_id) : NULL;
+        if (block && block->container_sample) {
+            result = block->container_sample(runtime->world, container);
+            if (maage_status_failed(result)) {
+                server_status_event(runtime, result, NULL);
+                return;
+            }
         }
-        container->revision = snapshot.player.furnace.revision;
-        container->inputs[0] = snapshot.player.furnace.slots[0];
-        container->inputs[1] = snapshot.player.furnace.slots[1];
-        container->output = snapshot.player.furnace.slots[2];
     }
     snapshot.player.food = runtime->game.food;
     runtime->publication_dirty = 0;
@@ -703,7 +701,7 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     maage_status result;
     char error[256];
     if (!runtime->config.content) {
-        result = maage_content_create(NULL, &runtime->owned_content, trace);
+        result = maage_base_content_create(NULL, &runtime->owned_content, trace);
         if (maage_status_failed(result)) return result;
     }
     runtime->content = runtime->config.content ? runtime->config.content : runtime->owned_content;

@@ -5,12 +5,15 @@
 #include "maage/pixels.h"
 #include "maage/content.h"
 #include "maage/window.h"
-#define MAAGE_CLIENT_SOURCE_COUNT (64 + MAAGE_ITEM_TEXTURE_COUNT + MAAGE_CONTENT_TEXTURE_ITEMS - MAAGE_CONTENT_TEXTURE_CRAFTING_TOP)
 #define MAAGE_CLIENT_BREAK_STAGES 10
 typedef struct maage_client_resources {
     maage_image image;
     maage_pixel_buffer atlas;
-    float uv[MAAGE_CONTENT_TEXTURE_COUNT][4];
+    maage_content *catalog;
+    maage_content_registration register_content, register_dependencies;
+    float (*texture_animation)[3];
+    size_t texture_count, source_count;
+    float (*uv)[4];
     float breaking_uv[MAAGE_CLIENT_BREAK_STAGES][4];
     /* One normalized local-player skin in the shared atlas. */
     float skin_uv[4];
@@ -25,12 +28,12 @@ typedef struct maage_client_resources {
      * load_status retains the first original error; recovery_status reports
      * atlas/fallback construction independently. */
     maage_status load_status, recovery_status;
-    maage_status source_results[MAAGE_CLIENT_SOURCE_COUNT];
+    maage_status *source_results;
     unsigned int failed_resources;
 } maage_client_resources;
 /* Colormap samples populate mutable biome definitions before finalization. */
 typedef maage_status (*maage_client_resource_checkpoint)(void *context, maage_status_trace *trace);
-maage_status maage_client_resources_load(const char *application_data, maage_client_resources *resources, maage_biome_registry *biomes, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace);
+maage_status maage_client_resources_load(const char *application_data, const maage_content_config *registration, maage_client_resources *resources, maage_biome_registry *biomes, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace);
 /* Startup-only native icon; external reconstructed artwork is never packaged. */
 maage_status maage_client_resources_set_window_icon(const char *application_data, maage_window *window, maage_status_trace *trace);
 /* Construct one owning finalized registry set, for integrated Client/Server use.

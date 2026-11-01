@@ -88,7 +88,7 @@ int maage_entity_valid(const maage_entity *entity, const maage_item_registry *it
 }
 
 maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_block_state_id state_id) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
     maage_entities *entities = maage_world_entities(world);
     const maage_item_registry *items = maage_world_item_registry(world);
     const maage_block_state_definition *state = maage_block_registry_state(maage_world_registry(world), state_id);
@@ -151,7 +151,7 @@ static int entity_loaded(const maage_world *world, const maage_entity *entity) {
     return 1;
 }
 static void entity_move(maage_entity *entity, const maage_world *world) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
     const maage_block_state_definition *state;
     double vertical, drag, minimum[3], maximum[3], current[3];
     unsigned int axis;
@@ -172,7 +172,8 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     drag = entity->grounded ? 0.588 : 0.98;
     if (entity->grounded) {
         state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, (int) floor(entity->position[0]), (int) floor(entity->position[1] - 0.01), (int) floor(entity->position[2])));
-        if (state && state->block_id == ids->block_ice) drag = 0.9604;
+        if (state) drag = maage_block_registry_block(maage_world_registry(world), state->block_id)->item_drag;
+        if (drag == 0) drag = 0.588;
     }
     /* A clipped vertical sweep has already removed impact velocity. Preserve
      * that rest state rather than reflecting the pre-collision request. */
@@ -183,7 +184,7 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     if (fabs(entity->velocity[2]) < 0.0001) entity->velocity[2] = 0;
 }
 static maage_status entity_fall_move(maage_entity *entity, maage_world *world) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
     const maage_block_state_definition *state, *under;
     const maage_block_definition *block;
     maage_item_stack drop;

@@ -277,7 +277,7 @@ static unsigned long maage_client_particle_random(maage_client_environment *view
  * This visual pool limits particles, never the number of simulated furnaces. */
 static void maage_client_environment_particles(maage_client_environment *view, const maage_session_snapshot *snapshot, const maage_world *visual, const double camera[3], const float matrix[16], float width, float height) {
     const maage_block_registry *blocks = maage_world_registry(visual);
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
     const maage_block_state_definition *state;
     maage_world_target hit;
     maage_status result;
@@ -310,7 +310,7 @@ static void maage_client_environment_particles(maage_client_environment *view, c
             z -= (int) maage_client_particle_random(view, 16);
             if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
             state = maage_block_registry_state(blocks, maage_world_get(visual, x, y, z));
-            if (!state || state->block_id != ids->block_lit_furnace) continue;
+            if (!state || state->presentation_effect != 1) continue;
             offset = maage_client_particle_random(view, 65536UL) / 65536.0 * 0.6 - 0.3;
             for (pair = 0; pair < 2; ++pair) {
                 index = view->particle_cursor++ % MAAGE_ENVIRONMENT_PARTICLES;
@@ -338,7 +338,7 @@ static void maage_client_environment_particles(maage_client_environment *view, c
         if (!view->particles[i].active) continue;
         state = maage_block_registry_state(blocks, maage_world_get(visual, view->particles[i].x, view->particles[i].y, view->particles[i].z));
         view->particles[i].age += dt;
-        if (!state || state->block_id != ids->block_lit_furnace || view->particles[i].age >= view->particles[i].lifetime || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(view->particles[i].x), maage_world_chunk_coordinate(view->particles[i].z))) {
+        if (!state || state->presentation_effect != 1 || view->particles[i].age >= view->particles[i].lifetime || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(view->particles[i].x), maage_world_chunk_coordinate(view->particles[i].z))) {
             view->particles[i].active = 0;
             continue;
         }

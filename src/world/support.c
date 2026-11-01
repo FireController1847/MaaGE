@@ -12,71 +12,7 @@ static maage_status maage_support_block(const maage_world *world, int x, int y, 
     *block = *state ? maage_block_registry_block(registry, (*state)->block_id) : NULL;
     return maage_support_status(*block ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVARIANT_VIOLATION);
 }
-static int maage_support_full(const maage_block_definition *block) {
-    unsigned int axis;
-    if (!block->solid || !block->opaque) return 0;
-    for (axis = 0; axis < 3; ++axis)
-        if (block->collision_shape.minimum[axis] != 0 || block->collision_shape.maximum[axis] != 1) return 0;
-    return 1;
-}
-maage_status maage_support_rule(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
-    static const int torch_support[6][3] = {{0, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, -1, 0}};
-    static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    const maage_block_state_definition *below, *neighbor;
-    const maage_block_definition *block;
-    unsigned char light;
-    unsigned int side;
-    maage_status result;
-    *valid = 0;
-    if (y < 0 || y >= 256) return maage_support_status(MAAGE_STATUS_SUCCESS);
-    if (state->block_id == ids->block_farmland) {
-        result = maage_support_block(world, x, y + 1, z, &neighbor, &block);
-        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = !block->material_solid;
-        return result;
-    }
-    if (state->block_id == ids->block_torch) {
-        if (state->metadata < 1 || state->metadata > 5) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
-        result = maage_support_block(world, x + torch_support[state->metadata][0], y + torch_support[state->metadata][1], z + torch_support[state->metadata][2], &neighbor, &block);
-        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = maage_support_full(block);
-        return result;
-    }
-    result = maage_support_block(world, x, y - 1, z, &below, &block);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (state->block_id == ids->block_wheat) {
-        maage_environment_state environment;
-        *valid = below->block_id == ids->block_farmland;
-        if (!*valid) return maage_support_status(MAAGE_STATUS_SUCCESS);
-        result = maage_world_sample_light(world, x, y, z, &light);
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-        maage_world_environment(world, &environment);
-        *valid = (light >> 4) == 15 || (light & 15) >= 8 || (int) (light >> 4) - (int) maage_environment_sky_subtracted(&environment) >= 8;
-    } else if (state->block_id == ids->block_sapling || state->block_id == ids->block_tall_grass || state->block_id == ids->block_dandelion || state->block_id == ids->block_poppy) {
-        *valid = below->block_id == ids->block_dirt || below->block_id == ids->block_grass;
-    } else if (state->block_id == ids->block_dead_bush) {
-        *valid = below->block_id == ids->block_dirt || below->block_id == ids->block_sand;
-    } else if (state->block_id == ids->block_cactus) {
-        if (below->block_id != ids->block_sand && below->block_id != ids->block_cactus) return maage_support_status(MAAGE_STATUS_SUCCESS);
-        for (side = 0; side < 4; ++side) {
-            result = maage_support_block(world, x + sides[side][0], y, z + sides[side][1], &neighbor, &block);
-            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-            if (block->material_solid) return maage_support_status(MAAGE_STATUS_SUCCESS);
-        }
-        *valid = 1;
-    } else if (state->block_id == ids->block_snow) {
-        *valid = below->block_id != ids->block_ice &&
-                 (below->block_id == ids->block_leaves || (below->block_id == ids->block_snow && (below->metadata & 7U) == 7U) ||
-                  (block->opaque && block->material_solid));
-    } else if (state->block_id == ids->block_brown_mushroom || state->block_id == ids->block_red_mushroom) {
-        if (!block->opaque) return maage_support_status(MAAGE_STATUS_SUCCESS);
-        result = maage_world_sample_light(world, x, y, z, &light);
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-        *valid = (light >> 4) < 13 && (light & 15) < 13;
-    } else {
-        return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
-    }
-    return maage_support_status(MAAGE_STATUS_SUCCESS);
-}
+
 maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z, maage_block_state_id state_id, int *valid) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
@@ -128,8 +64,8 @@ maage_status maage_support_changed(maage_world *world, int x, int y, int z, maag
     }
     return maage_support_status(MAAGE_STATUS_SUCCESS);
 }
-maage_status maage_support_update(maage_world *world, int x, int y, int z) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+maage_status maage_world_check_support(maage_world *world, int x, int y, int z) {
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_item_drops drops;
@@ -154,12 +90,12 @@ maage_status maage_support_update(maage_world *world, int x, int y, int z) {
     result = maage_world_can_survive(world, x, y, z, state->id, &valid);
     if (maage_status_code(result) == MAAGE_STATUS_NOOP) return maage_support_schedule(world, x, y, z, 1);
     if (maage_status_failed(result) || valid) return result;
-    if (state->block_id == ids->block_farmland) return maage_world_set(world, x, y, z, state->id, ids->state_dirt);
+    if (block->unsupported_replaces) return maage_world_set(world, x, y, z, state->id, block->unsupported_state);
     memset(&drops, 0, sizeof(drops));
     random = maage_entities_random(entities);
     /* Snow's neighbor callback removes it without harvesting snowballs.
      * Support loss is environmental even when the triggering player is Creative. */
-    if (state->block_id != ids->block_snow) {
+    if (!block->unsupported_no_drops) {
         result = maage_item_generate_drops(maage_world_registry(world), items, state->id, NULL, &random, &drops);
         if (maage_status_failed(result)) return result;
         result = maage_entities_reserve(entities, drops.count);

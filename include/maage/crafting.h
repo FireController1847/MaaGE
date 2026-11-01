@@ -42,7 +42,6 @@ maage_status maage_recipe_registry_register(maage_recipe_registry *registry, con
 maage_status maage_recipe_registry_finalize(maage_recipe_registry *registry);
 maage_status maage_recipe_registry_destroy(maage_recipe_registry *registry);
 size_t maage_recipe_registry_count(const maage_recipe_registry *registry);
-maage_status maage_recipe_registry_create_builtin(const maage_item_registry *items, maage_recipe_registry **output);
 /* NOOP and an empty match when no recipe fits. Only 2x2 and 3x3 grids. */
 maage_status maage_recipe_find(const maage_recipe_registry *registry, const maage_item_stack *grid, unsigned int width, maage_recipe_match *match);
 
@@ -64,10 +63,12 @@ enum {
 };
 typedef struct maage_crafting_container {
     unsigned long identity, revision, block_identity;
-    unsigned int kind;
+    unsigned int kind, grid_width;
+    unsigned long active_remaining, active_duration, process, process_duration;
     int closing, x, y, z;
     maage_item_stack inputs[MAAGE_CRAFTING_CELLS], output;
 } maage_crafting_container;
+maage_status maage_crafting_open_grid(maage_crafting_container *container, unsigned int kind, int x, int y, int z, unsigned int width);
 maage_status maage_crafting_open(maage_crafting_container *container, unsigned int kind, int x, int y, int z);
 maage_status maage_crafting_refresh(maage_crafting_container *container, const maage_recipe_registry *recipes);
 /* Server validates container identity/world access before calling. Revision is

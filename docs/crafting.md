@@ -5,12 +5,42 @@ services. Client screens display copied state and submit numeric actions. No
 recipe matching, inventory mutation, asset lookup or gameplay rules run in a GPU
 backend.
 
+## Content Registration
+
+Applications select modules explicitly. `maage_content_create` creates empty
+registries, invokes `register_content` and then `register_dependencies`, validates
+cross-domain references and finalizes the set. A composition callback can call
+`maage_base_register` and register further content through the same public APIs;
+there is no namespace privilege or external loader. `maage_content_own` transfers
+module data to that content lifetime. All Worlds, jobs and readers stop before
+the owning content is destroyed.
+
+`src/base/base.c` orchestrates the built-in game. Block/item/biome definitions,
+recipes, smelting, fuels and ores have individual registration invocations.
+Metadata-state families retain systematic loops. Base references live in
+`maage_base_ids`, borrowed by the module's own callbacks; engine code uses explicit
+required bindings and registered definitions instead of that table.
+
+Block definitions provide optional activation, drop, survival, scheduled/random
+tick, change/import and landing callbacks. Item definitions select placement,
+use, durability and variant-presentation policies. Properties retain ordinary
+hardness, shapes, materials, harvest requirements and default drops. Server
+mutations and capacity preflight remain authoritative; Client prediction invokes
+only the read-only placement policy.
+
+Furnace inventories use a registered block-entity provider. World owns opaque
+live/scratch buffers, owner ticking, reserved drops and immutable save copies;
+the provider owns validation, timer processing, inventory commits and codecs.
+Containers dispatch access/actions/sampling through their block definition.
+Copied processing progress is carried in the existing numeric container snapshot,
+without giving temporary crafting inputs ownership of persistent inventories.
+
 ## Source and ownership
 
 - `include/maage/crafting.h` defines recipe registration, matching, temporary
   containers and numeric slot/action contracts.
 - `src/world/recipes.c` owns copied definitions and alternatives in a growable
-  registry. `recipes_builtin.c` registers the current catalog during content
+  registry. `src/base/recipes.c` explicitly registers the current catalog during content
   initialization; content finalizes and owns recipes alongside items/blocks.
 - `src/world/crafting.c` owns container operations. `src/world/gameplay.c` owns the
   active container alongside the existing player inventory. There is one cursor
@@ -84,7 +114,7 @@ overflow becomes existing authoritative item entities. All overflow capacity is
 reserved before transferring items. Allocation failure leaves unreturned inputs
 owned and blocks further container edits; the owner retries closure.
 
-The single current metadata encoding is `MGWRLD11`. Normal shutdown closes the
+The single current metadata encoding is `MGWRLD12`. Normal shutdown closes the
 container before World flush and the atomic player/entity checkpoint. If closure
 cannot allocate overflow entities, that same checkpoint retains only the still
 unreturned input stacks. Loading returns those stacks before allowing another
@@ -164,10 +194,10 @@ edits, at five-second progress intervals, before retirement and during shutdown.
 Workers never borrow mutable furnace state. Auxiliary changes preserve geometry
 and light epochs; region compression/indexing and single-writer saves are shared.
 
-`MGCHNK8` stores explicit numeric stacks through the World item translation map,
+`MGCHNK9` stores explicit numeric stacks through the World item translation map,
 burn remaining/duration, progress and inventory revision. Records validate type,
 location, bounds and lit state; missing/duplicate/malformed records fail loading.
-`MGWRLD11` adds player experience and an independent fractional-rounding RNG.
+`MGWRLD12` retains player experience and an independent fractional-rounding RNG.
 Extraction awards only the removed quantity's registered output XP; no historical
 recipe-use bank exists. The HUD uses the pre-1.8 level costs. Player inventory,
 output splitting/merging, cursor handling and shift-click use the existing stack

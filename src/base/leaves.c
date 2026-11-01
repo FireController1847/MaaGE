@@ -1,4 +1,4 @@
-#include "world_internal.h"
+#include "base_internal.h"
 #include "maage/entities.h"
 
 #define MAAGE_LEAF_EDGE 9
@@ -10,7 +10,7 @@ static maage_status maage_leaves_noop(void) {
 }
 
 maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const maage_block_state_definition *before, const maage_block_state_definition *after) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *leaf;
     maage_block_state_id marked;
@@ -43,7 +43,7 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const
 }
 
 maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
     static const int steps[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *neighbor;

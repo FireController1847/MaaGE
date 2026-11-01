@@ -4,6 +4,18 @@ Metal, Vulkan and modern OpenGL consume the same portable world, UI, scene,
 foreground and animation contracts. Runtime appearance and platform behavior
 require programmer verification; source integration does not establish visual parity.
 
+## Registered Content Presentation
+
+The content presentation registry owns copied source paths and numeric texture
+definitions, including optional fallback, opacity and animation metadata.
+`src/base/textures.c` registers the built-in catalog and binds application roles
+such as skin, colormaps, cracks and fluid strips. Atlas/source arrays derive from
+registry counts; registered extra textures and vertical frame strips use the same
+atlas and shaders. Block states carry resolved face/tint/overlay intent; item
+variants provide pure numeric icon/name callbacks. No GPU or Client pointers enter
+authoritative definitions. Presentation resolution happens before finalization;
+missing optional art retains the existing generated fallback behavior.
+
 ## Shared Preparation and Backend Ownership
 
 Common C owns material grouping, triangle centers, camera/depth ordering,

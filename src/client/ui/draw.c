@@ -111,7 +111,7 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
  * including macOS borderless/notch margins. Only subsequent interactive
  * elements use ui->content for safe-area positioning. */
 void maage_client_ui_menu_background(maage_client_ui *ui) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(ui->blocks);
+    const maage_registry_bindings *ids = maage_block_registry_bindings(ui->blocks);
     const maage_block_state_definition *dirt;
     maage_client_ui_rect previous, full, tile;
     float uv[4], x, y;
@@ -127,7 +127,7 @@ void maage_client_ui_menu_background(maage_client_ui *ui) {
         memcpy(uv, ui->resources.menu_background_uv, sizeof(uv));
         available = 1;
     } else {
-        dirt = ui->blocks ? maage_block_registry_state(ui->blocks, ids->state_dirt) : NULL;
+        dirt = ui->blocks ? maage_block_registry_state(ui->blocks, ids->state_ui_background) : NULL;
         if (dirt && ui->resources.atlas_edge > 0) {
             uv[0] = dirt->faces[0].uv[0] * ui->resources.block_atlas_width / ui->resources.atlas_edge;
             uv[2] = dirt->faces[0].uv[2] * ui->resources.block_atlas_width / ui->resources.atlas_edge;

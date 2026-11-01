@@ -62,6 +62,8 @@ struct maage_random_tick_state;
 struct maage_item_registry;
 struct maage_smelting_registry;
 struct maage_fuel_registry;
+const struct maage_smelting_registry *maage_world_smelting_registry(const maage_world *world);
+const struct maage_fuel_registry *maage_world_fuel_registry(const maage_world *world);
 typedef enum maage_chunk_state {
     MAAGE_CHUNK_REQUESTED = 0,
     MAAGE_CHUNK_LOADING,
@@ -316,6 +318,7 @@ int maage_world_solid(const maage_world *world, int x, int y, int z);
 maage_status maage_world_raycast(const maage_world *world, const double origin[3], const double direction[3], double range, maage_world_target *target);
 /* Shared placement/survival query. NOOP defers unknown terrain/current light;
  * SUCCESS writes validity. Ordinary solid blocks have no support requirement. */
+maage_status maage_world_check_support(maage_world *world, int x, int y, int z);
 maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z, maage_block_state_id state, int *valid);
 /* Owner simulation phase only. Compare expected numeric state, then publish a
  * private copy; workers retain their old immutable snapshots. Invalidates

@@ -322,7 +322,7 @@ maage_status maage_client_audio_scene_bind(maage_client_audio_scene *scene, cons
     return sc_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_INITIALIZE);
 }
 static maage_status sc_observe(maage_client_audio_scene *scene, const maage_world *visual, const maage_session_snapshot *snapshot, const double listener[3], maage_client_audio_scene_observation *audio, maage_status_trace *trace) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(visual));
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(visual));
     const maage_block_registry *registry = maage_world_registry(visual);
     const maage_block_state_definition *state, *above;
     const maage_block_definition *block;

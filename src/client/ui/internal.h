@@ -67,7 +67,8 @@ struct maage_client_ui {
     int creative_dragging;
     maage_item_stack *creative_items;
     size_t creative_count;
-    float item_uv[MAAGE_CONTENT_TEXTURE_COUNT][4];
+    const float (*item_uv)[4];
+    size_t item_texture_count;
     maage_client_ui_resources resources;
     maage_client_ui_debug_cache debug_cache;
     maage_render_ui_vertex *vertices;

@@ -5,6 +5,22 @@ surface, vegetation and structure stages. Integrated and dedicated sessions use
 the same generator. Client biome color blending is a separate presentation setting
 and cannot change generated blocks, regional climate or feature choices.
 
+## Registration and Ownership
+
+`MaaGE::World` supplies detached columns, numeric registries, seed/policy services,
+Jobs, publication and persistence. The statically linked `MaaGE::Base` module
+registers the current generator/spawn providers and owns the terrain sampler,
+biome ecology, trees, structures and decoration choices. Biome ecology is copied
+opaque registration data; generic biome lookup does not interpret its layout.
+
+`maage_generation_ore_register` copies individually named numeric ore parameters,
+including a stable coordinate-RNG salt and optional density callback. The base
+provider preserves regional-owner order and its existing distributions while
+reading that registry. `maage_generation_feature_register` adds deterministic
+callbacks at existing stage boundaries. Workers borrow finalized definitions and
+mutate only their detached output; callback contexts are immutable and must outlive
+jobs. Registration order determines extension ordering, never job completion order.
+
 ## Regions and Terrain
 
 One seeded sampler classifies ocean, hills, taiga, desert, forest and plains from
@@ -174,7 +190,7 @@ disk operations, global barriers, or unconditional remeshing are introduced.
 
 ## Storage Codec Performance
 
-Current `MGCHNK8` region records use numeric saved state/biome IDs and
+Current `MGCHNK9` region records use numeric saved state/biome IDs and
 CRC32 integrity checks. The encoder now discovers the small set of
 distinct block identities using an allocated per-save hash table, sorting only
 unique entries instead of all occupied cells. The decoder copies validated
@@ -221,7 +237,7 @@ detached output column. Tree snow ownership uses two small job-local arrays of
 256 entries, with no persisted tree records or neighbor access. Spawn floor queries
 replay the same tree emitter and snow decisions.
 
-`MGWRLD11`, `MGCHNK8` and `MGRGN2` are the current formats. Existing saved chunks load
+`MGWRLD12`, `MGCHNK9` and `MGRGN2` are the current formats. Block-entity records identify their owning block through the World block dictionary and dispatch versioned registered codecs; runtime handler IDs are never persisted as an ordering assumption. Existing saved chunks load
 their authoritative blocks and biome identities; they are not regenerated or
 rewritten to adopt a new region model. Only missing chunks use current generation.
 Existing-to-new material, decoration or biome-tint seams can therefore remain,

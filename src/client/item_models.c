@@ -104,7 +104,6 @@ static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *i
 }
 
 maage_status maage_client_item_model(const maage_client_resources *resources, const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, maage_mesh_vertex *vertices, unsigned int *indices, maage_mesh_data *data) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     const maage_item_definition *item;
     const maage_block_state_definition *state;
     const maage_block_definition *block;
@@ -118,7 +117,7 @@ maage_status maage_client_item_model(const maage_client_resources *resources, co
     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
     if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
         texture = maage_client_item_texture(item, stack->metadata);
-        if (texture >= MAAGE_CONTENT_TEXTURE_COUNT) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
+        if (texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
         if (state) maage_client_item_face_tint(resources->inventory_grass_color, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
         maage_item_model_sprite(vertices, indices, &faces, resources->uv[texture], tint);
         /* Center the shared sprite. Contexts apply their own transforms. */
@@ -133,7 +132,7 @@ maage_status maage_client_item_model(const maage_client_resources *resources, co
             maximum[axis] = block->selection_shape.maximum[axis] - 0.5;
         }
         material = block->opaque ? MAAGE_MESH_MATERIAL_OPAQUE : MAAGE_MESH_MATERIAL_CUTOUT;
-        if (block->id == ids->block_ice) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
+        if (block->mesh_material == MAAGE_MESH_MATERIAL_TRANSLUCENT) material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
         maage_client_item_box(resources->inventory_grass_color, vertices, indices, &faces, minimum, maximum, state, material);
     }
     data->vertices = vertices;
@@ -143,7 +142,7 @@ maage_status maage_client_item_model(const maage_client_resources *resources, co
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
 }
 
-size_t maage_client_item_icon(const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float textures[MAAGE_CONTENT_TEXTURE_COUNT][4], maage_render_ui_vertex vertices[24]) {
+size_t maage_client_item_icon(const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float (*textures)[4], size_t texture_count, maage_render_ui_vertex vertices[24]) {
     static const unsigned int visible[3] = {MAAGE_FACE_NEGATIVE_X, MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_POSITIVE_Y};
     /* GUI light rig: ambient 0.4 plus two diffuse 0.6 lights,
      * evaluated for the orthographic item transform's visible face normals. */
@@ -164,7 +163,7 @@ size_t maage_client_item_icon(const maage_item_registry *items, const maage_bloc
     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
     if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
         texture = maage_client_item_texture(item, stack->metadata);
-        if (texture >= MAAGE_CONTENT_TEXTURE_COUNT) return 0;
+        if (texture >= texture_count) return 0;
         for (axis = 0; axis < 4; ++axis)
             tint[axis] = 1;
         if (state) maage_client_item_face_tint(grass, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);

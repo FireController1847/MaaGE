@@ -1,3 +1,5 @@
+#include "maage/generation.h"
+#include "maage/block_entity.h"
 #include <maage/blocks.h>
 #include "maage/items.h"
 #include "world_internal.h"
@@ -15,7 +17,6 @@ double maage_block_fluid_height(const maage_block_state_definition *state) {
 }
 
 void maage_block_fluid_flow(const maage_block_registry *registry, const maage_block_state_definition *state, const maage_block_state_definition *sides[4], const maage_block_state_definition *below[4], const maage_block_state_definition *above[4], double flow[3]) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
     static const int dx[4] = {-1, 1, 0, 0}, dz[4] = {0, 0, -1, 1};
     const maage_block_definition *block;
     const maage_block_state_definition *neighbor;
@@ -33,10 +34,10 @@ void maage_block_fluid_flow(const maage_block_registry *registry, const maage_bl
         else difference = 0;
         flow[0] += dx[side] * difference;
         flow[2] += dz[side] * difference;
-        if (block && block->material_solid && neighbor->block_id != ids->block_ice) wall = 1;
+        if (block && block->material_solid && !block->flow_permeable) wall = 1;
         neighbor = above[side];
         block = neighbor ? maage_block_registry_block(registry, neighbor->block_id) : NULL;
-        if (block && block->material_solid && neighbor->block_id != ids->block_ice) wall = 1;
+        if (block && block->material_solid && !block->flow_permeable) wall = 1;
     }
     length = sqrt(flow[0] * flow[0] + flow[2] * flow[2]);
     if (length > 0) {
@@ -51,16 +52,6 @@ void maage_block_fluid_flow(const maage_block_registry *registry, const maage_bl
     }
 }
 
-maage_status maage_block_leaves_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
-    unsigned int species = metadata & MAAGE_LEAF_SPECIES_MASK;
-    if (state) *state = MAAGE_CONTENT_ID_INVALID;
-    if (!ids || !state || metadata > 15 || species > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-    if (!maage_block_registry_state(registry, ids->leaves[metadata])) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-    *state = ids->leaves[metadata];
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
-}
-
 typedef struct maage_block_slot {
     maage_block_definition definition;
     char *name;
@@ -72,7 +63,16 @@ typedef struct maage_state_slot {
 } maage_state_slot;
 
 struct maage_block_registry {
-    maage_builtin_ids ids;
+    maage_registry_bindings bindings;
+    maage_generation_feature *features;
+    char **feature_names;
+    size_t feature_count;
+    maage_ore_definition *ores;
+    char **ore_names;
+    size_t ore_count;
+    maage_block_entity_handler **entities;
+    char **entity_names;
+    size_t entity_count;
     maage_registry_pages blocks, states;
     maage_block_slot **name_buckets;
     maage_state_slot **state_buckets;
@@ -205,7 +205,7 @@ maage_status maage_block_registry_create(size_t block_capacity, size_t state_cap
     if (block_capacity > (maximum / sizeof(maage_block_slot *) - 1) / 2 || state_capacity > (maximum / sizeof(maage_state_slot *) - 1) / 2) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
     registry = (maage_block_registry *) calloc(1, sizeof(*registry));
     if (!registry) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_CREATE, 0);
-    memset(&registry->ids, 255, sizeof(registry->ids));
+    memset(&registry->bindings, 255, sizeof(registry->bindings));
     registry->bucket_count = block_capacity * 2 + 1;
     registry->state_bucket_count = state_capacity * 2 + 1;
     registry->name_buckets = (maage_block_slot **) calloc(registry->bucket_count, sizeof(*registry->name_buckets));
@@ -219,6 +219,26 @@ maage_status maage_block_registry_create(size_t block_capacity, size_t state_cap
 }
 maage_status maage_block_registry_destroy(maage_block_registry *registry) {
     if (!registry) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    {
+        size_t i;
+        for (i = 0; i < registry->entity_count; ++i) {
+            free(registry->entities[i]);
+            free(registry->entity_names[i]);
+        }
+        free(registry->entities);
+        free(registry->entity_names);
+    }
+    {
+        size_t i;
+        for (i = 0; i < registry->feature_count; ++i)
+            free(registry->feature_names[i]);
+        for (i = 0; i < registry->ore_count; ++i)
+            free(registry->ore_names[i]);
+        free(registry->features);
+        free(registry->feature_names);
+        free(registry->ores);
+        free(registry->ore_names);
+    }
     maage_registry_pages_destroy(&registry->blocks, maage_block_release);
     maage_registry_pages_destroy(&registry->states, maage_state_release);
     free(registry->name_buckets);
@@ -264,7 +284,6 @@ maage_status maage_block_registry_register_block(maage_block_registry *registry,
     }
     memcpy(slot->name, external_name, length);
     slot->definition = *definition;
-    slot->definition.builtins = &registry->ids;
     entry = maage_registry_pages_ensure(&registry->blocks, definition->id);
     if (!entry) {
         maage_block_release(slot);
@@ -273,7 +292,6 @@ maage_status maage_block_registry_register_block(maage_block_registry *registry,
     *entry = slot;
     bucket = maage_block_name_bucket(registry, external_name, &found);
     registry->name_buckets[bucket] = slot;
-    if (!strcmp(external_name, "minecraft:air")) registry->ids.block_air = definition->id;
     ++registry->block_count;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
@@ -294,7 +312,7 @@ static int maage_block_animation_valid(const float uv[4], const float animation[
 }
 
 maage_status maage_block_registry_register_state(maage_block_registry *registry, maage_block_state_definition *definition) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
+    const maage_registry_bindings *ids = maage_block_registry_bindings(registry);
     unsigned int face, component;
     size_t bucket;
     int found;
@@ -340,7 +358,6 @@ maage_status maage_block_registry_register_state(maage_block_registry *registry,
     slot = (maage_state_slot *) calloc(1, sizeof(*slot));
     if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     slot->definition = *definition;
-    slot->definition.builtins = &registry->ids;
     slot->occupied = 1;
     entry = maage_registry_pages_ensure(&registry->states, definition->id);
     if (!entry) {
@@ -350,36 +367,55 @@ maage_status maage_block_registry_register_state(maage_block_registry *registry,
     *entry = slot;
     bucket = maage_block_state_bucket(registry, definition->block_id, definition->metadata, &found);
     registry->state_buckets[bucket] = slot;
-    if (definition->block_id == registry->ids.block_air && !definition->metadata) registry->ids.state_air = definition->id;
+    if (definition->block_id == registry->bindings.block_air && !definition->metadata) registry->bindings.state_air = definition->id;
     ++registry->state_count;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
+static int maage_block_definition_valid(const maage_block_definition *block) {
+    unsigned int axis;
+    if (!block || block->emitted_light > 15 || block->light_opacity > 15 || block->mesh_shape > MAAGE_BLOCK_MESH_TORCH || block->mesh_material > 2 || !(block->hardness >= -DBL_MAX && block->hardness <= DBL_MAX) || !(block->item_drag >= 0 && block->item_drag <= 1) || (block->special_tool_class && !(block->special_tool_speed >= 1 && block->special_tool_speed <= 1024))) return 0;
+    for (axis = 0; axis < 3; ++axis) {
+        if (block->solid && !(block->collision_shape.minimum[axis] >= 0 && block->collision_shape.maximum[axis] <= 1 && block->collision_shape.minimum[axis] < block->collision_shape.maximum[axis])) return 0;
+        if (block->selectable && !(block->selection_shape.minimum[axis] >= 0 && block->selection_shape.maximum[axis] <= 1 && block->selection_shape.minimum[axis] < block->selection_shape.maximum[axis])) return 0;
+        if (block->contact_damage && !(block->contact_shape.minimum[axis] >= 0 && block->contact_shape.maximum[axis] <= 1 && block->contact_shape.minimum[axis] < block->contact_shape.maximum[axis])) return 0;
+    }
+    return 1;
+}
+static int maage_block_state_presentation_valid(const maage_block_state_definition *state) {
+    unsigned int side, channel;
+    const maage_block_face_definition *face;
+    if (state->texture_axis > 3) return 0;
+    for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
+        face = &state->faces[side];
+        if (face->tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || face->overlay_tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || !maage_block_uv_valid(face->uv, 0) || !maage_block_uv_valid(face->overlay_uv, 1) || !maage_block_uv_valid(face->snow_uv, 1) || !maage_block_uv_valid(face->flow_uv, 1) || !maage_block_animation_valid(face->uv, face->animation) || !maage_block_animation_valid(face->flow_uv, face->flow_animation)) return 0;
+        for (channel = 0; channel < 4; ++channel)
+            if (!(face->tint[channel] >= 0 && face->tint[channel] <= 1)) return 0;
+    }
+    return 1;
+}
 maage_status maage_block_registry_finalize(maage_block_registry *registry) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
+    const maage_registry_bindings *ids = maage_block_registry_bindings(registry);
     const maage_block_definition *air;
     const maage_block_state_definition *air_state;
     maage_block_state_definition *state;
     const maage_block_state_definition *flow;
     size_t bucket;
     unsigned int level;
+    size_t i;
+    const maage_block_definition *block;
     if (registry == NULL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     air = maage_block_registry_block(registry, ids->block_air);
     air_state = maage_block_registry_state(registry, ids->state_air);
     if (air == NULL || air->solid || air->opaque || air_state == NULL || air_state->block_id != ids->block_air) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
-    for (bucket = 0; bucket < registry->state_bucket_count; ++bucket) {
-        if (!registry->state_buckets[bucket]) continue;
-        state = &registry->state_buckets[bucket]->definition;
-        if (state->block_id == ids->block_water || state->block_id == ids->block_lava) {
-            const unsigned long *levels = state->block_id == ids->block_water ? ids->water : ids->lava;
-            state->fluid_source_state = levels[0];
-            for (level = 0; level < 16; ++level)
-                state->fluid_states[level] = levels[level];
-        }
+    for (i = 0; i < registry->block_count; ++i) {
+        block = maage_block_registry_block(registry, (maage_block_id) i);
+        if (!maage_block_definition_valid(block) || (block->unsupported_replaces && !maage_block_registry_state(registry, block->unsupported_state)) || (block->entity && maage_block_registry_entity(registry, block->entity->id) != block->entity)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     for (bucket = 0; bucket < registry->state_bucket_count; ++bucket) {
         if (!registry->state_buckets[bucket]) continue;
         state = &registry->state_buckets[bucket]->definition;
+        if (!maage_block_state_presentation_valid(state)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         if (!state->fluid_kind) continue;
 
         if (state->fluid_states[0] != state->fluid_source_state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
@@ -436,48 +472,132 @@ maage_status maage_block_registry_resolve_state(const maage_block_registry *regi
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
 }
 
-maage_status maage_block_sapling_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(registry);
-    unsigned int species = metadata & 7U;
-    if (state) *state = MAAGE_CONTENT_ID_INVALID;
-    if (!ids || !state || (metadata & ~15U) || species > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-    if (!maage_block_registry_state(registry, ids->saplings[metadata])) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-    *state = ids->saplings[metadata];
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
-}
-
-const maage_builtin_ids *maage_block_registry_builtin_ids(const maage_block_registry *registry) {
-    return registry ? &registry->ids : NULL;
-}
-maage_builtin_ids *maage_block_registry_initialize_ids(maage_block_registry *registry) {
-    return registry && !registry->finalized ? &registry->ids : NULL;
-}
-
 /* Complete item references after both independent domains have been registered. */
-maage_status maage_block_registry_bind_items(maage_block_registry *registry, const maage_item_registry *items) {
-    maage_block_definition *block;
-    const maage_builtin_ids *ids = maage_item_registry_builtin_ids(items);
-    size_t i;
+
+const maage_registry_bindings *maage_block_registry_bindings(const maage_block_registry *registry) {
+    return registry ? &registry->bindings : NULL;
+}
+maage_status maage_block_registry_bind(maage_block_registry *registry, const maage_registry_bindings *bindings) {
+    if (!registry || registry->finalized || !bindings) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->bindings = *bindings;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+maage_status maage_block_registry_update_block(maage_block_registry *registry, const maage_block_definition *definition) {
     void **entry;
-    if (!registry || registry->finalized || !maage_item_registry_is_finalized(items)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
-    for (i = 0; i < registry->block_count; ++i) {
-        entry = maage_registry_pages_find(&registry->blocks, (unsigned long) i);
-        block = &((maage_block_slot *) *entry)->definition;
-        if (block->id == ids->block_glass) block->drop_count = 0;
-        if (block->id == ids->block_clay) {
-            block->drop_item_id = ids->item_clay_ball;
-            block->drop_count = 4;
-        }
-        if (block->id == ids->block_quartz_ore) block->drop_item_id = ids->item_quartz;
-        if (!block->drop_count) continue;
-        if (!block->drop_item_id) {
-            if (block->id == ids->block_lit_furnace) block->drop_item_id = ids->item_furnace;
-            else if (block->id == ids->block_stone) block->drop_item_id = ids->item_cobblestone;
-            else if (block->id == ids->block_grass || block->id == ids->block_farmland) block->drop_item_id = ids->item_dirt;
-            else if (block->id == ids->block_snow_block) block->drop_item_id = ids->item_snowball;
-            else block->drop_item_id = maage_item_registry_block_item(items, block->id);
-        }
-        if (!maage_item_registry_get(items, block->drop_item_id)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0);
+    if (!registry || registry->finalized || !definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    entry = maage_registry_pages_find(&registry->blocks, definition->id);
+    if (!entry || !*entry) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    ((maage_block_slot *) *entry)->definition = *definition;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+maage_status maage_block_registry_update_state(maage_block_registry *registry, const maage_block_state_definition *definition) {
+    maage_block_state_definition *state;
+    if (!registry || registry->finalized || !definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    state = (maage_block_state_definition *) maage_block_registry_state(registry, definition->id);
+    if (!state || state->block_id != definition->block_id || state->metadata != definition->metadata) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    *state = *definition;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+
+maage_status maage_block_registry_register_entity(maage_block_registry *registry, const char *name, const maage_block_entity_handler *handler, const maage_block_entity_handler **output) {
+    maage_block_entity_handler **handlers, *copy;
+    char **names, *identity;
+    size_t i, count;
+    if (output) *output = NULL;
+    if (!registry || registry->finalized || !output || !handler || !maage_block_name_valid(name) || !handler->size || handler->size > 65536UL || !handler->encoded_size || handler->encoded_size > 65536UL || !handler->version || handler->drop_slots > (size_t) - 1 - MAAGE_DROP_STACKS || !handler->snapshot_ticks || !handler->valid || !handler->initialize || !handler->tick || !handler->can_commit || !handler->encode || !handler->decode || (handler->drop_slots && !handler->drop)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    for (i = 0; i < registry->entity_count; ++i)
+        if (!strcmp(registry->entity_names[i], name)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    count = registry->entity_count + 1;
+    if (!count || count > 4294967295UL || count > (size_t) - 1 / sizeof(*handlers) || count > (size_t) - 1 / sizeof(*names)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    handlers = (maage_block_entity_handler **) realloc(registry->entities, count * sizeof(*handlers));
+    if (!handlers) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->entities = handlers;
+    names = (char **) realloc(registry->entity_names, count * sizeof(*names));
+    if (!names) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->entity_names = names;
+    copy = (maage_block_entity_handler *) malloc(sizeof(*copy));
+    identity = (char *) malloc(strlen(name) + 1);
+    if (!copy || !identity) {
+        free(copy);
+        free(identity);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     }
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_INITIALIZE, 0);
+    strcpy(identity, name);
+    *copy = *handler;
+    copy->id = (unsigned long) count;
+    registry->entities[registry->entity_count] = copy;
+    registry->entity_names[registry->entity_count++] = identity;
+    *output = copy;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+const maage_block_entity_handler *maage_block_registry_entity(const maage_block_registry *registry, unsigned long id) {
+    return registry && id && id <= registry->entity_count ? registry->entities[id - 1] : NULL;
+}
+
+maage_status maage_generation_feature_register(maage_block_registry *registry, const char *name, const maage_generation_feature *definition, unsigned long *id) {
+    maage_generation_feature *grown;
+    char **names, *copy;
+    size_t i, count;
+    if (!registry || registry->finalized || !definition || !definition->callback || !maage_block_name_valid(name) || definition->stage >= MAAGE_GENERATION_STAGE_COUNT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    for (i = 0; i < registry->feature_count; ++i)
+        if (!strcmp(name, registry->feature_names[i])) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    count = registry->feature_count + 1;
+    if (!count || count > 4294967295UL || count > (size_t) - 1 / sizeof(*grown) || count > (size_t) - 1 / sizeof(*names)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    grown = (maage_generation_feature *) realloc(registry->features, count * sizeof(*grown));
+    if (!grown) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->features = grown;
+    names = (char **) realloc(registry->feature_names, count * sizeof(*names));
+    if (!names) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->feature_names = names;
+    copy = (char *) malloc(strlen(name) + 1);
+    if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    strcpy(copy, name);
+    registry->features[registry->feature_count] = *definition;
+    registry->features[registry->feature_count].id = (unsigned long) registry->feature_count;
+    registry->feature_names[registry->feature_count] = copy;
+    if (id) *id = (unsigned long) registry->feature_count;
+    ++registry->feature_count;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+maage_status maage_generation_ore_register(maage_block_registry *registry, const char *name, const maage_ore_definition *definition, unsigned long *id) {
+    maage_ore_definition *grown;
+    char **names, *copy;
+    size_t i, count;
+    if (!registry || registry->finalized || !definition || !maage_block_name_valid(name) || !definition->size || definition->size > 4096 || definition->minimum_y >= definition->maximum_y || definition->maximum_y > MAAGE_WORLD_HEIGHT || !maage_block_registry_state(registry, definition->state) || definition->salt > 4294967295UL) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    for (i = 0; i < registry->ore_count; ++i)
+        if (!strcmp(name, registry->ore_names[i])) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    count = registry->ore_count + 1;
+    if (!count || count > 4294967295UL || count > (size_t) - 1 / sizeof(*grown) || count > (size_t) - 1 / sizeof(*names)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    grown = (maage_ore_definition *) realloc(registry->ores, count * sizeof(*grown));
+    if (!grown) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->ores = grown;
+    names = (char **) realloc(registry->ore_names, count * sizeof(*names));
+    if (!names) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    registry->ore_names = names;
+    copy = (char *) malloc(strlen(name) + 1);
+    if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    strcpy(copy, name);
+    registry->ores[registry->ore_count] = *definition;
+    registry->ore_names[registry->ore_count] = copy;
+    if (id) *id = (unsigned long) registry->ore_count;
+    ++registry->ore_count;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
+size_t maage_generation_ore_count(const maage_block_registry *registry) {
+    return registry ? registry->ore_count : 0;
+}
+const maage_ore_definition *maage_generation_ore_at(const maage_block_registry *registry, size_t index) {
+    return registry && index < registry->ore_count ? &registry->ores[index] : NULL;
+}
+maage_status maage_generation_features_run(const maage_block_registry *registry, unsigned int stage, maage_chunk *chunk, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, const maage_job_token *token, maage_status_trace *trace) {
+    size_t i;
+    maage_status result;
+    if (!registry || !registry->finalized || !chunk) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, 0);
+    for (i = 0; i < registry->feature_count; ++i) {
+        if (registry->features[i].stage != stage) continue;
+        if (token && maage_job_cancelled(token)) return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, 0);
+        result = registry->features[i].callback(registry->features[i].context, chunk, seed, registry, biomes, policy, token, trace);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE);
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_GENERATE, 0);
 }

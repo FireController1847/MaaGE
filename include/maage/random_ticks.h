@@ -22,6 +22,10 @@ typedef struct maage_random_tick_context {
 /* Uniform [0,bound), with nonzero bound required by the callback contract.
  * The callback's operation result covers this infallible numeric step. */
 unsigned int maage_random_tick_next(maage_random_tick_context *context, unsigned int bound);
+struct maage_item_stack;
+/* Callbacks reserve entity capacity and validate quantities before mutation;
+ * this helper uses only the callback's persistent RNG for presentation velocity. */
+maage_status maage_random_tick_spawn_drop(maage_world *, int, int, int, const struct maage_item_stack *, maage_random_tick_context *);
 #ifdef __cplusplus
 }
 #endif

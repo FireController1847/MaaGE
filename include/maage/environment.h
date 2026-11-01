@@ -13,12 +13,8 @@ enum {
 };
 enum {
     MAAGE_BLOCK_UPDATE_FLUID = 1U,
-    MAAGE_BLOCK_UPDATE_SUPPORT = 2U
-};
-enum {
-    MAAGE_BLOCK_ENTITY_CONTAINER = 1UL,
-    MAAGE_BLOCK_ENTITY_FURNACE = 2UL,
-    MAAGE_BLOCK_ENTITY_SIGN = 3UL
+    MAAGE_BLOCK_UPDATE_SUPPORT = 2U,
+    MAAGE_BLOCK_UPDATE_CONTENT = 3U
 };
 typedef struct maage_environment_state {
     unsigned long ticks_low, ticks_high, day_tick, day_low, day_high;
@@ -66,8 +62,9 @@ maage_status maage_world_take_update(maage_world *world, unsigned long now_low, 
 void maage_world_environment(const maage_world *world, maage_environment_state *state);
 /* Owner-thread numeric block-entity foundation. Reads copy into caller storage;
  * length reports the required bytes, and short buffers fail without borrowing
- * a worker-visible payload. Set/remove use the same immutable publication path
- * as blocks; changing a block type removes its associated entity. */
+ * a worker-visible payload. Registered handlers validate owner commits. Live
+ * entities are created/removed with their owning block; switching states with
+ * the same handler preserves ownership. Unregistered payload types fail. */
 maage_status maage_world_block_entity_set(maage_world *world, int x, int y, int z, unsigned long type, unsigned long version, const void *data, size_t length);
 maage_status maage_world_block_entity_get(const maage_world *world, int x, int y, int z, unsigned long *type, unsigned long *version, void *data, size_t capacity, size_t *length);
 maage_status maage_world_block_entity_remove(maage_world *world, int x, int y, int z);

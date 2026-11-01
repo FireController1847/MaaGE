@@ -30,7 +30,7 @@ endif()
 # The local Session transport has no dependency on a loopback TCP stack.
 # Audio remains Client-only; Server depends solely on portable libraries.
 target_link_libraries(maage_client PRIVATE MaaGE::Render MaaGE::MinecraftAssets MaaGE::Image MaaGE::Skin
-    MaaGE::World MaaGE::Instance MaaGE::Session MaaGE::Server MaaGE::Audio
+    MaaGE::Base MaaGE::World MaaGE::Instance MaaGE::Session MaaGE::Server MaaGE::Audio
     MaaGE::SoundBank MaaGE::AudioCatalog)
 if(WIN32)
     target_link_libraries(maage_client PRIVATE psapi)

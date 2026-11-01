@@ -43,11 +43,9 @@ static void maage_client_debug_memory(double *resident, double *peak) {
     }
 #endif
 }
-static const char *maage_client_debug_biome(maage_biome_id biome) {
-    /* Display labels only: gameplay definitions remain numeric and immutable. */
-    static const char *const names[MAAGE_BIOME_COUNT] = {
-        "Ocean", "Plains", "Desert", "Extreme Hills", "Forest", "Taiga"};
-    return biome < MAAGE_BIOME_COUNT ? names[biome] : "Unknown";
+static const char *maage_client_debug_biome(const maage_biome_registry *biomes, maage_biome_id id) {
+    const maage_biome_definition *biome = maage_biome_registry_get(biomes, id);
+    return biome ? biome->display_name : "Unknown";
 }
 void maage_client_debug_frame(maage_client_debug *debug, double now, double elapsed, int presented, unsigned long ticks, double tick_seconds) {
     double duration, retained, weight;
@@ -74,7 +72,7 @@ void maage_client_debug_frame(maage_client_debug *debug, double now, double elap
     debug->tick_ms = debug->ticks ? debug->tick_seconds * 1000.0 / debug->ticks : 0;
     debug->timing_ready = 1;
 }
-const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes) {
+const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, const maage_biome_registry *biomes) {
     maage_client_ui_debug *text;
     const maage_client_metadata *identity = maage_client_identity();
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
@@ -130,7 +128,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->left[left++], "Facing: %s (%.1f / %.1f)", facing[direction], degrees, pitch * 57.29577951308232);
     if (snapshot->has_observation) {
         const maage_world_observation *observation = &snapshot->observation;
-        sprintf(text->left[left++], "Biome: %s", maage_client_debug_biome(observation->biome_id));
+        sprintf(text->left[left++], "Biome: %.127s", maage_client_debug_biome(biomes, observation->biome_id));
         if (observation->light_available) sprintf(text->left[left++], "Light: %u sky / %u block", (unsigned) observation->light >> 4, (unsigned) observation->light & 15);
     }
     if (snapshot->player.has_target) sprintf(text->left[left++], "Target: %d %d %d | %lu:%lu", snapshot->player.target.x, snapshot->player.target.y, snapshot->player.target.z, snapshot->player.target.block_id, snapshot->player.target.state_id);

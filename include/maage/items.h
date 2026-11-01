@@ -18,16 +18,14 @@ enum {
     MAAGE_ITEM_MODEL_SPRITE = 1
 };
 /* Item identities are allocated independently of blocks and states. */
-#define MAAGE_ITEM_TEXTURE_COUNT 64U
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
 typedef struct maage_item_definition {
-    const maage_builtin_ids *builtins; /* Registry-owned. */
+    const void *behavior_context; /* Borrowed immutable module data. */
     maage_item_id id;
     int has_block;
     maage_block_id block_id;
     maage_block_state_id placement_state_id, icon_state_id;
-    unsigned long fuel_ticks; /* Initialization hint used to populate the separate fuel registry. */
     unsigned int max_stack, durability, tool_class, tool_level, max_metadata;
     /* Nonzero durability is the inclusive maximum usable damage value. */
     double mining_speed;
@@ -35,10 +33,18 @@ typedef struct maage_item_definition {
     double food_saturation;
     int food_always_edible;
     maage_item_id container_item; /* Optional consumption remainder (food/fuel); max_stack must be one. */
-    unsigned int model;           /* Shared numeric presentation category. */
-    unsigned int texture_index;   /* Builtin item-atlas tile, initialization only. */
+    maage_block_state_id (*icon_state)(const struct maage_item_definition *, unsigned int);
+    maage_texture_id (*icon_texture)(const struct maage_item_definition *, unsigned int);
+    const char *(*variant_name)(const struct maage_item_definition *, unsigned int);
+    unsigned int model;         /* Shared numeric presentation category. */
+    unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;
     const char *display_name;
+    maage_status (*use_placement)(const struct maage_item_definition *, const struct maage_world *, const struct maage_world_target *, maage_block_state_id *, int *);
+    int placement_air_only;
+    int use_durability;      /* Successful use damages rather than consumes the stack. */
+    unsigned int break_wear; /* 0 none, 1 ordinary hardness, 2 matching block class. */
+    int fuel_container;
     maage_item_placement placement; /* NULL uses placement_state_id, metadata 0. */
 } maage_item_definition;
 typedef struct maage_item_stack {
@@ -62,14 +68,14 @@ maage_status maage_item_registry_finalize(maage_item_registry *registry);
 int maage_item_registry_is_finalized(const maage_item_registry *registry);
 const maage_item_definition *maage_item_registry_get(const maage_item_registry *registry, maage_item_id id);
 size_t maage_item_registry_count(const maage_item_registry *registry);
-const maage_builtin_ids *maage_item_registry_builtin_ids(const maage_item_registry *registry);
+
 /* First registered placeable item for this block, or zero if absent. */
 maage_item_id maage_item_registry_block_item(const maage_item_registry *registry, maage_block_id block);
 const maage_item_definition *maage_item_registry_at(const maage_item_registry *registry, size_t index);
 /* For persistence/import only, never the fixed-step simulation. */
 const char *maage_item_registry_name(const maage_item_registry *registry, maage_item_id id);
 maage_status maage_item_registry_resolve_name(const maage_item_registry *registry, const char *name, maage_item_id *id);
-maage_status maage_item_registry_create_builtin(const maage_block_registry *blocks, maage_item_registry **output);
+
 int maage_item_stack_valid(const maage_item_registry *registry, const maage_item_stack *stack);
 const maage_item_stack *maage_inventory_selected(const maage_inventory *inventory);
 /* Remaining is initialized to input count; PARTIAL retains uninserted items.

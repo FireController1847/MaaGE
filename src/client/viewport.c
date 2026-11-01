@@ -1,3 +1,4 @@
+#include "maage/base.h"
 #include "maage/window.h"
 #include "maage/client.h"
 #include "maage/input.h"
@@ -612,6 +613,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_local_column_update column_update;
     maage_content *content = NULL;
     maage_biome_registry *biomes = NULL;
+    maage_content_config content_registration;
     const maage_block_registry *blocks = NULL;
     const maage_item_registry *items = NULL;
     maage_instance *instance = maage_client_storage_instance();
@@ -744,8 +746,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         goto done;
     }
     operation = maage_biome_registry_init(biomes);
+    if (!maage_status_failed(operation)) operation = maage_base_biomes_register(biomes);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_resources_load(directory, &resources, biomes, maage_client_storage_player(), maage_client_splash_update, &splash, trace);
+    memset(&content_registration, 0, sizeof(content_registration));
+    content_registration.register_content = maage_base_register;
+    operation = maage_client_resources_load(directory, &content_registration, &resources, biomes, maage_client_storage_player(), maage_client_splash_update, &splash, trace);
     if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice)) resource_notice = resources.load_status;
     maage_status_trace_init(trace);
@@ -772,7 +777,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     (void) maage_image_destroy(&resources.image);
     resources.atlas.pixels = NULL;
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_set_content(ui, items, blocks, resources.inventory_grass_color, resources.uv);
+    operation = maage_client_ui_set_content(ui, items, blocks, resources.inventory_grass_color, resources.uv, resources.texture_count);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_frontend_create(ui, instance, content, &frontend, trace);
     if (maage_status_failed(operation)) goto done;
@@ -1503,7 +1508,7 @@ choose_world:
             }
             cache.draws[draw_count++] = interaction.mesh;
         }
-        debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, &visual_snapshot, options.radius, !active, renderer, &mesh_stats) : NULL;
+        debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, &visual_snapshot, options.radius, !active, renderer, &mesh_stats, maage_content_biomes(content)) : NULL;
         maage_client_ui_notice_time(ui, now);
         operation = maage_client_ui_draw(ui, debug_text, &ui_draw);
         if (maage_status_failed(operation)) goto done;

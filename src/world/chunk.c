@@ -77,7 +77,6 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z) {
 }
 
 maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage_block_registry *blocks, int *leaf_rechecks) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_block_state_id pending;
@@ -95,12 +94,12 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
             /* Detached load/generation output only. Rechecking natural leaves
              * catches support removals that occurred while this column was
              * absent, without retaining events or generating distant terrain. */
-            if (state->block_id == ids->block_leaves && !(state->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) {
-                result = maage_block_leaves_state(blocks, state->metadata | MAAGE_LEAF_CHECK_DECAY, &pending);
+            if (block->import_state) {
+                result = block->import_state(blocks, state, &pending);
                 if (maage_status_failed(result)) return result;
                 if (!maage_block_registry_state(blocks, pending)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
                 chunk->sections[section]->states[cell] = pending;
-                *leaf_rechecks = 1;
+                if (pending != state->id) *leaf_rechecks = 1;
             }
             if (state->random_ticks) ++chunk->random_tick_counts[section];
         }
@@ -119,4 +118,27 @@ unsigned char maage_chunk_presentation_light(const maage_chunk *chunk, const maa
     /* This is never stored in numerical light buffers. Roofed terrain has a
      * modest sky approximation; calculated cave darkness is left untouched. */
     return (unsigned char) ((y >= chunk->heightmap[z * 16 + x] ? 240 : 64) | (block ? block->emitted_light : 0));
+}
+
+int maage_chunk_x(const maage_chunk *chunk) {
+    return chunk ? chunk->x : 0;
+}
+int maage_chunk_z(const maage_chunk *chunk) {
+    return chunk ? chunk->z : 0;
+}
+maage_status maage_chunk_set_biome(maage_chunk *chunk, int x, int z, maage_biome_id biome) {
+    if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || biome >= MAAGE_CONTENT_ID_INVALID) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    chunk->biomes[z * 16 + x] = biome;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+
+maage_status maage_chunk_generation_output(maage_chunk *chunk, maage_generation_output *output) {
+    if (!chunk || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    output->x = chunk->x;
+    output->z = chunk->z;
+    output->biomes = chunk->biomes;
+    output->heightmap = chunk->heightmap;
+    output->stages = &chunk->generation_stages;
+    output->features = chunk->generation_features;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
 }

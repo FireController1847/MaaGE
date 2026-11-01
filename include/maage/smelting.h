@@ -30,5 +30,4 @@ maage_status maage_fuel_register(maage_fuel_registry *registry, const maage_fuel
 maage_status maage_fuel_finalize(maage_fuel_registry *registry);
 maage_status maage_fuel_destroy(maage_fuel_registry *registry);
 const maage_fuel_definition *maage_fuel_find(const maage_fuel_registry *registry, maage_item_id item, unsigned int metadata);
-maage_status maage_smelting_create_builtin(const maage_item_registry *items, maage_smelting_registry **recipes, maage_fuel_registry **fuels);
 #endif

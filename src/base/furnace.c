@@ -118,8 +118,8 @@ maage_status maage_furnace_click(maage_furnace_state *state, maage_inventory *in
             if (!source->count) memset(source, 0, sizeof(*source));
         } else furnace_merge(source, &carried.cursor, items);
     } else {
-        if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && carried.cursor.count && !maage_fuel_find(fuels, carried.cursor.item_id, carried.cursor.metadata) && carried.cursor.item_id != maage_item_registry_builtin_ids(items)->item_bucket) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
-        if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && carried.cursor.item_id == maage_item_registry_builtin_ids(items)->item_bucket && carried.cursor.count > 1) {
+        if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && carried.cursor.count && !maage_fuel_find(fuels, carried.cursor.item_id, carried.cursor.metadata) && !maage_item_registry_get(items, carried.cursor.item_id)->fuel_container) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
+        if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && (carried.cursor.count && maage_item_registry_get(items, carried.cursor.item_id)->fuel_container) && carried.cursor.count > 1) {
             if (source->count) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
             *source = carried.cursor;
             source->count = 1;

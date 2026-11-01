@@ -159,6 +159,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 
 ## Numeric Identity and Content
 
+- `MaaGE::Base` registers the built-in game through the same public content/behavior APIs as other statically linked modules; generic World/Server code must not consult its private reference table. Module callbacks/data outlive finalized registries and jobs.
 - Block types, states, items and biomes are distinct automatically allocated numeric
   domains. Registration assigns IDs and captures built-in references; finalized
   tables are immutable. ID-to-definition access is deterministic direct O(1).
@@ -227,10 +228,10 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
   never acquire plant support requirements. Preserve each block's distinct rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD11` metadata embeds one checksummed
+  worlds. Canonical UUIDs identify them. `MGWRLD12` metadata embeds one checksummed
   `MGIDMAP1` World dictionary for blocks, states (block identity plus metadata), items
-  and biomes; `MGRGN2` region headers bind its UUID. `MGCHNK8` palettes, stacks and
-  entities carry numeric saved IDs only. Resolve names once at open, retain both
+  and biomes; `MGRGN2` region headers bind its UUID. `MGCHNK9` palettes, stacks and
+  entities carry numeric saved IDs only. Block-entity records bind registered codecs through the owning saved block identity, not runtime handler order. Resolve names once at open, retain both
   numeric translation directions, and atomically publish map extensions before jobs
   can save new IDs. Never reinterpret saved IDs or duplicate dictionaries per chunk.
   Reject missing content, incompatible/corrupt bytes and duplicate identities. Keep

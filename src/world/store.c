@@ -1,3 +1,4 @@
+#include "maage/block_entity.h"
 #include "world_internal.h"
 #include "region_store.h"
 #include "maage/world_store.h"
@@ -700,7 +701,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWRLD11", 8);
+    maage_store_text_put(&bytes, "MGWRLD12", 8);
     maage_store_put(&bytes, (unsigned long) store->map_length, 4);
     maage_store_text_put(&bytes, (const char *) store->map_bytes, store->map_length);
     maage_store_put(&bytes, record->seed.low, 4);
@@ -765,12 +766,12 @@ static maage_status maage_store_metadata_load(maage_world_store *store, const ch
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD11", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD12", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD11");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD12");
     if (ok) {
         unsigned long map_length = maage_store_get(&bytes, 4);
         if (bytes.failed || map_length > bytes.length - bytes.position) ok = 0;
@@ -1064,8 +1065,39 @@ static size_t maage_store_biome_index(const maage_biome_id *biomes, size_t count
     }
     return left < count && biomes[left] == value ? left : count;
 }
+typedef struct maage_store_entity_codec {
+    maage_store_bytes *bytes;
+    const maage_world_store *store;
+    int writing;
+} maage_store_entity_codec;
+static maage_status maage_store_entity_word(void *context, unsigned long *word, unsigned int width) {
+    maage_store_entity_codec *codec = (maage_store_entity_codec *) context;
+    if (!width || width > 4) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
+    if (codec->writing && *word > (width == 4 ? MAAGE_STORE_WORD : ((1UL << (width * 8U)) - 1UL))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_ENCODE, 0);
+    if (codec->writing) maage_store_put(codec->bytes, *word, width);
+    else *word = maage_store_get(codec->bytes, width);
+    if (maage_status_failed(codec->bytes->failure)) return codec->bytes->failure;
+    return maage_status_make(codec->bytes->failed ? MAAGE_STATUS_MALFORMED_INPUT : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_ENCODE : MAAGE_OPERATION_DECODE, 0);
+}
+static maage_status maage_store_entity_stack(void *context, maage_item_stack *stack) {
+    maage_store_entity_codec *codec = (maage_store_entity_codec *) context;
+    if (codec->writing) maage_store_stack_put(codec->bytes, stack, codec->store);
+    else maage_store_stack_get(codec->bytes, stack, codec->store);
+    if (maage_status_failed(codec->bytes->failure)) return codec->bytes->failure;
+    return maage_status_make(codec->bytes->failed ? MAAGE_STATUS_MALFORMED_INPUT : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD_IO, codec->writing ? MAAGE_OPERATION_ENCODE : MAAGE_OPERATION_DECODE, 0);
+}
+static const maage_block_entity_handler *maage_store_entity_handler(const maage_block_registry *blocks, const maage_block_state_definition *state) {
+    const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    return block ? block->entity : NULL;
+}
 static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chunk *chunk, const maage_block_registry *blocks, const maage_world_store *store) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    const maage_block_entity_handler *handler;
+    maage_store_entity_codec adapter;
+    maage_entity_codec codec;
+    maage_status result;
+    unsigned long saved_block;
+    size_t end;
+    const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
     maage_scheduled_update update;
     maage_block_entity *entity;
     unsigned char occupied[8192];
@@ -1080,10 +1112,10 @@ static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chun
         chunk->generation_features[i] = maage_store_get(bytes, 4);
     chunk->environment_initialized = (int) maage_store_get(bytes, 1);
     count = maage_store_get(bytes, 4);
-    if (bytes->failed || chunk->environment_initialized > 1 || count > 131072UL || count > (bytes->length - bytes->position) / 14UL) return 0;
+    if (bytes->failed || chunk->environment_initialized > 1 || count > 196608UL || count > (bytes->length - bytes->position) / 14UL) return 0;
     for (i = 0; i < count; ++i) {
         update.kind = (unsigned int) maage_store_get(bytes, 4);
-        if (update.kind != MAAGE_BLOCK_UPDATE_FLUID && update.kind != MAAGE_BLOCK_UPDATE_SUPPORT) return 0;
+        if (update.kind != MAAGE_BLOCK_UPDATE_FLUID && update.kind != MAAGE_BLOCK_UPDATE_SUPPORT && update.kind != MAAGE_BLOCK_UPDATE_CONTENT) return 0;
         update.cell = (unsigned int) maage_store_get(bytes, 2);
         update.due_low = maage_store_get(bytes, 4);
         update.due_high = maage_store_get(bytes, 4);
@@ -1105,65 +1137,52 @@ static int maage_store_chunk_simulation_get(maage_store_bytes *bytes, maage_chun
     for (i = 0; i < count; ++i) {
         entity = &chunk->entities[chunk->entity_count++];
         entity->cell = (unsigned int) maage_store_get(bytes, 2);
-        entity->type = maage_store_get(bytes, 4);
+        saved_block = maage_store_runtime(store, MAAGE_STORE_BLOCK, maage_store_get(bytes, 4), bytes);
         entity->version = maage_store_get(bytes, 4);
         length = maage_store_get(bytes, 4);
-        if (bytes->failed || !entity->type || !entity->version || length > 65536UL || length > bytes->length - bytes->position || (occupied[entity->cell / 8] & (1U << (entity->cell % 8)))) return 0;
+        if (bytes->failed || !entity->version || length > 65536UL || length > bytes->length - bytes->position || (occupied[entity->cell / 8] & (1U << (entity->cell % 8)))) return 0;
         state = maage_block_registry_state(blocks, maage_chunk_get(chunk, (int) (entity->cell % 16), (int) (entity->cell / 256), (int) ((entity->cell / 16) % 16)));
         if (!state || state->block_id == ids->block_air) return 0;
         occupied[entity->cell / 8] |= (unsigned char) (1U << (entity->cell % 8));
-        if (entity->type == MAAGE_BLOCK_ENTITY_FURNACE) {
-            maage_furnace_state furnace;
-            unsigned int slot;
-            if (length != 55UL || entity->version != MAAGE_FURNACE_VERSION || (state->block_id != ids->block_furnace && state->block_id != ids->block_lit_furnace)) return 0;
-            memset(&furnace, 0, sizeof(furnace));
-            for (slot = 0; slot < 3; ++slot)
-                maage_store_stack_get(bytes, &furnace.slots[slot], store);
-            furnace.burn = maage_store_get(bytes, 4);
-            furnace.duration = maage_store_get(bytes, 4);
-            {
-                unsigned long cook = maage_store_get(bytes, 4);
-                furnace.cook = (unsigned int) cook;
-                if (cook >= MAAGE_FURNACE_COOK_TICKS) return 0;
-            }
-            furnace.revision = maage_store_get(bytes, 4);
-            if (bytes->failed || !maage_furnace_valid(&furnace, store->items) || (furnace.burn != 0) != (state->block_id == ids->block_lit_furnace)) return 0;
-            entity->length = sizeof(furnace);
-            entity->data = (unsigned char *) malloc(sizeof(furnace));
-            if (!entity->data) {
-                bytes->failure = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
-                return 0;
-            }
-            memcpy(entity->data, &furnace, sizeof(furnace));
-            continue;
+        handler = maage_store_entity_handler(blocks, state);
+        if (!handler || state->block_id != saved_block || entity->version != handler->version || length != handler->encoded_size) return 0;
+        entity->type = handler->id;
+        entity->length = handler->size;
+        entity->data = (unsigned char *) calloc(1, handler->size);
+        if (!entity->data) {
+            bytes->failure = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
+            return 0;
         }
-        if (state->block_id == ids->block_furnace || state->block_id == ids->block_lit_furnace) return 0;
-        entity->length = (size_t) length;
-        if (length) {
-            entity->data = (unsigned char *) malloc((size_t) length);
-            if (!entity->data) {
-                bytes->failure = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
-                return 0;
-            }
-            memcpy(entity->data, bytes->data + bytes->position, (size_t) length);
-            bytes->position += (size_t) length;
+        end = bytes->position + (size_t) length;
+        adapter.bytes = bytes;
+        adapter.store = store;
+        adapter.writing = 0;
+        codec.context = &adapter;
+        codec.word = maage_store_entity_word;
+        codec.stack = maage_store_entity_stack;
+        result = handler->decode(entity->data, &codec);
+        if (maage_status_failed(result)) {
+            bytes->failure = result;
+            return 0;
         }
+        if (bytes->failed || bytes->position != end || !handler->valid(handler, state, store->items, entity->data)) return 0;
     }
     chunk->updates_relative = 1;
     return !bytes->failed;
 }
 static int maage_store_chunk_simulation_size(const maage_chunk *chunk, const maage_block_registry *blocks, const maage_world_store *store, size_t *length) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
-    unsigned char occupied[16384];
+    const maage_block_entity_handler *handler;
+    const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
+    unsigned char occupied[24576];
     const maage_block_entity *entity;
     const maage_block_state_definition *state;
     size_t i, size = 45UL;
-    if (chunk->update_count > 131072UL || chunk->entity_count > 65536UL || chunk->generation_stages > 255U || (chunk->environment_initialized != 0 && chunk->environment_initialized != 1)) return 0;
+    if (chunk->update_count > 196608UL || chunk->entity_count > 65536UL || chunk->generation_stages > 255U || (chunk->environment_initialized != 0 && chunk->environment_initialized != 1)) return 0;
     size += chunk->update_count * 14UL + chunk->entity_count * 14UL;
     memset(occupied, 0, sizeof(occupied));
     for (i = 0; i < chunk->update_count; ++i) {
         const maage_scheduled_update *update = &chunk->updates[i];
-        if ((update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_SUPPORT) || update->cell > 65535U ||
+        if ((update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_SUPPORT && update->kind != MAAGE_BLOCK_UPDATE_CONTENT) || update->cell > 65535U ||
             update->due_low > MAAGE_STORE_WORD || update->due_high > MAAGE_STORE_WORD ||
             (occupied[(update->kind - 1U) * 8192U + update->cell / 8] & (1U << (update->cell % 8)))) return 0;
         occupied[(update->kind - 1U) * 8192U + update->cell / 8] |= (unsigned char) (1U << (update->cell % 8));
@@ -1177,12 +1196,9 @@ static int maage_store_chunk_simulation_size(const maage_chunk *chunk, const maa
         state = maage_block_registry_state(blocks, maage_chunk_get(chunk, (int) (entity->cell % 16), (int) (entity->cell / 256), (int) ((entity->cell / 16) % 16)));
         if (!state || state->block_id == ids->block_air) return 0;
         occupied[entity->cell / 8] |= (unsigned char) (1U << (entity->cell % 8));
-        if (entity->type == MAAGE_BLOCK_ENTITY_FURNACE) {
-            const maage_furnace_state *furnace = (const maage_furnace_state *) entity->data;
-            if (entity->version != MAAGE_FURNACE_VERSION || entity->length != sizeof(*furnace) || !maage_furnace_valid(furnace, store->items) ||
-                (state->block_id != ids->block_furnace && state->block_id != ids->block_lit_furnace) || (furnace->burn != 0) != (state->block_id == ids->block_lit_furnace)) return 0;
-            size += 55UL;
-        } else size += entity->length;
+        handler = maage_store_entity_handler(blocks, state);
+        if (!handler || entity->type != handler->id || entity->version != handler->version || entity->length != handler->size || !handler->valid(handler, state, store->items, entity->data) || handler->encoded_size > MAAGE_STORE_CHUNK_MAX - size) return 0;
+        size += handler->encoded_size;
     }
     for (i = 0; i < 8; ++i)
         if (chunk->generation_features[i] > MAAGE_STORE_WORD) return 0;
@@ -1190,7 +1206,12 @@ static int maage_store_chunk_simulation_size(const maage_chunk *chunk, const maa
     return 1;
 }
 static void maage_store_chunk_simulation_put(maage_store_bytes *bytes, const maage_chunk *chunk, const maage_world_store *store, unsigned long now_low, unsigned long now_high) {
-    size_t i, j;
+    size_t i, end;
+    const maage_block_state_definition *state;
+    const maage_block_entity_handler *handler;
+    maage_store_entity_codec adapter;
+    maage_entity_codec codec;
+    maage_status result;
     unsigned long low, high;
     const maage_scheduled_update *update;
     const maage_block_entity *entity;
@@ -1218,22 +1239,32 @@ static void maage_store_chunk_simulation_put(maage_store_bytes *bytes, const maa
     for (i = 0; i < chunk->entity_count; ++i) {
         entity = &chunk->entities[i];
         maage_store_put(bytes, entity->cell, 2);
-        maage_store_put(bytes, entity->type, 4);
-        maage_store_put(bytes, entity->version, 4);
-        if (entity->type == MAAGE_BLOCK_ENTITY_FURNACE) {
-            const maage_furnace_state *furnace = (const maage_furnace_state *) entity->data;
-            maage_store_put(bytes, 55UL, 4);
-            for (j = 0; j < 3; ++j)
-                maage_store_stack_put(bytes, &furnace->slots[j], store);
-            maage_store_put(bytes, furnace->burn, 4);
-            maage_store_put(bytes, furnace->duration, 4);
-            maage_store_put(bytes, furnace->cook, 4);
-            maage_store_put(bytes, furnace->revision, 4);
-            continue;
+        state = maage_block_registry_state(store->blocks, maage_chunk_get(chunk, entity->cell % 16, entity->cell / 256, (entity->cell / 16) % 16));
+        handler = maage_store_entity_handler(store->blocks, state);
+        if (!handler) {
+            bytes->failed = 1;
+            return;
         }
-        maage_store_put(bytes, (unsigned long) entity->length, 4);
-        for (j = 0; j < entity->length; ++j)
-            maage_store_put(bytes, entity->data[j], 1);
+        maage_store_put(bytes, maage_store_saved(store, MAAGE_STORE_BLOCK, state->block_id, bytes), 4);
+        maage_store_put(bytes, entity->version, 4);
+        maage_store_put(bytes, (unsigned long) handler->encoded_size, 4);
+        adapter.bytes = bytes;
+        adapter.store = store;
+        adapter.writing = 1;
+        codec.context = &adapter;
+        codec.word = maage_store_entity_word;
+        codec.stack = maage_store_entity_stack;
+        end = bytes->position + handler->encoded_size;
+        result = handler->encode(entity->data, &codec);
+        if (maage_status_failed(result)) {
+            bytes->failure = result;
+            bytes->failed = 1;
+            return;
+        }
+        if (bytes->position != end) {
+            bytes->failed = 1;
+            return;
+        }
     }
 }
 static maage_status maage_store_chunk_decode(const maage_world_store *store, unsigned char *data, size_t length, int x, int z, const maage_block_registry *blocks, maage_chunk **output, maage_status_trace *trace) {
@@ -1241,14 +1272,14 @@ static maage_status maage_store_chunk_decode(const maage_world_store *store, uns
     maage_chunk *chunk = NULL;
     struct maage_store_palette_entry {
         maage_block_state_id state;
-        int furnace;
+        int entity;
     } *palette = NULL;
     maage_biome_id biome_palette[256];
     unsigned long mask, stored_x, stored_z, expected_x, expected_z, value;
     unsigned long state_count, biome_count;
     size_t i, section, payload_length = 768UL + 45UL;
-    size_t active_cells = 0, furnace_cells = 0, furnace_entities = 0;
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    size_t active_cells = 0, entity_cells = 0, entity_count = 0;
+    const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
     maage_status result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
     *output = NULL;
     bytes.data = data;
@@ -1256,7 +1287,7 @@ static maage_status maage_store_chunk_decode(const maage_world_store *store, uns
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (length < 845UL || !maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK8\0")) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
+    if (length < 845UL || !maage_store_checksum(&bytes) || !maage_store_magic(&bytes, "MGCHNK9\0")) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE);
     stored_x = maage_store_get(&bytes, 4);
     stored_z = maage_store_get(&bytes, 4);
     expected_x = (unsigned long) x & MAAGE_STORE_WORD;
@@ -1292,12 +1323,12 @@ static maage_status maage_store_chunk_decode(const maage_world_store *store, uns
             bytes.failed = 1;
             break;
         }
-        palette[i].furnace = state->block_id == ids->block_furnace || state->block_id == ids->block_lit_furnace;
+        palette[i].entity = maage_store_entity_handler(blocks, state) != NULL;
     }
     for (i = 0; i < biome_count; ++i)
         biome_palette[i] = maage_store_runtime(store, MAAGE_STORE_BIOME, maage_store_get(&bytes, 4), &bytes);
     if (bytes.failed || bytes.length - bytes.position < payload_length) goto failed;
-    result = maage_chunk_create(x, z, maage_block_registry_builtin_ids(blocks)->state_air, &chunk);
+    result = maage_chunk_create(x, z, maage_block_registry_bindings(blocks)->state_air, &chunk);
     if (maage_status_failed(result)) goto failed;
     result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_DECODE, 0);
     for (i = 0; i < 256; ++i) {
@@ -1325,7 +1356,7 @@ static maage_status maage_store_chunk_decode(const maage_world_store *store, uns
             value = (unsigned long) bytes.data[offset] | ((unsigned long) bytes.data[offset + 1] << 8);
             if (value >= state_count) goto failed;
             chunk->sections[section]->states[i] = palette[value].state;
-            furnace_cells += palette[value].furnace;
+            entity_cells += palette[value].entity;
         }
         bytes.position += MAAGE_SECTION_VOLUME * 2UL;
         memcpy(chunk->sections[section]->light, bytes.data + bytes.position, MAAGE_SECTION_VOLUME);
@@ -1335,8 +1366,8 @@ static maage_status maage_store_chunk_decode(const maage_world_store *store, uns
         chunk->generation_stages != (1U << MAAGE_GENERATION_STAGE_COUNT) - 1U ||
         bytes.failed || bytes.position != bytes.length) goto failed;
     for (i = 0; i < chunk->entity_count; ++i)
-        if (chunk->entities[i].type == MAAGE_BLOCK_ENTITY_FURNACE) ++furnace_entities;
-    if (furnace_cells != furnace_entities) goto failed;
+        if (maage_block_registry_entity(blocks, chunk->entities[i].type)) ++entity_count;
+    if (entity_cells != entity_count) goto failed;
     free(palette);
     *output = chunk;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DECODE, 0);
@@ -1376,8 +1407,8 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     maage_biome_id biome_ids[256];
     unsigned long mask = 0;
     size_t i, section, j, unique = 0, biome_count = 0, cells = 0;
-    size_t capacity = 800UL, simulation_length, furnace_cells = 0, furnace_entities = 0;
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    size_t capacity = 800UL, simulation_length, entity_cells = 0, entity_count = 0;
+    const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
     maage_status result;
     if (!store || !chunk || !blocks || !biomes || blocks != store->blocks || biomes != store->biomes || !maage_store_coordinates(chunk->x, chunk->z)) {
         maage_store_error(error, "Chunk coordinates or path exceed the world format bounds.");
@@ -1422,7 +1453,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
             size_t bucket = (size_t) ((id ^ (id >> 16)) * 2654435761UL) & (slot_capacity - 1U);
             const maage_block_state_definition *state = maage_block_registry_state(blocks, id);
             if (!state) goto incompatible;
-            if (state->block_id == ids->block_furnace || state->block_id == ids->block_lit_furnace) ++furnace_cells;
+            if (maage_store_entity_handler(blocks, state) != NULL) ++entity_cells;
             while (state_slots[bucket] && states[state_slots[bucket] - 1U] != id)
                 bucket = (bucket + 1U) & (slot_capacity - 1U);
             if (!state_slots[bucket]) {
@@ -1432,8 +1463,8 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
         }
     }
     for (i = 0; i < chunk->entity_count; ++i)
-        if (chunk->entities[i].type == MAAGE_BLOCK_ENTITY_FURNACE) ++furnace_entities;
-    if (furnace_cells != furnace_entities) goto incompatible;
+        if (maage_block_registry_entity(blocks, chunk->entities[i].type)) ++entity_count;
+    if (entity_cells != entity_count) goto incompatible;
     free(state_slots);
     state_slots = NULL;
     if (unique) qsort(states, unique, sizeof(*states), maage_store_state_compare);
@@ -1458,7 +1489,7 @@ maage_status maage_world_store_save_chunk_at(maage_world_store *store, const maa
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGCHNK8\0", 8);
+    maage_store_text_put(&bytes, "MGCHNK9\0", 8);
     maage_store_put(&bytes, (unsigned long) chunk->x, 4);
     maage_store_put(&bytes, (unsigned long) chunk->z, 4);
     maage_store_put(&bytes, mask, 2);

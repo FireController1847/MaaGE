@@ -26,7 +26,7 @@ static void maage_client_ui_stack(maage_client_ui *ui, const maage_item_stack *s
     if (!stack || !stack->count || !ui->items || !ui->blocks) return;
     item = maage_item_registry_get(ui->items, stack->item_id);
     if (!item) return;
-    quads = maage_client_item_icon(ui->items, ui->blocks, stack, ui->inventory_grass_color, ui->item_uv, vertices);
+    quads = maage_client_item_icon(ui->items, ui->blocks, stack, ui->inventory_grass_color, ui->item_uv, ui->item_texture_count, vertices);
     for (i = 0; i < quads * 4; ++i) {
         vertices[i].position[0] += x;
         vertices[i].position[1] += y;
@@ -361,15 +361,16 @@ static void maage_client_ui_inventory_draw(maage_client_ui *ui, void *context) {
         else
             maage_client_ui_player_preview(ui, frame);
         if (table == 2) {
-            const maage_furnace_state *furnace = &ui->snapshot.player.furnace;
-            unsigned long duration = furnace->duration ? furnace->duration : MAAGE_FURNACE_COOK_TICKS;
+            const maage_crafting_container *furnace = &ui->snapshot.player.crafting;
+            unsigned long process_duration = furnace->process_duration ? furnace->process_duration : 1;
+            unsigned long duration = furnace->active_duration ? furnace->active_duration : process_duration;
             unsigned long quotient = duration / 13UL, remainder = duration % 13UL;
             float edge = (float) ui->resources.atlas_edge;
-            int flame = 13, arrow = (int) (furnace->cook * 24U / MAAGE_FURNACE_COOK_TICKS), top;
+            int flame = 13, arrow = (int) (furnace->process * 24U / process_duration), top;
             /* Integer pixel thresholds avoid overflowing 32-bit burn counters. */
-            while (flame && furnace->burn < quotient * (unsigned int) flame + (remainder * (unsigned int) flame + 12UL) / 13UL)
+            while (flame && furnace->active_remaining < quotient * (unsigned int) flame + (remainder * (unsigned int) flame + 12UL) / 13UL)
                 --flame;
-            if (furnace->burn) {
+            if (furnace->active_remaining) {
                 /* Omit the transparent wrap row above the flame's atlas tile. */
                 top = 12 - flame;
                 if (top < 0) top = 0;
@@ -458,7 +459,7 @@ maage_status maage_client_ui_inventory_register(maage_client_ui *ui) {
     return maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_CRAFTING_TABLE, maage_client_ui_inventory_draw, maage_client_ui_inventory_input, NULL);
 }
 
-maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_registry *items, const maage_block_registry *blocks, const float inventory_grass_color[3], const float (*item_uv)[4]) {
+maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_registry *items, const maage_block_registry *blocks, const float inventory_grass_color[3], const float (*item_uv)[4], size_t texture_count) {
     maage_item_stack *creative;
     const maage_item_definition *item;
     size_t i, count = 0, index = 0, variants, metadata;
@@ -486,7 +487,8 @@ maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_r
     ui->creative_page = 0;
     ui->items = items;
     ui->blocks = blocks;
-    memcpy(ui->item_uv, item_uv, sizeof(ui->item_uv));
+    ui->item_uv = item_uv;
+    ui->item_texture_count = texture_count;
     memcpy(ui->inventory_grass_color, inventory_grass_color, sizeof(ui->inventory_grass_color));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }

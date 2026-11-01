@@ -141,7 +141,7 @@ from stationary geometry; async mesh latency can delay that visual handoff.
 
 ## Storage and publication
 
-The sole metadata encoding is `MGWRLD11`; earlier development worlds are rejected
+The sole metadata encoding is `MGWRLD12`; earlier development worlds are rejected
 and must be recreated. Files are never deleted or converted automatically.
 `world.bin` atomically checkpoints player/inventory, environment and all active
 or dormant item entities after successful World flush. Unreturned temporary

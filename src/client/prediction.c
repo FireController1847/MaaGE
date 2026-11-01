@@ -135,7 +135,7 @@ failed:
     return result;
 }
 maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, unsigned long input_sequence, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(maage_world_registry(visual));
+    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(visual));
     maage_world_target target, destination;
     maage_block_state_id placed;
     double direction[3], damage, progress, phase;
@@ -276,7 +276,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             stack = &snapshot->player.inventory.slots[hotbar];
-            if ((target.block_id == ids->block_crafting_table || target.block_id == ids->block_furnace || target.block_id == ids->block_lit_furnace) && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+            if ((maage_block_registry_block(maage_world_registry(visual), target.block_id)->use != NULL) && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
             else result = maage_gameplay_placement(&snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 memset(&prediction->entries[vacant], 0, sizeof(prediction->entries[vacant]));
@@ -325,7 +325,7 @@ maage_status maage_client_prediction_destroy(maage_client_prediction *prediction
 }
 
 maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_block_registry *blocks, const maage_session_event *event) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
     unsigned int i;
     if (event->kind != MAAGE_EVENT_SOUND || event->session_epoch != prediction->session || event->world_epoch != prediction->world || (event->sound.event_id != MAAGE_SOUND_BLOCK_BREAK && event->sound.event_id != MAAGE_SOUND_BLOCK_DIG)) return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)

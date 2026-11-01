@@ -1,4 +1,4 @@
-#include "world_internal.h"
+#include "base_internal.h"
 #include <math.h>
 
 #define MAAGE_FEATURE_WORD_MASK 4294967295UL
@@ -29,12 +29,12 @@ int maage_generation_region(int coordinate, int edge) {
     return coordinate % edge < 0 ? result - 1 : result;
 }
 int maage_generation_write(maage_generation_context *context, int x, int y, int z, maage_block_state_id replacement, maage_generation_write_rule rule) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
+    const maage_base_ids *ids = maage_base_references(context->blocks);
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_block_state_id current;
-    x -= context->chunk->x * 16;
-    z -= context->chunk->z * 16;
+    x -= context->output.x * 16;
+    z -= context->output.z * 16;
     if (x < 0 || x >= 16 || z < 0 || z >= 16 || y < 1 || y >= 256) return 0;
     current = maage_chunk_get(context->chunk, x, y, z);
     if (current == replacement) return 0;
@@ -62,7 +62,7 @@ int maage_generation_write(maage_generation_context *context, int x, int y, int 
     return maage_status_code(context->failure) == MAAGE_STATUS_NOOP ? 0 : 1;
 }
 int maage_generation_features_valid(const maage_block_registry *blocks) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(blocks);
+    const maage_base_ids *ids = maage_base_references(blocks);
     maage_block_state_id required[25];
     size_t index;
     required[0] = ids->state_coal_ore;
@@ -98,10 +98,10 @@ int maage_generation_features_valid(const maage_block_registry *blocks) {
 /* Each region owns finite tunnels; every intersecting column replays the same
  * complete paths and clips writes. Region halo 2 covers all 88-block paths. */
 static int maage_feature_carve_ball(maage_generation_context *context, double cx, double cy, double cz, double rx, double ry, double rz) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
+    const maage_base_ids *ids = maage_base_references(context->blocks);
     double dx, dy, dz;
     int x, y, z, low_x, high_x, low_z, high_z, low_y, high_y, result, changed = 0;
-    int origin_x = context->chunk->x * 16, origin_z = context->chunk->z * 16;
+    int origin_x = context->output.x * 16, origin_z = context->output.z * 16;
     low_x = (int) floor(cx - rx);
     high_x = (int) floor(cx + rx);
     low_z = (int) floor(cz - rz);
@@ -152,8 +152,8 @@ maage_status maage_generation_carve(maage_generation_context *context) {
     int rx, rz, center_x, center_z, count, branch, result, changed;
     double x, y, z, angle;
     unsigned long random, branch_random;
-    center_x = maage_generation_region(context->chunk->x * 16, 64);
-    center_z = maage_generation_region(context->chunk->z * 16, 64);
+    center_x = maage_generation_region(context->output.x * 16, 64);
+    center_z = maage_generation_region(context->output.z * 16, 64);
     for (rz = center_z - 2; rz <= center_z + 2; ++rz)
         for (rx = center_x - 2; rx <= center_x + 2; ++rx) {
             if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CAVES);
@@ -174,7 +174,7 @@ maage_status maage_generation_carve(maage_generation_context *context) {
                 if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CAVES);
                 changed |= result;
             }
-            if (changed) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_CAVES];
+            if (changed) ++context->output.features[MAAGE_GENERATION_STAGE_CAVES];
             /* A separate rare narrow, vertically stretched path forms a ravine. */
             random = maage_generation_feature_hash(context->seed, rx, rz, 10002UL);
             if (!(random % 7UL)) {
@@ -186,34 +186,17 @@ maage_status maage_generation_carve(maage_generation_context *context) {
                     if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CAVES);
                     changed |= result;
                 }
-                if (changed) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_CAVES];
+                if (changed) ++context->output.features[MAAGE_GENERATION_STAGE_CAVES];
             }
         }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CAVES, 0);
 }
 
-typedef struct maage_ore_feature {
-    size_t state;
-    unsigned int attempts, size, minimum_y, maximum_y;
-    int emerald, triangular;
-} maage_ore_feature;
-/* Ore definitions specify height bands, attempt counts and vein sizes. */
-static const maage_ore_feature maage_ore_features[] = {
-    {offsetof(maage_builtin_ids, state_dirt), 20, 32, 0, 256, 0, 0},
-    {offsetof(maage_builtin_ids, state_gravel), 10, 32, 0, 256, 0, 0},
-    {offsetof(maage_builtin_ids, state_coal_ore), 20, 17, 0, 128, 0, 0},
-    {offsetof(maage_builtin_ids, state_iron_ore), 20, 9, 0, 64, 0, 0},
-    {offsetof(maage_builtin_ids, state_gold_ore), 2, 9, 0, 32, 0, 0},
-    {offsetof(maage_builtin_ids, state_redstone_ore), 8, 8, 0, 16, 0, 0},
-    {offsetof(maage_builtin_ids, state_diamond_ore), 1, 8, 0, 16, 0, 0},
-    {offsetof(maage_builtin_ids, state_lapis_ore), 1, 7, 0, 32, 0, 1},
-    {offsetof(maage_builtin_ids, state_emerald_ore), 5, 1, 4, 32, 1, 0}};
-static int maage_feature_vein(maage_generation_context *context, const maage_ore_feature *feature, int cx, int cy, int cz, unsigned long random) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
+static int maage_feature_vein(maage_generation_context *context, const maage_ore_definition *feature, int cx, int cy, int cz, unsigned long random) {
     double angle, x1, x2, z1, z2, y1, y2, fraction, x, y, z, radius, dx, dy, dz;
     int step, bx, by, bz, min_x, max_x, min_z, max_z, min_y, max_y, result, changed = 0;
-    int origin_x = context->chunk->x * 16, origin_z = context->chunk->z * 16;
-    if (feature->size == 1) return maage_generation_write(context, cx, cy, cz, MAAGE_CONTENT_ID(ids, feature->state), MAAGE_GENERATION_WRITE_STONE);
+    int origin_x = context->output.x * 16, origin_z = context->output.z * 16;
+    if (feature->size == 1) return maage_generation_write(context, cx, cy, cz, feature->state, MAAGE_GENERATION_WRITE_STONE);
     angle = (maage_generation_feature_next(&random) % 65536UL) * MAAGE_FEATURE_PI / 65536.0;
     x1 = cx + sin(angle) * feature->size / 8.0;
     x2 = cx - sin(angle) * feature->size / 8.0;
@@ -246,7 +229,7 @@ static int maage_feature_vein(maage_generation_context *context, const maage_ore
                     dy = (by + 0.5 - y) / radius;
                     dz = (bz + 0.5 - z) / radius;
                     if (dx * dx + dy * dy + dz * dz >= 1.0) continue;
-                    result = maage_generation_write(context, bx, by, bz, MAAGE_CONTENT_ID(ids, feature->state), MAAGE_GENERATION_WRITE_STONE);
+                    result = maage_generation_write(context, bx, by, bz, feature->state, MAAGE_GENERATION_WRITE_STONE);
                     if (result < 0) return -1;
                     changed |= result;
                 }
@@ -254,32 +237,34 @@ static int maage_feature_vein(maage_generation_context *context, const maage_ore
     return changed;
 }
 maage_status maage_generation_underground(maage_generation_context *context) {
-    const maage_builtin_ids *ids = maage_block_registry_builtin_ids(context->blocks);
-    const maage_ore_feature *feature;
+    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_ore_definition *feature;
     unsigned long random;
     size_t index;
     maage_generation_sample sample;
     int ox, oz, attempt, x, y, z, height, result, local_x, local_z, changed, dx, dy, dz, lava;
-    double distance;
-    for (oz = context->chunk->z - 1; oz <= context->chunk->z + 1; ++oz)
-        for (ox = context->chunk->x - 1; ox <= context->chunk->x + 1; ++ox) {
+    double distance, density;
+    maage_status status;
+    for (oz = context->output.z - 1; oz <= context->output.z + 1; ++oz)
+        for (ox = context->output.x - 1; ox <= context->output.x + 1; ++ox) {
             if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
-            for (index = 0; index < sizeof(maage_ore_features) / sizeof(maage_ore_features[0]); ++index) {
+            for (index = 0; index < sizeof(maage_ore_definitions) / sizeof(maage_ore_definitions[0]); ++index) {
                 if (context->token && maage_job_cancelled(context->token)) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
-                feature = &maage_ore_features[index];
-                random = maage_generation_feature_hash(context->seed, ox, oz, 11000UL + (unsigned long) index);
+                feature = &maage_ore_definitions[index];
+                random = maage_generation_feature_hash(context->seed, ox, oz, feature->salt);
                 for (attempt = 0; attempt < (int) feature->attempts; ++attempt) {
                     x = ox * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
                     z = oz * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
                     y = feature->minimum_y + (int) (maage_generation_feature_next(&random) % (feature->maximum_y - feature->minimum_y));
                     if (feature->triangular) y = (y + (int) (maage_generation_feature_next(&random) % 32UL)) / 2;
-                    if (feature->emerald) {
-                        if (!maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, &sample, context->regions)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
-                        if ((maage_generation_feature_next(&random) & 65535UL) / 65536.0 >= sample.decoration.emeralds) continue;
+                    if (feature->density) {
+                        status = feature->density(context->seed, context->biomes, context->policy, x, z, context->regions, &density);
+                        if (maage_status_failed(status)) return status;
+                        if ((maage_generation_feature_next(&random) & 65535UL) / 65536.0 >= density) continue;
                     }
                     result = maage_feature_vein(context, feature, x, y, z, maage_generation_feature_next(&random));
                     if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
-                    if (result) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_UNDERGROUND];
+                    if (result) ++context->output.features[MAAGE_GENERATION_STAGE_UNDERGROUND];
                 }
             }
             random = maage_generation_feature_hash(context->seed, ox, oz, 12000UL);
@@ -297,14 +282,14 @@ maage_status maage_generation_underground(maage_generation_context *context) {
                     for (dy = -2; dy <= 2; ++dy) {
                         distance = dx * dx / 16.0 + dz * dz / 12.0 + dy * dy / 4.0;
                         if (distance >= 1.0) continue;
-                        local_x = x + dx - context->chunk->x * 16;
-                        local_z = z + dz - context->chunk->z * 16;
+                        local_x = x + dx - context->output.x * 16;
+                        local_z = z + dz - context->output.z * 16;
                         if (local_x < 0 || local_x >= 16 || local_z < 0 || local_z >= 16 || y + dy < 5 || y + dy >= context->columns[local_z * 16 + local_x].height - 1) continue;
                         result = maage_generation_write(context, x + dx, y + dy, z + dz, dy >= 0 ? ids->state_air : (lava ? ids->state_lava : ids->state_water), MAAGE_GENERATION_WRITE_NATURAL);
                         if (result < 0) return maage_generation_outcome(context, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_ORES);
                         changed |= result;
                     }
-            if (changed) ++context->chunk->generation_features[MAAGE_GENERATION_STAGE_UNDERGROUND];
+            if (changed) ++context->output.features[MAAGE_GENERATION_STAGE_UNDERGROUND];
         }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ORES, 0);
 }

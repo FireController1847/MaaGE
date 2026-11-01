@@ -19,16 +19,6 @@ typedef unsigned long maage_texture_id;
 typedef struct maage_block_registry maage_block_registry;
 
 enum {
-    MAAGE_LEAF_SPECIES_MASK = 3U,
-    MAAGE_LEAF_PERSISTENT = 4U,
-    MAAGE_LEAF_CHECK_DECAY = 8U
-};
-/* Oak/spruce/birch, with all four flag combinations. Direct numeric mapping;
- * unsupported species/metadata fail explicitly. */
-maage_status maage_block_leaves_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state);
-/* Species 0..2 plus stage bit 8; unsupported metadata fails explicitly. */
-maage_status maage_block_sapling_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state);
-enum {
     MAAGE_BLOCK_MESH_CUBE = 0,
     MAAGE_BLOCK_MESH_CROSS = 1,
     MAAGE_BLOCK_MESH_TORCH = 2
@@ -58,6 +48,7 @@ enum {
 
 typedef struct maage_block_face_definition {
     maage_texture_id texture_id;
+    maage_texture_id overlay_texture, snow_texture;
     /* Pre-resolved top-left-origin atlas rectangle: u0, v0, u1, v1. */
     float uv[4];
     float tint[4];
@@ -77,6 +68,18 @@ typedef struct maage_block_shape {
     double minimum[3], maximum[3];
 } maage_block_shape;
 
+struct maage_block_entity_handler;
+struct maage_chunk;
+struct maage_world_seed;
+struct maage_biome_registry;
+struct maage_generation_policy;
+struct maage_job_token;
+struct maage_item_registry;
+struct maage_item_definition;
+struct maage_item_drops;
+struct maage_crafting_container;
+struct maage_gameplay;
+struct maage_world_target;
 struct maage_world;
 struct maage_random_tick_context;
 struct maage_block_state_definition;
@@ -85,7 +88,7 @@ typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *wor
 typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
 
 typedef struct maage_block_definition {
-    const maage_builtin_ids *builtins; /* Registry-owned immutable references. */
+    const void *behavior_context; /* Borrowed immutable module data; outlives registry readers. */
     maage_block_id id;
     int solid;
     int opaque;
@@ -108,14 +111,39 @@ typedef struct maage_block_definition {
      * eligibility without behavior when a required system is unimplemented. */
     maage_block_random_tick_callback random_tick;
     maage_block_survival_callback survives;
+    maage_status (*scheduled_tick)(struct maage_world *, int, int, int, const struct maage_block_state_definition *);
+    /* Content callbacks run on the owner, except import_state (detached worker).
+     * Read-only placement/presentation callbacks never mutate World. */
+    maage_status (*drops)(const maage_block_registry *, const struct maage_item_registry *, const struct maage_block_state_definition *, const struct maage_item_definition *, unsigned long *, struct maage_item_drops *);
+    maage_status (*use)(struct maage_world *, const struct maage_world_target *, struct maage_crafting_container *);
+    maage_status (*land)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, double, unsigned long *);
+    maage_status (*changed)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, const struct maage_block_state_definition *);
+    maage_status (*import_state)(const maage_block_registry *, const struct maage_block_state_definition *, maage_block_state_id *);
+    maage_status (*container_action)(struct maage_world *, struct maage_gameplay *, unsigned long, unsigned int, unsigned int, unsigned int);
+    maage_status (*container_sample)(const struct maage_world *, struct maage_crafting_container *);
+    int (*container_access)(const struct maage_world *, const struct maage_crafting_container *);
+    unsigned int material, mesh_material, foliage, snow_cover, flow_permeable;
+    unsigned int mesh_inset, cull_same;
+    unsigned int tool_wear_class, special_tool_class;
+    double special_tool_speed, item_drag;
+    int unsupported_no_drops, unsupported_replaces;
+    maage_block_state_id unsupported_state;
+    const struct maage_block_entity_handler *entity;
+
 } maage_block_definition;
 
 typedef struct maage_block_state_definition {
-    const maage_builtin_ids *builtins;
     maage_block_state_id id;
     maage_block_id block_id;
     /* Numeric property payload; no text at runtime. */
     unsigned int metadata;
+    int geometry_grouped;      /* Explicit opt-in; ordinary states always invalidate geometry. */
+    unsigned int geometry_key; /* Equal keys within a type preserve geometry epochs. */
+    unsigned int texture_axis; /* 0 = ordinary; 1..3 = X/Y/Z. */
+    unsigned int presentation_effect;
+    maage_block_shape mesh_bounds;
+    maage_block_state_id fluid_mix_flow, fluid_mix_source, fluid_mix_shallow;
+
     int random_ticks; /* Section eligibility, independent of callback support. */
     /* Optional selection override; all-zero keeps the type's bounds. */
     maage_block_shape selection_shape;
@@ -123,6 +151,7 @@ typedef struct maage_block_state_definition {
     maage_block_state_id fluid_source_state, fluid_states[16];
     maage_block_face_definition faces[MAAGE_FACE_COUNT];
     /* Optional pre-resolved opaque leaf texture; zero uses ordinary UVs. */
+    maage_texture_id fast_texture;
     float leaf_fast_uv[4];
 } maage_block_state_definition;
 
@@ -143,7 +172,19 @@ maage_status maage_block_registry_finalize(maage_block_registry *registry);
 int maage_block_registry_is_finalized(const maage_block_registry *registry);
 size_t maage_block_registry_block_count(const maage_block_registry *registry);
 size_t maage_block_registry_state_count(const maage_block_registry *registry);
-const maage_builtin_ids *maage_block_registry_builtin_ids(const maage_block_registry *registry);
+/* Explicit engine-required bindings. No names or namespace receives special treatment. */
+typedef struct maage_registry_bindings {
+    maage_block_id block_air;
+    maage_block_state_id state_air, state_boundary, state_ui_background;
+    const void *generation_context;
+    maage_status (*generate)(struct maage_chunk *chunk, struct maage_world_seed seed, const maage_block_registry *blocks, const struct maage_biome_registry *biomes, const struct maage_generation_policy *policy, const struct maage_job_token *token, maage_status_trace *trace);
+    maage_status (*spawn)(struct maage_world_seed seed, const maage_block_registry *blocks, const struct maage_biome_registry *biomes, const struct maage_generation_policy *policy, double feet[3]);
+} maage_registry_bindings;
+maage_status maage_block_registry_bind(maage_block_registry *registry, const maage_registry_bindings *bindings);
+const maage_registry_bindings *maage_block_registry_bindings(const maage_block_registry *registry);
+/* Registration-only replacement copies a complete definition and retains its ID. */
+maage_status maage_block_registry_update_block(maage_block_registry *registry, const maage_block_definition *definition);
+maage_status maage_block_registry_update_state(maage_block_registry *registry, const maage_block_state_definition *definition);
 
 /* Registration / explicit import boundary only. Open-addressed hashing gives
  * expected O(1) lookup with exact collision checks, not worst-case O(1). */

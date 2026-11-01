@@ -6,7 +6,7 @@ add_library(MaaGE::Server ALIAS maage_server_core)
 add_dependencies(maage_server_core maage_versions)
 maage_configure_portable_target(maage_server_core)
 target_include_directories(maage_server_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(maage_server_core PUBLIC maage_core MaaGE::World MaaGE::Thread MaaGE::Session)
+target_link_libraries(maage_server_core PUBLIC maage_core MaaGE::Base MaaGE::World MaaGE::Thread MaaGE::Session)
 
 if(MAAGE_BUILD_SERVER)
     add_executable(maage_server main.c)

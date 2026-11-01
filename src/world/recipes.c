@@ -24,7 +24,7 @@ static void recipe_clear(maage_recipe_definition *recipe) {
 maage_status maage_recipe_registry_create(const maage_item_registry *items, maage_recipe_registry **output) {
     if (!output) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     *output = NULL;
-    if (!maage_item_registry_is_finalized(items)) return recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_CREATE);
+    if (!items) return recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_CREATE);
     *output = (maage_recipe_registry *) calloc(1, sizeof(**output));
     if (!*output) return recipe_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     (*output)->items = items;
