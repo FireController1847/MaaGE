@@ -927,7 +927,7 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
         geometry = calloc(1, sizeof(*geometry));
         if (!geometry) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
         mesh->platform = geometry;
-        geometry->vertices = [native->device newBufferWithLength:vertex_bytes options:MTLResourceStorageModeShared];
+        geometry->vertices = mesh->vertex_source ? [((maage_metal_mesh *) mesh->vertex_source->platform)->vertices retain] : [native->device newBufferWithLength:vertex_bytes options:MTLResourceStorageModeShared];
         geometry->indices = [native->device newBufferWithLength:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
         if (!geometry->vertices || !geometry->indices) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     }

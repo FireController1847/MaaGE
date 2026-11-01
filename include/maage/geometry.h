@@ -7,7 +7,6 @@
  * top-left-origin straight-alpha RGBA texture; colors multiply sampled texels. */
 typedef struct maage_mesh_vertex {
     float position[3];
-    float normal[3];
     float uv[2];
     float color[4];
     float light[2]; /* Independent normalized static skylight and block emission. */

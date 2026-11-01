@@ -398,6 +398,8 @@ maage_status maage_renderer_begin_geometry(maage_renderer *renderer, maage_mesh_
     if (!mesh) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh->renderer = renderer;
     mesh->texture = texture;
+    mesh->vertex_count = (*preparation)->data.vertex_count;
+    mesh->references = 1;
     mesh->upload = *preparation;
     *preparation = NULL;
     ++texture->references;
@@ -455,6 +457,50 @@ maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maag
     *output = mesh;
     return result;
 }
+/* GPU variants reuse immutable source vertices; only indices and their
+ * transparency metadata are prepared and uploaded. The source stays alive
+ * until all its derived views have been retired. */
+maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, const maage_mesh_data *data, maage_render_mesh **output, maage_status_trace *trace) {
+    maage_renderer *renderer;
+    maage_mesh_preparation *prepared = NULL;
+    maage_render_mesh *mesh;
+    maage_status result;
+    if (output) *output = NULL;
+    if (!source || !data || !output || !source->renderer || source->upload || source->vertex_source || !source->platform ||
+        data->vertex_count != source->vertex_count || !source->texture)
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    renderer = source->renderer;
+    if (maage_status_failed(renderer->failure)) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    if (!renderer->api->upload_geometry) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    result = maage_mesh_prepare(data, &prepared);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    mesh = (maage_render_mesh *) calloc(1, sizeof(*mesh));
+    if (!mesh) {
+        maage_mesh_preparation_destroy(prepared);
+        return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    }
+    mesh->renderer = renderer;
+    mesh->texture = source->texture;
+    mesh->vertex_source = (maage_render_mesh *) source;
+    mesh->vertex_count = source->vertex_count;
+    mesh->references = 1;
+    mesh->upload_offset = data->vertex_count * sizeof(*data->vertices);
+    mesh->upload = prepared;
+    ++mesh->vertex_source->references;
+    ++mesh->texture->references;
+    mesh->next = renderer->meshes;
+    if (mesh->next) mesh->next->previous = mesh;
+    renderer->meshes = mesh;
+    do {
+        result = maage_render_mesh_upload_step(mesh, (size_t) - 1, trace);
+    } while (maage_status_code(result) == MAAGE_STATUS_NOOP);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
+        maage_render_mesh_destroy(mesh);
+        return result;
+    }
+    *output = mesh;
+    return result;
+}
 maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_mesh_data *data, const maage_pixel_buffer *atlas, maage_render_mesh **output, maage_status_trace *trace) {
     maage_render_texture *texture;
     maage_status result;
@@ -467,7 +513,12 @@ maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_me
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
 }
 maage_status maage_render_mesh_destroy(maage_render_mesh *mesh) {
+    maage_render_mesh *source;
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    /* A derived index view holds the original GPU vertices alive even if a
+     * newer revision has already superseded the original draw resource. */
+    if (--mesh->references) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    source = mesh->vertex_source;
     if (mesh->renderer->foreground == mesh) mesh->renderer->foreground = NULL;
     mesh->renderer->api->destroy_mesh(mesh);
     maage_geometry_dispose(&mesh->geometry);
@@ -478,6 +529,7 @@ maage_status maage_render_mesh_destroy(maage_render_mesh *mesh) {
     if (mesh->next) mesh->next->previous = mesh->previous;
     maage_render_texture_release(mesh->texture);
     free(mesh);
+    maage_render_mesh_destroy(source);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_status maage_renderer_draw_frame(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count, const float view_projection[16], const maage_render_ui_data *ui, maage_status_trace *trace) {

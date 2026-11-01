@@ -998,7 +998,8 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
         geometry = calloc(1, sizeof(*geometry));
         if (!geometry) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED);
         mesh->platform = geometry;
-        MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, vertex_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0, &geometry->vertices));
+        if (mesh->vertex_source) geometry->vertices = ((maage_vulkan_mesh *) mesh->vertex_source->platform)->vertices;
+        else MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, vertex_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0, &geometry->vertices));
         MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, data->index_count * sizeof(*data->indices), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0, &geometry->indices));
     }
     MAAGE_VULKAN_TRY(maage_vulkan_staging(renderer, bytes, &staging));
@@ -1013,7 +1014,7 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
 static void maage_vulkan_destroy_mesh(maage_render_mesh *mesh) {
     maage_vulkan_mesh *geometry = mesh->platform;
     if (!geometry) return;
-    if (geometry->vertices.buffer) maage_vulkan_retire(mesh->renderer, &geometry->vertices, NULL);
+    if (geometry->vertices.buffer && !mesh->vertex_source) maage_vulkan_retire(mesh->renderer, &geometry->vertices, NULL);
     if (geometry->indices.buffer) maage_vulkan_retire(mesh->renderer, &geometry->indices, NULL);
     for (unsigned int slot = 0; slot < MAAGE_VULKAN_FRAME_SLOTS; ++slot)
         if (geometry->sorted[slot].buffer) maage_vulkan_retire(mesh->renderer, &geometry->sorted[slot], NULL);

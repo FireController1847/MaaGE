@@ -571,12 +571,13 @@ static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_ren
         if (!geometry) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
         mesh->platform = geometry;
         native->gl.GenVertexArrays(1, &geometry->vao);
-        native->gl.GenBuffers(1, &geometry->vertices);
+        if (mesh->vertex_source) geometry->vertices = ((maage_gl_mesh *) mesh->vertex_source->platform)->vertices;
+        else native->gl.GenBuffers(1, &geometry->vertices);
         native->gl.GenBuffers(1, &geometry->indices);
         if (!geometry->vao || !geometry->vertices || !geometry->indices) return maage_gl_resource_failure(renderer, MAAGE_OPERATION_UPLOAD);
         native->gl.BindVertexArray(geometry->vao);
         native->gl.BindBuffer(MAAGE_GL_ARRAY_BUFFER, geometry->vertices);
-        native->gl.BufferData(MAAGE_GL_ARRAY_BUFFER, (ptrdiff_t) vertex_bytes, NULL, MAAGE_GL_STATIC_DRAW);
+        if (!mesh->vertex_source) native->gl.BufferData(MAAGE_GL_ARRAY_BUFFER, (ptrdiff_t) vertex_bytes, NULL, MAAGE_GL_STATIC_DRAW);
         maage_gl_mesh_attributes(native);
         native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, geometry->indices);
         native->gl.BufferData(MAAGE_GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t) index_bytes, NULL, MAAGE_GL_STATIC_DRAW);
@@ -607,7 +608,7 @@ static void maage_gl_destroy_mesh(maage_render_mesh *mesh) {
     if (!maage_status_failed(result)) {
         native->gl.BindVertexArray(0);
         if (geometry->vao) native->gl.DeleteVertexArrays(1, &geometry->vao);
-        if (geometry->vertices) native->gl.DeleteBuffers(1, &geometry->vertices);
+        if (geometry->vertices && !mesh->vertex_source) native->gl.DeleteBuffers(1, &geometry->vertices);
         if (geometry->indices) native->gl.DeleteBuffers(1, &geometry->indices);
         for (index = 0; index < MAAGE_GL_FRAME_SLOTS * 2; ++index)
             if (geometry->sorted[index].name) native->gl.DeleteBuffers(1, &geometry->sorted[index].name);

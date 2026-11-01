@@ -192,6 +192,25 @@ light requests and missing first-frame preparation acknowledgments are also
 reconciled. Ready and in-flight geometry is left intact; no Server generation,
 disk operations, global barriers, or unconditional remeshing are introduced.
 
+## Mesh Residency and Prediction
+
+Chunk mesh vertices contain position, atlas UV, precomputed tint/AO, light,
+material and animation attributes; unused vertex normals are omitted from the
+shared CPU and native GPU layouts. For block prediction, the Client retains the
+immutable CPU source and compact 16-bit chunk-local face-owner tags instead of
+three world-coordinate integers per quad. A derived GPU prediction view retains
+the base vertex buffer and uploads only filtered indices plus the transparent
+triangle metadata needed to sort that view. Source resource ownership is
+reference-counted through the renderer: retiring an old mesh does not free
+its native vertex allocation while any derived view still uses it.
+
+The debug overlay reports retained CPU source mesh payload and estimated native
+base vertex/index payload separately. These are payload estimates, not total
+process or GPU allocation measurements: transient uploads, driver allocation
+rounding, transparency sort buffers and prediction index views are excluded.
+Compacting vertex attributes further and pooling native allocations remain
+separate opportunities.
+
 ## Runtime Section Storage
 
 A 16x16x16 populated section retains its byte-per-cell calculated lighting

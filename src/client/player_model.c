@@ -83,7 +83,6 @@ void maage_player_arm_geometry(unsigned int model, const float skin_uv[4], maage
                     vertex->uv[axis] = skin_uv[axis] + pixels[source][axis] / 64 * (skin_uv[axis + 2] - skin_uv[axis]);
                 for (axis = 0; axis < 4; ++axis)
                     vertex->color[axis] = 1;
-                vertex->normal[face / 2] = (face & 1 ? 1.0f : -1.0f) * (face / 2 == 1 ? -1.0f : 1.0f);
                 vertex->material = layer ? MAAGE_MESH_MATERIAL_TRANSLUCENT : MAAGE_MESH_MATERIAL_OPAQUE;
                 vertex->light[1] = 1;
             }
@@ -224,7 +223,6 @@ void maage_player_part_geometry(unsigned int model, unsigned int part, const flo
                     vertex->color[axis] = 1;
                 for (axis = 0; axis < 3; ++axis)
                     vertex->color[axis] = shades[face];
-                vertex->normal[face / 2] = (face & 1 ? 1.0f : -1.0f) * (face / 2 == 0 ? -1.0f : 1.0f);
                 vertex->material = layer ? MAAGE_MESH_MATERIAL_TRANSLUCENT : MAAGE_MESH_MATERIAL_OPAQUE;
                 vertex->light[0] = 1;
             }

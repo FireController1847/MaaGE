@@ -46,7 +46,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
 maage_status maage_client_prediction_prepare(maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, maage_world *visual, maage_client_chunk_mesh *meshes, size_t capacity, maage_status_trace *trace);
 /* Prepare a streamed source against exactly the currently published patch.
  * The caller publishes both resources together only after successful upload. */
-maage_status maage_client_prediction_mesh(const maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, const maage_world_mesh *source, int x, int z, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace);
+maage_status maage_client_prediction_mesh(const maage_client_prediction *prediction, const maage_render_mesh *gpu_source, const maage_world_mesh *source, int x, int z, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace);
 /* Consume the matching Server effect echo once; late dig cues cannot trail a
  * locally completed break. Local completion audio follows published geometry. */
 maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_block_registry *blocks, const maage_session_event *event);

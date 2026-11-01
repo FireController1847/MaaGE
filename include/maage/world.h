@@ -330,6 +330,9 @@ int maage_world_collision_shape(const maage_world *world, int x, int y, int z, m
  * Destroy/cancel the upload before destroying its source mesh. */
 maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh);
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh);
+/* Resident CPU source payload (including owner tags); excludes upload
+ * preparations and renderer-owned native buffers. Constant-time query. */
+size_t maage_world_mesh_cpu_bytes(const maage_world_mesh *mesh);
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh);
 #ifdef __cplusplus
 }

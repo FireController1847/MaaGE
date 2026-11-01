@@ -31,7 +31,7 @@ void maage_client_prediction_confirm(maage_client_prediction *prediction, const 
             return;
         }
 }
-static maage_status maage_prediction_filter(maage_renderer *renderer, maage_render_texture *atlas, const maage_world_mesh *source, int x, int z, const maage_block_position *centers, size_t count, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace) {
+static maage_status maage_prediction_filter(const maage_render_mesh *gpu_source, const maage_world_mesh *source, int x, int z, const maage_block_position *centers, size_t count, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace) {
     maage_mesh_data data;
     unsigned int *indices = NULL;
     size_t i;
@@ -43,13 +43,16 @@ static maage_status maage_prediction_filter(maage_renderer *renderer, maage_rend
     if (i == count) return maage_prediction_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MESH);
     if (!source) return maage_prediction_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MESH);
     result = maage_world_mesh_filter(source, centers, count, &data, &indices);
-    if (!maage_status_failed(result) && data.index_count) result = maage_renderer_upload_geometry(renderer, &data, atlas, replacement, trace);
+    if (!maage_status_failed(result) && data.index_count) {
+        if (!gpu_source) result = maage_prediction_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MESH);
+        else result = maage_renderer_upload_index_view(gpu_source, &data, replacement, trace);
+    }
     free(indices);
     if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *filtered = 1;
     return result;
 }
-maage_status maage_client_prediction_mesh(const maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, const maage_world_mesh *source, int x, int z, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace) {
-    return maage_prediction_filter(renderer, atlas, source, x, z, prediction->published, prediction->published_count, replacement, filtered, trace);
+maage_status maage_client_prediction_mesh(const maage_client_prediction *prediction, const maage_render_mesh *gpu_source, const maage_world_mesh *source, int x, int z, maage_render_mesh **replacement, int *filtered, maage_status_trace *trace) {
+    return maage_prediction_filter(gpu_source, source, x, z, prediction->published, prediction->published_count, replacement, filtered, trace);
 }
 static maage_status maage_prediction_present(maage_client_prediction *prediction, maage_world *visual) {
     maage_block_position positions[MAAGE_CLIENT_PREDICTIONS];
@@ -103,7 +106,7 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
     for (column = 0; column < capacity; ++column)
         if (meshes[column].used) {
             if (meshes[column].filtered_revision == meshes[column].visual_revision && meshes[column].filtered_generation == prediction->generation) continue;
-            result = maage_prediction_filter(renderer, atlas, meshes[column].source, meshes[column].x, meshes[column].z, centers, count, &meshes[column].prepared, &meshes[column].prepared_filtered, trace);
+            result = maage_prediction_filter(meshes[column].mesh, meshes[column].source, meshes[column].x, meshes[column].z, centers, count, &meshes[column].prepared, &meshes[column].prepared_filtered, trace);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto failed;
             meshes[column].prepared_changed = 1;
         }

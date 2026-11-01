@@ -10,7 +10,8 @@ struct maage_world_mesh {
     maage_mesh_preparation *prepared;
     maage_mesh_vertex *vertices;
     unsigned int *indices;
-    maage_block_position *owners;
+    unsigned short *owners;
+    int chunk_x, chunk_z;
 };
 
 static const int maage_face_neighbor[MAAGE_FACE_COUNT][3] = {
@@ -273,8 +274,6 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
         {{1, 0, 1}, {0, 0, 0}, {0, 1, 0}, {1, 1, 1}},
         {{1, 0, 0}, {0, 0, 1}, {0, 1, 1}, {1, 1, 0}},
         {{0, 0, 1}, {1, 0, 0}, {1, 1, 0}, {0, 1, 1}}};
-    static const float cross_normals[4][3] = {
-        {-0.70710678f, 0, 0.70710678f}, {0.70710678f, 0, -0.70710678f}, {-0.70710678f, 0, -0.70710678f}, {0.70710678f, 0, 0.70710678f}};
     maage_mesh_vertex *vertex;
     unsigned int base, corner, component, alternate, source;
     const int *point;
@@ -347,8 +346,6 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
         vertex->position[0] = (float) x + local[0];
         vertex->position[1] = (float) y + local[1];
         vertex->position[2] = (float) z + local[2];
-        for (component = 0; component < 3; ++component)
-            vertex->normal[component] = model == MAAGE_BLOCK_MESH_CROSS ? cross_normals[face][component] : (float) maage_face_neighbor[face][component];
         vertex->uv[0] = uv[0] + u * (uv[2] - uv[0]);
         vertex->uv[1] = uv[1] + v * (uv[3] - uv[1]);
         for (component = 0; component < 3; ++component) {
@@ -368,11 +365,9 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
 }
 
 static void maage_mesh_reverse_face(maage_mesh_vertex *vertices, unsigned int *indices, size_t source, size_t destination) {
-    unsigned int corner, component, offset;
+    unsigned int corner, offset;
     for (corner = 0; corner < 4; ++corner) {
         vertices[destination * 4 + corner] = vertices[source * 4 + corner];
-        for (component = 0; component < 3; ++component)
-            vertices[destination * 4 + corner].normal[component] *= -1;
     }
     for (corner = 0; corner < 6; ++corner) {
         offset = corner % 3 == 1 ? corner + 1 : (corner % 3 == 2 ? corner - 1 : corner);
@@ -398,7 +393,7 @@ static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry, co
     return 1;
 }
 
-static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, maage_block_position *owners, maage_leaves_mode mode, maage_biome_blend blend, maage_mesh_biome_cache *cache, const maage_job_token *token, const maage_block_position *cell, unsigned int *failure) {
+static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, unsigned short *owners, maage_leaves_mode mode, maage_biome_blend blend, maage_mesh_biome_cache *cache, const maage_job_token *token, const maage_block_position *cell, unsigned int *failure) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(registry);
     const maage_block_state_definition *state, *neighbor, *above;
     const maage_block_definition *block, *current;
@@ -540,9 +535,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                         if (owners) {
                             size_t owner, end = face_count + 1 + (overlay ? 1 : 0) + (reverse ? 1 : 0);
                             for (owner = face_count; owner < end; ++owner) {
-                                owners[owner].x = chunk->x * 16 + x;
-                                owners[owner].y = y;
-                                owners[owner].z = chunk->z * 16 + z;
+                                owners[owner] = (unsigned short) (y * 256 + z * 16 + x);
                             }
                         }
                         face_count += 1 + (overlay ? 1 : 0) + (reverse ? 1 : 0);
@@ -578,10 +571,12 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
     if (token && maage_job_cancelled(token)) return maage_mesh_failure(trace, MAAGE_STATUS_INTERRUPTED);
     mesh = (maage_world_mesh *) calloc(1, sizeof(*mesh));
     if (!mesh) return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
+    mesh->chunk_x = chunk->x;
+    mesh->chunk_z = chunk->z;
     if (faces) {
         mesh->vertices = (maage_mesh_vertex *) malloc(faces * 4 * sizeof(*mesh->vertices));
         mesh->indices = (unsigned int *) malloc(faces * 6 * sizeof(*mesh->indices));
-        mesh->owners = (maage_block_position *) malloc(faces * sizeof(*mesh->owners));
+        mesh->owners = (unsigned short *) malloc(faces * sizeof(*mesh->owners));
         if (!mesh->vertices || !mesh->indices || !mesh->owners) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
@@ -616,6 +611,10 @@ maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh) {
     return mesh ? &mesh->data : NULL;
 }
+size_t maage_world_mesh_cpu_bytes(const maage_world_mesh *mesh) {
+    if (!mesh) return 0;
+    return sizeof(*mesh) + mesh->data.vertex_count * sizeof(*mesh->vertices) + mesh->data.index_count * sizeof(*mesh->indices) + (mesh->owners ? mesh->data.vertex_count / 4 * sizeof(*mesh->owners) : 0);
+}
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh) {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_mesh_preparation_destroy(mesh->prepared);
@@ -642,7 +641,7 @@ maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_b
         if (!*indices) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     }
     for (face = 0; face < mesh->data.index_count / 6; ++face) {
-        if (maage_mesh_removed(removed, count, mesh->owners[face].x, mesh->owners[face].y, mesh->owners[face].z)) continue;
+        if (maage_mesh_removed(removed, count, mesh->chunk_x * 16 + (mesh->owners[face] & 15U), mesh->owners[face] >> 8, mesh->chunk_z * 16 + ((mesh->owners[face] >> 4) & 15U))) continue;
         memcpy(*indices + written, mesh->indices + face * 6, 6 * sizeof(**indices));
         written += 6;
     }

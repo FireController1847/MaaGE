@@ -29,7 +29,6 @@ static void maage_interaction_box(maage_mesh_vertex *vertices, unsigned int *ind
             vertex->uv[1] = uv[corner < 2 ? 3 : 1];
             for (axis = 0; axis < 3; ++axis)
                 vertex->color[axis] = brightness;
-            vertex->normal[face / 2] = face % 2 ? 1.0f : -1.0f;
             vertex->color[3] = alpha;
             vertex->material = material;
             vertex->light[1] = 1;

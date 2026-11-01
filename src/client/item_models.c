@@ -13,21 +13,12 @@ static const int maage_interaction_corners[6][4][3] = {
 static void maage_item_model_quad(maage_mesh_vertex *vertices, unsigned int *indices, size_t *faces, const float positions[4][3], const float uv[4], const float tint[4], float shade, float material, const float *animation) {
     static const unsigned int offsets[6] = {0, 1, 2, 0, 2, 3};
     maage_mesh_vertex *vertex;
-    float edge[2][3], normal[3], length;
     unsigned int corner, axis, base = (unsigned int) (*faces * 4);
-    for (axis = 0; axis < 3; ++axis) {
-        edge[0][axis] = positions[1][axis] - positions[0][axis];
-        edge[1][axis] = positions[2][axis] - positions[0][axis];
-    }
-    for (axis = 0; axis < 3; ++axis)
-        normal[axis] = edge[0][(axis + 1) % 3] * edge[1][(axis + 2) % 3] - edge[0][(axis + 2) % 3] * edge[1][(axis + 1) % 3];
-    length = (float) sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
     for (corner = 0; corner < 4; ++corner) {
         vertex = &vertices[base + corner];
         memset(vertex, 0, sizeof(*vertex));
         for (axis = 0; axis < 3; ++axis) {
             vertex->position[axis] = positions[corner][axis];
-            vertex->normal[axis] = length > 0 ? normal[axis] / length : 0;
             vertex->color[axis] = tint[axis] * shade;
             if (animation) vertex->animation[axis] = animation[axis];
         }

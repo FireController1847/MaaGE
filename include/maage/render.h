@@ -185,6 +185,11 @@ maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_me
 maage_status maage_renderer_create_texture(maage_renderer *renderer, const maage_pixel_buffer *atlas, maage_render_texture **texture, maage_status_trace *trace);
 maage_status maage_render_texture_destroy(maage_render_texture *texture);
 maage_status maage_renderer_upload_geometry(maage_renderer *renderer, const maage_mesh_data *data, maage_render_texture *texture, maage_render_mesh **mesh, maage_status_trace *trace);
+/* An index-only view borrows the original immutable GPU vertices and retains
+ * its source until the view is destroyed. Data indices must address the same
+ * vertices as source; only grouped/filtered indices and sort data are uploaded.
+ * This avoids allocating another full vertex buffer for local predictions. */
+maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, const maage_mesh_data *data, maage_render_mesh **mesh, maage_status_trace *trace);
 /* Begin consumes preparation on SUCCESS. Vertices stay borrowed until step
  * returns SUCCESS or the mesh is destroyed. Step copies at most byte_budget
  * bytes on the window/renderer thread; NOOP means more work remains. Native
