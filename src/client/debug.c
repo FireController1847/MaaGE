@@ -16,8 +16,8 @@
 
 /* Platform-specific diagnostics stay private to this Client collector. No
  * filesystem reads, allocation, GUI mutation or world locks are needed. */
-static void maage_client_debug_memory(double *resident, double *peak) {
-    *resident = *peak = -1.0;
+static void maage_client_debug_memory(double *used, double *resident, double *peak) {
+    *used = *resident = *peak = -1.0;
 #if defined(_WIN32)
     {
         PROCESS_MEMORY_COUNTERS memory;
@@ -30,10 +30,23 @@ static void maage_client_debug_memory(double *resident, double *peak) {
     }
 #elif defined(__APPLE__)
     {
-        mach_task_basic_info_data_t memory;
-        mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
         struct rusage usage;
-        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t) &memory, &count) == KERN_SUCCESS) *resident = (double) memory.resident_size;
+#if defined(TASK_VM_INFO) && defined(TASK_VM_INFO_REV0_COUNT)
+        task_vm_info_data_t memory;
+        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+        memset(&memory, 0, sizeof(memory));
+        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t) &memory, &count) == KERN_SUCCESS && count >= TASK_VM_INFO_REV0_COUNT) {
+            *resident = (double) memory.resident_size;
+            /* Reusable resident pages can be reclaimed; subtract them to
+             * estimate the active working set. This is not JVM heap usage. */
+            if (memory.reusable <= memory.resident_size) *used = (double) (memory.resident_size - memory.reusable);
+        }
+#endif
+        if (*resident < 0) {
+            mach_task_basic_info_data_t basic;
+            mach_msg_type_number_t basic_count = MACH_TASK_BASIC_INFO_COUNT;
+            if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t) &basic, &basic_count) == KERN_SUCCESS) *resident = (double) basic.resident_size;
+        }
         if (!getrusage(RUSAGE_SELF, &usage)) *peak = (double) usage.ru_maxrss;
     }
 #elif defined(__linux__)
@@ -80,7 +93,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     const maage_player *player;
     double yaw, pitch;
     const char *gpu;
-    double degrees, resident, peak, retained;
+    double degrees, used, resident, peak, retained;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
     if (!debug || !snapshot || !renderer || !meshes || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
@@ -106,9 +119,10 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
         if (debug->timing_ready) sprintf(debug->performance, "%.0f FPS | %.1f TPS | %.1f ms", debug->fps, debug->tps, debug->frame_ms);
         else
             strcpy(debug->performance, "Collecting timing...");
-        maage_client_debug_memory(&resident, &peak);
+        maage_client_debug_memory(&used, &resident, &peak);
         debug->memory[0] = 0;
-        if (resident >= 0) sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
+        if (used >= 0 && resident >= 0) sprintf(debug->memory, "Memory: %.0f / %.0f MiB", used / 1048576.0, resident / 1048576.0);
+        else if (resident >= 0) sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
         else if (peak >= 0) sprintf(debug->memory, "Peak memory: %.0f MiB", peak / 1048576.0);
         sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u", debug->busy_workers, stats->worker_count, stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);
         debug->measurement_after = now + 0.25;

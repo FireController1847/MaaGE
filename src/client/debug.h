@@ -26,7 +26,10 @@ typedef struct maage_client_debug {
 } maage_client_debug;
 /* Copied player/target observations are read from the latest Server snapshot. Performance uses
  * a 0.75-second exponential history, displayed at 250 ms intervals; native memory
- * is sampled at that interval. Static identity is formatted on renderer changes.
+ * is sampled at that interval. On macOS F3 estimates non-reusable resident
+ * memory / total resident memory; other platforms display the available single
+ * resident or peak figure. These are process metrics, not allocator heap totals.
+ * Static identity is formatted on renderer changes.
  * latest_frame_ms remains unsmoothed for upload scheduling. Owner-thread only:
  * no heap allocation, disk I/O, World lock or worker wait. */
 void maage_client_debug_frame(maage_client_debug *debug, double now, double elapsed, int presented, unsigned long ticks, double tick_seconds);
