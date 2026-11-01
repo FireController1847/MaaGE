@@ -36,7 +36,7 @@ struct maage_renderer {
     maage_window_native native;
     const maage_render_backend_api *api;
     void *platform;
-    float clear[4], sky_light, fog[4];
+    float clear[4], sky_light, fog[4], fog_distance[4]; /* Distance start/end; projection scales are filled per frame. */
     const maage_render_ui_data *background, *overlay;
     const maage_render_mesh *foreground;
     const maage_render_instance *instances;

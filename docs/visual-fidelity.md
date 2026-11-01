@@ -232,7 +232,7 @@ the sampled cell and the cell above, without solid-cube AO. Existing async mesh
 jobs, local prediction patches, transparency sorting and retained GPU presentation
 remain in use; no separate fluid mesher or synchronous relight is introduced.
 
-## Underwater Presentation
+## Distance and Underwater Fog
 
 Client replica surfaces at the interpolated camera select water presentation.
 World and hand projection apply the existing 60/70 water FOV factor once; in
@@ -244,10 +244,23 @@ It blends distant geometry toward blue, preserving ordinary lighting on nearby
 terrain and entities. The exact reference fog-light temporal smoothing is not
 implemented. Unknown light retains the last presentation value.
 
-One 112-byte shared uniform packet and shader equation serve Metal, Vulkan and
-modern OpenGL; native adapters bind/upload the additional fog vector. Fog applies
-to scene geometry and instances, with neutral fading for multiplicative damage
-cracks. Foreground and HUD are unfogged. Unsupported backends reject nonzero fog.
+Air uses smooth radial distance fog in the existing scene fragment shader.
+Its color is the same biome/day/weather sky RGB used to clear the scene. The
+visibility range is the rendered radius in chunks times the chunk edge, reduced
+by the maximum horizontal camera displacement from the player. This inscribed
+range remains inside the drawn chunk square at every center-chunk position and
+stays stable when that square rebases. Fog starts at 75% and reaches the sky color
+at 95% of that range, hiding axial cutoffs and distant corners without changing
+culling or streaming. Transient missing/unpresented chunks inside the footprint
+are still governed by the existing asynchronous presentation path.
+
+One 128-byte shared uniform packet and shader equation serve Metal, Vulkan and
+modern OpenGL. Perspective row lengths recover radial camera coordinates once
+per frame; instances retain those scales before applying their model transforms.
+Switching air/water replaces the fog parameters; exponential underwater depth,
+color and density calculations are unchanged. Fog applies to scene geometry and
+instances, with neutral fading for multiplicative damage cracks. Foreground and
+HUD are unfogged. Unsupported backends reject nonzero fog.
 The existing optional `textures/misc/underwater.png` loads once into the scene
 atlas. First-person immersion draws four repeats with orientation-linked UVs and
 half alpha after the hand, before the HUD, using at most 25 clipped quads. It adds

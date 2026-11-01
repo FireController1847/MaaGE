@@ -27,7 +27,7 @@ typedef struct maage_gl_target {
 } maage_gl_target;
 typedef struct maage_gl_program {
     GLuint name;
-    GLint matrix, lighting, parameters, fog;
+    GLint matrix, lighting, parameters, fog, fog_distance;
 } maage_gl_program;
 typedef struct maage_gl_frame {
     maage_gl_sync fence;
@@ -123,9 +123,10 @@ static maage_status maage_gl_program_create(maage_renderer *renderer, maage_gl_p
     program->matrix = native->gl.GetUniformLocation(program->name, "maage.matrix");
     program->lighting = native->gl.GetUniformLocation(program->name, "maage.lighting");
     program->fog = native->gl.GetUniformLocation(program->name, "maage.fog");
+    program->fog_distance = native->gl.GetUniformLocation(program->name, "maage.fog_distance");
     program->parameters = native->gl.GetUniformLocation(program->name, "maage.parameters");
     sampler = native->gl.GetUniformLocation(program->name, "maage_source");
-    if (sampler < 0 || program->parameters < 0 || (mesh && (program->matrix < 0 || program->lighting < 0 || program->fog < 0))) {
+    if (sampler < 0 || program->parameters < 0 || (mesh && (program->matrix < 0 || program->lighting < 0 || program->fog < 0 || program->fog_distance < 0))) {
         maage_log_warning("maage.render.opengl", "GLSL %s program is missing required active uniforms.", label);
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
@@ -331,6 +332,7 @@ static void maage_gl_uniforms(maage_gl_renderer *native, const maage_gl_program 
     if (program->matrix >= 0) native->gl.UniformMatrix4fv(program->matrix, 1, GL_FALSE, uniforms->matrix);
     if (program->lighting >= 0) native->gl.Uniform4fv(program->lighting, 1, uniforms->lighting);
     if (program->fog >= 0) native->gl.Uniform4fv(program->fog, 1, uniforms->fog);
+    if (program->fog_distance >= 0) native->gl.Uniform4fv(program->fog_distance, 1, uniforms->fog_distance);
     if (program->parameters >= 0) native->gl.Uniform4fv(program->parameters, 1, uniforms->parameters);
 }
 static void maage_gl_texture_bind(maage_gl_renderer *native, GLuint texture) {

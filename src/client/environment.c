@@ -374,7 +374,7 @@ static void maage_client_environment_particles(maage_client_environment *view, c
 maage_status maage_client_environment_update(maage_client_environment *view, maage_renderer *renderer, const maage_session_snapshot *snapshot, float width, float height, const float view_projection[16], const maage_world *visual, const double camera[3], double yaw, double pitch, int first_person, int radius) {
     const maage_client_environment_resource *resource;
     const maage_environment_state *state;
-    double sun[3], angle, phase, sunlight, rain, sky_brightness;
+    double sun[3], angle, phase, sunlight, rain, sky_brightness, visibility, camera_dx, camera_dz;
     float x, y, size, alpha;
     float sky_color[3], brightness, sky_level, block_level, range_weight;
     unsigned char light = 0;
@@ -415,8 +415,6 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
         maage_client_environment_particles(view, snapshot, visual, camera, view_projection, width, height);
         return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);
     }
-    result = maage_renderer_set_fog(renderer, 0, 0, 0, 0);
-    if (maage_status_failed(result)) return result;
     angle = maage_environment_celestial_angle(state) * 6.283185307179586;
     sky_brightness = cos(angle) * 2 + 0.5;
     if (sky_brightness < 0) sky_brightness = 0;
@@ -424,6 +422,15 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
     maage_client_sky_color(snapshot->has_observation ? snapshot->observation.temperature : 0.8, sky_brightness, rain, state->thunder_intensity, sky_color);
     result = maage_renderer_set_clear_color(renderer, sky_color[0], sky_color[1], sky_color[2], 1);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    /* The draw-selection square extends at least radius whole chunks around
+     * the player, regardless of position inside its center chunk. Use that stable
+     * inscribed range and the actual camera offset, including third person. */
+    camera_dx = fabs(camera[0] - snapshot->player.player.position[0]);
+    camera_dz = fabs(camera[2] - snapshot->player.player.position[2]);
+    visibility = (double) radius * MAAGE_CHUNK_EDGE - (camera_dx > camera_dz ? camera_dx : camera_dz);
+    if (!(visibility > 0)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
+    result = maage_renderer_set_distance_fog(renderer, sky_color[0], sky_color[1], sky_color[2], (float) (visibility * 0.75), (float) (visibility * 0.95));
+    if (maage_status_failed(result)) return result;
     sun[0] = -sin(angle);
     sun[1] = cos(angle);
     sun[2] = 0;

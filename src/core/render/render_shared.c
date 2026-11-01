@@ -1,6 +1,7 @@
 #include "render_internal.h"
 #include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -204,8 +205,25 @@ maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maa
     plan->world.lighting[0] = renderer->sky_light;
     plan->world.parameters[0] = renderer->animation_tick;
     memcpy(plan->world.fog, renderer->fog, sizeof(plan->world.fog));
+    memcpy(plan->world.fog_distance, renderer->fog_distance, sizeof(plan->world.fog_distance));
+    if (matrix && renderer->fog_distance[1] > 0) {
+        double horizontal = 0, vertical = 0;
+        /* Rotation preserves row lengths. Undo perspective X/Y scaling once
+         * per frame, before any instance transform changes the draw matrix. */
+        for (axis = 0; axis < 3; ++axis) {
+            horizontal += (double) matrix[axis * 4] * matrix[axis * 4];
+            vertical += (double) matrix[axis * 4 + 1] * matrix[axis * 4 + 1];
+        }
+        if (!(horizontal > 0 && horizontal <= DBL_MAX && vertical > 0 && vertical <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+        horizontal = 1.0 / sqrt(horizontal);
+        vertical = 1.0 / sqrt(vertical);
+        if (!(horizontal <= FLT_MAX && vertical <= FLT_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_PRESENT, 0);
+        plan->world.fog_distance[2] = (float) horizontal;
+        plan->world.fog_distance[3] = (float) vertical;
+    }
     plan->hand = plan->world;
     plan->hand.fog[3] = 0;
+    memset(plan->hand.fog_distance, 0, sizeof(plan->hand.fog_distance));
     memcpy(plan->hand.matrix, renderer->foreground_matrix, sizeof(plan->hand.matrix));
     plan->hand.lighting[1] = renderer->foreground_light[0];
     plan->hand.lighting[2] = renderer->foreground_light[1];

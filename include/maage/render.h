@@ -134,8 +134,15 @@ maage_status maage_renderer_set_clear_color(maage_renderer *renderer, float red,
 maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light, const maage_render_ui_data *background, const maage_render_ui_data *overlay);
 /* Exponential view-depth fog on scene meshes/instances; density zero disables.
  * RGB stays in [0,1], density is finite/nonnegative. Foreground/UI stay clear.
- * Nonzero density requires FOG support; no backend silently emulates it. */
+ * Replaces distance fog. Nonzero density requires FOG support; no backend
+ * silently emulates it. */
 maage_status maage_renderer_set_fog(maage_renderer *renderer, float red, float green, float blue, float density);
+/* Smooth radial fog on perspective scene meshes/instances. RGB is in [0,1];
+ * finite 0 <= start < end gives untouched near geometry and full fog at end.
+ * The world matrix must combine perspective projection with a rigid camera
+ * transform. Replaces exponential fog; set_fog with density zero disables both.
+ * Requires FOG support. Foreground, sky and screen-space UI remain clear. */
+maage_status maage_renderer_set_distance_fog(maage_renderer *renderer, float red, float green, float blue, float start, float end);
 /* Borrow a camera-local presentation mesh until cleared/destroyed; copy its
  * column-major transform. Draw after the scene with independent depth, before
  * GUI. NULL clears the pass. Requires TEXTURED_MESH and SCENE support. */

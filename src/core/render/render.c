@@ -253,6 +253,18 @@ maage_status maage_renderer_set_fog(maage_renderer *renderer, float red, float g
     renderer->fog[1] = green;
     renderer->fog[2] = blue;
     renderer->fog[3] = density;
+    memset(renderer->fog_distance, 0, sizeof(renderer->fog_distance));
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+maage_status maage_renderer_set_distance_fog(maage_renderer *renderer, float red, float green, float blue, float start, float end) {
+    if (!renderer || !(red >= 0 && red <= 1 && green >= 0 && green <= 1 && blue >= 0 && blue <= 1 && start >= 0 && start < end && end <= FLT_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    if (!(renderer->capabilities.features & MAAGE_RENDER_CAP_FOG)) return maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    renderer->fog[0] = red;
+    renderer->fog[1] = green;
+    renderer->fog[2] = blue;
+    renderer->fog[3] = 0;
+    renderer->fog_distance[0] = start;
+    renderer->fog_distance[1] = end;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 maage_status maage_renderer_set_foreground(maage_renderer *renderer, const maage_render_mesh *mesh, const float view_projection[16], float sky_light, float block_light) {
