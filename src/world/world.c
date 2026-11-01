@@ -91,7 +91,8 @@ struct maage_world {
     unsigned *free_tasks;
     unsigned count, cache_limit, active, saves_active, free_count, task_limit;
     unsigned scan_step, mesh_turn, column_turn;
-    int scan_ring, save_turn, visual_frontier[MAAGE_WORLD_REVEAL_SECTORS];
+    int scan_ring, save_turn, front_loading_pending, visual_frontier[MAAGE_WORLD_REVEAL_SECTORS];
+    unsigned facing_sector;
     unsigned long clock, rate_generated;
     double rate_time, generation_rate;
     int center_x, center_z, retained_radius, stopped, failed, diagnostics;
@@ -323,6 +324,26 @@ static int maage_world_distance(const maage_world *world, const maage_world_slot
     int x = abs(slot->x - world->center_x), z = abs(slot->z - world->center_z);
     return x > z ? x : z;
 }
+/* Separate view-facing admission priority from geometric first-presentation
+ * sectors. Yaw arrives from the Server's normal sampled input, not only the
+ * initial VIEW command, and is quantized to avoid full reprioritization
+ * for every tiny mouse movement. */
+static unsigned maage_world_facing_sector(double yaw) {
+    double sector = fmod(yaw + 0.39269908169872414, 6.283185307179586);
+    if (sector < 0.0) sector += 6.283185307179586;
+    return (unsigned) (sector / 0.7853981633974483);
+}
+static unsigned maage_world_job_priority(const maage_world *world, int dx, int dz, int kind, double forward_x, double forward_z) {
+    unsigned ring = (unsigned) (abs(dx) > abs(dz) ? abs(dx) : abs(dz));
+    unsigned priority = ring * 16U;
+    /* All jobs ahead take priority over farther or nearer rear jobs. Keep
+     * age-based fairness inside Jobs so an obsolete facing angle cannot
+     * indefinitely strand previously accepted tasks. */
+    if (dx * forward_x + dz * forward_z < 0.0 && ring > 1U) priority += ((unsigned) maage_world_resident_radius(world) + 2U) * 16U;
+    if (kind == MAAGE_JOB_LOAD || kind == MAAGE_JOB_GENERATE) priority += 4U;
+    else if (kind == MAAGE_JOB_MESH) ++priority;
+    return priority;
+}
 /* An earlier column becoming eligible for its next independent job brings the
  * admission cursor back to that ring, without waiting for another sweep. */
 static void maage_world_scan_revisit(maage_world *world, const maage_world_slot *slot) {
@@ -377,6 +398,23 @@ static void maage_world_reset_visual_frontiers(maage_world *world) {
 }
 static int maage_world_complete(const maage_world_slot *slot) {
     return slot && slot->data && !slot->failed;
+}
+/* Front-loaded is defined by authoritative block availability, not lighting
+ * or the order in which a mesh happens to appear. The near-player collision
+ * halo remains eligible regardless of the current viewing direction. */
+static int maage_world_front_missing(const maage_world *world, double forward_x, double forward_z) {
+    int radius = maage_world_resident_radius(world);
+    int bound = MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1;
+    int dx, dz, x, z;
+    for (dz = -radius; dz <= radius; ++dz)
+        for (dx = -radius; dx <= radius; ++dx) {
+            if (dx * forward_x + dz * forward_z < 0.0 && (abs(dx) > 1 || abs(dz) > 1)) continue;
+            x = world->center_x + dx;
+            z = world->center_z + dz;
+            if (x < -bound || x > bound || z < -bound || z > bound) continue;
+            if (!maage_world_complete(maage_world_find(world, x, z))) return 1;
+        }
+    return 0;
 }
 static void maage_world_neighbors(const maage_world *world, int x, int z, maage_world_slot *neighbors[8]) {
     static const int offsets[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
@@ -1129,6 +1167,16 @@ static maage_status maage_world_schedule(maage_world *world) {
     if (world->config.presentation_only && budget > 64U) budget = 64U;
     forward_x = sin(world->yaw);
     forward_z = -cos(world->yaw);
+    if (!world->config.presentation_only) {
+        int was_pending = world->front_loading_pending;
+        world->front_loading_pending = maage_world_front_missing(world, forward_x, forward_z);
+        if (was_pending && !world->front_loading_pending) {
+            /* Revisit the deferred rear immediately after all requested
+             * forward blocks have arrived, rather than waiting for a wrap. */
+            world->scan_ring = 0;
+            world->scan_step = 0;
+        }
+    }
     for (examined = 0; examined < budget && world->active - world->saves_active < work_limit && world->active < world->task_limit; ++examined) {
         if (world->scan_ring > radius) {
             world->scan_ring = 0;
@@ -1143,6 +1191,11 @@ static maage_status maage_world_schedule(maage_world *world) {
         if (abs(x) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1 || abs(z) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1) continue;
         slot = maage_world_find(world, x, z);
         if (slot && (slot->failed || (!slot->data && slot->work))) continue;
+        /* Do not spend fresh disk reads or generation on unseen rear terrain
+         * while requested forward blocks remain unavailable. Existing rear
+         * columns, including gameplay/light upkeep, are not discarded. */
+        if (world->front_loading_pending && (!slot || !slot->data) &&
+            (abs(dx) > 1 || abs(dz) > 1) && dx * forward_x + dz * forward_z < 0.0) continue;
         kind = 0;
         if (!slot) {
             if (world->config.presentation_only) continue;
@@ -1164,11 +1217,8 @@ static maage_status maage_world_schedule(maage_world *world) {
         if (!slot) slot = maage_world_insert(world, x, z);
         if (!slot) break;
         ring = abs(dx) > abs(dz) ? abs(dx) : abs(dz);
-        priority = (unsigned) ring * 16U;
-        if (dx * forward_x + dz * forward_z < 0) priority += 3U;
-        if (kind == MAAGE_JOB_LOAD || kind == MAAGE_JOB_GENERATE) priority += 4U;
-        else if (kind == MAAGE_JOB_MESH) ++priority;
-        else if (kind == MAAGE_JOB_LIGHT && !slot->light_ready) priority += 2U;
+        priority = maage_world_job_priority(world, dx, dz, kind, forward_x, forward_z);
+        if (kind == MAAGE_JOB_LIGHT && !slot->light_ready) priority += 2U;
         result = maage_world_submit(world, slot, kind, priority);
         if (maage_status_failed(result)) {
             maage_world_failure_status(world, slot, result, "World task submission failed.");
@@ -1256,6 +1306,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->center_x = maage_world_chunk_coordinate((int) floor(world->spawn[0]));
     world->center_z = maage_world_chunk_coordinate((int) floor(world->spawn[2]));
     world->retained_radius = config->render_distance;
+    world->facing_sector = maage_world_facing_sector(world->yaw);
     world->tasks = (maage_world_task *) calloc(job_limit, sizeof(*world->tasks));
     world->observations = (maage_job_observation *) malloc((size_t) job_limit * sizeof(*world->observations));
     world->free_tasks = (unsigned *) malloc((size_t) job_limit * sizeof(*world->free_tasks));
@@ -1382,7 +1433,8 @@ maage_status maage_world_set_biome_blend(maage_world *world, maage_biome_blend b
 }
 maage_status maage_world_stream(maage_world *world, double x, double z, double yaw, maage_status_trace *trace) {
     maage_world_slot *slot;
-    int cx, cz, old_x, old_z, radius;
+    int cx, cz, old_x, old_z, radius, facing_changed;
+    unsigned facing_sector;
     unsigned long failures;
     if (!world || world->stopped || !(x > -MAAGE_WORLD_LIMIT && x < MAAGE_WORLD_LIMIT && z > -MAAGE_WORLD_LIMIT && z < MAAGE_WORLD_LIMIT)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE);
     failures = world->stats.failure_reports;
@@ -1391,24 +1443,26 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
     old_x = world->center_x;
     old_z = world->center_z;
     radius = world->config.render_distance;
+    facing_sector = maage_world_facing_sector(yaw);
+    facing_changed = facing_sector != world->facing_sector;
     world->center_x = cx;
     world->center_z = cz;
     world->yaw = yaw;
+    world->facing_sector = facing_sector;
     if (cx != old_x || cz != old_z) {
         maage_world_reset_visual_frontiers(world);
         world->retained_radius = world->config.render_distance;
     }
     maage_world_collect(world);
-    if (cx != old_x || cz != old_z) {
+    if (cx != old_x || cz != old_z || facing_changed) {
         unsigned index;
+        double forward_x = sin(yaw), forward_z = -cos(yaw);
         for (index = 0; index < world->task_limit; ++index) {
             maage_world_task *task = &world->tasks[index];
-            int dx, dz, distance;
+            unsigned priority;
             if (!task->used || task->kind == MAAGE_JOB_SAVE || task->cancel_requested) continue;
-            dx = abs(task->x - cx);
-            dz = abs(task->z - cz);
-            distance = dx > dz ? dx : dz;
-            (void) maage_jobs_set_priority(task->kind == MAAGE_JOB_LOAD && world->io_jobs ? world->io_jobs : world->jobs, task->id, (unsigned) distance * 16U + (task->kind <= MAAGE_JOB_GENERATE ? 4U : (task->kind == MAAGE_JOB_MESH ? 1U : 0U)));
+            priority = maage_world_job_priority(world, task->x - cx, task->z - cz, task->kind, forward_x, forward_z);
+            (void) maage_jobs_set_priority(task->kind == MAAGE_JOB_LOAD && world->io_jobs ? world->io_jobs : world->jobs, task->id, priority);
         }
         world->scan_ring = 0;
         world->scan_step = 0;
@@ -2327,11 +2381,14 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
     const maage_chunk *chunk, *before;
     size_t count = 0, index = 0, byte;
     unsigned int bit, cell;
-    int x, y, z, best = INT_MAX, distance, fair;
+    int x, y, z, best = INT_MAX, distance, fair, behind, chosen_behind = 0;
+    double forward_x, forward_z;
     maage_block_state_id state;
     if (output) *output = NULL;
     if (!world || !output || world->config.presentation_only) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
     fair = ++world->column_turn % 8U == 0;
+    forward_x = sin(world->yaw);
+    forward_z = -cos(world->yaw);
     /* Transfer completed columns freely; only the Client's initial mesh
      * presentation frontier is ordered. This allows far work to be prepared
      * while an earlier ring is still lighting or meshing. */
@@ -2343,10 +2400,16 @@ maage_status maage_world_next_column(maage_world *world, maage_column_update **o
          * for instant re-expansion, but receive no unnecessary deltas. */
         if (distance > world->config.render_distance + 1 && distance <= world->retained_radius + 1) continue;
         if (distance <= world->config.render_distance + 1 ? slot->block_revision == slot->sent_revision : !slot->sent) continue;
-        if (chosen && (fair ? slot->block_revision >= chosen->block_revision : distance >= best)) continue;
+        behind = (slot->x - world->center_x) * forward_x + (slot->z - world->center_z) * forward_z < 0.0 && distance > 1;
+        /* Never release a new rear initial packet ahead of the requested
+         * forward terrain; rear deltas and unloads retain their obligations. */
+        if (world->front_loading_pending && behind && !slot->sent) continue;
+        if (chosen && (behind > chosen_behind ||
+                       (behind == chosen_behind && (fair ? slot->block_revision >= chosen->block_revision : distance >= best)))) continue;
         /* Transfer only blocks and biomes; Server lighting is neither copied
          * nor needed to begin Client-owned lighting and meshing. */
         chosen = slot;
+        chosen_behind = behind;
         best = distance;
     }
     if (!chosen) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SNAPSHOT, 0);

@@ -116,8 +116,14 @@ biome decoration.
 The World scheduler admits independent jobs through one progressing square-ring
 spiral, without waiting for earlier rings to finish. Completed loads, generation,
 lighting and changed neighbor inputs immediately reopen the closest eligible ring
-for its next job rather than waiting for a full scan around the view. Jobs remain
-prioritized by distance. Authoritative disk loads and durable saves run on a
+for its next job rather than waiting for a full scan around the view. Missing
+blocks in the forward half-plane (plus the immediate collision halo) take
+admission priority over new disk reads/generation behind the player. The rear
+initial loads are deferred until the current requested forward range has blocks;
+already loaded rear data remains resident and can still receive gameplay/light
+updates. Completed column transfers favor the forward direction as well.
+Accepted jobs are prioritized by facing hemisphere, then distance; changing
+the facing octant reprioritizes pending jobs without cancelling running work. Authoritative disk loads and durable saves run on a
 separate I/O worker pool, so blocking filesystem operations never occupy a
 generation/lighting/meshing CPU worker. Both pools share bounded owner-managed
 task contexts, immutable snapshots and completion handling; shutdown drains
