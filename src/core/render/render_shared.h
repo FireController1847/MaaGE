@@ -61,6 +61,11 @@ typedef struct maage_render_gpu_mesh_vertex {
     float animation[3];
 } maage_render_gpu_mesh_vertex;
 void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offset, size_t bytes, void *destination);
+/* Native index representation is chosen per mesh. These private helpers are
+ * shared by the core uploader and each native rendering backend. */
+size_t maage_render_gpu_mesh_index_bytes(const maage_render_mesh *mesh);
+size_t maage_render_gpu_index_allocation_bytes(size_t count, size_t width);
+void maage_render_gpu_index_pack_span(const unsigned int *indices, size_t count, size_t width, size_t offset, size_t bytes, void *destination);
 typedef struct maage_render_ui_gpu_vertex {
     maage_render_ui_vertex vertex;
     float depth;
