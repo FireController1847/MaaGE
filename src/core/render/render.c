@@ -384,6 +384,17 @@ maage_status maage_render_texture_destroy(maage_render_texture *texture) {
     maage_render_texture_release(texture);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
+size_t maage_renderer_gpu_mesh_allocation_bytes(const maage_renderer *renderer) {
+    const maage_render_mesh *mesh;
+    size_t total = 0, bytes;
+    if (!renderer || !renderer->api || !renderer->api->mesh_allocation_bytes) return 0;
+    for (mesh = renderer->meshes; mesh; mesh = mesh->next) {
+        bytes = renderer->api->mesh_allocation_bytes(mesh);
+        if (bytes > (size_t) - 1 - total) return (size_t) - 1;
+        total += bytes;
+    }
+    return total;
+}
 size_t maage_render_gpu_mesh_vertex_bytes(void) {
     return sizeof(maage_render_gpu_mesh_vertex);
 }

@@ -45,6 +45,7 @@ typedef struct maage_gl_renderer {
 } maage_gl_renderer;
 typedef struct maage_gl_mesh {
     GLuint vao, vertices, indices;
+    size_t vertex_bytes, index_bytes;
     /* Foreground and world can reference the same mesh with different cameras. */
     maage_gl_buffer sorted[MAAGE_GL_FRAME_SLOTS * 2];
     unsigned long sorted_revision[MAAGE_GL_FRAME_SLOTS * 2];
@@ -585,10 +586,14 @@ static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_ren
         if (!geometry->vao || !geometry->vertices || !geometry->indices) return maage_gl_resource_failure(renderer, MAAGE_OPERATION_UPLOAD);
         native->gl.BindVertexArray(geometry->vao);
         native->gl.BindBuffer(MAAGE_GL_ARRAY_BUFFER, geometry->vertices);
-        if (!mesh->vertex_source) native->gl.BufferData(MAAGE_GL_ARRAY_BUFFER, (ptrdiff_t) vertex_bytes, NULL, MAAGE_GL_STATIC_DRAW);
+        if (!mesh->vertex_source) {
+            native->gl.BufferData(MAAGE_GL_ARRAY_BUFFER, (ptrdiff_t) vertex_bytes, NULL, MAAGE_GL_STATIC_DRAW);
+            geometry->vertex_bytes = vertex_bytes;
+        }
         maage_gl_mesh_attributes(native);
         native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, geometry->indices);
         native->gl.BufferData(MAAGE_GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t) index_bytes, NULL, MAAGE_GL_STATIC_DRAW);
+        geometry->index_bytes = index_bytes;
     }
     native->gl.BindVertexArray(geometry->vao);
     if (offset < vertex_bytes) {
@@ -604,6 +609,15 @@ static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_ren
         native->gl.BufferSubData(MAAGE_GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t) (offset - vertex_bytes), (ptrdiff_t) bytes, (const unsigned char *) data->indices + offset - vertex_bytes);
     }
     return maage_opengl_check(renderer, MAAGE_OPERATION_UPLOAD);
+}
+static size_t maage_gl_mesh_allocation_bytes(const maage_render_mesh *mesh) {
+    maage_gl_mesh *geometry = mesh->platform;
+    size_t bytes;
+    unsigned int slot;
+    if (!geometry) return 0;
+    bytes = geometry->vertex_bytes + geometry->index_bytes;
+    for (slot = 0; slot < MAAGE_GL_FRAME_SLOTS * 2; ++slot) bytes += geometry->sorted[slot].capacity;
+    return bytes;
 }
 static void maage_gl_destroy_mesh(maage_render_mesh *mesh) {
     maage_gl_mesh *geometry = mesh->platform;
@@ -781,4 +795,4 @@ static maage_status maage_opengl_modern_destroy(maage_renderer *renderer) {
 const maage_render_backend_api maage_render_opengl_api = {
     MAAGE_RENDER_OPENGL, maage_opengl_modern_create, maage_opengl_modern_destroy,
     MAAGE_RENDER_CAPABILITIES_VERSION, NULL, maage_gl_frame_render, maage_gl_upload_geometry,
-    maage_gl_destroy_mesh, maage_gl_create_texture, maage_gl_destroy_texture, maage_opengl_context_vsync};
+    maage_gl_destroy_mesh, maage_gl_create_texture, maage_gl_destroy_texture, maage_opengl_context_vsync, maage_gl_mesh_allocation_bytes};

@@ -52,4 +52,4 @@ static maage_status maage_software_present(maage_renderer *renderer, const maage
 }
 const maage_render_backend_api maage_render_software_api = {
     MAAGE_RENDER_SOFTWARE, maage_software_create, maage_software_destroy,
-    MAAGE_RENDER_CAPABILITIES_VERSION, maage_software_present, NULL, NULL, NULL, NULL, NULL, NULL};
+    MAAGE_RENDER_CAPABILITIES_VERSION, maage_software_present, NULL, NULL, NULL, NULL, NULL, NULL, NULL};

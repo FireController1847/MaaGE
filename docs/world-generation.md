@@ -215,9 +215,10 @@ SW (Server World retained storage), CW (Client World retained storage),
 and U (unattributed resident-memory remainder). World figures inspect the owner-thread's allocated
 column snapshots, packed sections, lighting, and indexing structures; detached
 worker outputs, external registries, and renderer allocations are not included.
-GPU bytes count the actual compact 40-byte vertex stride and 32-bit base mesh
-index payloads, not native driver overhead, transparency sort buffers, prediction
-views or other resources. The fourth number is a subtraction from process
+GPU bytes now sum live native mesh vertex/index allocations, including
+translucent sort buffers and index-only prediction views without double-counting
+shared source vertices. The counter excludes textures, temporary uploads,
+retired native resources and driver overhead. The fourth number is a subtraction from process
 resident memory, not an independent allocation measurement, and can be unknown
 if the GPU allocation footprint exceeds reported residency. Further GPU quad
 merging and pooling native allocations remain separate opportunities.

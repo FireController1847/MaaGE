@@ -935,6 +935,17 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
     else memcpy((unsigned char *) [geometry->indices contents] + offset - vertex_bytes, (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
+static size_t maage_metal_mesh_allocation_bytes(const maage_render_mesh *mesh) {
+    maage_metal_mesh *geometry = mesh->platform;
+    size_t bytes = 0;
+    unsigned int slot;
+    if (!geometry) return 0;
+    if (!mesh->vertex_source && geometry->vertices) bytes += [geometry->vertices length];
+    if (geometry->indices) bytes += [geometry->indices length];
+    for (slot = 0; slot < MAAGE_METAL_FRAME_SLOTS; ++slot)
+        if (geometry->sorted_indices[slot]) bytes += [geometry->sorted_indices[slot] length];
+    return bytes;
+}
 static void maage_metal_destroy_mesh(maage_render_mesh *mesh) {
     maage_metal_mesh *geometry = mesh->platform;
     unsigned int slot;
@@ -1004,4 +1015,4 @@ const maage_render_backend_api maage_render_metal_api = {
     MAAGE_RENDER_METAL, maage_metal_create, maage_metal_destroy,
     MAAGE_RENDER_CAPABILITIES_VERSION, NULL, maage_metal_frame, maage_metal_upload_geometry,
     maage_metal_destroy_mesh, maage_metal_create_texture, maage_metal_destroy_texture,
-    maage_metal_set_vsync};
+    maage_metal_set_vsync, maage_metal_mesh_allocation_bytes};

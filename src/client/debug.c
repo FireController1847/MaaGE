@@ -81,6 +81,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     double yaw, pitch;
     const char *gpu;
     double degrees, resident, peak, retained, tracked;
+    size_t native_gpu_bytes;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
     if (!debug || !snapshot || !renderer || !meshes || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
@@ -110,17 +111,18 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
         debug->memory[0] = 0;
         if (resident >= 0) sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
         else if (peak >= 0) sprintf(debug->memory, "Peak memory: %.0f MiB", peak / 1048576.0);
-        tracked = (double) meshes->gpu_bytes + (double) snapshot->world_stats.resident_storage_bytes + (double) client_world_bytes;
+        native_gpu_bytes = maage_renderer_gpu_mesh_allocation_bytes(renderer);
+        tracked = (double) native_gpu_bytes + (double) snapshot->world_stats.resident_storage_bytes + (double) client_world_bytes;
         /* The last number is an unattributed process-resident remainder, not
          * an independent allocation count. Unified GPU memory and in-flight
          * allocations can make this a deliberately incomplete reconciliation. */
         if (resident >= tracked)
             sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / U %.0f MiB",
-                (double) meshes->gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
+                (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
                 (double) client_world_bytes / 1048576.0, (resident - tracked) / 1048576.0);
         else
             sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / U ? MiB",
-                (double) meshes->gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
+                (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
                 (double) client_world_bytes / 1048576.0);
         sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u", debug->busy_workers, stats->worker_count, stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);
         debug->measurement_after = now + 0.25;

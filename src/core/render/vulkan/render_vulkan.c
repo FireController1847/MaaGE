@@ -1018,6 +1018,16 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
     vkCmdCopyBuffer(gpu->upload, staging->buffer.buffer, offset < vertex_bytes ? geometry->vertices.buffer : geometry->indices.buffer, 1, &copy);
     return MAAGE_VULKAN_OK;
 }
+static size_t maage_vulkan_mesh_allocation_bytes(const maage_render_mesh *mesh) {
+    maage_vulkan_mesh *geometry = mesh->platform;
+    size_t bytes = 0;
+    unsigned int slot;
+    if (!geometry) return 0;
+    if (!mesh->vertex_source) bytes += (size_t) geometry->vertices.capacity;
+    bytes += (size_t) geometry->indices.capacity;
+    for (slot = 0; slot < MAAGE_VULKAN_FRAME_SLOTS; ++slot) bytes += (size_t) geometry->sorted[slot].capacity;
+    return bytes;
+}
 static void maage_vulkan_destroy_mesh(maage_render_mesh *mesh) {
     maage_vulkan_mesh *geometry = mesh->platform;
     if (!geometry) return;
@@ -1087,4 +1097,4 @@ const maage_render_backend_api maage_render_vulkan_api = {
     MAAGE_RENDER_VULKAN, maage_vulkan_create, maage_vulkan_destroy,
     MAAGE_RENDER_CAPABILITIES_VERSION, NULL, maage_vulkan_render_frame, maage_vulkan_upload_geometry,
     maage_vulkan_destroy_mesh, maage_vulkan_create_texture,
-    maage_vulkan_destroy_texture, maage_vulkan_set_vsync};
+    maage_vulkan_destroy_texture, maage_vulkan_set_vsync, maage_vulkan_mesh_allocation_bytes};
