@@ -315,12 +315,39 @@ static int maage_block_animation_valid(const float uv[4], const float animation[
            uv[3] + animation[0] * (count - 1.0f) <= 1.0f;
 }
 
+int maage_block_face_definition_valid(const maage_block_face_definition *face) {
+    unsigned int channel;
+    if (!face || (face->has_flow_texture != 0 && face->has_flow_texture != 1) || (face->has_flow_texture && face->flow_texture >= MAAGE_CONTENT_ID_INVALID) || face->tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || face->overlay_tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || !maage_block_uv_valid(face->uv, 0) || !maage_block_uv_valid(face->overlay_uv, 1) || !maage_block_uv_valid(face->snow_uv, 1) || !maage_block_uv_valid(face->flow_uv, 1) || !maage_block_animation_valid(face->uv, face->animation) || !maage_block_animation_valid(face->flow_uv, face->flow_animation)) return 0;
+    for (channel = 0; channel < 4; ++channel)
+        if (!(face->tint[channel] >= 0 && face->tint[channel] <= 1)) return 0;
+    return 1;
+}
+static int maage_block_bounds_valid(const maage_block_shape *shape) {
+    unsigned int axis;
+    int empty = 1;
+    for (axis = 0; axis < 3; ++axis)
+        if (shape->minimum[axis] != 0 || shape->maximum[axis] != 0) empty = 0;
+    if (empty) return 1;
+    for (axis = 0; axis < 3; ++axis)
+        if (!(shape->minimum[axis] >= 0 && shape->maximum[axis] <= 1 && shape->minimum[axis] < shape->maximum[axis])) return 0;
+    return 1;
+}
+static int maage_block_state_bounds_valid(const maage_block_state_definition *state) {
+    return state && (state->collision_override == 0 || state->collision_override == 1) && maage_block_bounds_valid(&state->selection_shape) && (!state->collision_override || maage_block_bounds_valid(&state->collision_shape));
+}
+int maage_block_collision_shape(const maage_block_definition *block, const maage_block_state_definition *state, maage_block_shape *shape) {
+    const maage_block_shape *bounds;
+    if (!block) return 0;
+    bounds = state && state->collision_override ? &state->collision_shape : (block->solid ? &block->collision_shape : NULL);
+    if (!bounds || bounds->maximum[0] <= bounds->minimum[0]) return 0;
+    if (shape) *shape = *bounds;
+    return 1;
+}
 maage_status maage_block_registry_register_state(maage_block_registry *registry, maage_block_state_definition *definition) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(registry);
-    unsigned int face, component;
+    unsigned int face;
     size_t bucket;
     int found;
-    const maage_block_face_definition *texture;
     maage_state_slot *slot;
     void **entry;
     if (!registry || !definition) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -328,30 +355,14 @@ maage_status maage_block_registry_register_state(maage_block_registry *registry,
     if (registry->state_count >= 4294967295UL) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     definition->id = (unsigned long) registry->state_count;
     if (definition->id > 4294967295UL || (definition->random_ticks != 0 && definition->random_ticks != 1) || definition->fluid_kind >= MAAGE_CONTENT_ID_INVALID || (!definition->fluid_kind && definition->fluid_level)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    if (definition->selection_shape.maximum[0] != 0.0)
-        for (component = 0; component < 3; ++component)
-            if (!(definition->selection_shape.minimum[component] >= 0.0 && definition->selection_shape.maximum[component] <= 1.0 && definition->selection_shape.minimum[component] < definition->selection_shape.maximum[component])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (!maage_block_state_bounds_valid(definition)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!maage_block_registry_block(registry, definition->block_id)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (maage_block_registry_state(registry, definition->id)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     bucket = maage_block_state_bucket(registry, definition->block_id, definition->metadata, &found);
     if (found) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    if (definition->block_id != ids->block_air) {
-        for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
-            texture = &definition->faces[face];
-            if (texture->tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL ||
-                texture->overlay_tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL ||
-                !maage_block_uv_valid(texture->uv, 0) ||
-                !maage_block_uv_valid(texture->overlay_uv, 1) ||
-                !maage_block_uv_valid(texture->snow_uv, 1) ||
-                !maage_block_uv_valid(texture->flow_uv, 1) ||
-                !maage_block_animation_valid(texture->uv, texture->animation) ||
-                !maage_block_animation_valid(texture->flow_uv, texture->flow_animation))
-                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-            for (component = 0; component < 4; ++component) {
-                if (!(texture->tint[component] >= 0.0f && texture->tint[component] <= 1.0f)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-            }
-        }
-    }
+    if (definition->block_id != ids->block_air)
+        for (face = 0; face < MAAGE_FACE_COUNT; ++face)
+            if (!maage_block_face_definition_valid(&definition->faces[face])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!maage_block_grow_state_buckets(registry)) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     slot = (maage_state_slot *) calloc(1, sizeof(*slot));
     if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -381,15 +392,10 @@ static int maage_block_definition_valid(const maage_block_definition *block) {
     return 1;
 }
 static int maage_block_state_presentation_valid(const maage_block_state_definition *state) {
-    unsigned int side, channel;
-    const maage_block_face_definition *face;
-    if (state->texture_axis > 3) return 0;
-    for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
-        face = &state->faces[side];
-        if ((face->has_flow_texture && face->flow_texture >= MAAGE_CONTENT_ID_INVALID) || face->tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || face->overlay_tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || !maage_block_uv_valid(face->uv, 0) || !maage_block_uv_valid(face->overlay_uv, 1) || !maage_block_uv_valid(face->snow_uv, 1) || !maage_block_uv_valid(face->flow_uv, 1) || !maage_block_animation_valid(face->uv, face->animation) || !maage_block_animation_valid(face->flow_uv, face->flow_animation)) return 0;
-        for (channel = 0; channel < 4; ++channel)
-            if (!(face->tint[channel] >= 0 && face->tint[channel] <= 1)) return 0;
-    }
+    unsigned int side;
+    if (state->texture_axis > 3 || !maage_block_state_bounds_valid(state)) return 0;
+    for (side = 0; side < MAAGE_FACE_COUNT; ++side)
+        if (!maage_block_face_definition_valid(&state->faces[side])) return 0;
     return 1;
 }
 maage_status maage_block_registry_bind_sounds(maage_block_registry *registry, const maage_sound_registry *sounds) {
@@ -527,7 +533,7 @@ maage_status maage_block_registry_update_state(maage_block_registry *registry, c
     maage_block_state_definition *state;
     if (!registry || registry->finalized || !definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     state = (maage_block_state_definition *) maage_block_registry_state(registry, definition->id);
-    if (!state || state->block_id != definition->block_id || state->metadata != definition->metadata) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (!state || state->block_id != definition->block_id || state->metadata != definition->metadata || !maage_block_state_bounds_valid(definition)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     *state = *definition;
     state->fluid_definition = NULL;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);

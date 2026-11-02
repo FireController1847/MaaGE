@@ -139,7 +139,7 @@ typedef struct maage_block_state_definition {
     /* Numeric property payload; no text at runtime. */
     unsigned int metadata;
     int geometry_grouped;      /* Explicit opt-in; ordinary states always invalidate geometry. */
-    unsigned int geometry_key; /* Equal keys within a type preserve geometry epochs. */
+    unsigned int geometry_key; /* Equal keys preserve geometry epochs only when physical bounds also agree. */
     unsigned int texture_axis; /* 0 = ordinary; 1..3 = X/Y/Z. */
     unsigned int presentation_effect;
     maage_block_shape mesh_bounds;
@@ -147,6 +147,10 @@ typedef struct maage_block_state_definition {
     int random_ticks; /* Section eligibility, independent of callback support. */
     /* Optional selection override; all-zero keeps the type's bounds. */
     maage_block_shape selection_shape;
+    /* Explicit physical override; all-zero bounds disable collision for this
+     * state. Without the flag, the type supplies its ordinary collision. */
+    int collision_override;
+    maage_block_shape collision_shape;
     maage_fluid_id fluid_kind;
     unsigned int fluid_level;
     const maage_fluid_definition *fluid_definition; /* Finalize-resolved immutable numeric dispatch. */
@@ -155,6 +159,11 @@ typedef struct maage_block_state_definition {
     maage_texture_id fast_texture;
     float leaf_fast_uv[4];
 } maage_block_state_definition;
+
+/* Pure validation/lookup services shared by registered appearances and World.
+ * Collision returns zero for empty bounds; shape may be NULL for a predicate. */
+int maage_block_face_definition_valid(const maage_block_face_definition *face);
+int maage_block_collision_shape(const maage_block_definition *block, const maage_block_state_definition *state, maage_block_shape *shape);
 
 /* Capacities are initial expected-registration-count hints (zero selects a small
  * default). Sparse paged numeric indexing allocates only occupied ID paths;

@@ -367,6 +367,7 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     const maage_block_definition *block, *old_block;
     int x, y, z, valid, in_place = 0;
     maage_status result;
+    maage_block_shape collision_shape;
     if (!player || !world || !items || !held || !target || !destination || !placed || (unsigned int) target->face >= MAAGE_FACE_COUNT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
     if (target->x <= -MAAGE_WORLD_LIMIT || target->x >= MAAGE_WORLD_LIMIT || target->z <= -MAAGE_WORLD_LIMIT || target->z >= MAAGE_WORLD_LIMIT || target->y < 0 || target->y >= MAAGE_WORLD_HEIGHT) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     if (maage_world_get(world, target->x, target->y, target->z) != target->state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
@@ -404,7 +405,7 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     old_state = maage_block_registry_state(maage_world_registry(world), destination->state_id);
     if (item->placement_air_only && (!old_state || old_state->id != maage_block_registry_bindings(maage_world_registry(world))->state_air)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
-    if (!old_block || !old_block->replaceable || (block->solid && maage_gameplay_player_overlap(player, x, y, z, &block->collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+    if (!old_block || !old_block->replaceable || (maage_block_collision_shape(block, state, &collision_shape) && maage_gameplay_player_overlap(player, x, y, z, &collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     destination->block_id = old_state->block_id;
     result = maage_world_can_survive(world, x, y, z, *placed, &valid);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;

@@ -36,7 +36,9 @@ module-owned state. Shutdown stops consumers before destroying their content.
   immutable module context and owner-thread open/access/policy/action/sample/close
   callbacks. Server validates identity, access, revisions and visible slot policies.
   Callbacks preflight ownership changes and retain uncommitted items on failure.
-  Custom backing storage stays module-owned. Copied slot and progress windows page
+  Custom backing storage stays module-owned. Failed closure keeps the container
+  closing for owner retries; fallback recipe descriptors validate their grid
+  contracts. Progress uses bounded logarithmic work even for large pixel ranges. Copied slot and progress windows page
   independently over the same origin; the packet capacity does not cap registration.
   Client draws the authoritative type's registered layout. Existing recipe scratch
   remains specifically 2x2/3x3; arbitrary containers use their own transactions.
@@ -47,12 +49,15 @@ module-owned state. Shutdown stops consumers before destroying their content.
   Finalization caches each state's fluid definition for numeric runtime dispatch.
 - `block_geometry.h` registers optimized primitives or worker-safe quad providers.
   Providers use immutable state/neighborhood queries and allocation-free sinks;
-  count and write passes must agree. Cuboid services accept resolved face appearance,
+  count and write passes, including prediction patches, must agree. Cuboid services accept resolved face appearance,
   material, UV and culling data. The same providers feed World, held-item and GUI
-  geometry. Collision and selection retain their independent registered bounds.
-  Custom providers do not require another renderer or shader. Texture appearances
-  resolve during content initialization, including any module-owned appearances
-  resolved through the configured presentation resolver.
+  geometry. Providers can own any number of copied appearances, accessed through
+  `query.geometry` and resolved once by the configured `appearance_resolver`. This
+  requires no artificial block states. Collision and selection retain independent
+  registered bounds; a state can explicitly override or disable type collision.
+  World collision and placement share the same bounds resolver, and changing
+  physical bounds invalidates geometry epochs even when visual keys match.
+  Custom providers do not require another renderer or shader.
 - `sounds.h` separates registered resources, events, materials, music and ambient
   policies from playback. Engine occurrence hooks select registered numeric events;
   modules can emit additional events directly. Registration capacity is independent

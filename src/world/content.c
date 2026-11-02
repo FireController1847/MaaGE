@@ -164,19 +164,32 @@ maage_status maage_content_own(maage_content_context *context, void *data, void 
     context->owner = node;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
 }
+static int content_face_registered(const maage_content_context *context, const maage_block_face_definition *face) {
+    return face && maage_presentation_texture(context->presentation, face->texture_id) && (!face->overlay_texture || maage_presentation_texture(context->presentation, face->overlay_texture)) && (!face->snow_texture || maage_presentation_texture(context->presentation, face->snow_texture)) && (!face->has_flow_texture || maage_presentation_texture(context->presentation, face->flow_texture));
+}
+static int content_face_identity_equal(const maage_block_face_definition *left, const maage_block_face_definition *right) {
+    return left->texture_id == right->texture_id && left->overlay_texture == right->overlay_texture && left->snow_texture == right->snow_texture && left->has_flow_texture == right->has_flow_texture && left->flow_texture == right->flow_texture;
+}
 static maage_status content_validate_presentation(const maage_content_context *context) {
     const maage_block_state_definition *state;
     const maage_block_face_definition *face;
     const maage_fluid_definition *fluid;
     const maage_container_definition *container;
+    const maage_block_geometry_definition *geometry;
     size_t i, j;
     for (i = 0; i < maage_block_registry_state_count(context->blocks); ++i) {
         state = maage_block_registry_state(context->blocks, (maage_block_state_id) i);
         if (!state || (state->fast_texture && !maage_presentation_texture(context->presentation, state->fast_texture))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (j = 0; j < MAAGE_FACE_COUNT; ++j) {
             face = &state->faces[j];
-            if (!maage_presentation_texture(context->presentation, face->texture_id) || (face->overlay_texture && !maage_presentation_texture(context->presentation, face->overlay_texture)) || (face->snow_texture && !maage_presentation_texture(context->presentation, face->snow_texture)) || (face->has_flow_texture && !maage_presentation_texture(context->presentation, face->flow_texture))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+            if (!content_face_registered(context, face)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         }
+    }
+    for (i = 0; i < maage_block_geometry_count(context->geometry); ++i) {
+        geometry = maage_block_geometry_get(context->geometry, (maage_block_geometry_id) i + 1);
+        if (!geometry) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        for (j = 0; j < geometry->appearance_count; ++j)
+            if (!content_face_registered(context, &geometry->appearances[j])) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     for (i = 0; i < maage_fluid_count(context->fluids); ++i) {
         fluid = maage_fluid_get(context->fluids, (maage_fluid_id) i + 1);
@@ -195,7 +208,9 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     maage_content *content;
     maage_content_context *context;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
-    size_t i;
+    size_t i, appearance_index;
+    const maage_block_geometry_definition *geometry;
+    maage_block_face_definition appearance, logical_appearance;
     maage_block_state_definition state, logical;
     maage_biome_definition tinted;
     const maage_biome_definition *presentation_biome;
@@ -285,7 +300,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
             result = config->resolver(config->resolver_context, &logical, state.faces, state.leaf_fast_uv);
             if (!maage_status_failed(result))
                 for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
-                    if (state.faces[side].texture_id != logical.faces[side].texture_id || state.faces[side].overlay_texture != logical.faces[side].overlay_texture || state.faces[side].snow_texture != logical.faces[side].snow_texture || state.faces[side].has_flow_texture != logical.faces[side].has_flow_texture || state.faces[side].flow_texture != logical.faces[side].flow_texture) {
+                    if (!content_face_identity_equal(&state.faces[side], &logical.faces[side])) {
                         result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
                         break;
                     }
@@ -293,6 +308,22 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
             if (!maage_status_failed(result)) result = maage_block_registry_update_state(context->blocks, &state);
             if (maage_status_failed(result)) goto failed;
         }
+    for (i = 0; i < maage_block_geometry_count(context->geometry); ++i) {
+        geometry = maage_block_geometry_get(context->geometry, (maage_block_geometry_id) i + 1);
+        if (geometry->appearance_count && config->resolver && !config->appearance_resolver) {
+            result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+            goto failed;
+        }
+        if (!config->appearance_resolver) continue;
+        for (appearance_index = 0; appearance_index < geometry->appearance_count; ++appearance_index) {
+            logical_appearance = geometry->appearances[appearance_index];
+            appearance = logical_appearance;
+            result = config->appearance_resolver(config->resolver_context, &logical_appearance, &appearance);
+            if (!maage_status_failed(result) && !content_face_identity_equal(&appearance, &logical_appearance)) result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+            if (!maage_status_failed(result)) result = maage_block_geometry_update_appearance(context->geometry, (maage_block_geometry_id) i + 1, appearance_index, &appearance);
+            if (maage_status_failed(result)) goto failed;
+        }
+    }
     result = maage_presentation_finalize(context->presentation);
     if (!maage_status_failed(result)) result = maage_item_registry_finalize(context->items);
     if (!maage_status_failed(result)) result = maage_sound_finalize(context->sounds);

@@ -64,11 +64,15 @@ maage_status maage_content_module_data(const maage_content_context *context, con
 /* The logical state is read-only. Only copied face presentation and opaque
  * foliage UVs can change; numeric texture identities must remain unchanged. */
 typedef maage_status (*maage_content_presentation_resolver)(void *context, const maage_block_state_definition *state, maage_block_face_definition faces[MAAGE_FACE_COUNT], float leaf_fast_uv[4]);
+/* Resolve one copied provider-owned appearance without requiring a block
+ * state. Numeric texture identities remain unchanged, as for state faces. */
+typedef maage_status (*maage_content_appearance_resolver)(void *context, const maage_block_face_definition *logical, maage_block_face_definition *resolved);
 typedef struct maage_content_config {
     const maage_content_module *const *modules;
     size_t module_count;
     maage_content_failure *failure;               /* Optional caller-owned creation failure output. */
     maage_content_presentation_resolver resolver; /* NULL = headless */
+    maage_content_appearance_resolver appearance_resolver; /* NULL for headless. */
     void *resolver_context;
     const maage_biome_registry *presentation_biomes;
 } maage_content_config;

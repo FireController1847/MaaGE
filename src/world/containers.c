@@ -100,6 +100,7 @@ maage_status maage_container_register(maage_container_registry *registry, const 
     for (i = 0; i < definition->slot_count; ++i) {
         slot = &definition->slots[i];
         if (!slot->group || slot->group == MAAGE_SLOT_INVENTORY || (!slot->storage && !definition->sample) || (slot->flags & ~(MAAGE_CONTAINER_SLOT_INSERT | MAAGE_CONTAINER_SLOT_EXTRACT | MAAGE_CONTAINER_SLOT_REVISION)) || slot->storage > MAAGE_CONTAINER_SLOT_OUTPUT || (slot->storage == MAAGE_CONTAINER_SLOT_INPUT && slot->slot >= MAAGE_CRAFTING_CELLS) || (slot->storage == MAAGE_CONTAINER_SLOT_OUTPUT && slot->slot)) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+        if (!definition->action && !((slot->group == MAAGE_SLOT_CRAFT_INPUT && slot->storage == MAAGE_CONTAINER_SLOT_INPUT && slot->slot < definition->grid_width * definition->grid_width) || (slot->group == MAAGE_SLOT_CRAFT_RESULT && slot->storage == MAAGE_CONTAINER_SLOT_OUTPUT && slot->slot == 0))) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
         for (j = 0; j < i; ++j)
             if (definition->slots[j].group == slot->group && definition->slots[j].slot == slot->slot) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     }
@@ -331,7 +332,9 @@ maage_status maage_container_close(const maage_container_registry *registry, maa
     if (!game || !world || !player) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CLOSE);
     if (game->crafting.kind && !definition) return container_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_CLOSE);
     if (definition && definition->closed) {
+        game->crafting.closing = 1;
         result = definition->closed(definition->context, world, game, player);
+        game->crafting.closing = 1;
         if (maage_status_failed(result)) return result;
     }
     result = maage_crafting_close(&game->crafting, &game->inventory, maage_world_item_registry(world), player, world);

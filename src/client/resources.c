@@ -409,30 +409,38 @@ static int maage_client_texture_available(const maage_client_resources *resource
     const maage_texture_definition *texture = maage_presentation_texture(maage_content_presentation(resources->catalog), id);
     return texture && ((texture->source < resources->source_count && !maage_status_failed(resources->source_results[texture->source])) || (texture->fallback < resources->source_count && !maage_status_failed(resources->source_results[texture->fallback])));
 }
+static maage_status maage_client_content_resolve_appearance(void *context, const maage_block_face_definition *logical, maage_block_face_definition *face) {
+    const maage_client_resources *resources = (const maage_client_resources *) context;
+    const maage_texture_definition *texture;
+    if (!resources || !logical || !face) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
+    *face = *logical;
+    if (face->texture_id >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
+    memcpy(face->uv, resources->uv[face->texture_id], sizeof(face->uv));
+    memcpy(face->animation, resources->texture_animation[face->texture_id], sizeof(face->animation));
+    texture = maage_presentation_texture(maage_content_presentation(resources->catalog), face->texture_id);
+    if (!texture || texture->source == MAAGE_CONTENT_ID_INVALID || maage_status_failed(resources->source_results[texture->source])) {
+        face->tint_mode = face->overlay_tint_mode = 0;
+        face->tint[0] = face->tint[1] = face->tint[2] = face->tint[3] = 1;
+    }
+    memset(face->overlay_uv, 0, sizeof(face->overlay_uv));
+    memset(face->snow_uv, 0, sizeof(face->snow_uv));
+    if (face->overlay_texture && face->overlay_texture < resources->texture_count && maage_client_texture_available(resources, face->overlay_texture)) memcpy(face->overlay_uv, resources->uv[face->overlay_texture], sizeof(face->overlay_uv));
+    if (face->snow_texture && face->snow_texture < resources->texture_count && maage_client_texture_available(resources, face->snow_texture)) memcpy(face->snow_uv, resources->uv[face->snow_texture], sizeof(face->snow_uv));
+    if (face->has_flow_texture) {
+        if (face->flow_texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
+        memcpy(face->flow_uv, resources->uv[face->flow_texture], sizeof(face->flow_uv));
+        memcpy(face->flow_animation, resources->texture_animation[face->flow_texture], sizeof(face->flow_animation));
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
 static maage_status maage_client_content_resolve(void *context, const maage_block_state_definition *state, maage_block_face_definition faces[MAAGE_FACE_COUNT], float leaf_fast_uv[4]) {
     const maage_client_resources *resources = (const maage_client_resources *) context;
-    maage_block_face_definition *face;
-    const maage_texture_definition *texture;
+    maage_status result;
     unsigned int side;
     if (!resources || !state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
-        face = &faces[side];
-        if (face->texture_id >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
-        memcpy(face->uv, resources->uv[face->texture_id], sizeof(face->uv));
-        memcpy(face->animation, resources->texture_animation[face->texture_id], sizeof(face->animation));
-        texture = maage_presentation_texture(maage_content_presentation(resources->catalog), face->texture_id);
-        if (!texture || texture->source == MAAGE_CONTENT_ID_INVALID || maage_status_failed(resources->source_results[texture->source])) {
-            face->tint_mode = face->overlay_tint_mode = 0;
-            face->tint[0] = face->tint[1] = face->tint[2] = face->tint[3] = 1;
-            continue;
-        }
-        if (face->overlay_texture && face->overlay_texture < resources->texture_count && maage_client_texture_available(resources, face->overlay_texture)) memcpy(face->overlay_uv, resources->uv[face->overlay_texture], sizeof(face->overlay_uv));
-        if (face->snow_texture && face->snow_texture < resources->texture_count && maage_client_texture_available(resources, face->snow_texture)) memcpy(face->snow_uv, resources->uv[face->snow_texture], sizeof(face->snow_uv));
-        if (face->has_flow_texture) {
-            if (face->flow_texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
-            memcpy(face->flow_uv, resources->uv[face->flow_texture], sizeof(face->flow_uv));
-            memcpy(face->flow_animation, resources->texture_animation[face->flow_texture], sizeof(face->flow_animation));
-        }
+        result = maage_client_content_resolve_appearance(context, &state->faces[side], &faces[side]);
+        if (maage_status_failed(result)) return result;
     }
     if (state->fast_texture && state->fast_texture < resources->texture_count) memcpy(leaf_fast_uv, resources->uv[state->fast_texture], sizeof(state->leaf_fast_uv));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
@@ -450,6 +458,7 @@ maage_status maage_client_content_create(const maage_client_resources *resources
     config.modules = resources->modules;
     config.module_count = resources->module_count;
     config.resolver = maage_client_content_resolve;
+    config.appearance_resolver = maage_client_content_resolve_appearance;
     config.resolver_context = (void *) resources;
     config.presentation_biomes = biomes;
     result = maage_application_content_create(&config, output, trace);

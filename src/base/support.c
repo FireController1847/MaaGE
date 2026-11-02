@@ -9,11 +9,12 @@ static maage_status maage_support_block(const maage_world *world, int x, int y, 
     *block = *state ? maage_block_registry_block(registry, (*state)->block_id) : NULL;
     return maage_support_status(*block ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVARIANT_VIOLATION);
 }
-static int maage_support_full(const maage_block_definition *block) {
+static int maage_support_full(const maage_block_definition *block, const maage_block_state_definition *state) {
     unsigned int axis;
-    if (!block->solid || !block->opaque) return 0;
+    maage_block_shape shape;
+    if (!block->opaque || !maage_block_collision_shape(block, state, &shape)) return 0;
     for (axis = 0; axis < 3; ++axis)
-        if (block->collision_shape.minimum[axis] != 0 || block->collision_shape.maximum[axis] != 1) return 0;
+        if (shape.minimum[axis] != 0 || shape.maximum[axis] != 1) return 0;
     return 1;
 }
 static maage_status base_survival(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid, unsigned int policy) {
@@ -35,7 +36,7 @@ static maage_status base_survival(const maage_world *world, int x, int y, int z,
     if (policy == 1) {
         if (state->metadata < 1 || state->metadata > 5) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
         result = maage_support_block(world, x + torch_support[state->metadata][0], y + torch_support[state->metadata][1], z + torch_support[state->metadata][2], &neighbor, &block);
-        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = maage_support_full(block);
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = maage_support_full(block, neighbor);
         return result;
     }
     result = maage_support_block(world, x, y - 1, z, &below, &block);

@@ -614,6 +614,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                         query.blocks = registry;
                         query.block = current;
                         query.state = state;
+                        query.geometry = geometry;
                         query.x = chunk->x * 16 + x;
                         query.y = y;
                         query.z = chunk->z * 16 + z;
@@ -1214,6 +1215,10 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
                 }
             }
         }
+    }
+    if (written != faces) {
+        maage_world_mesh_destroy(mesh);
+        return maage_mesh_failure(trace, MAAGE_STATUS_INVARIANT_VIOLATION);
     }
     mesh->data.vertices = mesh->vertices;
     mesh->data.indices = mesh->indices;

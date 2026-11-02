@@ -208,6 +208,7 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
             query.blocks = blocks;
             query.block = block;
             query.state = state;
+            query.geometry = geometry;
             query.item = 1;
             sink.quad = maage_item_geometry_quad;
             sink.context = &work;
@@ -396,6 +397,7 @@ maage_status maage_client_item_icon(const maage_item_registry *items, const maag
         query.blocks = blocks;
         query.block = block;
         query.state = state;
+        query.geometry = geometry;
         query.item = 1;
         geometry_sink.quad = maage_item_icon_quad;
         geometry_sink.context = &work;

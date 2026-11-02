@@ -54,11 +54,14 @@ typedef struct maage_container_definition {
      * inventory/results and backing-store capacity before publishing ownership.
      * A failed action must retain uncommitted items. Actions preserve container
      * identity, coordinates and page, and advance revisions without wrapping.
-     * closed() is retryable: retain ownership until closure can complete. */
+     * closed() is retryable and receives closing == 1; failed closure blocks
+     * further actions while the owner retries. Retain ownership until complete. */
     maage_status (*opened)(const void *, struct maage_world *, maage_crafting_container *);
     maage_status (*closed)(const void *, struct maage_world *, struct maage_gameplay *, const struct maage_player *);
     int (*accessible)(const void *, const struct maage_world *, const maage_crafting_container *);
     maage_status (*policy)(const void *, const struct maage_world *, const struct maage_gameplay *, const maage_container_slot_definition *, unsigned int);
+    /* NULL action uses canonical recipe input/result groups, matching scratch
+     * storage and grid indices. Custom actions may define their own slot groups. */
     maage_status (*action)(const void *, struct maage_world *, struct maage_gameplay *, unsigned long, unsigned int, unsigned int, unsigned int);
     /* Fill view[] and progress[] at the shared page origin view_first;
      * view_count/progress_count describe each independent window. No borrowed pointers

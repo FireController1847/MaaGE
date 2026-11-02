@@ -252,19 +252,24 @@ static void maage_client_ui_registered_texture(maage_client_ui *ui, maage_client
 static void maage_client_ui_registered_progress(maage_client_ui *ui, maage_client_ui_rect frame, const maage_container_progress_definition *progress, const maage_container_progress_value *sample) {
     maage_client_ui_rect rectangle;
     unsigned long value, duration, quotient, remainder;
-    unsigned int fill;
+    unsigned int fill, lower, upper, middle;
     float uv[4], fraction;
     if (progress->require_active && !sample->active) return;
     value = sample->value;
     duration = sample->total ? sample->total : 1;
     if (value > duration) value = duration;
-    /* Registration bounds steps to the displayed pixel extent. Quotient and
-     * remainder comparisons retain pixel stepping for full-width tick counts. */
+    /* Search the monotonic pixel thresholds in logarithmic work, preserving
+     * quotient/remainder stepping across full-width tick counts. */
     quotient = duration / progress->steps;
     remainder = duration % progress->steps;
-    fill = progress->steps;
-    while (fill && (double) value < (double) quotient * fill + ceil((double) remainder * fill / progress->steps))
-        --fill;
+    lower = 0;
+    upper = progress->steps;
+    while (lower < upper) {
+        middle = lower + (upper - lower) / 2U + (upper - lower) % 2U;
+        if ((double) value >= (double) quotient * middle + ceil((double) remainder * middle / progress->steps)) lower = middle;
+        else upper = middle - 1U;
+    }
+    fill = lower;
     if (!fill && !progress->extra_pixel) return;
     fraction = (float) (fill + progress->extra_pixel) / (progress->steps + progress->extra_pixel);
     if (progress->vertical && progress->extra_pixel) fraction = (float) (fill + progress->extra_pixel) / progress->steps;

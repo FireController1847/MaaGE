@@ -2278,7 +2278,7 @@ int maage_world_solid(const maage_world *world, int x, int y, int z) {
     if (!maage_world_complete(slot)) return 1;
     state = maage_block_registry_state(world->config.registry, maage_world_get(world, x, y, z));
     block = state ? maage_block_registry_block(world->config.registry, state->block_id) : NULL;
-    return !block || block->solid;
+    return !block || maage_block_collision_shape(block, state, NULL);
 }
 int maage_world_collision_shape(const maage_world *world, int x, int y, int z, maage_block_shape *shape) {
     const maage_block_state_definition *state;
@@ -2295,8 +2295,28 @@ int maage_world_collision_shape(const maage_world *world, int x, int y, int z, m
     state = maage_block_registry_state(world->config.registry, maage_world_get(world, x, y, z));
     block = state ? maage_block_registry_block(world->config.registry, state->block_id) : NULL;
     if (!block) return 1;
-    if (!block->solid) return 0;
-    *shape = block->collision_shape;
+    return maage_block_collision_shape(block, state, shape);
+}
+/* Camera collision and targeting share geometry epochs with mesh consumers.
+ * A visual grouping key cannot hide state-dependent physical bounds changes. */
+static int maage_world_geometry_equal(const maage_block_registry *registry, const maage_block_state_definition *before, const maage_block_state_definition *after) {
+    const maage_block_definition *block;
+    const maage_block_shape *first_selection, *second_selection;
+    maage_block_shape first_collision, second_collision;
+    int first_solid, second_solid;
+    unsigned int axis;
+    if (before->block_id != after->block_id || !before->geometry_grouped || !after->geometry_grouped || before->geometry_key != after->geometry_key) return 0;
+    block = maage_block_registry_block(registry, before->block_id);
+    if (!block) return 0;
+    first_solid = maage_block_collision_shape(block, before, &first_collision);
+    second_solid = maage_block_collision_shape(block, after, &second_collision);
+    if (first_solid != second_solid) return 0;
+    first_selection = before->selection_shape.maximum[0] != 0 ? &before->selection_shape : &block->selection_shape;
+    second_selection = after->selection_shape.maximum[0] != 0 ? &after->selection_shape : &block->selection_shape;
+    for (axis = 0; axis < 3; ++axis) {
+        if (first_solid && (first_collision.minimum[axis] != second_collision.minimum[axis] || first_collision.maximum[axis] != second_collision.maximum[axis])) return 0;
+        if (first_selection->minimum[axis] != second_selection->minimum[axis] || first_selection->maximum[axis] != second_selection->maximum[axis]) return 0;
+    }
     return 1;
 }
 maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_block_state_id expected, maage_block_state_id replacement) {
@@ -2354,7 +2374,7 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
     entity_cell = (unsigned int) ((y * 16 + local_z) * 16 + local_x);
     entity = maage_world_entity_node(slot, entity_cell);
     if ((old_entity != (entity != NULL)) || (entity && entity->handler != old_handler)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-    flags_only = old_state->block_id == new_state->block_id && old_state->geometry_grouped && new_state->geometry_grouped && old_state->geometry_key == new_state->geometry_key;
+    flags_only = maage_world_geometry_equal(world->config.registry, old_state, new_state);
     /* A replication delta map is needed only for columns with actual changes.
      * Reserve it before any private mutation or support-side effects. */
     if ((before->light_opacity != after->light_opacity || before->emitted_light != after->emitted_light) && !slot->light_cells) {
@@ -3059,7 +3079,7 @@ static maage_status maage_world_visual_cell(const maage_world *world, maage_worl
         result = maage_light_provisional_cell(chunk, inputs, world->config.registry, x, y, z);
         if (maage_status_failed(result)) return result;
     }
-    if (before->block_id != after->block_id || !before->geometry_grouped || !after->geometry_grouped || before->geometry_key != after->geometry_key) slot->geometry_changed = 1;
+    if (!maage_world_geometry_equal(world->config.registry, before, after)) slot->geometry_changed = 1;
     if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
         slot->light_changed = 1;

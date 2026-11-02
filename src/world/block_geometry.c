@@ -44,8 +44,10 @@ maage_status maage_block_geometry_create(maage_block_geometry_registry **output)
 maage_status maage_block_geometry_destroy(maage_block_geometry_registry *registry) {
     size_t i;
     if (!registry) return geometry_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
-    for (i = 0; i < registry->count; ++i)
+    for (i = 0; i < registry->count; ++i) {
         free(registry->names[i]);
+        free((void *) registry->definitions[i].appearances);
+    }
     free(registry->names);
     free(registry->definitions);
     free(registry->buckets);
@@ -53,12 +55,17 @@ maage_status maage_block_geometry_destroy(maage_block_geometry_registry *registr
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
 maage_status maage_block_geometry_register(maage_block_geometry_registry *registry, const char *name, const maage_block_geometry_definition *definition, maage_block_geometry_id *id) {
-    maage_block_geometry_definition *definitions;
+    maage_block_geometry_definition *definitions, definition_copy;
+    maage_block_face_definition *appearances = NULL;
     maage_block_geometry_id *buckets;
     char **names, *copy;
     size_t capacity, count, index, bucket;
     if (id) *id = 0;
-    if (!registry || registry->finalized || !id || !definition || !geometry_name_valid(name) || definition->primitive > MAAGE_BLOCK_GEOMETRY_CUSTOM || (definition->primitive == MAAGE_BLOCK_GEOMETRY_CUSTOM ? !definition->emit : definition->emit != NULL)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+    if (!registry || registry->finalized || !id || !definition || !geometry_name_valid(name) || definition->primitive > MAAGE_BLOCK_GEOMETRY_CUSTOM || (definition->primitive == MAAGE_BLOCK_GEOMETRY_CUSTOM ? !definition->emit : definition->emit != NULL) || (definition->appearance_count && !definition->appearances)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+    if (definition->appearance_count > (size_t) - 1 / sizeof(*appearances)) return geometry_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
+    for (index = 0; index < definition->appearance_count; ++index)
+        if (!maage_block_face_definition_valid(&definition->appearances[index])) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+    definition_copy = *definition;
     if (registry->bucket_count && registry->buckets[geometry_bucket(registry, name)]) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
     if (registry->count >= MAAGE_CONTENT_ID_INVALID - 1UL) return geometry_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     copy = (char *) malloc(strlen(name) + 1);
@@ -101,15 +108,37 @@ maage_status maage_block_geometry_register(maage_block_geometry_registry *regist
         for (index = 0; index < registry->count; ++index)
             registry->buckets[geometry_bucket(registry, registry->names[index])] = (maage_block_geometry_id) index + 1;
     }
+    if (definition_copy.appearance_count) {
+        appearances = (maage_block_face_definition *) malloc(definition_copy.appearance_count * sizeof(*appearances));
+        if (!appearances) {
+            free(copy);
+            return geometry_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_REGISTER);
+        }
+        memcpy(appearances, definition_copy.appearances, definition_copy.appearance_count * sizeof(*appearances));
+    }
     bucket = geometry_bucket(registry, name);
-    registry->definitions[registry->count] = *definition;
+    registry->definitions[registry->count] = definition_copy;
+    registry->definitions[registry->count].appearances = appearances;
     registry->names[registry->count] = copy;
     *id = (maage_block_geometry_id) ++registry->count;
     registry->buckets[bucket] = *id;
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
+maage_status maage_block_geometry_update_appearance(maage_block_geometry_registry *registry, maage_block_geometry_id id, size_t index, const maage_block_face_definition *appearance) {
+    maage_block_geometry_definition *definition;
+    if (!registry || !appearance || !id || id > registry->count || !maage_block_face_definition_valid(appearance)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    if (registry->finalized) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_UPDATE);
+    definition = &registry->definitions[id - 1];
+    if (index >= definition->appearance_count) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    ((maage_block_face_definition *) definition->appearances)[index] = *appearance;
+    return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
+}
 maage_status maage_block_geometry_finalize(maage_block_geometry_registry *registry) {
+    size_t geometry, appearance;
     if (!registry || registry->finalized) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
+    for (geometry = 0; geometry < registry->count; ++geometry)
+        for (appearance = 0; appearance < registry->definitions[geometry].appearance_count; ++appearance)
+            if (!maage_block_face_definition_valid(&registry->definitions[geometry].appearances[appearance])) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
     registry->finalized = 1;
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
 }
