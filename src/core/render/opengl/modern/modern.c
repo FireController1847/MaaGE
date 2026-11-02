@@ -354,11 +354,11 @@ static void maage_gl_vao_bind(maage_gl_renderer *native, GLuint vao) {
     native->gl.BindVertexArray(vao);
     native->vao = vao;
 }
-static void maage_gl_indices(size_t first, size_t count) {
+static void maage_gl_indices(size_t first, size_t count, size_t width) {
     while (count) {
         size_t amount = count > (size_t) INT_MAX ? (size_t) INT_MAX : count;
         amount -= amount % 3;
-        glDrawElements(GL_TRIANGLES, (GLsizei) amount, GL_UNSIGNED_INT, (const void *) (first * sizeof(unsigned int)));
+        glDrawElements(GL_TRIANGLES, (GLsizei) amount, width == 2U ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, (const void *) (first * width));
         first += amount;
         count -= amount;
     }
@@ -379,10 +379,10 @@ static void maage_gl_mesh_passes(maage_gl_renderer *native, const maage_render_f
         count = maage_render_geometry_range(&mesh->geometry, cursor.layer, &first);
         if (cursor.instance && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
             native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, geometry->indices);
-            maage_gl_indices(cursor.triangle, 3);
+            maage_gl_indices(cursor.triangle, 3, maage_render_gpu_mesh_index_bytes(mesh));
         } else {
             native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, cursor.layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted[slot + (foreground ? MAAGE_GL_FRAME_SLOTS : 0)].name : geometry->indices);
-            maage_gl_indices(first, count);
+            maage_gl_indices(first, count, cursor.layer == MAAGE_RENDER_TRANSLUCENT ? sizeof(unsigned int) : maage_render_gpu_mesh_index_bytes(mesh));
         }
     }
 }
@@ -400,7 +400,7 @@ static void maage_gl_ui_draw(maage_gl_renderer *native, const maage_gl_stream *s
     segment_count = maage_render_ui_segments(batch, first, count, segments);
     for (index = 0; index < segment_count; ++index) {
         maage_gl_pipeline(native, MAAGE_RENDER_UI + (panorama ? MAAGE_RENDER_BLEND_ALPHA : segments[index].blend));
-        maage_gl_indices(segments[index].first, segments[index].count);
+        maage_gl_indices(segments[index].first, segments[index].count, sizeof(unsigned int));
     }
 }
 static void maage_gl_fullscreen(maage_gl_renderer *native, GLuint texture, float x, float y, int blur) {
@@ -572,7 +572,7 @@ static void maage_gl_destroy_texture(maage_render_texture *resource) {
 static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_render_mesh *mesh, const maage_mesh_data *data, size_t offset, size_t bytes) {
     maage_gl_renderer *native = maage_gl_gpu(renderer);
     maage_gl_mesh *geometry = mesh->platform;
-    size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex), index_bytes = data->index_count * sizeof(*data->indices);
+    size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex), index_width = maage_render_gpu_mesh_index_bytes(mesh), index_bytes = maage_render_gpu_index_allocation_bytes(data->index_count, index_width);
     MAAGE_GL_TRY(maage_opengl_context_bind(renderer));
     if ((ptrdiff_t) vertex_bytes <= 0 || (size_t) (ptrdiff_t) vertex_bytes != vertex_bytes || (ptrdiff_t) index_bytes <= 0 || (size_t) (ptrdiff_t) index_bytes != index_bytes) return MAAGE_STATUS_VALUE(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     if (!geometry) {
@@ -606,7 +606,12 @@ static maage_status maage_gl_upload_geometry(maage_renderer *renderer, maage_ren
         }
     } else {
         native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, geometry->indices);
-        native->gl.BufferSubData(MAAGE_GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t) (offset - vertex_bytes), (ptrdiff_t) bytes, (const unsigned char *) data->indices + offset - vertex_bytes);
+        {
+            void *mapped = native->gl.MapBufferRange(MAAGE_GL_ELEMENT_ARRAY_BUFFER, (ptrdiff_t) (offset - vertex_bytes), (ptrdiff_t) bytes, MAAGE_GL_MAP_WRITE_BIT | MAAGE_GL_MAP_UNSYNCHRONIZED_BIT);
+            if (!mapped) return maage_gl_resource_failure(renderer, MAAGE_OPERATION_UPLOAD);
+            maage_render_gpu_index_pack_span(data->indices, data->index_count, index_width, offset - vertex_bytes, bytes, mapped);
+            if (!native->gl.UnmapBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER)) return maage_gl_resource_failure(renderer, MAAGE_OPERATION_UPLOAD);
+        }
     }
     return maage_opengl_check(renderer, MAAGE_OPERATION_UPLOAD);
 }

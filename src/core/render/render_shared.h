@@ -49,7 +49,8 @@ typedef struct maage_render_uniforms {
     MAAGE_RENDER_UNIFORM_FIELDS(maage_render_matrix, maage_render_vector)
 } maage_render_uniforms;
 /* Native-only 40-byte stream, keeping precision-sensitive coordinates,
- * animation and material fields as floats. CPU producers remain 60-byte
+ * animation as floats and material as the renderer's 16-bit surface mode.
+ * CPU producers remain 60-byte
  * maage_mesh_vertex. Light and tint use normalized 8-bit channels. */
 typedef struct maage_render_gpu_mesh_vertex {
     float position[3];

@@ -434,7 +434,7 @@ maage_status maage_render_mesh_upload_step(maage_render_mesh *mesh, size_t byte_
     if (maage_status_failed(renderer->failure)) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     data = &mesh->upload->data;
     vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
-    total = vertex_bytes + data->index_count * sizeof(*data->indices);
+    total = vertex_bytes + maage_render_gpu_index_allocation_bytes(data->index_count, maage_render_gpu_mesh_index_bytes(mesh));
     bytes = (mesh->upload_offset < vertex_bytes ? vertex_bytes : total) - mesh->upload_offset;
     byte_budget -= byte_budget % 4;
     if (bytes > byte_budget) bytes = byte_budget;

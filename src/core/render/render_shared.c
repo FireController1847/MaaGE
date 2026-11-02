@@ -320,6 +320,31 @@ void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offse
         bytes -= part;
     }
 }
+/* The native index representation varies by geometry, not by a logical
+ * mesh cap. 16-bit meshes fall back transparently to 32-bit as they grow. */
+size_t maage_render_gpu_mesh_index_bytes(const maage_render_mesh *mesh) {
+    return mesh && mesh->vertex_count <= 65536UL && sizeof(unsigned short) == 2 ? 2U : sizeof(unsigned int);
+}
+size_t maage_render_gpu_index_allocation_bytes(size_t count, size_t width) {
+    size_t size = count * width;
+    return width == 2U ? (size + 3U) & ~(size_t) 3U : size;
+}
+void maage_render_gpu_index_pack_span(const unsigned int *indices, size_t count, size_t width, size_t offset, size_t bytes, void *destination) {
+    unsigned char *target = (unsigned char *) destination;
+    if (width == sizeof(unsigned int)) {
+        memcpy(target, (const unsigned char *) indices + offset, bytes);
+        return;
+    }
+    while (bytes) {
+        unsigned short value = offset / 2U < count ? (unsigned short) indices[offset / 2U] : 0;
+        size_t start = offset & 1U, part = 2U - start;
+        if (part > bytes) part = bytes;
+        memcpy(target, (const unsigned char *) &value + start, part);
+        offset += part;
+        target += part;
+        bytes -= part;
+    }
+}
 int maage_render_gpu_layout_supported(void) {
     return sizeof(float) == 4 && sizeof(unsigned int) == 4 &&
            sizeof(maage_mesh_vertex) == MAAGE_RENDER_MESH_VERTEX_BYTES &&

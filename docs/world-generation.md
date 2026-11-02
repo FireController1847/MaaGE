@@ -202,7 +202,12 @@ material and animation attributes; unused vertex normals are omitted. Native
 GPU uploads encode color and both normalized light channels as 8-bit values
 while retaining full 32-bit precision for position, UV, material and animation.
 This reduces the native GPU vertex stride from 60 to 40 bytes without
-compressing the CPU mesher, geometry preparation or triangle metadata. Once the base GPU upload finishes, the Client
+compressing the CPU mesher, geometry preparation or triangle metadata.
+Native indices use 16-bit elements for meshes with at most 65536 vertices
+and automatically retain 32-bit elements for larger meshes. Incremental native
+uploads pad compact index allocations to four-byte alignment for Vulkan
+transfer compatibility. Translucent camera-sorted indices remain independent
+32-bit buffers; CPU-side geometry always uses 32-bit indices. Once the base GPU upload finishes, the Client
 discards its full CPU source vertex and index arrays. It retains only a 16-bit
 chunk-local owner and a byte of material/quad-winding information per face.
 Immediate local prediction reconstructs only the selected index list; the

@@ -467,7 +467,10 @@ static void maage_metal_draw_geometry(id<MTLRenderCommandEncoder> encoder, const
     if (!count) return;
     [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
     [encoder setFragmentTexture:(id<MTLTexture>) mesh->texture->platform atIndex:0];
-    [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:count indexType:MTLIndexTypeUInt32 indexBuffer:layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted_indices[slot] : geometry->indices indexBufferOffset:offset * sizeof(unsigned int)];
+    {
+        size_t width = layer == MAAGE_RENDER_TRANSLUCENT ? sizeof(unsigned int) : maage_render_gpu_mesh_index_bytes(mesh);
+        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:count indexType:width == 2U ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32 indexBuffer:layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted_indices[slot] : geometry->indices indexBufferOffset:offset * width];
+    }
 }
 static void maage_metal_draw_mesh_passes(maage_metal_renderer *native, id<MTLRenderCommandEncoder> encoder, const maage_render_frame_plan *plan, int foreground, unsigned int slot) {
     maage_render_uniforms uniforms;
@@ -490,7 +493,10 @@ static void maage_metal_draw_mesh_passes(maage_metal_renderer *native, id<MTLRen
             maage_metal_mesh *geometry = mesh->platform;
             [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
             [encoder setFragmentTexture:(id<MTLTexture>) mesh->texture->platform atIndex:0];
-            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:3 indexType:MTLIndexTypeUInt32 indexBuffer:geometry->indices indexBufferOffset:cursor.triangle * sizeof(unsigned int)];
+            {
+                size_t width = maage_render_gpu_mesh_index_bytes(mesh);
+                [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:3 indexType:width == 2U ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32 indexBuffer:geometry->indices indexBufferOffset:cursor.triangle * width];
+            }
         } else
             maage_metal_draw_geometry(encoder, mesh, cursor.layer, slot);
     }
@@ -916,6 +922,7 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
     maage_metal_renderer *native = renderer->platform;
     maage_metal_mesh *geometry = mesh->platform;
     size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
+    size_t index_width = maage_render_gpu_mesh_index_bytes(mesh);
     maage_status result;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, MAAGE_STATUS_INVALID_STATE);
     if (!maage_render_gpu_layout_supported()) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
@@ -928,11 +935,11 @@ static maage_status maage_metal_upload_geometry(maage_renderer *renderer, maage_
         if (!geometry) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
         mesh->platform = geometry;
         geometry->vertices = mesh->vertex_source ? [((maage_metal_mesh *) mesh->vertex_source->platform)->vertices retain] : [native->device newBufferWithLength:vertex_bytes options:MTLResourceStorageModeShared];
-        geometry->indices = [native->device newBufferWithLength:data->index_count * sizeof(*data->indices) options:MTLResourceStorageModeShared];
+        geometry->indices = [native->device newBufferWithLength:maage_render_gpu_index_allocation_bytes(data->index_count, index_width) options:MTLResourceStorageModeShared];
         if (!geometry->vertices || !geometry->indices) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     }
     if (offset < vertex_bytes) maage_render_mesh_pack_span(data->vertices, offset, bytes, (unsigned char *) [geometry->vertices contents] + offset);
-    else memcpy((unsigned char *) [geometry->indices contents] + offset - vertex_bytes, (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
+    else maage_render_gpu_index_pack_span(data->indices, data->index_count, index_width, offset - vertex_bytes, bytes, (unsigned char *) [geometry->indices contents] + offset - vertex_bytes);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
 static size_t maage_metal_mesh_allocation_bytes(const maage_render_mesh *mesh) {

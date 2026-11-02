@@ -708,12 +708,12 @@ static void maage_vulkan_bind(maage_vulkan_renderer *native, VkCommandBuffer com
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, gpu->layout, 0, 1, &descriptor, 0, NULL);
     vkCmdPushConstants(command, gpu->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(*push), push);
 }
-static void maage_vulkan_indices(maage_vulkan_renderer *native, VkCommandBuffer command, VkBuffer indices, size_t first, size_t count) {
+static void maage_vulkan_indices(maage_vulkan_renderer *native, VkCommandBuffer command, VkBuffer indices, size_t first, size_t count, size_t width) {
     (void) native;
     while (count) {
         uint32_t amount = count > UINT32_MAX ? UINT32_MAX : (uint32_t) count;
         amount -= amount % 3;
-        vkCmdBindIndexBuffer(command, indices, (VkDeviceSize) first * sizeof(unsigned int), VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(command, indices, (VkDeviceSize) first * width, width == 2U ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(command, amount, 1, 0, 0, 0);
         first += amount;
         count -= amount;
@@ -738,7 +738,7 @@ static void maage_vulkan_mesh_draw(maage_vulkan_renderer *native, VkCommandBuffe
     if (!count) return;
     maage_vulkan_bind(native, command, gpu->mesh[layer], texture->descriptor, push);
     vkCmdBindVertexBuffers(command, 0, 1, &geometry->vertices.buffer, &offset);
-    maage_vulkan_indices(native, command, layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted[slot].buffer : geometry->indices.buffer, first, count);
+    maage_vulkan_indices(native, command, layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted[slot].buffer : geometry->indices.buffer, first, count, layer == MAAGE_RENDER_TRANSLUCENT ? sizeof(unsigned int) : maage_render_gpu_mesh_index_bytes(mesh));
 }
 static void maage_vulkan_mesh_passes(maage_vulkan_renderer *native, VkCommandBuffer command, const maage_render_frame_plan *plan, int foreground, unsigned int slot) {
     maage_render_mesh_cursor cursor = {0, 0};
@@ -752,7 +752,7 @@ static void maage_vulkan_mesh_passes(maage_vulkan_renderer *native, VkCommandBuf
             VkDeviceSize offset = 0;
             maage_vulkan_bind(native, command, ((maage_vulkan_rendering *) native->rendering)->mesh[cursor.layer], texture->descriptor, &uniforms);
             vkCmdBindVertexBuffers(command, 0, 1, &geometry->vertices.buffer, &offset);
-            maage_vulkan_indices(native, command, geometry->indices.buffer, cursor.triangle, 3);
+            maage_vulkan_indices(native, command, geometry->indices.buffer, cursor.triangle, 3, maage_render_gpu_mesh_index_bytes(mesh));
         } else
             maage_vulkan_mesh_draw(native, command, mesh, cursor.layer, slot, &uniforms);
     }
@@ -779,7 +779,7 @@ static void maage_vulkan_ui_draw(maage_vulkan_renderer *native, VkCommandBuffer 
     vkCmdBindVertexBuffers(command, 0, 1, &frame->vertices[layer].buffer, &offset);
     for (n = 0; n < segment_count; ++n) {
         maage_vulkan_bind(native, command, panorama ? gpu->panorama_ui[MAAGE_RENDER_BLEND_ALPHA] : gpu->ui[segments[n].blend], texture->descriptor, &push);
-        maage_vulkan_indices(native, command, frame->indices[layer].buffer, segments[n].first, segments[n].count);
+        maage_vulkan_indices(native, command, frame->indices[layer].buffer, segments[n].first, segments[n].count, sizeof(unsigned int));
     }
 }
 static void maage_vulkan_fullscreen(maage_vulkan_renderer *native, VkCommandBuffer command, VkPipeline pipeline, maage_vulkan_image *source, float x, float y, int blur) {
@@ -999,6 +999,7 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
     maage_vulkan_mesh *geometry = mesh->platform;
     maage_vulkan_garbage *staging;
     size_t vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
+    size_t index_width = maage_render_gpu_mesh_index_bytes(mesh);
     VkBufferCopy copy = {0};
     if (!geometry) {
         geometry = calloc(1, sizeof(*geometry));
@@ -1006,11 +1007,11 @@ static maage_status maage_vulkan_upload_geometry(maage_renderer *renderer, maage
         mesh->platform = geometry;
         if (mesh->vertex_source) geometry->vertices = ((maage_vulkan_mesh *) mesh->vertex_source->platform)->vertices;
         else MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, vertex_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0, &geometry->vertices));
-        MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, data->index_count * sizeof(*data->indices), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0, &geometry->indices));
+        MAAGE_VULKAN_TRY(maage_vulkan_buffer_create(renderer, maage_render_gpu_index_allocation_bytes(data->index_count, index_width), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0, &geometry->indices));
     }
     MAAGE_VULKAN_TRY(maage_vulkan_staging(renderer, bytes, &staging));
     if (offset < vertex_bytes) maage_render_mesh_pack_span(data->vertices, offset, bytes, staging->buffer.mapped);
-    else memcpy(staging->buffer.mapped, (const unsigned char *) data->indices + offset - vertex_bytes, bytes);
+    else maage_render_gpu_index_pack_span(data->indices, data->index_count, index_width, offset - vertex_bytes, bytes, staging->buffer.mapped);
     MAAGE_VULKAN_TRY(maage_vulkan_flush(renderer, &staging->buffer));
     MAAGE_VULKAN_TRY(maage_vulkan_upload_begin(renderer));
     copy.dstOffset = offset < vertex_bytes ? offset : offset - vertex_bytes;
