@@ -10,7 +10,7 @@
 #include "maage/random_ticks.h"
 #include "maage/content.h"
 #define MAAGE_SECTION_VOLUME 4096
-/* Every direct-sky value is in 0..15; two shafts cells share one byte. */
+/* Mutable sky uses two 4-bit cells per byte; immutable uniform sections elide cells. */
 #define MAAGE_DIRECT_SKY_BYTES (MAAGE_WORLD_HEIGHT * MAAGE_CHUNK_EDGE * MAAGE_CHUNK_EDGE / 2)
 /* All block/light arrays are numeric and owned by their column. Empty sections
  * are NULL; implicit light uses cached direct sky when initialized, otherwise
@@ -38,12 +38,15 @@ maage_block_state_id maage_section_get(const maage_section *section, size_t cell
 maage_status maage_section_set(maage_section *section, size_t cell, maage_block_state_id state);
 maage_status maage_section_expand(maage_section *section);
 void maage_chunk_compact(maage_chunk *chunk);
+maage_status maage_section_export(const maage_section *section, maage_column_section *packet);
+maage_status maage_section_import(const maage_column_section *packet, const maage_block_registry *registry, maage_section **output);
 size_t maage_section_payload_resident_bytes(const maage_section *section);
 size_t maage_section_light_resident_bytes(const maage_section *section);
 maage_status maage_section_light_writable(maage_section *section);
 size_t maage_chunk_sky_resident_bytes(const maage_chunk *chunk);
 maage_status maage_chunk_sky_writable(maage_chunk *chunk);
 void maage_chunk_sky_share(maage_chunk *destination, const maage_chunk *source);
+int maage_chunk_sky_equal(const maage_chunk *left, const maage_chunk *right);
 typedef struct maage_update_index {
     unsigned int kind, cell;
     size_t heap_index; /* index+1, 0 empty, (size_t)-1 tombstone */
@@ -51,7 +54,7 @@ typedef struct maage_update_index {
 struct maage_chunk {
     int x, z;
     maage_block_state_id air;  /* Implicit empty sections use the registered state. */
-    unsigned char *direct_sky; /* Packed 4-bit values (32 KiB); absent from persistence. */
+    unsigned char *direct_sky; /* Sky payload present; access only through the numeric helpers. */
     maage_sky_payload *sky_payload; /* Shared until lighting explicitly detaches. */
     maage_section *sections[16];
     maage_biome_id biomes[256];
@@ -71,6 +74,7 @@ struct maage_chunk {
     unsigned long generation_features[8];
 };
 unsigned char maage_chunk_direct_sky_get(const maage_chunk *chunk, size_t cell);
+/* Requires a private dense cache obtained through maage_chunk_sky_writable. */
 void maage_chunk_direct_sky_set(maage_chunk *chunk, size_t cell, unsigned char value);
 maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output);
 /* Seed one edited cell from effective opacity/emission, its sky shaft and
@@ -110,7 +114,8 @@ maage_status maage_generation_spawn(maage_world_seed seed, const maage_block_reg
  * clip writes to the private output column; no neighbor storage is borrowed. */
 /* All inputs are pinned immutable snapshots. Client retains copied CPU/GPU
  * geometry, never borrowed columns. Cancellation leaves partial output private. */
-maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace);
+maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, size_t reserved_bytes, size_t *required_bytes, maage_world_mesh **output, maage_status_trace *trace);
+size_t maage_world_mesh_resident_bytes(const maage_world_mesh *mesh);
 /* Owner-thread borrowed effective inputs for bounded presentation patches;
  * a new column participates only after its whole mesh is prepared. */
 int maage_world_present_inputs(const maage_world *world, int x, int z, const maage_chunk **chunk, const maage_chunk *neighbors[8], const maage_block_registry **blocks, const maage_biome_registry **biomes);

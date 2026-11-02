@@ -184,7 +184,7 @@ static maage_status maage_vulkan_suitable(maage_renderer *renderer, VkPhysicalDe
         properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
         properties.pNext = &subset;
         query(physical, &properties);
-        if (!subset.minVertexInputBindingStrideAlignment || sizeof(maage_mesh_vertex) % subset.minVertexInputBindingStrideAlignment || sizeof(maage_render_ui_gpu_vertex) % subset.minVertexInputBindingStrideAlignment) return maage_vulkan_unsupported(physical, "portability vertex-stride alignment is incompatible");
+        if (!subset.minVertexInputBindingStrideAlignment || sizeof(maage_render_gpu_mesh_vertex) % subset.minVertexInputBindingStrideAlignment || sizeof(maage_render_ui_gpu_vertex) % subset.minVertexInputBindingStrideAlignment) return maage_vulkan_unsupported(physical, "portability vertex-stride alignment is incompatible");
         /* Current pipelines need none of the optional subset features: triangle
          * lists, identity image views, zero LOD bias and no stencil/events. */
     }

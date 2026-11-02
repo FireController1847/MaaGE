@@ -17,7 +17,10 @@ struct maage_section_payload {
 };
 struct maage_sky_payload {
     volatile long references;
-    unsigned char *cells; /* Exact 32 KiB allocation, no size-class bump. */
+    size_t bytes;
+    unsigned short offsets[16]; /* Byte offsets; USHRT_MAX denotes a uniform section. */
+    unsigned char uniform[16];
+    unsigned char *cells;
 };
 struct maage_section_light_payload {
     volatile long references;
@@ -94,18 +97,20 @@ size_t maage_chunk_sky_resident_bytes(const maage_chunk *chunk) {
     long references;
     if (!chunk || !chunk->sky_payload) return 0;
     references = maage_payload_references(&chunk->sky_payload->references);
-    return references > 0 ? (sizeof(*chunk->sky_payload) + MAAGE_DIRECT_SKY_BYTES) / (size_t) references : 0;
+    return references > 0 ? (sizeof(*chunk->sky_payload) + chunk->sky_payload->bytes) / (size_t) references : 0;
 }
 void maage_chunk_sky_share(maage_chunk *destination, const maage_chunk *source) {
-    if (!source->direct_sky) return;
-    destination->sky_payload = source->sky_payload;
-    maage_payload_retain(&destination->sky_payload->references);
-    destination->direct_sky = destination->sky_payload->cells;
+    maage_sky_payload *payload = source->sky_payload;
+    if (payload) maage_payload_retain(&payload->references);
+    maage_sky_payload_release(destination->sky_payload);
+    destination->sky_payload = payload;
+    destination->direct_sky = payload ? payload->cells : NULL;
 }
 maage_status maage_chunk_sky_writable(maage_chunk *chunk) {
     maage_sky_payload *copy;
+    int section;
     if (!chunk) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
-    if (chunk->sky_payload && maage_payload_references(&chunk->sky_payload->references) == 1)
+    if (chunk->sky_payload && chunk->sky_payload->bytes == MAAGE_DIRECT_SKY_BYTES && maage_payload_references(&chunk->sky_payload->references) == 1)
         return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
     copy = (maage_sky_payload *) malloc(sizeof(*copy));
     if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
@@ -115,11 +120,79 @@ maage_status maage_chunk_sky_writable(maage_chunk *chunk) {
         return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
     }
     copy->references = 1;
-    if (chunk->direct_sky) memcpy(copy->cells, chunk->direct_sky, MAAGE_DIRECT_SKY_BYTES);
+    copy->bytes = MAAGE_DIRECT_SKY_BYTES;
+    for (section = 0; section < 16; ++section) {
+        copy->offsets[section] = (unsigned short) (section * (MAAGE_SECTION_VOLUME / 2));
+        copy->uniform[section] = 0;
+    }
+    if (chunk->sky_payload)
+        for (section = 0; section < 16; ++section) {
+            unsigned short offset = chunk->sky_payload->offsets[section];
+            if (offset == USHRT_MAX) memset(copy->cells + copy->offsets[section], chunk->sky_payload->uniform[section] * 17U, MAAGE_SECTION_VOLUME / 2);
+            else memcpy(copy->cells + copy->offsets[section], chunk->direct_sky + offset, MAAGE_SECTION_VOLUME / 2);
+        }
     maage_sky_payload_release(chunk->sky_payload);
     chunk->sky_payload = copy;
     chunk->direct_sky = copy->cells;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
+}
+static void maage_chunk_sky_compact(maage_chunk *chunk) {
+    maage_sky_payload *source = chunk->sky_payload, *copy;
+    unsigned char uniform[16], value;
+    unsigned short offsets[16];
+    size_t section, cell, bytes = 0;
+    if (!source || source->bytes != MAAGE_DIRECT_SKY_BYTES || maage_payload_references(&source->references) != 1) return;
+    for (section = 0; section < 16; ++section) {
+        value = source->cells[section * (MAAGE_SECTION_VOLUME / 2)];
+        for (cell = 0; cell < MAAGE_SECTION_VOLUME / 2; ++cell)
+            if (source->cells[section * (MAAGE_SECTION_VOLUME / 2) + cell] != value) break;
+        uniform[section] = value & 15U;
+        if (cell == MAAGE_SECTION_VOLUME / 2 && value == (unsigned char) (uniform[section] * 17U)) offsets[section] = USHRT_MAX;
+        else {
+            offsets[section] = (unsigned short) bytes;
+            bytes += MAAGE_SECTION_VOLUME / 2;
+        }
+    }
+    if (bytes == MAAGE_DIRECT_SKY_BYTES) return;
+    copy = (maage_sky_payload *) malloc(sizeof(*copy));
+    if (!copy) return;
+    copy->cells = (unsigned char *) malloc(bytes ? bytes : 1);
+    if (!copy->cells) {
+        free(copy);
+        return;
+    }
+    copy->references = 1;
+    copy->bytes = bytes ? bytes : 1;
+    memcpy(copy->uniform, uniform, sizeof(uniform));
+    memcpy(copy->offsets, offsets, sizeof(offsets));
+    for (section = 0; section < 16; ++section)
+        if (offsets[section] != USHRT_MAX) memcpy(copy->cells + offsets[section], source->cells + section * (MAAGE_SECTION_VOLUME / 2), MAAGE_SECTION_VOLUME / 2);
+    maage_sky_payload_release(source);
+    chunk->sky_payload = copy;
+    chunk->direct_sky = copy->cells;
+}
+int maage_chunk_sky_equal(const maage_chunk *left, const maage_chunk *right) {
+    const maage_sky_payload *a = left->sky_payload, *b = right->sky_payload;
+    size_t section, byte;
+    unsigned short ao, bo;
+    unsigned char value;
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    for (section = 0; section < 16; ++section) {
+        ao = a->offsets[section];
+        bo = b->offsets[section];
+        if (ao == USHRT_MAX && bo == USHRT_MAX) {
+            if (a->uniform[section] != b->uniform[section]) return 0;
+        } else if (ao != USHRT_MAX && bo != USHRT_MAX) {
+            if (memcmp(a->cells + ao, b->cells + bo, MAAGE_SECTION_VOLUME / 2)) return 0;
+        } else {
+            const unsigned char *cells = ao == USHRT_MAX ? b->cells + bo : a->cells + ao;
+            value = (unsigned char) ((ao == USHRT_MAX ? a->uniform[section] : b->uniform[section]) * 17U);
+            for (byte = 0; byte < MAAGE_SECTION_VOLUME / 2; ++byte)
+                if (cells[byte] != value) return 0;
+        }
+    }
+    return 1;
 }
 
 #if UINT_MAX < 4294967295UL
@@ -280,10 +353,99 @@ static void maage_section_compact(maage_section *section) {
     section->packed = bytes ? packed : NULL;
     section->bits = bits;
 }
+maage_status maage_section_export(const maage_section *section, maage_column_section *packet) {
+    maage_section *copy = NULL;
+    size_t bytes, palette_bytes;
+    if (!section) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_COPY, 0);
+    if (section->states) {
+        copy = maage_section_clone(section);
+        if (!copy) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+        maage_section_compact(copy);
+        section = copy;
+    }
+    if (section->states) {
+        maage_section_destroy(copy);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    }
+    bytes = MAAGE_SECTION_VOLUME * section->bits / 8;
+    palette_bytes = section->palette_count * sizeof(*packet->palette);
+    packet->palette = (unsigned int *) malloc(palette_bytes + bytes);
+    if (!packet->palette) {
+        maage_section_destroy(copy);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    }
+    packet->palette_count = section->palette_count;
+    packet->bits = section->bits;
+    packet->packed = bytes ? (unsigned char *) packet->palette + palette_bytes : NULL;
+    memcpy(packet->palette, section->palette, palette_bytes);
+    if (bytes) memcpy(packet->packed, section->packed, bytes);
+    maage_section_destroy(copy);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
+}
+maage_status maage_section_import(const maage_column_section *packet, const maage_block_registry *registry, maage_section **output) {
+    maage_section *section;
+    maage_section_payload *payload;
+    unsigned int seen[8192], index, bucket, state, expected;
+    size_t bytes, total, cell;
+    *output = NULL;
+    if (!packet->palette_count) {
+        if (packet->bits || packet->palette || packet->packed) goto malformed;
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_COPY, 0);
+    }
+    if (packet->palette_count > MAAGE_SECTION_VOLUME || !packet->palette) goto malformed;
+    expected = packet->palette_count <= 1U ? 0U : (packet->palette_count <= 2U ? 1U : (packet->palette_count <= 4U ? 2U : (packet->palette_count <= 16U ? 4U : (packet->palette_count <= 256U ? 8U : 16U))));
+    if (packet->bits != expected || (expected && !packet->packed) || (!expected && packet->packed)) goto malformed;
+    memset(seen, 0, sizeof(seen));
+    for (index = 0; index < packet->palette_count; ++index) {
+        state = packet->palette[index];
+        if (!maage_block_registry_state(registry, state)) goto malformed;
+        bucket = (unsigned int) ((state * 2654435761UL) & 8191UL);
+        while (seen[bucket]) {
+            if (packet->palette[seen[bucket] - 1U] == state) goto malformed;
+            bucket = (bucket + 1U) & 8191U;
+        }
+        seen[bucket] = index + 1U;
+    }
+    section = (maage_section *) calloc(1, sizeof(*section));
+    if (!section) goto allocation;
+    bytes = MAAGE_SECTION_VOLUME * expected / 8;
+    total = offsetof(maage_section_payload, palette) + packet->palette_count * sizeof(*packet->palette) + bytes;
+    if (total < sizeof(*payload)) total = sizeof(*payload);
+    payload = (maage_section_payload *) malloc(total);
+    if (!payload) {
+        free(section);
+        goto allocation;
+    }
+    payload->references = 1;
+    payload->bytes = total;
+    memcpy(payload->palette, packet->palette, packet->palette_count * sizeof(*packet->palette));
+    section->payload = payload;
+    section->palette = payload->palette;
+    section->palette_count = packet->palette_count;
+    section->bits = expected;
+    section->packed = bytes ? (unsigned char *) (payload->palette + packet->palette_count) : NULL;
+    if (bytes) memcpy(section->packed, packet->packed, bytes);
+    for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
+        if (maage_section_index(section, cell) >= section->palette_count) {
+            maage_section_destroy(section);
+            goto malformed;
+        }
+    if (maage_status_failed(maage_section_light_writable(section))) {
+        maage_section_destroy(section);
+        goto allocation;
+    }
+    *output = section;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_COPY, 0);
+malformed:
+    return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+allocation:
+    return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+}
 void maage_chunk_compact(maage_chunk *chunk) {
     int section;
     if (!chunk) return;
     for (section = 0; section < 16; ++section) maage_section_compact(chunk->sections[section]);
+    maage_chunk_sky_compact(chunk);
 }
 
 int maage_world_chunk_coordinate(int coordinate) {
@@ -326,12 +488,15 @@ maage_status maage_chunk_destroy(maage_chunk *chunk) {
     free(chunk->updates);
     free(chunk->update_index);
     if (chunk->sky_payload) maage_sky_payload_release(chunk->sky_payload);
-    else free(chunk->direct_sky);
     free(chunk);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 unsigned char maage_chunk_direct_sky_get(const maage_chunk *chunk, size_t cell) {
-    unsigned char packed = chunk->direct_sky[cell >> 1];
+    size_t section = cell / MAAGE_SECTION_VOLUME;
+    unsigned short offset = chunk->sky_payload->offsets[section];
+    unsigned char packed;
+    if (offset == USHRT_MAX) return chunk->sky_payload->uniform[section];
+    packed = chunk->direct_sky[offset + (cell % MAAGE_SECTION_VOLUME) / 2];
     return (unsigned char) ((cell & 1U) ? packed >> 4 : packed & 15U);
 }
 void maage_chunk_direct_sky_set(maage_chunk *chunk, size_t cell, unsigned char value) {

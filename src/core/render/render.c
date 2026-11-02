@@ -400,19 +400,21 @@ size_t maage_render_gpu_mesh_vertex_bytes(void) {
 }
 maage_status maage_renderer_begin_geometry(maage_renderer *renderer, maage_mesh_preparation **preparation, maage_render_texture *texture, maage_render_mesh **output, maage_status_trace *trace) {
     maage_render_mesh *mesh;
-    size_t vertex_bytes, index_bytes;
+    size_t vertex_bytes, index_bytes, surface_bytes;
     if (output) *output = NULL;
     if (!output || !renderer || !preparation || !*preparation || !texture || texture->renderer != renderer || !texture->owned) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     if (maage_status_code(renderer->failure) != MAAGE_STATUS_SUCCESS) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     if (!renderer->api->upload_geometry) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     vertex_bytes = (*preparation)->data.vertex_count * sizeof(maage_render_gpu_mesh_vertex);
     index_bytes = (*preparation)->data.index_count * sizeof(unsigned int);
-    if (vertex_bytes > (size_t) - 1 - index_bytes) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
+    surface_bytes = (*preparation)->surface_count * sizeof(maage_mesh_surface);
+    if (surface_bytes > (size_t) - 1 - index_bytes || vertex_bytes > (size_t) - 1 - index_bytes - surface_bytes) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh = (maage_render_mesh *) calloc(1, sizeof(*mesh));
     if (!mesh) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     mesh->renderer = renderer;
     mesh->texture = texture;
     mesh->vertex_count = (*preparation)->data.vertex_count;
+    mesh->surface_count = (*preparation)->surface_count;
     mesh->references = 1;
     mesh->upload = *preparation;
     *preparation = NULL;
@@ -426,7 +428,7 @@ maage_status maage_renderer_begin_geometry(maage_renderer *renderer, maage_mesh_
 maage_status maage_render_mesh_upload_step(maage_render_mesh *mesh, size_t byte_budget, maage_status_trace *trace) {
     maage_renderer *renderer;
     const maage_mesh_data *data;
-    size_t vertex_bytes, total, bytes;
+    size_t vertex_bytes, index_end, total, bytes;
     maage_status result;
     if (!mesh || byte_budget < 4) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     if (!mesh->upload) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
@@ -434,8 +436,9 @@ maage_status maage_render_mesh_upload_step(maage_render_mesh *mesh, size_t byte_
     if (maage_status_failed(renderer->failure)) return MAAGE_STATUS_PROPAGATE(trace, renderer->failure, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
     data = &mesh->upload->data;
     vertex_bytes = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
-    total = vertex_bytes + maage_render_gpu_index_allocation_bytes(data->index_count, maage_render_gpu_mesh_index_bytes(mesh));
-    bytes = (mesh->upload_offset < vertex_bytes ? vertex_bytes : total) - mesh->upload_offset;
+    index_end = vertex_bytes + maage_render_gpu_index_allocation_bytes(data->index_count, maage_render_gpu_mesh_index_bytes(mesh));
+    total = index_end + maage_render_mesh_surface_bytes(mesh);
+    bytes = (mesh->upload_offset < vertex_bytes ? vertex_bytes : (mesh->upload_offset < index_end ? index_end : total)) - mesh->upload_offset;
     byte_budget -= byte_budget % 4;
     if (bytes > byte_budget) bytes = byte_budget;
     renderer->operation_trace = trace;
@@ -497,6 +500,7 @@ maage_status maage_renderer_upload_index_view(const maage_render_mesh *source, c
     mesh->texture = source->texture;
     mesh->vertex_source = (maage_render_mesh *) source;
     mesh->vertex_count = source->vertex_count;
+    mesh->surface_count = source->surface_count;
     mesh->references = 1;
     mesh->upload_offset = data->vertex_count * sizeof(maage_render_gpu_mesh_vertex);
     mesh->upload = prepared;

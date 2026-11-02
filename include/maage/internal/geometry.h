@@ -16,10 +16,18 @@ typedef struct maage_geometry {
     unsigned long revision;
 } maage_geometry;
 
+typedef struct maage_mesh_surface {
+    float animation[3], material;
+    float tile[4];
+} maage_mesh_surface;
+
 struct maage_mesh_preparation {
     maage_mesh_data data;
     unsigned int *indices;
     maage_geometry geometry;
+    maage_mesh_surface *surfaces;
+    unsigned int *surface_indices;
+    size_t surface_count, surface_capacity;
 };
 maage_status maage_geometry_dispose(maage_geometry *geometry);
 /* Prepare filtered, index-only geometry from a retained GPU mesh's immutable

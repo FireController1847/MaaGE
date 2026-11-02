@@ -31,7 +31,7 @@ struct maage_render_mesh {
     maage_render_geometry geometry;
     maage_mesh_preparation *upload;
     maage_render_mesh *vertex_source;
-    size_t upload_offset, vertex_count, references;
+    size_t upload_offset, vertex_count, surface_count, references;
     maage_render_mesh *next;
     maage_render_mesh *previous;
 };

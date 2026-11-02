@@ -8,11 +8,12 @@ layout(location = 1) in vec4 maage_fragment_color;
 layout(location = 2) in vec2 maage_fragment_light;
 layout(location = 3) flat in float maage_fragment_material;
 layout(location = 4) in vec3 maage_fog_position;
+layout(location = 5) flat in vec4 maage_tile;
 layout(location = 0) out vec4 maage_result;
 
 void main()
 {
-    vec4 texel = texture(maage_atlas, maage_fragment_uv);
+    vec4 texel = texture(maage_atlas, maage_shader_tile_uv(maage_fragment_uv, maage_tile));
     if (maage_shader_cutout(maage_fragment_material, texel.a)) discard;
     maage_result = maage_shader_fog(maage_shader_mesh_color(texel, maage_fragment_color, maage_fragment_light, maage_fragment_material, maage.lighting), maage_fog_position, maage_fragment_material, maage.fog, maage.fog_distance);
 }

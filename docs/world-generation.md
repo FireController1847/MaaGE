@@ -197,19 +197,32 @@ disk operations, global barriers, or unconditional remeshing are introduced.
 
 ## Mesh Residency and Prediction
 
-CPU mesh vertices contain position, atlas UV, precomputed tint/AO, light,
-material and animation attributes; unused vertex normals are omitted. Native
-GPU uploads encode color and both normalized light channels as 8-bit values
-while retaining full 32-bit precision for position, UV, material and animation.
-This reduces the native GPU vertex stride from 60 to 40 bytes without
-compressing the CPU mesher, geometry preparation or triangle metadata.
+CPU mesh vertices contain full-precision position/UV, tint/AO, light, material,
+animation and optional atlas-repeat bounds. Native GPU vertices occupy 32 bytes:
+position and UV remain 32-bit floats, tint/light use normalized bytes, and one
+32-bit index selects an immutable surface table. Each 32-byte surface entry holds
+material, animation and repeat bounds, deduplicated during CPU preparation with
+expected O(1) hashing. Surface tables grow with actual content and are shared by
+index-only prediction views. Metal uses a device buffer, Vulkan a read-only
+storage buffer, and modern OpenGL a texture buffer. Unsupported hardware resource
+sizes fail explicitly; no registry-count or shape ceiling is introduced.
+
+Full opaque cube faces with identical atlas/material/animation tuples and constant
+corner tint, AO and light merge into rectangles within each 16³ section. Atlas UVs
+repeat per block inside the selected tile. Arbitrary shapes, overlays, fluids,
+transparency and varying corner shading keep their ordinary quads. Prediction
+retains each quad's inclusive owner-cell bounds and face direction. If an edit
+intersects a merged rectangle, its replacement regenerates that direction across
+the rectangle plus the ordinary local patch, leaving other cached faces intact.
+No asynchronous World job or GPU wait is introduced in that synchronous patch.
+
 Native indices use 16-bit elements for meshes with at most 65536 vertices
 and automatically retain 32-bit elements for larger meshes. Incremental native
 uploads pad compact index allocations to four-byte alignment for Vulkan
 transfer compatibility. Translucent camera-sorted indices remain independent
 32-bit buffers; CPU-side geometry always uses 32-bit indices. Once the base GPU upload finishes, the Client
-discards its full CPU source vertex and index arrays. It retains only a 16-bit
-chunk-local owner and a byte of material/quad-winding information per face.
+discards its full CPU source vertex and index arrays. It retains only two 16-bit
+chunk-local owner bounds and a byte of material/winding/direction per face.
 Immediate local prediction reconstructs only the selected index list; the
 renderer groups its draw passes and reuses original GPU vertex data and
 transparent triangle centers without rehydrating CPU vertex arrays.
@@ -221,15 +234,16 @@ The debug overlay displays one process resident-memory number followed by a
 memory breakdown (MiB), ordered left to right: GPU (base mesh payload),
 SW (Server World retained storage), CW (Client World retained storage),
 and U (unattributed resident-memory remainder). World figures inspect the owner-thread's allocated
-column snapshots, packed sections, lighting, and indexing structures; detached
+column snapshots, packed sections, lighting, indexing structures and pending CPU
+meshes; detached
 worker outputs, external registries, and renderer allocations are not included.
-GPU bytes now sum live native mesh vertex/index allocations, including
+GPU bytes sum live native mesh vertex/index/surface allocations, including
 translucent sort buffers and index-only prediction views without double-counting
 shared source vertices. The counter excludes textures, temporary uploads,
 retired native resources and driver overhead. The fourth number is a subtraction from process
 resident memory, not an independent allocation measurement, and can be unknown
-if the GPU allocation footprint exceeds reported residency. Further GPU quad
-merging and pooling native allocations remain separate opportunities.
+if the GPU allocation footprint exceeds reported residency. Native allocation pooling
+remains a separate opportunity; these counters establish no process-memory target.
 
 Server lighting is scheduled within the configured simulation distance plus
 one neighboring column for authoritative gameplay queries. Render-only Server
@@ -240,11 +254,13 @@ without holding up Client lighting, which independently covers all rendered
 columns. The one-column simulation halo preserves gameplay light availability
 at the active edge.
 
-Numerical direct-sky caches use two four-bit light values per byte, allocating
-32 KiB per initialized column instead of 64 KiB. The packed array is shared by
-reference between immutable chunk snapshots and detached by the lighting worker
-on its first actual sky write. Its small reference-count header is allocated
-separately to avoid moving the 32 KiB array to a larger native malloc size class.
+Numerical direct-sky caches retain exact four-bit values. Mutable lighting outputs
+use a 32 KiB dense array; immutable publication elides uniform 16³ sections and
+packs only nonuniform sections (2 KiB each), plus section descriptors. Fully uniform
+columns need only descriptors and a minimal allocation. Complex lighting can retain
+the complete dense representation. Snapshots share payloads until an actual sky
+write expands a private dense cache; compatible light rebases share the compact
+result. These derived caches are absent from persistence.
 The independent per-column replication-change bitmap is allocated only after a
 block mutation and released when the matching Client update is acknowledged;
 new columns and clean Client visual columns do not carry an idle 8 KiB map.
@@ -256,6 +272,37 @@ and excludes detached worker-owned copies. Lighting-change bitsets are also
 allocated only on actual light-affecting block mutations, and lighting-job
 snapshots only allocate 8 KiB when there are dirty light cells. Initial
 lighting jobs use an immutable zero mask without allocating per-column masks.
+
+Transient job admission also accounts for bytes, independently of worker/context
+counts. `maage_world_config.job_memory_budget` supplies bytes; zero selects positive
+decimal `MAAGE_WORLD_JOB_MEMORY_MIB`, defaulting to 64 MiB per World. Reservations
+cover accepted work through owner collection, and pending CPU meshes remain charged
+until handed to the Client's separately bounded incremental upload. Generation,
+load, light and save reservations estimate scratch plus retained inputs; they are
+not a hard bound on arbitrary content callbacks or process residency. Mesh workers
+count faces before allocating and request a larger conservative reservation when
+needed. The owner retries them without blocking a worker. An oversized mesh drains
+other visual work and can run alone; invalidated requests release that preference.
+Saves have an independent quarter-budget and likewise allow one oversized writer,
+so visual pressure cannot prevent authoritative persistence. Allocation failures
+still propagate normally. World statistics expose the budget, reservations, pending
+mesh bytes and memory-pressure occurrences.
+
+Initial column packets own independent palette-packed sections and 256 biome IDs.
+Uniform-air sections are omitted; state IDs remain full-width numeric identities.
+Import validates palette identities, duplicate entries, packing widths and every
+index before publication, creates packed payloads directly, and derives the
+heightmap without building expanded state arrays. Only exact-base deltas use
+sorted cell/state records. No Server snapshot or light storage is borrowed.
+
+Replica capacity reserves the transport's packet capacity above the largest live
+footprint: the Server's target, its observed residency, and the Client's retained
+base count. This preserves import headroom while a render-distance shrink still
+has ordered unloads in flight, including a reversal of that shrink. Reading the
+Client count is O(1); target changes do not preallocate column data or evict bases.
+Presentation shutdown captures its failing status before saving options. A rejected
+column records its coordinates, revision/base, retained count and capacity before
+releasing the packet, so shutdown cannot replace the cause with a generic fatal.
 
 ## Runtime Section Storage
 

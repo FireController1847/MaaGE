@@ -105,6 +105,10 @@ typedef struct maage_world_config {
      * Cache and accepted-job limits are independent runtime allocations. */
     unsigned int cache_capacity;
     unsigned int job_capacity;
+    /* Soft byte admission budget for accepted transient work and pending CPU
+     * meshes. 0 selects MAAGE_WORLD_JOB_MEMORY_MIB or 64 MiB. One oversized
+     * job can proceed alone; saves retain an independent quarter-budget. */
+    size_t job_memory_budget;
     maage_world_cache_policy cache_policy; /* Residency policy, not a logical world-size limit. */
     /* All-zero selects the current generation defaults. */
     maage_generation_policy generation_policy;
@@ -138,6 +142,8 @@ typedef struct maage_world_stats {
     unsigned int resident_columns, cache_capacity, job_capacity;
     unsigned int completed_uncommitted_jobs;
     unsigned long queue_saturation_events, cache_pressure_events;
+    unsigned long memory_pressure_events;
+    size_t job_memory_budget, reserved_job_bytes, pending_mesh_bytes;
     double generated_columns_per_second;
     double scheduling_latency_ms;
     int failed;
@@ -145,7 +151,7 @@ typedef struct maage_world_stats {
     maage_status last_job_result;           /* Owner disposition, including cancellation/stale. */
     maage_status last_job_operation_result; /* Original callback outcome survives disposition. */
     unsigned long failure_reports;          /* Owner failures; cancellation/staleness excluded. */
-    size_t resident_storage_bytes; /* Owner-indexed slots, chunk snapshots and backing arrays; excludes in-flight worker outputs. */
+    size_t resident_storage_bytes;          /* Owner-indexed columns, snapshots and pending meshes; excludes worker outputs and Client upload handoffs. */
 } maage_world_stats;
 typedef struct maage_world_observation {
     maage_biome_id biome_id;
@@ -193,19 +199,29 @@ unsigned long maage_world_column_revision(const maage_world *world, int x, int z
 maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_block_position *removed, size_t count, maage_mesh_data *data, unsigned int **indices);
 /* Exact geometry for the deduplicated 3x3x3 cells and axial foliage dependencies
  * around at most 32 edits.
+ * Sources lend retained owner rectangles so edits can replace merged faces
+ * without holes outside the local cells. Sources outlive this synchronous call.
  * Uses effective replica state immediately in prepared/presented columns,
  * independent of subsequent lighting refinement.
  * Filter removes these same owner cells from cached complete meshes. */
-maage_status maage_world_mesh_patch(const maage_world *replica, const maage_block_position *centers, size_t count, maage_leaves_mode leaves, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace);
+maage_status maage_world_mesh_patch(const maage_world *replica, const maage_block_position *centers, size_t count, const maage_world_mesh *const *sources, size_t source_count, maage_leaves_mode leaves, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace);
 unsigned long maage_world_presentation_revision(const maage_world *replica);
 /* Owned numeric state transfer; no light, scheduling, entities or file data.
  * Ordered unloads retire an exact base after all preceding packets.
- * base_revision==0 replaces a complete column (unlisted cells are air).
- * Otherwise cells are deltas against exactly base_revision. */
+ * base_revision==0 replaces a column with owned palette-packed sections
+ * (absent sections are air). Otherwise sorted cells are exact-base deltas. */
 typedef struct maage_column_cell {
     unsigned int cell;
     maage_block_state_id state;
 } maage_column_cell;
+/* IDs retain their full numeric domain; at most 4096 distinct states occur
+ * in one physical section. packed follows palette in the same allocation.
+ * bits is 0,1,2,4,8 or 16; indices are little-endian within each byte/pair. */
+typedef struct maage_column_section {
+    unsigned int palette_count, bits;
+    unsigned int *palette;
+    unsigned char *packed;
+} maage_column_section;
 typedef struct maage_column_update {
     int x, z;
     unsigned long revision, base_revision;
@@ -213,6 +229,7 @@ typedef struct maage_column_update {
     size_t count;
     maage_column_cell *cells;
     maage_biome_id *biomes; /* 256 entries on complete publications only */
+    maage_column_section sections[16]; /* Complete publications only; no lighting. */
 } maage_column_update;
 maage_status maage_world_next_column(maage_world *world, maage_column_update **output);
 /* Called after ownership transfer; reads copied identity fields only. */
@@ -271,6 +288,8 @@ maage_status maage_world_status(const maage_world *world);
 const maage_status_trace *maage_world_trace(const maage_world *world);
 const maage_status_trace *maage_world_last_job_trace(const maage_world *world);
 void maage_world_get_stats(maage_world *world, maage_world_stats *stats);
+/* Owner-thread O(1) retained membership count, including replicas awaiting unload. */
+unsigned int maage_world_resident_columns(const maage_world *world);
 /* Owner-thread read-only diagnostics of published numeric column data. Returns
  * zero for an unavailable column or out-of-world coordinates. Biome zero is a
  * valid ID. Light is unavailable until the column lighting result is current.

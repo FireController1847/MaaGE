@@ -300,11 +300,12 @@ static unsigned char maage_render_unit_channel(float value) {
     if (value >= 1.0f) return 255;
     return (unsigned char) (value * 255.0f + 0.5f);
 }
-void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offset, size_t bytes, void *destination) {
+void maage_render_mesh_pack_span(const maage_mesh_preparation *prepared, size_t offset, size_t bytes, void *destination) {
     unsigned char *target = (unsigned char *) destination;
     while (bytes) {
         maage_render_gpu_mesh_vertex packed;
-        const maage_mesh_vertex *source = &vertices[offset / sizeof(packed)];
+        size_t vertex = offset / sizeof(packed);
+        const maage_mesh_vertex *source = &prepared->data.vertices[vertex];
         size_t start = offset % sizeof(packed), part = sizeof(packed) - start;
         int channel;
         if (part > bytes) part = bytes;
@@ -312,8 +313,8 @@ void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offse
         memcpy(packed.uv, source->uv, sizeof(packed.uv));
         for (channel = 0; channel < 4; ++channel) packed.color[channel] = maage_render_unit_channel(source->color[channel]);
         for (channel = 0; channel < 2; ++channel) packed.light[channel] = maage_render_unit_channel(source->light[channel]);
-        packed.material = (unsigned short) source->material;
-        memcpy(packed.animation, source->animation, sizeof(packed.animation));
+        packed.padding[0] = packed.padding[1] = 0;
+        packed.surface = prepared->surface_indices[vertex];
         memcpy(target, (const unsigned char *) &packed + start, part);
         target += part;
         offset += part;
@@ -322,6 +323,9 @@ void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offse
 }
 /* The native index representation varies by geometry, not by a logical
  * mesh cap. 16-bit meshes fall back transparently to 32-bit as they grow. */
+size_t maage_render_mesh_surface_bytes(const maage_render_mesh *mesh) {
+    return mesh->vertex_source ? 0 : mesh->surface_count * sizeof(maage_mesh_surface);
+}
 size_t maage_render_gpu_mesh_index_bytes(const maage_render_mesh *mesh) {
     return mesh && mesh->vertex_count <= 65536UL && sizeof(unsigned short) == 2 ? 2U : sizeof(unsigned int);
 }
@@ -352,8 +356,10 @@ int maage_render_gpu_layout_supported(void) {
            offsetof(maage_render_gpu_mesh_vertex, uv) == 12 &&
            offsetof(maage_render_gpu_mesh_vertex, color) == 20 &&
            offsetof(maage_render_gpu_mesh_vertex, light) == 24 &&
-           offsetof(maage_render_gpu_mesh_vertex, material) == 26 &&
-           offsetof(maage_render_gpu_mesh_vertex, animation) == 28 &&
+           offsetof(maage_render_gpu_mesh_vertex, surface) == 28 &&
+           sizeof(maage_mesh_surface) == 32 &&
+           offsetof(maage_mesh_surface, material) == 12 &&
+           offsetof(maage_mesh_surface, tile) == 16 &&
            sizeof(maage_render_ui_vertex) == MAAGE_RENDER_UI_VERTEX_BYTES &&
            sizeof(maage_render_ui_gpu_vertex) == MAAGE_RENDER_UI_GPU_VERTEX_BYTES &&
            sizeof(maage_render_uniforms) == MAAGE_RENDER_UNIFORM_BYTES;

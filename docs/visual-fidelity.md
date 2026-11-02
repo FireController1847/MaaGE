@@ -153,9 +153,10 @@ separate rules. Lighting/AO and their interpolation are unchanged.
 
 Each light task clones one column and borrows four immutable neighboring snapshots.
 Its queue holds at most 65,536 deduplicated cells, with an 8,192-byte membership
-bitset; accepted-job capacity bounds concurrent memory. Existing direct-sky data
-is retained. Dirty bytes select changed cells and shafts, while changed boundary
-masks seed only the necessary faces. Sky and emission solve the same attenuating
+bitset; accepted-job counts and estimated byte reservations bound concurrent work.
+Existing direct-sky data is shared in compact section form and expanded privately
+on first mutation. Dirty bytes select changed cells and shafts, while changed
+boundary masks seed only the necessary faces. Sky and emission solve the same attenuating
 fixed point, including removal. Boundary passes converge after inputs stabilize;
 intermediate retained values are explicitly pending presentation data.
 

@@ -82,6 +82,8 @@ static maage_status maage_prediction_present(maage_client_prediction *prediction
 static maage_status maage_prediction_rebuild(maage_client_prediction *prediction, maage_renderer *renderer, maage_render_texture *atlas, maage_world *visual, maage_client_chunk_mesh *meshes, size_t capacity, maage_status_trace *trace) {
     maage_block_position centers[MAAGE_CLIENT_PREDICTIONS];
     maage_world_mesh *patch = NULL;
+    const maage_world_mesh *sources[MAAGE_CLIENT_PREDICTIONS * 4];
+    size_t source_count = 0, center;
     maage_mesh_data data;
     maage_render_mesh *reveal = NULL;
     unsigned int i, count = 0;
@@ -93,8 +95,17 @@ static maage_status maage_prediction_rebuild(maage_client_prediction *prediction
             centers[count].y = prediction->entries[i].target.y;
             centers[count++].z = prediction->entries[i].target.z;
         }
+    for (column = 0; column < capacity; ++column)
+        if (meshes[column].used && meshes[column].source) {
+            for (center = 0; center < count; ++center)
+                if (maage_world_chunk_coordinate(centers[center].x - 3) <= meshes[column].x && maage_world_chunk_coordinate(centers[center].x + 3) >= meshes[column].x && maage_world_chunk_coordinate(centers[center].z - 3) <= meshes[column].z && maage_world_chunk_coordinate(centers[center].z + 3) >= meshes[column].z) break;
+            if (center < count) {
+                if (source_count == MAAGE_CLIENT_PREDICTIONS * 4) return maage_prediction_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_MESH);
+                sources[source_count++] = meshes[column].source;
+            }
+        }
     if (count) {
-        result = maage_world_mesh_patch(visual, centers, count, prediction->leaves, prediction->biome_blend, &patch, trace);
+        result = maage_world_mesh_patch(visual, centers, count, sources, source_count, prediction->leaves, prediction->biome_blend, &patch, trace);
         if (maage_status_failed(result)) return result;
         data = *maage_world_mesh_data(patch);
         if (data.index_count) result = maage_renderer_upload_geometry(renderer, &data, atlas, &reveal, trace);

@@ -5,7 +5,7 @@
 #include <string.h>
 
 static maage_status maage_geometry_validate(const maage_mesh_data *data) {
-    size_t index, axis;
+    size_t index, axis, corner;
     if (!data || !data->vertices || !data->indices || !data->vertex_count ||
         !data->index_count || data->index_count % 3 || data->vertex_count > UINT_MAX ||
         data->vertex_count > (size_t) - 1 / sizeof(*data->vertices) ||
@@ -14,7 +14,16 @@ static maage_status maage_geometry_validate(const maage_mesh_data *data) {
     for (index = 0; index < data->index_count; ++index)
         if (data->indices[index] >= data->vertex_count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     for (index = 0; index < data->index_count; index += 3) {
-        float material = data->vertices[data->indices[index]].material;
+        const maage_mesh_vertex *first = &data->vertices[data->indices[index]];
+        float material = first->material;
+        for (corner = 1; corner < 3; ++corner) {
+            const maage_mesh_vertex *vertex = &data->vertices[data->indices[index + corner]];
+            for (axis = 0; axis < 4; ++axis)
+                if (first->tile[axis] != vertex->tile[axis]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
+            if (first->tile[2] > first->tile[0])
+                for (axis = 0; axis < 3; ++axis)
+                    if (first->animation[axis] != vertex->animation[axis]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
+        }
         if (!(material == MAAGE_MESH_MATERIAL_OPAQUE || material == MAAGE_MESH_MATERIAL_CUTOUT ||
               material == MAAGE_MESH_MATERIAL_TRANSLUCENT || material == MAAGE_MESH_MATERIAL_MULTIPLY) ||
             data->vertices[data->indices[index + 1]].material != material ||
@@ -23,6 +32,10 @@ static maage_status maage_geometry_validate(const maage_mesh_data *data) {
     }
     for (index = 0; index < data->vertex_count; ++index) {
         const float *animation = data->vertices[index].animation;
+        const float *tile = data->vertices[index].tile;
+        for (axis = 0; axis < 4; ++axis)
+            if (!(tile[axis] >= 0 && tile[axis] <= 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
+        if (tile[2] < tile[0] || tile[3] < tile[1] || (tile[2] > tile[0]) != (tile[3] > tile[1])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
         if (!(animation[0] >= 0 && animation[0] <= 1 &&
               animation[1] >= -FLT_MAX && animation[1] <= FLT_MAX &&
               animation[2] >= 0 && animation[2] <= FLT_MAX) ||
@@ -79,6 +92,72 @@ maage_status maage_geometry_dispose(maage_geometry *geometry) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
+/* Material tuples are deduplicated once on CPU workers, never in draw loops.
+ * IDs are per-mesh numeric indices; table growth has no content-count ceiling. */
+static unsigned long maage_surface_hash(const maage_mesh_surface *surface) {
+    const unsigned char *bytes = (const unsigned char *) surface;
+    unsigned long hash = 2166136261UL;
+    size_t i;
+    for (i = 0; i < sizeof(*surface); ++i)
+        hash = ((hash ^ bytes[i]) * 16777619UL) & 0xffffffffUL;
+    return hash;
+}
+static maage_status maage_geometry_surfaces(maage_mesh_preparation *prepared, const maage_mesh_data *data) {
+    maage_mesh_surface surface, *grown;
+    unsigned int *buckets = NULL, *new_buckets;
+    size_t capacity = 0, bucket_count = 0, index, bucket, i;
+    prepared->surface_indices = (unsigned int *) malloc(data->vertex_count * sizeof(*prepared->surface_indices));
+    if (!prepared->surface_indices) goto allocation;
+    for (index = 0; index < data->vertex_count; ++index) {
+        memset(&surface, 0, sizeof(surface));
+        memcpy(surface.animation, data->vertices[index].animation, sizeof(surface.animation));
+        surface.material = data->vertices[index].material;
+        memcpy(surface.tile, data->vertices[index].tile, sizeof(surface.tile));
+        if (prepared->surface_count == capacity) {
+            size_t next = capacity ? capacity * 2 : 16;
+            if (next < capacity || next > (size_t) - 1 / (2 * sizeof(*buckets)) || next > (size_t) - 1 / sizeof(*grown)) goto overflow;
+            grown = (maage_mesh_surface *) realloc(prepared->surfaces, next * sizeof(*grown));
+            if (!grown) goto allocation;
+            prepared->surfaces = grown;
+            new_buckets = (unsigned int *) calloc(next * 2, sizeof(*new_buckets));
+            if (!new_buckets) goto allocation;
+            free(buckets);
+            buckets = new_buckets;
+            capacity = next;
+            prepared->surface_capacity = capacity;
+            bucket_count = next * 2;
+            for (i = 0; i < prepared->surface_count; ++i) {
+                bucket = maage_surface_hash(&prepared->surfaces[i]) & (bucket_count - 1);
+                while (buckets[bucket])
+                    bucket = (bucket + 1) & (bucket_count - 1);
+                buckets[bucket] = (unsigned int) i + 1U;
+            }
+        }
+        bucket = maage_surface_hash(&surface) & (bucket_count - 1);
+        while (buckets[bucket] && memcmp(&prepared->surfaces[buckets[bucket] - 1U], &surface, sizeof(surface)))
+            bucket = (bucket + 1) & (bucket_count - 1);
+        if (!buckets[bucket]) {
+            if (prepared->surface_count >= UINT_MAX) goto overflow;
+            prepared->surfaces[prepared->surface_count++] = surface;
+            buckets[bucket] = (unsigned int) prepared->surface_count;
+        }
+        prepared->surface_indices[index] = buckets[bucket] - 1U;
+    }
+    free(buckets);
+    grown = (maage_mesh_surface *) realloc(prepared->surfaces, prepared->surface_count * sizeof(*grown));
+    if (grown) {
+        prepared->surfaces = grown;
+        prepared->surface_capacity = prepared->surface_count;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
+overflow:
+    free(buckets);
+    return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+allocation:
+    free(buckets);
+    return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
+}
+
 maage_status maage_mesh_prepare(const maage_mesh_data *data, maage_mesh_preparation **output) {
     maage_mesh_preparation *prepared;
     maage_status result;
@@ -91,6 +170,7 @@ maage_status maage_mesh_prepare(const maage_mesh_data *data, maage_mesh_preparat
     prepared->indices = (unsigned int *) malloc(data->index_count * sizeof(*prepared->indices));
     if (!prepared->indices) result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     else result = maage_geometry_prepare(&prepared->geometry, data, prepared->indices);
+    if (!maage_status_failed(result)) result = maage_geometry_surfaces(prepared, data);
     if (maage_status_failed(result)) {
         maage_mesh_preparation_destroy(prepared);
         return result;
@@ -202,9 +282,32 @@ failed:
     return result;
 }
 
+maage_status maage_mesh_preparation_estimate_bytes(size_t vertices, size_t indices, size_t *bytes) {
+    size_t per_vertex = 3 * sizeof(maage_mesh_surface) + 7 * sizeof(unsigned int);
+    size_t total = sizeof(maage_mesh_preparation), triangles = indices / 3;
+    size_t table_vertices = vertices < 16 ? 16 : vertices;
+    if (!bytes) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
+    *bytes = 0;
+    /* Realloc may overlap old/new palettes, and rehash overlaps both maps. */
+    if (table_vertices > ((size_t) - 1 - total) / per_vertex) goto overflow;
+    total += table_vertices * per_vertex;
+    if (indices > ((size_t) - 1 - total) / sizeof(unsigned int)) goto overflow;
+    total += indices * sizeof(unsigned int);
+    if (triangles > ((size_t) - 1 - total) / sizeof(maage_geometry_triangle)) goto overflow;
+    *bytes = total + triangles * sizeof(maage_geometry_triangle);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+overflow:
+    return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_QUERY, 0);
+}
+size_t maage_mesh_preparation_resident_bytes(const maage_mesh_preparation *prepared) {
+    if (!prepared) return 0;
+    return sizeof(*prepared) + prepared->data.index_count * sizeof(*prepared->indices) + (prepared->surface_indices ? prepared->data.vertex_count * sizeof(*prepared->surface_indices) : 0) + prepared->surface_capacity * sizeof(*prepared->surfaces) + prepared->geometry.translucent_count / 3 * sizeof(*prepared->geometry.triangles);
+}
 maage_status maage_mesh_preparation_destroy(maage_mesh_preparation *prepared) {
     if (!prepared) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_geometry_dispose(&prepared->geometry);
+    free(prepared->surfaces);
+    free(prepared->surface_indices);
     free(prepared->indices);
     free(prepared);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);

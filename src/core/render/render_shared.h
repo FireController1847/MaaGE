@@ -48,19 +48,17 @@ typedef float maage_render_vector[4];
 typedef struct maage_render_uniforms {
     MAAGE_RENDER_UNIFORM_FIELDS(maage_render_matrix, maage_render_vector)
 } maage_render_uniforms;
-/* Native-only 40-byte stream, keeping precision-sensitive coordinates,
- * animation as floats and material as the renderer's 16-bit surface mode.
- * CPU producers remain 60-byte
- * maage_mesh_vertex. Light and tint use normalized 8-bit channels. */
+/* Full-precision coordinates and UVs, normalized tint/light, and one numeric
+ * index into an immutable 32-byte surface table. Native stride is 32 bytes. */
 typedef struct maage_render_gpu_mesh_vertex {
     float position[3];
     float uv[2];
     unsigned char color[4];
-    unsigned char light[2];
-    unsigned short material; /* Four native surface pipeline modes. */
-    float animation[3];
+    unsigned char light[2], padding[2];
+    unsigned int surface;
 } maage_render_gpu_mesh_vertex;
-void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offset, size_t bytes, void *destination);
+void maage_render_mesh_pack_span(const maage_mesh_preparation *prepared, size_t offset, size_t bytes, void *destination);
+size_t maage_render_mesh_surface_bytes(const maage_render_mesh *mesh);
 /* Native index representation is chosen per mesh. These private helpers are
  * shared by the core uploader and each native rendering backend. */
 size_t maage_render_gpu_mesh_index_bytes(const maage_render_mesh *mesh);

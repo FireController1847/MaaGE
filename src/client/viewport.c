@@ -78,6 +78,17 @@ typedef struct maage_client_mesh_verifier {
     double next_at;
 } maage_client_mesh_verifier;
 
+/* A smaller Server target does not retire already acknowledged Client bases.
+ * Leave packet headroom above every live footprint until FIFO unloads arrive. */
+static maage_status maage_client_replica_capacity(const maage_world_stats *server, const maage_world *replica, size_t packet_capacity, unsigned int *capacity) {
+    unsigned int retained = server->cache_capacity, resident = maage_world_resident_columns(replica);
+    if (server->resident_columns > retained) retained = server->resident_columns;
+    if (resident > retained) retained = resident;
+    if (!server->cache_capacity || packet_capacity > UINT_MAX - retained) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SET, 0);
+    *capacity = retained + (unsigned int) packet_capacity;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+
 /* Textual options are resolved before any world/runtime work begins. */
 static maage_status maage_client_world_options_parse(int argc, char *const argv[], maage_client_world_options *options) {
     int i;
@@ -685,6 +696,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_status resource_notice = 0, mesh_notice = 0, audio_notice = 0;
     maage_status_trace cleanup_trace;
     const char *failure_message = "Client presentation cannot continue.";
+    char failure_detail[256];
     char directory[MAAGE_PATH_CAPACITY];
     char window_title[128];
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
@@ -966,13 +978,8 @@ choose_world:
         maage_local_session_backlog backlog;
         operation = maage_local_session_get_backlog(session, &backlog);
         if (maage_status_failed(operation)) goto done;
-        if (!latest.world_stats.cache_capacity || backlog.column_capacity > UINT_MAX - latest.world_stats.cache_capacity) {
-            operation = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
-            goto done;
-        }
-        /* At most one retained base per Server resident column, plus one for
-         * each queued ordered removal. Remote transports must negotiate this bound. */
-        visual_config.cache_capacity = latest.world_stats.cache_capacity + (unsigned int) backlog.column_capacity;
+        operation = maage_client_replica_capacity(&latest.world_stats, NULL, backlog.column_capacity, &visual_config.cache_capacity);
+        if (maage_status_failed(operation)) goto done;
     }
     memcpy(visual_config.position, latest.player.player.position, sizeof(visual_config.position));
     operation = maage_world_create(&visual_config, &visual_world, trace);
@@ -1326,18 +1333,16 @@ choose_world:
         cx = maage_world_chunk_coordinate((int) floor(latest.player.player.position[0]));
         cz = maage_world_chunk_coordinate((int) floor(latest.player.player.position[2]));
         {
-            unsigned int received = 0;
+            unsigned int received = 0, replica_capacity;
             maage_local_session_backlog backlog;
             double receive_begin = maage_time_monotonic_seconds(), apply_begin;
             /* Retain all acknowledged bases until ordered unloads arrive,
              * including Server residency growth after a distance change. */
             operation = maage_local_session_get_backlog(session, &backlog);
             if (maage_status_failed(operation)) goto done;
-            if (!latest.world_stats.cache_capacity || backlog.column_capacity > UINT_MAX - latest.world_stats.cache_capacity) {
-                operation = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SET, 0);
-                goto done;
-            }
-            operation = maage_world_set_render_distance(visual_world, options.radius, latest.world_stats.cache_capacity + (unsigned int) backlog.column_capacity);
+            operation = maage_client_replica_capacity(&latest.world_stats, visual_world, backlog.column_capacity, &replica_capacity);
+            if (maage_status_failed(operation)) goto done;
+            operation = maage_world_set_render_distance(visual_world, options.radius, replica_capacity);
             if (maage_status_failed(operation)) goto done;
             while (received++ < 16U) {
                 memset(&column_update, 0, sizeof(column_update));
@@ -1347,6 +1352,11 @@ choose_world:
                 apply_begin = prediction.diagnostics ? maage_time_monotonic_seconds() : -1;
                 if (column_update.world_epoch == world_epoch) {
                     operation = maage_world_apply_column(visual_world, column_update.column);
+                    if (maage_status_failed(operation)) {
+                        outcome = MAAGE_STATUS_PROPAGATE(trace, operation, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SNAPSHOT);
+                        sprintf(failure_detail, "Client replica rejected column %d,%d; revision=%lu; base=%lu; resident=%u; capacity=%u.", column_update.x, column_update.z, column_update.revision, column_update.column ? column_update.column->base_revision : 0UL, maage_world_resident_columns(visual_world), replica_capacity);
+                        failure_message = failure_detail;
+                    }
                     if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS && (column_update.column->unload || !column_update.column->base_revision)) {
                         size_t index;
                         for (index = 0; index < cache.capacity; ++index)
@@ -1689,19 +1699,21 @@ window_failed:
     outcome = MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     failure_message = "Native window/input cannot continue.";
 done:
-    /* Window teardown must not wait on a saving Server, draining Client
-     * World workers, or a disk sync. Retain all borrowed resources until
-     * their background operations finish after the UI is hidden. */
-    if (window) (void) maage_window_set_visible(window, 0);
+    /* Capture the failing occurrence before saving options overwrites operation.
+     * An explicitly retained Server/window/clock failure remains authoritative. */
     if (splash.close_requested) ok = 1;
-    if (options_ready && ui) {
-        operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);
-        if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to persist config/options.ini during shutdown.");
-    }
     if (ok) outcome = maage_status_make(maage_status_is_success(resource_notice) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
     else if (!maage_status_failed(outcome)) {
         outcome = maage_status_failed(rendered) ? rendered : (maage_status_failed(result) ? result : operation);
         if (!maage_status_failed(outcome)) outcome = maage_status_make(MAAGE_STATUS_FATAL, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP, 0);
+    }
+    /* Window teardown must not wait on a saving Server, draining Client
+     * World workers, or a disk sync. Retain all borrowed resources until
+     * their background operations finish after the UI is hidden. */
+    if (window) (void) maage_window_set_visible(window, 0);
+    if (options_ready && ui) {
+        operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);
+        if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to persist config/options.ini during shutdown.");
     }
     if (!ok) {
         MAAGE_STATUS_PROPAGATE(trace, outcome, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_STOP);

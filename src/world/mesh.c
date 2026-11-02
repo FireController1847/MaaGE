@@ -1,18 +1,24 @@
 #include "world_internal.h"
 #include "maage/jobs.h"
 #include <limits.h>
+#include <stddef.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct maage_mesh_owner {
+    unsigned short minimum, maximum; /* Inclusive owner-cell box, within one section. */
+} maage_mesh_owner;
 
 struct maage_world_mesh {
     maage_mesh_data data;
     maage_mesh_preparation *prepared;
     maage_mesh_vertex *vertices;
     unsigned int *indices;
-    unsigned short *owners;
+    maage_mesh_owner *owners;
     unsigned char *face_flags; /* Material category and quad winding per face. */
     int chunk_x, chunk_z;
+    size_t vertex_bytes, index_bytes, retained_bytes;
 };
 
 /* Each generated face has four private vertices; all four quad windings
@@ -294,6 +300,7 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
     second = (axis + 2) % 3;
     for (corner = 0; corner < 4; ++corner) {
         vertex = &vertices[face_index * 4 + corner];
+        memset(vertex->tile, 0, sizeof(vertex->tile));
         point = model == MAAGE_BLOCK_MESH_CROSS ? cross_corners[face][corner] : maage_face_corners[face][corner];
         for (component = 0; component < 3; ++component)
             local[component] = (float) (shape->minimum[component] + point[component] * (shape->maximum[component] - shape->minimum[component]));
@@ -401,7 +408,7 @@ static int maage_mesh_smart_leaf_hidden(const maage_block_registry *registry, co
     return 1;
 }
 
-static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, unsigned short *owners, maage_leaves_mode mode, maage_biome_blend blend, maage_mesh_biome_cache *cache, const maage_job_token *token, const maage_block_position *cell, unsigned int *failure) {
+static size_t maage_mesh_generate(const maage_block_registry *registry, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_mesh_vertex *vertices, unsigned int *indices, maage_mesh_owner *owners, maage_leaves_mode mode, maage_biome_blend blend, maage_mesh_biome_cache *cache, const maage_job_token *token, const maage_block_position *cell, unsigned int face_mask, unsigned int *failure) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(registry);
     const maage_block_state_definition *state, *neighbor, *above;
     const maage_block_definition *block, *current;
@@ -479,6 +486,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                     colors_ready = 0;
                     log_axis = (int) state->texture_axis - 1;
                     for (face = 0; face < face_limit; ++face) {
+                        if (!(face_mask & (1U << face))) continue;
                         face_shape = shape;
                         nx = x + (crossed ? 0 : maage_face_neighbor[face][0]);
                         ny = y + (crossed ? 0 : maage_face_neighbor[face][1]);
@@ -537,13 +545,24 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                             if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, current->emitted_light, &illumination);
                             else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary || (model == MAAGE_BLOCK_MESH_CUBE && current->use_neighbor_brightness && face == MAAGE_FACE_POSITIVE_Y), smooth, current->emitted_light, &illumination);
                             maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
+                            if (!overlay && !reverse && !state->fluid_kind && model == MAAGE_BLOCK_MESH_CUBE && material == MAAGE_MESH_MATERIAL_OPAQUE && log_axis < 0 && uv[2] > uv[0] && uv[3] > uv[1] && face_shape.minimum[0] == 0 && face_shape.minimum[1] == 0 && face_shape.minimum[2] == 0 && face_shape.maximum[0] == 1 && face_shape.maximum[1] == 1 && face_shape.maximum[2] == 1) {
+                                maage_mesh_vertex *quad = vertices + face_count * 4;
+                                for (corner = 1; corner < 4; ++corner)
+                                    if (memcmp(quad[0].color, quad[corner].color, sizeof(quad[0].color)) || memcmp(quad[0].light, quad[corner].light, sizeof(quad[0].light))) break;
+                                if (corner == 4)
+                                    for (corner = 0; corner < 4; ++corner) {
+                                        memcpy(quad[corner].tile, uv, sizeof(quad[corner].tile));
+                                        quad[corner].uv[0] = quad[corner].uv[0] == uv[0] ? 0 : 1;
+                                        quad[corner].uv[1] = quad[corner].uv[1] == uv[1] ? 0 : 1;
+                                    }
+                            }
                             if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], definition->overlay_tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, NULL, NULL, NULL, &illumination);
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));
                         }
                         if (owners) {
                             size_t owner, end = face_count + 1 + (overlay ? 1 : 0) + (reverse ? 1 : 0);
                             for (owner = face_count; owner < end; ++owner) {
-                                owners[owner] = (unsigned short) (y * 256 + z * 16 + x);
+                                owners[owner].minimum = owners[owner].maximum = (unsigned short) (y * 256 + z * 16 + x);
                             }
                         }
                         face_count += 1 + (overlay ? 1 : 0) + (reverse ? 1 : 0);
@@ -554,46 +573,235 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
     return face_count;
 }
 
+/* Greedy rectangles remain inside a physical section. Only constant corner
+ * shading and identical atlas/material/animation tuples merge. Other geometry
+ * uses the original path, including transparent sorting and arbitrary shapes. */
+static unsigned int maage_mesh_direction(const maage_world_mesh *mesh, size_t face) {
+    const maage_mesh_vertex *vertices = mesh->vertices + face * 4;
+    unsigned int axis, corner, cell = mesh->owners[face].minimum;
+    float owner[3];
+    owner[0] = (float) (mesh->chunk_x * 16 + (int) (cell & 15U));
+    owner[1] = (float) (cell >> 8);
+    owner[2] = (float) (mesh->chunk_z * 16 + (int) ((cell >> 4) & 15U));
+    for (axis = 0; axis < 3; ++axis) {
+        for (corner = 1; corner < 4; ++corner)
+            if (vertices[corner].position[axis] != vertices[0].position[axis]) break;
+        if (corner == 4) return axis * 2U + (vertices[0].position[axis] > owner[axis] ? 1U : 0U);
+    }
+    return 0;
+}
+static int maage_mesh_same_surface(const maage_world_mesh *mesh, size_t first, size_t second) {
+    const maage_mesh_vertex *a = mesh->vertices + first * 4, *b = mesh->vertices + second * 4;
+    unsigned int corner;
+    for (corner = 0; corner < 4; ++corner)
+        if (memcmp(a[corner].uv, b[corner].uv, sizeof(a[corner]) - offsetof(maage_mesh_vertex, uv))) return 0;
+    return 1;
+}
+static unsigned int maage_mesh_grid_cell(unsigned int plane, unsigned int u, unsigned int v, unsigned int axis) {
+    unsigned int point[3];
+    point[axis] = plane;
+    point[(axis + 1) % 3] = u;
+    point[(axis + 2) % 3] = v;
+    return point[1] * 256U + point[2] * 16U + point[0];
+}
+static maage_status maage_mesh_merge(maage_world_mesh *mesh, size_t *faces, const maage_job_token *token) {
+    unsigned int *grid;
+    unsigned int section, direction, axis, plane, u, v, width, height, x, y, corner, component, origin[3], end[3];
+    size_t face, source, next, first, cursor = 0, written = 0;
+    unsigned int planes[6][16], point[3], candidates;
+    maage_mesh_vertex *quad;
+    float gradients[2][2];
+    void *shrunk;
+    grid = (unsigned int *) calloc(6UL * MAAGE_SECTION_VOLUME, sizeof(*grid));
+    if (!grid) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
+    for (section = 0; section < 16; ++section) {
+        if (token && maage_job_cancelled(token)) {
+            free(grid);
+            return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, MAAGE_DETAIL_CANCELLED);
+        }
+        /* The ordinary generator emits all faces of each section together. */
+        first = cursor;
+        while (cursor < *faces && mesh->owners[cursor].minimum / MAAGE_SECTION_VOLUME == section)
+            ++cursor;
+        if (first == cursor) continue;
+        candidates = 0;
+        memset(planes, 0, sizeof(planes));
+        memset(grid, 0, 6UL * MAAGE_SECTION_VOLUME * sizeof(*grid));
+        for (face = first; face < cursor; ++face)
+            if (mesh->owners[face].minimum <= mesh->owners[face].maximum && mesh->owners[face].minimum / MAAGE_SECTION_VOLUME == section && mesh->vertices[face * 4].tile[2] > mesh->vertices[face * 4].tile[0]) {
+                direction = maage_mesh_direction(mesh, face);
+                grid[direction * MAAGE_SECTION_VOLUME + mesh->owners[face].minimum % MAAGE_SECTION_VOLUME] = (unsigned int) face + 1U;
+                point[0] = mesh->owners[face].minimum & 15U;
+                point[1] = (mesh->owners[face].minimum >> 8) & 15U;
+                point[2] = (mesh->owners[face].minimum >> 4) & 15U;
+                ++planes[direction][point[direction / 2]];
+                ++candidates;
+            }
+        if (!candidates) continue;
+        for (direction = 0; direction < 6; ++direction) {
+            axis = direction / 2;
+            for (plane = 0; plane < 16; ++plane) {
+                if (!planes[direction][plane]) continue;
+                for (v = 0; v < 16; ++v)
+                    for (u = 0; u < 16; ++u) {
+                        source = grid[direction * MAAGE_SECTION_VOLUME + maage_mesh_grid_cell(plane, u, v, axis)];
+                        if (!source) continue;
+                        --source;
+                        for (width = 1; u + width < 16; ++width) {
+                            next = grid[direction * MAAGE_SECTION_VOLUME + maage_mesh_grid_cell(plane, u + width, v, axis)];
+                            if (!next || !maage_mesh_same_surface(mesh, source, next - 1)) break;
+                        }
+                        for (height = 1; v + height < 16; ++height) {
+                            for (x = 0; x < width; ++x) {
+                                next = grid[direction * MAAGE_SECTION_VOLUME + maage_mesh_grid_cell(plane, u + x, v + height, axis)];
+                                if (!next || !maage_mesh_same_surface(mesh, source, next - 1)) break;
+                            }
+                            if (x != width) break;
+                        }
+                        for (y = 0; y < height; ++y)
+                            for (x = 0; x < width; ++x) {
+                                unsigned int *entry = &grid[direction * MAAGE_SECTION_VOLUME + maage_mesh_grid_cell(plane, u + x, v + y, axis)];
+                                if (*entry - 1U != source) {
+                                    mesh->owners[*entry - 1U].minimum = 1;
+                                    mesh->owners[*entry - 1U].maximum = 0;
+                                }
+                                *entry = 0;
+                            }
+                        if (width == 1 && height == 1) continue;
+                        origin[axis] = end[axis] = plane;
+                        origin[(axis + 1) % 3] = u;
+                        origin[(axis + 2) % 3] = v;
+                        end[(axis + 1) % 3] = u + width - 1U;
+                        end[(axis + 2) % 3] = v + height - 1U;
+                        mesh->owners[source].maximum = (unsigned short) (section * MAAGE_SECTION_VOLUME + end[1] * 256U + end[2] * 16U + end[0]);
+                        quad = mesh->vertices + source * 4;
+                        memset(gradients, 0, sizeof(gradients));
+                        for (x = 0; x < 2; ++x) {
+                            unsigned int coordinate = (axis + x + 1) % 3;
+                            for (corner = 1; corner < 4; ++corner)
+                                if (quad[corner].position[coordinate] != quad[0].position[coordinate] && quad[corner].position[(axis + 2 - x) % 3] == quad[0].position[(axis + 2 - x) % 3]) {
+                                    for (component = 0; component < 2; ++component)
+                                        gradients[x][component] = (quad[corner].uv[component] - quad[0].uv[component]) / (quad[corner].position[coordinate] - quad[0].position[coordinate]);
+                                    break;
+                                }
+                        }
+                        for (corner = 0; corner < 4; ++corner) {
+                            float du = quad[corner].position[(axis + 1) % 3] - (float) (origin[(axis + 1) % 3] + ((axis + 1) % 3 == 1 ? section * 16U : 0U));
+                            float dv = quad[corner].position[(axis + 2) % 3] - (float) (origin[(axis + 2) % 3] + ((axis + 2) % 3 == 1 ? section * 16U : 0U));
+                            if ((axis + 1) % 3 == 0) du -= (float) (mesh->chunk_x * 16);
+                            if ((axis + 1) % 3 == 2) du -= (float) (mesh->chunk_z * 16);
+                            if ((axis + 2) % 3 == 0) dv -= (float) (mesh->chunk_x * 16);
+                            if ((axis + 2) % 3 == 2) dv -= (float) (mesh->chunk_z * 16);
+                            du *= (float) (width - 1U);
+                            dv *= (float) (height - 1U);
+                            quad[corner].position[(axis + 1) % 3] += du;
+                            quad[corner].position[(axis + 2) % 3] += dv;
+                            for (component = 0; component < 2; ++component)
+                                quad[corner].uv[component] += du * gradients[0][component] + dv * gradients[1][component];
+                        }
+                    }
+            }
+        }
+    }
+    free(grid);
+    for (face = 0; face < *faces; ++face) {
+        unsigned int indices[6];
+        if (mesh->owners[face].minimum > mesh->owners[face].maximum) continue;
+        for (corner = 0; corner < 6; ++corner)
+            indices[corner] = mesh->indices[face * 6 + corner] - (unsigned int) (face * 4) + (unsigned int) (written * 4);
+        if (face != written) {
+            memmove(mesh->vertices + written * 4, mesh->vertices + face * 4, 4 * sizeof(*mesh->vertices));
+            mesh->owners[written] = mesh->owners[face];
+        }
+        memcpy(mesh->indices + written * 6, indices, sizeof(indices));
+        ++written;
+    }
+    if (written) {
+        shrunk = realloc(mesh->vertices, written * 4 * sizeof(*mesh->vertices));
+        if (shrunk) {
+            mesh->vertices = (maage_mesh_vertex *) shrunk;
+            mesh->vertex_bytes = written * 4 * sizeof(*mesh->vertices);
+        }
+        shrunk = realloc(mesh->indices, written * 6 * sizeof(*mesh->indices));
+        if (shrunk) {
+            mesh->indices = (unsigned int *) shrunk;
+            mesh->index_bytes = written * 6 * sizeof(*mesh->indices);
+        }
+        shrunk = realloc(mesh->owners, written * sizeof(*mesh->owners));
+        if (shrunk) {
+            mesh->owners = (maage_mesh_owner *) shrunk;
+            mesh->retained_bytes -= (*faces - written) * sizeof(*mesh->owners);
+        }
+        shrunk = realloc(mesh->face_flags, written);
+        if (shrunk) {
+            mesh->face_flags = (unsigned char *) shrunk;
+            mesh->retained_bytes -= *faces - written;
+        }
+    }
+    *faces = written;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
+
 static maage_status maage_mesh_failure(maage_status_trace *trace, unsigned int code) {
     maage_status result = maage_status_make(code, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, code == MAAGE_STATUS_INTERRUPTED ? MAAGE_DETAIL_CANCELLED : 0);
     return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
 }
-maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, maage_world_mesh **output, maage_status_trace *trace) {
+maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_chunk *chunk, const maage_chunk *neighbors[8], maage_leaves_mode mode, maage_biome_blend blend, const maage_job_token *token, size_t reserved_bytes, size_t *required_bytes, maage_world_mesh **output, maage_status_trace *trace) {
     maage_world_mesh *mesh;
     maage_mesh_biome_cache cache;
-    size_t faces, written, maximum = (size_t) - 1;
+    size_t faces, written, preparation_bytes, source_bytes, maximum = (size_t) - 1;
+    size_t per_face = 4 * sizeof(maage_mesh_vertex) + 6 * sizeof(unsigned int) + sizeof(maage_mesh_owner) + sizeof(unsigned char);
+    maage_status estimate;
     unsigned int failure = MAAGE_STATUS_INVARIANT_VIOLATION;
     if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 5);
     *output = NULL;
     cache.initialized = 0;
     if (mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY || blend < MAAGE_BIOME_BLEND_OFF || blend > MAAGE_BIOME_BLEND_SMOOTH_9) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
-    if (!blocks || !biomes || !chunk || !neighbors) {
-        return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, !blocks ? 0 : (!biomes ? 1 : (!chunk ? 2 : 3))), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
-    }
-    faces = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, blend, &cache, token, NULL, &failure);
+    if (!blocks || !biomes || !chunk || !neighbors) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, !blocks ? 0 : (!biomes ? 1 : (!chunk ? 2 : 3))), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
+    faces = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, blend, &cache, token, NULL, 63U, &failure);
     if (faces == maximum) return maage_mesh_failure(trace, failure);
     if (faces > UINT_MAX / 4 ||
         faces > maximum / (4 * sizeof(maage_mesh_vertex)) ||
         faces > maximum / (6 * sizeof(unsigned int)) || faces > maximum / sizeof(maage_block_position))
         return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
+    /* Reserve a conservative peak before allocating faces, deduplication tables
+     * or preparation. A larger result is retried by the owner, never waited on
+     * by a worker. The reservation includes unmerged output and scratch. */
+    estimate = maage_mesh_preparation_estimate_bytes(faces * 4, faces * 6, &preparation_bytes);
+    if (maage_status_failed(estimate)) return MAAGE_STATUS_PROPAGATE(trace, estimate, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
+    if (maximum < 1048576UL || sizeof(*mesh) > maximum - 1048576UL || faces > (maximum - 1048576UL - sizeof(*mesh)) / per_face) return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
+    source_bytes = 1048576UL + sizeof(*mesh) + faces * per_face;
+    if (preparation_bytes > maximum - source_bytes) return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
+    *required_bytes = source_bytes + preparation_bytes;
+    if (*required_bytes > reserved_bytes) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
     if (token && maage_job_cancelled(token)) return maage_mesh_failure(trace, MAAGE_STATUS_INTERRUPTED);
     mesh = (maage_world_mesh *) calloc(1, sizeof(*mesh));
     if (!mesh) return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
     mesh->chunk_x = chunk->x;
     mesh->chunk_z = chunk->z;
+    mesh->vertex_bytes = faces * 4 * sizeof(*mesh->vertices);
+    mesh->index_bytes = faces * 6 * sizeof(*mesh->indices);
+    mesh->retained_bytes = faces * (sizeof(*mesh->owners) + sizeof(*mesh->face_flags));
     if (faces) {
         mesh->vertices = (maage_mesh_vertex *) malloc(faces * 4 * sizeof(*mesh->vertices));
         mesh->indices = (unsigned int *) malloc(faces * 6 * sizeof(*mesh->indices));
-        mesh->owners = (unsigned short *) malloc(faces * sizeof(*mesh->owners));
+        mesh->owners = (maage_mesh_owner *) malloc(faces * sizeof(*mesh->owners));
         mesh->face_flags = (unsigned char *) malloc(faces * sizeof(*mesh->face_flags));
         if (!mesh->vertices || !mesh->indices || !mesh->owners || !mesh->face_flags) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
         }
-        written = maage_mesh_generate(blocks, biomes, chunk, neighbors, mesh->vertices, mesh->indices, mesh->owners, mode, blend, &cache, token, NULL, &failure);
+        written = maage_mesh_generate(blocks, biomes, chunk, neighbors, mesh->vertices, mesh->indices, mesh->owners, mode, blend, &cache, token, NULL, 63U, &failure);
         if (written != faces) {
             maage_world_mesh_destroy(mesh);
             return maage_mesh_failure(trace, failure);
+        }
+    }
+    if (faces) {
+        maage_status result = maage_mesh_merge(mesh, &faces, token);
+        if (maage_status_failed(result)) {
+            maage_world_mesh_destroy(mesh);
+            return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH);
         }
     }
     mesh->data.vertices = mesh->vertices;
@@ -622,13 +830,16 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
                 return maage_mesh_failure(trace, MAAGE_STATUS_INVARIANT_VIOLATION);
             }
             category = material == MAAGE_MESH_MATERIAL_TRANSLUCENT ? 1U : (material == MAAGE_MESH_MATERIAL_MULTIPLY ? 2U : 0U);
-            mesh->face_flags[written] = (unsigned char) (category | (pattern << 2));
+            mesh->face_flags[written] = (unsigned char) (category | (pattern << 2) | (maage_mesh_direction(mesh, written) << 4));
         }
     }
     *output = mesh;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }
 
+size_t maage_world_mesh_resident_bytes(const maage_world_mesh *mesh) {
+    return mesh ? sizeof(*mesh) + mesh->vertex_bytes + mesh->index_bytes + mesh->retained_bytes + maage_mesh_preparation_resident_bytes(mesh->prepared) : 0;
+}
 maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh) {
     maage_mesh_preparation *prepared = mesh ? mesh->prepared : NULL;
     if (mesh) mesh->prepared = NULL;
@@ -651,6 +862,7 @@ void maage_world_mesh_release_upload_data(maage_world_mesh *mesh) {
     mesh->vertices = NULL;
     mesh->data.indices = NULL;
     mesh->data.vertices = NULL;
+    mesh->vertex_bytes = mesh->index_bytes = 0;
 }
 maage_status maage_world_mesh_destroy(maage_world_mesh *mesh) {
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
@@ -663,10 +875,19 @@ maage_status maage_world_mesh_destroy(maage_world_mesh *mesh) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
-static int maage_mesh_removed(const maage_block_position *removed, size_t count, int x, int y, int z) {
+static int maage_mesh_interval_distance(int point, int minimum, int maximum) {
+    return point < minimum ? minimum - point : (point > maximum ? point - maximum : 0);
+}
+static int maage_mesh_owner_removed(const maage_world_mesh *mesh, size_t face, const maage_block_position *removed, size_t count) {
+    unsigned int minimum = mesh->owners[face].minimum, maximum = mesh->owners[face].maximum;
     size_t i;
-    for (i = 0; i < count; ++i)
-        if ((abs(removed[i].x - x) <= 1 && abs(removed[i].y - y) <= 1 && abs(removed[i].z - z) <= 1) || (removed[i].x == x && removed[i].y == y && abs(removed[i].z - z) <= 3) || (removed[i].x == x && removed[i].z == z && abs(removed[i].y - y) <= 3) || (removed[i].y == y && removed[i].z == z && abs(removed[i].x - x) <= 3)) return 1;
+    int dx, dy, dz;
+    for (i = 0; i < count; ++i) {
+        dx = maage_mesh_interval_distance(removed[i].x, mesh->chunk_x * 16 + (int) (minimum & 15U), mesh->chunk_x * 16 + (int) (maximum & 15U));
+        dy = maage_mesh_interval_distance(removed[i].y, minimum >> 8, maximum >> 8);
+        dz = maage_mesh_interval_distance(removed[i].z, mesh->chunk_z * 16 + (int) ((minimum >> 4) & 15U), mesh->chunk_z * 16 + (int) ((maximum >> 4) & 15U));
+        if ((dx <= 1 && dy <= 1 && dz <= 1) || (!dx && !dy && dz <= 3) || (!dx && !dz && dy <= 3) || (!dy && !dz && dx <= 3)) return 1;
+    }
     return 0;
 }
 maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_block_position *removed, size_t count, maage_mesh_data *data, unsigned int **indices) {
@@ -677,14 +898,14 @@ maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_b
     *indices = NULL;
     *data = mesh->data;
     for (face = 0; face < mesh->data.index_count / 6; ++face)
-        if (!maage_mesh_removed(removed, count, mesh->chunk_x * 16 + (mesh->owners[face] & 15U), mesh->owners[face] >> 8, mesh->chunk_z * 16 + ((mesh->owners[face] >> 4) & 15U))) ++retained;
+        if (!maage_mesh_owner_removed(mesh, face, removed, count)) ++retained;
     if (retained) {
         *indices = (unsigned int *) malloc(retained * 6 * sizeof(**indices));
         if (!*indices) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MESH, 0);
     }
     for (face = 0; face < mesh->data.index_count / 6; ++face) {
-        if (maage_mesh_removed(removed, count, mesh->chunk_x * 16 + (mesh->owners[face] & 15U), mesh->owners[face] >> 8, mesh->chunk_z * 16 + ((mesh->owners[face] >> 4) & 15U))) continue;
-        pattern = mesh->face_flags[face] >> 2;
+        if (maage_mesh_owner_removed(mesh, face, removed, count)) continue;
+        pattern = (mesh->face_flags[face] >> 2) & 3U;
         base = (unsigned int) (face * 4);
         for (corner = 0; corner < 6; ++corner)
             (*indices)[written * 6 + corner] = base + maage_mesh_quad_indices[pattern][corner];
@@ -694,31 +915,19 @@ maage_status maage_world_mesh_filter(const maage_world_mesh *mesh, const maage_b
     data->index_count = written * 6;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }
-static int maage_mesh_cell_order(const void *left, const void *right) {
-    const maage_block_position *a = (const maage_block_position *) left, *b = (const maage_block_position *) right;
-    int ax = maage_world_chunk_coordinate(a->x), bx = maage_world_chunk_coordinate(b->x);
-    int az = maage_world_chunk_coordinate(a->z), bz = maage_world_chunk_coordinate(b->z);
-    if (ax != bx) return ax < bx ? -1 : 1;
-    if (az != bz) return az < bz ? -1 : 1;
-    return 0;
-}
-
-/* The owner lends immutable effective snapshots only for this synchronous,
- * bounded patch. The ordinary face generator also handles fluids and cutouts. */
-maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_position *centers, size_t count, maage_leaves_mode mode, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace) {
-    maage_block_position cells[32 * 39], cell;
-    const maage_chunk *chunk, *neighbors[8], *cached_chunk = NULL;
-    maage_mesh_biome_cache cache;
-    maage_world_mesh *mesh;
-    size_t i, j, n = 0, faces = 0, written = 0, amount, index;
+/* Local edits remove complete merged rectangles. Outside the ordinary local
+ * patch, regenerate only each removed rectangle's face direction, retaining all
+ * unaffected cached faces. Each rectangle is section-bounded; no world jobs or
+ * GPU waits are introduced on the input path. */
+static void maage_mesh_patch_mask(unsigned char mask[65536], int x, int z, const maage_block_position *centers, size_t count, const maage_world_mesh *const *sources, size_t source_count, size_t *lower, size_t *upper) {
+    maage_block_position cell;
+    const maage_world_mesh *source;
+    size_t i, j, face, index;
+    unsigned int minimum, maximum, ix, iy, iz, direction;
     int dx, dy, dz;
-    unsigned int failure = MAAGE_STATUS_INVARIANT_VIOLATION;
-    const maage_block_registry *blocks;
-    const maage_biome_registry *biomes;
-    if (output) *output = NULL;
-    if (!world || !output || count > 32 || (count && !centers) || mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY || blend < MAAGE_BIOME_BLEND_OFF || blend > MAAGE_BIOME_BLEND_SMOOTH_9) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
-    for (i = 0; i < count; ++i)
-        if (centers[i].x <= -MAAGE_WORLD_LIMIT || centers[i].x >= MAAGE_WORLD_LIMIT || centers[i].z <= -MAAGE_WORLD_LIMIT || centers[i].z >= MAAGE_WORLD_LIMIT || centers[i].y < 0 || centers[i].y >= 256) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
+    memset(mask, 0, 65536UL);
+    *lower = 65536UL;
+    *upper = 0;
     for (i = 0; i < count; ++i)
         for (dy = -3; dy <= 3; ++dy)
             for (dz = -3; dz <= 3; ++dz)
@@ -727,54 +936,97 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
                     cell.x = centers[i].x + dx;
                     cell.y = centers[i].y + dy;
                     cell.z = centers[i].z + dz;
-                    if (cell.y < 0 || cell.y >= 256) continue;
-                    for (j = 0; j < n; ++j)
-                        if (cells[j].x == cell.x && cells[j].y == cell.y && cells[j].z == cell.z) break;
-                    if (j == n) cells[n++] = cell;
+                    if (cell.y < 0 || cell.y >= 256 || maage_world_chunk_coordinate(cell.x) != x || maage_world_chunk_coordinate(cell.z) != z) continue;
+                    index = (size_t) cell.y * 256 + maage_world_local_coordinate(cell.z) * 16 + maage_world_local_coordinate(cell.x);
+                    mask[index] = 63U;
+                    if (index < *lower) *lower = index;
+                    if (index > *upper) *upper = index;
                 }
-    qsort(cells, n, sizeof(*cells), maage_mesh_cell_order);
-    for (i = 0; i < n; ++i) {
-        if (!maage_world_present_inputs(world, cells[i].x, cells[i].z, &chunk, neighbors, &blocks, &biomes)) continue;
-        cell.x = maage_world_local_coordinate(cells[i].x);
-        cell.y = cells[i].y;
-        cell.z = maage_world_local_coordinate(cells[i].z);
-        amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, NULL, NULL, NULL, mode, blend, NULL, NULL, &cell, &failure);
-        if (amount == (size_t) - 1) return maage_mesh_failure(trace, failure);
-        faces += amount;
-    }
-    if (faces > UINT_MAX / 4U || faces > (size_t) - 1 / (4 * sizeof(maage_mesh_vertex)) || faces > (size_t) - 1 / (6 * sizeof(unsigned int))) return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
-    mesh = (maage_world_mesh *) calloc(1, sizeof(*mesh));
-    if (!mesh) return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
-    if (faces) {
-        mesh->vertices = (maage_mesh_vertex *) malloc(faces * 4 * sizeof(*mesh->vertices));
-        mesh->indices = (unsigned int *) malloc(faces * 6 * sizeof(*mesh->indices));
-        if (!mesh->vertices || !mesh->indices) {
-            maage_world_mesh_destroy(mesh);
-            return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
+    for (j = 0; j < source_count; ++j) {
+        source = sources[j];
+        if (!source || source->chunk_x != x || source->chunk_z != z) continue;
+        for (face = 0; face < source->data.index_count / 6; ++face) {
+            minimum = source->owners[face].minimum;
+            maximum = source->owners[face].maximum;
+            if (minimum == maximum || !maage_mesh_owner_removed(source, face, centers, count)) continue;
+            direction = source->face_flags[face] >> 4;
+            if (minimum < *lower) *lower = minimum;
+            if (maximum > *upper) *upper = maximum;
+            for (iy = minimum >> 8; iy <= maximum >> 8; ++iy)
+                for (iz = (minimum >> 4) & 15U; iz <= ((maximum >> 4) & 15U); ++iz)
+                    for (ix = minimum & 15U; ix <= (maximum & 15U); ++ix)
+                        mask[iy * 256U + iz * 16U + ix] |= (unsigned char) (1U << direction);
         }
     }
-    for (i = 0; i < n; ++i) {
-        if (!maage_world_present_inputs(world, cells[i].x, cells[i].z, &chunk, neighbors, &blocks, &biomes)) continue;
-        cell.x = maage_world_local_coordinate(cells[i].x);
-        cell.y = cells[i].y;
-        cell.z = maage_world_local_coordinate(cells[i].z);
-        if (chunk != cached_chunk) {
+}
+maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_position *centers, size_t count, const maage_world_mesh *const *sources, size_t source_count, maage_leaves_mode mode, maage_biome_blend blend, maage_world_mesh **output, maage_status_trace *trace) {
+    maage_block_position columns[32 * 4], cell;
+    const maage_chunk *chunk, *neighbors[8];
+    maage_mesh_biome_cache cache;
+    maage_world_mesh *mesh = NULL;
+    unsigned char mask[65536];
+    size_t i, j, n = 0, faces = 0, written = 0, amount, index, voxel, lower, upper;
+    unsigned int pass, failure = MAAGE_STATUS_INVARIANT_VIOLATION;
+    int x, z;
+    const maage_block_registry *blocks;
+    const maage_biome_registry *biomes;
+    if (output) *output = NULL;
+    if (!world || !output || count > 32 || (count && !centers) || (source_count && !sources) || mode < MAAGE_LEAVES_FAST || mode > MAAGE_LEAVES_FANCY || blend < MAAGE_BIOME_BLEND_OFF || blend > MAAGE_BIOME_BLEND_SMOOTH_9) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
+    for (i = 0; i < count; ++i) {
+        if (centers[i].x <= -MAAGE_WORLD_LIMIT || centers[i].x >= MAAGE_WORLD_LIMIT || centers[i].z <= -MAAGE_WORLD_LIMIT || centers[i].z >= MAAGE_WORLD_LIMIT || centers[i].y < 0 || centers[i].y >= 256) return maage_mesh_failure(trace, MAAGE_STATUS_INVALID_ARGUMENT);
+        for (z = maage_world_chunk_coordinate(centers[i].z - 3); z <= maage_world_chunk_coordinate(centers[i].z + 3); ++z)
+            for (x = maage_world_chunk_coordinate(centers[i].x - 3); x <= maage_world_chunk_coordinate(centers[i].x + 3); ++x) {
+                for (j = 0; j < n; ++j)
+                    if (columns[j].x == x && columns[j].z == z) break;
+                if (j == n) {
+                    columns[n].x = x;
+                    columns[n++].z = z;
+                }
+            }
+    }
+    for (pass = 0; pass < 2; ++pass) {
+        if (pass) {
+            if (faces > UINT_MAX / 4U || faces > (size_t) - 1 / (4 * sizeof(maage_mesh_vertex)) || faces > (size_t) - 1 / (6 * sizeof(unsigned int))) return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
+            mesh = (maage_world_mesh *) calloc(1, sizeof(*mesh));
+            if (!mesh) return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
+            if (faces) {
+                mesh->vertices = (maage_mesh_vertex *) malloc(faces * 4 * sizeof(*mesh->vertices));
+                mesh->indices = (unsigned int *) malloc(faces * 6 * sizeof(*mesh->indices));
+                if (!mesh->vertices || !mesh->indices) {
+                    maage_world_mesh_destroy(mesh);
+                    return maage_mesh_failure(trace, MAAGE_STATUS_ALLOCATION_FAILED);
+                }
+            }
+        }
+        for (i = 0; i < n; ++i) {
+            if (!maage_world_present_inputs(world, columns[i].x * 16, columns[i].z * 16, &chunk, neighbors, &blocks, &biomes)) continue;
+            maage_mesh_patch_mask(mask, columns[i].x, columns[i].z, centers, count, sources, source_count, &lower, &upper);
             cache.initialized = 0;
-            cached_chunk = chunk;
+            for (voxel = lower; voxel <= upper; ++voxel) {
+                if (!mask[voxel]) continue;
+                cell.x = (int) (voxel % 16);
+                cell.y = (int) (voxel / 256);
+                cell.z = (int) ((voxel / 16) % 16);
+                amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, pass && faces ? mesh->vertices + written * 4 : NULL, pass && faces ? mesh->indices + written * 6 : NULL, NULL, mode, blend, pass ? &cache : NULL, NULL, &cell, mask[voxel], &failure);
+                if (amount == (size_t) - 1 || (pass && amount > faces - written)) {
+                    maage_world_mesh_destroy(mesh);
+                    return maage_mesh_failure(trace, failure);
+                }
+                if (!pass) {
+                    if (amount > (size_t) - 1 - faces) return maage_mesh_failure(trace, MAAGE_STATUS_BUFFER_OVERFLOW);
+                    faces += amount;
+                } else {
+                    for (index = 0; index < amount * 6; ++index)
+                        mesh->indices[written * 6 + index] += (unsigned int) (written * 4);
+                    written += amount;
+                }
+            }
         }
-        amount = maage_mesh_generate(blocks, biomes, chunk, neighbors, faces ? mesh->vertices + written * 4 : NULL, faces ? mesh->indices + written * 6 : NULL, NULL, mode, blend, &cache, NULL, &cell, &failure);
-        if (amount == (size_t) - 1 || amount > faces - written) {
-            maage_world_mesh_destroy(mesh);
-            return maage_mesh_failure(trace, failure);
-        }
-        for (index = 0; index < amount * 6; ++index)
-            mesh->indices[written * 6 + index] += (unsigned int) (written * 4);
-        written += amount;
     }
     mesh->data.vertices = mesh->vertices;
     mesh->data.indices = mesh->indices;
-    mesh->data.vertex_count = faces * 4;
-    mesh->data.index_count = faces * 6;
+    mesh->data.vertex_count = written * 4;
+    mesh->data.index_count = written * 6;
     *output = mesh;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }

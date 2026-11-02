@@ -19,6 +19,8 @@ typedef struct __GLsync *maage_gl_sync;
     F(void, BindVertexArray, (GLuint)) \
     F(void, EnableVertexAttribArray, (GLuint)) \
     F(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
+    F(void, VertexAttribIPointer, (GLuint, GLint, GLenum, GLsizei, const void *)) \
+    F(void, TexBuffer, (GLenum, GLenum, GLuint)) \
     F(GLuint, CreateShader, (GLenum)) \
     F(void, DeleteShader, (GLuint)) \
     F(void, ShaderSource, (GLuint, GLsizei, const char *const *, const GLint *)) \
@@ -76,6 +78,9 @@ enum {
     MAAGE_GL_COMPILE_STATUS = 0x8B81,
     MAAGE_GL_LINK_STATUS = 0x8B82,
     MAAGE_GL_TEXTURE0 = 0x84C0,
+    MAAGE_GL_TEXTURE_BUFFER = 0x8C2A,
+    MAAGE_GL_RGBA32F = 0x8814,
+    MAAGE_GL_MAX_TEXTURE_BUFFER_SIZE = 0x8C2B,
     MAAGE_GL_CLAMP_TO_EDGE = 0x812F,
     MAAGE_GL_RGBA8 = 0x8058,
     MAAGE_GL_FUNC_ADD = 0x8006,
@@ -93,6 +98,7 @@ enum {
     MAAGE_GL_SIGNALED = 0x9119,
     MAAGE_GL_MAX_VERTEX_ATTRIBS = 0x8869,
     MAAGE_GL_MAX_TEXTURE_IMAGE_UNITS = 0x8872,
+    MAAGE_GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS = 0x8B4C,
     MAAGE_GL_MAX_VERTEX_UNIFORM_COMPONENTS = 0x8B4A,
     MAAGE_GL_MAX_FRAGMENT_UNIFORM_COMPONENTS = 0x8B49,
     MAAGE_GL_MAX_VERTEX_OUTPUT_COMPONENTS = 0x9122,

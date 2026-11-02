@@ -79,7 +79,8 @@ bubble disappears; resurfacing immediately hides the air row.
 
 ## State Transfer and Visual Lighting
 
-The Server publishes owned numeric block/biome columns initially, then changed
+The Server initially publishes owned numeric palette-packed block sections and
+biomes, then changed
 cells against exact acknowledged block revisions. Per-column FIFO never coalesces away
 a required delta base; backpressure retains unsent state and changed-cell bits.
 The Server retains only the acknowledged revision and changed-cell map, not a
@@ -88,9 +89,12 @@ Subsequent packets enumerate deduplicated mutated cells rather than comparing ev
 section. A successful queue transfer advances the producer base only after the
 packet owns all necessary state. Ordered unload packets close an interest lifetime;
 the replica retains bases until that removal arrives. Reentry starts with a complete
-column. Initial local capacity covers Server residency plus bounded packets in flight;
-remote transports must negotiate an equivalent bound. Packets contain no light arrays,
-scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 19;
+column. Replica capacity leaves packet headroom above the largest of the Server's
+target capacity, actual Server residency and currently retained Client bases.
+Shrinking or reversing the view cannot remove that headroom before ordered unloads
+arrive. The calculation uses an O(1) owner membership count, without scanning World
+storage each frame. Remote transports must negotiate an equivalent bound. Packets contain no light arrays,
+scheduled work, camera collision samples, ambient candidates or visual meshes. Protocol is 21;
 remote encoding is not implemented.
 
 Snapshots include per-life raw travel/velocity observations and authoritative

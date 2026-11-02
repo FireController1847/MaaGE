@@ -13,6 +13,11 @@ float maage_shader_animation(MAAGE_SHADER_VEC3 animation, float tick) {
     return frame * animation.x;
 }
 
+MAAGE_SHADER_VEC2 maage_shader_tile_uv(MAAGE_SHADER_VEC2 uv, MAAGE_SHADER_VEC4 tile) {
+    if (tile.z > tile.x && tile.w > tile.y) return tile.xy + (uv - floor(uv)) * (tile.zw - tile.xy);
+    return uv;
+}
+
 MAAGE_SHADER_VEC3 maage_shader_lighting(MAAGE_SHADER_VEC2 level, float daylight) {
     MAAGE_SHADER_VEC2 normalized = MAAGE_SHADER_SATURATE(level);
     MAAGE_SHADER_VEC2 brightness = normalized / (MAAGE_RENDER_LIGHT_CURVE_BASE - MAAGE_RENDER_LIGHT_CURVE_SCALE * normalized);
