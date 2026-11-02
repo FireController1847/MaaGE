@@ -7,9 +7,8 @@
 #include "maage/environment.h"
 #include "maage/random_ticks.h"
 #define MAAGE_BASE_ID(ids, offset) (*(const unsigned long *) ((const unsigned char *) (ids) + (offset)))
-maage_base_ids *maage_base_mutable_references(maage_block_registry *registry);
-maage_status maage_content_register_state(maage_block_registry *, const maage_content_config *, maage_block_state_id *, maage_block_id, unsigned int, int);
-maage_status maage_furnace_content_blocks(maage_block_registry *, const maage_content_config *);
+maage_status maage_content_register_state(maage_block_registry *, const maage_base_ids *, const maage_content_config *, maage_block_state_id *, maage_block_id, unsigned int, int);
+maage_status maage_furnace_content_blocks(maage_block_registry *, maage_base_ids *, const maage_content_config *);
 maage_status maage_furnace_content_items(maage_content_context *, maage_base_ids *);
 maage_status maage_base_blocks(maage_content_context *, maage_base_ids *);
 maage_status maage_base_items(maage_content_context *, maage_base_ids *);
@@ -48,14 +47,19 @@ maage_status maage_support_wheat(const maage_world *, int, int, int, const maage
 maage_block_state_id maage_base_item_icon(const maage_item_definition *, unsigned int);
 maage_texture_id maage_base_item_texture(const maage_item_definition *, unsigned int);
 const char *maage_base_item_name(const maage_item_definition *, unsigned int);
-maage_status maage_base_bind_behaviors(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_resolve_blocks(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_table_use(maage_world *, const maage_world_target *, maage_crafting_container *);
 maage_status maage_base_furnace_use(maage_world *, const maage_world_target *, maage_crafting_container *);
-int maage_base_table_access(const maage_world *, const maage_crafting_container *);
+int maage_base_table_access(const maage_base_ids *, const maage_world *, const maage_crafting_container *);
 int maage_base_furnace_access(const maage_world *, const maage_crafting_container *);
 maage_status maage_base_farmland_land(maage_world *, int, int, int, const maage_block_state_definition *, double, unsigned long *);
 maage_status maage_base_leaf_import(const maage_block_registry *, const maage_block_state_definition *, maage_block_state_id *);
 maage_status maage_base_furnace_entity(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_containers(maage_content_context *, maage_base_ids *);
+maage_status maage_base_sounds(maage_content_context *, maage_base_ids *);
+maage_status maage_base_geometry(maage_content_context *, maage_base_ids *);
+maage_status maage_base_fluids_register(maage_content_context *, maage_base_ids *);
+maage_status maage_base_fluids_resolve(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_textures(maage_content_context *, maage_base_ids *);
 maage_texture_id maage_base_logical_texture(const maage_base_ids *, maage_texture_id);
 #define MAAGE_GENERATION_REGION_CACHE_CAPACITY 64
@@ -77,6 +81,7 @@ typedef struct maage_generation_sample {
     maage_base_biome_decoration decoration;
 } maage_generation_sample;
 typedef struct maage_generation_context {
+    const maage_base_ids *ids;
     maage_chunk *chunk;
     maage_generation_output output;
     maage_world_seed seed;
@@ -99,11 +104,11 @@ typedef enum maage_generation_write_rule {
     MAAGE_GENERATION_WRITE_AIR,
     MAAGE_GENERATION_WRITE_FOLIAGE
 } maage_generation_write_rule;
-int maage_generation_surface(maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, int *height, maage_biome_id *biome, maage_generation_region_cache *regions);
+int maage_generation_surface(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, int *height, maage_biome_id *biome, maage_generation_region_cache *regions);
 /* Same supported discrete region and unchanged height function as surface().
  * Ecology uses compact influences near those region boundaries. Optional cache
  * belongs to this seed/job; cache misses and halo/spawn queries are equivalent. */
-int maage_generation_sample_at(maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions);
+int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions);
 int maage_generation_cold(const maage_generation_sample *sample, int y);
 unsigned long maage_generation_feature_hash(maage_world_seed seed, int x, int z, unsigned long salt);
 unsigned long maage_generation_feature_next(unsigned long *random);
@@ -111,16 +116,16 @@ int maage_generation_region(int coordinate, int edge);
 /* -1 allocation failure, zero clipped/rejected/unchanged, one changed cell. */
 int maage_generation_write(maage_generation_context *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule);
 maage_status maage_generation_outcome(maage_generation_context *context, unsigned char code, unsigned char operation);
-int maage_generation_features_valid(const maage_block_registry *blocks);
+int maage_generation_features_valid(const maage_base_ids *ids, const maage_block_registry *blocks);
 maage_status maage_generation_carve(maage_generation_context *context);
 maage_status maage_generation_underground(maage_generation_context *context);
 maage_status maage_generation_decorate(maage_generation_context *context);
 maage_status maage_generation_vegetation(maage_generation_context *context);
 maage_status maage_generation_structures(maage_generation_context *context);
-int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_region_cache *regions);
-int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y, maage_generation_region_cache *regions);
+int maage_generation_spawn_clear(const maage_base_ids *ids, maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_region_cache *regions);
+int maage_generation_spawn_floor(const maage_base_ids *ids, maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y, maage_generation_region_cache *regions);
 
-maage_status maage_generation_grow_tree(maage_world *, int, int, int, unsigned int, int, unsigned long, int *);
+maage_status maage_generation_grow_tree(const maage_base_ids *ids, maage_world *, int, int, int, unsigned int, int, unsigned long, int *);
 maage_status maage_base_generation_register(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_drop_wheat(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
 maage_status maage_base_drop_redstone(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);

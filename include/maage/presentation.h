@@ -7,11 +7,13 @@ typedef struct maage_texture_definition {
     int opaque;
     unsigned int frame_ticks; /* Zero static; otherwise vertically stacked square frames. */
     int pingpong;
+    unsigned int frame_edge; /* Zero uses the atlas block edge; otherwise exact target frame pixels. */
 } maage_texture_definition;
 /* Application presentation roles are explicit bindings, never special paths. */
 typedef struct maage_presentation_bindings {
-    unsigned long skin, grass, foliage, breaking[10], fluids[4];
-    maage_texture_id fluid_textures[2], missing;
+    unsigned long skin, grass, foliage, breaking[10];
+    unsigned long environment[5]; /* Sun, moon atlas, rain, snow, particles. */
+    maage_texture_id missing;
 } maage_presentation_bindings;
 maage_status maage_presentation_bind(maage_presentation_registry *, const maage_presentation_bindings *);
 const maage_presentation_bindings *maage_presentation_get_bindings(const maage_presentation_registry *);

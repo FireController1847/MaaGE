@@ -14,7 +14,8 @@ typedef struct maage_ore_definition {
     unsigned int attempts, size, minimum_y, maximum_y;
     unsigned long salt; /* Coordinate RNG domain, independent of numeric registry order. */
     int triangular;
-    maage_status (*density)(maage_world_seed, const maage_biome_registry *, const maage_generation_policy *, int, int, void *, double *);
+    const void *context; /* Borrowed immutable provider data; outlives generation jobs. */
+    maage_status (*density)(const void *, maage_world_seed, const maage_biome_registry *, const maage_generation_policy *, int, int, void *, double *);
 } maage_ore_definition;
 maage_status maage_generation_feature_register(maage_block_registry *, const char *, const maage_generation_feature *, unsigned long *);
 maage_status maage_generation_ore_register(maage_block_registry *, const char *, const maage_ore_definition *, unsigned long *);

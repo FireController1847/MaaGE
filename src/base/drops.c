@@ -5,7 +5,7 @@ static unsigned long drop_random(unsigned long *random, unsigned long range) {
 }
 
 maage_status maage_base_drop_wheat(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -26,7 +26,7 @@ maage_status maage_base_drop_wheat(const maage_block_registry *blocks, const maa
 }
 
 maage_status maage_base_drop_redstone(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -41,7 +41,7 @@ maage_status maage_base_drop_redstone(const maage_block_registry *blocks, const 
 }
 
 maage_status maage_base_drop_lapis(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -56,7 +56,7 @@ maage_status maage_base_drop_lapis(const maage_block_registry *blocks, const maa
 }
 
 maage_status maage_base_drop_gravel(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -70,7 +70,7 @@ maage_status maage_base_drop_gravel(const maage_block_registry *blocks, const ma
 }
 
 maage_status maage_base_drop_species(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -84,7 +84,7 @@ maage_status maage_base_drop_species(const maage_block_registry *blocks, const m
 }
 
 maage_status maage_base_drop_planks(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -98,7 +98,7 @@ maage_status maage_base_drop_planks(const maage_block_registry *blocks, const ma
 }
 
 maage_status maage_base_drop_leaves(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -124,7 +124,7 @@ maage_status maage_base_drop_leaves(const maage_block_registry *blocks, const ma
 }
 
 maage_status maage_base_drop_grass(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;
@@ -139,7 +139,7 @@ maage_status maage_base_drop_grass(const maage_block_registry *blocks, const maa
 }
 
 maage_status maage_base_drop_bush(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
     maage_item_stack *drop = &drops->stacks[0];
     (void) items;

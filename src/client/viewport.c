@@ -1,4 +1,4 @@
-#include "maage/base.h"
+#include "../application/content_modules.h"
 #include "maage/window.h"
 #include "maage/client.h"
 #include "maage/input.h"
@@ -644,6 +644,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int direct_world = 0;
     maage_client_environment *environment_view = NULL;
     maage_client_audio_service *audio = NULL;
+    int retain_content = 0;
     maage_local_session *session = NULL;
     maage_server_runtime *server = NULL;
     maage_world *visual_world = NULL;
@@ -705,6 +706,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_pacing pacing = {0, 0.0};
     maage_client_fov fov = {0.0, 0, 0, 0, 0};
     double effective_fov;
+    const maage_fluid_definition *eye_fluid, *camera_fluid;
     double eye[3], forward[3], yaw = 0.0, pitch = 0.0, wheel = 0.0;
     double render_yaw = 0.0, render_pitch = 0.0;
     unsigned long world_epoch = 0, last_sound_sequence = 0, last_seen_tick = 0;
@@ -788,10 +790,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         goto done;
     }
     operation = maage_biome_registry_init(biomes);
-    if (!maage_status_failed(operation)) operation = maage_base_biomes_register(biomes);
     if (maage_status_failed(operation)) goto done;
-    memset(&content_registration, 0, sizeof(content_registration));
-    content_registration.register_content = maage_base_register;
+    maage_application_content_config(&content_registration);
     operation = maage_client_resources_load(directory, &content_registration, &resources, biomes, maage_client_storage_player(), maage_client_splash_update, &splash, trace);
     if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice)) resource_notice = resources.load_status;
@@ -828,7 +828,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_is_success(resource_notice)) resource_notice = maage_client_ui_resource_status(ui);
     operation = maage_client_splash_update(&splash, trace);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_environment_create(renderer, directory, &environment_view, trace);
+    operation = maage_client_environment_create(renderer, directory, &resources, &environment_view, trace);
     if (maage_status_failed(operation)) goto done;
     if (maage_status_is_success(resource_notice)) resource_notice = maage_client_environment_resource_status(environment_view, NULL);
     /* The service remains valid in silent-device recovery. Rendering and the
@@ -839,7 +839,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) {
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio", operation, "Audio component registration failed; falling back to silent service.");
     }
-    operation = maage_client_audio_service_create(directory, &video_options, &audio, trace);
+    operation = maage_client_audio_service_create(directory, &video_options, maage_content_sounds(content), &audio, trace);
     if (maage_status_failed(operation) && !audio) {
         maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio", operation, "Audio setup failed; gameplay presentation continues.");
         maage_status_trace_init(trace);
@@ -1510,11 +1510,12 @@ choose_world:
         maage_client_food_animation_update(&food_animation, &latest, raw_elapsed, active && (input.secondary_down || input.secondary_pressed) && !input.primary_down && !input.primary_pressed);
         rendered = maage_client_interaction_update(&interaction, renderer, atlas, blocks, &visual_snapshot, &prediction, trace);
         if (maage_status_failed(rendered)) goto done;
-        visual_snapshot.player.submerged = maage_world_fluid_at(visual_world, eye) == MAAGE_FLUID_WATER;
+        eye_fluid = maage_fluid_get(maage_content_fluids(content), maage_world_fluid_at(visual_world, eye));
+        visual_snapshot.player.submerged = eye_fluid && eye_fluid->submerges;
         operation = maage_client_camera_effects_update(&camera_effects, &visual_snapshot, alpha, latest.paused || maage_client_ui_pauses_game(ui), maage_client_ui_view_bobbing(ui));
         if (maage_status_failed(operation)) goto done;
         if (maage_status_is_warning(operation)) maage_client_ui_notify(ui, operation, now);
-        effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed) * camera_effects.fov_scale;
+        effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed) * camera_effects.fov_scale * (eye_fluid ? eye_fluid->fov_scale : 1);
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;
@@ -1572,8 +1573,9 @@ choose_world:
             if (maage_status_failed(operation)) goto done;
             camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch, latest.player.sneaking, camera_effects.eye_drop, (double) state.framebuffer_width / state.framebuffer_height, effective_fov, &collision, blocks, camera_eye, &camera_yaw, &camera_pitch);
             if (camera_mode != MAAGE_CAMERA_FIRST) {
-                if (visual_snapshot.player.submerged) effective_fov *= 70.0 / 60.0;
-                if (maage_world_fluid_at(visual_world, camera_eye) == MAAGE_FLUID_WATER) effective_fov *= 60.0 / 70.0;
+                if (eye_fluid) effective_fov /= eye_fluid->fov_scale;
+                camera_fluid = maage_fluid_get(maage_content_fluids(content), maage_world_fluid_at(visual_world, camera_eye));
+                if (camera_fluid) effective_fov *= camera_fluid->fov_scale;
             }
             maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
             rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, swing_progress, &food_animation, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
@@ -1725,8 +1727,12 @@ done:
      * World flush/persistence; no Client World store/save API is ever invoked. */
     if (server) maage_server_runtime_request_stop(server);
     if (ui) maage_client_ui_set_click_callback(ui, NULL, NULL);
-    maage_client_cleanup_result(maage_client_audio_service_destroy(audio, &cleanup_trace), &outcome, &cleanup_trace, trace);
-    maage_client_cleanup_result(maage_world_destroy(visual_world), &outcome, &cleanup_trace, trace);
+    operation = maage_client_audio_service_destroy(audio, &cleanup_trace);
+    if (maage_status_failed(operation)) retain_content = 1;
+    maage_client_cleanup_result(operation, &outcome, &cleanup_trace, trace);
+    operation = maage_world_destroy(visual_world);
+    if (maage_status_failed(operation)) retain_content = 1;
+    maage_client_cleanup_result(operation, &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_prediction_destroy(&prediction), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_mesh_cache_clear(&cache, NULL), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_environment_destroy(environment_view), &outcome, &cleanup_trace, trace);
@@ -1774,7 +1780,8 @@ done:
         maage_client_cleanup_result(maage_local_session_close(session), &outcome, &cleanup_trace, trace);
         maage_client_cleanup_result(maage_local_session_destroy(session), &outcome, &cleanup_trace, trace);
     }
-    maage_client_cleanup_result(maage_content_destroy(content), &outcome, &cleanup_trace, trace);
+    /* Failed worker teardown retains its borrowed immutable definitions. */
+    if (!retain_content) maage_client_cleanup_result(maage_content_destroy(content), &outcome, &cleanup_trace, trace);
     if (biomes) {
         maage_client_cleanup_result(maage_biome_registry_destroy(biomes), &outcome, &cleanup_trace, trace);
         free(biomes);

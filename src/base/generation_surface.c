@@ -12,10 +12,10 @@ static const maage_generation_sample *maage_surface_sample(const maage_generatio
         local_z = z - context->output.z * 16;
         if (local_x >= 0 && local_x < 16 && local_z >= 0 && local_z < 16) return &context->columns[local_z * 16 + local_x];
     }
-    return maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, sample, context->regions) ? sample : NULL;
+    return maage_generation_sample_at(context->ids, context->seed, context->biomes, context->policy, x, z, sample, context->regions) ? sample : NULL;
 }
 static int maage_cactus_height(const maage_generation_context *context, int x, int ground, int z, unsigned long random) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     maage_generation_sample sample, adjacent;
     const maage_generation_sample *column = maage_surface_sample(context, x, z, &sample), *neighbor;
     const maage_block_state_definition *floor, *neighbor_floor;
@@ -39,7 +39,7 @@ static int maage_cactus_height(const maage_generation_context *context, int x, i
     return 1 + (int) ((random >> 24) % 3UL);
 }
 maage_status maage_generation_decorate(maage_generation_context *context) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     const maage_generation_sample *column;
     const maage_block_state_definition *floor;
     maage_block_state_id state;
@@ -205,7 +205,7 @@ static int maage_tree_generation_write(void *context, int x, int y, int z, maage
     return result;
 }
 static int maage_tree_place(maage_tree_generation *trees, const maage_tree_feature *feature, int x, int ground, int z, unsigned long random, int snowfall) {
-    const maage_base_ids *ids = maage_base_references(trees->context->blocks);
+    const maage_base_ids *ids = trees->context->ids;
     int height = maage_tree_height(feature, random);
     if (ground + height + 2 >= 256) return 0;
     trees->snowfall = snowfall;
@@ -225,8 +225,7 @@ static int maage_block_plan_write(void *context, int x, int y, int z, maage_bloc
 static int maage_tree_replaceable(const maage_base_ids *ids, const maage_block_state_definition *state) {
     return state && (state->block_id == ids->block_air || state->block_id == ids->block_leaves || state->block_id == ids->block_sapling || state->block_id == ids->block_tall_grass || state->block_id == ids->block_dandelion || state->block_id == ids->block_poppy || state->block_id == ids->block_snow);
 }
-maage_status maage_generation_grow_tree(maage_world *world, int x, int y, int z, unsigned int species, int large, unsigned long random, int *attempted) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+maage_status maage_generation_grow_tree(const maage_base_ids *ids, maage_world *world, int x, int y, int z, unsigned int species, int large, unsigned long random, int *attempted) {
     const maage_tree_feature *feature;
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *state;
@@ -236,7 +235,7 @@ maage_status maage_generation_grow_tree(maage_world *world, int x, int y, int z,
     size_t count, cell;
     int height, radius, dx, dy, dz, cx, cz;
     if (attempted) *attempted = 0;
-    if (!world || !attempted || species > 2 || (large != 0 && large != 1) || !random) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    if (!ids || !world || !attempted || species > 2 || (large != 0 && large != 1) || !random) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     feature = &maage_tree_features[species == 0 ? (large ? 3 : 0) : (species == 1 ? (large ? 4 : 2) : 1)];
     height = maage_tree_height(feature, random);
     if (x - feature->radius - 2 <= -MAAGE_WORLD_LIMIT || z - feature->radius - 2 <= -MAAGE_WORLD_LIMIT || x + feature->radius + feature->width + 1 >= MAAGE_WORLD_LIMIT || z + feature->radius + feature->width + 1 >= MAAGE_WORLD_LIMIT) return result;
@@ -304,7 +303,7 @@ done:
 }
 
 static int maage_tree_candidate(const maage_generation_context *context, int gx, int gz, int *x, int *height, int *z, const maage_tree_feature **tree, unsigned long *random, int *snowfall) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     maage_generation_sample sample;
     const maage_generation_sample *column;
     const maage_block_state_definition *floor;
@@ -327,7 +326,7 @@ static int maage_tree_candidate(const maage_generation_context *context, int gx,
     if (total <= 0 || maage_surface_unit(maage_generation_feature_next(random)) >= total) return 0;
     for (dz = -1; dz <= 1; ++dz)
         for (dx = -1; dx <= 1; ++dx)
-            if (!maage_generation_surface(context->seed, context->biomes, *x + dx, *z + dz, &sample_height, &sample_biome, context->regions) || abs(sample_height - *height) > 1) return 0;
+            if (!maage_generation_surface(context->ids, context->seed, context->biomes, *x + dx, *z + dz, &sample_height, &sample_biome, context->regions) || abs(sample_height - *height) > 1) return 0;
     rank = maage_surface_unit(maage_generation_feature_next(random)) * total;
     for (species = 0; species < 2 && rank >= column->decoration.trees[species]; ++species)
         rank -= column->decoration.trees[species];
@@ -338,19 +337,20 @@ static int maage_tree_candidate(const maage_generation_context *context, int gx,
     *snowfall = column->rainfall > 0 && maage_generation_cold(column, *height + maage_tree_height(*tree, *random) + 2);
     return 1;
 }
-int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_region_cache *regions) {
+int maage_generation_spawn_clear(const maage_base_ids *ids, maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_region_cache *regions) {
     maage_generation_context context;
     maage_generation_sample column;
     const maage_tree_feature *tree;
     unsigned long random;
     int gx, gz, tx, tz, height, snowfall;
     memset(&context, 0, sizeof(context));
+    context.ids = ids;
     context.seed = seed;
     context.blocks = blocks;
     context.biomes = biomes;
     context.policy = policy;
     context.regions = regions;
-    if (!maage_generation_sample_at(seed, biomes, policy, x, z, &column, regions)) return 0;
+    if (!maage_generation_sample_at(ids, seed, biomes, policy, x, z, &column, regions)) return 0;
     random = maage_generation_feature_hash(seed, x, z, 13000UL);
     if (maage_cactus_height(&context, x, column.height, z, random)) return 0;
     for (gz = maage_generation_region(z, 8) - 1; gz <= maage_generation_region(z, 8) + 1; ++gz)
@@ -359,13 +359,14 @@ int maage_generation_spawn_clear(maage_world_seed seed, const maage_block_regist
     return 1;
 }
 typedef struct maage_tree_spawn_column {
+    const maage_base_ids *ids;
     const maage_block_registry *blocks;
     maage_block_state_id state;
     int x, z, top, snowfall, tree_snowfall;
 } maage_tree_spawn_column;
 static int maage_tree_spawn_write(void *context, int x, int y, int z, maage_block_state_id state, maage_generation_write_rule rule) {
     maage_tree_spawn_column *column = (maage_tree_spawn_column *) context;
-    const maage_base_ids *ids = maage_base_references(column->blocks);
+    const maage_base_ids *ids = column->ids;
     const maage_block_state_definition *current;
     if (x != column->x || z != column->z || y < column->top || rule != MAAGE_GENERATION_WRITE_FOLIAGE) return 0;
     if (y == column->top) {
@@ -377,8 +378,7 @@ static int maage_tree_spawn_write(void *context, int x, int y, int z, maage_bloc
     column->snowfall = column->tree_snowfall;
     return 1;
 }
-int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y, maage_generation_region_cache *regions) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+int maage_generation_spawn_floor(const maage_base_ids *ids, maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, double *feet_y, maage_generation_region_cache *regions) {
     maage_generation_context context;
     maage_generation_sample column;
     maage_tree_spawn_column exposed;
@@ -388,15 +388,17 @@ int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_regist
     unsigned long random;
     int gx, gz, tx, tz, ground, tree_ground, height, cactus, snowfall;
     memset(&context, 0, sizeof(context));
+    context.ids = ids;
     context.seed = seed;
     context.blocks = blocks;
     context.biomes = biomes;
     context.policy = policy;
     context.regions = regions;
-    if (!feet_y || !maage_generation_sample_at(seed, biomes, policy, x, z, &column, regions)) return 0;
+    if (!feet_y || !maage_generation_sample_at(ids, seed, biomes, policy, x, z, &column, regions)) return 0;
     state = maage_block_registry_state(blocks, column.surface);
     if (!state || !maage_block_registry_block(blocks, state->block_id)) return 0;
     ground = column.height;
+    exposed.ids = ids;
     exposed.blocks = blocks;
     exposed.x = x;
     exposed.z = z;
@@ -427,7 +429,7 @@ int maage_generation_spawn_floor(maage_world_seed seed, const maage_block_regist
     return 1;
 }
 maage_status maage_generation_vegetation(maage_generation_context *context) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     maage_tree_generation trees;
     const maage_tree_feature *tree;
     const maage_generation_sample *column;
@@ -497,7 +499,7 @@ static const maage_structure_feature maage_dungeon_feature = {
     MAAGE_STRUCTURE_DUNGEON, 64, 3, 4, 4, 5, 16, 48,
     offsetof(maage_base_ids, state_cobblestone), offsetof(maage_base_ids, state_mossy_cobblestone)};
 static int maage_structure_box(maage_generation_context *context, const maage_structure_feature *feature, int cx, int cy, int cz, unsigned long random) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     maage_block_state_id wall = MAAGE_BASE_ID(ids, feature->wall), floor = MAAGE_BASE_ID(ids, feature->floor);
     maage_block_state_id state;
     int x, y, z, result, changed = 0, doorway;
@@ -534,7 +536,7 @@ maage_status maage_generation_structures(maage_generation_context *context) {
             fit = 1;
             for (dz = -feature->half_depth; dz <= feature->half_depth; dz += feature->half_depth)
                 for (dx = -feature->half_width; dx <= feature->half_width; dx += feature->half_width) {
-                    if (!maage_generation_surface(context->seed, context->biomes, x + dx, z + dz, &height, &biome, context->regions) || height <= y + feature->height + 4) fit = 0;
+                    if (!maage_generation_surface(context->ids, context->seed, context->biomes, x + dx, z + dz, &height, &biome, context->regions) || height <= y + feature->height + 4) fit = 0;
                 }
             if (!fit) continue;
             result = maage_structure_box(context, feature, x, y, z, random);

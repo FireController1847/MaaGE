@@ -1,12 +1,14 @@
 #include "base_internal.h"
 #include "maage/gameplay.h"
+#include "maage/containers.h"
 #include <string.h>
 static maage_status use_status(unsigned char code) {
     return maage_status_make(code, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
 }
 maage_status maage_base_table_use(maage_world *world, const maage_world_target *target, maage_crafting_container *container) {
-    (void) world;
-    return maage_crafting_open_grid(container, MAAGE_CONTAINER_TABLE, target->x, target->y, target->z, 3);
+    const maage_block_registry *blocks = maage_world_registry(world);
+    const maage_base_ids *ids = maage_base_state_references(blocks, maage_block_registry_state(blocks, target->state_id));
+    return maage_container_open(maage_block_registry_containers(blocks), container, ids->container_table, target->x, target->y, target->z, world);
 }
 maage_status maage_base_furnace_use(maage_world *world, const maage_world_target *target, maage_crafting_container *container) {
     maage_furnace_state furnace;
@@ -16,17 +18,18 @@ maage_status maage_base_furnace_use(maage_world *world, const maage_world_target
     maage_status result;
     if (cover && cover->opaque) return use_status(MAAGE_STATUS_NOOP);
     result = maage_world_furnace_get(world, target->x, target->y, target->z, &furnace);
-    if (!maage_status_failed(result)) result = maage_crafting_open(container, MAAGE_CONTAINER_FURNACE, target->x, target->y, target->z);
+    if (!maage_status_failed(result)) result = maage_container_open(maage_block_registry_containers(blocks), container, maage_base_state_references(blocks, maage_block_registry_state(blocks, target->state_id))->container_furnace, target->x, target->y, target->z, world);
     if (!maage_status_failed(result)) container->block_identity = furnace.identity;
     return result;
 }
-int maage_base_table_access(const maage_world *world, const maage_crafting_container *container) {
-    (void) world;
-    return container->kind == MAAGE_CONTAINER_TABLE;
+int maage_base_table_access(const maage_base_ids *ids, const maage_world *world, const maage_crafting_container *container) {
+    const maage_block_registry *blocks = maage_world_registry(world);
+    const maage_block_state_definition *state = maage_block_registry_state(blocks, maage_world_get(world, container->x, container->y, container->z));
+    return state && state->block_id == ids->block_crafting_table;
 }
 int maage_base_furnace_access(const maage_world *world, const maage_crafting_container *container) {
     maage_furnace_state furnace;
-    return container->kind == MAAGE_CONTAINER_FURNACE && !maage_status_failed(maage_world_furnace_get(world, container->x, container->y, container->z, &furnace)) && furnace.identity == container->block_identity;
+    return !maage_status_failed(maage_world_furnace_get(world, container->x, container->y, container->z, &furnace)) && furnace.identity == container->block_identity;
 }
 maage_status maage_base_seed_placement(const maage_item_definition *item, const maage_world *world, const maage_world_target *target, maage_block_state_id *placed, int *in_place) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
@@ -43,7 +46,7 @@ maage_status maage_base_hoe_placement(const maage_item_definition *item, const m
     return use_status(MAAGE_STATUS_SUCCESS);
 }
 maage_status maage_base_farmland_land(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, double distance, unsigned long *random) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     if (distance <= 0.5) return use_status(MAAGE_STATUS_NOOP);
     *random = (*random * 1664525UL + 1013904223UL) & 4294967295UL;
     if ((*random >> 8) / 16777216.0 < distance - 0.5) return maage_world_set(world, x, y, z, state->id, ids->state_dirt);
@@ -51,7 +54,7 @@ maage_status maage_base_farmland_land(maage_world *world, int x, int y, int z, c
 }
 maage_status maage_base_leaf_import(const maage_block_registry *blocks, const maage_block_state_definition *state, maage_block_state_id *replacement) {
     *replacement = state->id;
-    if (!(state->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) return maage_block_leaves_state(blocks, state->metadata | MAAGE_LEAF_CHECK_DECAY, replacement);
+    if (!(state->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) return maage_block_leaves_state(blocks, maage_base_state_references(blocks, state), state->metadata | MAAGE_LEAF_CHECK_DECAY, replacement);
     return use_status(MAAGE_STATUS_NOOP);
 }
 

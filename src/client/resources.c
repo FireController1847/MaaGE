@@ -1,4 +1,5 @@
 #include "resources.h"
+#include "../application/content_modules.h"
 #include "maage/minecraft_assets.h"
 #include "maage/storage.h"
 #include "maage/log.h"
@@ -76,10 +77,23 @@ static void maage_client_resource_failure(maage_client_resources *resources, int
     maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.resources", result, trace, "%s; using an initialized visual fallback. Repair resources with the Launcher.", maage_client_source_name(resources, (unsigned long) index));
 }
 
+typedef struct maage_client_animation_region {
+    size_t texture;
+    int x, y, width, height;
+} maage_client_animation_region;
+static int maage_client_animation_order(const void *left, const void *right) {
+    const maage_client_animation_region *a = (const maage_client_animation_region *) left;
+    const maage_client_animation_region *b = (const maage_client_animation_region *) right;
+    if (a->height != b->height) return a->height > b->height ? -1 : 1;
+    return a->texture < b->texture ? -1 : a->texture != b->texture;
+}
+
 maage_status maage_client_resources_load(const char *application_data, const maage_content_config *registration, maage_client_resources *resources, maage_biome_registry *biomes, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace) {
     static const float default_grass[3] = {0.50f, 0.72f, 0.35f};
     static const float default_foliage[3] = {0.35f, 0.66f, 0.30f};
     maage_image *sources = NULL, missing;
+    maage_client_animation_region *regions = NULL;
+    size_t region_count = 0, region_index;
     const maage_texture_definition *texture;
     const maage_presentation_registry *catalog;
     const maage_presentation_bindings *bindings;
@@ -92,33 +106,44 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     unsigned char *pixel, *source;
     int i, j, x, y, sx, sy, edge = 16, tile, source_index, stage, ok = 0;
     int columns = 32, rows, tile_x, tile_y, skin_y;
-    int fluid, frame, frames[4], animation_y, animation_height, frame_edge, frame_tile, custom_height = 0, custom_y, custom_frames;
-    float *fluid_uv, *fluid_animation;
+    int frame, animation_y, frame_edge, frame_tile, custom_height = 0, custom_x, custom_y, custom_frames, shelf_x, shelf_y, shelf_height;
     if (!resources || !registration || !biomes || biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !resources ? 1 : 2);
     memset(&missing, 0, sizeof(missing));
     memset(resources, 0, sizeof(*resources));
     resources->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     resources->recovery_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ATLAS, 0);
-    result = maage_content_create(registration, &resources->catalog, trace);
+    result = maage_application_content_create(registration, &resources->catalog, trace);
     if (maage_status_failed(result)) {
         resources->recovery_status = result;
         goto done;
     }
+    /* Copy every composed biome for Client-only tint resolution; module order
+     * and persistent names retain the catalog's authoritative numeric IDs. */
+    for (i = 0; (size_t) i < maage_biome_registry_count(maage_content_biomes(resources->catalog)); ++i) {
+        const maage_biome_registry *registered = maage_content_biomes(resources->catalog);
+        tinted = *maage_biome_registry_get(registered, (maage_biome_id) i);
+        result = maage_biome_registry_register(biomes, maage_biome_registry_name(registered, (maage_biome_id) i), &tinted);
+        if (maage_status_failed(result) || tinted.id != (maage_biome_id) i) {
+            resources->recovery_status = maage_status_failed(result) ? result : maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
+            goto done;
+        }
+    }
     catalog = maage_content_presentation(resources->catalog);
     bindings = maage_presentation_get_bindings(catalog);
-    resources->register_content = registration->register_content;
-    resources->register_dependencies = registration->register_dependencies;
+    resources->modules = registration->modules;
+    resources->module_count = registration->module_count;
     resources->texture_count = maage_presentation_texture_count(catalog);
     resources->source_count = maage_presentation_source_count(catalog);
-    if (resources->texture_count > INT_MAX - MAAGE_CLIENT_BREAK_STAGES - 31 || resources->source_count > INT_MAX || resources->texture_count > (size_t) - 1 / sizeof(*resources->uv) || resources->source_count > (size_t) - 1 / sizeof(*sources) || resources->source_count > (size_t) - 1 / sizeof(*resources->source_results)) {
+    if (resources->texture_count > INT_MAX - MAAGE_CLIENT_BREAK_STAGES - 31 || resources->source_count > INT_MAX || resources->texture_count > (size_t) - 1 / sizeof(*regions) || resources->texture_count > (size_t) - 1 / sizeof(*resources->uv) || resources->source_count > (size_t) - 1 / sizeof(*sources) || resources->source_count > (size_t) - 1 / sizeof(*resources->source_results)) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
         goto done;
     }
+    regions = (maage_client_animation_region *) calloc(resources->texture_count, sizeof(*regions));
     sources = (maage_image *) calloc(resources->source_count, sizeof(*sources));
     resources->source_results = (maage_status *) calloc(resources->source_count, sizeof(*resources->source_results));
     resources->texture_animation = (float (*)[3]) calloc(resources->texture_count, sizeof(*resources->texture_animation));
     resources->uv = (float (*)[4]) calloc(resources->texture_count, sizeof(*resources->uv));
-    if (!sources || !resources->source_results || !resources->uv || !resources->texture_animation) {
+    if (!regions || !sources || !resources->source_results || !resources->uv || !resources->texture_animation) {
         resources->recovery_status = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
         goto done;
     }
@@ -128,16 +153,6 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     }
     for (i = 0; i < 10; ++i)
         if (bindings->breaking[i] >= resources->source_count) {
-            resources->recovery_status = maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
-            goto done;
-        }
-    for (i = 0; i < 4; ++i)
-        if (bindings->fluids[i] >= resources->source_count) {
-            resources->recovery_status = maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
-            goto done;
-        }
-    for (i = 0; i < 2; ++i)
-        if (bindings->fluid_textures[i] >= resources->texture_count) {
             resources->recovery_status = maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
             goto done;
         }
@@ -178,13 +193,18 @@ maage_status maage_client_resources_load(const char *application_data, const maa
             maage_image_destroy(&sources[i]);
             maage_status_trace_init(&source_trace);
         }
+        /* Environment sprites have independent rectangular layouts; their
+         * renderer loads these registered sources into its own bounded atlas. */
+        for (j = 0; j < 5; ++j)
+            if (bindings->environment[j] == (unsigned long) i) break;
+        if (j < 5) continue;
         result = maage_minecraft_asset_path(application_data, maage_client_source_name(resources, (unsigned long) i), path, sizeof(path), &source_trace);
         if (!maage_status_failed(result)) result = (unsigned long) i == bindings->skin ? maage_skin_load(path, MAAGE_SKIN_CLASSIC, &sources[i], &source_trace) : maage_image_load_png(path, &sources[i], &source_trace);
     source_checked:
         if (!maage_status_failed(result)) {
             /* Normalize each valid source independently into the canonical
              * 16px atlas. One unusual texture cannot resize unrelated tiles. */
-            if (((unsigned long) i == bindings->grass || (unsigned long) i == bindings->foliage) ? (sources[i].width != 256 || sources[i].height != 256) : ((unsigned long) i == bindings->skin ? (sources[i].width != 64 || sources[i].height != 64) : (sources[i].height != sources[i].width && !(maage_presentation_source_animated(catalog, (unsigned long) i) || (((unsigned long) i == bindings->fluids[0] || (unsigned long) i == bindings->fluids[1] || (unsigned long) i == bindings->fluids[2] || (unsigned long) i == bindings->fluids[3]) && sources[i].height >= sources[i].width && sources[i].height % sources[i].width == 0)))))
+            if (((unsigned long) i == bindings->grass || (unsigned long) i == bindings->foliage) ? (sources[i].width != 256 || sources[i].height != 256) : ((unsigned long) i == bindings->skin ? (sources[i].width != 64 || sources[i].height != 64) : (sources[i].height != sources[i].width && !(maage_presentation_source_animated(catalog, (unsigned long) i)))))
                 result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
         }
         if (!maage_status_failed(result) && maage_presentation_source_animated(catalog, (unsigned long) i) && (sources[i].height < sources[i].width || sources[i].height % sources[i].width != 0)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
@@ -224,26 +244,42 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     if (edge > INT_MAX - 2 || edge + 2 > INT_MAX / columns || edge + 2 > INT_MAX / rows) goto done;
     tile = edge + 2;
     resources->image.width = tile * columns;
+    if (resources->image.width < 1024) resources->image.width = 1024;
     animation_y = tile * rows;
-    frames[0] = sources[bindings->fluids[0]].pixels ? sources[bindings->fluids[0]].height / sources[bindings->fluids[0]].width : 1;
-    frames[1] = sources[bindings->fluids[1]].pixels ? sources[bindings->fluids[1]].height / sources[bindings->fluids[1]].width : 1;
-    frames[2] = sources[bindings->fluids[2]].pixels ? sources[bindings->fluids[2]].height / sources[bindings->fluids[2]].width : 1;
-    frames[3] = sources[bindings->fluids[3]].pixels ? sources[bindings->fluids[3]].height / sources[bindings->fluids[3]].width : 1;
-    animation_height = 0;
-    for (fluid = 0; fluid < 4; ++fluid) {
-        frame_tile = fluid < 2 ? tile : 34;
-        if (frames[fluid] > INT_MAX / frame_tile) goto done;
-        if (frames[fluid] * frame_tile > animation_height) animation_height = frames[fluid] * frame_tile;
-    }
     for (i = 0; i < (int) resources->texture_count; ++i) {
         texture = maage_presentation_texture(catalog, (maage_texture_id) i);
         if (!texture->frame_ticks || texture->source == MAAGE_CONTENT_ID_INVALID || !sources[texture->source].pixels) continue;
         custom_frames = sources[texture->source].height / sources[texture->source].width;
-        if (custom_frames > (INT_MAX - custom_height) / tile) goto done;
-        custom_height += custom_frames * tile;
+        if (texture->frame_edge > INT_MAX - 2U) goto done;
+        frame_edge = texture->frame_edge ? (int) texture->frame_edge : edge;
+        frame_tile = frame_edge + 2;
+        if (custom_frames > INT_MAX / frame_tile) goto done;
+        if (frame_tile > resources->image.width) resources->image.width = frame_tile;
+        regions[region_count].texture = (size_t) i;
+        regions[region_count].width = frame_tile;
+        regions[region_count++].height = custom_frames * frame_tile;
     }
-    if (animation_height > INT_MAX - 66 - custom_height || animation_y > INT_MAX - animation_height - custom_height - 66) goto done;
-    skin_y = animation_y + animation_height + custom_height;
+    /* Keep animation strips contiguous while packing tall strips beside GUI
+     * textures. Registration order does not force a sparse, growing atlas. */
+    qsort(regions, region_count, sizeof(*regions), maage_client_animation_order);
+    shelf_x = 0;
+    shelf_y = animation_y;
+    shelf_height = 0;
+    for (region_index = 0; region_index < region_count; ++region_index) {
+        if (shelf_x > resources->image.width - regions[region_index].width) {
+            if (shelf_y > INT_MAX - shelf_height) goto done;
+            shelf_y += shelf_height;
+            shelf_x = shelf_height = 0;
+        }
+        regions[region_index].x = shelf_x;
+        regions[region_index].y = shelf_y;
+        shelf_x += regions[region_index].width;
+        if (regions[region_index].height > shelf_height) shelf_height = regions[region_index].height;
+    }
+    if (shelf_y > INT_MAX - shelf_height) goto done;
+    custom_height = shelf_y + shelf_height - animation_y;
+    if (animation_y > INT_MAX - custom_height - 66) goto done;
+    skin_y = animation_y + custom_height;
     resources->image.height = skin_y + 66;
     if ((size_t) resources->image.width > (size_t) - 1 / 4) goto done;
     resources->image.stride = (size_t) resources->image.width * 4;
@@ -309,69 +345,37 @@ maage_status maage_client_resources_load(const char *application_data, const maa
         if (texture && texture->fallback != MAAGE_CONTENT_ID_INVALID && sources[texture->fallback].pixels) continue;
         memcpy(resources->uv[i], resources->uv[bindings->missing], sizeof(resources->uv[i]));
     }
-    /* Immutable padded animation strips keep all mesh UVs stable. The original
-     * 1.7.10 water metadata visits every frame; lava visits 0..19..1, both with
-     * two game ticks per frame. Flow metadata uses one tick for water and three
-     * for lava. No texture decode, upload or remesh per tick. */
-    for (fluid = 0; fluid < 4; ++fluid) {
-        source_index = (int) bindings->fluids[fluid];
-        if (!sources[source_index].pixels) continue;
-        selected = &sources[source_index];
-        frame_edge = fluid < 2 ? edge : 32;
-        frame_tile = frame_edge + 2;
-        tile_x = fluid < 2 ? fluid * tile : 2 * tile + (fluid - 2) * frame_tile;
-        for (frame = 0; frame < frames[fluid]; ++frame) {
-            tile_y = animation_y + frame * frame_tile;
-            for (y = 0; y < frame_tile; ++y) {
-                sy = y == 0 ? 0 : (y > frame_edge ? frame_edge - 1 : y - 1);
-                for (x = 0; x < frame_tile; ++x) {
-                    sx = x == 0 ? 0 : (x > frame_edge ? frame_edge - 1 : x - 1);
-                    pixel = resources->image.pixels + (size_t) (tile_y + y) * resources->image.stride + (size_t) (tile_x + x) * 4;
-                    source = selected->pixels + (size_t) (frame * selected->width + sy * selected->width / frame_edge) * selected->stride + (size_t) (sx * selected->width / frame_edge) * 4;
-                    memcpy(pixel, source, 4);
-                    if (fluid == 1 || fluid == 3) pixel[3] = 255;
-                }
-            }
-        }
-        i = (int) bindings->fluid_textures[fluid ? 1 : 0];
-        fluid_uv = fluid < 2 ? resources->uv[i] : resources->fluid_flow_uv[fluid - 2];
-        fluid_animation = fluid < 2 ? resources->fluid_animation[fluid] : resources->fluid_flow_animation[fluid - 2];
-        fluid_uv[0] = (float) (tile_x + 1) / resources->image.width;
-        fluid_uv[1] = (float) (animation_y + 1) / resources->image.height;
-        fluid_uv[2] = (float) (tile_x + 1 + frame_edge) / resources->image.width;
-        fluid_uv[3] = (float) (animation_y + 1 + frame_edge) / resources->image.height;
-        if (frames[fluid] > 1) {
-            fluid_animation[0] = (float) frame_tile / resources->image.height;
-            fluid_animation[1] = (float) (fluid == 1 ? -frames[fluid] : frames[fluid]);
-            fluid_animation[2] = fluid < 2 ? 2.0f : (fluid == 2 ? 1.0f : 3.0f);
-        }
-    }
-    custom_y = animation_y + animation_height;
-    for (i = 0; i < (int) resources->texture_count; ++i) {
+    /* Every registered animation owns a padded immutable strip. */
+    for (region_index = 0; region_index < region_count; ++region_index) {
+        i = (int) regions[region_index].texture;
+        custom_x = regions[region_index].x;
+        custom_y = regions[region_index].y;
         texture = maage_presentation_texture(catalog, (maage_texture_id) i);
         if (!texture->frame_ticks || texture->source == MAAGE_CONTENT_ID_INVALID || !sources[texture->source].pixels) continue;
         selected = &sources[texture->source];
         custom_frames = selected->height / selected->width;
+        frame_edge = texture->frame_edge ? (int) texture->frame_edge : edge;
+        frame_tile = frame_edge + 2;
+        if (frame_tile > resources->image.width) goto done;
         for (frame = 0; frame < custom_frames; ++frame)
-            for (y = 0; y < tile; ++y)
-                for (x = 0; x < tile; ++x) {
-                    sx = x == 0 ? 0 : (x > edge ? edge - 1 : x - 1);
-                    sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
-                    pixel = resources->image.pixels + (size_t) (custom_y + frame * tile + y) * resources->image.stride + (size_t) x * 4;
-                    source = selected->pixels + (size_t) (frame * selected->width + sy * selected->width / edge) * selected->stride + (size_t) (sx * selected->width / edge) * 4;
+            for (y = 0; y < frame_tile; ++y)
+                for (x = 0; x < frame_tile; ++x) {
+                    sx = x == 0 ? 0 : (x > frame_edge ? frame_edge - 1 : x - 1);
+                    sy = y == 0 ? 0 : (y > frame_edge ? frame_edge - 1 : y - 1);
+                    pixel = resources->image.pixels + (size_t) (custom_y + frame * frame_tile + y) * resources->image.stride + (size_t) (custom_x + x) * 4;
+                    source = selected->pixels + (size_t) (frame * selected->width + sy * selected->width / frame_edge) * selected->stride + (size_t) (sx * selected->width / frame_edge) * 4;
                     memcpy(pixel, source, 4);
                     if (texture->opaque) pixel[3] = 255;
                 }
-        resources->uv[i][0] = 1.0f / resources->image.width;
+        resources->uv[i][0] = (float) (custom_x + 1) / resources->image.width;
         resources->uv[i][1] = (float) (custom_y + 1) / resources->image.height;
-        resources->uv[i][2] = (float) (edge + 1) / resources->image.width;
-        resources->uv[i][3] = (float) (custom_y + edge + 1) / resources->image.height;
+        resources->uv[i][2] = (float) (custom_x + frame_edge + 1) / resources->image.width;
+        resources->uv[i][3] = (float) (custom_y + frame_edge + 1) / resources->image.height;
         if (custom_frames > 1) {
-            resources->texture_animation[i][0] = (float) tile / resources->image.height;
+            resources->texture_animation[i][0] = (float) frame_tile / resources->image.height;
             resources->texture_animation[i][1] = (float) (texture->pingpong ? -custom_frames : custom_frames);
             resources->texture_animation[i][2] = (float) texture->frame_ticks;
         }
-        custom_y += custom_frames * tile;
     }
     pixel = resources->image.pixels + (size_t) (resources->image.height - 1) * resources->image.stride + (size_t) (resources->image.width - 1) * 4;
     memset(pixel, 255, 4);
@@ -388,6 +392,7 @@ done:
         for (j = 0; j < (int) resources->source_count; ++j)
             maage_image_destroy(&sources[j]);
     free(sources);
+    free(regions);
     maage_image_destroy(&missing);
     if (!ok) {
         maage_image_destroy(&resources->image);
@@ -408,7 +413,7 @@ static maage_status maage_client_content_resolve(void *context, const maage_bloc
     const maage_client_resources *resources = (const maage_client_resources *) context;
     maage_block_face_definition *face;
     const maage_texture_definition *texture;
-    unsigned int side, fluid;
+    unsigned int side;
     if (!resources || !state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
         face = &faces[side];
@@ -423,11 +428,10 @@ static maage_status maage_client_content_resolve(void *context, const maage_bloc
         }
         if (face->overlay_texture && face->overlay_texture < resources->texture_count && maage_client_texture_available(resources, face->overlay_texture)) memcpy(face->overlay_uv, resources->uv[face->overlay_texture], sizeof(face->overlay_uv));
         if (face->snow_texture && face->snow_texture < resources->texture_count && maage_client_texture_available(resources, face->snow_texture)) memcpy(face->snow_uv, resources->uv[face->snow_texture], sizeof(face->snow_uv));
-        if (state->fluid_kind) {
-            fluid = state->fluid_kind == MAAGE_FLUID_LAVA;
-            memcpy(face->animation, resources->fluid_animation[fluid], sizeof(face->animation));
-            memcpy(face->flow_uv, resources->fluid_flow_uv[fluid], sizeof(face->flow_uv));
-            memcpy(face->flow_animation, resources->fluid_flow_animation[fluid], sizeof(face->flow_animation));
+        if (face->has_flow_texture) {
+            if (face->flow_texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
+            memcpy(face->flow_uv, resources->uv[face->flow_texture], sizeof(face->flow_uv));
+            memcpy(face->flow_animation, resources->texture_animation[face->flow_texture], sizeof(face->flow_animation));
         }
     }
     if (state->fast_texture && state->fast_texture < resources->texture_count) memcpy(leaf_fast_uv, resources->uv[state->fast_texture], sizeof(state->leaf_fast_uv));
@@ -443,12 +447,12 @@ maage_status maage_client_content_create(const maage_client_resources *resources
         !resources ? 0 : (!biomes ? 1 : 2));
     if (!biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
     memset(&config, 0, sizeof(config));
-    config.register_content = resources->register_content;
-    config.register_dependencies = resources->register_dependencies;
+    config.modules = resources->modules;
+    config.module_count = resources->module_count;
     config.resolver = maage_client_content_resolve;
     config.resolver_context = (void *) resources;
     config.presentation_biomes = biomes;
-    result = maage_content_create(&config, output, trace);
+    result = maage_application_content_create(&config, output, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
     maage_log_info("maage.client.world", "Finalized %lu block types / %lu states; direct numeric runtime indexing.", (unsigned long) maage_block_registry_block_count(maage_content_blocks(*output)), (unsigned long) maage_block_registry_state_count(maage_content_blocks(*output)));
     return result;

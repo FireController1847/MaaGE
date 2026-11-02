@@ -12,19 +12,19 @@ typedef struct maage_client_audio_service maage_client_audio_service;
  * Client build. It binds the independently owned Audio, Bank, Catalog and
  * audio_scene APIs; this API deliberately makes no new Audio-core ABI claims.
  * Event playback and listener callbacks never acquire decoder resources.
- * Environmental effects are decoded at scene binding; playback performs no
- * resource acquisition. Music uses a separate streaming producer.
+ * Registered events decode on demand through the catalog worker. Music uses
+ * a streaming producer only for its selected registered resource.
  * Nonfatal warnings/partial results may accompany usable output handles.
  * All handles are owned by the service, not the adapter or the caller.
  * set_volume's bus is the numeric MAAGE_CLIENT_AUDIO_BUS_* value.
  * stop_voices must synchronously quiesce every voice before catalog release. */
-#define MAAGE_CLIENT_AUDIO_COMPONENTS_VERSION 3U
+#define MAAGE_CLIENT_AUDIO_COMPONENTS_VERSION 4U
 typedef struct maage_client_audio_components {
     unsigned int version;
     maage_status (*bank_create)(const char *data_root, void **bank, maage_status_trace *trace);
     maage_status (*engine_create)(void **engine, maage_status_trace *trace);
-    maage_status (*catalog_create)(void *bank, void *engine, void **catalog, maage_status_trace *trace);
-    maage_status (*scene_create)(void *bank, void *catalog, void *engine, void **scene, maage_status_trace *trace);
+    maage_status (*catalog_create)(void *bank, void *engine, const maage_sound_registry *definitions, void **catalog, maage_status_trace *trace);
+    maage_status (*scene_create)(void *bank, void *catalog, void *engine, const maage_sound_registry *definitions, void **scene, maage_status_trace *trace);
     maage_status (*set_volume)(void *engine, unsigned int bus, int percent, maage_status_trace *trace);
     maage_status (*set_listener)(void *engine, const double position[3], const double forward[3], maage_status_trace *trace);
     maage_status (*play_event)(void *catalog, void *engine, const maage_sound_event *event, maage_status_trace *trace);
@@ -48,7 +48,7 @@ typedef struct maage_client_audio_components {
  * removes the registration only before creation. Never re-register live. */
 maage_status maage_client_audio_service_components_install(const maage_client_audio_components *components);
 
-maage_status maage_client_audio_service_create(const char *data_root, const maage_client_options *options, maage_client_audio_service **output, maage_status_trace *trace);
+maage_status maage_client_audio_service_create(const char *data_root, const maage_client_options *options, const maage_sound_registry *definitions, maage_client_audio_service **output, maage_status_trace *trace);
 maage_status maage_client_audio_service_apply_options(maage_client_audio_service *service, const maage_client_options *options);
 maage_status maage_client_audio_service_event(maage_client_audio_service *service, const maage_sound_event *sound_event, maage_status_trace *trace);
 /* Uses MAAGE_SOUND_GUI_CLICK through the same semantic numeric event contract. */

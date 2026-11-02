@@ -341,17 +341,17 @@ maage_status maage_client_prediction_destroy(maage_client_prediction *prediction
 maage_status maage_client_prediction_observe_sound(maage_client_prediction *prediction, const maage_block_registry *blocks, const maage_session_event *event) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(blocks);
     unsigned int i;
-    if (event->kind != MAAGE_EVENT_SOUND || event->session_epoch != prediction->session || event->world_epoch != prediction->world || (event->sound.event_id != MAAGE_SOUND_BLOCK_BREAK && event->sound.event_id != MAAGE_SOUND_BLOCK_DIG)) return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    if (event->kind != MAAGE_EVENT_SOUND || event->session_epoch != prediction->session || event->world_epoch != prediction->world || (event->sound.action != MAAGE_SOUND_BLOCK_BREAK && event->sound.action != MAAGE_SOUND_BLOCK_DIG)) return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)
         if (prediction->entries[i].active && prediction->entries[i].confirmed >= 0 && prediction->entries[i].replacement == ids->state_air &&
             event->sound.position[0] == prediction->entries[i].target.x + 0.5 && event->sound.position[1] == prediction->entries[i].target.y + 0.5 && event->sound.position[2] == prediction->entries[i].target.z + 0.5) {
-            if (event->sound.event_id == MAAGE_SOUND_BLOCK_BREAK) {
+            if (event->sound.action == MAAGE_SOUND_BLOCK_BREAK) {
                 if (prediction->entries[i].sound_echo) continue;
                 prediction->entries[i].sound_echo = 1;
             } else if (prediction->entries[i].sound_echo) continue;
             return maage_prediction_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
         }
-    if (prediction->targeting && event->sound.event_id == MAAGE_SOUND_BLOCK_BREAK &&
+    if (prediction->targeting && event->sound.action == MAAGE_SOUND_BLOCK_BREAK &&
         event->sound.position[0] == prediction->target.x + 0.5 && event->sound.position[1] == prediction->target.y + 0.5 && event->sound.position[2] == prediction->target.z + 0.5) prediction->break_sound_heard = 1;
     return maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
 }
@@ -369,8 +369,12 @@ maage_status maage_client_prediction_take_break_sound(maage_client_prediction *p
         state = maage_block_registry_state(blocks, prediction->entries[i].target.state_id);
         if (!state) return maage_prediction_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_READ);
         memset(sound, 0, sizeof(*sound));
-        sound->event_id = MAAGE_SOUND_BLOCK_BREAK;
+        sound->action = MAAGE_SOUND_BLOCK_BREAK;
         sound->material = maage_gameplay_block_material(maage_block_registry_block(blocks, state->block_id));
+        {
+            maage_status selected = maage_sound_select(maage_block_registry_sounds(blocks), sound->action, sound->material, &sound->event_id);
+            if (maage_status_failed(selected)) return selected;
+        }
         sound->position[0] = prediction->entries[i].target.x + 0.5;
         sound->position[1] = prediction->entries[i].target.y + 0.5;
         sound->position[2] = prediction->entries[i].target.z + 0.5;

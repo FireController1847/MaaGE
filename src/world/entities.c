@@ -161,7 +161,7 @@ static void entity_move(maage_entity *entity, const maage_world *world) {
     }
     /* Item water motion retains ordinary gravity/drag and has no buoyancy.
      * Observe the whole small body, including a current across a cell edge. */
-    if (maage_world_fluid_volume(world, minimum, maximum, MAAGE_FLUID_WATER, current))
+    if (maage_world_fluid_volume_properties(world, minimum, maximum, MAAGE_FLUID_PROPERTY_SWIMMING, current))
         for (axis = 0; axis < 3; ++axis)
             entity->velocity[axis] += current[axis] * MAAGE_PLAYER_CURRENT_IMPULSE;
     entity->velocity[1] -= 0.04;

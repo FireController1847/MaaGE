@@ -36,7 +36,7 @@ typedef struct maage_environment maage_environment;
 
 maage_status maage_environment_default(maage_world_seed seed, maage_environment_state *state);
 int maage_environment_state_valid(const maage_environment_state *state);
-maage_status maage_environment_create(maage_world_seed seed, const maage_environment_state *state, maage_environment **output);
+maage_status maage_environment_create(maage_world_seed seed, const maage_environment_state *state, const maage_block_registry *blocks, maage_environment **output);
 maage_status maage_environment_destroy(maage_environment *environment);
 /* Exactly one owner-thread 20 TPS phase. Consumes at most update_budget queued
  * updates through World mutation, without waiting for chunks, jobs or I/O. */

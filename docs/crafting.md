@@ -7,13 +7,10 @@ backend.
 
 ## Content Registration
 
-Applications select modules explicitly. `maage_content_create` creates empty
-registries, invokes `register_content` and then `register_dependencies`, validates
-cross-domain references and finalizes the set. A composition callback can call
-`maage_base_register` and register further content through the same public APIs;
-there is no namespace privilege or external loader. `maage_content_own` transfers
-module data to that content lifetime. All Worlds, jobs and readers stop before
-the owning content is destroyed.
+Applications compose namespaced module descriptors through the phased lifecycle
+in [Content Modules](content-modules.md). All definitions and deferred references
+complete before shared registry finalization. Base uses that same lifecycle;
+module-owned data outlives all registry readers and World jobs.
 
 `src/base/base.c` orchestrates the built-in game. Block/item/biome definitions,
 recipes, smelting, fuels and ores have individual registration invocations.
@@ -31,14 +28,16 @@ only the read-only placement policy.
 Furnace inventories use a registered block-entity provider. World owns opaque
 live/scratch buffers, owner ticking, reserved drops and immutable save copies;
 the provider owns validation, timer processing, inventory commits and codecs.
-Containers dispatch access/actions/sampling through their block definition.
+Registered container definitions dispatch access/actions/sampling independently
+of their activating block.
 Copied processing progress is carried in the existing numeric container snapshot,
 without giving temporary crafting inputs ownership of persistent inventories.
 
 ## Source and ownership
 
-- `include/maage/crafting.h` defines recipe registration, matching, temporary
-  containers and numeric slot/action contracts.
+- `include/maage/crafting.h` defines recipes, recipe scratch and copied container
+  windows. `include/maage/containers.h` defines registered layouts, progress,
+  slot policies and Server lifecycle/transaction callbacks.
 - `src/world/recipes.c` owns copied definitions and alternatives in a growable
   registry. `src/base/recipes.c` explicitly registers the current catalog during content
   initialization; content finalizes and owns recipes alongside items/blocks.

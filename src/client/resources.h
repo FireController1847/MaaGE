@@ -10,7 +10,8 @@ typedef struct maage_client_resources {
     maage_image image;
     maage_pixel_buffer atlas;
     maage_content *catalog;
-    maage_content_registration register_content, register_dependencies;
+    const maage_content_module *const *modules;
+    size_t module_count;
     float (*texture_animation)[3];
     size_t texture_count, source_count;
     float (*uv)[4];
@@ -20,8 +21,6 @@ typedef struct maage_client_resources {
     unsigned int skin_model;
     maage_status skin_status;
     float inventory_grass_color[3];
-    float fluid_animation[2][3];
-    float fluid_flow_uv[2][4], fluid_flow_animation[2][3];
     float white_uv[4];
     /* Initialization-only numeric failure cache. Gameplay never retries loads.
      * Destroy/reload explicitly retries all sources on the renderer owner.
@@ -31,7 +30,10 @@ typedef struct maage_client_resources {
     maage_status *source_results;
     unsigned int failed_resources;
 } maage_client_resources;
-/* Colormap samples populate mutable biome definitions before finalization. */
+/* Colormap samples populate mutable biome definitions before finalization.
+ * Registration descriptors/dependency arrays are borrowed through resource
+ * destruction: the same composition constructs the atlas catalog and final
+ * presentation content. Their callback code/data obey content.h lifetimes. */
 typedef maage_status (*maage_client_resource_checkpoint)(void *context, maage_status_trace *trace);
 maage_status maage_client_resources_load(const char *application_data, const maage_content_config *registration, maage_client_resources *resources, maage_biome_registry *biomes, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace);
 /* Startup-only native icon; external reconstructed artwork is never packaged. */

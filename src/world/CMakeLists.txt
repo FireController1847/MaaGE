@@ -1,5 +1,5 @@
 find_package(ZLIB 1.2.3 REQUIRED)
-add_library(maage_world STATIC content.c presentation.c blocks.c chunk.c world.c raycast.c mesh.c player.c items.c recipes.c crafting.c smelting.c entities.c gameplay.c
+add_library(maage_world STATIC content.c presentation.c fluids.c block_geometry.c containers.c sounds.c blocks.c chunk.c world.c raycast.c mesh.c player.c items.c recipes.c crafting.c smelting.c entities.c gameplay.c
     seed.c biomes.c generation.c lighting.c store.c region_store.c environment.c random_ticks.c support.c)
 add_library(MaaGE::World ALIAS maage_world)
 maage_configure_portable_target(maage_world)
@@ -10,7 +10,7 @@ if(NOT WIN32)
 endif()
 
 add_library(maage_base STATIC
-    ../base/base.c ../base/bindings.c ../base/blocks.c ../base/items.c ../base/biomes.c
+    ../base/base.c ../base/sounds.c ../base/sound_ambience.c ../base/containers.c ../base/fluids.c ../base/bindings.c ../base/blocks.c ../base/items.c ../base/biomes.c
     ../base/recipes.c ../base/furnace_content.c ../base/furnace.c ../base/furnace_entity.c
     ../base/interaction.c ../base/placement.c ../base/drops.c ../base/support.c
     ../base/states.c ../base/random_ticks.c ../base/leaves.c ../base/presentation.c ../base/textures.c

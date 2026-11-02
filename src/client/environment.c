@@ -5,6 +5,7 @@
 #include "maage/log.h"
 #include "maage/time.h"
 #include <math.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,6 +40,8 @@ struct maage_client_environment {
     unsigned long particle_random, particle_tick_low, particle_tick_high, particle_session, particle_world;
     double particle_time;
     float water_brightness;
+    int atlas_height, *fluid_overlays;
+    size_t fluid_count;
 };
 static void maage_client_environment_quad(maage_render_ui_data *batch, float x, float y, float width, float height, float u, float v, float uv_width, float uv_height, float alpha) {
     static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
@@ -58,37 +61,63 @@ static void maage_client_environment_quad(maage_render_ui_data *batch, float x, 
     batch->vertex_count += 4;
     batch->index_count += 6;
 }
-maage_status maage_client_environment_create(maage_renderer *renderer, const char *application_data, maage_client_environment **output, maage_status_trace *trace) {
+maage_status maage_client_environment_create(maage_renderer *renderer, const char *application_data, const maage_client_resources *resources, maage_client_environment **output, maage_status_trace *trace) {
     const maage_client_environment_resource *resource;
     maage_client_environment *view;
     maage_image atlas, source;
     maage_pixel_buffer pixels;
-    char name[128], path[MAAGE_PATH_CAPACITY];
+    const maage_presentation_registry *presentation;
+    const maage_presentation_bindings *bindings;
+    const maage_fluid_registry *fluids;
+    const maage_fluid_definition *fluid;
+    const maage_texture_definition *overlay;
+    const char *name;
+    char path[MAAGE_PATH_CAPACITY];
+    size_t fluid_index;
+    int overlay_y, source_x, source_y;
     maage_status status;
     maage_status uploaded, result;
     maage_status_trace source_trace, recovered_trace;
     int i, y, ok = 0;
     if (output) *output = NULL;
-    if (!output || !renderer) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !renderer ? 0 : 2);
+    if (!output || !renderer || !resources || !resources->catalog) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !renderer ? 0 : 2);
     result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     view = (maage_client_environment *) calloc(1, sizeof(*view));
     if (!view) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     view->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     memset(&atlas, 0, sizeof(atlas));
     memset(&source, 0, sizeof(source));
-    atlas.width = atlas.height = 256;
+    presentation = maage_content_presentation(resources->catalog);
+    bindings = maage_presentation_get_bindings(presentation);
+    fluids = maage_content_fluids(resources->catalog);
+    view->fluid_count = maage_fluid_count(fluids);
+    if (!bindings || view->fluid_count > (size_t) (INT_MAX - 256) / 16 || view->fluid_count >= (size_t) - 1 / sizeof(*view->fluid_overlays)) {
+        result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
+        goto done;
+    }
+    view->fluid_overlays = (int *) calloc(view->fluid_count + 1, sizeof(*view->fluid_overlays));
+    if (!view->fluid_overlays) goto done;
+    atlas.width = 256;
+    atlas.height = view->atlas_height = 256 + (int) view->fluid_count * 16;
     atlas.stride = 1024;
-    atlas.pixels = (unsigned char *) calloc(256, atlas.stride);
+    if ((size_t) atlas.height > (size_t) - 1 / atlas.stride) {
+        result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
+        goto done;
+    }
+    atlas.pixels = (unsigned char *) calloc((size_t) atlas.height, atlas.stride);
     if (!atlas.pixels) goto done;
     view->water_brightness = 1;
     for (i = 0; i < 6; ++i) {
+        if (i == 4) continue;
         maage_status_trace_init(&source_trace);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
         MAAGE_STATUS_TRACE(&source_trace, 0, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS);
         resource = &maage_client_environment_resources[i];
-        strcpy(name, i == 5 ? "minecraft/textures/particle/" : (i == 4 ? "minecraft/textures/misc/" : "minecraft/textures/environment/"));
-        strcat(name, resource->name);
-        strcat(name, ".png");
+        name = maage_presentation_source(presentation, bindings->environment[i == 5 ? 4 : i]);
+        if (!name) {
+            result = maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
+            goto done;
+        }
         status = maage_minecraft_asset_path(application_data, name, path, sizeof(path), &source_trace);
         if (!maage_status_failed(status)) status = maage_image_load_png(path, &source, &source_trace);
         if (!maage_status_failed(status) && (source.width != resource->width || source.height != resource->height)) status = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
@@ -106,6 +135,22 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
         for (y = 0; y < source.height; ++y)
             memcpy(atlas.pixels + (size_t) (resource->y + y) * atlas.stride + (size_t) resource->x * 4, source.pixels + (size_t) y * source.stride, (size_t) source.width * 4);
         maage_image_destroy(&source);
+    }
+    /* Overlay resources were loaded once with the registered texture catalog.
+     * Copy their normalized tiles beside the scene sprites; update only uses
+     * numeric fluid IDs and never performs I/O or allocation. */
+    overlay_y = 256;
+    for (fluid_index = 1; fluid_index <= view->fluid_count; ++fluid_index) {
+        fluid = maage_fluid_get(fluids, (maage_fluid_id) fluid_index);
+        if (!fluid || !fluid->has_overlay_texture) continue;
+        overlay = maage_presentation_texture(presentation, fluid->overlay_texture);
+        if (!overlay || overlay->source >= resources->source_count || maage_status_failed(resources->source_results[overlay->source])) continue;
+        source_x = (int) (resources->uv[fluid->overlay_texture][0] * resources->image.width + 0.5f);
+        source_y = (int) (resources->uv[fluid->overlay_texture][1] * resources->image.height + 0.5f);
+        for (y = 0; y < 16; ++y)
+            memcpy(atlas.pixels + (size_t) (overlay_y + y) * atlas.stride, resources->image.pixels + (size_t) (source_y + y) * resources->image.stride + (size_t) source_x * 4, 64);
+        view->fluid_overlays[fluid_index] = overlay_y;
+        overlay_y += 16;
     }
     memset(atlas.pixels + 255 * atlas.stride + 127 * 4, 255, 4);
     pixels.width = atlas.width;
@@ -146,6 +191,7 @@ maage_status maage_client_environment_destroy(maage_client_environment *view) {
         maage_renderer_set_fog(view->renderer, 0, 0, 0, 0);
     }
     maage_render_texture_destroy(view->texture);
+    free(view->fluid_overlays);
     free(view);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
@@ -163,9 +209,9 @@ static void maage_client_environment_body(maage_client_environment *view, const 
     tangent[1] = direction[0];
     tangent[2] = 0;
     uv_width = (double) resource->width / (moon ? 4 : 1) / 256;
-    uv_height = (double) resource->height / (moon ? 2 : 1) / 256;
+    uv_height = (double) resource->height / (moon ? 2 : 1) / view->atlas_height;
     u = (double) resource->x / 256 + (moon ? (phase % 4) * uv_width : 0);
-    v = (double) resource->y / 256 + (moon ? (phase / 4) * uv_height : 0);
+    v = (double) resource->y / view->atlas_height + (moon ? (phase / 4) * uv_height : 0);
     for (corner = 0; corner < 4; ++corner) {
         horizontal = corner == 1 || corner == 2 ? 1 : -1;
         vertical = corner >= 2 ? 1 : -1;
@@ -241,13 +287,15 @@ static void maage_client_sky_color(double temperature, double brightness, double
 }
 /* Tile within the atlas rather than wrapping across unrelated resources. At
  * most 25 clipped quads reproduce the four repeats and orientation-linked UVs. */
-static void maage_client_environment_water(maage_client_environment *view, float width, float height, double yaw, double pitch, float brightness) {
-    const maage_client_environment_resource *resource = &maage_client_environment_resources[4];
+static void maage_client_environment_water(maage_client_environment *view, float width, float height, double yaw, double pitch, float brightness, int overlay_y) {
+    maage_client_environment_resource tile = {NULL, 0, 0, 16, 16};
+    const maage_client_environment_resource *resource = &tile;
     double u = -yaw * 180.0 / (3.141592653589793 * 64.0), v = pitch * 180.0 / (3.141592653589793 * 64.0);
     float tile_width = width * 0.25f, tile_height = height * 0.25f;
     float left, top, right, bottom, x, y, uv_x, uv_y;
     size_t first, vertex;
     int row, column;
+    tile.y = overlay_y;
     u -= floor(u);
     v -= floor(v);
     for (row = -1; row <= 4; ++row)
@@ -260,9 +308,9 @@ static void maage_client_environment_water(maage_client_environment *view, float
             bottom = y + tile_height > height ? height : y + tile_height;
             if (right <= left || bottom <= top) continue;
             uv_x = (resource->x + (1 - (left - x) / tile_width) * resource->width) / 256.0f;
-            uv_y = (resource->y + (top - y) / tile_height * resource->height) / 256.0f;
+            uv_y = (resource->y + (top - y) / tile_height * resource->height) / view->atlas_height;
             first = view->weather.vertex_count;
-            maage_client_environment_quad(&view->weather, left, top, right - left, bottom - top, uv_x, uv_y, -(right - left) / tile_width * resource->width / 256.0f, (bottom - top) / tile_height * resource->height / 256.0f, 0.5f);
+            maage_client_environment_quad(&view->weather, left, top, right - left, bottom - top, uv_x, uv_y, -(right - left) / tile_width * resource->width / 256.0f, (bottom - top) / tile_height * resource->height / view->atlas_height, 0.5f);
             for (vertex = first; vertex < view->weather.vertex_count; ++vertex)
                 view->weather_vertices[vertex].color[0] = view->weather_vertices[vertex].color[1] = view->weather_vertices[vertex].color[2] = brightness;
         }
@@ -362,9 +410,9 @@ static void maage_client_environment_particles(maage_client_environment *view, c
         size = width * sqrt(matrix[0] * matrix[0] + matrix[4] * matrix[4] + matrix[8] * matrix[8]) * (view->particles[i].smoke ? 0.1 * (1 + fade) : 0.1 * (1 - fade * fade * 0.5)) / projected[2];
         frame = view->particles[i].smoke ? 7U - (unsigned int) (fade * 8) : 48U;
         u = (float) (frame % 16U) * 8 / 256;
-        v = (96.0f + (float) (frame / 16U) * 8) / 256;
+        v = (96.0f + (float) (frame / 16U) * 8) / view->atlas_height;
         first = view->weather.vertex_count;
-        maage_client_environment_quad(&view->weather, (float) (width * 0.5 * (1 + projected[0] / projected[2]) - size * 0.5), (float) (height * 0.5 * (1 - projected[1] / projected[2]) - size * 0.5), (float) size, (float) size, u, v, 8.0f / 256, 8.0f / 256, 1);
+        maage_client_environment_quad(&view->weather, (float) (width * 0.5 * (1 + projected[0] / projected[2]) - size * 0.5), (float) (height * 0.5 * (1 - projected[1] / projected[2]) - size * 0.5), (float) size, (float) size, u, v, 8.0f / 256, 8.0f / view->atlas_height, 1);
         if (view->particles[i].smoke)
             for (axis = 0; axis < 4; ++axis)
                 view->weather_vertices[first + axis].color[0] = view->weather_vertices[first + axis].color[1] = view->weather_vertices[first + axis].color[2] = 0.3f;
@@ -374,6 +422,7 @@ static void maage_client_environment_particles(maage_client_environment *view, c
 maage_status maage_client_environment_update(maage_client_environment *view, maage_renderer *renderer, const maage_session_snapshot *snapshot, float width, float height, const float view_projection[16], const maage_world *visual, const double camera[3], double yaw, double pitch, int first_person, int radius) {
     const maage_client_environment_resource *resource;
     const maage_environment_state *state;
+    const maage_fluid_definition *fluid;
     double sun[3], angle, phase, sunlight, rain, sky_brightness, visibility, camera_dx, camera_dz;
     float x, y, size, alpha;
     float sky_color[3], brightness, sky_level, block_level, range_weight;
@@ -393,7 +442,8 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
     rain = state->rain_intensity;
     result = maage_renderer_set_animation_tick(renderer, (float) (state->ticks_low % 3648UL));
     if (maage_status_failed(result)) return result;
-    if (maage_world_fluid_at(visual, camera) == MAAGE_FLUID_WATER) {
+    fluid = maage_fluid_get(maage_block_registry_fluids(maage_world_registry(visual)), maage_world_fluid_at(visual, camera));
+    if (fluid && fluid->fog_density > 0) {
         result = maage_world_present_light(visual, (int) floor(camera[0]), (int) floor(camera[1]), (int) floor(camera[2]), &light);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS || maage_status_code(result) == MAAGE_STATUS_PARTIAL) {
@@ -405,13 +455,13 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
         range_weight = radius / 16.0f;
         if (range_weight < 0) range_weight = 0;
         if (range_weight > 1) range_weight = 1;
-        brightness = view->water_brightness * (1 - range_weight) + range_weight;
-        result = maage_renderer_set_fog(renderer, 0.02f * brightness, 0.02f * brightness, 0.2f * brightness, 0.1f);
+        brightness = fluid->fog_light_scaled ? view->water_brightness * (1 - range_weight) + range_weight : 1;
+        result = maage_renderer_set_fog(renderer, fluid->fog_color[0] * brightness, fluid->fog_color[1] * brightness, fluid->fog_color[2] * brightness, fluid->fog_density);
         if (maage_status_failed(result)) return result;
-        result = maage_renderer_set_clear_color(renderer, 0.02f * brightness, 0.02f * brightness, 0.2f * brightness, 1);
+        result = maage_renderer_set_clear_color(renderer, fluid->fog_color[0] * brightness, fluid->fog_color[1] * brightness, fluid->fog_color[2] * brightness, 1);
         if (maage_status_failed(result)) return result;
         view->weather.after_foreground = 1;
-        if (first_person && view->available[4]) maage_client_environment_water(view, width, height, yaw, pitch, view->water_brightness);
+        if (first_person && fluid->id <= view->fluid_count && view->fluid_overlays[fluid->id]) maage_client_environment_water(view, width, height, yaw, pitch, fluid->fog_light_scaled ? view->water_brightness : 1, view->fluid_overlays[fluid->id]);
         maage_client_environment_particles(view, snapshot, visual, camera, view_projection, width, height);
         return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);
     }
@@ -453,7 +503,7 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
             size = cold ? 3 : 2;
             alpha = (float) rain * (cold ? 0.7f : 0.42f);
             if (cold) x += (float) sin(phase + i) * 4;
-            maage_client_environment_quad(&view->weather, x, y, size, cold ? size : 18, (float) resource->x / 256, (float) resource->y / 256, (float) resource->width / 256, (float) resource->height / 256, alpha);
+            maage_client_environment_quad(&view->weather, x, y, size, cold ? size : 18, (float) resource->x / 256, (float) resource->y / view->atlas_height, (float) resource->width / 256, (float) resource->height / view->atlas_height, alpha);
         }
     maage_client_environment_particles(view, snapshot, visual, camera, view_projection, width, height);
     return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);

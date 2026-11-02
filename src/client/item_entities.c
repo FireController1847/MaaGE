@@ -76,8 +76,6 @@ failed:
 static maage_status item_entities_model(maage_client_item_entities *view, const maage_item_stack *stack, const maage_render_mesh **mesh, int *notice, maage_status_trace *trace) {
     void **slot = maage_registry_pages_find(&view->models, stack->item_id);
     maage_item_models *models = slot ? (maage_item_models *) *slot : NULL;
-    maage_mesh_vertex vertices[MAAGE_ITEM_MODEL_FACES * 4];
-    unsigned int indices[MAAGE_ITEM_MODEL_FACES * 6];
     maage_mesh_data data;
     maage_status result;
     *notice = 0;
@@ -85,9 +83,10 @@ static maage_status item_entities_model(maage_client_item_entities *view, const 
     if (!models->variants[stack->metadata]) {
         double began = view->diagnostics ? maage_time_monotonic_seconds() : -1, upload_at;
         if (maage_status_failed(models->results[stack->metadata])) return models->results[stack->metadata];
-        result = maage_client_item_model(view->resources, view->items, view->blocks, stack, vertices, indices, &data);
+        result = maage_client_item_model_create(view->resources, view->items, view->blocks, stack, &data);
         upload_at = view->diagnostics ? maage_time_monotonic_seconds() : -1;
         if (!maage_status_failed(result)) result = maage_renderer_upload_geometry(view->renderer, &data, view->atlas, &models->variants[stack->metadata], trace);
+        maage_client_item_model_destroy(&data);
         if (view->diagnostics) maage_log_info("maage.client.latency", "item=%lu metadata=%u model_ms=%.3f upload_api_ms=%.3f", (unsigned long) stack->item_id, stack->metadata, (upload_at - began) * 1000, (maage_time_monotonic_seconds() - upload_at) * 1000);
         models->results[stack->metadata] = result;
         if (maage_status_failed(result)) {

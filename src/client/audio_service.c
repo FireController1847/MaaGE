@@ -22,6 +22,7 @@
 
 struct maage_client_audio_service {
     maage_client_audio_components api;
+    const maage_sound_registry *definitions;
     void *bank;
     void *engine;
     void *catalog;
@@ -42,6 +43,11 @@ static maage_status maage_client_audio_result(unsigned char severity, unsigned c
 
 static maage_status maage_client_audio_invalid(unsigned char operation) {
     return maage_client_audio_result(MAAGE_STATUS_INVALID_ARGUMENT, operation);
+}
+
+static int maage_client_audio_ui_event(const maage_client_audio_service *service, const maage_sound_event *event) {
+    const maage_sound_definition *definition = maage_sound_get(service->definitions, event->event_id);
+    return definition && definition->bus == MAAGE_SOUND_BUS_UI;
 }
 
 static int maage_client_audio_valid_options(const maage_client_options *options) {
@@ -141,7 +147,7 @@ static maage_status maage_client_audio_release(maage_client_audio_service *servi
     /* All playing references are quiescent before catalog PCM release. */
     if (service->catalog) {
         result = service->api.catalog_destroy(service->catalog, trace);
-        if (maage_status_failed(result) && !maage_status_failed(first_failure)) first_failure = result;
+        if (maage_status_failed(result)) return result;
         service->catalog = NULL;
     }
     if (service->engine) {
@@ -160,16 +166,17 @@ static maage_status maage_client_audio_release(maage_client_audio_service *servi
     return first_failure;
 }
 
-maage_status maage_client_audio_service_create(const char *data_root, const maage_client_options *options, maage_client_audio_service **output, maage_status_trace *trace) {
+maage_status maage_client_audio_service_create(const char *data_root, const maage_client_options *options, const maage_sound_registry *definitions, maage_client_audio_service **output, maage_status_trace *trace) {
     maage_client_audio_service *service;
     maage_status result, problem, recovered, warning;
     int bus;
     if (output) *output = NULL;
-    if (!output || !maage_client_audio_valid_options(options)) return MAAGE_STATUS_TRACE(trace, maage_client_audio_invalid(MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
+    if (!output || !maage_client_audio_valid_options(options) || !maage_sound_is_finalized(definitions)) return MAAGE_STATUS_TRACE(trace, maage_client_audio_invalid(MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
     service = (maage_client_audio_service *) calloc(1, sizeof(*service));
     if (!service) return MAAGE_STATUS_TRACE(trace, maage_client_audio_result(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
     for (bus = 0; bus < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++bus)
         service->volume[bus] = -1;
+    service->definitions = definitions;
     service->accepting = 1;
     warning = maage_client_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
     ++maage_client_audio_live;
@@ -210,7 +217,7 @@ maage_status maage_client_audio_service_create(const char *data_root, const maag
         if (!maage_status_is_warning(warning)) warning = result;
         maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_DEVICE, result, trace, "Audio backend recovered with reduced capability.");
     }
-    result = service->api.catalog_create(service->bank, service->engine, &service->catalog, trace);
+    result = service->api.catalog_create(service->bank, service->engine, definitions, &service->catalog, trace);
     if (maage_status_failed(result) || !service->catalog) {
         problem = maage_status_failed(result) ? result : maage_client_audio_result(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_REGISTER);
         maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_CATALOG, problem, trace, "Sound catalog unavailable; the Client continues silently.");
@@ -227,7 +234,7 @@ maage_status maage_client_audio_service_create(const char *data_root, const maag
         warning = result;
     }
     if (service->api.scene_create) {
-        result = service->api.scene_create(service->bank, service->catalog, service->engine, &service->scene, trace);
+        result = service->api.scene_create(service->bank, service->catalog, service->engine, definitions, &service->scene, trace);
         if (maage_status_failed(result)) {
             maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_SCENE, result, trace, "Environmental audio could not start; gameplay sounds remain available.");
             /* A failed callback may still allocate a partial scene. Dispose of
@@ -263,18 +270,19 @@ muted:
 maage_status maage_client_audio_service_event(maage_client_audio_service *service, const maage_sound_event *sound_event, maage_status_trace *trace) {
     unsigned int tail;
     maage_status result;
-    if (!service || !sound_event || !sound_event->event_id ||
-        sound_event->event_id > MAAGE_SOUND_MAX || sound_event->material > MAAGE_MATERIAL_MAX ||
+    if (!service || !sound_event || sound_event->action >= MAAGE_SOUND_ACTION_COUNT ||
+        (sound_event->event_id && !maage_sound_get(service->definitions, sound_event->event_id)) ||
+        (sound_event->material && !maage_sound_material_get(service->definitions, sound_event->material)) ||
         sound_event->intensity != sound_event->intensity ||
         sound_event->pitch != sound_event->pitch ||
         sound_event->intensity < 0.0 || sound_event->intensity > 10000.0 ||
-        sound_event->pitch < 0.0 || sound_event->pitch > DBL_MAX ||
+        sound_event->pitch <= 0.0 || sound_event->pitch > DBL_MAX ||
         !(sound_event->position[0] >= -DBL_MAX && sound_event->position[0] <= DBL_MAX) ||
         !(sound_event->position[1] >= -DBL_MAX && sound_event->position[1] <= DBL_MAX) ||
         !(sound_event->position[2] >= -DBL_MAX && sound_event->position[2] <= DBL_MAX))
         return MAAGE_STATUS_TRACE(trace, maage_client_audio_invalid(MAAGE_OPERATION_SUBMIT), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT);
     if (!service->accepting) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
-    if (!service->playable || sound_event->intensity == 0) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
+    if (!service->playable || !sound_event->event_id || sound_event->intensity == 0) return maage_client_audio_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     result = maage_client_audio_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
     if (service->count >= MAAGE_CLIENT_AUDIO_QUEUE_SIZE) {
         result = maage_client_audio_result(MAAGE_STATUS_PARTIAL, MAAGE_OPERATION_SUBMIT);
@@ -290,9 +298,12 @@ maage_status maage_client_audio_service_event(maage_client_audio_service *servic
 
 maage_status maage_client_audio_service_ui_click(maage_client_audio_service *service, maage_status_trace *trace) {
     maage_sound_event click;
+    maage_status result;
     memset(&click, 0, sizeof(click));
-    click.event_id = MAAGE_SOUND_GUI_CLICK;
-    click.material = MAAGE_MATERIAL_DEFAULT;
+    if (!service) return maage_client_audio_invalid(MAAGE_OPERATION_SUBMIT);
+    click.action = MAAGE_SOUND_GUI_CLICK;
+    result = maage_sound_select(service->definitions, click.action, 0, &click.event_id);
+    if (maage_status_failed(result)) return result;
     click.intensity = 1.0;
     click.pitch = 1.0;
     return maage_client_audio_service_event(service, &click, trace);
@@ -314,7 +325,7 @@ maage_status maage_client_audio_service_reset_world(maage_client_audio_service *
         event = service->queue[service->first];
         service->first = (service->first + 1U) % MAAGE_CLIENT_AUDIO_QUEUE_SIZE;
         --service->count;
-        if (event.event_id != MAAGE_SOUND_GUI_CLICK || !service->accepting || !service->playable) continue;
+        if (!maage_client_audio_ui_event(service, &event) || !service->accepting || !service->playable) continue;
         result = service->api.play_event(service->catalog, service->engine, &event, trace);
         if (maage_status_failed(result)) {
             maage_client_audio_notice(service, MAAGE_CLIENT_AUDIO_NOTICE_EVENT, result, trace, "A GUI activation sound could not play during navigation.");
@@ -342,7 +353,7 @@ maage_status maage_client_audio_service_update(maage_client_audio_service *servi
         event = service->queue[service->first];
         service->first = (service->first + 1U) % MAAGE_CLIENT_AUDIO_QUEUE_SIZE;
         --service->count;
-        if (session_snapshot && session_snapshot->paused && event.event_id != MAAGE_SOUND_GUI_CLICK) continue;
+        if (session_snapshot && session_snapshot->paused && !maage_client_audio_ui_event(service, &event)) continue;
         result = service->api.play_event(service->catalog, service->engine, &event, trace);
         if (maage_status_failed(result)) {
             if (!maage_status_failed(first_failure)) first_failure = result;

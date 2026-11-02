@@ -2,21 +2,12 @@
 #define MAAGE_SOUND_CATALOG_H
 
 #include "maage/status.h"
+#include "maage/sounds.h"
 #include "maage/session_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Public numeric bus requests. The Client-owned adapter maps these to the
- * Audio engine's category IDs; these are not backend audio category IDs. */
-typedef enum maage_sound_catalog_bus {
-    MAAGE_SOUND_CATALOG_BLOCKS = 0,
-    MAAGE_SOUND_CATALOG_PLAYERS = 1,
-    MAAGE_SOUND_CATALOG_UI = 2,
-    MAAGE_SOUND_CATALOG_AMBIENT = 3,
-    MAAGE_SOUND_CATALOG_WEATHER = 4
-} maage_sound_catalog_bus;
 
 typedef struct maage_sound_catalog maage_sound_catalog;
 
@@ -37,8 +28,12 @@ typedef struct maage_sound_catalog_port {
 } maage_sound_catalog_port;
 
 /* bank and audio are borrowed. They MUST outlive catalog destroy. The returned
- * catalog owns the registered path table and successfully uploaded buffers. */
-maage_status maage_sound_catalog_create(void *sound_bank, void *audio, maage_sound_catalog **output, maage_status_trace *trace);
+ * catalog borrows immutable definitions and owns successfully uploaded buffers.
+ * The definitions must outlive the catalog and its joined decoding work. */
+maage_status maage_sound_catalog_create(void *sound_bank, void *audio, const maage_sound_registry *definitions, maage_sound_catalog **output, maage_status_trace *trace);
+/* Accepted decode requests are bounded separately from registered resources.
+ * Default 64; callers may configure any positive capacity before prepare. */
+maage_status maage_sound_catalog_pending_capacity(maage_sound_catalog *, size_t);
 /* Must be called once before prepare; the function table is copied by value.
  * The Client adapter bridges Audio and SoundBank ownership. */
 maage_status maage_sound_catalog_set_port(maage_sound_catalog *catalog, const maage_sound_catalog_port *port, maage_status_trace *trace);
@@ -48,7 +43,7 @@ maage_status maage_sound_catalog_prepare(maage_sound_catalog *catalog, maage_sta
 /* Collect background decode completions on the audio owner; upload/replay
  * pending one-shots and release buffers after their last use. */
 maage_status maage_sound_catalog_poll(maage_sound_catalog *catalog, double now);
-/* Direct numeric event/material dispatch with deterministic variant selection.
+/* Direct numeric registered-event dispatch with deterministic variant selection.
  * Missing event families return NOT_FOUND; inaudible intensity returns NOOP. */
 maage_status maage_sound_catalog_play(maage_sound_catalog *catalog, const maage_sound_event *event, maage_status_trace *trace);
 /* Joins pending decoder work and releases owned PCM and Audio buffers. NULL is a NOOP. */

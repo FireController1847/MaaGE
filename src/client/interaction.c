@@ -82,18 +82,15 @@ static void maage_first_person_scale(float matrix[16], float scale) {
     maage_first_person_multiply(matrix, matrix, transform);
 }
 static maage_status maage_first_person_upload(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, maage_status_trace *trace) {
-    maage_mesh_vertex vertices[66 * 4];
-    unsigned int indices[66 * 6];
+    maage_mesh_vertex vertices[48];
+    unsigned int indices[72];
     maage_mesh_data data;
     const maage_item_definition *item;
     maage_render_mesh *replacement = NULL;
     maage_status result;
-    size_t faces = 0;
     visual->sprite = 0;
-    if (!visual->item_id) {
-        maage_player_arm_geometry(visual->resources->skin_model, visual->resources->skin_uv, vertices, indices, &data);
-        faces = data.index_count / 6;
-    } else {
+    if (!visual->item_id) maage_player_arm_geometry(visual->resources->skin_model, visual->resources->skin_uv, vertices, indices, &data);
+    else {
         maage_item_stack stack;
         stack.item_id = visual->item_id;
         stack.metadata = visual->metadata;
@@ -102,15 +99,11 @@ static maage_status maage_first_person_upload(maage_client_first_person *visual,
         item = maage_item_registry_get(items, visual->item_id);
         if (!item) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
         visual->sprite = item->model == MAAGE_ITEM_MODEL_SPRITE;
-        result = maage_client_item_model(visual->resources, items, blocks, &stack, vertices, indices, &data);
+        result = maage_client_item_model_create(visual->resources, items, blocks, &stack, &data);
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPLOAD);
-        faces = data.index_count / 6;
     }
-    data.vertices = vertices;
-    data.vertex_count = faces * 4;
-    data.indices = indices;
-    data.index_count = faces * 6;
     result = maage_renderer_upload_geometry(renderer, &data, atlas, &replacement, trace);
+    if (visual->item_id) maage_client_item_model_destroy(&data);
     if (maage_status_failed(result)) {
         maage_render_mesh_destroy(replacement);
         return result;

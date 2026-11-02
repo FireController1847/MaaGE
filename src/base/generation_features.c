@@ -29,7 +29,7 @@ int maage_generation_region(int coordinate, int edge) {
     return coordinate % edge < 0 ? result - 1 : result;
 }
 int maage_generation_write(maage_generation_context *context, int x, int y, int z, maage_block_state_id replacement, maage_generation_write_rule rule) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_block_state_id current;
@@ -61,8 +61,7 @@ int maage_generation_write(maage_generation_context *context, int x, int y, int 
     }
     return maage_status_code(context->failure) == MAAGE_STATUS_NOOP ? 0 : 1;
 }
-int maage_generation_features_valid(const maage_block_registry *blocks) {
-    const maage_base_ids *ids = maage_base_references(blocks);
+int maage_generation_features_valid(const maage_base_ids *ids, const maage_block_registry *blocks) {
     maage_block_state_id required[25];
     size_t index;
     required[0] = ids->state_coal_ore;
@@ -98,7 +97,7 @@ int maage_generation_features_valid(const maage_block_registry *blocks) {
 /* Each region owns finite tunnels; every intersecting column replays the same
  * complete paths and clips writes. Region halo 2 covers all 88-block paths. */
 static int maage_feature_carve_ball(maage_generation_context *context, double cx, double cy, double cz, double rx, double ry, double rz) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     double dx, dy, dz;
     int x, y, z, low_x, high_x, low_z, high_z, low_y, high_y, result, changed = 0;
     int origin_x = context->output.x * 16, origin_z = context->output.z * 16;
@@ -237,7 +236,7 @@ static int maage_feature_vein(maage_generation_context *context, const maage_ore
     return changed;
 }
 maage_status maage_generation_underground(maage_generation_context *context) {
-    const maage_base_ids *ids = maage_base_references(context->blocks);
+    const maage_base_ids *ids = context->ids;
     const maage_ore_definition *feature;
     unsigned long random;
     size_t index;
@@ -258,7 +257,7 @@ maage_status maage_generation_underground(maage_generation_context *context) {
                     y = feature->minimum_y + (int) (maage_generation_feature_next(&random) % (feature->maximum_y - feature->minimum_y));
                     if (feature->triangular) y = (y + (int) (maage_generation_feature_next(&random) % 32UL)) / 2;
                     if (feature->density) {
-                        status = feature->density(context->seed, context->biomes, context->policy, x, z, context->regions, &density);
+                        status = feature->density(feature->context, context->seed, context->biomes, context->policy, x, z, context->regions, &density);
                         if (maage_status_failed(status)) return status;
                         if ((maage_generation_feature_next(&random) & 65535UL) / 65536.0 >= density) continue;
                     }
@@ -271,7 +270,7 @@ maage_status maage_generation_underground(maage_generation_context *context) {
             if (random % 4UL) continue;
             x = ox * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
             z = oz * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
-            if (!maage_generation_sample_at(context->seed, context->biomes, context->policy, x, z, &sample, context->regions)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
+            if (!maage_generation_sample_at(context->ids, context->seed, context->biomes, context->policy, x, z, &sample, context->regions)) return maage_generation_outcome(context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_ORES);
             height = sample.height;
             if (height <= context->policy->sea_level || (maage_generation_feature_next(&random) & 65535UL) / 65536.0 >= sample.decoration.lakes) continue;
             lava = (random & 32UL) != 0;

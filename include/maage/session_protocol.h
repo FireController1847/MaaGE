@@ -5,6 +5,7 @@
 #include "maage/gameplay.h"
 #include "maage/entities.h"
 #include "maage/status.h"
+#include "maage/sounds.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,7 +13,7 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 21U
+#define MAAGE_SESSION_PROTOCOL_VERSION 22U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -28,55 +29,9 @@ typedef enum maage_session_command_kind {
     MAAGE_CMD_CONTAINER_CLOSE = 12,
     MAAGE_CMD_CONTAINER_SLOT = 13,
     MAAGE_CMD_BREAK_PREVIEW = 14,
-    MAAGE_CMD_PLACE_PREVIEW = 15
+    MAAGE_CMD_PLACE_PREVIEW = 15,
+    MAAGE_CMD_CONTAINER_PAGE = 16
 } maage_session_command_kind;
-
-typedef enum maage_session_sound_id {
-    MAAGE_SOUND_FOOTSTEP = 1,
-    MAAGE_SOUND_BLOCK_BREAK = 2,
-    MAAGE_SOUND_BLOCK_PLACE = 3,
-    MAAGE_SOUND_PLAYER_JUMP = 4,
-    MAAGE_SOUND_PLAYER_LAND = 5,
-    MAAGE_SOUND_PLAYER_HURT = 6,
-    MAAGE_SOUND_PLAYER_SWIM = 7,
-    MAAGE_SOUND_INVENTORY_CLICK = 8,
-    MAAGE_SOUND_GUI_CLICK = 9,
-    MAAGE_SOUND_CAVE_AMBIENT = 10,
-    MAAGE_SOUND_RAIN = 11,
-    MAAGE_SOUND_THUNDER = 12,
-    MAAGE_SOUND_WATER = 13,
-    MAAGE_SOUND_LAVA = 14,
-    MAAGE_SOUND_BLOCK_DIG = 15,
-    MAAGE_SOUND_PLAYER_SPLASH = 16,
-    MAAGE_SOUND_ITEM_PICKUP = 17,
-    MAAGE_SOUND_PLAYER_FALL_SMALL = 18,
-    MAAGE_SOUND_PLAYER_FALL_BIG = 19,
-    MAAGE_SOUND_PLAYER_DEATH = 20,
-    MAAGE_SOUND_ITEM_BREAK = 21,
-    MAAGE_SOUND_EAT = 22,
-    MAAGE_SOUND_BURP = 23
-} maage_session_sound_id;
-#define MAAGE_SOUND_MAX MAAGE_SOUND_BURP
-
-typedef enum maage_session_material_id {
-    MAAGE_MATERIAL_DEFAULT = 0,
-    MAAGE_MATERIAL_STONE = 1,
-    MAAGE_MATERIAL_GRASS = 2,
-    MAAGE_MATERIAL_DIRT = 3,
-    MAAGE_MATERIAL_WOOD = 4,
-    MAAGE_MATERIAL_SAND = 5,
-    MAAGE_MATERIAL_GRAVEL = 6,
-    MAAGE_MATERIAL_SNOW = 7,
-    MAAGE_MATERIAL_METAL = 8,
-    MAAGE_MATERIAL_GLASS = 9,
-    MAAGE_MATERIAL_WATER = 10,
-    MAAGE_MATERIAL_LAVA = 11,
-    MAAGE_MATERIAL_FOLIAGE = 12,
-    MAAGE_MATERIAL_CLOTH = 13,
-    MAAGE_MATERIAL_LADDER = 14,
-    MAAGE_MATERIAL_ANVIL = 15
-} maage_session_material_id;
-#define MAAGE_MATERIAL_MAX MAAGE_MATERIAL_ANVIL
 
 typedef struct maage_session_command {
     unsigned int protocol_version;
@@ -90,6 +45,7 @@ typedef struct maage_session_command {
      * use/raycast. CLOSE/SLOT require the current nonzero container identity.
      * RESULT also requires the published revision. No Client stacks/recipes. */
     unsigned long container_identity, container_revision;
+    unsigned long container_view_first;
     unsigned int slot_group, container_slot, slot_action;
     unsigned long prediction;
     unsigned long prediction_revision;         /* Replica baseline before this expected-state edit. */
@@ -106,8 +62,9 @@ typedef struct maage_session_command {
 } maage_session_command;
 
 typedef struct maage_sound_event {
-    unsigned int event_id;
-    unsigned int material;
+    maage_sound_id event_id;
+    maage_sound_material_id material;
+    unsigned int action; /* Engine occurrence hook; zero for a directly emitted event. */
     unsigned long tick;
     unsigned long sequence;
     double position[3];

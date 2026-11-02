@@ -50,18 +50,9 @@ typedef struct maage_native_music {
     int cancel;
 } maage_native_music;
 typedef struct maage_native_scene_sound {
-    maage_audio_buffer *buffer;
     maage_native_music *stream;
     size_t bytes;
-    double last_used, replay_at;
-    double replay_position[3], replay_gain, replay_pitch;
-    unsigned int replay_category;
-    int replay_positional, replay_pending;
-    maage_sound_pcm decoded_pcm;
-    maage_status decode_result;
-    int music, loop, decode_state;
     unsigned long clip_id;
-    struct maage_native_scene_sound *queue_next;
 } maage_native_scene_sound;
 typedef struct maage_native_scene {
     maage_client_audio_scene *scene;
@@ -70,11 +61,7 @@ typedef struct maage_native_scene {
     maage_native_engine *engine;
     maage_native_scene_sound *sounds;
     size_t sound_count, sound_capacity;
-    maage_native_scene_sound *queue_head, *queue_tail;
-    maage_mutex *mutex;
-    maage_condition *wake;
-    maage_thread *worker;
-    int paused, stopping;
+    int paused;
 } maage_native_scene;
 
 static maage_status mn_status(unsigned char code, unsigned char operation) {
@@ -228,7 +215,7 @@ static maage_status mn_catalog_release_buffer(void *value, unsigned long numeric
     (void) trace;
     if (!engine || !numeric || numeric >= engine->buffer_capacity || !engine->buffers[numeric]) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_DESTROY);
     result = maage_audio_buffer_destroy(engine->buffers[numeric]);
-    engine->buffers[numeric] = NULL;
+    if (!maage_status_failed(result)) engine->buffers[numeric] = NULL;
     return result;
 }
 static maage_audio_bus mn_catalog_bus(unsigned int bus) {
@@ -290,13 +277,13 @@ static maage_status mn_catalog_play(void *value, unsigned long buffer, unsigned 
     if (!engine || !buffer || buffer >= engine->buffer_capacity || !engine->buffers[buffer] || bus >= 5U) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
     return mn_play(engine, engine->buffers[buffer], NULL, mn_catalog_bus(bus), positional, position, gain, pitch, max_distance, 0, NULL, trace);
 }
-static maage_status mn_catalog_create(void *bank, void *engine, void **output, maage_status_trace *trace) {
+static maage_status mn_catalog_create(void *bank, void *engine, const maage_sound_registry *definitions, void **output, maage_status_trace *trace) {
     maage_sound_catalog *catalog = NULL;
     maage_sound_catalog_port port;
     maage_status status;
     if (output) *output = NULL;
     if (!bank || !engine || !output) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
-    status = maage_sound_catalog_create(bank, engine, &catalog, trace);
+    status = maage_sound_catalog_create(bank, engine, definitions, &catalog, trace);
     if (maage_status_failed(status) || !catalog) return status;
     memset(&port, 0, sizeof(port));
     port.register_clip = mn_catalog_register;
@@ -452,7 +439,8 @@ static void mn_music_worker(void *context) {
     music->result = result;
     (void) maage_audio_stream_finish(music->ring);
 }
-static maage_status mn_music_release(maage_native_music *music) {
+static maage_status mn_music_release(maage_native_music **owned) {
+    maage_native_music *music = *owned;
     maage_status result;
     if (!music) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_RELEASE);
     if (music->mutex) {
@@ -461,14 +449,23 @@ static maage_status mn_music_release(maage_native_music *music) {
         if (music->wake) maage_condition_broadcast(music->wake);
         maage_mutex_unlock(music->mutex);
     }
-    if (music->worker) (void) maage_thread_join(music->worker);
-    result = music->worker ? music->result : mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_RELEASE);
-    if (music->ring) (void) maage_audio_stream_destroy(music->ring);
+    if (music->worker) {
+        result = maage_thread_join(music->worker);
+        if (maage_status_failed(result)) return result;
+        music->worker = NULL;
+        if (maage_status_failed(music->result)) (void) maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio_native", music->result, "Incremental music decoding stopped due to an error.");
+    }
+    if (music->ring) {
+        result = maage_audio_stream_destroy(music->ring);
+        if (maage_status_failed(result)) return result;
+        music->ring = NULL;
+    }
     if (music->decoder) (void) maage_sound_stream_destroy(music->decoder);
     if (music->wake) (void) maage_condition_destroy(music->wake);
     if (music->mutex) (void) maage_mutex_destroy(music->mutex);
     free(music);
-    return result;
+    *owned = NULL;
+    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RELEASE);
 }
 static maage_status mn_music_prepare(maage_native_scene *scene, maage_native_scene_sound *sound, size_t budget) {
     maage_native_music *music;
@@ -479,38 +476,38 @@ static maage_status mn_music_prepare(maage_native_scene *scene, maage_native_sce
     if (!music) return mn_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     result = maage_sound_bank_stream_open(scene->bank->bank, sound->clip_id, &music->decoder, NULL);
     if (maage_status_failed(result)) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return result;
     }
     result = maage_sound_stream_format(music->decoder, &channels, &rate);
     if (maage_status_failed(result)) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return result;
     }
     bytes = MAAGE_NATIVE_STREAM_FRAMES * (size_t) channels * sizeof(float);
     if (bytes > budget) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_CREATE);
     }
     music->channels = channels;
     result = maage_audio_stream_create(scene->engine->audio, channels, rate, MAAGE_NATIVE_STREAM_FRAMES, &music->ring, NULL);
     if (maage_status_failed(result)) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return result;
     }
     result = maage_mutex_create(&music->mutex);
     if (maage_status_failed(result)) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return result;
     }
     result = maage_condition_create(&music->wake);
     if (maage_status_failed(result)) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return result;
     }
     result = maage_thread_start(mn_music_worker, music, &music->worker);
     if (maage_status_failed(result)) {
-        mn_music_release(music);
+        mn_music_release(&music);
         return result;
     }
     sound->stream = music;
@@ -534,103 +531,16 @@ static maage_status mn_scene_sounds_reserve(maage_native_scene *scene, size_t ne
     return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESIZE);
 }
 
-/* A single scene worker decodes requested ambient effects. The audio owner
- * alone uploads returned PCM and controls buffer lifetime; no frame waits on
- * Vorbis or filesystem work. Scene sounds are stable once binding finishes. */
-static void mn_scene_decode_worker(void *context) {
-    maage_native_scene *scene = (maage_native_scene *) context;
-    maage_native_scene_sound *sound;
-    maage_sound_pcm pcm;
-    maage_status result;
-    for (;;) {
-        maage_mutex_lock(scene->mutex);
-        while (!scene->stopping && !scene->queue_head) maage_condition_wait(scene->wake, scene->mutex);
-        if (scene->stopping) {
-            maage_mutex_unlock(scene->mutex);
-            return;
-        }
-        sound = scene->queue_head;
-        scene->queue_head = sound->queue_next;
-        if (!scene->queue_head) scene->queue_tail = NULL;
-        sound->queue_next = NULL;
-        sound->decode_state = 2;
-        maage_mutex_unlock(scene->mutex);
-        memset(&pcm, 0, sizeof(pcm));
-        result = maage_sound_bank_decode(scene->bank->bank, sound->clip_id, &pcm, NULL);
-        maage_mutex_lock(scene->mutex);
-        sound->decoded_pcm = pcm;
-        sound->decode_result = result;
-        sound->decode_state = 3;
-        maage_mutex_unlock(scene->mutex);
-    }
-}
-static maage_audio_bus mn_scene_bus(unsigned int category) {
-    return category == MAAGE_AUDIO_SCENE_WEATHER ? MAAGE_AUDIO_WEATHER :
-        (category == MAAGE_AUDIO_SCENE_MUSIC ? MAAGE_AUDIO_MUSIC :
-         (category == MAAGE_AUDIO_SCENE_BLOCKS ? MAAGE_AUDIO_BLOCKS : MAAGE_AUDIO_AMBIENT));
-}
-static void mn_scene_collect(maage_native_scene *scene, double now, int world_active) {
-    size_t i;
-    for (i = 1; i <= scene->sound_count; ++i) {
-        maage_native_scene_sound *sound = &scene->sounds[i];
-        maage_sound_pcm pcm;
-        maage_status result;
-        int ready = 0;
-        maage_audio_buffer *buffer = NULL;
-        if (sound->music) continue;
-        memset(&pcm, 0, sizeof(pcm));
-        maage_mutex_lock(scene->mutex);
-        if (sound->decode_state == 3) {
-            pcm = sound->decoded_pcm;
-            memset(&sound->decoded_pcm, 0, sizeof(sound->decoded_pcm));
-            result = sound->decode_result;
-            sound->decode_state = 0;
-            ready = 1;
-        } else
-            result = mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DECODE);
-        maage_mutex_unlock(scene->mutex);
-        if (ready) {
-            if (!maage_status_failed(result) && pcm.samples)
-                result = maage_audio_buffer_create_float(scene->engine->audio, pcm.samples, pcm.frame_count, pcm.channels, pcm.sample_rate, &buffer, NULL);
-            (void) maage_sound_pcm_destroy(&pcm);
-            if (!maage_status_failed(result) && buffer) {
-                sound->buffer = buffer;
-                sound->decode_state = 4;
-                sound->last_used = now;
-                if (sound->replay_pending && world_active && now - sound->replay_at < 1.0) {
-                    (void) mn_play(scene->engine, buffer, NULL, mn_scene_bus(sound->replay_category), sound->replay_positional, sound->replay_position, (float) sound->replay_gain, (float) sound->replay_pitch, 16.0f, 0, NULL, NULL);
-                }
-                sound->replay_pending = 0;
-            } else {
-                if (buffer) (void) maage_audio_buffer_destroy(buffer);
-                sound->replay_pending = 0;
-                if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) {
-                    sound->decode_result = maage_status_failed(result) ? result : mn_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_DECODE);
-                    sound->decode_state = 5;
-                }
-            }
-        }
-        if (sound->buffer && now - sound->last_used >= 20.0) {
-            result = maage_audio_buffer_destroy(sound->buffer);
-            if (!maage_status_failed(result)) {
-                sound->buffer = NULL;
-                sound->decode_state = 0;
-            }
-        }
-    }
-}
-/* All music is registered by numeric ID and decoded incrementally by a
- * worker only when selected. Environmental one-shots likewise remain only
- * registered until first use, with idle PCM reclaimed on the owner thread. */
-static maage_status mn_scene_prepare_buffer(maage_native_scene *scene, maage_native_scene_sound *sound);
-static maage_status mn_scene_resolve(void *context, const void *catalog, const char *path, maage_client_audio_scene_sound_id *numeric) {
+/* Music resources bind numeric handles without decoding. All one-shot effects,
+ * including ambient providers, share the catalog's reusable decoder and cache. */
+static maage_status mn_scene_resolve(void *context, const void *catalog, const maage_sound_resource_definition *resource, maage_client_audio_scene_sound_id *numeric) {
     maage_native_scene *scene = (maage_native_scene *) context;
     maage_native_scene_sound *sound;
     maage_status result;
     size_t id;
     (void) catalog;
     if (numeric) *numeric = 0;
-    if (!scene || !path || !numeric || scene->sound_count >= ULONG_MAX - 1UL) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    if (!scene || !resource || !resource->streamed || !numeric || scene->sound_count >= ULONG_MAX - 1UL) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     id = scene->sound_count + 1U;
     result = mn_scene_sounds_reserve(scene, id + 1U);
     if (maage_status_failed(result)) return result;
@@ -638,69 +548,17 @@ static maage_status mn_scene_resolve(void *context, const void *catalog, const c
     sound = &scene->sounds[id];
     if (scene->bank->next_id >= MAAGE_SOUND_MAX_CLIP_ID) return mn_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     sound->clip_id = ++scene->bank->next_id;
-    result = maage_sound_bank_register(scene->bank->bank, sound->clip_id, path, NULL);
+    result = maage_sound_bank_register(scene->bank->bank, sound->clip_id, resource->path, NULL);
     if (maage_status_failed(result)) {
         sound->clip_id = 0;
         return result;
     }
-    sound->music = strstr(path, "/music/") != NULL;
-    /* Environmental effects are one-shots; decode on first use only. */
-    sound->loop = 0;
     *numeric = (maage_client_audio_scene_sound_id) id;
     return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
 }
 static maage_native_scene_sound *mn_scene_get(maage_native_scene *scene, maage_client_audio_scene_sound_id numeric) {
     if (!scene || !numeric || numeric > scene->sound_count) return NULL;
     return scene->sounds[numeric].clip_id ? &scene->sounds[numeric] : NULL;
-}
-static int mn_scene_can_loop(void *context, const void *catalog, maage_client_audio_scene_sound_id numeric) {
-    maage_native_scene_sound *sound = mn_scene_get((maage_native_scene *) context, numeric);
-    (void) catalog;
-    return sound && sound->loop;
-}
-/* Materialize effects during scene binding, before ordinary playback begins. */
-static maage_status mn_scene_prepare_buffer(maage_native_scene *scene, maage_native_scene_sound *sound) {
-    maage_status result;
-    if (sound->buffer) return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOAD);
-    maage_mutex_lock(scene->mutex);
-    result = sound->decode_state == 5 ? sound->decode_result : mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_LOAD);
-    if (!sound->decode_state) {
-        sound->decode_state = 1;
-        sound->queue_next = NULL;
-        if (scene->queue_tail) scene->queue_tail->queue_next = sound;
-        else scene->queue_head = sound;
-        scene->queue_tail = sound;
-        maage_condition_signal(scene->wake);
-    }
-    maage_mutex_unlock(scene->mutex);
-    return result;
-}
-static maage_status mn_scene_play_sound(void *context, void *audio, maage_client_audio_scene_sound_id numeric, unsigned int category, const double *position, double gain, double pitch, int loop, maage_client_audio_scene_voice *voice) {
-    static const double origin[3] = {0.0, 0.0, 0.0};
-    maage_native_scene *scene = (maage_native_scene *) context;
-    maage_native_scene_sound *sound = mn_scene_get(scene, numeric);
-    maage_status result;
-    unsigned int bus;
-    (void) audio;
-    if (voice) *voice = 0;
-    if (!sound || !voice || sound->music || (loop && !sound->loop)) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
-    result = mn_scene_prepare_buffer(scene, sound);
-    if (maage_status_code(result) == MAAGE_STATUS_NOOP) {
-        if (!sound->replay_pending) {
-            sound->replay_pending = 1;
-            sound->replay_at = maage_time_monotonic_seconds();
-            sound->replay_category = category;
-            sound->replay_positional = position != NULL;
-            memcpy(sound->replay_position, position ? position : origin, sizeof(sound->replay_position));
-            sound->replay_gain = gain;
-            sound->replay_pitch = pitch;
-        }
-        return result;
-    }
-    if (maage_status_failed(result)) return result;
-    sound->last_used = maage_time_monotonic_seconds();
-    bus = mn_scene_bus(category);
-    return mn_play(scene->engine, sound->buffer, NULL, bus, position != NULL, position ? position : origin, (float) gain, (float) pitch, 16.0f, loop, (unsigned long *) voice, NULL);
 }
 static maage_status mn_scene_music_prepare(void *context, const void *catalog, maage_client_audio_scene_sound_id numeric, size_t max_bytes, void **pcm, size_t *bytes) {
     maage_native_scene *scene = (maage_native_scene *) context;
@@ -709,7 +567,7 @@ static maage_status mn_scene_music_prepare(void *context, const void *catalog, m
     (void) catalog;
     if (pcm) *pcm = NULL;
     if (bytes) *bytes = 0;
-    if (!pcm || !bytes || !sound || !sound->music || !sound->clip_id) return mn_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP);
+    if (!pcm || !bytes || !sound || !sound->clip_id) return mn_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_LOOKUP);
     if (sound->stream) return mn_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_DECODE);
     result = mn_music_prepare(scene, sound, max_bytes);
     if (maage_status_failed(result)) return result;
@@ -723,18 +581,17 @@ static maage_status mn_scene_music_play(void *context, void *audio, void *pcm, d
     maage_native_scene *scene = (maage_native_scene *) context;
     (void) audio;
     if (voice) *voice = 0;
-    if (!scene || !sound || !sound->music || !sound->stream || !voice) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
+    if (!scene || !sound || !sound->stream || !voice) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
     return mn_play(scene->engine, NULL, sound->stream->ring, MAAGE_AUDIO_MUSIC, 0, zero, (float) gain, 1.0f, 16.0f, 0, (unsigned long *) voice, NULL);
 }
-static void mn_scene_music_release(void *context, void *pcm) {
+static maage_status mn_scene_music_release(void *context, void *pcm) {
     maage_native_scene_sound *sound = (maage_native_scene_sound *) pcm;
     maage_status result;
     (void) context;
-    if (!sound || !sound->stream) return;
-    result = mn_music_release(sound->stream);
-    sound->stream = NULL;
-    sound->bytes = 0;
-    if (maage_status_failed(result)) (void) maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio_native", result, "Incremental Vorbis music decoding stopped due to an error");
+    if (!sound || !sound->stream) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_RELEASE);
+    result = mn_music_release(&sound->stream);
+    if (!maage_status_failed(result)) sound->bytes = 0;
+    return result;
 }
 static int mn_scene_voice_running(void *context, void *audio, maage_client_audio_scene_voice token) {
     maage_native_scene *scene = (maage_native_scene *) context;
@@ -746,20 +603,6 @@ static int mn_scene_voice_running(void *context, void *audio, maage_client_audio
     if (!voice) return 0;
     (void) maage_audio_voice_get_state(scene->engine->audio, voice->native_id, &state);
     return state != MAAGE_AUDIO_VOICE_STOPPED;
-}
-static maage_status mn_scene_voice_gain(void *context, void *audio, maage_client_audio_scene_voice token, double gain) {
-    maage_native_scene *scene = (maage_native_scene *) context;
-    maage_native_voice *voice;
-    maage_status result;
-    float clamped;
-    (void) audio;
-    if (!scene) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);
-    voice = mn_voice_find(scene->engine, (unsigned long) token);
-    if (!voice) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SET);
-    clamped = gain < 0.0 ? 0.0f : (gain > MAAGE_NATIVE_MAX_VOLUME ? MAAGE_NATIVE_MAX_VOLUME : (float) gain);
-    result = maage_audio_voice_set_gain(scene->engine->audio, voice->native_id, clamped);
-    if (!maage_status_failed(result)) voice->playback.gain = clamped;
-    return result;
 }
 static maage_status mn_scene_voice_pause(void *context, void *audio, maage_client_audio_scene_voice token, int paused) {
     maage_native_scene *scene = (maage_native_scene *) context;
@@ -787,38 +630,23 @@ static maage_status mn_scene_voice_stop(void *context, void *audio, maage_client
 }
 static maage_status mn_scene_destroy(void *handle, maage_status_trace *trace) {
     maage_native_scene *scene = (maage_native_scene *) handle;
-    maage_status first, result;
+    maage_status result;
     size_t i;
     (void) trace;
     if (!scene) return mn_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
-    /* A failed logical-scene stop can leave buffers in use. Preserve the
-     * adapter and borrowed dependencies so the owner can retry shutdown. */
-    first = scene->scene ? maage_client_audio_scene_destroy(scene->scene) : mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
-    if (maage_status_failed(first)) return first;
+    result = scene->scene ? maage_client_audio_scene_destroy(scene->scene) : mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
+    if (maage_status_failed(result)) return result;
     scene->scene = NULL;
-    if (scene->mutex) {
-        maage_mutex_lock(scene->mutex);
-        scene->stopping = 1;
-        if (scene->wake) maage_condition_broadcast(scene->wake);
-        maage_mutex_unlock(scene->mutex);
-    }
-    if (scene->worker) (void) maage_thread_join(scene->worker);
     for (i = 1; i <= scene->sound_count; ++i) {
-        (void) maage_sound_pcm_destroy(&scene->sounds[i].decoded_pcm);
-        if (scene->sounds[i].stream) mn_scene_music_release(scene, &scene->sounds[i]);
-        if (scene->sounds[i].buffer) {
-            result = maage_audio_buffer_destroy(scene->sounds[i].buffer);
-            if (maage_status_failed(result)) return result;
-            scene->sounds[i].buffer = NULL;
-        }
+        if (!scene->sounds[i].stream) continue;
+        result = mn_scene_music_release(scene, &scene->sounds[i]);
+        if (maage_status_failed(result)) return result;
     }
     free(scene->sounds);
-    if (scene->wake) (void) maage_condition_destroy(scene->wake);
-    if (scene->mutex) (void) maage_mutex_destroy(scene->mutex);
     free(scene);
-    return first;
+    return mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
-static maage_status mn_scene_create(void *bank, void *catalog, void *engine, void **output, maage_status_trace *trace) {
+static maage_status mn_scene_create(void *bank, void *catalog, void *engine, const maage_sound_registry *definitions, void **output, maage_status_trace *trace) {
     maage_native_scene *scene;
     maage_client_audio_scene_ports ports;
     maage_status result;
@@ -834,7 +662,7 @@ static maage_status mn_scene_create(void *bank, void *catalog, void *engine, voi
         free(scene);
         return result;
     }
-    result = maage_client_audio_scene_create(catalog, engine, &scene->scene, trace);
+    result = maage_client_audio_scene_create(definitions, catalog, engine, &scene->scene, trace);
     if (maage_status_failed(result)) {
         free(scene);
         return result;
@@ -842,19 +670,13 @@ static maage_status mn_scene_create(void *bank, void *catalog, void *engine, voi
     memset(&ports, 0, sizeof(ports));
     ports.play_event = mn_catalog_event;
     ports.resolve_sound = mn_scene_resolve;
-    ports.sound_can_loop = mn_scene_can_loop;
-    ports.play_sound = mn_scene_play_sound;
     ports.music_prepare = mn_scene_music_prepare;
     ports.music_play = mn_scene_music_play;
     ports.music_release = mn_scene_music_release;
     ports.voice_running = mn_scene_voice_running;
-    ports.voice_gain = mn_scene_voice_gain;
     ports.voice_pause = mn_scene_voice_pause;
     ports.voice_stop = mn_scene_voice_stop;
     result = maage_client_audio_scene_bind(scene->scene, &ports, scene, trace);
-    if (!maage_status_failed(result)) result = maage_mutex_create(&scene->mutex);
-    if (!maage_status_failed(result)) result = maage_condition_create(&scene->wake);
-    if (!maage_status_failed(result)) result = maage_thread_start(mn_scene_decode_worker, scene, &scene->worker);
     if (maage_status_failed(result)) {
         (void) mn_scene_destroy(scene, trace);
         return result;
@@ -888,7 +710,6 @@ static maage_status mn_scene_update(void *handle, const maage_session_snapshot *
     /* Upload decoded catalog effects after background completion; release
      * dormant environmental buffers. Audio itself retains playing references. */
     (void) maage_sound_catalog_poll((maage_sound_catalog *) scene->scene_catalog, now);
-    mn_scene_collect(scene, now, snapshot != NULL && !paused);
     return maage_client_audio_scene_update(scene->scene, snapshot, visual, position, now, trace);
 }
 static maage_status mn_scene_stop(void *handle, maage_status_trace *trace) {

@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 #include "maage/content_ids.h"
+#include "maage/fluids.h"
+#include "maage/sounds.h"
 #include "maage/status.h"
 
 #ifdef __cplusplus
@@ -15,6 +17,9 @@ extern "C" {
 typedef unsigned long maage_block_id;
 typedef unsigned long maage_block_state_id;
 typedef unsigned long maage_texture_id;
+typedef unsigned long maage_block_geometry_id;
+struct maage_block_geometry_registry;
+struct maage_container_registry;
 
 typedef struct maage_block_registry maage_block_registry;
 
@@ -22,11 +27,6 @@ enum {
     MAAGE_BLOCK_MESH_CUBE = 0,
     MAAGE_BLOCK_MESH_CROSS = 1,
     MAAGE_BLOCK_MESH_TORCH = 2
-};
-enum {
-    MAAGE_FLUID_NONE = 0,
-    MAAGE_FLUID_WATER = 1,
-    MAAGE_FLUID_LAVA = 2
 };
 
 typedef enum maage_block_face {
@@ -60,6 +60,8 @@ typedef struct maage_block_face_definition {
     /* V stride, signed frame count (negative ping-pongs), ticks per frame. */
     float animation[3];
     float flow_uv[4], flow_animation[3];
+    int has_flow_texture;
+    maage_texture_id flow_texture;
 } maage_block_face_definition;
 
 /* Local voxel coordinates; selection and collision may differ. Empty shapes
@@ -98,7 +100,8 @@ typedef struct maage_block_definition {
     unsigned int light_opacity;  /* 0..15; independent of face occlusion. */
     int use_neighbor_brightness; /* Combined light uses up and four sides. */
     int selectable, replaceable;
-    unsigned int mesh_shape; /* Numeric cube, crossed plant or narrow torch. */
+    maage_block_geometry_id geometry_id; /* Registered geometry; resolved before finalization. */
+    unsigned int mesh_shape;             /* Cached optimized primitive tag from the geometry registry. */
     double hardness;         /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
     int harvest_requires_tool;  /* Effectiveness and harvest eligibility differ. */
@@ -119,10 +122,8 @@ typedef struct maage_block_definition {
     maage_status (*land)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, double, unsigned long *);
     maage_status (*changed)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, const struct maage_block_state_definition *);
     maage_status (*import_state)(const maage_block_registry *, const struct maage_block_state_definition *, maage_block_state_id *);
-    maage_status (*container_action)(struct maage_world *, struct maage_gameplay *, unsigned long, unsigned int, unsigned int, unsigned int);
-    maage_status (*container_sample)(const struct maage_world *, struct maage_crafting_container *);
-    int (*container_access)(const struct maage_world *, const struct maage_crafting_container *);
-    unsigned int material, mesh_material, foliage, snow_cover, flow_permeable;
+    maage_sound_material_id material;
+    unsigned int mesh_material, foliage, snow_cover, flow_permeable;
     unsigned int mesh_inset, cull_same;
     unsigned int tool_wear_class, special_tool_class;
     double special_tool_speed, item_drag;
@@ -142,13 +143,13 @@ typedef struct maage_block_state_definition {
     unsigned int texture_axis; /* 0 = ordinary; 1..3 = X/Y/Z. */
     unsigned int presentation_effect;
     maage_block_shape mesh_bounds;
-    maage_block_state_id fluid_mix_flow, fluid_mix_source, fluid_mix_shallow;
 
     int random_ticks; /* Section eligibility, independent of callback support. */
     /* Optional selection override; all-zero keeps the type's bounds. */
     maage_block_shape selection_shape;
-    unsigned int fluid_kind, fluid_level;
-    maage_block_state_id fluid_source_state, fluid_states[16];
+    maage_fluid_id fluid_kind;
+    unsigned int fluid_level;
+    const maage_fluid_definition *fluid_definition; /* Finalize-resolved immutable numeric dispatch. */
     maage_block_face_definition faces[MAAGE_FACE_COUNT];
     /* Optional pre-resolved opaque leaf texture; zero uses ordinary UVs. */
     maage_texture_id fast_texture;
@@ -168,6 +169,15 @@ maage_status maage_block_registry_create(size_t block_capacity, size_t state_cap
 maage_status maage_block_registry_destroy(maage_block_registry *registry);
 maage_status maage_block_registry_register_block(maage_block_registry *registry, const char *external_name, maage_block_definition *definition);
 maage_status maage_block_registry_register_state(maage_block_registry *registry, maage_block_state_definition *definition);
+/* Borrowed registries outlive finalized block definitions and their users. */
+maage_status maage_block_registry_bind_sounds(maage_block_registry *registry, const maage_sound_registry *sounds);
+const maage_sound_registry *maage_block_registry_sounds(const maage_block_registry *registry);
+maage_status maage_block_registry_bind_containers(maage_block_registry *registry, const struct maage_container_registry *containers);
+const struct maage_container_registry *maage_block_registry_containers(const maage_block_registry *registry);
+maage_status maage_block_registry_bind_fluids(maage_block_registry *registry, const maage_fluid_registry *fluids);
+const maage_fluid_registry *maage_block_registry_fluids(const maage_block_registry *registry);
+maage_status maage_block_registry_bind_geometry(maage_block_registry *registry, const struct maage_block_geometry_registry *geometry);
+const struct maage_block_geometry_registry *maage_block_registry_geometry(const maage_block_registry *registry);
 maage_status maage_block_registry_finalize(maage_block_registry *registry);
 int maage_block_registry_is_finalized(const maage_block_registry *registry);
 size_t maage_block_registry_block_count(const maage_block_registry *registry);

@@ -8,6 +8,9 @@
 #define MAAGE_BLOCK_ENTITY_DATA_MAX 65536UL
 struct maage_environment {
     maage_environment_state state;
+    unsigned char *route_visited;
+    int *route_x, *route_z;
+    unsigned int *route_distance;
 };
 
 static unsigned long maage_environment_random(maage_environment_state *state) {
@@ -40,22 +43,49 @@ int maage_environment_state_valid(const maage_environment_state *state) {
            state->rain_intensity >= 0 && state->rain_intensity <= 1 &&
            state->thunder_intensity >= 0 && state->thunder_intensity <= 1;
 }
-maage_status maage_environment_create(maage_world_seed seed, const maage_environment_state *saved, maage_environment **output) {
+maage_status maage_environment_create(maage_world_seed seed, const maage_environment_state *saved, const maage_block_registry *blocks, maage_environment **output) {
     maage_environment *environment;
-    if (!output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 2);
-    *output = NULL;
+    const maage_fluid_registry *fluids = maage_block_registry_fluids(blocks);
+    const maage_fluid_definition *fluid;
+    size_t index, radius = 1, span, cells;
+    if (output) *output = NULL;
+    if (!output || !fluids || !maage_fluid_is_finalized(fluids)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 2);
     if (saved && !maage_environment_state_valid(saved)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
-    environment = (maage_environment *) malloc(sizeof(*environment));
+    environment = (maage_environment *) calloc(1, sizeof(*environment));
     if (!environment) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
+    for (index = 0; index < maage_fluid_count(fluids); ++index) {
+        fluid = maage_fluid_get(fluids, (maage_fluid_id) index + 1UL);
+        if ((size_t) fluid->routing_depth + 1U > radius) radius = (size_t) fluid->routing_depth + 1U;
+    }
+    if (radius > ((size_t) - 1 - 1) / 2) goto overflow;
+    span = radius * 2 + 1;
+    if (span > (size_t) - 1 / span) goto overflow;
+    cells = span * span;
+    if (cells > (size_t) - 1 / sizeof(*environment->route_x) || cells > (size_t) - 1 / sizeof(*environment->route_distance)) goto overflow;
+    environment->route_visited = (unsigned char *) malloc(cells);
+    environment->route_x = (int *) malloc(cells * sizeof(*environment->route_x));
+    environment->route_z = (int *) malloc(cells * sizeof(*environment->route_z));
+    environment->route_distance = (unsigned int *) malloc(cells * sizeof(*environment->route_distance));
+    if (!environment->route_visited || !environment->route_x || !environment->route_z || !environment->route_distance) {
+        maage_environment_destroy(environment);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
+    }
     if (saved) {
         environment->state = *saved;
     } else
         maage_environment_default(seed, &environment->state);
     *output = environment;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
+overflow:
+    maage_environment_destroy(environment);
+    return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
 }
 maage_status maage_environment_destroy(maage_environment *environment) {
     if (!environment) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    free(environment->route_visited);
+    free(environment->route_x);
+    free(environment->route_z);
+    free(environment->route_distance);
     free(environment);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
@@ -390,29 +420,36 @@ static maage_status maage_environment_schedule(maage_environment *environment, m
     maage_environment_due(&environment->state, delay, &low, &high);
     return maage_world_schedule_update(world, x, y, z, MAAGE_BLOCK_UPDATE_FLUID, low, high);
 }
-/* Contact solidification must not wait for lava's ordinary spreading delay.
- * Keep the mutation in the bounded scheduled owner phase, outside this hook. */
-static unsigned int maage_environment_change_delay(maage_world *world, const maage_block_state_definition *state, int x, int y, int z) {
+/* Content supplies contact products and expedited scheduling. The solver owns
+ * all mutations and defers them to the ordinary bounded owner phase. */
+static maage_status maage_environment_change_delay(maage_world *world, const maage_block_state_definition *state, int x, int y, int z, unsigned int *delay) {
     static const int offsets[5][3] = {{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}};
+    const maage_fluid_definition *fluid = state->fluid_definition;
     const maage_block_state_definition *neighbor;
-    unsigned int side;
-    int nx, ny, nz;
-    if (state->fluid_kind != MAAGE_FLUID_LAVA) return 5;
-    if (state->fluid_level > 4) return 30;
+    maage_block_state_id replacement;
+    unsigned int side, requested;
+    int allow;
+    maage_status result;
+    if (!fluid) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    *delay = fluid->tick_delay;
+    if (!fluid->contact) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
     for (side = 0; side < 5; ++side) {
-        nx = x + offsets[side][0];
-        ny = y + offsets[side][1];
-        nz = z + offsets[side][2];
-        if (!maage_environment_loaded(world, nx, ny, nz)) continue;
-        neighbor = maage_environment_fluid(world, nx, ny, nz);
-        if (neighbor && neighbor->fluid_kind == MAAGE_FLUID_WATER) return 1;
+        if (!maage_environment_loaded(world, x + offsets[side][0], y + offsets[side][1], z + offsets[side][2])) continue;
+        neighbor = maage_environment_fluid(world, x + offsets[side][0], y + offsets[side][1], z + offsets[side][2]);
+        if (!neighbor || neighbor->fluid_kind == state->fluid_kind) continue;
+        replacement = MAAGE_CONTENT_ID_INVALID;
+        requested = 0;
+        allow = 0;
+        result = fluid->contact(fluid->context, state, neighbor, 0, 0, &replacement, &requested, &allow);
+        if (maage_status_failed(result)) return result;
+        if (requested && requested < *delay) *delay = requested;
     }
-    return 30;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
 maage_status maage_environment_changed(maage_environment *environment, maage_world *world, int x, int y, int z) {
     static const int directions[7][3] = {{0, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_block_state_definition *state;
-    unsigned int i;
+    unsigned int i, delay;
     int nx, ny, nz;
     maage_status result;
     if (!environment || !world) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
@@ -423,7 +460,9 @@ maage_status maage_environment_changed(maage_environment *environment, maage_wor
         if (!maage_environment_loaded(world, nx, ny, nz)) continue;
         state = maage_environment_fluid(world, nx, ny, nz);
         if (state) {
-            result = maage_environment_schedule(environment, world, nx, ny, nz, maage_environment_change_delay(world, state, nx, ny, nz));
+            result = maage_environment_change_delay(world, state, nx, ny, nz, &delay);
+            if (maage_status_failed(result)) return result;
+            result = maage_environment_schedule(environment, world, nx, ny, nz, delay);
             if (maage_status_failed(result)) return result;
         }
     }
@@ -431,7 +470,7 @@ maage_status maage_environment_changed(maage_environment *environment, maage_wor
 }
 /* Routing observes material barriers, independently of body collision shapes.
  * Unavailable terrain stops the search and retains one deduplicated retry. */
-static int maage_environment_barrier(const maage_world *world, int x, int y, int z, unsigned int kind, int exclude_source, int *waiting) {
+static int maage_environment_barrier(const maage_world *world, int x, int y, int z, maage_fluid_id kind, int exclude_source, int *waiting) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     if (y < 0 || y >= MAAGE_WORLD_HEIGHT || x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return 1;
@@ -444,41 +483,42 @@ static int maage_environment_barrier(const maage_world *world, int x, int y, int
     return !block || block->material_solid || (!state->fluid_kind && !block->replaceable) || (exclude_source && state->fluid_kind == kind && !state->fluid_level);
 }
 
-/* A breadth-first local footprint ranks outlets by distance to a drop. The
- * five-cell reach is a fluid rule, not a World/cache/queue capacity limit. */
-static unsigned int maage_environment_outlet(const maage_world *world, int x, int y, int z, unsigned int kind, unsigned int direction, int *waiting) {
+/* One reusable environment-owned footprint supports every registered search
+ * radius. Content finalization determines its allocation before owner ticks. */
+static unsigned int maage_environment_outlet(maage_environment *environment, const maage_world *world, int x, int y, int z, const maage_fluid_definition *fluid, unsigned int direction, int *waiting) {
     static const int dx[4] = {-1, 1, 0, 0}, dz[4] = {0, 0, -1, 1};
-    unsigned char visited[11][11];
-    int qx[121], qz[121];
-    unsigned int distance[121], head = 0, tail = 0, side, depth;
-    int nx, nz, cx, cz;
-    memset(visited, 0, sizeof(visited));
+    size_t head = 0, tail = 0, index;
+    unsigned int side, depth;
+    int nx, nz, cx, cz, radius = (int) fluid->routing_depth + 1;
+    size_t span = (size_t) radius * 2 + 1;
+    memset(environment->route_visited, 0, span * span);
     nx = dx[direction];
     nz = dz[direction];
-    if (maage_environment_barrier(world, x + nx, y, z + nz, kind, 1, waiting)) return 6;
-    qx[tail] = nx;
-    qz[tail] = nz;
-    distance[tail++] = 0;
-    visited[nz + 5][nx + 5] = 1;
-    visited[5][5] = 1;
+    if (maage_environment_barrier(world, x + nx, y, z + nz, fluid->id, 1, waiting)) return fluid->routing_depth + 2U;
+    environment->route_x[tail] = nx;
+    environment->route_z[tail] = nz;
+    environment->route_distance[tail++] = 0;
+    environment->route_visited[(size_t) (nz + radius) * span + nx + radius] = 1;
+    environment->route_visited[(size_t) radius * span + radius] = 1;
     while (head < tail) {
-        cx = qx[head];
-        cz = qz[head];
-        depth = distance[head++];
-        if (!maage_environment_barrier(world, x + cx, y - 1, z + cz, kind, 0, waiting)) return depth;
-        if (depth == 4) continue;
+        cx = environment->route_x[head];
+        cz = environment->route_z[head];
+        depth = environment->route_distance[head++];
+        if (!maage_environment_barrier(world, x + cx, y - 1, z + cz, fluid->id, 0, waiting)) return depth;
+        if (depth == fluid->routing_depth) continue;
         for (side = 0; side < 4; ++side) {
             nx = cx + dx[side];
             nz = cz + dz[side];
-            if (visited[nz + 5][nx + 5]) continue;
-            visited[nz + 5][nx + 5] = 1;
-            if (maage_environment_barrier(world, x + nx, y, z + nz, kind, 1, waiting)) continue;
-            qx[tail] = nx;
-            qz[tail] = nz;
-            distance[tail++] = depth + 1;
+            index = (size_t) (nz + radius) * span + nx + radius;
+            if (environment->route_visited[index]) continue;
+            environment->route_visited[index] = 1;
+            if (maage_environment_barrier(world, x + nx, y, z + nz, fluid->id, 1, waiting)) continue;
+            environment->route_x[tail] = nx;
+            environment->route_z[tail] = nz;
+            environment->route_distance[tail++] = depth + 1;
         }
     }
-    return 6;
+    return fluid->routing_depth + 2U;
 }
 
 static maage_status maage_environment_flow(maage_environment *environment, maage_world *world, const maage_block_state_definition *source, int x, int y, int z, unsigned int level, int downward, int *flowed) {
@@ -490,7 +530,9 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
     maage_item_drops drops;
     maage_block_state_id old, state;
     unsigned long random = 0;
-    unsigned int i;
+    unsigned int i, requested = 0;
+    int allow = 0;
+    const maage_fluid_definition *fluid = source->fluid_definition;
     double position[3], velocity[3] = {0, 0.2, 0};
     maage_status result;
     *flowed = 0;
@@ -499,24 +541,33 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
     target = maage_block_registry_state(maage_world_registry(world), old);
     block = target ? maage_block_registry_block(maage_world_registry(world), target->block_id) : NULL;
     if (!block || !target) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
-    if (target->fluid_kind == source->fluid_kind || target->fluid_kind == MAAGE_FLUID_LAVA) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
-    if (target->fluid_kind == MAAGE_FLUID_WATER) {
-        if (source->fluid_kind != MAAGE_FLUID_LAVA) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
-        if (downward) {
-            *flowed = 1;
-            return maage_world_set(world, x, y, z, old, source->fluid_mix_flow);
+    if (!fluid) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    if (target->fluid_kind == source->fluid_kind) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    if (target->fluid_kind) {
+        state = MAAGE_CONTENT_ID_INVALID;
+        if (fluid->contact) {
+            result = fluid->contact(fluid->context, source, target, 1, downward, &state, &requested, &allow);
+            if (maage_status_failed(result)) return result;
+            if (state != MAAGE_CONTENT_ID_INVALID) {
+                if (!maage_block_registry_state(maage_world_registry(world), state)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+                result = maage_world_set(world, x, y, z, old, state);
+                if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *flowed = 1;
+                return result;
+            }
         }
+        if (!allow) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     }
     if (block->material_solid || !block->replaceable) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     memset(&drops, 0, sizeof(drops));
-    if (source->fluid_kind == MAAGE_FLUID_WATER && target->block_id != ids->block_air) {
+    if (fluid->drops_displaced && target->block_id != ids->block_air) {
         random = maage_entities_random(entities);
         result = maage_item_generate_drops(maage_world_registry(world), items, old, NULL, &random, &drops);
         if (maage_status_failed(result)) return result;
         result = maage_entities_reserve(entities, drops.count);
         if (maage_status_failed(result)) return result;
     }
-    state = source->fluid_states[level];
+    if (level >= fluid->state_count) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    state = fluid->states[level];
     result = maage_world_set(world, x, y, z, old, state);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     *flowed = 1;
@@ -531,22 +582,27 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
         result = maage_entities_set_random(entities, random);
         if (maage_status_failed(result)) return result;
     }
-    return maage_environment_schedule(environment, world, x, y, z, source->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U);
+    return maage_environment_schedule(environment, world, x, y, z, fluid->tick_delay);
 }
 static maage_status maage_environment_fluid_update(maage_environment *environment, maage_world *world, int x, int y, int z) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
     static const int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *state, *neighbor, *above, *under;
     const maage_block_definition *below;
+    const maage_fluid_definition *fluid;
     maage_block_state_id old, replacement;
-    unsigned int i, level, minimum = 8, sources = 0, delay, next, costs[4], best = 6;
-    int waiting = 0, nx, nz, flowed, blocked;
+    unsigned int i, level, minimum, sources = 0, delay, next, costs[4], best, requested = 0;
+    int waiting = 0, nx, nz, flowed, blocked, allow;
     maage_status result;
     state = maage_environment_fluid(world, x, y, z);
     if (!state) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    fluid = state->fluid_definition;
+    if (!fluid) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    minimum = fluid->flow_levels;
+    best = fluid->routing_depth + 2U;
     old = state->id;
     level = state->fluid_level;
-    delay = state->fluid_kind == MAAGE_FLUID_LAVA ? 30U : 5U;
+    delay = fluid->tick_delay;
     for (i = 0; i < 4; ++i) {
         nx = x + directions[i][0];
         nz = z + directions[i][1];
@@ -556,28 +612,40 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
         }
         neighbor = maage_environment_fluid(world, nx, y, nz);
         if (!neighbor) continue;
-        if (state->fluid_kind == MAAGE_FLUID_LAVA && neighbor->fluid_kind == MAAGE_FLUID_WATER && level <= 4) return maage_world_set(world, x, y, z, old, level == 0 ? state->fluid_mix_source : state->fluid_mix_shallow);
+        if (neighbor->fluid_kind != state->fluid_kind && fluid->contact) {
+            replacement = MAAGE_CONTENT_ID_INVALID;
+            allow = 0;
+            result = fluid->contact(fluid->context, state, neighbor, 0, 0, &replacement, &requested, &allow);
+            if (maage_status_failed(result)) return result;
+            if (replacement != MAAGE_CONTENT_ID_INVALID) return maage_world_set(world, x, y, z, old, replacement);
+        }
         if (neighbor->fluid_kind != state->fluid_kind) continue;
         if (neighbor->fluid_level == 0) ++sources;
-        next = neighbor->fluid_level >= 8 ? 0 : neighbor->fluid_level;
+        next = neighbor->fluid_level >= fluid->flow_levels ? 0 : neighbor->fluid_level;
         if (next < minimum) minimum = next;
     }
     above = y + 1 < MAAGE_WORLD_HEIGHT ? maage_environment_fluid(world, x, y + 1, z) : NULL;
-    if (state->fluid_kind == MAAGE_FLUID_LAVA && above && above->fluid_kind == MAAGE_FLUID_WATER && level <= 4) return maage_world_set(world, x, y, z, old, level == 0 ? state->fluid_mix_source : state->fluid_mix_shallow);
+    if (above && above->fluid_kind != state->fluid_kind && fluid->contact) {
+        replacement = MAAGE_CONTENT_ID_INVALID;
+        allow = 0;
+        result = fluid->contact(fluid->context, state, above, 0, 0, &replacement, &requested, &allow);
+        if (maage_status_failed(result)) return result;
+        if (replacement != MAAGE_CONTENT_ID_INVALID) return maage_world_set(world, x, y, z, old, replacement);
+    }
     if (level) {
         if (waiting) return maage_environment_schedule(environment, world, x, y, z, delay);
-        next = minimum + (state->fluid_kind == MAAGE_FLUID_LAVA ? 2U : 1U);
-        if (above && above->fluid_kind == state->fluid_kind) next = 8U + (above->fluid_level & 7U);
-        /* Supporting sources regenerate even with water above. Material
+        next = minimum >= fluid->flow_levels || fluid->level_step >= fluid->flow_levels - minimum ? fluid->flow_levels : minimum + fluid->level_step;
+        if (above && above->fluid_kind == state->fluid_kind) next = fluid->flow_levels + above->fluid_level % fluid->flow_levels;
+        /* Supporting sources regenerate even with the same fluid above. Material
          * support is independent of opaque/full-cube collision geometry. */
-        if (state->fluid_kind == MAAGE_FLUID_WATER && sources >= 2) {
+        if (fluid->source_neighbors && sources >= fluid->source_neighbors) {
             under = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, y - 1, z));
             below = under ? maage_block_registry_block(maage_world_registry(world), under->block_id) : NULL;
-            if ((below && below->material_solid) || (under && under->fluid_kind == MAAGE_FLUID_WATER && !under->fluid_level)) next = 0;
+            if ((below && below->material_solid) || (under && under->fluid_kind == state->fluid_kind && !under->fluid_level)) next = 0;
         }
-        if (next >= 8 && !(above && above->fluid_kind == state->fluid_kind)) return maage_world_set(world, x, y, z, old, ids->state_air);
+        if (next >= fluid->flow_levels && !(above && above->fluid_kind == state->fluid_kind)) return maage_world_set(world, x, y, z, old, ids->state_air);
         if (next != level) {
-            replacement = state->fluid_states[next];
+            replacement = fluid->states[next];
             result = maage_world_set(world, x, y, z, old, replacement);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
             state = maage_block_registry_state(maage_world_registry(world), replacement);
@@ -589,15 +657,15 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
         if (maage_status_failed(result)) return result;
     }
     if (y > 0) {
-        result = maage_environment_flow(environment, world, state, x, y - 1, z, 8U + (level & 7U), 1, &flowed);
+        result = maage_environment_flow(environment, world, state, x, y - 1, z, fluid->flow_levels + level % fluid->flow_levels, 1, &flowed);
         if (maage_status_failed(result) || flowed) return result;
     }
     blocked = maage_environment_barrier(world, x, y - 1, z, state->fluid_kind, 0, &waiting);
     if (level && !blocked) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
-    next = level >= 8 ? 1U : level + (state->fluid_kind == MAAGE_FLUID_LAVA ? 2U : 1U);
-    if (next >= 8) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    next = level >= fluid->flow_levels ? fluid->falling_spread_level : (fluid->level_step >= fluid->flow_levels - level ? fluid->flow_levels : level + fluid->level_step);
+    if (next >= fluid->flow_levels) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     for (i = 0; i < 4; ++i) {
-        costs[i] = maage_environment_outlet(world, x, y, z, state->fluid_kind, i, &waiting);
+        costs[i] = maage_environment_outlet(environment, world, x, y, z, fluid, i, &waiting);
         if (costs[i] < best) best = costs[i];
     }
     if (waiting) return maage_environment_schedule(environment, world, x, y, z, delay);
@@ -652,7 +720,7 @@ maage_status maage_chunk_environment_initialize(maage_chunk *chunk, const maage_
                 if (!exposed) continue;
                 update.kind = MAAGE_BLOCK_UPDATE_FLUID;
                 update.cell = (unsigned int) ((y * 16 + z) * 16 + x);
-                update.due_low = (now_low + (state->fluid_kind == MAAGE_FLUID_LAVA ? 30UL : 5UL)) & MAAGE_ENVIRONMENT_WORD;
+                update.due_low = (now_low + state->fluid_definition->tick_delay) & MAAGE_ENVIRONMENT_WORD;
                 update.due_high = (now_high + (update.due_low < now_low ? 1UL : 0UL)) & MAAGE_ENVIRONMENT_WORD;
                 result = maage_chunk_schedule_update(chunk, &update);
                 if (maage_status_failed(result)) return result;

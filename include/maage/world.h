@@ -334,9 +334,11 @@ maage_block_state_id maage_world_get(const maage_world *world, int x, int y, int
 /* Allocation-free local fluid/body observation using actual numeric surface
  * heights. Unknown columns contribute neither air nor flow. Optional flow sums
  * intersecting unit currents then normalizes once; callers apply the impulse. */
-int maage_world_fluid_volume(const maage_world *world, const double minimum[3], const double maximum[3], unsigned int kind, double flow[3]);
-/* Point immersion uses the classic 1/9-block surface tolerance. */
-unsigned int maage_world_fluid_at(const maage_world *world, const double point[3]);
+int maage_world_fluid_volume(const maage_world *world, const double minimum[3], const double maximum[3], maage_fluid_id kind, double flow[3]);
+/* Matches every requested property; zero matches any fluid. */
+int maage_world_fluid_volume_properties(const maage_world *world, const double minimum[3], const double maximum[3], unsigned int properties, double flow[3]);
+/* Point immersion uses the registered level spacing as surface tolerance. */
+maage_fluid_id maage_world_fluid_at(const maage_world *world, const double point[3]);
 int maage_world_solid(const maage_world *world, int x, int y, int z);
 /* Allocation-free DDA through selection shapes. Direction is normalized here;
  * range and returned distance are blocks. Missing columns stop traversal with

@@ -52,6 +52,12 @@ typedef struct maage_base_biome_decoration {
  * this table through const accessors; publication/finalization ends mutation.
  * Array indices below describe properties, never content identities. */
 typedef struct maage_base_ids {
+    unsigned long material_default, material_stone, material_grass, material_dirt, material_wood, material_sand, material_gravel, material_snow;
+    unsigned long material_metal, material_glass, material_water, material_lava, material_foliage, material_cloth, material_ladder, material_anvil;
+    unsigned long container_player, container_table, container_furnace;
+    unsigned long fluid_water, fluid_lava;
+    unsigned long geometry_cube, geometry_cross, geometry_torch;
+    unsigned long texture_water_flow, texture_lava_flow, texture_water_overlay;
     unsigned long biome_ids[MAAGE_BASE_BIOME_COUNT];
     unsigned long textures[MAAGE_BASE_TEXTURE_COUNT];
     unsigned long sources[190];
@@ -268,8 +274,10 @@ enum {
 };
 /* Oak/spruce/birch, with all four flag combinations. Direct numeric mapping;
  * unsupported species/metadata fail explicitly. */
-maage_status maage_block_leaves_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state);
+maage_status maage_block_leaves_state(const maage_block_registry *registry, const maage_base_ids *ids, unsigned int metadata, maage_block_state_id *state);
 /* Species 0..2 plus stage bit 8; unsupported metadata fails explicitly. */
-maage_status maage_block_sapling_state(const maage_block_registry *registry, unsigned int metadata, maage_block_state_id *state);
-const maage_base_ids *maage_base_references(const maage_block_registry *registry);
+maage_status maage_block_sapling_state(const maage_block_registry *registry, const maage_base_ids *ids, unsigned int metadata, maage_block_state_id *state);
+/* Selected Base generator/spawn entry only; gameplay borrows its own block context. */
+const maage_base_ids *maage_base_generation_references(const maage_block_registry *registry);
+const maage_base_ids *maage_base_state_references(const maage_block_registry *registry, const maage_block_state_definition *state);
 #endif

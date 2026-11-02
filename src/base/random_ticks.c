@@ -46,7 +46,7 @@ static maage_status maage_random_grass_light(const maage_world *world, int x, in
 }
 
 maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     const maage_block_state_definition *cover, *destination;
     const maage_block_definition *block;
     unsigned int attempt;
@@ -80,7 +80,7 @@ maage_status maage_random_tick_grass(maage_world *world, int x, int y, int z, co
 }
 
 maage_status maage_random_tick_farmland(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     maage_environment_state environment;
@@ -101,7 +101,7 @@ maage_status maage_random_tick_farmland(maage_world *world, int x, int y, int z,
                 result = maage_random_block(world, x + dx, y + dy, z + dz, &neighbor, &block);
                 if (maage_status_failed(result)) return result;
                 if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) unavailable = 1;
-                else if (neighbor->fluid_kind == MAAGE_FLUID_WATER) {
+                else if (neighbor->fluid_kind == ids->fluid_water) {
                     hydrated = 1;
                     break;
                 }
@@ -136,7 +136,7 @@ maage_status maage_random_tick_farmland(maage_world *world, int x, int y, int z,
 }
 
 maage_status maage_random_tick_wheat(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     unsigned char light;
@@ -175,7 +175,7 @@ maage_status maage_random_tick_wheat(maage_world *world, int x, int y, int z, co
 }
 
 maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     maage_block_state_id staged, reset[4];
@@ -192,7 +192,7 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (maage_random_light_value(light, context) < 9 || maage_random_tick_next(context, 7)) return maage_random_noop();
     if (!(state->metadata & 8U)) {
-        result = maage_block_sapling_state(maage_world_registry(world), state->metadata | 8U, &staged);
+        result = maage_block_sapling_state(maage_world_registry(world), ids, state->metadata | 8U, &staged);
         return maage_status_failed(result) ? result : maage_world_set(world, x, y, z, state->id, staged);
     }
     if (species == 1) {
@@ -219,11 +219,11 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
     } else if (!species) large = maage_random_tick_next(context, 10) == 0;
     random = ((1UL + maage_random_tick_next(context, 65535U)) << 16);
     random |= maage_random_tick_next(context, 65536U);
-    result = maage_generation_grow_tree(world, x, y, z, species, large, random, &attempted);
+    result = maage_generation_grow_tree(ids, world, x, y, z, species, large, random, &attempted);
     if (maage_status_code(result) != MAAGE_STATUS_NOOP || !attempted) return result;
     /* A known obstruction restarts the two-stage cycle. Operational failure
      * and unavailable terrain keep every original sapling/stage untouched. */
-    result = maage_block_sapling_state(maage_world_registry(world), species, &staged);
+    result = maage_block_sapling_state(maage_world_registry(world), ids, species, &staged);
     if (maage_status_failed(result)) return result;
     reset[0] = reset[1] = reset[2] = reset[3] = staged;
     plan.x = x;
@@ -236,7 +236,7 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
 }
 
 maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
@@ -286,8 +286,7 @@ maage_status maage_random_tick_bush(maage_world *world, int x, int y, int z, con
     return maage_world_check_support(world, x, y, z);
 }
 
-static maage_status maage_random_mushroom_site(const maage_world *world, int x, int y, int z, int *valid) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+static maage_status maage_random_mushroom_site(const maage_base_ids *ids, const maage_world *world, int x, int y, int z, int *valid) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     unsigned char light;
@@ -306,7 +305,7 @@ static maage_status maage_random_mushroom_site(const maage_world *world, int x, 
 }
 
 maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     int dx, dy, dz, count = 0, attempt, nx, ny, nz, valid;
@@ -325,7 +324,7 @@ maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z,
         ny = y + (int) maage_random_tick_next(context, 2);
         ny -= (int) maage_random_tick_next(context, 2);
         nz = z + (int) maage_random_tick_next(context, 3) - 1;
-        result = maage_random_mushroom_site(world, nx, ny, nz, &valid);
+        result = maage_random_mushroom_site(ids, world, nx, ny, nz, &valid);
         if (maage_status_failed(result)) return result;
         if (attempt == 4) return valid ? maage_world_set(world, nx, ny, nz, ids->state_air, state->block_id == ids->block_brown_mushroom ? ids->state_brown_mushroom : ids->state_red_mushroom)
                                        : maage_random_noop();
@@ -339,7 +338,7 @@ maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z,
 }
 
 maage_status maage_random_tick_snow(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     unsigned char light;
     maage_status result = maage_world_sample_light(world, x, y, z, &light);
     (void) context;
@@ -348,7 +347,7 @@ maage_status maage_random_tick_snow(maage_world *world, int x, int y, int z, con
 }
 
 maage_status maage_random_tick_ice(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     const maage_block_definition *block = maage_block_registry_block(maage_world_registry(world), state->block_id);
     unsigned char light;
     maage_status result = maage_world_sample_light(world, x, y, z, &light);

@@ -195,7 +195,7 @@ maage_status maage_client_camera_effects_update(maage_client_camera_effects *eff
         effects->rendered = 1;
     }
     maage_player_matrix_identity(effects->matrix);
-    effects->fov_scale = snapshot->player.submerged ? 60.0 / 70.0 : 1;
+    effects->fov_scale = 1;
     if (effects->death_age >= 0) {
         roll = 40 * effects->death_age / (effects->death_age + 200);
         maage_player_matrix_rotate(effects->matrix, 2, roll * pi / 180);

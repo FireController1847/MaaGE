@@ -17,7 +17,7 @@ static int maage_support_full(const maage_block_definition *block) {
     return 1;
 }
 static maage_status base_survival(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid, unsigned int policy) {
-    const maage_base_ids *ids = maage_base_references(maage_world_registry(world));
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
     static const int torch_support[6][3] = {{0, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, -1, 0}};
     static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     const maage_block_state_definition *below, *neighbor;

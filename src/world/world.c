@@ -1556,7 +1556,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
             return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
         }
     }
-    result = maage_environment_create(config->seed, config->initial_environment, &world->environment);
+    result = maage_environment_create(config->seed, config->initial_environment, config->registry, &world->environment);
     if (maage_status_failed(result)) {
         maage_jobs_destroy(world->io_jobs, NULL);
         maage_jobs_destroy(world->jobs, NULL);

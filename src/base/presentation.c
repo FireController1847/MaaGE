@@ -1,4 +1,21 @@
 #include "base_internal.h"
+#include "maage/block_geometry.h"
+#include <string.h>
+
+maage_status maage_base_geometry(maage_content_context *context, maage_base_ids *ids) {
+    maage_block_geometry_definition definition;
+    maage_status result;
+    memset(&definition, 0, sizeof(definition));
+    definition.primitive = MAAGE_BLOCK_MESH_CUBE;
+    result = maage_block_geometry_register(context->geometry, "minecraft:cube", &definition, &ids->geometry_cube);
+    if (maage_status_failed(result)) return result;
+    definition.primitive = MAAGE_BLOCK_MESH_CROSS;
+    result = maage_block_geometry_register(context->geometry, "minecraft:cross", &definition, &ids->geometry_cross);
+    if (maage_status_failed(result)) return result;
+    definition.primitive = MAAGE_BLOCK_MESH_TORCH;
+    return maage_block_geometry_register(context->geometry, "minecraft:torch", &definition, &ids->geometry_torch);
+}
+
 maage_block_state_id maage_base_item_icon(const maage_item_definition *item, unsigned int metadata) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
     unsigned int species = metadata & 3U;

@@ -1,6 +1,7 @@
-#include "maage/base.h"
+#include "../application/content_modules.h"
 #include "maage/server_runtime.h"
 #include "maage/content.h"
+#include "maage/containers.h"
 #include "maage/gameplay.h"
 #include "maage/local_session.h"
 #include "maage/thread.h"
@@ -216,14 +217,14 @@ static maage_status server_reject(maage_server_runtime *runtime, unsigned char c
 
 static maage_status server_close_container(maage_server_runtime *runtime) {
     maage_status result;
-    result = maage_crafting_close(&runtime->game.crafting, &runtime->game.inventory, maage_content_items(runtime->content), &runtime->player, runtime->world);
+    result = maage_container_close(maage_content_containers(runtime->content), runtime->world, &runtime->game, &runtime->player);
     runtime->publication_dirty = 1;
     return result;
 }
 static void server_service_container(maage_server_runtime *runtime) {
     maage_crafting_container *container = &runtime->game.crafting;
     maage_status result;
-    if (!container->closing && (!container->kind || (runtime->game.health && maage_crafting_accessible(container, &runtime->player, runtime->world)))) return;
+    if (!container->closing && (!container->kind || (runtime->game.health && maage_container_accessible(maage_content_containers(runtime->content), container, &runtime->player, runtime->world)))) return;
     result = server_close_container(runtime);
     if (maage_status_failed(result) && result != runtime->crafting_failure) server_status_event(runtime, result, NULL);
     runtime->crafting_failure = result;
@@ -383,7 +384,12 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SELECT);
     case MAAGE_CMD_CONTAINER_OPEN:
         if (!runtime->game.health || runtime->game.crafting.kind || runtime->game.crafting.closing) return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_OPEN);
-        result = maage_crafting_open(&runtime->game.crafting, MAAGE_CONTAINER_PLAYER, 0, 0, 0);
+        result = maage_container_open(maage_content_containers(runtime->content), &runtime->game.crafting, maage_container_inventory(maage_content_containers(runtime->content)), 0, 0, 0, runtime->world);
+        runtime->publication_dirty = 1;
+        break;
+    case MAAGE_CMD_CONTAINER_PAGE:
+        if (!command->container_identity || command->container_identity != runtime->game.crafting.identity || !runtime->game.health || !maage_container_accessible(maage_content_containers(runtime->content), &runtime->game.crafting, &runtime->player, runtime->world)) return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_SET);
+        result = maage_container_page(maage_content_containers(runtime->content), &runtime->game.crafting, command->container_view_first);
         runtime->publication_dirty = 1;
         break;
     case MAAGE_CMD_CONTAINER_CLOSE:
@@ -391,20 +397,11 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         if (!command->container_identity || command->container_identity != runtime->game.crafting.identity || !runtime->game.crafting.kind) return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
         if (command->kind == MAAGE_CMD_CONTAINER_CLOSE) result = server_close_container(runtime);
         else {
-            const maage_crafting_container *container = &runtime->game.crafting;
-            const maage_block_state_definition *state;
-            const maage_block_definition *block;
-            if (!runtime->game.health || !maage_crafting_accessible(&runtime->game.crafting, &runtime->player, runtime->world)) {
+            if (!runtime->game.health || !maage_container_accessible(maage_content_containers(runtime->content), &runtime->game.crafting, &runtime->player, runtime->world)) {
                 server_service_container(runtime);
                 return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
             }
-            state = maage_block_registry_state(blocks, maage_world_get(runtime->world, container->x, container->y, container->z));
-            block = state && container->kind != MAAGE_CONTAINER_PLAYER ? maage_block_registry_block(blocks, state->block_id) : NULL;
-            if (block && block->container_action) {
-                result = block->container_action(runtime->world, &runtime->game, command->container_revision, command->slot_group, command->container_slot, command->slot_action);
-            } else {
-                result = maage_crafting_click(&runtime->game.crafting, &runtime->game.inventory, items, maage_content_recipes(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action);
-            }
+            result = maage_container_action(maage_content_containers(runtime->content), runtime->world, &runtime->game, &runtime->player, maage_content_recipes(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action);
         }
         runtime->publication_dirty = 1;
         break;
@@ -416,7 +413,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         break;
     case MAAGE_CMD_CREATIVE_PICK:
         if (runtime->game.mode != MAAGE_GAME_MODE_CREATIVE || !runtime->game.health ||
-            runtime->game.crafting.kind != MAAGE_CONTAINER_PLAYER || runtime->game.crafting.closing ||
+            !maage_container_get(maage_content_containers(runtime->content), runtime->game.crafting.kind) || !maage_container_get(maage_content_containers(runtime->content), runtime->game.crafting.kind)->creative_catalog || runtime->game.crafting.closing ||
             command->container_identity != runtime->game.crafting.identity)
             return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
         result = maage_inventory_creative(&runtime->game.inventory, items, command->item_id, command->item_metadata);
@@ -590,17 +587,10 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.inventory = runtime->game.inventory;
     snapshot.player.crafting = runtime->game.crafting;
     snapshot.player.experience = runtime->game.experience;
-    if (snapshot.player.crafting.kind && snapshot.player.crafting.kind != MAAGE_CONTAINER_PLAYER) {
-        maage_crafting_container *container = &snapshot.player.crafting;
-        const maage_block_state_definition *state = maage_block_registry_state(maage_content_blocks(runtime->content), maage_world_get(runtime->world, container->x, container->y, container->z));
-        const maage_block_definition *block = state ? maage_block_registry_block(maage_content_blocks(runtime->content), state->block_id) : NULL;
-        if (block && block->container_sample) {
-            result = block->container_sample(runtime->world, container);
-            if (maage_status_failed(result)) {
-                server_status_event(runtime, result, NULL);
-                return;
-            }
-        }
+    result = maage_container_sample(maage_content_containers(runtime->content), runtime->world, &snapshot.player.crafting);
+    if (maage_status_failed(result)) {
+        server_status_event(runtime, result, NULL);
+        return;
     }
     snapshot.player.food = runtime->game.food;
     runtime->publication_dirty = 0;
@@ -697,11 +687,13 @@ static void server_offer_columns(maage_server_runtime *runtime) {
 
 static maage_status server_open_world(maage_server_runtime *runtime, maage_status_trace *trace) {
     maage_world_config world_config;
+    maage_content_config content_config;
     const maage_item_registry *items;
     maage_status result;
     char error[256];
     if (!runtime->config.content) {
-        result = maage_base_content_create(NULL, &runtime->owned_content, trace);
+        maage_application_content_config(&content_config);
+        result = maage_application_content_create(&content_config, &runtime->owned_content, trace);
         if (maage_status_failed(result)) return result;
     }
     runtime->content = runtime->config.content ? runtime->config.content : runtime->owned_content;
@@ -880,7 +872,7 @@ static maage_status server_tick(maage_server_runtime *runtime, double scheduled_
         result = maage_entities_tick(maage_world_entities(runtime->world), runtime->world, maage_content_items(runtime->content), &runtime->player, &runtime->game.inventory, runtime->game.health != 0, &collected, pickups, 32, &pickup_count);
         if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_TICK);
         if (pickup_count) {
-            result = maage_gameplay_build_sound(&runtime->game, &pickup, MAAGE_SOUND_ITEM_PICKUP, MAAGE_MATERIAL_DEFAULT, runtime->player.position, 0.2, 1.6 + server_effect_random(runtime, 800) / 1000.0);
+            result = maage_gameplay_build_sound(&runtime->game, maage_content_sounds(runtime->content), &pickup, MAAGE_SOUND_ITEM_PICKUP, 0, runtime->player.position, 0.2, 1.6 + server_effect_random(runtime, 800) / 1000.0);
             if (!maage_status_failed(result)) {
                 pickup.tick = runtime->tick + 1;
                 server_emit_effect(runtime, &pickup, pickups, pickup_count);

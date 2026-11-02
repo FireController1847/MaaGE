@@ -3,9 +3,10 @@
 #include "maage/items.h"
 #include "maage/crafting.h"
 #include "maage/player.h"
+#include "maage/sounds.h"
 
 /* Shared numeric sound classification for authoritative and predicted effects. */
-unsigned int maage_gameplay_block_material(const maage_block_definition *block);
+maage_sound_material_id maage_gameplay_block_material(const maage_block_definition *block);
 
 /* Forward declaration avoids a cycle: session_protocol.h includes gameplay.h. */
 struct maage_sound_event;
@@ -60,7 +61,7 @@ typedef struct maage_gameplay {
     unsigned int dig_ticks;
     maage_item_id breaking_item;
     unsigned int breaking_metadata, breaking_damage;
-    int attack_held, use_held, audio_initialized, in_water;
+    int attack_held, use_held, audio_initialized, swimming;
 } maage_gameplay;
 typedef struct maage_gameplay_intent {
     maage_player_input movement;
@@ -95,7 +96,7 @@ maage_status maage_gameplay_drop(maage_gameplay *game, const maage_player *playe
 maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player, const maage_world *world, double yaw, double pitch);
 /* Numeric event construction for Server-owned gameplay/environment occurrences.
  * No audio device, transport, allocation, or string identity is involved. */
-maage_status maage_gameplay_build_sound(maage_gameplay *game, struct maage_sound_event *event, unsigned int kind, unsigned int material, const double position[3], double intensity, double pitch);
+maage_status maage_gameplay_build_sound(maage_gameplay *game, const maage_sound_registry *sounds, struct maage_sound_event *event, unsigned int kind, maage_sound_material_id material, const double position[3], double intensity, double pitch);
 
 /* One fixed-step owner tick. The caller owns the bounded event array.
  * (NULL, 0, NULL) disables event generation. Otherwise

@@ -43,7 +43,7 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size) {
 }
 
 static int session_command_valid(const maage_session_command *command) {
-    if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_PLACE_PREVIEW) return 0;
+    if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CONTAINER_PAGE) return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
@@ -52,15 +52,16 @@ static int session_command_valid(const maage_session_command *command) {
         return command->prediction != 0 && command->prediction <= 4294967295UL && command->prediction_revision != 0 && command->prediction_command_sequence != 0 && command->prediction_command_sequence < command->sequence;
     case MAAGE_CMD_CONTAINER_OPEN:
         return 1;
+    case MAAGE_CMD_CONTAINER_PAGE:
+        return command->container_identity != 0 && command->container_identity <= 4294967295UL && command->container_view_first < MAAGE_CONTENT_ID_INVALID;
     case MAAGE_CMD_CONTAINER_CLOSE:
         return command->container_identity != 0 && command->container_identity <= 4294967295UL;
     case MAAGE_CMD_CONTAINER_SLOT:
         return command->container_identity != 0 && command->container_identity <= 4294967295UL &&
                command->container_revision <= 4294967295UL &&
                command->slot_action >= MAAGE_SLOT_PRIMARY && command->slot_action <= MAAGE_SLOT_QUICK_MOVE &&
-               ((command->slot_group == MAAGE_SLOT_INVENTORY && command->container_slot < MAAGE_INVENTORY_SLOTS) ||
-                (command->slot_group == MAAGE_SLOT_CRAFT_INPUT && command->container_slot < MAAGE_CRAFTING_CELLS) ||
-                (command->slot_group == MAAGE_SLOT_CRAFT_RESULT && command->container_slot == 0));
+               command->slot_group != 0 && command->container_slot < MAAGE_CONTENT_ID_INVALID &&
+               (command->slot_group != MAAGE_SLOT_INVENTORY || command->container_slot < MAAGE_INVENTORY_SLOTS);
     case MAAGE_CMD_DROP:
         return command->inventory_slot <= MAAGE_INVENTORY_SLOTS && (command->secondary_click == 0 || command->secondary_click == 1);
     case MAAGE_CMD_GAME_MODE:
@@ -88,6 +89,15 @@ static int session_motion_valid(const maage_session_player_motion *motion) {
     return 1;
 }
 
+static int session_container_valid(const maage_crafting_container *container) {
+    unsigned int i;
+    if (container->kind >= MAAGE_CONTENT_ID_INVALID || container->identity > 4294967295UL || container->revision > 4294967295UL || (container->closing != 0 && container->closing != 1) || container->view_first >= MAAGE_CONTENT_ID_INVALID || container->view_first % MAAGE_CONTAINER_VIEW_SLOTS || container->view_count > MAAGE_CONTAINER_VIEW_SLOTS || container->progress_count > MAAGE_CONTAINER_VIEW_SLOTS || container->view_first > MAAGE_CONTENT_ID_INVALID - container->view_count || container->view_first > MAAGE_CONTENT_ID_INVALID - container->progress_count) return 0;
+    if (container->kind && (!container->identity || !container->revision)) return 0;
+    for (i = 0; i < container->progress_count; ++i)
+        if (container->progress[i].value > container->progress[i].total || container->progress[i].total > 4294967295UL || (container->progress[i].active != 0 && container->progress[i].active != 1)) return 0;
+    return 1;
+}
+
 static int session_event_valid(const maage_session_event *event) {
     if (event->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_PLAYER_MOTION || event->kind == 3U ||
@@ -95,9 +105,9 @@ static int session_event_valid(const maage_session_event *event) {
     if (event->kind == MAAGE_EVENT_PICKUP && (!event->pickup_count || event->pickup_count > 32)) return 0;
     if (event->kind == MAAGE_EVENT_PLAYER_MOTION && (!event->sequence || !session_motion_valid(&event->motion))) return 0;
     if (event->kind == MAAGE_EVENT_SOUND || event->kind == MAAGE_EVENT_PICKUP)
-        return event->sound.event_id >= MAAGE_SOUND_FOOTSTEP &&
-               event->sound.event_id <= MAAGE_SOUND_MAX &&
-               event->sound.material <= MAAGE_MATERIAL_MAX &&
+        return (event->sound.event_id || event->sound.action) &&
+               event->sound.event_id < MAAGE_CONTENT_ID_INVALID && event->sound.material < MAAGE_CONTENT_ID_INVALID &&
+               event->sound.action < MAAGE_SOUND_ACTION_COUNT &&
                event->sequence != 0UL && event->sound.sequence == event->sequence &&
                event->sound.tick == event->tick;
     return 1;
@@ -206,7 +216,7 @@ maage_status maage_local_session_publish_snapshot(maage_local_session *session, 
     maage_status result;
     if (!session) return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
     if (!snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        !session_motion_valid(&snapshot->player.motion) || snapshot->player.air < -19 || snapshot->player.air > 300 ||
+        !session_motion_valid(&snapshot->player.motion) || !session_container_valid(&snapshot->player.crafting) || snapshot->player.air < -19 || snapshot->player.air > 300 ||
         (snapshot->player.food.remaining && (!snapshot->player.food.stack.item_id || !snapshot->player.food.stack.count || snapshot->player.food.slot >= MAAGE_HOTBAR_SLOTS || snapshot->player.food.remaining > snapshot->player.food.duration || snapshot->player.food.started_tick > snapshot->tick)) ||
         snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick || snapshot->player.last_break_tick > snapshot->tick ||
         snapshot->gameplay_command_sequence > snapshot->applied_command_sequence || !(snapshot->next_tick_at == -1 || (snapshot->next_tick_at >= 0 && snapshot->next_tick_at <= DBL_MAX)) ||

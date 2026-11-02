@@ -8,26 +8,6 @@ static maage_status crafting_status(unsigned char code, unsigned char operation)
 static int stacks_equal(const maage_item_stack *a, const maage_item_stack *b) {
     return a->item_id == b->item_id && a->metadata == b->metadata && a->damage == b->damage;
 }
-maage_status maage_crafting_open_grid(maage_crafting_container *container, unsigned int kind, int x, int y, int z, unsigned int width) {
-    unsigned int i;
-    if (!container || (!kind || (width != 0 && width != 2 && width != 3))) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_OPEN);
-    if (container->kind || container->closing) return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_OPEN);
-    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
-        if (container->inputs[i].count)
-            return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_OPEN);
-    if (container->identity == 4294967295UL) return crafting_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_OPEN);
-    ++container->identity;
-    container->revision = 1;
-    container->kind = kind;
-    container->grid_width = width;
-    container->active_remaining = container->active_duration = container->process = container->process_duration = 0;
-    container->block_identity = 0;
-    container->x = x;
-    container->y = y;
-    container->z = z;
-    memset(&container->output, 0, sizeof(container->output));
-    return crafting_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_OPEN);
-}
 maage_status maage_crafting_refresh(maage_crafting_container *container, const maage_recipe_registry *recipes) {
     maage_recipe_match match;
     maage_status result;
@@ -152,22 +132,6 @@ maage_status maage_crafting_click(maage_crafting_container *container, maage_inv
     result = maage_crafting_refresh(container, recipes);
     return maage_status_failed(result) ? result : outcome;
 }
-int maage_crafting_accessible(const maage_crafting_container *container, const maage_player *player, const maage_world *world) {
-    const maage_block_definition *block;
-    const maage_block_state_definition *state;
-    double dx, dy, dz;
-    if (!container || !player || !world || container->closing) return 0;
-    if (container->kind == MAAGE_CONTAINER_PLAYER) return 1;
-    if (!maage_world_chunk_loaded(world, maage_world_chunk_coordinate(container->x), maage_world_chunk_coordinate(container->z))) return 0;
-    state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, container->x, container->y, container->z));
-    if (!state) return 0;
-    block = maage_block_registry_block(maage_world_registry(world), state->block_id);
-    if (!block || !block->container_access || !block->container_access(world, container)) return 0;
-    dx = player->position[0] - (container->x + 0.5);
-    dy = player->position[1] - (container->y + 0.5);
-    dz = player->position[2] - (container->z + 0.5);
-    return dx * dx + dy * dy + dz * dz <= 64.0;
-}
 maage_status maage_crafting_close(maage_crafting_container *container, maage_inventory *inventory, const maage_item_registry *items, const maage_player *player, maage_world *world) {
     maage_inventory next;
     maage_item_stack *source;
@@ -211,8 +175,4 @@ maage_status maage_crafting_close(maage_crafting_container *container, maage_inv
     container->closing = 0;
     ++container->revision;
     return crafting_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CLOSE);
-}
-
-maage_status maage_crafting_open(maage_crafting_container *container, unsigned int kind, int x, int y, int z) {
-    return maage_crafting_open_grid(container, kind, x, y, z, kind == MAAGE_CONTAINER_PLAYER ? 2U : 0U);
 }

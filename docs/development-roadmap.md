@@ -12,7 +12,7 @@ audio and cross-platform completion require programmer verification.
 | --- | --- | --- |
 | Platform | C90 shared libraries; native Window/Input/Storage/Jobs/Status/Log; Metal/Vulkan rendering and a modern OpenGL scene/UI backend | Modern OpenGL awaits compilation and programmer runtime/platform validation; legacy OpenGL/Software implement smaller subsets; Wayland lacks Client relative capture. |
 | Applications | Independent native Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote transport, administration GUI and Launcher Server management are absent. |
-| Content API | Statically linked `MaaGE::Base` module; explicit block/item/biome/recipe/fuel/ore registrations through generic registries; definition-dispatched behavior, processing containers, block-entity codecs and growable presentation catalogs | No external module loader, scripting, package discovery or remote content negotiation. Refactor awaits compilation and programmer runtime verification. |
+| Content API | Dependency-ordered static modules; shared definition/resolve/finalize/initialize phases; registered containers/GUI, fluids, geometry providers, sound content and explicit Base definitions; existing block-entity codecs | No external module loader, scripting, package discovery or remote content negotiation. Refactor awaits compilation and programmer runtime verification. |
 | World | Numeric registries, deterministic staged generation with coherent biome regions and shared boundary ecology, sparse columns, immutable asynchronous I/O/jobs, environment, scheduled fluids/support and random ticks | Six selected biome categories; transition visuals/runtime costs await programmer verification; no Java seed/save interoperability or migration. |
 | Gameplay | Movement/collision, breaking/placement, provisional vitals, inventory, typed item/falling-block entities, cactus contact damage, sapling/tree growth, hoe tilling and wheat farming, food use, transactional 2x2/3x3 crafting, persistent furnaces and extraction XP | Farming is limited to wheat; full Survival progression, mobs and combat remain incomplete/absent. |
 | Presentation | Packed GPU surface tables, compatible section-bounded face merging, Title/world management, gameplay/settings/inventory screens, local visual light/meshing, break/placement prediction, shared player skins/perspectives, eating poses, configurable biome blending, audio | Creative has one catalog; unavailable settings/content remain disabled or absent. |
@@ -31,6 +31,7 @@ Maintain Metal/Vulkan presentation semantics and resource lifetimes together.
 
 Current technical references:
 
+- [Content modules, registries and ownership](content-modules.md)
 - [World generation, biome transitions and saved terrain](world-generation.md)
 - [Client UI, visual World, prediction and neighbor support](gameplay-parity.md)
 - [Rendering, materials, light sampling and sprint presentation](visual-fidelity.md)
@@ -39,7 +40,6 @@ Current technical references:
 - [Random ticks, leaf support and RNG checkpoints](random-block-ticks.md)
 - [Authenticated skin acquisition and cache](player-skins.md)
 - [Player perspectives and camera collision](third-person.md)
-- [Numeric audio catalog](../src/audio/catalog/README.md)
 
 ## Remaining Milestones
 

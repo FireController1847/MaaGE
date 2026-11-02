@@ -88,7 +88,7 @@ static unsigned long furnace_type(const maage_world *world, int x, int y, int z)
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *state = maage_block_registry_state(blocks, maage_world_get(world, x, y, z));
     const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-    return block && block->container_action == maage_base_furnace_action && block->entity ? block->entity->id : 0;
+    return block && block->use == maage_base_furnace_use && block->entity ? block->entity->id : 0;
 }
 maage_status maage_world_furnace_get(const maage_world *world, int x, int y, int z, maage_furnace_state *state) {
     return maage_world_entity_read(world, x, y, z, furnace_type(world, x, y, z), state, sizeof(*state));

@@ -18,7 +18,6 @@ typedef struct maage_biome_definition {
 typedef struct maage_biome_registry {
     size_t count, name_capacity;
     void **name_buckets;
-    const void *generation_context; /* Borrowed generator data, never interpreted by registry. */
     void *extension_pages;
     void *extensions;
     int finalized;
