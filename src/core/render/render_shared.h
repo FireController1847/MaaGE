@@ -48,15 +48,15 @@ typedef float maage_render_vector[4];
 typedef struct maage_render_uniforms {
     MAAGE_RENDER_UNIFORM_FIELDS(maage_render_matrix, maage_render_vector)
 } maage_render_uniforms;
-/* Native-only 44-byte stream, keeping precision-sensitive coordinates,
+/* Native-only 40-byte stream, keeping precision-sensitive coordinates,
  * animation and material fields as floats. CPU producers remain 60-byte
  * maage_mesh_vertex. Light and tint use normalized 8-bit channels. */
 typedef struct maage_render_gpu_mesh_vertex {
     float position[3];
     float uv[2];
     unsigned char color[4];
-    unsigned char light[4]; /* First two channels used; remaining bytes reserved. */
-    float material;
+    unsigned char light[2];
+    unsigned short material; /* Four native surface pipeline modes. */
     float animation[3];
 } maage_render_gpu_mesh_vertex;
 void maage_render_mesh_pack_span(const maage_mesh_vertex *vertices, size_t offset, size_t bytes, void *destination);

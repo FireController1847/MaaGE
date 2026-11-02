@@ -483,6 +483,8 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
 #define MAAGE_VERTEX_VEC3 VK_FORMAT_R32G32B32_SFLOAT
 #define MAAGE_VERTEX_VEC4 VK_FORMAT_R32G32B32A32_SFLOAT
 #define MAAGE_VERTEX_BYTE4 VK_FORMAT_R8G8B8A8_UNORM
+#define MAAGE_VERTEX_BYTE2 VK_FORMAT_R8G8_UNORM
+#define MAAGE_VERTEX_USHORT1 VK_FORMAT_R16_UINT
 #define MAAGE_VERTEX_FIELD(slot, format, name) {slot, 0, format, offsetof(maage_render_gpu_mesh_vertex, name)},
         static const VkVertexInputAttributeDescription mesh_fields[] = {
             MAAGE_RENDER_GPU_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)};
@@ -496,6 +498,8 @@ static maage_status maage_vulkan_pipeline(maage_renderer *renderer, VkRenderPass
 #undef MAAGE_VERTEX_VEC3
 #undef MAAGE_VERTEX_VEC4
 #undef MAAGE_VERTEX_BYTE4
+#undef MAAGE_VERTEX_BYTE2
+#undef MAAGE_VERTEX_USHORT1
         memcpy(attributes, ui ? ui_fields : mesh_fields, ui ? sizeof(ui_fields) : sizeof(mesh_fields));
     }
     vertices.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;

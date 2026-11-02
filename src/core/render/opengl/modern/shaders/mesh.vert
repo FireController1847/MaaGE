@@ -1,7 +1,10 @@
 #version 330 core
 #include "common.glsl"
+#define MAAGE_VERTEX_BYTE4 vec4
+#define MAAGE_VERTEX_BYTE2 vec2
+#define MAAGE_VERTEX_USHORT1 float
 #define MAAGE_VERTEX_FIELD(slot, type, name) layout(location = slot) in type name;
-MAAGE_RENDER_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
+MAAGE_RENDER_GPU_MESH_ATTRIBUTES(MAAGE_VERTEX_FIELD)
 #undef MAAGE_VERTEX_FIELD
 out vec2 maage_uv;
 out vec4 maage_color;

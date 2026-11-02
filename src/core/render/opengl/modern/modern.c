@@ -238,13 +238,14 @@ static void maage_gl_mesh_attributes(maage_gl_renderer *native) {
 #define MAAGE_GL_MESH_FLOAT(slot, count, name) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_FLOAT, GL_FALSE, sizeof(maage_render_gpu_mesh_vertex), (const void *) offsetof(maage_render_gpu_mesh_vertex, name));
     MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_POSITION_LOCATION, 3, position)
     MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_UV_LOCATION, 2, uv)
-    MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_MATERIAL_LOCATION, 1, material)
     MAAGE_GL_MESH_FLOAT(MAAGE_RENDER_MESH_ANIMATION_LOCATION, 3, animation)
 #undef MAAGE_GL_MESH_FLOAT
 #define MAAGE_GL_MESH_BYTE(slot, count, name) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(maage_render_gpu_mesh_vertex), (const void *) offsetof(maage_render_gpu_mesh_vertex, name));
     MAAGE_GL_MESH_BYTE(MAAGE_RENDER_MESH_COLOR_LOCATION, 4, color)
     MAAGE_GL_MESH_BYTE(MAAGE_RENDER_MESH_LIGHT_LOCATION, 2, light)
 #undef MAAGE_GL_MESH_BYTE
+    native->gl.EnableVertexAttribArray(MAAGE_RENDER_MESH_MATERIAL_LOCATION);
+    native->gl.VertexAttribPointer(MAAGE_RENDER_MESH_MATERIAL_LOCATION, 1, GL_UNSIGNED_SHORT, GL_FALSE, sizeof(maage_render_gpu_mesh_vertex), (const void *) offsetof(maage_render_gpu_mesh_vertex, material));
 }
 static void maage_gl_ui_attributes(maage_gl_renderer *native) {
 #define MAAGE_GL_ATTRIBUTE(slot, count, field) native->gl.EnableVertexAttribArray(slot); native->gl.VertexAttribPointer(slot, count, GL_FLOAT, GL_FALSE, sizeof(maage_render_ui_gpu_vertex), (const void *) (offsetof(maage_render_ui_gpu_vertex, vertex) + offsetof(maage_render_ui_vertex, field)));
