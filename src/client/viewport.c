@@ -816,8 +816,6 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_splash_update(&splash, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_create(renderer, window, directory, &resources, &ui, trace);
-    (void) maage_image_destroy(&resources.image);
-    resources.atlas.pixels = NULL;
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_set_content(ui, items, blocks, resources.inventory_grass_color, resources.uv, resources.texture_count);
     if (maage_status_failed(operation)) goto done;
@@ -829,7 +827,13 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_splash_update(&splash, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_environment_create(renderer, directory, &resources, &environment_view, trace);
-    if (maage_status_failed(operation)) goto done;
+    /* Both GUI and environment copy from the initialization-only CPU atlas. */
+    (void) maage_image_destroy(&resources.image);
+    resources.atlas.pixels = NULL;
+    if (maage_status_failed(operation)) {
+        failure_message = "Environment presentation initialization failed.";
+        goto done;
+    }
     if (maage_status_is_success(resource_notice)) resource_notice = maage_client_environment_resource_status(environment_view, NULL);
     /* The service remains valid in silent-device recovery. Rendering and the
      * authoritative Server must not depend on sound playback succeeding. */

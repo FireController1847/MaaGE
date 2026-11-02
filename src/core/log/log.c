@@ -56,13 +56,25 @@ static maage_status maage_log_close_file(void) {
 }
 
 maage_status maage_log_init(const maage_log_config *config, int argc, char *const argv[]) {
-    maage_status result, previous;
+    maage_status result, previous, crash;
+    maage_status_trace trace;
+    char message[MAAGE_LOG_EVENT_SIZE];
     maage_log_lock();
     previous = maage_log_close_file();
+    maage_log_crash_stop();
     free(maage_log_current.overrides);
     maage_log_current.overrides = NULL;
     maage_log_current.count = maage_log_current.capacity = 0;
     result = maage_log_configure(config, argc, argv);
+    crash = maage_log_crash_start(maage_log_current.output);
+    if (maage_status_failed(crash)) {
+        maage_status_trace_init(&trace);
+        MAAGE_STATUS_TRACE(&trace, crash, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_INITIALIZE);
+        maage_status_trace_recover(&trace, maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CORE, MAAGE_OPERATION_INITIALIZE, __FILE__, (unsigned long) __LINE__);
+        maage_log_format_status(crash, &trace, "Native crash recording unavailable; ordinary logging and OS diagnostics remain active.", message, sizeof(message));
+        maage_log_emit(MAAGE_LOG_WARNING, "maage.core.log", message);
+        if (maage_status_is_success(result)) result = maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_INITIALIZE, 0);
+    }
     if (maage_status_failed(previous) && !maage_status_failed(result)) result = previous;
     maage_log_unlock();
     return result;
@@ -314,6 +326,7 @@ maage_status maage_log_shutdown(void) {
     result = maage_log_flush();
     maage_log_lock();
     closed = maage_log_close_file();
+    maage_log_crash_stop();
     if (maage_status_failed(closed) && !maage_status_failed(result)) result = closed;
     free(maage_log_current.overrides);
     maage_log_current.overrides = NULL;

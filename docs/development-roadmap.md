@@ -31,6 +31,7 @@ Maintain Metal/Vulkan presentation semantics and resource lifetimes together.
 
 Current technical references:
 
+- [Logging and native crash records](diagnostics.md)
 - [Content modules, registries and ownership](content-modules.md)
 - [World generation, biome transitions and saved terrain](world-generation.md)
 - [Client UI, visual World, prediction and neighbor support](gameplay-parity.md)

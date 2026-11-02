@@ -74,13 +74,14 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
     const char *name;
     char path[MAAGE_PATH_CAPACITY];
     size_t fluid_index;
-    int overlay_y, source_x, source_y;
+    int overlay_y, source_x, source_y, tile_width, tile_height, x;
     maage_status status;
     maage_status uploaded, result;
     maage_status_trace source_trace, recovered_trace;
     int i, y, ok = 0;
     if (output) *output = NULL;
     if (!output || !renderer || !resources || !resources->catalog) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !renderer ? 0 : 2);
+    if (!resources->image.pixels || !resources->uv || !resources->source_results || resources->image.width < 16 || resources->image.height < 16 || (size_t) resources->image.width > (size_t) - 1 / 4 || resources->image.stride < (size_t) resources->image.width * 4 || (size_t) resources->image.height > (size_t) - 1 / resources->image.stride) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     view = (maage_client_environment *) calloc(1, sizeof(*view));
     if (!view) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
@@ -145,10 +146,21 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
         if (!fluid || !fluid->has_overlay_texture) continue;
         overlay = maage_presentation_texture(presentation, fluid->overlay_texture);
         if (!overlay || overlay->source >= resources->source_count || maage_status_failed(resources->source_results[overlay->source])) continue;
-        source_x = (int) (resources->uv[fluid->overlay_texture][0] * resources->image.width + 0.5f);
-        source_y = (int) (resources->uv[fluid->overlay_texture][1] * resources->image.height + 0.5f);
+        if (!(resources->uv[fluid->overlay_texture][0] >= 0 && resources->uv[fluid->overlay_texture][1] >= 0 && resources->uv[fluid->overlay_texture][2] <= 1 && resources->uv[fluid->overlay_texture][3] <= 1 && resources->uv[fluid->overlay_texture][0] < resources->uv[fluid->overlay_texture][2] && resources->uv[fluid->overlay_texture][1] < resources->uv[fluid->overlay_texture][3])) {
+            result = MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
+            goto done;
+        }
+        source_x = (int) ((double) resources->uv[fluid->overlay_texture][0] * resources->image.width + 0.5);
+        source_y = (int) ((double) resources->uv[fluid->overlay_texture][1] * resources->image.height + 0.5);
+        tile_width = (int) (((double) resources->uv[fluid->overlay_texture][2] - resources->uv[fluid->overlay_texture][0]) * resources->image.width + 0.5);
+        tile_height = (int) (((double) resources->uv[fluid->overlay_texture][3] - resources->uv[fluid->overlay_texture][1]) * resources->image.height + 0.5);
+        if (source_x < 0 || source_y < 0 || tile_width < 1 || tile_height < 1 || tile_width > resources->image.width - source_x || tile_height > resources->image.height - source_y) {
+            result = MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
+            goto done;
+        }
         for (y = 0; y < 16; ++y)
-            memcpy(atlas.pixels + (size_t) (overlay_y + y) * atlas.stride, resources->image.pixels + (size_t) (source_y + y) * resources->image.stride + (size_t) source_x * 4, 64);
+            for (x = 0; x < 16; ++x)
+                memcpy(atlas.pixels + (size_t) (overlay_y + y) * atlas.stride + (size_t) x * 4, resources->image.pixels + ((size_t) source_y + (size_t) y * tile_height / 16) * resources->image.stride + ((size_t) source_x + (size_t) x * tile_width / 16) * 4, 4);
         view->fluid_overlays[fluid_index] = overlay_y;
         overlay_y += 16;
     }

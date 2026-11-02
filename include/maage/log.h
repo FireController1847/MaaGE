@@ -46,6 +46,14 @@ typedef struct maage_log_config {
  * failed redirection retains the previous destinations. Set stdout/stderr
  * unbuffered before their first I/O when immediate raw output is required.
  * File records are flushed immediately and the file permits external sharing.
+ * Init also installs best-effort native fault recording into a duplicate append
+ * handle for the live log (stderr when no file is open). Fatal signal/exception
+ * records bypass level filtering, locks, stdio and heap allocation. They include
+ * native codes, available fault registers and the main image base/identity, then
+ * retain OS termination/reporting; no recovery, save or normal cleanup is attempted.
+ * Already-owned POSIX signals/Windows exception filters are left alone. Other libraries/debuggers
+ * can supersede hooks; SIGKILL, fast-fail, severe stack corruption and I/O failure
+ * may prevent a record. Install/reconfigure/shutdown hooks at lifecycle boundaries.
  * Unknown application arguments are ignored and argv is never modified. */
 maage_status maage_log_config_init(maage_log_config *config);
 maage_status maage_log_init(const maage_log_config *config, int argc, char *const argv[]);
@@ -55,6 +63,7 @@ maage_status maage_log_set_level(const char *logger, maage_log_level level);
 int maage_log_enabled(const char *logger, maage_log_level level);
 maage_status maage_log_flush(void);
 /* Flushes/closes owned files, GZip-copies the session and resets defaults.
+ * Native crash hooks are restored and their duplicate sink is closed.
  * Archive failures preserve the current file and emit an error. Logging before init or after
  * shutdown is safe and uses defaults. FATAL never terminates the process.
  * Operations are serialized; do not call from signal handlers. Messages longer

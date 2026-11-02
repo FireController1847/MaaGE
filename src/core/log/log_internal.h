@@ -51,5 +51,9 @@ int maage_log_archive_remove(const char *path);
 int maage_log_archive_sync(FILE *file);
 FILE *maage_log_open(const char *path, const char *mode);
 int maage_log_capture_stdio(FILE *output);
+/* Initialization/shutdown only, serialized by the log lock. Native handlers
+ * own a duplicate append sink and never call back into ordinary Log APIs. */
+maage_status maage_log_crash_start(FILE *output);
+void maage_log_crash_stop(void);
 
 #endif
