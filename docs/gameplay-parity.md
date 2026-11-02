@@ -4,6 +4,17 @@ The Client owns UI, camera, visual lighting, meshes and presentation prediction.
 The integrated and dedicated Server share one authoritative simulation. All
 runtime and visual verification remains programmer-owned.
 
+Reducing render distance retires off-screen Client CPU/GPU meshes with a small
+per-frame cleanup budget, independently of successful rendering or uploads.
+Oversized Client mesh-slot arrays and Server column indexes shrink after their
+membership contracts. The Server still preserves simulation-distance chunks,
+unsaved data and acknowledged packet bases until ordered unloads complete.
+On macOS, a delayed background malloc-zone pressure-relief request may return
+otherwise reusable pages; the OS and GPU driver control the resulting footprint.
+F3 distinguishes resident set size (RSS), macOS physical footprint and tracked
+GPU/Server/Client allocations. Its Other value is an *unattributed subtraction*,
+not leaked, free or reclaimable memory.
+
 ## Screens and Input
 
 Screens register before finalization and use direct numeric indexing. The stack

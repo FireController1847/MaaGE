@@ -61,7 +61,7 @@ typedef struct maage_client_world_options {
 typedef struct maage_client_mesh_cache {
     maage_client_chunk_mesh *slots;
     const maage_render_mesh **draws;
-    size_t capacity;
+    size_t capacity, retire_cursor;
     unsigned long generation;
     maage_world_mesh_update uploading;
     maage_render_mesh *upload_mesh;
@@ -186,6 +186,51 @@ static maage_status maage_client_mesh_cache_clear(maage_client_mesh_cache *cache
     memset(cache, 0, sizeof(*cache));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
+/* Reclaim obsolete presentation even when uploads are deferred by a modal,
+ * a prediction update or an unavailable drawable. Work is budgeted per frame;
+ * a complete pass also contracts high-water-only slot/draw arrays. */
+static int maage_client_mesh_cache_retire(maage_client_mesh_cache *cache, maage_world *visual, int center_x, int center_z, int radius, double budget_ms) {
+    size_t scanned = 0, index, highest = 0, target = 32;
+    double began = maage_time_monotonic_seconds();
+    maage_client_chunk_mesh *slots;
+    const maage_render_mesh **draws;
+    if (cache->uploading.mesh &&
+        (!maage_world_chunk_loaded(visual, cache->uploading.x, cache->uploading.z) ||
+         abs(cache->uploading.x - center_x) > radius + 1 || abs(cache->uploading.z - center_z) > radius + 1)) {
+        (void) maage_world_mesh_prepared(visual, cache->uploading.x, cache->uploading.z, 0);
+        maage_render_mesh_destroy(cache->upload_mesh);
+        maage_world_mesh_destroy(cache->uploading.mesh);
+        cache->upload_mesh = NULL;
+        memset(&cache->uploading, 0, sizeof(cache->uploading));
+    }
+    while (scanned < cache->capacity) {
+        index = cache->retire_cursor++;
+        if (cache->retire_cursor == cache->capacity) cache->retire_cursor = 0;
+        ++scanned;
+        if (cache->slots[index].used &&
+            (!maage_world_chunk_loaded(visual, cache->slots[index].x, cache->slots[index].z) ||
+             abs(cache->slots[index].x - center_x) > radius + 1 ||
+             abs(cache->slots[index].z - center_z) > radius + 1))
+            maage_client_mesh_cache_drop(cache, index, visual);
+        if (began >= 0.0 && (maage_time_monotonic_seconds() - began) * 1000.0 >= budget_ms) return 0;
+    }
+    for (index = 0; index < cache->capacity; ++index)
+        if (cache->slots[index].used) highest = index + 1;
+    while (target < highest && target <= (size_t) - 1 / 2)
+        target *= 2;
+    if (target >= highest && target <= cache->capacity / 2) {
+        slots = (maage_client_chunk_mesh *) realloc(cache->slots, target * sizeof(*slots));
+        if (slots) {
+            cache->slots = slots;
+            cache->capacity = target;
+            cache->retire_cursor = 0;
+            ++cache->generation;
+            draws = (const maage_render_mesh **) realloc(cache->draws, (target + 2) * sizeof(*draws));
+            if (draws) cache->draws = draws;
+        }
+    }
+    return 1;
+}
 /* Periodically compare each loaded, requested column with the Client's
  * owned GPU mesh. A valid empty mesh still occupies a used cache slot, so
  * there is no false repair loop for legitimately invisible geometry.
@@ -293,18 +338,6 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
     activity->status.budget_ms = budget_ms;
     begin = maage_time_monotonic_seconds();
     if (begin < 0) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
-    for (i = 0; i < cache->capacity; ++i) {
-        if (cache->slots[i].used &&
-            (!maage_world_chunk_loaded(visual, cache->slots[i].x, cache->slots[i].z) ||
-             abs(cache->slots[i].x - center_x) > options->radius + 1 ||
-             abs(cache->slots[i].z - center_z) > options->radius + 1)) {
-            /* A remote unload can lag behind camera movement and the Server's
-             * save/replica queue. Release off-screen CPU and GPU meshes now. */
-            maage_client_mesh_cache_drop(cache, i, visual);
-            processed = 1;
-            if ((maage_time_monotonic_seconds() - begin) * 1000 >= budget_ms) break;
-        }
-    }
     for (;;) {
         current = maage_time_monotonic_seconds();
         if (current < 0) return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPDATE, 0);
@@ -656,6 +689,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     char window_title[128];
     double last = 0.0, now = 0.0, raw_elapsed = 0.0, frame_end = 0.0;
     double diagnostic_time = 0.0, received_time = 0.0, alpha = 1.0, startup_began = 0.0;
+    double memory_reclaim_after = -1.0;
     maage_client_pacing pacing = {0, 0.0};
     maage_client_fov fov = {0.0, 0, 0, 0, 0};
     double effective_fov;
@@ -1032,6 +1066,7 @@ choose_world:
         }
         video_options.render_distance = maage_client_ui_render_distance(ui);
         if (options.radius != video_options.render_distance) {
+            memory_reclaim_after = video_options.render_distance < options.radius ? now + 3.0 : -1.0;
             options.radius = video_options.render_distance;
             view_sent = 0;
         }
@@ -1334,6 +1369,16 @@ choose_world:
             if (maage_status_failed(operation)) goto done;
             operation = maage_world_set_leaves_mode(visual_world, video_options.leaves);
             if (maage_status_failed(operation)) goto done;
+        }
+        {
+            int retired = maage_client_mesh_cache_retire(&cache, visual_world, cx, cz, options.radius, maage_client_mesh_budget(&options, &debug, &mesh_activity));
+            /* Pages freed by the Client and the integrated Server may remain
+             * in malloc zones. Let the Server retire its old footprint first. */
+            if (retired && memory_reclaim_after >= 0.0 && now >= memory_reclaim_after &&
+                latest.world_stats.resident_columns <= latest.world_stats.cache_capacity) {
+                maage_client_debug_release_unused_memory();
+                memory_reclaim_after = -1.0;
+            }
         }
         {
             double prediction_eye[3];

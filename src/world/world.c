@@ -204,15 +204,12 @@ static size_t maage_world_bucket(int x, int z, size_t count) {
     hash ^= hash >> 16;
     return (size_t) hash & (count - 1);
 }
-/* Open-addressed owner-only map. Rehash before occupancy reaches one half;
- * both allocation and bucket count grow with actual resident membership. */
-static int maage_world_grow_buckets(maage_world *world) {
+/* Open-addressed owner-only map. Rehash on membership changes, preserving
+ * existing storage if an opportunistic shrink cannot allocate. */
+static int maage_world_rehash_buckets(maage_world *world, size_t count) {
     maage_chunk_bucket *buckets;
     maage_world_slot *slot;
-    size_t count, bucket;
-    if (world->bucket_count && (size_t) world->count < world->bucket_count / 2) return 1;
-    if (world->bucket_count > (size_t) - 1 / 2) return 0;
-    count = world->bucket_count ? world->bucket_count * 2 : 16;
+    size_t bucket;
     if (count > (size_t) - 1 / sizeof(*buckets)) return 0;
     buckets = (maage_chunk_bucket *) calloc(count, sizeof(*buckets));
     if (!buckets) return 0;
@@ -226,6 +223,19 @@ static int maage_world_grow_buckets(maage_world *world) {
     world->buckets = buckets;
     world->bucket_count = count;
     return 1;
+}
+static int maage_world_grow_buckets(maage_world *world) {
+    if (world->bucket_count && (size_t) world->count < world->bucket_count / 2) return 1;
+    if (world->bucket_count > (size_t) - 1 / 2) return 0;
+    return maage_world_rehash_buckets(world, world->bucket_count ? world->bucket_count * 2 : 16);
+}
+static void maage_world_trim_buckets(maage_world *world) {
+    size_t target = world->bucket_count;
+    if (target <= 16 || (size_t) world->count >= target / 8) return;
+    do {
+        target /= 2;
+    } while (target > 16 && (size_t) world->count < target / 8);
+    (void) maage_world_rehash_buckets(world, target);
 }
 static maage_world_slot *maage_world_find(const maage_world *world, int x, int z) {
     size_t bucket, probes;
@@ -1175,6 +1185,7 @@ static void maage_world_retire(maage_world *world) {
         maage_world_invalidate_neighbors(world, x, z, 15U);
         maage_world_light_neighbors(world, x, z, 15U);
     }
+    maage_world_trim_buckets(world);
 }
 static int maage_world_make_room(maage_world *world) {
     maage_world_slot *slot, *victim = NULL;
@@ -2905,6 +2916,7 @@ maage_status maage_world_ack_column(maage_world *world, const maage_column_updat
         maage_world_remove(world, slot);
         maage_world_invalidate_neighbors(world, x, z, 15U);
         maage_world_light_neighbors(world, x, z, 15U);
+        maage_world_trim_buckets(world);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
