@@ -234,7 +234,10 @@ The Server retains only the acknowledged block revision and dirty-cell bitmap
 for replication: the complete old chunk snapshot (including lighting) is no
 longer pinned solely as an update baseline. Owner-thread World accounting
 reports shared payload allocations proportionally across their live references
-and excludes detached worker-owned copies.
+and excludes detached worker-owned copies. Lighting-change bitsets are also
+allocated only on actual light-affecting block mutations, and lighting-job
+snapshots only allocate 8 KiB when there are dirty light cells. Initial
+lighting jobs use an immutable zero mask without allocating per-column masks.
 
 ## Runtime Section Storage
 
