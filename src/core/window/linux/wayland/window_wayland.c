@@ -152,15 +152,7 @@ static const struct xdg_wm_base_listener maage_wayland_shell_listener = {
 /* Physical evdev positions, independent of text layout. The adapter still
  * reports unsupported mouse capture until relative-pointer support exists. */
 static int maage_wayland_key_code(uint32_t code) {
-    static const uint32_t codes[MAAGE_INPUT_KEY_COUNT] = {
-        17, 30, 31, 32, 57, 1, 61, 28, 15, 103, 108, 105, 106, 18,
-        2, 3, 4, 5, 6, 7, 8, 9, 10, 42, 87, 16, 29, 29, 63};
-    unsigned int i;
-    for (i = 0; i < MAAGE_INPUT_KEY_COUNT; ++i)
-        if (codes[i] == code) return (int) i;
-    if (code == 54) return MAAGE_INPUT_KEY_SHIFT;
-    if (code == 97) return MAAGE_INPUT_KEY_CONTROL;
-    return -1;
+    return (int) maage_window_key_evdev(code);
 }
 static void maage_wayland_keymap(void *data, struct wl_keyboard *keyboard, uint32_t format, int32_t fd, uint32_t size) {
     (void) data;
@@ -184,9 +176,10 @@ static void maage_wayland_key_enter(void *data, struct wl_keyboard *keyboard, ui
             maage_window_input_focus(window, 1);
             wl_array_for_each(code, keys) {
                 key = maage_wayland_key_code(*code);
-                if (key >= 0) window->input.keys[key] = 1; /* Held keys are not new presses. */
-                if (*code == 29) window->input.keys[MAAGE_INPUT_KEY_LEFT_CONTROL] = 1;
+                if (key > 0) window->input.keys[key] = 1; /* Held keys are not new presses. */
             }
+            window->input.keys[MAAGE_INPUT_KEY_SHIFT] = window->input.keys[225] || window->input.keys[229];
+            window->input.keys[MAAGE_INPUT_KEY_CONTROL] = window->input.keys[224] || window->input.keys[228];
             break;
         }
 }
@@ -204,9 +197,8 @@ static void maage_wayland_key(void *data, struct wl_keyboard *keyboard, uint32_t
     (void) keyboard;
     (void) serial;
     (void) time;
-    if (!native->keyboard_focus || key < 0) return;
+    if (!native->keyboard_focus || key <= 0) return;
     maage_window_input_key(native->keyboard_focus, (maage_input_key) key, state == WL_KEYBOARD_KEY_STATE_PRESSED);
-    if (code == 29) maage_window_input_key(native->keyboard_focus, MAAGE_INPUT_KEY_LEFT_CONTROL, state == WL_KEYBOARD_KEY_STATE_PRESSED);
 }
 static void maage_wayland_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) {
     (void) data;

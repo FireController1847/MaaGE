@@ -125,7 +125,7 @@ static unsigned int maage_options_count(maage_client_ui_screen_id screen) {
     return MAAGE_OPTIONS_MAIN_COUNT;
 }
 static int maage_options_enabled(const maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id) {
-    if (screen == MAAGE_CLIENT_UI_OPTIONS) return id == 0U || id == 3U || id == 5U || id == MAAGE_OPTIONS_MAIN_DONE;
+    if (screen == MAAGE_CLIENT_UI_OPTIONS) return id == 0U || id == 3U || id == 5U || id == 6U || id == MAAGE_OPTIONS_MAIN_DONE;
     if (screen == MAAGE_CLIENT_UI_SOUND_SETTINGS) return id < MAAGE_OPTIONS_SOUND_COUNT;
     if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS) {
         if (id == 1U || id == 3U || id == 5U || id == 6U || id == 14U || id == 15U || id == MAAGE_OPTIONS_VIDEO_DONE) return 1;
@@ -231,6 +231,10 @@ static void maage_options_action(maage_client_ui *ui, maage_client_ui_screen_id 
         } else if (id == 5U) {
             ui->video_first_row = 0;
             ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_VIDEO_SETTINGS);
+        } else if (id == 6U) {
+            ui->control_scroll = 0;
+            ui->control_focus = 0;
+            ui->route_result = maage_client_ui_open(ui, MAAGE_CLIENT_UI_CONTROLS);
         } else if (id == MAAGE_OPTIONS_MAIN_DONE) ui->route_result = maage_client_ui_back(ui);
     } else if (screen == MAAGE_CLIENT_UI_SOUND_SETTINGS) {
         if (id == MAAGE_OPTIONS_SOUND_DONE) ui->route_result = maage_client_ui_back(ui);

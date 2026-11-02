@@ -53,20 +53,16 @@ static maage_status maage_x11_init(maage_window_system *system) {
     XkbDescPtr keyboard;
     int code, key;
     Bool detectable;
-    static const char names[MAAGE_INPUT_KEY_COUNT][5] = {
-        "AD02", "AC01", "AC02", "AC03", "SPCE", "ESC",
-        "FK03", "RTRN", "TAB", "UP", "DOWN", "LEFT", "RGHT", "AD03",
-        "AE01", "AE02", "AE03", "AE04", "AE05", "AE06", "AE07", "AE08", "AE09", "LFSH", "FK11", "AD01", "LCTL", "LCTL", "FK05"};
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     system->platform = native;
     native->display = XOpenDisplay(NULL);
     if (!native->display) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     keyboard = XkbGetKeyboard(native->display, XkbAllComponentsMask, XkbUseCoreKbd);
     if (keyboard && keyboard->names && keyboard->names->keys) {
-        for (code = keyboard->min_key_code; code <= keyboard->max_key_code; ++code)
-            for (key = 0; key < MAAGE_INPUT_KEY_COUNT; ++key)
-                if (!memcmp(keyboard->names->keys[code].name, names[key], 4))
-                    native->keycodes[key] = code;
+        for (code = keyboard->min_key_code; code <= keyboard->max_key_code; ++code) {
+            key = (int) maage_window_key_xkb(keyboard->names->keys[code].name);
+            if (key) native->keycodes[key] = code;
+        }
     }
     if (keyboard) XkbFreeKeyboard(keyboard, XkbAllComponentsMask, True);
     XkbSetDetectableAutoRepeat(native->display, True, &detectable);
@@ -220,13 +216,10 @@ static maage_status maage_x11_capture(maage_window *window, int capture) {
     XWindowAttributes attributes;
     Pixmap bitmap;
     XColor color;
-    int key;
     static const char empty[1] = {0};
     if (capture == window->input.captured) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
     if (capture) {
-        /* Optional UI keys must not disable an otherwise usable capture path. */
-        for (key = 0; key <= MAAGE_INPUT_KEY_ESCAPE; ++key)
-            if (!system->keycodes[key]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+        if (!system->keycodes[MAAGE_INPUT_KEY_W] || !system->keycodes[MAAGE_INPUT_KEY_ESCAPE]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOT_IMPLEMENTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         if (!XGetWindowAttributes(system->display, native->handle, &attributes)) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         for (other = window->system->windows; other; other = other->next)
             if (other != window && other->input.captured) maage_window_capture_mouse(other, 0);
@@ -238,7 +231,7 @@ static maage_status maage_x11_capture(maage_window *window, int capture) {
             XFreePixmap(system->display, bitmap);
             if (!native->hidden_cursor) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         }
-        if (XGrabPointer(system->display, native->handle, False, PointerMotionMask | ButtonPressMask, GrabModeAsync, GrabModeAsync, native->handle, native->hidden_cursor, CurrentTime) != GrabSuccess) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
+        if (XGrabPointer(system->display, native->handle, False, PointerMotionMask | ButtonPressMask | ButtonReleaseMask, GrabModeAsync, GrabModeAsync, native->handle, native->hidden_cursor, CurrentTime) != GrabSuccess) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_ACQUIRE, 0);
         native->pointer_x = native->warp_x = attributes.width / 2;
         native->pointer_y = native->warp_y = attributes.height / 2;
         native->warp_pending = 1;
@@ -294,14 +287,10 @@ static maage_status maage_x11_poll(maage_window_system *system, int timeout_ms) 
             if (event.type == ButtonPress || event.type == ButtonRelease) {
                 window->input.mouse_x = event.xbutton.x;
                 window->input.mouse_y = event.xbutton.y;
-                if (event.xbutton.button == Button1) {
-                    window->input.primary_down = event.type == ButtonPress;
-                    if (event.type == ButtonPress) window->input.primary_pressed = 1;
-                }
-                if (event.xbutton.button == Button3) {
-                    window->input.secondary_down = event.type == ButtonPress;
-                    if (event.type == ButtonPress) window->input.secondary_pressed = 1;
-                }
+                if (event.xbutton.button == Button1) maage_window_input_button(window, 0, event.type == ButtonPress);
+                if (event.xbutton.button == Button3) maage_window_input_button(window, 1, event.type == ButtonPress);
+                if (event.xbutton.button == Button2) maage_window_input_button(window, 2, event.type == ButtonPress);
+                if (event.xbutton.button >= 8 && event.xbutton.button <= 12) maage_window_input_button(window, event.xbutton.button - 5U, event.type == ButtonPress);
                 if (event.type == ButtonPress && event.xbutton.button == Button4) window->input.scroll_y += 1;
                 if (event.type == ButtonPress && event.xbutton.button == Button5) window->input.scroll_y -= 1;
             }

@@ -2,43 +2,44 @@
 #define MAAGE_INPUT_H
 #include "maage/window.h"
 
-/* Physical movement-key positions, independent of the current text layout. */
-typedef enum maage_input_key {
-    MAAGE_INPUT_KEY_W = 0,
-    MAAGE_INPUT_KEY_A,
-    MAAGE_INPUT_KEY_S,
-    MAAGE_INPUT_KEY_D,
-    MAAGE_INPUT_KEY_SPACE,
-    MAAGE_INPUT_KEY_ESCAPE,
-    MAAGE_INPUT_KEY_F3,
-    MAAGE_INPUT_KEY_ENTER,
-    MAAGE_INPUT_KEY_TAB,
-    MAAGE_INPUT_KEY_UP,
-    MAAGE_INPUT_KEY_DOWN,
-    MAAGE_INPUT_KEY_LEFT,
-    MAAGE_INPUT_KEY_RIGHT,
-    MAAGE_INPUT_KEY_E,
-    MAAGE_INPUT_KEY_1,
-    MAAGE_INPUT_KEY_2,
-    MAAGE_INPUT_KEY_3,
-    MAAGE_INPUT_KEY_4,
-    MAAGE_INPUT_KEY_5,
-    MAAGE_INPUT_KEY_6,
-    MAAGE_INPUT_KEY_7,
-    MAAGE_INPUT_KEY_8,
-    MAAGE_INPUT_KEY_9,
-    MAAGE_INPUT_KEY_SHIFT,
-    MAAGE_INPUT_KEY_F11,
-    MAAGE_INPUT_KEY_Q,
-    MAAGE_INPUT_KEY_CONTROL,
-    MAAGE_INPUT_KEY_LEFT_CONTROL,
-    MAAGE_INPUT_KEY_F5,
-    MAAGE_INPUT_KEY_COUNT
-} maage_input_key;
+/* USB HID keyboard/keypad page (0x07) usage IDs are layout-independent physical
+ * positions. The 256-entry hardware domain does not limit registered actions.
+ * Zero is unassigned. Aggregate modifiers are GUI-only, never persisted. */
+typedef unsigned int maage_input_key;
+#define MAAGE_INPUT_KEY_W 26U
+#define MAAGE_INPUT_KEY_A 4U
+#define MAAGE_INPUT_KEY_S 22U
+#define MAAGE_INPUT_KEY_D 7U
+#define MAAGE_INPUT_KEY_E 8U
+#define MAAGE_INPUT_KEY_Q 20U
+#define MAAGE_INPUT_KEY_SPACE 44U
+#define MAAGE_INPUT_KEY_ESCAPE 41U
+#define MAAGE_INPUT_KEY_F3 60U
+#define MAAGE_INPUT_KEY_F5 62U
+#define MAAGE_INPUT_KEY_F11 68U
+#define MAAGE_INPUT_KEY_ENTER 40U
+#define MAAGE_INPUT_KEY_TAB 43U
+#define MAAGE_INPUT_KEY_UP 82U
+#define MAAGE_INPUT_KEY_DOWN 81U
+#define MAAGE_INPUT_KEY_LEFT 80U
+#define MAAGE_INPUT_KEY_RIGHT 79U
+#define MAAGE_INPUT_KEY_1 30U
+#define MAAGE_INPUT_KEY_LEFT_CONTROL 224U
+#define MAAGE_INPUT_KEY_LEFT_SHIFT 225U
+#define MAAGE_INPUT_KEY_RIGHT_CONTROL 228U
+#define MAAGE_INPUT_KEY_RIGHT_SHIFT 229U
+#define MAAGE_INPUT_KEY_SHIFT 256U
+#define MAAGE_INPUT_KEY_CONTROL 257U
+#define MAAGE_INPUT_KEY_COUNT 258U
+#define MAAGE_INPUT_MOUSE_COUNT 8U
+#define MAAGE_INPUT_MOUSE_BASE 256U
+#define MAAGE_INPUT_BINDING_COUNT 264U
 
 typedef struct maage_input_snapshot {
     int keys[MAAGE_INPUT_KEY_COUNT];
     int pressed[MAAGE_INPUT_KEY_COUNT];
+    int mouse_down[MAAGE_INPUT_MOUSE_COUNT], mouse_pressed[MAAGE_INPUT_MOUSE_COUNT];
+    unsigned int first_pressed; /* HID usage or MOUSE_BASE + zero-based button. */
     int primary_pressed, primary_down;
     int secondary_pressed, secondary_down;
     double scroll_y;         /* Positive scroll selects the preceding hotbar slot. */
@@ -48,6 +49,7 @@ typedef struct maage_input_snapshot {
     /* Ordered ASCII text/backspace events, consumed with press edges. */
     char text[128];
     int focused;
+    int focus_lost; /* Latched through a loss/regain within one polling interval. */
     int captured;
 } maage_input_snapshot;
 

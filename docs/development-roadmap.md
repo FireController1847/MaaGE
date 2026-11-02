@@ -47,7 +47,7 @@ Current technical references:
 ### Client GUI and Menu Completion — Phase 8
 
 Extend the existing numeric screen/navigation system. Finish supported Options,
-controls/focus workflows, Creative authoring/navigation and truthful loading
+remaining focus/accessibility workflows, Creative authoring/navigation and truthful loading
 progress as services expose it. Preserve ASCII font/text limits until deliberately
 expanded. Completion means a coherent startup → world → settings → save/quit
 workflow, including failure and cancellation, rather than merely drawing controls.

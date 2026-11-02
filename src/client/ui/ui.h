@@ -21,12 +21,14 @@ typedef unsigned int maage_client_ui_screen_id;
 #define MAAGE_CLIENT_UI_VIDEO_SETTINGS 10U
 #define MAAGE_CLIENT_UI_SOUND_SETTINGS 11U
 #define MAAGE_CLIENT_UI_CRAFTING_TABLE 12U
+#define MAAGE_CLIENT_UI_CONTROLS 13U
 #define MAAGE_CLIENT_UI_EXIT 1U
 #define MAAGE_CLIENT_UI_RESPAWN 2U
 #define MAAGE_CLIENT_UI_DEBUG_LINES 32
 #define MAAGE_CLIENT_UI_DEBUG_CHARACTERS 192
 
 typedef struct maage_client_ui_input {
+    const maage_input_snapshot *raw; /* Borrowed for this update; capture precedes shortcuts. */
     int escape, f3, f11, accept, previous, next, left, right, primary_pressed, primary_down, secondary_pressed, inventory;
     int list_up, list_down, shift;
     const char *text;

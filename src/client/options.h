@@ -2,6 +2,7 @@
 #define MAAGE_CLIENT_OPTIONS_H
 #include "maage/instance.h"
 #include "maage/world.h"
+#include "controls.h"
 
 /* Numeric runtime choices; names are resolved only at the INI boundary. */
 typedef enum maage_client_window_choice {
@@ -42,6 +43,10 @@ typedef enum maage_client_audio_bus {
 #define MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT 8
 #define MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX 32
 typedef struct maage_client_options {
+    maage_controls *controls; /* Borrowed on owner thread; saves serialize before worker handoff. */
+    unsigned long controls_revision;
+    int mouse_sensitivity; /* 0..100, corresponding to the original slider's 0..1. */
+    int invert_mouse;
     int audio_volume[MAAGE_CLIENT_AUDIO_BUS_COUNT]; /* Fixed numeric bus order; 0..100. */
     int fov_degrees;                                /* Vertical field of view, 30..110, default 70. */
     int max_fps;                                    /* 0 unlimited, otherwise 10..260 in increments of 10. */
@@ -58,7 +63,7 @@ typedef struct maage_client_options {
 void maage_client_options_defaults(maage_client_options *options);
 int maage_client_options_equal(const maage_client_options *a, const maage_client_options *b);
 /* Missing file and invalid individual values retain defaults. */
-maage_status maage_client_options_load(const maage_instance *instance, maage_client_options *options);
+maage_status maage_client_options_load(const maage_instance *instance, maage_client_options *options, maage_controls *controls);
 /* Stage, sync and atomically replace config/options.ini. */
-maage_status maage_client_options_save(const maage_instance *instance, const maage_client_options *options);
+maage_status maage_client_options_save(const maage_instance *instance, const maage_client_options *options, const char *bindings);
 #endif

@@ -150,15 +150,34 @@ void maage_window_input_character(maage_window *window, unsigned int character) 
     }
 }
 void maage_window_input_key(maage_window *window, maage_input_key key, int down) {
-    if (key < 0 || key >= MAAGE_INPUT_KEY_COUNT) return;
-    if (down && !window->input.keys[key]) window->input.pressed[key] = 1;
+    if (!key || key >= 256U) return;
+    if (down && !window->input.keys[key]) {
+        window->input.pressed[key] = 1;
+        if (!window->input.first_pressed) window->input.first_pressed = key;
+    }
     window->input.keys[key] = down != 0;
+    window->input.keys[MAAGE_INPUT_KEY_SHIFT] = window->input.keys[225] || window->input.keys[229];
+    window->input.keys[MAAGE_INPUT_KEY_CONTROL] = window->input.keys[224] || window->input.keys[228];
+}
+
+void maage_window_input_button(maage_window *window, unsigned int button, int down) {
+    if (button >= MAAGE_INPUT_MOUSE_COUNT) return;
+    if (down && !window->input.mouse_down[button]) {
+        window->input.mouse_pressed[button] = 1;
+        if (!window->input.first_pressed) window->input.first_pressed = MAAGE_INPUT_MOUSE_BASE + button;
+    }
+    window->input.mouse_down[button] = down != 0;
+    window->input.primary_down = window->input.mouse_down[0];
+    window->input.secondary_down = window->input.mouse_down[1];
+    window->input.primary_pressed = window->input.mouse_pressed[0];
+    window->input.secondary_pressed = window->input.mouse_pressed[1];
 }
 
 void maage_window_input_focus(maage_window *window, int focused) {
     if (!focused) {
         if (window->input.captured) maage_window_capture_mouse(window, 0);
         memset(&window->input, 0, sizeof(window->input));
+        window->input.focus_lost = 1;
     }
     window->input.focused = focused != 0;
 }
@@ -172,6 +191,9 @@ maage_status maage_window_get_input(maage_window *window, maage_input_snapshot *
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     *input = window->input;
     memset(window->input.pressed, 0, sizeof(window->input.pressed));
+    memset(window->input.mouse_pressed, 0, sizeof(window->input.mouse_pressed));
+    window->input.first_pressed = 0;
+    window->input.focus_lost = 0;
     window->input.primary_pressed = 0;
     window->input.secondary_pressed = 0;
     window->input.scroll_y = 0;

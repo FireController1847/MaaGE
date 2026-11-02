@@ -33,6 +33,7 @@ the frontend root. Unknown IDs and cycles fail explicitly.
 | 10 | Video | Scrollable settings at 25-pixel row spacing; title Y=5, Done at height−27. |
 | 11 | Sound | Master width 310, category sliders 150 wide with 24-pixel spacing; Done at height/6+168. |
 | 12 | Crafting Table | Panel 176x166, 3x3 inputs at (30,17), result at (124,35), shared inventory interaction. |
+| 13 | Controls | Invert/sensitivity at Y=18, disabled Touchscreen at Y=42; categorized 20-pixel rows between Y=63 and height−32, Done/Reset Keys at height−29. |
 
 Drawing and hit testing share layout calculations. Logical dimensions round up
 independently of framebuffer size; native safe areas bound application controls.
@@ -45,6 +46,46 @@ the safe viewport; carried items, counts and half-opacity slot highlights
 share the inventory path. Text entry is ASCII with backspace and blinking cursor.
 Unsupported controls remain disabled or absent. There is one Creative catalog,
 without fabricated category/search functionality.
+
+Controls registers independent named actions in a growable Client registry. Numeric
+handles drive movement, jump/flight, sneak/descent, sprint, inventory, drop, attack,
+use, nine hotbar slots and perspective, including local prediction and animation.
+The Server continues to receive intents only. Escape/menu navigation, F3/F11 and
+GUI transfer modifiers remain fixed system/UI inputs. Chat, player list, commands,
+screenshots, pick block, cinematic camera and broadcasting are not implemented
+binding actions; unsupported categories are omitted and Touchscreen stays disabled.
+
+Bindings use USB HID keyboard-page physical positions, translated from Windows
+set-1 scans, macOS keycodes, XKB physical names and Wayland evdev codes. Text input
+remains independent. Left/right modifiers and up to eight mouse buttons have
+separate identities (Windows supplies its five standard buttons). AppKit Caps Lock
+is a press pulse because it reports lock transitions. Wayland relative gameplay
+capture remains unsupported; this change supplies its canonical keyboard mapping.
+
+Capture precedes Client shortcuts. The activating click only arms capture; the
+next fresh keyboard/mouse edge assigns, Escape unassigns, and focus loss or a
+window transition cancels. Duplicate assignments stay independent and display red.
+Individual Reset and Reset Keys restore defaults; Reset Keys disables at defaults.
+Binding and Reset buttons share aligned columns measured across the entire list;
+reserved capture-marker space keeps their geometry stable when selecting a binding.
+Wheel, scrollbar dragging and keyboard focus scroll the list. Input held through
+modal screens/transitions stays suppressed until release before gameplay resumes.
+
+The existing atomic `config/options.ini` saves `[controls]` action identities as
+`key:<decimal USB HID usage>`, `mouse:<one-based button>` or `none`; missing entries
+retain defaults and invalid/unknown entries are ignored. `[mouse]` stores integer
+`sensitivity` in 0..100 (default 50) and boolean `invert`. The owner serializes an
+owned immutable binding section before handing a save to the options worker.
+Mouse deltas use the cubic sensitivity curve with no frame-time/GUI-scale factor;
+inversion affects vertical motion only.
+
+Creative sprint flight intentionally adds a separate 2x horizontal acceleration
+multiplier to ordinary flight. Descending does not apply ground sneak slowdown or
+cancel its sprint tap window. Forward release/collision still cancels sprint,
+flight preserves its existing drag/vertical movement and transition velocity
+handling, and ground/Survival movement retains its parameters. The existing
+smoothed FOV follows the same authoritative sprint state, independent of this
+flight multiplier. Runtime movement and visual fidelity remain unverified.
 
 Video Settings includes a Render Distance slider in chunks, defaulting to 8 with
 a normal range of 1..32. Explicit larger `--render-distance` or INI choices remain

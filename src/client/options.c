@@ -7,6 +7,10 @@
 
 void maage_client_options_defaults(maage_client_options *options) {
     if (!options) return;
+    options->controls = NULL;
+    options->controls_revision = 0;
+    options->mouse_sensitivity = 50;
+    options->invert_mouse = 0;
     options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MASTER] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
     options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_BLOCKS] = MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS;
     options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_PLAYER] = MAAGE_CLIENT_AUDIO_DEFAULT_PLAYER;
@@ -28,7 +32,7 @@ void maage_client_options_defaults(maage_client_options *options) {
 
 int maage_client_options_equal(const maage_client_options *a, const maage_client_options *b) {
     int i;
-    if (!a || !b || a->fov_degrees != b->fov_degrees ||
+    if (!a || !b || a->controls_revision != b->controls_revision || a->mouse_sensitivity != b->mouse_sensitivity || a->invert_mouse != b->invert_mouse || a->fov_degrees != b->fov_degrees ||
         a->max_fps != b->max_fps || a->render_distance != b->render_distance || a->vsync != b->vsync || a->view_bobbing != b->view_bobbing ||
         a->gui_scale != b->gui_scale || a->leaves != b->leaves || a->biome_blend != b->biome_blend ||
         a->window_mode != b->window_mode || a->fullscreen_style != b->fullscreen_style)
@@ -74,7 +78,7 @@ static void maage_client_options_parse(maage_client_options *options, char *line
     key = maage_client_options_trim(line);
     if (!*key || *key == '#' || *key == ';') return;
     if (*key == '[') {
-        *section = !strcmp(key, "[video]") ? 1 : (!strcmp(key, "[audio]") ? 2 : 0);
+        *section = !strcmp(key, "[video]") ? 1 : (!strcmp(key, "[audio]") ? 2 : (!strcmp(key, "[controls]") ? 3 : (!strcmp(key, "[mouse]") ? 4 : 0)));
         return;
     }
     if (!*section) return;
@@ -83,6 +87,15 @@ static void maage_client_options_parse(maage_client_options *options, char *line
     *equals = 0;
     value = maage_client_options_trim(equals + 1);
     key = maage_client_options_trim(key);
+    if (*section == 3) {
+        (void) maage_controls_parse(options->controls, key, value);
+        return;
+    }
+    if (*section == 4) {
+        if (!strcmp(key, "sensitivity") && maage_client_options_integer(value, 0, 100, 1, &number)) options->mouse_sensitivity = number;
+        if (!strcmp(key, "invert") && (!strcmp(value, "true") || !strcmp(value, "false"))) options->invert_mouse = !strcmp(value, "true");
+        return;
+    }
     if (*section == 2) {
         for (bus = 0; bus < MAAGE_CLIENT_AUDIO_BUS_COUNT; ++bus) {
             if (!strcmp(key, audio_keys[bus])) {
@@ -126,13 +139,43 @@ static void maage_client_options_parse(maage_client_options *options, char *line
     }
 }
 
-maage_status maage_client_options_load(const maage_instance *instance, maage_client_options *options) {
-    char path[MAAGE_PATH_CAPACITY], line[256];
+/* Grow to the complete line so registered names have no hidden INI truncation
+ * limit. Allocation/range failures are explicit and never parse partial bytes. */
+static maage_status maage_client_options_line(FILE *file, char **line, size_t *capacity, int *available) {
+    size_t length = 0, grown_capacity;
+    char *grown;
+    int character;
+    *available = 0;
+    while ((character = fgetc(file)) != EOF) {
+        if (length + 1 >= *capacity) {
+            grown_capacity = *capacity ? *capacity * 2 : 256;
+            if (grown_capacity <= *capacity) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_READ, 0);
+            grown = (char *) realloc(*line, grown_capacity);
+            if (!grown) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_READ, 0);
+            *line = grown;
+            *capacity = grown_capacity;
+        }
+        (*line)[length++] = (char) character;
+        if (character == '\n') break;
+    }
+    if (ferror(file)) return maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_READ, 0);
+    if (length) {
+        (*line)[length] = 0;
+        *available = 1;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_READ, 0);
+}
+
+maage_status maage_client_options_load(const maage_instance *instance, maage_client_options *options, maage_controls *controls) {
+    char path[MAAGE_PATH_CAPACITY], *line = NULL;
+    size_t capacity = 0;
     FILE *file;
     maage_status result;
-    int status, section = 0;
+    int status, available, section = 0;
     if (!instance || !options) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
     maage_client_options_defaults(options);
+    options->controls = controls;
+    options->controls_revision = controls ? controls->revision : 0;
     result = maage_instance_resolve_path(instance, MAAGE_INSTANCE_FOLDER_CONFIG, "options.ini", path, sizeof(path));
     if (maage_status_failed(result)) return result;
     status = maage_storage_status(path);
@@ -140,30 +183,32 @@ maage_status maage_client_options_load(const maage_instance *instance, maage_cli
     if (status != 1) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD, 0);
     file = maage_storage_open(path, "rb");
     if (!file) return maage_status_from_errno(errno, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOAD);
-    while (fgets(line, sizeof(line), file)) {
-        size_t length = strlen(line);
-        if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
-            int character;
-            while ((character = fgetc(file)) != '\n' && character != EOF) {
-            }
-            continue; /* Never interpret truncated lines as options. */
-        }
+    for (;;) {
+        result = maage_client_options_line(file, &line, &capacity, &available);
+        if (maage_status_failed(result) || !available) break;
         maage_client_options_parse(options, line, &section);
     }
-    result = ferror(file) ? maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_READ, 0) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
+    free(line);
     if (fclose(file) && !maage_status_failed(result)) result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CLOSE, 0);
-    if (maage_status_failed(result)) maage_client_options_defaults(options);
+    if (maage_status_failed(result)) {
+        size_t i;
+        maage_client_options_defaults(options);
+        options->controls = controls;
+        for (i = 0; controls && i < controls->count; ++i)
+            (void) maage_control_set(controls, i, controls->actions[i].default_binding);
+    }
+    options->controls_revision = controls ? controls->revision : 0;
     return result;
 }
 
-maage_status maage_client_options_save(const maage_instance *instance, const maage_client_options *options) {
+maage_status maage_client_options_save(const maage_instance *instance, const maage_client_options *options, const char *bindings) {
     static const char *const leaves[] = {"fast", "smart", "fancy"};
     static const char *const modes[] = {"windowed", "borderless", "fullscreen"};
     char destination[MAAGE_PATH_CAPACITY], temporary[MAAGE_PATH_CAPACITY];
     FILE *file;
     maage_status result;
     int status, bus;
-    if (!instance || !options || options->fov_degrees < 30 ||
+    if (!instance || !options || !bindings || options->mouse_sensitivity < 0 || options->mouse_sensitivity > 100 || (options->invert_mouse != 0 && options->invert_mouse != 1) || options->fov_degrees < 30 ||
         options->fov_degrees > 110 || (options->max_fps != 0 && (options->max_fps < 10 || options->max_fps > 260 || options->max_fps % 10)) ||
         options->render_distance < 1 || options->render_distance > MAAGE_WORLD_MAX_RADIUS ||
         (options->vsync != 0 && options->vsync != 1) ||
@@ -199,6 +244,8 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
                 options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_WEATHER],
                 options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_MUSIC],
                 options->audio_volume[MAAGE_CLIENT_AUDIO_BUS_UI]) < 0)
+        result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_WRITE, 0);
+    else if (fprintf(file, "\n[mouse]\nsensitivity=%d\ninvert=%s\n%s", options->mouse_sensitivity, options->invert_mouse ? "true" : "false", bindings) < 0)
         result = maage_status_make(MAAGE_STATUS_IO_ERROR, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_WRITE, 0);
     else
         result = maage_storage_sync(file);

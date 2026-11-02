@@ -24,6 +24,8 @@ extern "C" {
 #define MAAGE_PLAYER_AIR_DRAG 0.91
 #define MAAGE_PLAYER_INPUT_DAMPING 0.98
 #define MAAGE_PLAYER_SPRINT_SPEED 1.3
+/* Intentional later-style Creative flight improvement; ground speed is independent. */
+#define MAAGE_PLAYER_FLIGHT_SPRINT_SPEED 2.0
 #define MAAGE_PLAYER_SPRINT_JUMP 0.2
 #define MAAGE_PLAYER_SNEAK_INPUT 0.3
 #define MAAGE_PLAYER_CURRENT_IMPULSE 0.014

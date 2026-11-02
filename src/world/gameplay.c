@@ -634,7 +634,9 @@ static maage_status maage_gameplay_action_result(maage_status result, const maag
     return result;
 }
 static void maage_gameplay_sprint(maage_gameplay *game, maage_player *player, const maage_gameplay_intent *intent) {
-    int forward = intent->movement.forward * (intent->descend ? MAAGE_PLAYER_SNEAK_INPUT : 1.0) >= 0.8;
+    int sneaking = intent->descend && !game->flying;
+    int can_tap = player->grounded || game->flying;
+    int forward = intent->movement.forward * (sneaking ? MAAGE_PLAYER_SNEAK_INPUT : 1.0) >= 0.8;
     int allowed = game->health && (game->mode == MAAGE_GAME_MODE_CREATIVE || game->hunger > 6);
     if (game->sprint_window) --game->sprint_window;
     if (game->sprint_ticks && !--game->sprint_ticks) player->sprinting = 0;
@@ -642,15 +644,15 @@ static void maage_gameplay_sprint(maage_gameplay *game, maage_player *player, co
         player->sprinting = 0;
         game->sprint_ticks = 0;
     } else if (!player->sprinting) {
-        if (intent->movement.sprint || (player->grounded && (!game->forward_down || intent->forward_pressed) && game->sprint_window)) {
+        if (intent->movement.sprint || (can_tap && (!game->forward_down || intent->forward_pressed) && game->sprint_window)) {
             player->sprinting = 1;
             game->sprint_ticks = 600;
-        } else if (player->grounded && (!game->forward_down || intent->forward_pressed)) game->sprint_window = 7;
+        } else if (can_tap && (!game->forward_down || intent->forward_pressed)) game->sprint_window = 7;
     }
     /* Retain a short forward tap even if its release reached the mailbox
      * before this fixed step; only sustained forward input can start sprint. */
-    if (!forward && intent->forward_pressed && player->grounded && allowed && !intent->descend && !player->collided_horizontally) game->sprint_window = 7;
-    if (intent->descend || !allowed) game->sprint_window = 0;
+    if (!forward && intent->forward_pressed && can_tap && allowed && !sneaking && !player->collided_horizontally) game->sprint_window = 7;
+    if (sneaking || !allowed) game->sprint_window = 0;
     game->forward_down = forward;
 }
 

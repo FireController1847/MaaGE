@@ -39,7 +39,6 @@
 #include "mesh_diagnostics.h"
 
 /* Camera tuning remains provisional pending programmer verification. */
-#define MAAGE_CLIENT_MOUSE_RADIANS 0.0025
 #define MAAGE_CLIENT_PITCH_LIMIT 1.553343034
 #define MAAGE_CLIENT_MAX_FRAME_SECONDS 0.25
 /* Presentation policy: discard effects older than the Server's four-tick
@@ -667,6 +666,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_client_mesh_activity mesh_activity;
     maage_client_mesh_verifier mesh_verifier;
     maage_client_world_options options;
+    maage_controls *controls = NULL;
     maage_client_options video_options, saved_video_options, current_options;
     maage_client_interaction_visual interaction;
     maage_client_first_person first_person;
@@ -714,6 +714,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     float matrix[16];
     double camera_eye[3], camera_yaw, camera_pitch, camera_distance;
     size_t draw_count, resident_count, slot_index, first_count;
+    int drop_latched = 0, drop_stack = 0;
+    unsigned int drop_slot = 0;
     int valid_snapshot = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0;
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
@@ -754,7 +756,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
         failure_message = "No validated instance was selected at startup.";
         goto done;
     }
-    operation = maage_client_options_load(instance, &video_options);
+    operation = maage_controls_create(&controls);
+    if (maage_status_failed(operation)) goto done;
+    operation = maage_client_options_load(instance, &video_options, controls);
     if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to read config/options.ini; using defaults.");
     saved_video_options = video_options;
     if (options.radius_specified) video_options.render_distance = options.radius;
@@ -899,7 +903,7 @@ choose_world:
     paused_command = -1;
     view_sent = disconnected = 0;
     initial_capture = 1;
-    jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = 0;
+    jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = drop_latched = 0;
     pacing.deadline = 0;
     pacing.fps = 0;
     operation = maage_client_frontend_loading(frontend, trace);
@@ -1031,9 +1035,12 @@ choose_world:
         raw_elapsed = now - last;
         last = now;
         if (raw_elapsed < 0.0) raw_elapsed = 0.0;
+        maage_controls_observe(controls, &input);
         was_modal = maage_client_ui_modal(ui);
         was_options_visible = maage_client_ui_options_visible(ui);
         memset(&ui_input, 0, sizeof(ui_input));
+        ui_input.raw = &input;
+        ui_input.scroll = input.scroll_y;
         if (input.focused) {
             ui_input.escape = input.pressed[MAAGE_INPUT_KEY_ESCAPE];
             ui_input.f3 = input.pressed[MAAGE_INPUT_KEY_F3];
@@ -1046,7 +1053,7 @@ choose_world:
             ui_input.primary_down = input.primary_down;
             ui_input.primary_pressed = input.primary_pressed;
             ui_input.secondary_pressed = input.secondary_pressed;
-            ui_input.inventory = input.pressed[MAAGE_INPUT_KEY_E];
+            ui_input.inventory = maage_control_gui_pressed(controls, controls->inventory, &input);
             ui_input.shift = input.keys[MAAGE_INPUT_KEY_SHIFT];
         }
         ui_input.mouse_x = (float) input.mouse_x;
@@ -1081,7 +1088,7 @@ choose_world:
             options.radius = video_options.render_distance;
             view_sent = 0;
         }
-        if (!changing_mode && !was_changing_mode && ((was_focused && !input.focused) || (was_active && !input.captured))) {
+        if (!changing_mode && !was_changing_mode && ((was_focused && (!input.focused || input.focus_lost)) || (was_active && !input.captured))) {
             if (!maage_client_ui_modal(ui)) (void) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
         }
         was_changing_mode = changing_mode;
@@ -1103,7 +1110,8 @@ choose_world:
         active = !maage_client_ui_modal(ui) && !changing_mode &&
                  input.focused && input.captured && state.visible &&
                  state.framebuffer_width > 0 && state.framebuffer_height > 0;
-        if (active && input.pressed[MAAGE_INPUT_KEY_F5]) camera_mode = (camera_mode + 1U) % 3U;
+        if (!active || was_modal || !was_active) maage_controls_block(controls, &input);
+        if (active && maage_control_pressed(controls, controls->perspective, &input)) camera_mode = (camera_mode + 1U) % 3U;
         was_active = active;
         if (logged_max_fps != maage_client_ui_max_fps(ui) || logged_vsync != maage_client_ui_vsync(ui)) {
             logged_max_fps = maage_client_ui_max_fps(ui);
@@ -1162,14 +1170,20 @@ choose_world:
             }
         }
         if (active) {
-            yaw = fmod(yaw + input.mouse_delta_x * MAAGE_CLIENT_MOUSE_RADIANS, 6.283185307179586);
-            pitch += input.mouse_delta_y * MAAGE_CLIENT_MOUSE_RADIANS;
+            double factor, radians;
+            maage_client_ui_get_options(ui, &current_options);
+            factor = (double) current_options.mouse_sensitivity * 0.006 + 0.2;
+            /* Cubic sensitivity, then 0.15 degrees per scaled native delta.
+             * No elapsed-time or GUI-scale factor belongs in relative motion. */
+            radians = factor * factor * factor * 8.0 * 0.15 * 0.017453292519943295;
+            yaw = fmod(yaw + input.mouse_delta_x * radians, 6.283185307179586);
+            pitch += input.mouse_delta_y * radians * (current_options.invert_mouse ? -1 : 1);
             if (pitch > MAAGE_CLIENT_PITCH_LIMIT) pitch = MAAGE_CLIENT_PITCH_LIMIT;
             if (pitch < -MAAGE_CLIENT_PITCH_LIMIT) pitch = -MAAGE_CLIENT_PITCH_LIMIT;
         }
-        if (active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
+        if (active) {
             for (i = 0; i < (int) MAAGE_HOTBAR_SLOTS; ++i) {
-                if (input.pressed[MAAGE_INPUT_KEY_1 + i]) selected_hotbar = i;
+                if (maage_control_pressed(controls, controls->hotbar[i], &input)) selected_hotbar = i;
             }
             wheel += input.scroll_y;
             if (wheel >= 1.0 || wheel <= -1.0) {
@@ -1186,21 +1200,29 @@ choose_world:
                 else
                     queued_hotbar = selected_hotbar;
             }
-            if (input.pressed[MAAGE_INPUT_KEY_Q]) {
+            if (maage_control_pressed(controls, controls->drop, &input) && !drop_latched) {
+                drop_latched = 1;
+                drop_slot = (unsigned int) selected_hotbar;
+                drop_stack = input.keys[MAAGE_INPUT_KEY_CONTROL] != 0;
+            }
+            if (drop_latched) {
                 memset(&command, 0, sizeof(command));
                 command.kind = MAAGE_CMD_DROP;
-                command.inventory_slot = (unsigned int) selected_hotbar;
-                command.secondary_click = input.keys[MAAGE_INPUT_KEY_CONTROL] != 0;
+                command.inventory_slot = drop_slot;
+                command.secondary_click = drop_stack;
                 operation = maage_client_outbox_queue(&outbox, &command);
                 if (maage_status_failed(operation)) maage_client_ui_notify(ui, operation, now);
+                else drop_latched = 0;
             }
-        } else
+        } else {
+            drop_latched = 0;
             wheel = 0.0;
+        }
         if (active) {
-            if (input.pressed[MAAGE_INPUT_KEY_SPACE]) jump_latched = 1;
-            if (input.pressed[MAAGE_INPUT_KEY_W] && !input.keys[MAAGE_INPUT_KEY_S]) forward_latched = 1;
-            if (input.primary_pressed) attack_latched = 1;
-            if (input.secondary_pressed) use_latched = 1;
+            if (maage_control_pressed(controls, controls->jump, &input)) jump_latched = 1;
+            if (maage_control_pressed(controls, controls->forward, &input) && !maage_control_down(controls, controls->backward, &input)) forward_latched = 1;
+            if (maage_control_pressed(controls, controls->attack, &input)) attack_latched = 1;
+            if (maage_control_pressed(controls, controls->use, &input)) use_latched = 1;
         } else {
             jump_latched = attack_latched = use_latched = forward_latched = 0;
         }
@@ -1211,15 +1233,15 @@ choose_world:
             command.intent.movement.yaw = yaw;
             command.intent.pitch = pitch;
             if (active) {
-                command.intent.movement.forward = (double) (input.keys[MAAGE_INPUT_KEY_W] - input.keys[MAAGE_INPUT_KEY_S]);
-                command.intent.movement.strafe = (double) (input.keys[MAAGE_INPUT_KEY_D] - input.keys[MAAGE_INPUT_KEY_A]);
-                command.intent.movement.jump = input.keys[MAAGE_INPUT_KEY_SPACE];
-                command.intent.movement.sprint = input.keys[MAAGE_INPUT_KEY_LEFT_CONTROL];
+                command.intent.movement.forward = (double) (maage_control_down(controls, controls->forward, &input) - maage_control_down(controls, controls->backward, &input));
+                command.intent.movement.strafe = (double) (maage_control_down(controls, controls->right, &input) - maage_control_down(controls, controls->left, &input));
+                command.intent.movement.jump = maage_control_down(controls, controls->jump, &input);
+                command.intent.movement.sprint = maage_control_down(controls, controls->sprint, &input);
                 command.intent.forward_pressed = forward_latched;
                 command.intent.jump_pressed = jump_latched;
-                command.intent.descend = input.keys[MAAGE_INPUT_KEY_SHIFT];
-                command.intent.attack = input.primary_down || attack_latched;
-                command.intent.use = input.secondary_down || use_latched;
+                command.intent.descend = maage_control_down(controls, controls->sneak, &input);
+                command.intent.attack = maage_control_down(controls, controls->attack, &input) || attack_latched;
+                command.intent.use = maage_control_down(controls, controls->use, &input) || use_latched;
                 command.intent.attack_pressed = attack_latched;
                 command.intent.use_pressed = use_latched;
             }
@@ -1261,7 +1283,7 @@ choose_world:
                 yaw = incoming.player.yaw;
                 pitch = incoming.player.pitch;
                 selected_hotbar = queued_hotbar = (int) incoming.player.inventory.selected;
-                jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = 0;
+                jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = drop_latched = 0;
             } else if (incoming.player.motion.life != latest.player.motion.life) {
                 previous = incoming;
                 received_time = now;
@@ -1405,7 +1427,7 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, input.primary_down || input.primary_pressed, input.primary_pressed, input.secondary_down || input.secondary_pressed, input.secondary_pressed, input.keys[MAAGE_INPUT_KEY_SHIFT], (unsigned int) selected_hotbar, &command);
+            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, maage_control_down(controls, controls->attack, &input) || maage_control_pressed(controls, controls->attack, &input), maage_control_pressed(controls, controls->attack, &input), maage_control_down(controls, controls->use, &input) || maage_control_pressed(controls, controls->use, &input), maage_control_pressed(controls, controls->use, &input), maage_control_down(controls, controls->sneak, &input), (unsigned int) selected_hotbar, &command);
             if (!maage_status_failed(operation) && command.kind) {
                 command.sampled_at = prediction.diagnostics ? prediction.input_at : -1;
                 delivery = maage_client_outbox_queue(&outbox, &command);
@@ -1494,7 +1516,7 @@ choose_world:
         visual_snapshot.world_stats.meshing_queued += visual_stats.meshing_queued;
         visual_snapshot.world_stats.lighting_queued += visual_stats.lighting_queued;
         visual_snapshot.player.has_target = maage_status_code(maage_world_raycast(visual_world, eye, forward, latest.player.reach, &visual_snapshot.player.target)) == MAAGE_STATUS_SUCCESS;
-        if (!active || (!input.primary_down && !input.primary_pressed) ||
+        if (!active || (!maage_control_down(controls, controls->attack, &input) && !maage_control_pressed(controls, controls->attack, &input)) ||
             visual_snapshot.player.target.x != latest.player.breaking.x ||
             visual_snapshot.player.target.y != latest.player.breaking.y ||
             visual_snapshot.player.target.z != latest.player.breaking.z)
@@ -1510,8 +1532,8 @@ choose_world:
                 visual_snapshot.has_observation = 1;
             }
         }
-        swing_progress = maage_client_swing_update(&local_swing, &latest, raw_elapsed, active, input.primary_down || input.primary_pressed, input.primary_pressed, visual_snapshot.player.has_target);
-        maage_client_food_animation_update(&food_animation, &latest, raw_elapsed, active && (input.secondary_down || input.secondary_pressed) && !input.primary_down && !input.primary_pressed);
+        swing_progress = maage_client_swing_update(&local_swing, &latest, raw_elapsed, active, maage_control_down(controls, controls->attack, &input) || maage_control_pressed(controls, controls->attack, &input), maage_control_pressed(controls, controls->attack, &input), visual_snapshot.player.has_target);
+        maage_client_food_animation_update(&food_animation, &latest, raw_elapsed, active && (maage_control_down(controls, controls->use, &input) || maage_control_pressed(controls, controls->use, &input)) && !maage_control_down(controls, controls->attack, &input) && !maage_control_pressed(controls, controls->attack, &input));
         rendered = maage_client_interaction_update(&interaction, renderer, atlas, blocks, &visual_snapshot, &prediction, trace);
         if (maage_status_failed(rendered)) goto done;
         eye_fluid = maage_fluid_get(maage_content_fluids(content), maage_world_fluid_at(visual_world, eye));
@@ -1752,6 +1774,8 @@ done:
     }
     frontend = NULL;
     maage_client_cleanup_result(maage_client_ui_destroy(ui), &outcome, &cleanup_trace, trace);
+    maage_client_cleanup_result(maage_controls_destroy(controls), &outcome, &cleanup_trace, trace);
+    controls = NULL;
     maage_client_cleanup_result(maage_render_texture_destroy(atlas), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_client_splash_destroy(&splash), &outcome, &cleanup_trace, trace);
     maage_client_cleanup_result(maage_renderer_destroy(renderer, &cleanup_trace), &outcome, &cleanup_trace, trace);

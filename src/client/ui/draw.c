@@ -194,7 +194,7 @@ void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle
 
 void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rectangle, const char *label, maage_client_ui_button_visual state) {
     maage_client_ui_rect part;
-    float v, center, tint, half;
+    float v, center, text_y, tint, half;
     if (!ui || !label || state < MAAGE_CLIENT_UI_BUTTON_DISABLED || state > MAAGE_CLIENT_UI_BUTTON_HOVER || rectangle.width <= 0 || rectangle.height <= 0) return;
     if (state != MAAGE_CLIENT_UI_BUTTON_DISABLED) maage_client_ui_pointer(ui, rectangle);
     /* Buttons use two unscaled horizontal halves of widgets.png. */
@@ -207,9 +207,10 @@ void maage_client_ui_button_state(maage_client_ui *ui, maage_client_ui_rect rect
     part.width = rectangle.width - half;
     maage_client_ui_rectangle(ui, part, (456.0f - part.width) / ui->resources.atlas_edge, v / ui->resources.atlas_edge, 456.0f / ui->resources.atlas_edge, (v + 20) / ui->resources.atlas_edge, 1, 1, 1, 1);
     center = rectangle.x + rectangle.width * 0.5f;
-    maage_client_ui_text(ui, label, center + 1, rectangle.y + 7, MAAGE_CLIENT_UI_CENTER, 0.22f, 0.22f, 0.22f);
+    text_y = rectangle.y + (float) (int) ((rectangle.height - 8) * 0.5f);
+    maage_client_ui_text(ui, label, center + 1, text_y + 1, MAAGE_CLIENT_UI_CENTER, 0.22f, 0.22f, 0.22f);
     tint = state == MAAGE_CLIENT_UI_BUTTON_DISABLED ? 0.63f : (state == MAAGE_CLIENT_UI_BUTTON_HOVER ? 1.0f : 0.88f);
-    maage_client_ui_text(ui, label, center, rectangle.y + 6, MAAGE_CLIENT_UI_CENTER, tint, tint, state == MAAGE_CLIENT_UI_BUTTON_HOVER ? 0.63f : tint);
+    maage_client_ui_text(ui, label, center, text_y, MAAGE_CLIENT_UI_CENTER, tint, tint, state == MAAGE_CLIENT_UI_BUTTON_HOVER ? 0.63f : tint);
 }
 void maage_client_ui_button(maage_client_ui *ui, maage_client_ui_rect rectangle, const char *label, int highlighted) {
     maage_client_ui_button_state(ui, rectangle, label, highlighted ? MAAGE_CLIENT_UI_BUTTON_HOVER : MAAGE_CLIENT_UI_BUTTON_NORMAL);

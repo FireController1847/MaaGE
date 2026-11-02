@@ -44,6 +44,10 @@ typedef struct maage_client_ui_debug_cache {
     unsigned int count;
     int atlas_edge, scale, valid, disabled;
 } maage_client_ui_debug_cache;
+typedef struct maage_client_ui_control_row {
+    size_t handle;
+    float y;
+} maage_client_ui_control_row;
 struct maage_client_ui {
     maage_client_ui_navigation navigation;
     maage_renderer *renderer;
@@ -86,6 +90,12 @@ struct maage_client_ui {
     int render_distance, render_distance_max, dragging_distance;
     int audio_volume[7], dragging_volume;
     int dragging_fov, fov_degrees, video_first_row;
+    maage_controls *controls; /* Borrowed Client registry. */
+    maage_client_ui_control_row *control_order;
+    size_t control_count, control_capture, control_focus;
+    float control_scroll, control_drag_y, control_drag_scroll;
+    float control_label_x, control_key_x, control_key_width, control_reset_x, control_scrollbar_x;
+    int mouse_sensitivity, invert_mouse, dragging_sensitivity, dragging_controls;
     int window_mode, last_nonwindowed_mode, mode_pending, mode_changing;
     int confirmed_window_mode, confirmed_fullscreen_style;
     double mode_requested_at;
@@ -105,6 +115,8 @@ void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangl
 void maage_client_ui_slider(maage_client_ui *ui, maage_client_ui_rect rectangle, const char *label, float value, int highlighted);
 /* Shared cursor feedback for standard and custom-drawn controls. */
 void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle);
+maage_status maage_client_ui_controls_register(maage_client_ui *ui);
+int maage_client_ui_controls_capture(maage_client_ui *ui, const maage_client_ui_input *input);
 maage_status maage_client_ui_options_register(maage_client_ui *ui);
 void maage_client_ui_request_window_mode(maage_client_ui *ui, maage_client_window_choice choice);
 void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectangle, float u0, float v0, float u1, float v1, float red, float green, float blue, float alpha);

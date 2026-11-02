@@ -23,70 +23,6 @@ static unsigned int maage_win32_users;
 static const WCHAR maage_win32_class[] = L"MaaGEWindow";
 static maage_status maage_win32_capture(maage_window *, int);
 
-static int maage_win32_key(LPARAM code) {
-    switch (((unsigned long) code >> 16) & 255) {
-    case 0x11:
-        return MAAGE_INPUT_KEY_W;
-    case 0x1e:
-        return MAAGE_INPUT_KEY_A;
-    case 0x1f:
-        return MAAGE_INPUT_KEY_S;
-    case 0x20:
-        return MAAGE_INPUT_KEY_D;
-    case 0x39:
-        return MAAGE_INPUT_KEY_SPACE;
-    case 0x01:
-        return MAAGE_INPUT_KEY_ESCAPE;
-    case 0x3f:
-        return MAAGE_INPUT_KEY_F5;
-    case 0x3d:
-        return MAAGE_INPUT_KEY_F3;
-    case 0x57:
-        return MAAGE_INPUT_KEY_F11;
-    case 0x1c:
-        return MAAGE_INPUT_KEY_ENTER;
-    case 0x0f:
-        return MAAGE_INPUT_KEY_TAB;
-    case 0x48:
-        return MAAGE_INPUT_KEY_UP;
-    case 0x50:
-        return MAAGE_INPUT_KEY_DOWN;
-    case 0x4b:
-        return MAAGE_INPUT_KEY_LEFT;
-    case 0x4d:
-        return MAAGE_INPUT_KEY_RIGHT;
-    case 0x12:
-        return MAAGE_INPUT_KEY_E;
-    case 0x10:
-        return MAAGE_INPUT_KEY_Q;
-    case 0x1d:
-        return MAAGE_INPUT_KEY_CONTROL;
-    case 0x02:
-        return MAAGE_INPUT_KEY_1;
-    case 0x03:
-        return MAAGE_INPUT_KEY_2;
-    case 0x04:
-        return MAAGE_INPUT_KEY_3;
-    case 0x05:
-        return MAAGE_INPUT_KEY_4;
-    case 0x06:
-        return MAAGE_INPUT_KEY_5;
-    case 0x07:
-        return MAAGE_INPUT_KEY_6;
-    case 0x08:
-        return MAAGE_INPUT_KEY_7;
-    case 0x09:
-        return MAAGE_INPUT_KEY_8;
-    case 0x0a:
-        return MAAGE_INPUT_KEY_9;
-    case 0x2a:
-    case 0x36:
-        return MAAGE_INPUT_KEY_SHIFT;
-    default:
-        return -1;
-    }
-}
-
 static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, LPARAM lp) {
     maage_window *window;
     RECT *suggested;
@@ -114,22 +50,29 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
         case WM_CHAR:
             if (!window->input.captured) maage_window_input_character(window, (unsigned int) wp);
             break;
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
         case WM_KEYDOWN:
         case WM_KEYUP:
-            maage_window_input_key(window, (maage_input_key) maage_win32_key(lp), message == WM_KEYDOWN);
-            if ((((unsigned long) lp >> 16) & 255UL) == 0x1d && !(lp & 0x01000000L)) maage_window_input_key(window, MAAGE_INPUT_KEY_LEFT_CONTROL, message == WM_KEYDOWN);
+            maage_window_input_key(window, (wp == VK_PAUSE ? 72U : (wp == VK_NUMLOCK ? 83U : maage_window_key_scan((unsigned int) (((unsigned long) lp >> 16) & 255UL), (lp & 0x01000000L) != 0))), message == WM_KEYDOWN || message == WM_SYSKEYDOWN);
+            /* Preserve native system shortcuts while still reporting physical Alt. */
+            if (message == WM_SYSKEYDOWN || message == WM_SYSKEYUP) return DefWindowProcW(handle, message, wp, lp);
             break;
         case WM_MOUSEMOVE:
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
         case WM_RBUTTONDOWN:
         case WM_RBUTTONUP:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONUP:
             window->input.mouse_x = (double) (short) LOWORD(lp) * 96.0 / maage_win32_dpi(window);
             window->input.mouse_y = (double) (short) HIWORD(lp) * 96.0 / maage_win32_dpi(window);
-            if (message == WM_LBUTTONDOWN) window->input.primary_pressed = window->input.primary_down = 1;
-            if (message == WM_LBUTTONUP) window->input.primary_down = 0;
-            if (message == WM_RBUTTONDOWN) window->input.secondary_pressed = window->input.secondary_down = 1;
-            if (message == WM_RBUTTONUP) window->input.secondary_down = 0;
+            if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP) maage_window_input_button(window, 0, message == WM_LBUTTONDOWN);
+            if (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) maage_window_input_button(window, 1, message == WM_RBUTTONDOWN);
+            if (message == WM_MBUTTONDOWN || message == WM_MBUTTONUP) maage_window_input_button(window, 2, message == WM_MBUTTONDOWN);
+            if (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP) maage_window_input_button(window, GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? 3U : 4U, message == WM_XBUTTONDOWN);
             break;
         case WM_MOUSEWHEEL:
             window->input.scroll_y += (double) (short) HIWORD(wp) / WHEEL_DELTA;

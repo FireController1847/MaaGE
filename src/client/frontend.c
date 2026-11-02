@@ -16,6 +16,7 @@ typedef struct maage_front_options {
     maage_condition *wake;
     maage_thread *thread;
     maage_client_options latest;
+    char *bindings;
     int pending, stop;
 } maage_front_options;
 typedef struct maage_front_shutdown {
@@ -55,6 +56,7 @@ struct maage_client_frontend {
 static void front_options_run(void *context) {
     maage_front_options *writer = (maage_front_options *) context;
     maage_client_options options;
+    char *bindings;
     maage_status result;
     for (;;) {
         maage_mutex_lock(writer->mutex);
@@ -65,9 +67,12 @@ static void front_options_run(void *context) {
             return;
         }
         options = writer->latest;
+        bindings = writer->bindings;
+        writer->bindings = NULL;
         writer->pending = 0;
         maage_mutex_unlock(writer->mutex);
-        result = maage_client_options_save(writer->instance, &options);
+        result = maage_client_options_save(writer->instance, &options, bindings);
+        free(bindings);
         if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", result, "Background config/options.ini save failed.");
     }
 }
@@ -242,6 +247,8 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         maage_client_ui_set_safe_area(ui, &state.safe_area);
         maage_client_ui_notice_time(ui, start);
         memset(&routed, 0, sizeof(routed));
+        routed.raw = &input;
+        routed.shift = input.keys[MAAGE_INPUT_KEY_SHIFT];
         routed.escape = input.pressed[MAAGE_INPUT_KEY_ESCAPE];
         routed.f11 = input.pressed[MAAGE_INPUT_KEY_F11];
         routed.accept = input.pressed[MAAGE_INPUT_KEY_ENTER];
@@ -358,9 +365,16 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
     }
 }
 maage_status maage_client_frontend_save_options(maage_client_frontend *f, const maage_client_options *options) {
+    char *bindings;
+    maage_status result;
     if (!f || !options || !f->options.mutex) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SAVE, 0);
+    result = maage_controls_serialize(options->controls, &bindings);
+    if (maage_status_failed(result)) return result;
     maage_mutex_lock(f->options.mutex);
+    free(f->options.bindings);
+    f->options.bindings = bindings;
     f->options.latest = *options;
+    f->options.latest.controls = NULL;
     f->options.pending = 1;
     maage_condition_signal(f->options.wake);
     maage_mutex_unlock(f->options.mutex);

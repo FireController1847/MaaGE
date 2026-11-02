@@ -284,7 +284,7 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
     if (forward < -1.0) forward = -1.0;
     if (strafe > 1.0) strafe = 1.0;
     if (strafe < -1.0) strafe = -1.0;
-    if (input->descend) {
+    if (input->descend && !input->flying) {
         forward *= MAAGE_PLAYER_SNEAK_INPUT;
         strafe *= MAAGE_PLAYER_SNEAK_INPUT;
     }
@@ -307,7 +307,7 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
         for (axis = 0; axis < 3; ++axis)
             if (fabs(player->velocity[axis]) < 0.005) player->velocity[axis] = 0;
     if (input->flying) {
-        acceleration = 0.2;
+        acceleration = 0.2 * (player->sprinting ? MAAGE_PLAYER_FLIGHT_SPRINT_SPEED : 1.0);
         drag = 0.6;
     } else if (definition && definition->swimming) {
         acceleration = definition->acceleration;

@@ -115,6 +115,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->leaves_mode = MAAGE_LEAVES_FANCY;
     ui->biome_blend = MAAGE_BIOME_BLEND_SMOOTH_5;
     ui->fov_degrees = 70;
+    ui->mouse_sensitivity = 50;
     ui->audio_volume[0] = MAAGE_CLIENT_AUDIO_DEFAULT_MASTER;
     ui->audio_volume[1] = MAAGE_CLIENT_AUDIO_DEFAULT_BLOCKS;
     ui->audio_volume[2] = MAAGE_CLIENT_AUDIO_DEFAULT_PLAYER;
@@ -134,6 +135,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     }
     result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_PAUSE, pause_draw, pause_input, NULL);
     if (!maage_status_failed(result)) result = maage_client_ui_options_register(ui);
+    if (!maage_status_failed(result)) result = maage_client_ui_controls_register(ui);
     if (!maage_status_failed(result)) result = maage_client_ui_inventory_register(ui);
     if (maage_status_failed(result)) {
         maage_client_ui_destroy(ui);
@@ -172,6 +174,7 @@ maage_status maage_client_ui_destroy(maage_client_ui *ui) {
     free(ui->indices);
     maage_registry_pages_destroy(&ui->navigation.screens, free);
     free(ui->navigation.stack);
+    free(ui->control_order);
     free(ui);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
@@ -185,6 +188,13 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     if (actions) *actions = 0;
     if (!ui || !input || !actions) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE, !ui ? 0 : (!input ? 1 : 6));
     if (!ui->navigation.finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE, 0);
+    /* Cancellation must survive minimization and loss/regain in one event pump,
+     * and consume that update before any Client shortcut can run. */
+    if (ui->control_capture && (!input->raw || !input->raw->focused || input->raw->focus_lost || ui->mode_pending || ui->mode_changing)) {
+        ui->control_capture = 0;
+        ui->dragging_sensitivity = ui->dragging_controls = 0;
+        return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
+    }
     if (framebuffer_width <= 0 || framebuffer_height <= 0 || window_width <= 0 || window_height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     ui->route_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
     scale = framebuffer_width / 320;
@@ -213,11 +223,13 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     ui->mouse_y = input->mouse_y * (float) framebuffer_height / (float) window_height / scale;
     ui->primary_down = input->primary_down;
     if (ui->primary_down) maage_client_ui_cursor(ui, 0);
+    if (maage_client_ui_controls_capture(ui, input)) return ui->route_result;
     if (input->f3) ui->debug = !ui->debug;
     if (input->f11) maage_client_ui_request_window_mode(ui, (maage_client_window_choice) (ui->window_mode ? MAAGE_CLIENT_WINDOWED : ui->last_nonwindowed_mode));
     if (input->escape && (maage_client_ui_current(ui) < MAAGE_CLIENT_UI_TITLE ||
                           maage_client_ui_current(ui) == MAAGE_CLIENT_UI_VIDEO_SETTINGS ||
                           maage_client_ui_current(ui) == MAAGE_CLIENT_UI_SOUND_SETTINGS ||
+                          maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CONTROLS ||
                           maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CRAFTING_TABLE)) {
         ui->dragging_fps = 0;
         ui->dragging_distance = 0;
@@ -226,7 +238,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
-    if (input->inventory && ui->has_snapshot) {
+    if (input->inventory && ui->has_snapshot && (!id || id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE)) {
         if (id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE) return maage_client_ui_back(ui);
         if (!id && !ui->container_command_pending) {
             maage_session_command command;
@@ -302,6 +314,9 @@ maage_status maage_client_ui_set_window_state(maage_client_ui *ui, const maage_w
 maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_client_options *options) {
     maage_status result;
     if (!ui || !options) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
+    ui->controls = options->controls;
+    ui->mouse_sensitivity = options->mouse_sensitivity;
+    ui->invert_mouse = options->invert_mouse;
     ui->fov_degrees = options->fov_degrees;
     if (ui->fov_degrees < 30) ui->fov_degrees = 30;
     if (ui->fov_degrees > 110) ui->fov_degrees = 110;
@@ -339,6 +354,10 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
 
 void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options *options) {
     if (!ui || !options) return;
+    options->controls = ui->controls;
+    options->controls_revision = ui->controls ? ui->controls->revision : 0;
+    options->mouse_sensitivity = ui->mouse_sensitivity;
+    options->invert_mouse = ui->invert_mouse;
     options->fov_degrees = ui->fov_degrees;
     options->max_fps = ui->fps_step == 26 ? 0 : (ui->fps_step + 1) * 10;
     options->render_distance = ui->render_distance;
@@ -359,7 +378,7 @@ void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options
 
 int maage_client_ui_options_visible(const maage_client_ui *ui) {
     maage_client_ui_screen_id id = maage_client_ui_current(ui);
-    return id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS || id == MAAGE_CLIENT_UI_SOUND_SETTINGS;
+    return id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS || id == MAAGE_CLIENT_UI_SOUND_SETTINGS || id == MAAGE_CLIENT_UI_CONTROLS;
 }
 int maage_client_ui_window_mode_changing(const maage_client_ui *ui) {
     return ui && (ui->mode_pending || ui->mode_changing);
@@ -536,8 +555,9 @@ maage_status maage_client_ui_draw(maage_client_ui *ui, const maage_client_ui_deb
     id = maage_client_ui_current(ui);
     if (id) {
         rectangle = ui->clip;
-        if (ui->has_snapshot) maage_client_ui_gradient(ui, rectangle, 0xC0101010UL, 0xD0101010UL);
-        else if (id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS || id == MAAGE_CLIENT_UI_SOUND_SETTINGS) maage_client_ui_menu_background(ui);
+        if (id == MAAGE_CLIENT_UI_CONTROLS) maage_client_ui_menu_background(ui);
+        else if (ui->has_snapshot) maage_client_ui_gradient(ui, rectangle, 0xC0101010UL, 0xD0101010UL);
+        else if (id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS || id == MAAGE_CLIENT_UI_SOUND_SETTINGS || id == MAAGE_CLIENT_UI_CONTROLS) maage_client_ui_menu_background(ui);
         /* Only interactive content is kept within safe-area bounds; the title
          * panorama and its darkening layer must fill even the notch region. */
         ui->clip = id == MAAGE_CLIENT_UI_TITLE ? rectangle : ui->content;

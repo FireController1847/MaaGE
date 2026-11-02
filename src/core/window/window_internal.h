@@ -44,6 +44,11 @@ extern const maage_window_backend_api maage_window_cocoa_api;
 extern const maage_window_backend_api maage_window_x11_api;
 extern const maage_window_backend_api maage_window_wayland_api;
 void maage_window_input_character(maage_window *window, unsigned int character);
+void maage_window_input_button(maage_window *window, unsigned int button, int down);
+maage_input_key maage_window_key_evdev(unsigned int code);
+maage_input_key maage_window_key_scan(unsigned int code, int extended);
+maage_input_key maage_window_key_macos(unsigned int code);
+maage_input_key maage_window_key_xkb(const char *name);
 void maage_window_input_key(maage_window *window, maage_input_key key, int down);
 void maage_window_input_focus(maage_window *window, int focused);
 #endif

@@ -60,6 +60,8 @@ maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id
         if (navigation->stack[i] == id)
             return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     navigation->stack[navigation->depth++] = id;
+    ui->control_capture = 0;
+    ui->dragging_sensitivity = ui->dragging_controls = 0;
     ui->selected = 0;
     ui->selected_keyboard = 0;
     ui->dragging_fov = ui->dragging_fps = ui->dragging_distance = ui->dragging_volume = 0;
@@ -83,6 +85,8 @@ maage_status maage_client_ui_back(maage_client_ui *ui) {
         return maage_client_ui_queue_command(ui, &command);
     }
     --ui->navigation.depth;
+    ui->control_capture = 0;
+    ui->dragging_sensitivity = ui->dragging_controls = 0;
     ui->selected = 0;
     ui->selected_keyboard = 0;
     ui->dragging_fov = ui->dragging_fps = ui->dragging_distance = ui->dragging_volume = 0;
