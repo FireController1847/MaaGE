@@ -312,9 +312,6 @@ static maage_status maage_metal_create(maage_renderer *renderer) {
     if (maage_status_failed(result)) return result;
     native->device = MTLCreateSystemDefaultDevice();
     if (!native->device) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-    native->panorama_filter = [[MPSImageGaussianBlur alloc] initWithDevice:native->device sigma:MAAGE_RENDER_BLUR_SIGMA];
-    if (!native->panorama_filter) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
-    native->panorama_filter.edgeMode = MPSImageEdgeModeClamp;
     if ([native->device name]) {
         strncpy(renderer->device_name, [[native->device name] UTF8String], sizeof(renderer->device_name) - 1);
         renderer->device_name[sizeof(renderer->device_name) - 1] = 0;
@@ -629,6 +626,22 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [pool drain];
         return result;
     }
+    /* Each recycled slot has completed its previous command buffer. Release
+     * panorama-only render targets when its next frame does not need them,
+     * rather than retaining eight screen-sized textures throughout gameplay. */
+    if (!panorama_count) {
+        unsigned int remaining;
+        [native->panorama_source[slot] release];
+        [native->panorama_blurred[slot] release];
+        native->panorama_source[slot] = nil;
+        native->panorama_blurred[slot] = nil;
+        for (remaining = 0; remaining < MAAGE_METAL_FRAME_SLOTS; ++remaining)
+            if (native->panorama_source[remaining] || native->panorama_blurred[remaining]) break;
+        if (remaining == MAAGE_METAL_FRAME_SLOTS) {
+            [native->panorama_filter release];
+            native->panorama_filter = nil;
+        }
+    }
     for (layer = 0; layer < 3; ++layer) {
         batch = layers[layer];
         if (!batch || !batch->index_count) continue;
@@ -747,6 +760,14 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         id<MTLTexture> source, blurred;
         MTLTextureDescriptor *description;
         MTLRenderPassDescriptor *offscreen;
+        if (!native->panorama_filter) {
+            native->panorama_filter = [[MPSImageGaussianBlur alloc] initWithDevice:native->device sigma:MAAGE_RENDER_BLUR_SIGMA];
+            if (!native->panorama_filter) {
+                [pool drain];
+                return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_CREATE, 0);
+            }
+            native->panorama_filter.edgeMode = MPSImageEdgeModeClamp;
+        }
         if (!native->panorama_source[slot] || native->panorama_source[slot].width != color.width || native->panorama_source[slot].height != color.height) {
             description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:color.width height:color.height mipmapped:NO];
             description.storageMode = MTLStorageModePrivate;

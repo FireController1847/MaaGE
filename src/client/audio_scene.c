@@ -199,6 +199,7 @@ static void sc_effect(maage_client_audio_scene *scene, int begin, int end, unsig
         channel->voice = voice;
         channel->source = index;
     }
+    if (maage_status_code(result) == MAAGE_STATUS_NOOP && !voice) return; /* On-demand decode still pending. */
     if (maage_status_failed(result) || !voice) {
         if (!maage_status_failed(result)) result = sc_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_START);
         if (!sc_transient_pressure(result)) sc_resource_failed(scene, index, result, trace);

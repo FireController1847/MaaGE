@@ -1,24 +1,27 @@
 # Numeric Sound Catalog
 
 The Client-owned catalog maps numeric Session event/material IDs from
-`maage/session_protocol.h` to the single resource manifest in
-`sound_catalog_manifest.c`. SoundBank resolves its `minecraft/sounds/<stem>[N].ogg`
-paths below reconstructed resources. Registration/preload resolves names and
-copies decoded variants into Audio buffers; playback performs no filesystem work,
-name construction or allocation. One audio unit is one world block.
+`maage/session_protocol.h` to the resource manifest in
+`sound_catalog_manifest.c`. SoundBank registers numeric clip IDs and resolves
+reconstructed asset paths at initialization; this does **not** decode PCM.
 
-`maage_sound_catalog_create` borrows SoundBank and Audio. Set the copied callback
-port once, then preload before dispatch. All callbacks run on the Client audio
-owner. Decode returns owned immutable PCM; upload copies it into an independently
-owned buffer; PCM releases even if upload fails. Play borrows a buffer. Destroy
-releases successful buffers once; borrowed services must outlive it. The Client
-adapter maps the five catalog bus requests to Audio categories and owns listener
-configuration. Music and long-lived ambience scheduling belong to the Client scene,
-not this one-shot catalog.
+A single catalog decoder worker handles requested sound variants on demand.
+The owner schedules a first request without blocking presentation; when the
+worker completes, the audio owner uploads immutable PCM into Audio, releases
+temporary decoder memory, and plays a recent queued first occurrence. Idle
+buffers are retired after 20 seconds of nonuse; active mixer voices retain
+their buffer independently until playback ends. On subsequent use, retired
+variants decode again. Failed optional variants do not disable other sounds.
 
-Preload is idempotent. Unavailable variants remain absent until destruction/reload;
-`PARTIAL` retains usable variants, and playback returns `NOT_FOUND` if no compatible
-family is loaded. Material-specific footsteps/digging use compatible stone fallback;
-missing ambience can remain silent. Landing events select small/big fall samples,
-but ordinary jumps, landings and inventory slot changes emit no such event.
-GUI clicks are local/non-positional; thunder requires a real lightning event.
+`maage_sound_catalog_create` borrows SoundBank and Audio. Install its copied
+port, call `maage_sound_catalog_prepare`, and regularly call
+`maage_sound_catalog_poll` on the audio owner. The background worker reads
+only previously registered IDs. Shutdown joins the worker before releasing
+decoded PCM and catalog buffers; the borrowed bank and engine outlive it.
+
+Material-specific footsteps and digging retain the stone fallback mapping.
+GUI clicks are non-positional; ordinary jumps, landings and slot changes
+remain silent. Music and environmental effects are scheduled separately:
+music retains its existing selected-track streaming worker, while
+environmental effects have their own on-demand background decoder and
+20-second idle-buffer retirement.
