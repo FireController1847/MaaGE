@@ -153,9 +153,12 @@ Server columns transfer whenever their independent load/generation finishes;
 there is no initial packet ring barrier. Local Session transport retains
 per-column acknowledged revision identities and prioritizes nearer packets, while far columns
 can be received, lit, and meshed before their first visible turn. Initial
-block/biome transfer does not wait for Server lighting. The Server and Client
-retain previously viewed columns and GPU meshes when render distance temporarily
-shrinks at the same player chunk. The Server streams new/changed chunks only
+block/biome transfer does not wait for Server lighting. The default cache policy reclaims previously viewed Server columns on
+render-distance reductions through ordered Client unloads. Explicit
+RETAIN_ON_SHRINK instead preserves the previous radius for fast re-expansion.
+Neither residency policy limits the world's logical size, and dirty unsaved
+Server columns remain resident. Client capacity remains large enough to
+accept queued transport packets while ordered unloads are processed. The Server streams new/changed chunks only
 within the *current* view radius, while retaining acknowledged revision identities
 just outside it so later expansion does not repeat the initial transfer. Cached chunks are
 hidden outside the view. On movement, stale acknowledged Server columns receive

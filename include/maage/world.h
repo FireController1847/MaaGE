@@ -76,6 +76,10 @@ typedef enum maage_chunk_state {
     MAAGE_CHUNK_UNLOADING,
     MAAGE_CHUNK_FAILED
 } maage_chunk_state;
+typedef enum maage_world_cache_policy {
+    MAAGE_WORLD_CACHE_RECLAIM_ON_SHRINK = 0, /* Default: reclaim unneeded columns. */
+    MAAGE_WORLD_CACHE_RETAIN_ON_SHRINK = 1   /* Preserve fast re-expansion. */
+} maage_world_cache_policy;
 typedef struct maage_world_config {
     const maage_block_registry *registry;
     const struct maage_item_registry *items; /* finalized; borrowed for block drops */
@@ -101,6 +105,7 @@ typedef struct maage_world_config {
      * Cache and accepted-job limits are independent runtime allocations. */
     unsigned int cache_capacity;
     unsigned int job_capacity;
+    maage_world_cache_policy cache_policy; /* Residency policy, not a logical world-size limit. */
     /* All-zero selects the current generation defaults. */
     maage_generation_policy generation_policy;
     /* Copied during creation; NULL starts the seeded clock/weather defaults. */

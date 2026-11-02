@@ -1381,7 +1381,8 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
         !maage_item_registry_is_finalized(config->items) || !config->biomes ||
         !config->biomes->finalized || config->render_distance < 1 ||
         config->render_distance > MAAGE_WORLD_MAX_RADIUS || config->simulation_distance < 0 ||
-        config->simulation_distance > MAAGE_WORLD_MAX_RADIUS) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
+        config->simulation_distance > MAAGE_WORLD_MAX_RADIUS ||
+        (config->cache_policy != MAAGE_WORLD_CACHE_RECLAIM_ON_SHRINK && config->cache_policy != MAAGE_WORLD_CACHE_RETAIN_ON_SHRINK)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     if (!maage_world_random_speed_valid(config->simulation_distance, config->random_tick_speed)) goto overflow;
     resident_radius = config->render_distance > config->simulation_distance ? config->render_distance : config->simulation_distance;
     span = (size_t) resident_radius * 2U + 3U;
@@ -1505,11 +1506,14 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
     if (!world || world->stopped || world->failed || distance < 1 || distance > MAAGE_WORLD_MAX_RADIUS) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
     radius = distance > world->config.simulation_distance ? distance : world->config.simulation_distance;
     if (!maage_world_cache_bound(radius, cache_capacity, &limit)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
-    if (limit < world->cache_limit) limit = world->cache_limit;
+    /* A replica can have packets in flight while its target cache shrinks. */
+    if (world->config.cache_policy == MAAGE_WORLD_CACHE_RETAIN_ON_SHRINK && limit < world->cache_limit) limit = world->cache_limit;
+    if (world->config.presentation_only && limit < world->count) limit = world->count;
     previous = world->config.render_distance;
     if (previous == distance && limit == world->cache_limit) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
     world->config.render_distance = distance;
-    if (distance > world->retained_radius) world->retained_radius = distance;
+    if (world->config.cache_policy == MAAGE_WORLD_CACHE_RECLAIM_ON_SHRINK) world->retained_radius = distance;
+    else if (distance > world->retained_radius) world->retained_radius = distance;
     world->config.cache_capacity = cache_capacity;
     world->cache_limit = limit;
     if (previous != distance) {
