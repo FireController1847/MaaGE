@@ -18,8 +18,8 @@
 
 /* Platform-specific diagnostics stay private to this Client collector. No
  * filesystem reads, allocation, GUI mutation or world locks are needed. */
-static void maage_client_debug_memory(double *resident, double *peak, double *footprint) {
-    *resident = *peak = *footprint = -1.0;
+static void maage_client_debug_memory(double *resident, double *peak) {
+    *resident = *peak = -1.0;
 #if defined(_WIN32)
     {
         PROCESS_MEMORY_COUNTERS memory;
@@ -37,11 +37,6 @@ static void maage_client_debug_memory(double *resident, double *peak, double *fo
         struct rusage usage;
         if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t) &memory, &count) == KERN_SUCCESS) *resident = (double) memory.resident_size;
         if (!getrusage(RUSAGE_SELF, &usage)) *peak = (double) usage.ru_maxrss;
-        {
-            task_vm_info_data_t vm;
-            mach_msg_type_number_t vm_count = TASK_VM_INFO_COUNT;
-            if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t) &vm, &vm_count) == KERN_SUCCESS) *footprint = (double) vm.phys_footprint;
-        }
     }
 #elif defined(__linux__)
     {
@@ -100,7 +95,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     const maage_player *player;
     double yaw, pitch;
     const char *gpu;
-    double degrees, resident, peak, footprint, retained, tracked;
+    double degrees, resident, peak, retained, tracked;
     size_t native_gpu_bytes;
     int x, y, z, direction;
     unsigned left = 0, right = 0;
@@ -127,11 +122,10 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
         if (debug->timing_ready) sprintf(debug->performance, "%.0f FPS | %.1f TPS | %.1f ms", debug->fps, debug->tps, debug->frame_ms);
         else
             strcpy(debug->performance, "Collecting timing...");
-        maage_client_debug_memory(&resident, &peak, &footprint);
+        maage_client_debug_memory(&resident, &peak);
         debug->memory[0] = 0;
-        if (resident >= 0 && footprint >= 0) sprintf(debug->memory, "RSS %.0f MiB | Footprint %.0f MiB", resident / 1048576.0, footprint / 1048576.0);
-        else if (resident >= 0) sprintf(debug->memory, "RSS %.0f MiB", resident / 1048576.0);
-        else if (peak >= 0) sprintf(debug->memory, "Peak RSS %.0f MiB", peak / 1048576.0);
+        if (resident >= 0) sprintf(debug->memory, "Memory: %.0f MiB", resident / 1048576.0);
+        else if (peak >= 0) sprintf(debug->memory, "Peak memory: %.0f MiB", peak / 1048576.0);
         native_gpu_bytes = maage_renderer_gpu_mesh_allocation_bytes(renderer);
         tracked = (double) native_gpu_bytes + (double) snapshot->world_stats.resident_storage_bytes + (double) client_world_bytes;
         /* The last number is an unattributed process-resident remainder, not

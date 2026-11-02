@@ -27,12 +27,12 @@ typedef struct maage_client_debug {
 } maage_client_debug;
 /* Copied player/target observations are read from the latest Server snapshot. Performance uses
  * a 0.75-second exponential history, displayed at 250 ms intervals; native memory
- * is sampled at that interval. F3 shows process RSS (and macOS physical
- * footprint when available) with GPU native mesh allocations, Server/Client
- * World retained storage and an unattributed U remainder. The World
- * excludes detached jobs and other external ownership; GPU excludes textures
- * and driver resources. U is a subtraction, not an allocation or free-memory
- * measurement, and may be unknown for discrete/nonresident GPUs.
+ * is sampled at that interval. F3 shows process resident/peak memory and one
+ * breakdown line: GPU base mesh payload / SW Server World retained storage /
+ * CW Client World retained storage / U unattributed resident remainder.
+ * World counts exclude detached jobs and resources outside owned chunk arrays;
+ * GPU base bytes exclude other driver resources. The remainder is derived, not
+ * separately measured, and may be unknown for discrete/nonresident GPUs.
  * Static identity is formatted on renderer changes.
  * latest_frame_ms remains unsmoothed for upload scheduling. Owner-thread only:
  * no heap allocation, disk I/O, World lock or worker wait. */
