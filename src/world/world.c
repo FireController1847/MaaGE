@@ -1333,7 +1333,7 @@ static maage_status maage_world_schedule(maage_world *world) {
             }
             kind = MAAGE_JOB_LOAD;
         } else if (!slot->data) kind = slot->stage;
-        else if (slot->light_dirty && !slot->light_work) kind = MAAGE_JOB_LIGHT;
+        else if (slot->light_dirty && !slot->light_work && (world->config.presentation_only || (abs(dx) <= world->config.simulation_distance + 1 && abs(dz) <= world->config.simulation_distance + 1))) kind = MAAGE_JOB_LIGHT;
         else if (world->config.build_meshes && !slot->work && slot->mesh_dirty &&
                  abs(dx) <= world->config.render_distance &&
                  abs(dz) <= world->config.render_distance && maage_world_mesh_retry_ready(slot) &&
@@ -1585,6 +1585,12 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
             maage_world_task *task = &world->tasks[index];
             unsigned priority;
             if (!task->used || task->kind == MAAGE_JOB_SAVE || task->cancel_requested) continue;
+            /* Authoritative lighting is required only for active simulation and
+             * its halo, not for all Server chunks streamed to the Client. */
+            if (!world->config.presentation_only && task->kind == MAAGE_JOB_LIGHT && (abs(task->x - cx) > world->config.simulation_distance + 1 || abs(task->z - cz) > world->config.simulation_distance + 1)) {
+                maage_world_cancel(world, task);
+                continue;
+            }
             priority = maage_world_job_priority(world, task->x - cx, task->z - cz, task->kind, forward_x, forward_z);
             (void) maage_jobs_set_priority(task->kind == MAAGE_JOB_LOAD && world->io_jobs ? world->io_jobs : world->jobs, task->id, priority);
         }
@@ -1818,7 +1824,7 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats) {
                     ++stats->loaded_sections;
             if (slot->x >= lower_x && slot->x <= upper_x && slot->z >= lower_z && slot->z <= upper_z) --pending;
         }
-        if (maage_world_complete(slot) && !slot->light_dirty && (!world->config.build_meshes || !slot->mesh_dirty) && !slot->work && !slot->light_work) ++stats->ready;
+        if (maage_world_complete(slot) && (world->config.presentation_only || maage_world_distance(world, slot) <= world->config.simulation_distance + 1 ? !slot->light_dirty : 1) && (!world->config.build_meshes || !slot->mesh_dirty) && !slot->work && !slot->light_work) ++stats->ready;
     }
     stats->pending = (unsigned) pending;
     memset(&io, 0, sizeof(io));

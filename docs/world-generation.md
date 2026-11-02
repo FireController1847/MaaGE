@@ -222,6 +222,15 @@ resident memory, not an independent allocation measurement, and can be unknown
 if the GPU allocation footprint exceeds reported residency. Further GPU quad
 merging and pooling native allocations remain separate opportunities.
 
+Server lighting is scheduled within the configured simulation distance plus
+one neighboring column for authoritative gameplay queries. Render-only Server
+columns retain block/biome data without allocating sky or section-light caches
+unless they were previously active. Newly entered simulation columns resume
+their existing pending light work; obsolete distant light jobs are cancelled
+without holding up Client lighting, which independently covers all rendered
+columns. The one-column simulation halo preserves gameplay light availability
+at the active edge.
+
 Numerical direct-sky caches use two four-bit light values per byte, allocating
 32 KiB per initialized column instead of 64 KiB. The packed array is shared by
 reference between immutable chunk snapshots and detached by the lighting worker
