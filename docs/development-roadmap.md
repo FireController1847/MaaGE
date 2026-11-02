@@ -1,93 +1,32 @@
 # MaaGE Development Roadmap
 
-MaaGE is an independent native voxel platform using Minecraft Java Edition 1.7.10
-as loose gameplay/content inspiration. This roadmap describes current boundaries
-and future direction; it authorizes no implementation, build or runtime work.
-Current source is the authority for implemented capabilities. Runtime, visual,
-audio and cross-platform completion require programmer verification.
+This is a source-level view of existing foundations and planned work—not authorization for development or proof of runtime/visual correctness. [AGENTS.md](../AGENTS.md) remains the project policy authority.
 
 ## Existing Foundations
 
-| Area | Implemented in Source | Current Limits |
+| Area | Present in source | Principal gaps |
 | --- | --- | --- |
-| Platform | C90 shared libraries; native Window/Input/Storage/Jobs/Status/Log; Metal/Vulkan rendering and a modern OpenGL scene/UI backend | Modern OpenGL awaits compilation and programmer runtime/platform validation; legacy OpenGL/Software implement smaller subsets; Wayland lacks Client relative capture. |
-| Applications | Independent native Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote transport, administration GUI and Launcher Server management are absent. |
-| Content API | Dependency-ordered static modules; shared definition/resolve/finalize/initialize phases; registered containers/GUI, fluids, geometry providers, sound content and explicit Base definitions; existing block-entity codecs | No external module loader, scripting, package discovery or remote content negotiation. Refactor awaits compilation and programmer runtime verification. |
-| World | Numeric registries, deterministic staged generation with coherent biome regions and shared boundary ecology, sparse columns, immutable asynchronous I/O/jobs, environment, scheduled fluids/support and random ticks | Six selected biome categories; transition visuals/runtime costs await programmer verification; no Java seed/save interoperability or migration. |
-| Gameplay | Movement/collision, breaking/placement, provisional vitals, inventory, typed item/falling-block entities, cactus contact damage, sapling/tree growth, hoe tilling and wheat farming, food use, transactional 2x2/3x3 crafting, persistent furnaces and extraction XP | Farming is limited to wheat; full Survival progression, mobs and combat remain incomplete/absent. |
-| Presentation | Packed GPU surface tables, compatible section-bounded face merging, Title/world management, gameplay/settings/inventory screens, local visual light/meshing, break/placement prediction, shared player skins/perspectives, eating poses, configurable biome blending, audio | Creative has one catalog; unavailable settings/content remain disabled or absent. |
-| Launcher/resources | Microsoft authentication/access verification, encrypted account records, verified local resources, UUID instances and exact local Client selection | No remote distribution or modpack installation system. |
+| Applications | Native Core/World/Session, independent Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote networking, Server administration GUI and hosting workflow |
+| Presentation | Metal/Vulkan, modern OpenGL scene path, limited legacy/Software; Title/world/options/Controls/inventory UI, configurable input, visual replica/light, GPU streaming, player appearance and audio | Programmer platform validation, Wayland capture, secondary renderer coverage and visual polish |
+| Content and world | Dependency-ordered static modules, Base content, growable numeric registries, registered fluids/geometry/containers/sounds, regional generation, async I/O and region saves | No dynamic module loader, scripting, modpack distribution or remote content negotiation |
+| Gameplay | Movement, mining/placement, typed item/falling entities, drops, support/random ticks, saplings/wheat, food use, transactional 2x2/3x3 crafting and persistent furnaces | Full Survival, mobs/combat/AI, redstone, enchanting, dimensions and endgame |
+| Launcher/resources | Microsoft access verification, profile-specific skin cache, verified reconstructed assets, UUID instances and exact Client package selection | Remote package deployment and modpack install support |
 
-Predevelopment data is disposable: incompatible encodings fail explicitly without automatic
-reset, conversion or deletion.
-
-## Current Priorities
-
-Resolve observable defects in existing systems before adding speculative layers.
-Keep UI navigation, input capture, pause/save/quit, fullscreen safe areas and
-resource failure recovery coherent. Verify Client lighting and prediction across
-chunk boundaries; preserve Server gameplay light, scheduled cascades and saved RNG.
-Maintain Metal/Vulkan presentation semantics and resource lifetimes together.
-
-Current technical references:
-
-- [Logging and native crash records](diagnostics.md)
-- [Content modules, registries and ownership](content-modules.md)
-- [World generation, biome transitions and saved terrain](world-generation.md)
-- [Client UI, visual World, prediction and neighbor support](gameplay-parity.md)
-- [Rendering, materials, light sampling and sprint presentation](visual-fidelity.md)
-- [Item entities, harvesting and drops](item-entities.md)
-- [Crafting transactions and temporary containers](crafting.md)
-- [Random ticks, leaf support and RNG checkpoints](random-block-ticks.md)
-- [Authenticated skin acquisition and cache](player-skins.md)
-- [Player perspectives and camera collision](third-person.md)
+Incompatible pre-alpha saves or package formats fail explicitly without silent migration or deletion.
 
 ## Remaining Milestones
 
-### Client GUI and Menu Completion — Phase 8
+- **Client completion:** Finish intended UI navigation/settings, honest loading/cancellation, accessibility and resource-failure handling.
+- **Visual/game-feel fidelity:** Refine light/AO, water/foliage, sky/weather, effects, animation and player interaction on the primary renderers.
+- **Survival progression:** Add wider equipment/food systems, damage/combat, mobs/spawning/AI, XP entities and enchanting.
+- **Advanced gameplay:** Build redstone, richer block entities, structures, dimensions/portals and persistent endgame systems.
+- **Networking and extensibility:** Extend the same authoritative Server with a versioned remote Session protocol, multiplayer replication/reconciliation and later modpack/module delivery.
 
-Extend the existing numeric screen/navigation system. Finish supported Options,
-remaining focus/accessibility workflows, Creative authoring/navigation and truthful loading
-progress as services expose it. Preserve ASCII font/text limits until deliberately
-expanded. Completion means a coherent startup → world → settings → save/quit
-workflow, including failure and cancellation, rather than merely drawing controls.
+## Technical References
 
-### Visual Fidelity and Game Feel — Phase 9
+[Content module composition](content-modules.md) ·
+[World and gameplay](world-and-gameplay.md) ·
+[Client presentation](client-presentation.md) ·
+[Logging and native crashes](diagnostics.md).
 
-Refine light/AO, water/lava, foliage, sky/weather, particles, animation, interaction
-feedback and movement/camera feel. Correct defects without rebuilding gameplay in
-the Client or introducing backend-specific behavior. Completion requires consistent,
-responsive scenes on the primary renderers, not just available textures/shaders.
-
-### Core Gameplay Completion — Phase 10
-
-Build complete Survival progression on the existing Server: broader
-food/equipment, damage/combat, experience orbs/enchanting, passive/hostile mobs, spawning, AI and
-navigation. Reuse current entities, drops, recipes and persistence. Furnaces provide ore/charcoal processing; remaining progression still needs the listed systems.
-
-### Advanced Gameplay — Phase 11
-
-Add ordered redstone mechanisms, pistons/repeaters/comparators, richer block
-entities, enchanting, dimensions/portals, structures and endgame progression.
-Parallelize only independent workloads while preserving deterministic ordering
-where required. Features must work as persistent integrated gameplay.
-
-### Remote Networking — Phase 12
-
-Extend the existing authoritative Server with remote transports and an explicitly
-serialized versioned protocol independent of application SemVer. Support multiple
-players, sequenced input/reconciliation, atomic chunk/entity replication, lifecycle,
-configuration and administration. Launcher hosting workflows follow those services.
-Single-player and multiplayer must never become separate gameplay engines.
-
-## Dependencies and Completion
-
-Numeric content definitions and ownership precede new gameplay; persistence must
-cover authoritative state, while Client effects derive from copied publications.
-A Server GUI is a frontend to the same runtime and must not impose graphics on
-headless startup. Mods should prefer data-driven definitions and C-compatible
-extensions; Java/Forge execution and existing Java mod compatibility are not goals.
-
-Compilation establishes build compatibility only. The programmer owns runtime and
-platform acceptance. Follow [AGENTS.md](../AGENTS.md) for authorization, security,
-formatting and permanent development constraints.
+Current source and public headers provide the detailed implementation and API contracts. No compilation, gameplay or visual acceptance is implied by this roadmap.

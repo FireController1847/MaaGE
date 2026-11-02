@@ -222,7 +222,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   complete detached placement preflight; absent terrain defers growth.
   Preserve numeric leaf species/persistent/check flags, bounded connected log support,
   unavailable-neighborhood deferral and capacity-preflighted drops; no immediate leaf
-  deletion on log removal. Details: [random ticks](docs/random-block-ticks.md).
+  deletion on log removal. Details: [random ticks](docs/world-and-gameplay.md#random-ticks-and-growth).
 - Support callbacks serve placement and persistent deduplicated neighbor checks. Mutations
   preflight work; owner processing is iterative/bounded and never discards queued cascades.
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
@@ -249,7 +249,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   checkpoint owns active/dormant entities independently of column saves. Reserve drops
   before removal; never give mined drops directly to inventory or discard quantities.
   Client caches item geometry and presents confirmed pickup batches for 0.15s, without
-  a magnetic gameplay force. See [items](docs/item-entities.md).
+  a magnetic gameplay force. See [items](docs/world-and-gameplay.md#entities-and-item-drops).
 - One finalized numeric recipe registry serves temporary 2x2/3x3 containers and one
   inventory cursor. Matching allocates nothing. Server validates identity/result revision,
   health, loaded table and range. Preflight complete outputs/remainders; bound shift
@@ -258,7 +258,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   storage or recipe book is implied. Furnace inventories are persistent World-owned
   block entities; shared container actions never transfer their ownership on closure.
   Separate finalized numeric smelting/fuel registries drive 200-tick owner processing,
-  with extraction-only fractional XP, lit-state preservation and periodic save snapshots. See [crafting](docs/crafting.md).
+  with extraction-only fractional XP, lit-state preservation and periodic save snapshots. See [crafting](docs/world-and-gameplay.md#crafting-and-furnaces).
 - Sprint eligibility/tap timers are Server-owned; Player owns movement multiplier,
   jump impulse and collision cancellation. Dynamic sprint/world FOV stays independent
   of saved base and fixed hand projection; duplicate snapshots do not restart smoothing.
@@ -267,7 +267,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Client screens/layout/input live under `src/client/ui/`, not controller `frontend.c`.
   Controller owns catalog Jobs, lifecycle and Options persistence. Reuse one numeric
   registry, stack, primitive/atlas/input system; no native widget or second game UI.
-  [UI contracts](docs/gameplay-parity.md) list current IDs/layouts and modal behavior.
+  [UI contracts](docs/client-presentation.md#screens-and-controls) list current IDs/layouts and modal behavior.
 - Default startup shows Title; catalog/admin work uses bounded Jobs and current storage.
   Save/Quit to Title uses an independent lifecycle worker. Quit Game hides the
   native window before waiting for pending world saves or worker teardown; the
@@ -303,7 +303,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   changes, including predictions; unknown terrain obstructs. Borrow cached part/
   item meshes, clear instances before destruction and never rebuild on F5. One Client
   six-tick swing timeline, restart eligible at three, serves both perspectives without
-  attack-echo restarts. See [perspectives](docs/third-person.md).
+  attack-echo restarts. See [perspectives](docs/client-presentation.md#player-appearance-and-cameras).
 - UI/F3 live state updates each frame; keep one version/hash, FPS/TPS/chunks/position/
   facing/target/biome/light/memory/OS/GPU/workers. Performance uses 0.75s exponential
   history displayed at 250ms; memory shares observation cadence. Cache static/right text
@@ -356,7 +356,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   publication on the access worker. Failure never changes authorization; known-good/default
   fallback stays profile-scoped. Client receives a versioned nonsecret reference, never
   downloads/tokens. Normalize once into the common atlas; no per-frame I/O. Preserve
-  classic/slim/legacy conversion and independent limbs/layers. See [skins](docs/player-skins.md).
+  classic/slim/legacy conversion and independent limbs/layers. See [skins](docs/client-presentation.md#player-appearance-and-cameras).
 - Asset setup follows verified access. Launcher acquires official 1.7.10 indexed resources
   and verified client archive solely for assets; never executes it or extracts Java code.
   Asset worker snapshots/cancellation/Retry/Repair share one verification/reconstruction
@@ -397,7 +397,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Bound mutable frame resources and GPU work; preserve backpressure rather than software
   FPS ceilings. No per-frame GPU-wide waits; defer destruction until users retire. Vulkan
   maintenance1 is optional; Metal's first-frame priming/event responsiveness and VSync
-  presenter/direct path must remain coherent. See [rendering](docs/visual-fidelity.md).
+  presenter/direct path must remain coherent. See [rendering](docs/client-presentation.md#rendering-and-mesh-lifetimes).
 - Keep root authored CMake configuration/presets and generated cmake/<name>/ plus compiled
   build/<name>/ separate; never commit generated output. Cross-compile using target checks.
   Headless configuration must not discover graphics/GUI dependencies. Do not change
