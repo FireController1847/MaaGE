@@ -29,9 +29,9 @@ typedef struct maage_client_debug {
  * a 0.75-second exponential history, displayed at 250 ms intervals; native memory
  * is sampled at that interval. F3 shows process RSS (and macOS physical
  * footprint when available) with GPU native mesh allocations, Server/Client
- * World retained storage and an unattributed Other remainder. The World
+ * World retained storage and an unattributed U remainder. The World
  * excludes detached jobs and other external ownership; GPU excludes textures
- * and driver resources. Other is a subtraction, not an allocation or free-memory
+ * and driver resources. U is a subtraction, not an allocation or free-memory
  * measurement, and may be unknown for discrete/nonresident GPUs.
  * Static identity is formatted on renderer changes.
  * latest_frame_ms remains unsmoothed for upload scheduling. Owner-thread only:

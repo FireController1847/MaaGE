@@ -138,11 +138,11 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
          * an independent allocation count. Unified GPU memory and in-flight
          * allocations can make this a deliberately incomplete reconciliation. */
         if (resident >= tracked)
-            sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / Other %.0f MiB",
+            sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / U %.0f MiB",
                 (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
                 (double) client_world_bytes / 1048576.0, (resident - tracked) / 1048576.0);
         else
-            sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / Other ? MiB",
+            sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / U ? MiB",
                 (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
                 (double) client_world_bytes / 1048576.0);
         sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u", debug->busy_workers, stats->worker_count, stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);

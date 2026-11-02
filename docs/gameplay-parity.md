@@ -12,7 +12,7 @@ unsaved data and acknowledged packet bases until ordered unloads complete.
 On macOS, a delayed background malloc-zone pressure-relief request may return
 otherwise reusable pages; the OS and GPU driver control the resulting footprint.
 F3 distinguishes resident set size (RSS), macOS physical footprint and tracked
-GPU/Server/Client allocations. Its Other value is an *unattributed subtraction*,
+GPU/Server/Client allocations. Its U value is an *unattributed subtraction*,
 not leaked, free or reclaimable memory.
 
 ## Screens and Input
