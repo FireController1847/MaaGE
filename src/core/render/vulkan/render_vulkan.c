@@ -60,7 +60,7 @@ typedef struct maage_vulkan_rendering {
     VkFramebuffer *present_framebuffers;
     VkCommandPool upload_pool;
     VkCommandBuffer upload;
-    maage_vulkan_garbage *staging, *retired;
+    maage_vulkan_garbage *staging, *retired, *staging_pool; /* Completed transfer buffers; short-lived dynamic reuse. */
     maage_vulkan_descriptors *pools;
     maage_vulkan_frame_data frames[MAAGE_VULKAN_FRAME_SLOTS];
     uint64_t submitted, completed;
@@ -276,13 +276,24 @@ static maage_status maage_vulkan_upload_begin(maage_renderer *renderer) {
 static maage_status maage_vulkan_staging(maage_renderer *renderer, size_t bytes, maage_vulkan_garbage **output) {
     maage_vulkan_renderer *native = renderer->platform;
     maage_vulkan_rendering *gpu = native->rendering;
-    maage_vulkan_garbage *staging = calloc(1, sizeof(*staging));
+    maage_vulkan_garbage *staging;
+    maage_vulkan_garbage **link = &gpu->staging_pool, **best = NULL;
     maage_status result;
-    if (!staging) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED);
-    result = maage_vulkan_buffer_create(renderer, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 1, &staging->buffer);
-    if (maage_status_failed(result)) {
-        free(staging);
-        return result;
+    while (*link) {
+        if ((*link)->buffer.capacity >= bytes && (!best || (*link)->buffer.capacity < (*best)->buffer.capacity)) best = link;
+        link = &(*link)->next;
+    }
+    if (best) {
+        staging = *best;
+        *best = staging->next;
+    } else {
+        staging = calloc(1, sizeof(*staging));
+        if (!staging) return MAAGE_VULKAN_ERROR(MAAGE_STATUS_ALLOCATION_FAILED);
+        result = maage_vulkan_buffer_create(renderer, maage_render_transient_capacity(0, bytes), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 1, &staging->buffer);
+        if (maage_status_failed(result)) {
+            free(staging);
+            return result;
+        }
     }
     staging->next = gpu->staging;
     gpu->staging = staging;
@@ -307,10 +318,30 @@ static maage_status maage_vulkan_collect(maage_renderer *renderer) {
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || !frame->serial) continue;
         if (gpu->completed < frame->serial) gpu->completed = frame->serial;
-        maage_vulkan_garbage_destroy(native, frame->staging);
-        frame->staging = NULL;
+        /* The completed frame releases its transfer buffers for reuse.
+         * These are never shared with submissions still in flight. */
+        while (frame->staging) {
+            maage_vulkan_garbage *entry = frame->staging;
+            frame->staging = entry->next;
+            entry->serial = gpu->completed;
+            entry->next = gpu->staging_pool;
+            gpu->staging_pool = entry;
+        }
         if (frame->upload) vkFreeCommandBuffers(native->device, gpu->upload_pool, 1, &frame->upload);
         frame->upload = VK_NULL_HANDLE;
+    }
+    /* Reuse recent completed staging buffers without keeping a permanent
+     * high-water allocation after the upload burst has ended. */
+    {
+        maage_vulkan_garbage **reuse = &gpu->staging_pool;
+        while (*reuse) {
+            maage_vulkan_garbage *entry = *reuse;
+            if (gpu->completed >= entry->serial && gpu->completed - entry->serial >= MAAGE_VULKAN_FRAME_SLOTS) {
+                *reuse = entry->next;
+                entry->next = NULL;
+                maage_vulkan_garbage_destroy(native, entry);
+            } else reuse = &entry->next;
+        }
     }
     maage_vulkan_garbage **link = &gpu->retired;
     while (*link) {
@@ -976,6 +1007,8 @@ static maage_status maage_vulkan_destroy(maage_renderer *renderer) {
         maage_vulkan_pipelines_destroy(native);
         maage_vulkan_garbage_destroy(native, gpu->retired);
         gpu->retired = NULL;
+        maage_vulkan_garbage_destroy(native, gpu->staging_pool);
+        gpu->staging_pool = NULL;
         while (gpu->pools) {
             maage_vulkan_descriptors *pool = gpu->pools;
             gpu->pools = pool->next;
