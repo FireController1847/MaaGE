@@ -37,6 +37,9 @@ static DWORD WINAPI maage_thread_entry(LPVOID context) {
 #ifdef __linux__
 #include <sched.h>
 #endif
+#if defined(__APPLE__) && defined(__MACH__)
+#include <sys/sysctl.h>
+#endif
 struct maage_mutex {
     pthread_mutex_t handle;
 };
@@ -260,16 +263,41 @@ unsigned maage_thread_processor_count(void) {
 #if defined(_SC_NPROCESSORS_ONLN)
     long processors;
 #endif
+#if defined(__APPLE__) && defined(__MACH__)
+    int logical;
+    size_t length;
+    /* Darwin does not guarantee the POSIX online-processor sysconf selector.
+     * Query enabled logical cores, including Apple silicon performance and
+     * efficiency cores; hw.ncpu is a fallback if the live query fails. */
+    logical = 0;
+    length = sizeof(logical);
+    if (!sysctlbyname("hw.logicalcpu", &logical, &length, NULL, 0) && length == sizeof(logical) && logical > 0) return (unsigned) logical;
+    logical = 0;
+    length = sizeof(logical);
+    if (!sysctlbyname("hw.ncpu", &logical, &length, NULL, 0) && length == sizeof(logical) && logical > 0) return (unsigned) logical;
+#endif
 #ifdef __linux__
-    cpu_set_t affinity;
-    unsigned count, index;
-    /* Respect a process restricted to a smaller CPU set. If the platform set
-     * cannot represent the machine, fall back to its online-processor query. */
-    if (!sched_getaffinity(0, sizeof(affinity), &affinity)) {
-        count = 0;
-        for (index = 0; index < CPU_SETSIZE; ++index)
-            if (CPU_ISSET(index, &affinity)) ++count;
-        if (count) return count;
+    cpu_set_t *affinity;
+    size_t size;
+    int slots = CPU_SETSIZE, count, failure;
+    /* The kernel affinity mask can exceed cpu_set_t's fixed CPU_SETSIZE.
+     * Grow the native mask on EINVAL so large hosts retain affinity-aware
+     * worker selection instead of silently using the online CPU total. */
+    for (;;) {
+        affinity = CPU_ALLOC(slots);
+        if (!affinity) break;
+        size = CPU_ALLOC_SIZE(slots);
+        CPU_ZERO_S(size, affinity);
+        if (!sched_getaffinity(0, size, affinity)) {
+            count = CPU_COUNT_S(size, affinity);
+            CPU_FREE(affinity);
+            if (count > 0) return (unsigned) count;
+            break;
+        }
+        failure = errno;
+        CPU_FREE(affinity);
+        if (failure != EINVAL || slots > INT_MAX / 2) break;
+        slots *= 2;
     }
 #endif
 #if defined(_SC_NPROCESSORS_ONLN)

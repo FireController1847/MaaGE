@@ -25,7 +25,8 @@ void maage_condition_signal(maage_condition *condition);
 void maage_condition_broadcast(maage_condition *condition);
 maage_status maage_thread_start(void (*function)(void *), void *context, maage_thread **output);
 maage_status maage_thread_join(maage_thread *thread);
-/* Available logical processors, respecting Linux process affinity and including
- * all Windows processor groups when supported; zero if platform queries fail. */
+/* Available logical processors: macOS enabled logical cores, Linux process
+ * affinity (including large CPU sets), and Windows active processor groups.
+ * Zero means all supported native queries failed. */
 unsigned maage_thread_processor_count(void);
 #endif
