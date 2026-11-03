@@ -789,7 +789,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int initial_capture = 1, active = 0, was_active = 0;
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
-    int logged_max_fps = -1, logged_vsync = -1, paused_command = -1;
+    int logged_max_fps, logged_vsync, paused_command = -1;
     int selected_hotbar = 0, queued_hotbar = -1, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
     int jump_latched = 0, attack_latched = 0, use_latched = 0, respawn_latched = 0, forward_latched = 0;
     unsigned int ui_actions = 0, event_budget;
@@ -927,6 +927,8 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     operation = maage_client_ui_apply_options(ui, &video_options);
     if (maage_status_failed(operation)) goto done;
     options_ready = 1;
+    logged_max_fps = maage_client_ui_max_fps(ui);
+    logged_vsync = maage_client_ui_vsync(ui);
     operation = maage_client_splash_update(&splash, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_splash_destroy(&splash);
@@ -1087,7 +1089,7 @@ choose_world:
     received_time = diagnostic_time = mesh_activity.sample_start = last;
     maage_client_ui_notify(ui, resource_notice, last);
     if (audio_notice) maage_client_ui_notify(ui, audio_notice, last);
-    maage_log_info("maage.client", "Integrated authoritative Server active. Input/UI use numeric commands; GPU streaming and audio consume copied Server publications.");
+    maage_log_info("maage.client", "Connected to integrated Server.");
     for (;;) {
         maage_status_trace_init(trace);
         MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);

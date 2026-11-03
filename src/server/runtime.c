@@ -908,7 +908,7 @@ static void server_thread_entry(void *context) {
     double now, deadline, remaining, last_published, next_stream;
     unsigned int caught_up;
     unsigned long sleep_ms, last_published_tick = 0UL;
-    int center_x, center_z, spawn_ready, last_published_paused = -1;
+    int center_x, center_z, spawn_ready, ready_logged = 0, last_published_paused = -1;
     maage_status_trace_init(&trace);
     result = server_open_world(runtime, &trace);
     if (maage_status_failed(result)) {
@@ -949,6 +949,10 @@ static void server_thread_entry(void *context) {
         center_x = maage_world_chunk_coordinate((int) floor(runtime->player.position[0]));
         center_z = maage_world_chunk_coordinate((int) floor(runtime->player.position[2]));
         spawn_ready = maage_world_chunk_loaded(runtime->world, center_x, center_z);
+        if (spawn_ready && !ready_logged) {
+            maage_log_info("maage.server", "%s Server ready.", runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? "Integrated" : "Dedicated");
+            ready_logged = 1;
+        }
         if (runtime->paused || !spawn_ready) {
             /* Do not run delayed gameplay when resuming from pause/loading. */
             deadline = now + MAAGE_SERVER_STEP_SECONDS;
