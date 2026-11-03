@@ -294,6 +294,9 @@ maage_status maage_renderer_set_instances(maage_renderer *renderer, const maage_
         for (axis = 0; axis < 16; ++axis)
             if (!(instances[i].transform[axis] >= -FLT_MAX && instances[i].transform[axis] <= FLT_MAX))
                 return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+        for (axis = 0; axis < 4; ++axis)
+            if (!(instances[i].overlay[axis] >= 0 && instances[i].overlay[axis] <= 1))
+                return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
     }
     renderer->instances = instances;
     renderer->instance_count = count;

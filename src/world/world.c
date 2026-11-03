@@ -1829,7 +1829,7 @@ static maage_status maage_world_live_entities_tick(maage_world *world) {
                 if (!state || maage_world_block_handler(world->config.registry, state->block_id) != node->handler) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
                 replacement = state->id;
                 memcpy(node->scratch, node->state, node->handler->size);
-                result = node->handler->tick(node->handler, world, state, node->scratch, &replacement);
+                result = node->handler->tick(node->handler, world, x, y, z, state, node->scratch, &replacement);
                 if (maage_status_failed(result)) return result;
                 if (maage_status_code(result) == MAAGE_STATUS_NOOP) continue;
                 memcpy(node->state, node->scratch, node->handler->size);
@@ -2329,7 +2329,9 @@ int maage_world_collision_shape(const maage_world *world, int x, int y, int z, m
     state = maage_block_registry_state(world->config.registry, maage_world_get(world, x, y, z));
     block = state ? maage_block_registry_block(world->config.registry, state->block_id) : NULL;
     if (!block) return 1;
-    return maage_block_collision_shape(block, state, shape);
+    if (!maage_block_collision_shape(block, state, shape)) return 0;
+    if (block->bounds) block->bounds(world, x, y, z, state, shape);
+    return 1;
 }
 /* Camera collision and targeting share geometry epochs with mesh consumers.
  * A visual grouping key cannot hide state-dependent physical bounds changes. */
@@ -3338,16 +3340,86 @@ maage_status maage_world_entity_read(const maage_world *world, int x, int y, int
     memcpy(state, node->state, size);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_READ, 0);
 }
-maage_status maage_world_entity_commit(maage_world *world, int x, int y, int z, unsigned long type, const void *state, size_t size) {
-    maage_world_slot *slot = maage_world_entity_slot(world, x, y, z);
-    maage_entity_live *node = slot ? maage_world_entity_node(slot, (unsigned int) ((y * 16 + maage_world_local_coordinate(z)) * 16 + maage_world_local_coordinate(x))) : NULL;
+static maage_entity_live *maage_world_entity_update_node(maage_world *world, const maage_block_entity_update *update, maage_world_slot **slot) {
+    *slot = maage_world_entity_slot(world, update->x, update->y, update->z);
+    return *slot ? maage_world_entity_node(*slot, (unsigned int) ((update->y * 16 + maage_world_local_coordinate(update->z)) * 16 + maage_world_local_coordinate(update->x))) : NULL;
+}
+maage_status maage_world_entities_commit(maage_world *world, const maage_block_entity_update *updates, size_t count) {
+    maage_world_slot *slot;
+    maage_entity_live *node;
     const maage_block_state_definition *block;
-    if (!node || !state || world->failed || world->stopped || node->handler->id != type || size != node->handler->size) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
-    block = maage_block_registry_state(world->config.registry, maage_world_get(world, x, y, z));
-    if (!node->handler->valid(node->handler, block, world->config.items, state) || !node->handler->can_commit(node->state, state)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
-    memcpy(node->state, state, size);
-    slot->entity_dirty = 1;
-    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+    size_t i, j;
+    if (!world || world->failed || world->stopped || world->config.presentation_only || (count && !updates)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    for (i = 0; i < count; ++i) {
+        node = maage_world_entity_update_node(world, &updates[i], &slot);
+        if (!node || !updates[i].state || node->handler->id != updates[i].type || node->handler->size != updates[i].size) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+        for (j = 0; j < i; ++j)
+            if (updates[j].x == updates[i].x && updates[j].y == updates[i].y && updates[j].z == updates[i].z) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+        block = maage_block_registry_state(world->config.registry, maage_world_get(world, updates[i].x, updates[i].y, updates[i].z));
+        if (!node->handler->valid(node->handler, block, world->config.items, updates[i].state) || !node->handler->can_commit(node->state, updates[i].state)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SET, 0);
+    }
+    for (i = 0; i < count; ++i) {
+        node = maage_world_entity_update_node(world, &updates[i], &slot);
+        memcpy(node->state, updates[i].state, updates[i].size);
+        slot->entity_dirty = 1;
+    }
+    return maage_status_make(count ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SET, 0);
+}
+maage_status maage_world_entity_commit(maage_world *world, int x, int y, int z, unsigned long type, const void *state, size_t size) {
+    maage_block_entity_update update;
+    update.x = x;
+    update.y = y;
+    update.z = z;
+    update.type = type;
+    update.state = state;
+    update.size = size;
+    return maage_world_entities_commit(world, &update, 1);
+}
+maage_status maage_world_entity_views(const maage_world *world, int center_x, int center_z, int radius, maage_block_entity_view *views, size_t capacity, size_t *count) {
+    const maage_world_slot *slot;
+    const maage_entity_live *node;
+    const maage_block_state_definition *state;
+    maage_block_entity_view view;
+    maage_status result;
+    int x, y, z;
+    if (count) *count = 0;
+    if (!world || !count || radius < 0 || radius > MAAGE_WORLD_MAX_RADIUS || center_x < -MAAGE_WORLD_LIMIT / 16 || center_x > MAAGE_WORLD_LIMIT / 16 || center_z < -MAAGE_WORLD_LIMIT / 16 || center_z > MAAGE_WORLD_LIMIT / 16 || world->config.presentation_only) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+    for (slot = world->chunks; slot; slot = slot->next) {
+        if (!maage_world_complete(slot) || slot->x < center_x - radius || slot->x > center_x + radius || slot->z < center_z - radius || slot->z > center_z + radius) continue;
+        for (node = slot->live_entities; node; node = node->next) {
+            if (!node->handler->present) continue;
+            x = slot->x * 16 + (int) (node->cell % 16);
+            y = (int) (node->cell / 256);
+            z = slot->z * 16 + (int) ((node->cell / 16) % 16);
+            state = maage_block_registry_state(world->config.registry, maage_world_get(world, x, y, z));
+            if (!state || maage_world_block_handler(world->config.registry, state->block_id) != node->handler) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+            memset(&view, 0, sizeof(view));
+            view.secondary_state = MAAGE_CONTENT_ID_INVALID;
+            result = node->handler->present(node->handler, world, x, y, z, state, node->state, &view);
+            if (maage_status_failed(result)) return result;
+            if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) continue;
+            view.x = x;
+            view.y = y;
+            view.z = z;
+            view.state = state->id;
+            if (views) {
+                if (*count >= capacity) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+                views[*count] = view;
+            }
+            if (*count == (size_t) - 1) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SNAPSHOT, 0);
+            ++*count;
+        }
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
+}
+maage_status maage_world_emit_sound(maage_world *world, unsigned long sound, const double position[3], double intensity, double pitch) {
+    unsigned int axis;
+    if (!world || world->config.presentation_only || !position || !maage_sound_get(maage_block_registry_sounds(world->config.registry), sound) || !(intensity >= 0 && intensity <= 16 && pitch > 0 && pitch <= 4)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
+    for (axis = 0; axis < 3; ++axis)
+        if (!(position[axis] > -MAAGE_WORLD_LIMIT && position[axis] < MAAGE_WORLD_LIMIT)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
+    if (!world->config.emit_sound) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
+    world->config.emit_sound(world->config.sound_context, sound, position, intensity, pitch);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
 }
 const maage_smelting_registry *maage_world_smelting_registry(const maage_world *world) {
     return world ? world->config.smelting : NULL;

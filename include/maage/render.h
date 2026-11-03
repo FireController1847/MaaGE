@@ -161,6 +161,7 @@ typedef struct maage_render_instance {
     const maage_render_mesh *mesh;
     float transform[16];
     float sky_light, block_light;
+    float overlay[4]; /* RGB blended over lit texture, alpha is strength; zero disables. */
 } maage_render_instance;
 maage_status maage_renderer_set_instances(maage_renderer *renderer, const maage_render_instance *instances, size_t count);
 /* Presentation clock in 20 Hz ticks; caller may wrap at a common animation

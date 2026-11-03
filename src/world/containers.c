@@ -102,6 +102,7 @@ maage_status maage_container_register(maage_container_registry *registry, const 
     }
     if (!registry || registry->finalized || !container_name_valid(name) || !definition || (definition->grid_width && definition->grid_width != 2 && definition->grid_width != 3) || !definition->presentation.width || !definition->presentation.height || !definition->presentation.texture_edge || (definition->slot_count && !definition->slots) || (definition->progress_count && !definition->progress) || (definition->creative_catalog && (!definition->personal || !definition->presentation.creative_width || !definition->presentation.creative_height)) || (!definition->grid_width && !definition->action) || (!definition->personal && !definition->accessible)) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (registry->count >= MAAGE_CONTENT_ID_INVALID - 1UL || definition->slot_count > 4294967295UL || definition->slot_count > (size_t) - 1 / sizeof(*entry->slots) || definition->progress_count > 4294967295UL || definition->progress_count > (size_t) - 1 / sizeof(*entry->progress)) return container_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
+    if (definition->presentation.background_split && (definition->presentation.background_split >= definition->presentation.height || definition->presentation.background_bottom > definition->presentation.texture_edge || definition->presentation.height - definition->presentation.background_split > definition->presentation.texture_edge - definition->presentation.background_bottom)) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (definition->creative_catalog && (!definition->personal || !definition->presentation.show_inventory || definition->presentation.creative_width != 195 || definition->presentation.creative_height != 136 || definition->presentation.texture_edge != 256)) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     bucket = container_bucket(registry, name);
     if (registry->names[bucket]) return container_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
@@ -269,15 +270,19 @@ maage_status maage_container_sample(const maage_container_registry *registry, co
     const maage_container_definition *definition = container ? maage_container_get(registry, container->kind) : NULL;
     const maage_container_slot_definition *slot;
     maage_status result;
-    unsigned long identity, first, block_identity;
+    unsigned long identity, first, block_identity, secondary_block_identity;
     unsigned int i, width;
-    int x, y, z;
+    int x, y, z, secondary_x, secondary_y, secondary_z;
     if (!container || !world) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SNAPSHOT);
     if (!container->kind) return container_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SNAPSHOT);
     if (!definition || !container_window_valid(definition, container)) return container_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_SNAPSHOT);
     identity = container->identity;
     first = container->view_first;
     block_identity = container->block_identity;
+    secondary_block_identity = container->secondary_block_identity;
+    secondary_x = container->secondary_x;
+    secondary_y = container->secondary_y;
+    secondary_z = container->secondary_z;
     width = container->grid_width;
     x = container->x;
     y = container->y;
@@ -288,7 +293,7 @@ maage_status maage_container_sample(const maage_container_registry *registry, co
         result = definition->sample(definition->context, world, container);
         if (maage_status_failed(result)) return result;
     }
-    if (container->kind != definition->id || container->identity != identity || container->view_first != first || container->block_identity != block_identity || container->grid_width != width || container->x != x || container->y != y || container->z != z || !container->revision || container->revision > 4294967295UL || !container_window_valid(definition, container)) return container_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_SNAPSHOT);
+    if (container->kind != definition->id || container->identity != identity || container->view_first != first || container->block_identity != block_identity || container->secondary_block_identity != secondary_block_identity || container->secondary_x != secondary_x || container->secondary_y != secondary_y || container->secondary_z != secondary_z || container->grid_width != width || container->x != x || container->y != y || container->z != z || !container->revision || container->revision > 4294967295UL || !container_window_valid(definition, container)) return container_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_SNAPSHOT);
     for (i = 0; i < container->view_count; ++i) {
         slot = &definition->slots[container->view_first + i];
         if (slot->storage == MAAGE_CONTAINER_SLOT_INPUT) container->view[i] = container->inputs[slot->slot];
@@ -346,7 +351,7 @@ maage_status maage_container_action(const maage_container_registry *registry, ma
     before = game->crafting;
     if (definition->action) result = definition->action(definition->context, world, game, revision, group, index, action);
     else result = maage_crafting_click(&game->crafting, &game->inventory, maage_world_item_registry(world), recipes, revision, group, index, action);
-    if (game->crafting.identity != before.identity || game->crafting.kind != before.kind || game->crafting.block_identity != before.block_identity || game->crafting.x != before.x || game->crafting.y != before.y || game->crafting.z != before.z || game->crafting.grid_width != before.grid_width || game->crafting.closing != before.closing || game->crafting.view_first != before.view_first || game->crafting.revision < before.revision || game->crafting.revision > 4294967295UL || !container_window_valid(definition, &game->crafting)) return container_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_MUTATE);
+    if (game->crafting.identity != before.identity || game->crafting.kind != before.kind || game->crafting.block_identity != before.block_identity || game->crafting.secondary_block_identity != before.secondary_block_identity || game->crafting.secondary_x != before.secondary_x || game->crafting.secondary_y != before.secondary_y || game->crafting.secondary_z != before.secondary_z || game->crafting.x != before.x || game->crafting.y != before.y || game->crafting.z != before.z || game->crafting.grid_width != before.grid_width || game->crafting.closing != before.closing || game->crafting.view_first != before.view_first || game->crafting.revision < before.revision || game->crafting.revision > 4294967295UL || !container_window_valid(definition, &game->crafting)) return container_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_MUTATE);
     return result;
 }
 maage_status maage_container_close(const maage_container_registry *registry, maage_world *world, maage_gameplay *game, const maage_player *player) {

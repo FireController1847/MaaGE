@@ -12,7 +12,7 @@ endif()
 add_library(maage_base STATIC
     ../base/base.c ../base/sounds.c ../base/sound_ambience.c ../base/containers.c ../base/creative.c ../base/fluids.c ../base/bindings.c ../base/blocks.c ../base/items.c ../base/biomes.c
     ../base/recipes.c ../base/furnace_content.c ../base/furnace.c ../base/furnace_entity.c
-    ../base/models.c ../base/entities.c ../base/entity_models.c
+    ../base/models.c ../base/chests.c ../base/entities.c ../base/entity_models.c
     ../base/interaction.c ../base/placement.c ../base/drops.c ../base/support.c
     ../base/states.c ../base/random_ticks.c ../base/leaves.c ../base/presentation.c ../base/textures.c
     ../base/generation_content.c ../base/generation.c ../base/generation_features.c ../base/generation_surface.c)

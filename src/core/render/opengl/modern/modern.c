@@ -121,11 +121,11 @@ static maage_status maage_gl_program_create(maage_renderer *renderer, maage_gl_p
     if (shaders[0]) native->gl.DeleteShader(shaders[0]);
     if (shaders[1]) native->gl.DeleteShader(shaders[1]);
     if (maage_status_failed(result)) return result;
-    program->matrix = native->gl.GetUniformLocation(program->name, "maage.client.render");
-    program->lighting = native->gl.GetUniformLocation(program->name, "maage.client.render");
-    program->fog = native->gl.GetUniformLocation(program->name, "maage.client.render");
-    program->fog_distance = native->gl.GetUniformLocation(program->name, "maage.client.render");
-    program->parameters = native->gl.GetUniformLocation(program->name, "maage.client.render");
+    program->matrix = native->gl.GetUniformLocation(program->name, "maage.matrix");
+    program->lighting = native->gl.GetUniformLocation(program->name, "maage.lighting");
+    program->fog = native->gl.GetUniformLocation(program->name, "maage.fog");
+    program->fog_distance = native->gl.GetUniformLocation(program->name, "maage.fog_distance");
+    program->parameters = native->gl.GetUniformLocation(program->name, "maage.parameters");
     sampler = native->gl.GetUniformLocation(program->name, "maage_source");
     if (sampler < 0 || program->parameters < 0 || (mesh && (program->matrix < 0 || program->lighting < 0 || program->fog < 0 || program->fog_distance < 0))) {
         maage_log_warning("maage.client.render", "GLSL %s program is missing required active uniforms.", label);
@@ -718,7 +718,7 @@ static maage_status maage_gl_limits(maage_renderer *renderer) {
     glGetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
     MAAGE_GL_TRY(maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE));
     maage_log_info("maage.client.render", "GLSL %.120s; profile 0x%lX; attributes %d; fragment textures %d; vertex/fragment uniform components %d/%d; vertex-output/fragment-input components %d/%d; max texture %u; renderbuffer %d; viewport %dx%d.", language ? language : "unavailable", (unsigned long) profile, attributes, units, vertex_uniforms, fragment_uniforms, vertex_outputs, fragment_inputs, renderer->capabilities.max_texture_dimension_2d, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
-    if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 6 || units < 1 || vertex_units < 1 || vertex_uniforms < 24 || fragment_uniforms < 28 || vertex_outputs < 20 || fragment_inputs < 16 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
+    if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 6 || units < 1 || vertex_units < 1 || vertex_uniforms < 24 || fragment_uniforms < 32 || vertex_outputs < 20 || fragment_inputs < 16 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
         maage_log_warning("maage.client.render", "Required GLSL 3.30, core profile, double buffering, vertex layout, uniform/varying capacity, or framebuffer limits are unavailable.");
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }

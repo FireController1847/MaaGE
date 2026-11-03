@@ -23,6 +23,7 @@ typedef struct maage_model_part {
 } maage_model_part;
 typedef struct maage_model_animation {
     double age, walk_phase, walk_amount, yaw, pitch, attack, charge;
+    double hurt, death, airborne; /* Presentation-only tick phases and flight amplitude. */
     unsigned long variant, flags;
 } maage_model_animation;
 typedef struct maage_model_transform {

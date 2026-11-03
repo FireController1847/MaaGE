@@ -49,7 +49,7 @@ enum {
     MAAGE_CONTAINER_CLOSED = 0
 };
 /* A bounded copied presentation packet, independent of registered slot count. */
-#define MAAGE_CONTAINER_VIEW_SLOTS (MAAGE_CRAFTING_CELLS + 1U)
+#define MAAGE_CONTAINER_VIEW_SLOTS 54U
 enum {
     MAAGE_SLOT_INVENTORY = 1,
     MAAGE_SLOT_CRAFT_INPUT = 2,
@@ -65,7 +65,7 @@ typedef struct maage_container_progress_value {
     int active;
 } maage_container_progress_value;
 typedef struct maage_crafting_container {
-    unsigned long identity, revision, block_identity;
+    unsigned long identity, revision, block_identity, secondary_block_identity;
     unsigned long kind;
     unsigned int grid_width;
     unsigned long view_first;
@@ -74,6 +74,7 @@ typedef struct maage_crafting_container {
     maage_container_progress_value progress[MAAGE_CONTAINER_VIEW_SLOTS];
     unsigned long active_remaining, active_duration, process, process_duration;
     int closing, x, y, z;
+    int secondary_x, secondary_y, secondary_z; /* Optional independently owned backing block. */
     maage_item_stack inputs[MAAGE_CRAFTING_CELLS], output;
 } maage_crafting_container;
 

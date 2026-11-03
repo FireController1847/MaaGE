@@ -100,7 +100,7 @@ int maage_entity_valid(const maage_entity *entity, const maage_item_registry *it
     if (entity->type == MAAGE_ENTITY_ITEM || entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
         if (entity->registered_type || entity->state || entity->state_size || entity->age >= 6000 || !stack || !stack->count || !maage_item_stack_valid(items, stack)) return 0;
     } else if (entity->type == MAAGE_ENTITY_LIVING) {
-        if (!entity->registered_type || entity->registered_type >= MAAGE_CONTENT_ID_INVALID || entity->payload.living.air > 300 || entity->payload.living.variant > 4294967295UL || entity->payload.living.flags > 4294967295UL || entity->payload.living.target > 4294967295UL || entity->payload.living.attacker > 4294967295UL || entity->payload.living.idle_ticks > 4294967295UL || entity->payload.living.effect_cursor > 4294967295UL || entity->payload.living.effect_limit > 4294967295UL || !maage_item_stack_valid(items, &entity->payload.living.pending_drop) || !(entity->payload.living.yaw >= -1e9 && entity->payload.living.yaw <= 1e9) || !(entity->payload.living.pitch >= -1.6 && entity->payload.living.pitch <= 1.6) || !(entity->payload.living.walk_distance >= 0 && entity->payload.living.walk_distance <= 1e15) || !(entity->payload.living.fall_distance >= 0 && entity->payload.living.fall_distance <= 1e9)) return 0;
+        if (!entity->registered_type || entity->registered_type >= MAAGE_CONTENT_ID_INVALID || entity->payload.living.air > 300 || entity->payload.living.damage_sequence > 4294967295UL || !(entity->payload.living.head_yaw >= -1e9 && entity->payload.living.head_yaw <= 1e9) || !(entity->payload.living.damage_yaw >= -1e9 && entity->payload.living.damage_yaw <= 1e9) || entity->payload.living.variant > 4294967295UL || entity->payload.living.flags > 4294967295UL || entity->payload.living.target > 4294967295UL || entity->payload.living.attacker > 4294967295UL || entity->payload.living.idle_ticks > 4294967295UL || entity->payload.living.effect_cursor > 4294967295UL || entity->payload.living.effect_limit > 4294967295UL || !maage_item_stack_valid(items, &entity->payload.living.pending_drop) || !(entity->payload.living.yaw >= -1e9 && entity->payload.living.yaw <= 1e9) || !(entity->payload.living.pitch >= -1.6 && entity->payload.living.pitch <= 1.6) || !(entity->payload.living.walk_distance >= 0 && entity->payload.living.walk_distance <= 1e15) || !(entity->payload.living.fall_distance >= 0 && entity->payload.living.fall_distance <= 1e9)) return 0;
         for (axis = 0; axis < 3; ++axis)
             if (!(entity->payload.living.goal[axis] > -MAAGE_WORLD_LIMIT && entity->payload.living.goal[axis] < MAAGE_WORLD_LIMIT)) return 0;
     } else if (entity->type == MAAGE_ENTITY_PROJECTILE) {
@@ -125,7 +125,7 @@ int maage_entity_registered_valid(const maage_entity *entity, const maage_item_r
     if (!definition || definition->state_size != entity->state_size || (entity->state_size && !entity->state) || (!entity->state_size && entity->state)) return 0;
     if ((entity->type == MAAGE_ENTITY_PROJECTILE) != (definition->classification == MAAGE_ENTITY_CLASS_PROJECTILE)) return 0;
     if (entity->type == MAAGE_ENTITY_LIVING) {
-        if (entity->payload.living.health > definition->health || entity->payload.living.hurt_ticks > definition->invulnerability_ticks || entity->payload.living.attack_ticks > definition->attack_cooldown || entity->payload.living.fuse_ticks > definition->fuse_ticks) return 0;
+        if (entity->payload.living.hurt_animation_ticks > 10 || entity->payload.living.death_ticks > 20 || (entity->payload.living.health && entity->payload.living.death_ticks) || entity->payload.living.health > definition->health || entity->payload.living.hurt_ticks > definition->invulnerability_ticks || entity->payload.living.attack_ticks > definition->attack_cooldown || entity->payload.living.fuse_ticks > definition->fuse_ticks) return 0;
         if (entity->payload.living.flags & MAAGE_ENTITY_STATE_DYING) {
             if (entity->payload.living.health || entity->payload.living.idle_ticks > definition->loot_count || ((entity->payload.living.effect_cursor != 0) != (entity->payload.living.pending_drop.count != 0))) return 0;
         } else if (entity->payload.living.pending_drop.count) return 0;
@@ -151,6 +151,11 @@ void maage_entity_copy_view(const maage_entity *entity, maage_entity_view *view)
         view->payload.falling.source_revision = entity->payload.falling.source_revision;
     } else if (entity->type == MAAGE_ENTITY_LIVING) {
         view->payload.living.yaw = entity->payload.living.yaw;
+        view->payload.living.death_ticks = entity->payload.living.death_ticks;
+        view->payload.living.hurt_animation_ticks = entity->payload.living.hurt_animation_ticks;
+        view->payload.living.damage_sequence = entity->payload.living.damage_sequence;
+        view->payload.living.damage_yaw = entity->payload.living.damage_yaw;
+        view->payload.living.head_yaw = entity->payload.living.head_yaw;
         view->payload.living.pitch = entity->payload.living.pitch;
         view->payload.living.walk_distance = entity->payload.living.walk_distance;
         view->payload.living.variant = entity->payload.living.variant;
@@ -183,6 +188,11 @@ int maage_entity_view_valid(const maage_entity_view *view, const maage_item_regi
         entity.payload.falling.source_revision = view->payload.falling.source_revision;
     } else if (view->type == MAAGE_ENTITY_LIVING) {
         entity.payload.living.yaw = view->payload.living.yaw;
+        entity.payload.living.death_ticks = view->payload.living.death_ticks;
+        entity.payload.living.hurt_animation_ticks = view->payload.living.hurt_animation_ticks;
+        entity.payload.living.damage_sequence = view->payload.living.damage_sequence;
+        entity.payload.living.damage_yaw = view->payload.living.damage_yaw;
+        entity.payload.living.head_yaw = view->payload.living.head_yaw;
         entity.payload.living.pitch = view->payload.living.pitch;
         entity.payload.living.walk_distance = view->payload.living.walk_distance;
         entity.payload.living.variant = view->payload.living.variant;
@@ -196,7 +206,9 @@ int maage_entity_view_valid(const maage_entity_view *view, const maage_item_regi
     if (!maage_entity_valid(&entity, items)) return 0;
     if (!entity.registered_type) return 1;
     definition = maage_entity_type_get(types, entity.registered_type);
-    return definition && ((entity.type == MAAGE_ENTITY_PROJECTILE) == (definition->classification == MAAGE_ENTITY_CLASS_PROJECTILE)) && (entity.type != MAAGE_ENTITY_LIVING || entity.payload.living.health <= definition->health);
+    if (!definition || ((entity.type == MAAGE_ENTITY_PROJECTILE) != (definition->classification == MAAGE_ENTITY_CLASS_PROJECTILE))) return 0;
+    if (entity.type != MAAGE_ENTITY_LIVING) return 1;
+    return entity.payload.living.health <= definition->health && entity.payload.living.hurt_ticks <= definition->invulnerability_ticks && entity.payload.living.hurt_animation_ticks <= 10 && entity.payload.living.death_ticks <= 20 && entity.payload.living.attack_ticks <= definition->attack_cooldown && entity.payload.living.fuse_ticks <= definition->fuse_ticks && (!entity.payload.living.health || !entity.payload.living.death_ticks);
 }
 
 maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_block_state_id state_id) {
@@ -731,18 +743,42 @@ static void entity_hurt_player(maage_entity_context *context, unsigned int damag
         if (!maage_status_failed(selected)) entity_sound(context, sound, context->player->position, 1);
     }
 }
-static void entity_hurt(maage_entity_context *context, maage_entity *entity, const maage_entity_type_definition *definition, unsigned int damage, maage_entity_id attacker) {
+static void entity_hurt(maage_entity_context *context, maage_entity *entity, const maage_entity_type_definition *definition, unsigned int damage, maage_entity_id attacker, const double origin[3]) {
     unsigned int applied = damage;
+    int occurrence = 1;
+    double dx, dz, length;
     if (!damage || !entity->payload.living.health) return;
     if (entity->payload.living.hurt_ticks > definition->invulnerability_ticks / 2) {
         if (damage <= entity->payload.living.last_damage) return;
         applied = damage - entity->payload.living.last_damage;
+        occurrence = 0;
     } else entity->payload.living.hurt_ticks = definition->invulnerability_ticks;
     entity->payload.living.last_damage = damage;
     entity->payload.living.health = applied >= entity->payload.living.health ? 0 : entity->payload.living.health - applied;
     entity->payload.living.attacker = attacker;
     entity->payload.living.panic_ticks = 100;
-    entity_sound(context, entity->payload.living.health ? definition->hurt_sound : definition->death_sound, entity->position, 1);
+    if (occurrence) {
+        entity->payload.living.damage_sequence = (entity->payload.living.damage_sequence + 1UL) & 0xffffffffUL;
+        if (!entity->payload.living.damage_sequence) entity->payload.living.damage_sequence = 1;
+        entity->payload.living.hurt_animation_ticks = 10;
+        entity->payload.living.damage_yaw = 0;
+        if (origin) {
+            dx = entity->position[0] - origin[0];
+            dz = entity->position[2] - origin[2];
+            length = sqrt(dx * dx + dz * dz);
+            if (length < 0.0001) {
+                dx = sin(entity->payload.living.yaw);
+                dz = -cos(entity->payload.living.yaw);
+                length = 1;
+            }
+            entity->payload.living.damage_yaw = atan2(-dx, dz);
+            entity->velocity[0] = entity->velocity[0] * 0.5 + dx / length * 0.4;
+            entity->velocity[2] = entity->velocity[2] * 0.5 + dz / length * 0.4;
+            entity->velocity[1] = entity->velocity[1] * 0.5 + 0.4;
+            if (entity->velocity[1] > 0.4) entity->velocity[1] = 0.4;
+        }
+    }
+    if (occurrence || !entity->payload.living.health) entity_sound(context, entity->payload.living.health ? definition->hurt_sound : definition->death_sound, entity->position, 1);
 }
 static maage_status entity_projectile_spawn(maage_entity_context *context, const maage_entity_type_definition *definition, maage_entity *source) {
     const maage_entity_type_definition *projectile = maage_entity_type_get(context->entities->types, definition->projectile_type);
@@ -828,7 +864,7 @@ static maage_status entity_explode(maage_entity_context *context, const maage_en
         dz = other->position[2] - entity->position[2];
         distance = sqrt(dx * dx + dy * dy + dz * dz);
         other_type = maage_entity_type_get(context->entities->types, other->registered_type);
-        if (other_type && distance < radius * 2 && entity_line_of_sight(context->world, entity->position, other->position)) entity_hurt(context, other, other_type, (unsigned int) ceil((1 - distance / (radius * 2)) * (radius * 7 + 1)), entity->id);
+        if (other_type && distance < radius * 2 && entity_line_of_sight(context->world, entity->position, other->position)) entity_hurt(context, other, other_type, (unsigned int) ceil((1 - distance / (radius * 2)) * (radius * 7 + 1)), entity->id, entity->position);
     }
     if (processed == 64) return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
     entity->payload.living.effect_cursor = entity->payload.living.effect_limit;
@@ -972,6 +1008,11 @@ maage_status maage_entities_behavior_standard(const maage_entity_type_definition
     speed = definition->speed * (entity->payload.living.panic_ticks ? 1.5 : 1);
     if (entity->payload.living.fuse_ticks || ((definition->behaviors & MAAGE_ENTITY_BEHAVIOR_RANGED) && pursuing && visible && distance <= definition->attack_range * 0.8)) speed = 0;
     entity_steer(context, entity, definition, entity->payload.living.goal[0] - entity->position[0], entity->payload.living.goal[2] - entity->position[2], speed);
+    entity->payload.living.head_yaw = pursuing ? atan2(dx, -dz) : entity->payload.living.yaw;
+    if (!pursuing && !entity->payload.living.panic_ticks && distance < 6 && entity_line_of_sight(context->world, eye, target)) {
+        entity->payload.living.head_yaw = atan2(dx, -dz);
+        entity->payload.living.pitch = atan2(eye[1] - target[1], sqrt(dx * dx + dz * dz));
+    } else if (!pursuing) entity->payload.living.pitch = 0;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
 
@@ -1052,7 +1093,7 @@ static void entity_living_move(maage_entity_context *context, maage_entity *enti
     entity->payload.living.walk_distance += sqrt(dx * dx + dz * dz);
     if (entity->position[1] < old_y && !(definition->flags & MAAGE_ENTITY_SLOW_FALL)) entity->payload.living.fall_distance += old_y - entity->position[1];
     if (entity->grounded) {
-        if (entity->payload.living.fall_distance > 3) entity_hurt(context, entity, definition, (unsigned int) ceil(entity->payload.living.fall_distance - 3), 0);
+        if (entity->payload.living.fall_distance > 3) entity_hurt(context, entity, definition, (unsigned int) ceil(entity->payload.living.fall_distance - 3), 0, NULL);
         entity->payload.living.fall_distance = 0;
     }
 }
@@ -1066,7 +1107,7 @@ static void entity_living_environment(maage_entity_context *context, maage_entit
     int x, y, z;
     unsigned int damage = 0, axis;
     if (entity->position[1] < -32) {
-        entity_hurt(context, entity, definition, 4, 0);
+        entity_hurt(context, entity, definition, 4, 0, NULL);
         return;
     }
     memcpy(eye, entity->position, sizeof(eye));
@@ -1074,7 +1115,7 @@ static void entity_living_environment(maage_entity_context *context, maage_entit
     fluid = maage_fluid_get(maage_block_registry_fluids(maage_world_registry(context->world)), maage_world_fluid_at(context->world, eye));
     if (fluid && fluid->submerges) {
         if (entity->payload.living.air) --entity->payload.living.air;
-        else if (entity->age % 20 == 0) entity_hurt(context, entity, definition, 2, 0);
+        else if (entity->age % 20 == 0) entity_hurt(context, entity, definition, 2, 0, NULL);
     } else entity->payload.living.air = 300;
     for (axis = 0; axis < 3; ++axis) {
         low[axis] = entity->position[axis] - (axis == 1 ? 0 : definition->width * 0.5);
@@ -1088,12 +1129,12 @@ static void entity_living_environment(maage_entity_context *context, maage_entit
                 if (!block || !block->contact_damage) continue;
                 if (high[0] > x + block->contact_shape.minimum[0] && low[0] < x + block->contact_shape.maximum[0] && high[1] > y + block->contact_shape.minimum[1] && low[1] < y + block->contact_shape.maximum[1] && high[2] > z + block->contact_shape.minimum[2] && low[2] < z + block->contact_shape.maximum[2] && block->contact_damage > damage) damage = block->contact_damage;
             }
-    if (damage) entity_hurt(context, entity, definition, damage, 0);
+    if (damage) entity_hurt(context, entity, definition, damage, 0, NULL);
     if (maage_world_fluid_volume_properties(context->world, low, high, MAAGE_FLUID_PROPERTY_SWIMMING, NULL)) entity->payload.living.fire_ticks = 0;
     if (entity->payload.living.fire_ticks) {
         --entity->payload.living.fire_ticks;
         entity->payload.living.flags |= MAAGE_ENTITY_STATE_BURNING;
-        if (entity->age % 20 == 0) entity_hurt(context, entity, definition, 1, 0);
+        if (entity->age % 20 == 0) entity_hurt(context, entity, definition, 1, 0, NULL);
     } else entity->payload.living.flags &= ~MAAGE_ENTITY_STATE_BURNING;
     x = (int) floor(eye[0]);
     y = (int) floor(eye[1]);
@@ -1191,7 +1232,7 @@ static maage_status entity_living_death(maage_entity_context *context, maage_ent
             ++entity->payload.living.idle_ticks;
         }
     }
-    if (entity->payload.living.idle_ticks == definition->loot_count) {
+    if (entity->payload.living.idle_ticks == definition->loot_count && entity->payload.living.death_ticks >= 20) {
         if (entity->payload.living.attacker == MAAGE_ENTITY_PLAYER_ID && definition->experience) {
             result = maage_gameplay_add_experience(context->gameplay, definition->experience);
             if (maage_status_failed(result)) return result;
@@ -1221,7 +1262,7 @@ maage_status maage_entities_shear(maage_entity_context *context, maage_entity *e
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MUTATE);
 }
 
-static int entity_ray_box(const double origin[3], const double direction[3], const double position[3], double width, double height, double range, double *distance) {
+int maage_entity_ray_box(const double origin[3], const double direction[3], const double position[3], double width, double height, double range, double *distance) {
     double minimum[3], maximum[3], low = 0, high = range, first, last, swap;
     unsigned int axis;
     for (axis = 0; axis < 3; ++axis) {
@@ -1261,7 +1302,7 @@ static void entity_projectile_tick(maage_entity_context *context, maage_entity *
     if (length > 0.00001) {
         for (axis = 0; axis < 3; ++axis)
             direction[axis] /= length;
-        if (context->gameplay->health && entity_ray_box(origin, direction, context->player->position, MAAGE_PLAYER_WIDTH + definition->width, MAAGE_PLAYER_HEIGHT, length, &distance)) {
+        if (context->gameplay->health && maage_entity_ray_box(origin, direction, context->player->position, MAAGE_PLAYER_WIDTH + definition->width, MAAGE_PLAYER_HEIGHT, length, &distance)) {
             entity_hurt_player(context, entity->payload.projectile.damage, origin);
             entity->type = 0;
             return;
@@ -1428,11 +1469,15 @@ maage_status maage_entities_living_tick(maage_entities *entities, maage_world *w
             continue;
         }
         if (entity.payload.living.hurt_ticks) --entity.payload.living.hurt_ticks;
+        if (entity.payload.living.hurt_animation_ticks) --entity.payload.living.hurt_animation_ticks;
         if (entity.payload.living.attack_ticks) --entity.payload.living.attack_ticks;
         if (entity.payload.living.panic_ticks) --entity.payload.living.panic_ticks;
         if (entity.payload.living.idle_ticks < 4294967295UL && !(entity.payload.living.flags & (MAAGE_ENTITY_STATE_DYING | MAAGE_ENTITY_STATE_EXPLODING))) ++entity.payload.living.idle_ticks;
-        if (!entity.payload.living.health) result = entity_living_death(&context, &entity, definition);
-        else {
+        if (!entity.payload.living.health) {
+            if (entity.payload.living.death_ticks < 20) ++entity.payload.living.death_ticks;
+            memset(entity.velocity, 0, sizeof(entity.velocity));
+            result = entity_living_death(&context, &entity, definition);
+        } else {
             result = definition->behavior ? definition->behavior(definition, &entity, &context) : entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
             if (!maage_status_failed(result) && entity.type == MAAGE_ENTITY_LIVING && !(entity.payload.living.flags & MAAGE_ENTITY_STATE_EXPLODING)) {
                 entity_soft_collisions(&context, &entity, definition);
@@ -1484,14 +1529,15 @@ maage_status maage_entities_player_action(maage_entities *entities, maage_world 
     nearest = gameplay->reach > 0 ? gameplay->reach : gameplay->mode == MAAGE_GAME_MODE_CREATIVE ? 5
                                                                                                  : 4.5;
     result = maage_world_raycast(world, origin, direction, nearest, &block);
-    if (maage_status_code(result) == MAAGE_STATUS_NOT_FOUND) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
-    if (maage_status_failed(result)) return result;
-    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) nearest = block.distance;
+    if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return result;
+    nearest = block.distance;
     for (i = 0; i < entities->count; ++i) {
         if (entities->data[i].type != MAAGE_ENTITY_LIVING || !entities->data[i].payload.living.health) continue;
         definition = maage_entity_type_get(entities->types, entities->data[i].registered_type);
         if (!definition || !entity_body_loaded(world, entities->data[i].position, definition->width)) continue;
-        if (entity_ray_box(origin, direction, entities->data[i].position, definition->width + 0.2, definition->height + 0.1, nearest, &distance)) {
+        memcpy(position, entities->data[i].position, sizeof(position));
+        position[1] -= 0.1;
+        if (maage_entity_ray_box(origin, direction, position, definition->width + 0.2, definition->height + 0.2, nearest, &distance) && distance < nearest) {
             selected = i;
             nearest = distance;
         }
@@ -1527,14 +1573,10 @@ maage_status maage_entities_player_action(maage_entities *entities, maage_world 
     context.emit_sound = emit_sound;
     context.sound_context = sound_context;
     if (attack == 1) {
+        unsigned int health = entity.payload.living.health;
         if (item && item->attack_damage) damage = item->attack_damage;
-        entity_hurt(&context, &entity, definition, damage, MAAGE_ENTITY_PLAYER_ID);
-        if (entity.payload.living.health) {
-            entity.velocity[0] += sin(yaw) * 0.4;
-            entity.velocity[1] = 0.3;
-            entity.velocity[2] -= cos(yaw) * 0.4;
-        }
-        result = entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MUTATE);
+        entity_hurt(&context, &entity, definition, damage, MAAGE_ENTITY_PLAYER_ID, player->position);
+        result = entity_status(entity.payload.living.health != health ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
     } else if (use && !gameplay->use_delay) {
         gameplay->use_delay = 4;
         result = definition->interact ? definition->interact(definition, &entity, &context, MAAGE_ENTITY_INTERACT_USE) : entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);

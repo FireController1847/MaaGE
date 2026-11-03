@@ -21,6 +21,10 @@ enum {
 typedef struct maage_item_model_transform {
     double translation[3], rotation[3], scale; /* Model units to centered item; zero scale means one. */
 } maage_item_model_transform;
+typedef struct maage_item_sprite_layer {
+    maage_texture_id texture;
+    float tint[4];
+} maage_item_sprite_layer;
 /* Item identities are allocated independently of blocks and states. */
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
@@ -48,6 +52,8 @@ typedef struct maage_item_definition {
     maage_item_model_transform presentation;
     unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;
+    const maage_item_sprite_layer *sprite_layers; /* Ordered, copied by registration. Empty uses texture_id. */
+    size_t sprite_layer_count;
     const char *display_name;
     maage_status (*use_placement)(const struct maage_item_definition *, const struct maage_world *, const struct maage_world_target *, maage_block_state_id *, int *);
     int placement_air_only;

@@ -65,7 +65,7 @@ void maage_client_item_box(const float grass_color[3], maage_mesh_vertex *vertic
         }
     }
 }
-static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *indices, size_t *faces, const float uv[4], const float tint[4]) {
+static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *indices, size_t *faces, const float uv[4], const float tint[4], float bias) {
     float positions[4][3], rectangle[4], coordinate, sample;
     unsigned int face, corner, axis, pixel;
     /* Front/back plus one texture-sampled edge per pixel row/column, matching
@@ -74,7 +74,7 @@ static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *i
         for (corner = 0; corner < 4; ++corner) {
             for (axis = 0; axis < 3; ++axis)
                 positions[corner][axis] = (float) maage_interaction_corners[face][corner][axis];
-            positions[corner][2] = face == 4 ? -0.0625f : 0;
+            positions[corner][2] = face == 4 ? -0.0625f - bias : bias;
         }
         memcpy(rectangle, uv, sizeof(rectangle));
         if (face == MAAGE_FACE_POSITIVE_Z) {
@@ -98,8 +98,8 @@ static void maage_item_model_sprite(maage_mesh_vertex *vertices, unsigned int *i
             for (corner = 0; corner < 4; ++corner) {
                 positions[corner][0] = (float) maage_interaction_corners[face][corner][0];
                 positions[corner][1] = (float) maage_interaction_corners[face][corner][1];
-                positions[corner][2] = maage_interaction_corners[face][corner][2] ? 0 : -0.0625f;
-                positions[corner][axis] = coordinate;
+                positions[corner][2] = maage_interaction_corners[face][corner][2] ? bias : -0.0625f - bias;
+                positions[corner][axis] = coordinate + (face & 1U ? bias : -bias);
             }
             maage_item_model_quad(vertices, indices, faces, positions, rectangle, tint, 0.75f, MAAGE_MESH_MATERIAL_CUTOUT, NULL);
         }
@@ -308,7 +308,7 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
     maage_registered_item_work registered;
     maage_status result;
     maage_texture_id texture;
-    size_t faces = 0, i;
+    size_t faces = 0, i, layer;
     unsigned int axis;
     float tint[4] = {1, 1, 1, 1}, material;
     double minimum[3], maximum[3];
@@ -327,11 +327,14 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
         if (maage_status_failed(result)) return result;
         faces = registered.faces;
     } else if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
-        texture = maage_client_item_texture(item, stack->metadata);
-        if (texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
-        if (vertices && capacity < 66U) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
-        if (state) maage_client_item_face_tint(resources->inventory_grass_color, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
-        maage_item_model_sprite(vertices, indices, &faces, resources->uv[texture], tint);
+        if (item->sprite_layer_count > (size_t) - 1 / 66 || (vertices && capacity < 66 * (item->sprite_layer_count ? item->sprite_layer_count : 1))) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+        for (layer = 0; layer < (item->sprite_layer_count ? item->sprite_layer_count : 1); ++layer) {
+            texture = item->sprite_layer_count ? item->sprite_layers[layer].texture : maage_client_item_texture(item, stack->metadata);
+            if (texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
+            if (item->sprite_layer_count) memcpy(tint, item->sprite_layers[layer].tint, sizeof(tint));
+            else if (state) maage_client_item_face_tint(resources->inventory_grass_color, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
+            maage_item_model_sprite(vertices, indices, &faces, resources->uv[texture], tint, (float) layer * 0.0002f);
+        }
         /* Center the shared sprite. Contexts apply their own transforms. */
         if (vertices)
             for (i = 0; i < faces * 4; ++i) {
@@ -509,7 +512,8 @@ maage_status maage_client_item_icon(const maage_model_registry *models, const ma
     const float *uv;
     float tint[4];
     double position[3], sample_u, sample_v;
-    unsigned int i, corner, axis, layer;
+    size_t i;
+    unsigned int corner, axis, layer;
     maage_texture_id texture;
     if (!stack || !grass || !textures || !sink || !(item = maage_item_registry_get(items, stack->item_id))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
     state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->metadata) : NULL;
@@ -524,21 +528,25 @@ maage_status maage_client_item_icon(const maage_model_registry *models, const ma
         return maage_registered_item_emit(models, &registered);
     }
     if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
-        texture = maage_client_item_texture(item, stack->metadata);
-        if (texture >= texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
-        for (axis = 0; axis < 4; ++axis)
-            tint[axis] = 1;
-        if (state) maage_client_item_face_tint(grass, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
-        uv = textures[texture];
-        for (corner = 0; corner < 4; ++corner) {
-            vertex = &vertices[corner];
-            vertex->position[0] = corner == 1 || corner == 2 ? 16 : 0;
-            vertex->position[1] = corner < 2 ? 0 : 16;
-            vertex->uv[0] = uv[corner == 1 || corner == 2 ? 2 : 0];
-            vertex->uv[1] = uv[corner < 2 ? 1 : 3];
-            memcpy(vertex->color, tint, sizeof(tint));
+        for (i = 0; i < (item->sprite_layer_count ? item->sprite_layer_count : 1); ++i) {
+            texture = item->sprite_layer_count ? item->sprite_layers[i].texture : maage_client_item_texture(item, stack->metadata);
+            if (texture >= texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
+            for (axis = 0; axis < 4; ++axis)
+                tint[axis] = item->sprite_layer_count ? item->sprite_layers[i].tint[axis] : 1;
+            if (!item->sprite_layer_count && state) maage_client_item_face_tint(grass, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
+            uv = textures[texture];
+            for (corner = 0; corner < 4; ++corner) {
+                vertex = &vertices[corner];
+                vertex->position[0] = corner == 1 || corner == 2 ? 16 : 0;
+                vertex->position[1] = corner < 2 ? 0 : 16;
+                vertex->uv[0] = uv[corner == 1 || corner == 2 ? 2 : 0];
+                vertex->uv[1] = uv[corner < 2 ? 1 : 3];
+                memcpy(vertex->color, tint, sizeof(tint));
+            }
+            result = sink(context, vertices);
+            if (maage_status_failed(result)) return result;
         }
-        return sink(context, vertices);
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
     }
     if (!state || !block || !(geometry = maage_block_geometry_get(maage_block_registry_geometry(blocks), block->geometry_id))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
     if (geometry->primitive == MAAGE_BLOCK_GEOMETRY_CUSTOM) {

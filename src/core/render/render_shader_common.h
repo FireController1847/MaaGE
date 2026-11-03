@@ -31,11 +31,12 @@ MAAGE_SHADER_VEC3 maage_shader_lighting(MAAGE_SHADER_VEC2 level, float daylight)
 bool maage_shader_cutout(float material, float alpha) {
     return material == float(MAAGE_MESH_MATERIAL_CUTOUT) && alpha < MAAGE_RENDER_CUTOUT_ALPHA;
 }
-MAAGE_SHADER_VEC4 maage_shader_mesh_color(MAAGE_SHADER_VEC4 texel, MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC2 level, float material, MAAGE_SHADER_VEC4 lighting) {
+MAAGE_SHADER_VEC4 maage_shader_mesh_color(MAAGE_SHADER_VEC4 texel, MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC2 level, float material, MAAGE_SHADER_VEC4 lighting, MAAGE_SHADER_VEC4 parameters) {
     if (material == float(MAAGE_MESH_MATERIAL_MULTIPLY)) return MAAGE_SHADER_VEC4(mix(MAAGE_SHADER_VEC3(0.5), texel.rgb * color.rgb, texel.a), 1.0);
     MAAGE_SHADER_VEC3 light = maage_shader_lighting(lighting.w > 0.0 ? lighting.yz : level, lighting.x);
     float alpha = material == float(MAAGE_MESH_MATERIAL_OPAQUE) ? 1.0 : texel.a * color.a;
-    return MAAGE_SHADER_VEC4(texel.rgb * color.rgb * light, alpha);
+    MAAGE_SHADER_VEC3 rgb = mix(texel.rgb * color.rgb * light, parameters.yzw * light, max(lighting.w - 1.0, 0.0));
+    return MAAGE_SHADER_VEC4(rgb, alpha);
 }
 MAAGE_SHADER_VEC4 maage_shader_fog(MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC3 position, float material, MAAGE_SHADER_VEC4 fog, MAAGE_SHADER_VEC4 range) {
     float visibility = 1.0;

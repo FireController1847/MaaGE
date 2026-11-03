@@ -108,12 +108,16 @@ typedef struct maage_block_definition {
     unsigned long drop_item_id; /* Independent item domain; bound before finalize. */
     unsigned int drop_count;
     maage_block_shape collision_shape, selection_shape;
+    /* Allocation-free neighborhood adjustment for collision/selection queries.
+     * Preserve finite, ordered bounds inside the owning voxel. */
+    void (*bounds)(const struct maage_world *, int, int, int, const struct maage_block_state_definition *, maage_block_shape *);
     unsigned int contact_damage;
     maage_block_shape contact_shape; /* Damaging shell may differ from physical collision. */
     /* Called only on the World owner for eligible states. NULL retains sampling
      * eligibility without behavior when a required system is unimplemented. */
     maage_block_random_tick_callback random_tick;
     maage_block_survival_callback survives;
+    maage_block_survival_callback can_place; /* Destination validation only; never persistent support. */
     maage_status (*scheduled_tick)(struct maage_world *, int, int, int, const struct maage_block_state_definition *);
     /* Content callbacks run on the owner, except import_state (detached worker).
      * Read-only placement/presentation callbacks never mutate World. */

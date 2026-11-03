@@ -362,7 +362,10 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
     maage_biome_id biomes[4];
     maage_item_definition egg, milk;
     maage_status result;
-    maage_texture_id egg_texture;
+    maage_texture_id egg_texture, egg_overlay;
+    maage_item_sprite_layer layers[2];
+    static const unsigned long egg_colors[MAAGE_BASE_MOB_COUNT][2] = {{15771042UL, 14377823UL}, {4470310UL, 10592673UL}, {15198183UL, 16758197UL}, {10592673UL, 16711680UL}, {44975UL, 7969893UL}, {12698049UL, 4802889UL}, {894731UL, 0UL}, {3419431UL, 11013646UL}};
+    unsigned int layer, channel;
     unsigned int mob, count;
     char name[96], label[96], path[128];
     result = base_entity_item(context, "minecraft:feather", "Feather", "minecraft/textures/items/feather.png", 64, &ids->item_feather);
@@ -496,6 +499,7 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
         ids->mob_types[mob] = definition.id;
     }
     result = base_entity_texture(context, "minecraft/textures/items/spawn_egg.png", &egg_texture);
+    if (!maage_status_failed(result)) result = base_entity_texture(context, "minecraft/textures/items/spawn_egg_overlay.png", &egg_overlay);
     if (maage_status_failed(result)) return result;
     for (mob = 0; mob < MAAGE_BASE_MOB_COUNT; ++mob) {
         memset(&egg, 0, sizeof(egg));
@@ -506,6 +510,16 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
         egg.max_stack = 64;
         egg.model = MAAGE_ITEM_MODEL_SPRITE;
         egg.texture_id = egg_texture;
+        memset(layers, 0, sizeof(layers));
+        layers[0].texture = egg_texture;
+        layers[1].texture = egg_overlay;
+        for (layer = 0; layer < 2; ++layer) {
+            for (channel = 0; channel < 3; ++channel)
+                layers[layer].tint[channel] = (float) ((egg_colors[mob][layer] >> ((2 - channel) * 8)) & 255UL) / 255;
+            layers[layer].tint[3] = 1;
+        }
+        egg.sprite_layers = layers;
+        egg.sprite_layer_count = 2;
         egg.spawn_type = ids->mob_types[mob];
         egg.mining_speed = 1;
         result = maage_item_registry_register(context->items, name, &egg);

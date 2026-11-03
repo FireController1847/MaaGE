@@ -139,6 +139,7 @@ static maage_status maage_base_bind_internal(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_chest_models_bind(context, ids);
     if (!maage_status_failed(result)) result = maage_base_fluids_resolve(context, ids);
     if (!maage_status_failed(result)) result = maage_base_furnace_entity(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_chests_bind(context, ids);
     if (maage_status_failed(result)) return result;
     for (i = 0; i < MAAGE_BASE_BIOME_COUNT; ++i) {
         biome = *maage_biome_registry_get(context->biomes, ids->biome_ids[i]);

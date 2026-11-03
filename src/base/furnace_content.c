@@ -277,6 +277,11 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     ids->block_chest = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_chest, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
     if (maage_status_failed(result)) return result;
+    ids->chest_states[0][0] = ids->state_chest;
+    for (facing = 1; facing < 4; ++facing) {
+        result = maage_content_register_state(registry, ids, config, &ids->chest_states[0][facing], block.id, facing, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
+        if (maage_status_failed(result)) return result;
+    }
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
     block.geometry_id = ids->geometry_cube;
@@ -303,6 +308,11 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     ids->block_trapped_chest = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_trapped_chest, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
     if (maage_status_failed(result)) return result;
+    ids->chest_states[1][0] = ids->state_trapped_chest;
+    for (facing = 1; facing < 4; ++facing) {
+        result = maage_content_register_state(registry, ids, config, &ids->chest_states[1][facing], block.id, facing, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
+        if (maage_status_failed(result)) return result;
+    }
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
     block.geometry_id = ids->geometry_cube;
@@ -786,9 +796,9 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:log2", "Acacia Log", ids->block_log2, ids->state_log2, 1, maage_base_place_log2, 300, &ids->item_log2);
     if (maage_status_failed(result)) return result;
-    result = base_block_item(context, "minecraft:chest", "Chest", ids->block_chest, ids->state_chest, 0, NULL, 300, &ids->item_chest);
+    result = base_block_item(context, "minecraft:chest", "Chest", ids->block_chest, ids->state_chest, 0, maage_base_chest_placement, 300, &ids->item_chest);
     if (maage_status_failed(result)) return result;
-    result = base_block_item(context, "minecraft:trapped_chest", "Trapped Chest", ids->block_trapped_chest, ids->state_trapped_chest, 0, NULL, 300, &ids->item_trapped_chest);
+    result = base_block_item(context, "minecraft:trapped_chest", "Trapped Chest", ids->block_trapped_chest, ids->state_trapped_chest, 0, maage_base_chest_placement, 300, &ids->item_trapped_chest);
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:bookshelf", "Bookshelf", ids->block_bookshelf, ids->state_bookshelf, 0, NULL, 300, &ids->item_bookshelf);
     if (maage_status_failed(result)) return result;

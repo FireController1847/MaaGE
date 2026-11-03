@@ -838,7 +838,14 @@ static void inventory_draw(maage_client_ui *ui, void *context) {
             else creative_draw_tab(ui, frame, slot);
         }
     }
-    inventory_sprite(ui, frame, creative ? tab->background : presentation->background, 0, 0, frame.width, frame.height, (float) presentation->texture_edge);
+    if (!creative && presentation->background_split) {
+        rectangle = frame;
+        rectangle.height = (float) presentation->background_split;
+        inventory_sprite(ui, rectangle, presentation->background, 0, 0, frame.width, rectangle.height, (float) presentation->texture_edge);
+        rectangle.y += rectangle.height;
+        rectangle.height = frame.height - rectangle.height;
+        inventory_sprite(ui, rectangle, presentation->background, 0, (float) presentation->background_bottom, frame.width, rectangle.height, (float) presentation->texture_edge);
+    } else inventory_sprite(ui, frame, creative ? tab->background : presentation->background, 0, 0, frame.width, frame.height, (float) presentation->texture_edge);
     if (creative) {
         if (tab->kind != MAAGE_CREATIVE_INVENTORY) {
             maage_client_ui_text(ui, tab->title, frame.x + 8, frame.y + 6, MAAGE_CLIENT_UI_LEFT, 0.25f, 0.25f, 0.25f);

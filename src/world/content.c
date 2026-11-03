@@ -315,6 +315,8 @@ static maage_status content_validate_presentation(const maage_content_context *c
     for (i = 0; i < maage_item_registry_count(context->items); ++i) {
         item = maage_item_registry_at(context->items, i);
         if (!item || (item->model == MAAGE_ITEM_MODEL_REGISTERED && !maage_model_registry_get(context->models, item->registered_model)) || (item->spawn_type && !maage_entity_type_get(context->entity_types, item->spawn_type))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        for (j = 0; j < item->sprite_layer_count; ++j)
+            if (!maage_presentation_texture(context->presentation, item->sprite_layers[j].texture)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     for (i = 0; i < maage_fluid_count(context->fluids); ++i) {
         fluid = maage_fluid_get(context->fluids, (maage_fluid_id) i + 1);

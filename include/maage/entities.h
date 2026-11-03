@@ -33,9 +33,10 @@ typedef union maage_entity_payload {
         unsigned long source_revision; /* Pre-removal revision; transient across save/load. */
     } falling;
     struct {
-        double yaw, pitch, walk_distance, fall_distance, goal[3];
-        unsigned long variant, flags, target, attacker, idle_ticks, effect_cursor, effect_limit;
-        unsigned int health, hurt_ticks, last_damage, attack_ticks, panic_ticks, fuse_ticks, air, fire_ticks;
+        double yaw, head_yaw, pitch, damage_yaw, walk_distance, fall_distance, goal[3];
+        unsigned long variant, flags, target, attacker, idle_ticks, effect_cursor, effect_limit, damage_sequence;
+        /* hurt_ticks is resistance; hurt_animation_ticks identifies the separate accepted reaction. */
+        unsigned int health, hurt_ticks, hurt_animation_ticks, death_ticks, last_damage, attack_ticks, panic_ticks, fuse_ticks, air, fire_ticks;
         maage_item_stack pending_drop;
     } living;
     struct {
@@ -69,9 +70,9 @@ typedef union maage_entity_view_payload {
         unsigned long source_revision;
     } falling;
     struct {
-        double yaw, pitch, walk_distance;
-        unsigned long variant, flags;
-        unsigned int health, hurt_ticks, attack_ticks, fuse_ticks;
+        double yaw, head_yaw, pitch, damage_yaw, walk_distance;
+        unsigned long variant, flags, damage_sequence;
+        unsigned int health, hurt_ticks, hurt_animation_ticks, death_ticks, attack_ticks, fuse_ticks;
     } living;
     struct {
         unsigned int damage;
@@ -159,4 +160,7 @@ maage_status maage_entity_save_clear(maage_entity_save *save);
 /* Shared swept AABB collision for player and entities. Position is feet/center
  * XZ. Returns collided, updating position and clipping velocity on that axis. */
 int maage_world_sweep_body(const maage_world *world, double position[3], double velocity[3], double width, double height, int axis, double displacement);
+/* Allocation-free slab intersection. Direction is normalized; position is feet
+ * and center XZ. Callers share the same 0.1-block selection border. */
+int maage_entity_ray_box(const double[3], const double[3], const double[3], double width, double height, double range, double *distance);
 #endif

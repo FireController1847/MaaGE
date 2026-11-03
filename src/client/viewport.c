@@ -1504,17 +1504,32 @@ choose_world:
             }
         }
         {
-            double prediction_eye[3];
+            double prediction_eye[3], prediction_direction[3];
+            maage_world_target prediction_block;
             maage_status delivery;
-            int preview_queued = 0;
+            int preview_queued = 0, entity_target;
             for (i = 0; i < 3; ++i)
                 prediction_eye[i] = latest.player.player.position[i];
             prediction_eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
+            delivery = maage_client_item_entities_receive(item_entities, session, &latest, now);
+            if (maage_status_failed(delivery)) {
+                operation = delivery;
+                goto done;
+            }
+            prediction_direction[0] = sin(yaw) * cos(pitch);
+            prediction_direction[1] = -sin(pitch);
+            prediction_direction[2] = -cos(yaw) * cos(pitch);
+            delivery = maage_world_raycast(visual_world, prediction_eye, prediction_direction, latest.player.reach, &prediction_block);
+            if (maage_status_failed(delivery) && maage_status_code(delivery) != MAAGE_STATUS_NOT_FOUND) {
+                operation = delivery;
+                goto done;
+            }
+            entity_target = maage_client_item_entities_target(item_entities, &latest, prediction_eye, prediction_direction, prediction_block.distance, now);
             if (prediction_mesh_generation != cache.generation) {
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, maage_control_down(controls, controls->attack, &input) || maage_control_pressed(controls, controls->attack, &input), maage_control_pressed(controls, controls->attack, &input), maage_control_down(controls, controls->use, &input) || maage_control_pressed(controls, controls->use, &input), maage_control_pressed(controls, controls->use, &input), maage_control_down(controls, controls->sneak, &input), (unsigned int) selected_hotbar, &command);
+            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, maage_control_down(controls, controls->attack, &input) || maage_control_pressed(controls, controls->attack, &input), maage_control_pressed(controls, controls->attack, &input), maage_control_down(controls, controls->use, &input) || maage_control_pressed(controls, controls->use, &input), maage_control_pressed(controls, controls->use, &input), maage_control_down(controls, controls->sneak, &input), (unsigned int) selected_hotbar, entity_target, &command);
             if (!maage_status_failed(operation) && command.kind) {
                 command.sampled_at = prediction.diagnostics ? prediction.input_at : -1;
                 delivery = maage_client_outbox_queue(&outbox, &command);
@@ -1603,7 +1618,8 @@ choose_world:
         visual_snapshot.world_stats.meshing_queued += visual_stats.meshing_queued;
         visual_snapshot.world_stats.lighting_queued += visual_stats.lighting_queued;
         visual_snapshot.player.has_target = maage_status_code(maage_world_raycast(visual_world, eye, forward, latest.player.reach, &visual_snapshot.player.target)) == MAAGE_STATUS_SUCCESS;
-        if (!active || (!maage_control_down(controls, controls->attack, &input) && !maage_control_pressed(controls, controls->attack, &input)) ||
+        if (maage_client_item_entities_target(item_entities, &latest, eye, forward, visual_snapshot.player.target.distance, now)) visual_snapshot.player.has_target = 0;
+        if (!visual_snapshot.player.has_target || !active || (!maage_control_down(controls, controls->attack, &input) && !maage_control_pressed(controls, controls->attack, &input)) ||
             visual_snapshot.player.target.x != latest.player.breaking.x ||
             visual_snapshot.player.target.y != latest.player.breaking.y ||
             visual_snapshot.player.target.z != latest.player.breaking.z)

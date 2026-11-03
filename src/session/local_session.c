@@ -92,7 +92,7 @@ static int session_motion_valid(const maage_session_player_motion *motion) {
 
 static int session_container_valid(const maage_crafting_container *container) {
     unsigned int i;
-    if (container->kind >= MAAGE_CONTENT_ID_INVALID || container->identity > 4294967295UL || container->revision > 4294967295UL || (container->closing != 0 && container->closing != 1) || container->view_first >= MAAGE_CONTENT_ID_INVALID || container->view_first % MAAGE_CONTAINER_VIEW_SLOTS || container->view_count > MAAGE_CONTAINER_VIEW_SLOTS || container->progress_count > MAAGE_CONTAINER_VIEW_SLOTS || container->view_first > MAAGE_CONTENT_ID_INVALID - container->view_count || container->view_first > MAAGE_CONTENT_ID_INVALID - container->progress_count) return 0;
+    if (container->secondary_block_identity > 4294967295UL || container->kind >= MAAGE_CONTENT_ID_INVALID || container->identity > 4294967295UL || container->revision > 4294967295UL || (container->closing != 0 && container->closing != 1) || container->view_first >= MAAGE_CONTENT_ID_INVALID || container->view_first % MAAGE_CONTAINER_VIEW_SLOTS || container->view_count > MAAGE_CONTAINER_VIEW_SLOTS || container->progress_count > MAAGE_CONTAINER_VIEW_SLOTS || container->view_first > MAAGE_CONTENT_ID_INVALID - container->view_count || container->view_first > MAAGE_CONTENT_ID_INVALID - container->progress_count) return 0;
     if (container->kind && (!container->identity || !container->revision)) return 0;
     for (i = 0; i < container->progress_count; ++i)
         if (container->progress[i].value > container->progress[i].total || container->progress[i].total > 4294967295UL || (container->progress[i].active != 0 && container->progress[i].active != 1)) return 0;
@@ -362,6 +362,7 @@ maage_status maage_local_session_destroy(maage_local_session *session) {
     for (i = 0; i < session->column_count; ++i)
         (void) maage_column_update_destroy(session->columns[i].column);
     free(session->entities.entities);
+    free(session->entities.blocks);
     free(session->columns);
     free(session->events);
     free(session->commands);
@@ -371,10 +372,11 @@ maage_status maage_local_session_destroy(maage_local_session *session) {
 
 maage_status maage_local_session_offer_entities(maage_local_session *session, maage_session_entities *view) {
     maage_entity_view *retired = NULL;
+    maage_block_entity_view *retired_blocks = NULL;
     maage_status result;
     if (!session || !view || view->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         !view->session_epoch || !view->world_epoch || !view->sequence ||
-        view->count > (size_t) - 1 / sizeof(*view->entities) || (view->count && !view->entities))
+        view->count > (size_t) - 1 / sizeof(*view->entities) || (view->count && !view->entities) || view->block_count > (size_t) - 1 / sizeof(*view->blocks) || (view->block_count && !view->blocks))
         return session_argument(MAAGE_OPERATION_SUBMIT, 1);
     maage_mutex_lock(session->mutex);
     if (session->closed) result = session_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_SUBMIT);
@@ -387,14 +389,17 @@ maage_status maage_local_session_offer_entities(maage_local_session *session, ma
         result = session_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_SUBMIT);
     else {
         retired = session->entities.entities;
+        retired_blocks = session->entities.blocks;
         session->entities = *view;
         view->entities = NULL;
-        view->count = 0;
+        view->blocks = NULL;
+        view->count = view->block_count = 0;
         session->has_entities = 1;
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SUBMIT);
     }
     maage_mutex_unlock(session->mutex);
     free(retired);
+    free(retired_blocks);
     return result;
 }
 maage_status maage_local_session_take_entities(maage_local_session *session, maage_session_entities *view) {
@@ -404,6 +409,7 @@ maage_status maage_local_session_take_entities(maage_local_session *session, maa
     if (session->has_entities) {
         *view = session->entities;
         session->entities.entities = NULL;
+        session->entities.blocks = NULL;
         session->has_entities = 0;
         result = session_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_READ);
     } else

@@ -51,7 +51,7 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
  * retains stable saved IDs and both numeric translation directions. Dictionary
  * extensions publish atomically before new IDs can be saved by workers.
  * Environment, random ticks, generation settings and gameplay share the same
- * atomic metadata replacement (MGWRLD13 only). */
+ * atomic metadata replacement (MGWRLD14 only). */
 maage_status maage_world_store_save(maage_world_store *store, const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world, const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);

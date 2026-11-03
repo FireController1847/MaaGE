@@ -419,6 +419,10 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     destination->block_id = old_state->block_id;
     result = maage_world_can_survive(world, x, y, z, *placed, &valid);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (valid && block->can_place) {
+        result = block->can_place(world, x, y, z, state, &valid);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    }
     return maage_status_make(valid ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
 }
 static maage_status maage_gameplay_place(maage_gameplay *game, const maage_player *player, maage_world *world, const maage_item_registry *items, double yaw, int sneaking, maage_gameplay_sound_sink *sink) {

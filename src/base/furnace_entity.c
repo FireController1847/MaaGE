@@ -17,10 +17,14 @@ static maage_status furnace_entity_initialize(const maage_block_entity_handler *
     if (!loaded) state->revision = 1;
     return entity_status(MAAGE_STATUS_SUCCESS);
 }
-static maage_status furnace_entity_tick(const maage_block_entity_handler *handler, maage_world *world, const maage_block_state_definition *block, void *data, maage_block_state_id *replacement) {
+static maage_status furnace_entity_tick(const maage_block_entity_handler *handler, maage_world *world, int x, int y, int z, const maage_block_state_definition *block, void *data, maage_block_state_id *replacement) {
     const maage_base_ids *ids = (const maage_base_ids *) handler->context;
     maage_furnace_state *state = (maage_furnace_state *) data;
-    maage_status result = maage_furnace_tick(state, maage_world_item_registry(world), maage_world_smelting_registry(world), maage_world_fuel_registry(world));
+    maage_status result;
+    (void) x;
+    (void) y;
+    (void) z;
+    result = maage_furnace_tick(state, maage_world_item_registry(world), maage_world_smelting_registry(world), maage_world_fuel_registry(world));
     if (!maage_status_failed(result)) *replacement = ids->furnaces[state->burn ? 1 : 0][block->metadata];
     return result;
 }

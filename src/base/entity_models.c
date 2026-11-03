@@ -67,7 +67,7 @@ static maage_status base_quadruped_animate(const void *context, const maage_mode
     if (part == 0) {
         transform->rotation[0] = -animation->pitch;
         transform->rotation[1] = animation->yaw;
-    } else if (part >= 2 && part < 6) transform->rotation[0] = sin(animation->walk_phase + (part == 2 || part == 5 ? 0 : 3.141592653589793)) * animation->walk_amount * 0.8;
+    } else if (part >= 2 && part < 6) transform->rotation[0] = cos(animation->walk_phase * 0.6662 + (part == 2 || part == 5 ? 0 : 3.141592653589793)) * animation->walk_amount * 1.4;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
 static maage_status base_sheep_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {
@@ -82,13 +82,14 @@ static maage_status base_sheep_animate(const void *context, const maage_model_an
 }
 static maage_status base_chicken_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {
     maage_status result = base_quadruped_animate(context, animation, part < 4 ? part : 1, transform);
-    if (part == 4 || part == 5) transform->rotation[2] = sin(animation->age * 0.8) * 0.2 * (part == 4 ? 1 : -1);
+    if (part == 4 || part == 5) transform->rotation[2] = (1 + sin(animation->age * 2)) * animation->airborne * (part == 4 ? 1 : -1);
     return result;
 }
 static maage_status base_zombie_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {
     maage_status result = base_quadruped_animate(context, animation, part < 4 ? part : 1, transform);
     if (part == 4 || part == 5) {
-        transform->rotation[0] = -1.45 - sin(animation->attack * 3.141592653589793) * 0.5;
+        transform->rotation[0] = 1.5707963267948966 - sin(animation->attack * 3.141592653589793) * 1.2 + sin((1 - (1 - animation->attack) * (1 - animation->attack)) * 3.141592653589793) * 0.4;
+        transform->rotation[0] += sin(animation->age * 0.067) * 0.05;
         transform->rotation[2] = (part == 4 ? -1 : 1) * (0.05 + sin(animation->age * 0.07) * 0.025);
     }
     return result;
@@ -96,17 +97,21 @@ static maage_status base_zombie_animate(const void *context, const maage_model_a
 static maage_status base_skeleton_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {
     maage_status result = base_zombie_animate(context, animation, part, transform);
     if (part == 4 || part == 5) {
-        transform->rotation[0] = -1.5707963267948966 - animation->pitch;
+        transform->rotation[0] = 1.5707963267948966 - animation->pitch;
         transform->rotation[1] = animation->yaw + (part == 4 ? -0.25 : 0.45);
     }
     return result;
 }
 static maage_status base_creeper_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {
-    maage_status result = base_quadruped_animate(context, animation, part, transform);
-    if (animation->charge > 0) {
-        double pulse = sin(animation->age * 1.5) * animation->charge * 0.04;
-        transform->scale[0] = transform->scale[2] = 1 + pulse;
-        transform->scale[1] = 1 - pulse;
+    maage_status result = part ? base_quadruped_animate(context, animation, part - 1, transform) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
+    if (!part && animation->charge > 0) {
+        double charge = animation->charge, pulse;
+        if (charge > 1) charge = 1;
+        pulse = sin(charge * 100) * charge * 0.01;
+        charge *= charge;
+        charge *= charge;
+        transform->scale[0] = transform->scale[2] = (1 + charge * 0.4) * (1 + pulse);
+        transform->scale[1] = (1 + charge * 0.1) / (1 + pulse);
     }
     return result;
 }
@@ -116,10 +121,11 @@ static maage_status base_spider_animate(const void *context, const maage_model_a
         transform->rotation[0] = -animation->pitch;
         transform->rotation[1] = animation->yaw;
     } else if (part >= 3) {
-        double phase = animation->walk_phase + (double) ((part - 3) / 2) * 1.5707963267948966;
+        static const double phases[4] = {0, 3.141592653589793, 1.5707963267948966, 4.71238898038469};
+        double phase = phases[(part - 3) / 2], walk = animation->walk_phase * 0.6662;
         double side = part & 1U ? -1 : 1;
-        transform->rotation[1] = sin(phase) * animation->walk_amount * 0.35;
-        transform->rotation[2] = side * fabs(cos(phase)) * animation->walk_amount * 0.25;
+        transform->rotation[1] = -cos(walk * 2 + phase) * animation->walk_amount * 0.4 * side;
+        transform->rotation[2] = side * fabs(sin(walk + phase)) * animation->walk_amount * 0.4;
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
@@ -234,6 +240,7 @@ static maage_status base_creeper_model(maage_content_context *context, maage_bas
     unsigned int i;
     static const char *const names[] = {"rear_left_leg", "rear_right_leg", "front_left_leg", "front_right_leg"};
     memset(&builder, 0, sizeof(builder));
+    base_model_part(&builder, "swell", "charge", 0, 0, 0);
     base_model_part(&builder, "head", "look", 0, 18, 0);
     base_model_box(&builder, -4, 0, -4, 8, 8, 8, 0, 0, 0);
     base_model_part(&builder, "body", "body", 0, 6, 0);
@@ -242,6 +249,8 @@ static maage_status base_creeper_model(maage_content_context *context, maage_bas
         base_model_part(&builder, names[i], "walk", i & 1U ? 2 : -2, 6, i < 2 ? 4 : -4);
         base_model_box(&builder, -2, -6, -2, 4, 6, 4, 0, 16, 0);
     }
+    for (i = 1; i < builder.count; ++i)
+        builder.parts[i].parent = 0;
     return base_model_publish(context, "minecraft:creeper", &builder, ids->mob_textures[MAAGE_BASE_MOB_CREEPER], 32, base_creeper_animate, &ids->mob_models[MAAGE_BASE_MOB_CREEPER]);
 }
 static maage_status base_spider_model(maage_content_context *context, maage_base_ids *ids) {
@@ -258,8 +267,10 @@ static maage_status base_spider_model(maage_content_context *context, maage_base
     for (i = 0; i < 8; ++i) {
         double side = i & 1U ? 1 : -1;
         base_model_part(&builder, names[i], "crawl", side * 4, 9, 2 - (double) (i / 2));
-        builder.parts[builder.count - 1].rotation[1] = -side * (0.75 - (double) (i / 2) * 0.5);
-        builder.parts[builder.count - 1].rotation[2] = -side * 0.6;
+        builder.parts[builder.count - 1].rotation[1] = -side * (i / 2 == 0 ? 0.7853981633974483 : i / 2 == 1 ? 0.3926990816987241
+                                                                                              : i / 2 == 2   ? -0.3926990816987241
+                                                                                                             : -0.7853981633974483);
+        builder.parts[builder.count - 1].rotation[2] = -side * (i / 2 == 0 || i / 2 == 3 ? 0.7853981633974483 : 0.5811946409141118);
         base_model_box(&builder, side < 0 ? -15 : -1, -1, -1, 16, 2, 2, 18, 0, 0);
     }
     return base_model_publish(context, "minecraft:spider", &builder, ids->mob_textures[MAAGE_BASE_MOB_SPIDER], 32, base_spider_animate, &ids->mob_models[MAAGE_BASE_MOB_SPIDER]);

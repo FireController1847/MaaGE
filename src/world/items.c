@@ -11,6 +11,7 @@
 typedef struct maage_item_slot {
     maage_item_definition definition;
     char *name, *display;
+    maage_item_sprite_layer *layers;
 } maage_item_slot;
 struct maage_item_registry {
     content_policy *policy;
@@ -109,6 +110,7 @@ maage_status maage_item_registry_destroy(maage_item_registry *registry) {
         if (slot) {
             free(slot->name);
             free(slot->display);
+            free(slot->layers);
             free(slot);
         }
     }
@@ -121,7 +123,7 @@ maage_status maage_item_registry_destroy(maage_item_registry *registry) {
 }
 maage_status maage_item_registry_register(maage_item_registry *registry, const char *name, maage_item_definition *definition) {
     maage_status policy_result;
-    size_t i, length, display_length, bucket;
+    size_t i, j, length, display_length, bucket;
     maage_item_slot *slot;
     int colon = 0, found;
     if (registry) {
@@ -141,6 +143,10 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
         (definition->food_always_edible != 0 && definition->food_always_edible != 1) ||
         (!definition->food_ticks && (definition->food_hunger || definition->food_saturation || definition->food_always_edible)) ||
         (definition->container_item && definition->max_stack != 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if ((definition->sprite_layer_count && (!definition->sprite_layers || definition->model != MAAGE_ITEM_MODEL_SPRITE)) || definition->sprite_layer_count > (size_t) - 1 / sizeof(*slot->layers)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    for (i = 0; i < definition->sprite_layer_count; ++i)
+        for (j = 0; j < 4; ++j)
+            if (!(definition->sprite_layers[i].tint[j] >= 0 && definition->sprite_layers[i].tint[j] <= 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     length = strlen(name);
     display_length = strlen(definition->display_name);
     if (!length || length > 255 || !display_length || display_length > 127) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -160,24 +166,35 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
     if (maage_item_slot_get(registry, definition->id)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     slot = (maage_item_slot *) calloc(1, sizeof(*slot));
     if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (definition->sprite_layer_count) {
+        slot->layers = (maage_item_sprite_layer *) malloc(definition->sprite_layer_count * sizeof(*slot->layers));
+        if (!slot->layers) {
+            free(slot);
+            return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+        }
+        memcpy(slot->layers, definition->sprite_layers, definition->sprite_layer_count * sizeof(*slot->layers));
+    }
     bucket = maage_item_name_bucket(registry, name, &found);
     slot->name = (char *) malloc(length + 1);
     slot->display = (char *) malloc(display_length + 1);
     if (!slot->name || !slot->display) {
         free(slot->name);
         free(slot->display);
+        free(slot->layers);
         free(slot);
         return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     }
     memcpy(slot->name, name, length + 1);
     memcpy(slot->display, definition->display_name, display_length + 1);
     slot->definition = *definition;
+    slot->definition.sprite_layers = slot->layers;
     slot->definition.display_name = slot->display;
     {
         void **entry = maage_registry_pages_ensure(&registry->slots, definition->id);
         if (!entry) {
             free(slot->name);
             free(slot->display);
+            free(slot->layers);
             free(slot);
             return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         }
@@ -190,6 +207,7 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
             *entry = NULL;
             free(slot->name);
             free(slot->display);
+            free(slot->layers);
             free(slot);
             return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         }

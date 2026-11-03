@@ -60,7 +60,7 @@ fragment float4 maage_mesh_fragment_shader(maage_fragment input [[stage_in]], te
     constexpr sampler pixels(coord::normalized, address::clamp_to_edge, filter::nearest, mip_filter::none);
     float4 texel = atlas.sample(pixels, maage_shader_tile_uv(input.uv, input.tile));
     if (maage_shader_cutout(input.material, texel.a)) discard_fragment();
-    return maage_shader_fog(maage_shader_mesh_color(texel, input.color, input.light, input.material, uniforms.lighting), input.fog_position, input.material, uniforms.fog, uniforms.fog_distance);
+    return maage_shader_fog(maage_shader_mesh_color(texel, input.color, input.light, input.material, uniforms.lighting, uniforms.parameters), input.fog_position, input.material, uniforms.fog, uniforms.fog_distance);
 }
 
 struct maage_ui_vertex {

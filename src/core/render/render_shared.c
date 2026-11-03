@@ -291,7 +291,11 @@ void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foregro
         }
     uniforms->lighting[1] = cursor->instance->sky_light;
     uniforms->lighting[2] = cursor->instance->block_light;
-    uniforms->lighting[3] = 1;
+    /* Mesh draws leave parameters.yzw free. Pack the overlay into those
+     * components and the light-override tag, retaining Vulkan's 128-byte ABI. */
+    uniforms->lighting[3] = 1 + cursor->instance->overlay[3];
+    for (k = 0; k < 3; ++k)
+        uniforms->parameters[k + 1] = cursor->instance->overlay[k];
 }
 /* Assemble an arbitrary byte range of the native stream, including the
  * partial vertex ranges produced by budgeted incremental GPU uploads. */

@@ -112,6 +112,8 @@ typedef struct maage_world_config {
     int presentation_only; /* Replica: imported states only, no generation/simulation/save. */
     int build_meshes;      /* Initialized to 1; authoritative Server sets 0. */
     int new_world;
+    void (*emit_sound)(void *, unsigned long, const double[3], double, double); /* Owner-thread occurrence sink. */
+    void *sound_context;
     double position[3];
     /* 0 derives a bounded default from the streaming footprint and workers.
      * Cache and accepted-job limits are independent runtime allocations. */
@@ -359,8 +361,10 @@ maage_fluid_id maage_world_fluid_at(const maage_world *world, const double point
 int maage_world_solid(const maage_world *world, int x, int y, int z);
 /* Allocation-free DDA through selection shapes. Direction is normalized here;
  * range and returned distance are blocks. Missing columns stop traversal with
- * NOT_FOUND, never permit targeting through unavailable terrain. SUCCESS hit, NOOP miss. */
+ * NOT_FOUND at that boundary distance, never permit targeting through unavailable
+ * terrain. SUCCESS hits; NOOP misses and retains the requested range as distance. */
 maage_status maage_world_raycast(const maage_world *world, const double origin[3], const double direction[3], double range, maage_world_target *target);
+maage_status maage_world_emit_sound(maage_world *, unsigned long, const double[3], double intensity, double pitch);
 /* Shared placement/survival query. NOOP defers unknown terrain/current light;
  * SUCCESS writes validity. Ordinary solid blocks have no support requirement. */
 maage_status maage_world_check_support(maage_world *world, int x, int y, int z);

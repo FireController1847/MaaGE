@@ -148,7 +148,7 @@ failed:
     }
     return result;
 }
-maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, unsigned long input_sequence, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, maage_session_command *command) {
+maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, unsigned long input_sequence, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, int entity_target, maage_session_command *command) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(visual));
     maage_world_target target, destination;
     maage_block_state_id placed;
@@ -216,7 +216,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     direction[2] = -cos(yaw) * cos(pitch);
     result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return result;
-    if (!active || !held || !snapshot->player.health || snapshot->paused || snapshot->player.crafting.kind || maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
+    if (entity_target || !active || !held || !snapshot->player.health || snapshot->paused || snapshot->player.crafting.kind || maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
         prediction->targeting = 0;
         prediction->progress = 0;
     } else {
@@ -285,7 +285,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     }
     /* Use still travels as ordinary INPUT. The preview command merely asks
      * the Server to acknowledge the independently determined destination. */
-    if (!command->kind && active && use && prediction->use_delay <= 0 && snapshot->player.health && !snapshot->player.crafting.kind && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
+    if (!entity_target && !command->kind && active && use && prediction->use_delay <= 0 && snapshot->player.health && !snapshot->player.crafting.kind && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
         prediction->use_delay = 0.2;
         result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {

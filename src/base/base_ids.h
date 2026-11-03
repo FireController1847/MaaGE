@@ -69,9 +69,10 @@ typedef struct maage_base_ids {
     unsigned long block_wool, item_wool, wool_states[16], wool_textures[16];
     unsigned long material_default, material_stone, material_grass, material_dirt, material_wood, material_sand, material_gravel, material_snow;
     unsigned long material_metal, material_glass, material_water, material_lava, material_foliage, material_cloth, material_ladder, material_anvil;
-    unsigned long container_player, container_table, container_furnace;
+    unsigned long container_player, container_table, container_furnace, container_chest[2];
+    unsigned long chest_models[2][2], chest_states[2][4], chest_open_sound, chest_close_sound;
     unsigned long fluid_water, fluid_lava;
-    unsigned long geometry_cube, geometry_cross, geometry_torch;
+    unsigned long geometry_cube, geometry_cross, geometry_torch, geometry_entity;
     unsigned long texture_water_flow, texture_lava_flow, texture_water_overlay;
     unsigned long biome_ids[MAAGE_BASE_BIOME_COUNT];
     unsigned long textures[MAAGE_BASE_TEXTURE_COUNT];

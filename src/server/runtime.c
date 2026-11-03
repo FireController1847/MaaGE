@@ -60,7 +60,7 @@ struct maage_server_runtime {
     struct {
         int active, resolved, placing;
         maage_block_state_id replacement;
-        unsigned long base_revision, admitted_tick;
+        unsigned long base_revision, admitted_tick, command_sequence;
         maage_world_target target;
         maage_session_event event;
     } predictions[32];
@@ -286,7 +286,7 @@ static void server_predictions(maage_server_runtime *runtime) {
             for (n = 0; n < 32; ++n) {
                 action = (runtime->action_cursor + n) % 32U;
                 if (!runtime->actions[action].available || runtime->actions[action].placing != runtime->predictions[i].placing ||
-                    runtime->actions[action].revisions[4] <= runtime->predictions[i].base_revision ||
+                    runtime->actions[action].revisions[4] <= runtime->predictions[i].base_revision || runtime->actions[action].command_sequence < runtime->predictions[i].command_sequence ||
                     runtime->actions[action].target.x != target->x || runtime->actions[action].target.y != target->y || runtime->actions[action].target.z != target->z || runtime->actions[action].target.state_id != target->state_id ||
                     (runtime->predictions[i].placing && runtime->actions[action].replacement != runtime->predictions[i].replacement)) continue;
                 event->accepted = 1;
@@ -342,6 +342,7 @@ static maage_status server_predict_request(maage_server_runtime *runtime, const 
     runtime->predictions[i].replacement = command->predicted_state;
     runtime->predictions[i].base_revision = command->prediction_revision;
     runtime->predictions[i].admitted_tick = runtime->game.ticks;
+    runtime->predictions[i].command_sequence = command->prediction_command_sequence;
     runtime->predictions[i].event.prediction = command->prediction;
     runtime->predictions[i].event.block.x = command->predicted_target.x;
     runtime->predictions[i].event.block.y = command->predicted_target.y;
@@ -558,9 +559,17 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
      * publication. No pointers into mutable World storage cross threads. */
     for (i = 0; i < maage_entities_count(entities); ++i)
         if (server_entity_visible(runtime, maage_entities_at(entities, i))) ++visible;
-    if (visible) view.entities = (maage_entity_view *) malloc(visible * sizeof(*view.entities));
-    if (visible && !view.entities) {
-        result = server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SNAPSHOT);
+    result = maage_world_entity_views(runtime->world, maage_world_chunk_coordinate((int) floor(runtime->player.position[0])), maage_world_chunk_coordinate((int) floor(runtime->player.position[2])), runtime->config.render_distance, NULL, 0, &view.block_count);
+    if (!maage_status_failed(result) && view.block_count > (size_t) - 1 / sizeof(*view.blocks)) result = server_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SNAPSHOT);
+    if (!maage_status_failed(result)) {
+        if (visible) view.entities = (maage_entity_view *) malloc(visible * sizeof(*view.entities));
+        if (view.block_count) view.blocks = (maage_block_entity_view *) malloc(view.block_count * sizeof(*view.blocks));
+        if ((visible && !view.entities) || (view.block_count && !view.blocks)) result = server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SNAPSHOT);
+    }
+    if (!maage_status_failed(result)) result = maage_world_entity_views(runtime->world, maage_world_chunk_coordinate((int) floor(runtime->player.position[0])), maage_world_chunk_coordinate((int) floor(runtime->player.position[2])), runtime->config.render_distance, view.blocks, view.block_count, &view.block_count);
+    if (maage_status_failed(result)) {
+        free(view.entities);
+        free(view.blocks);
         if (runtime->entity_publication_failure != result) server_status_event(runtime, result, NULL);
         runtime->entity_publication_failure = result;
     } else {
@@ -579,6 +588,7 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
         if (maage_status_failed(result)) server_status_event(runtime, result, NULL);
         if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "entity_sequence=%lu entity_tick=%lu count=%lu offered_at=%.6f", view.sequence, tick, (unsigned long) visible, view.offered_at));
         free(view.entities);
+        free(view.blocks);
     }
 }
 
@@ -733,6 +743,8 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     world_config.items = items;
     world_config.entity_types = maage_content_entity_types(runtime->content);
     world_config.entity_policy = runtime->config.entity_policy;
+    world_config.emit_sound = server_entity_sound;
+    world_config.sound_context = runtime;
     world_config.smelting = maage_content_smelting(runtime->content);
     world_config.fuels = maage_content_fuels(runtime->content);
     world_config.biomes = maage_content_biomes(runtime->content);

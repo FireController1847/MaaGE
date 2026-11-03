@@ -664,6 +664,8 @@ static void maage_store_entity_state(maage_store_bytes *bytes, maage_entity *ent
 static void maage_store_living_put(maage_store_bytes *bytes, const maage_entity *entity, const maage_world_store *store) {
     unsigned int axis;
     maage_store_double_put(bytes, entity->payload.living.yaw);
+    maage_store_double_put(bytes, entity->payload.living.damage_yaw);
+    maage_store_double_put(bytes, entity->payload.living.head_yaw);
     maage_store_double_put(bytes, entity->payload.living.pitch);
     maage_store_double_put(bytes, entity->payload.living.walk_distance);
     maage_store_double_put(bytes, entity->payload.living.fall_distance);
@@ -685,11 +687,16 @@ static void maage_store_living_put(maage_store_bytes *bytes, const maage_entity 
     maage_store_put(bytes, entity->payload.living.fuse_ticks, 4);
     maage_store_put(bytes, entity->payload.living.air, 4);
     maage_store_put(bytes, entity->payload.living.fire_ticks, 4);
+    maage_store_put(bytes, entity->payload.living.death_ticks, 4);
+    maage_store_put(bytes, entity->payload.living.hurt_animation_ticks, 4);
+    maage_store_put(bytes, entity->payload.living.damage_sequence, 4);
 }
 static void maage_store_living_get(maage_store_bytes *bytes, maage_entity *entity, const maage_world_store *store) {
     unsigned int axis;
-    unsigned long values[8];
+    unsigned long values[11];
     entity->payload.living.yaw = maage_store_double_get(bytes);
+    entity->payload.living.damage_yaw = maage_store_double_get(bytes);
+    entity->payload.living.head_yaw = maage_store_double_get(bytes);
     entity->payload.living.pitch = maage_store_double_get(bytes);
     entity->payload.living.walk_distance = maage_store_double_get(bytes);
     entity->payload.living.fall_distance = maage_store_double_get(bytes);
@@ -703,9 +710,9 @@ static void maage_store_living_get(maage_store_bytes *bytes, maage_entity *entit
     entity->payload.living.effect_cursor = maage_store_get(bytes, 4);
     entity->payload.living.effect_limit = maage_store_get(bytes, 4);
     maage_store_stack_get(bytes, &entity->payload.living.pending_drop, store);
-    for (axis = 0; axis < 8; ++axis) {
+    for (axis = 0; axis < 11; ++axis) {
         values[axis] = maage_store_get(bytes, 4);
-        if (values[axis] > UINT_MAX) bytes->failed = 1;
+        if (axis < 10 && values[axis] > UINT_MAX) bytes->failed = 1;
     }
     entity->payload.living.health = (unsigned int) values[0];
     entity->payload.living.hurt_ticks = (unsigned int) values[1];
@@ -715,6 +722,9 @@ static void maage_store_living_get(maage_store_bytes *bytes, maage_entity *entit
     entity->payload.living.fuse_ticks = (unsigned int) values[5];
     entity->payload.living.air = (unsigned int) values[6];
     entity->payload.living.fire_ticks = (unsigned int) values[7];
+    entity->payload.living.death_ticks = (unsigned int) values[8];
+    entity->payload.living.hurt_animation_ticks = (unsigned int) values[9];
+    entity->payload.living.damage_sequence = values[10];
 }
 static void maage_store_entities_put(maage_store_bytes *bytes, const maage_entity_save *save, const maage_world_store *store) {
     size_t i;
@@ -872,7 +882,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWRLD13", 8);
+    maage_store_text_put(&bytes, "MGWRLD14", 8);
     maage_store_put(&bytes, (unsigned long) store->map_length, 4);
     maage_store_text_put(&bytes, (const char *) store->map_bytes, store->map_length);
     maage_store_put(&bytes, record->seed.low, 4);
@@ -937,12 +947,12 @@ static maage_status maage_store_metadata_load(maage_world_store *store, const ch
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD13", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD14", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD13");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD14");
     if (ok) {
         unsigned long map_length = maage_store_get(&bytes, 4);
         if (bytes.failed || map_length > bytes.length - bytes.position) ok = 0;

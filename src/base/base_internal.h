@@ -13,8 +13,17 @@ maage_status maage_furnace_content_items(maage_content_context *, maage_base_ids
 maage_status maage_base_blocks(maage_content_context *, maage_base_ids *);
 maage_status maage_base_creative(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_items(maage_content_context *, maage_base_ids *);
-maage_status maage_base_chest_models(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_chest_models(maage_content_context *, maage_base_ids *);
 maage_status maage_base_chest_models_bind(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_chests_bind(maage_content_context *, maage_base_ids *);
+maage_status maage_base_chest_can_place(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
+maage_status maage_base_chest_use(maage_world *, const maage_world_target *, maage_crafting_container *);
+maage_status maage_base_chest_placement(const maage_item_definition *, unsigned int, maage_block_face, double, maage_block_state_id *);
+maage_status maage_base_chest_opened(const void *, maage_world *, maage_crafting_container *);
+maage_status maage_base_chest_closed(const void *, maage_world *, struct maage_gameplay *, const struct maage_player *);
+int maage_base_chest_access(const void *, const maage_world *, const maage_crafting_container *);
+maage_status maage_base_chest_action(const void *, maage_world *, struct maage_gameplay *, unsigned long, unsigned int, unsigned int, unsigned int);
+maage_status maage_base_chest_sample(const void *, const maage_world *, maage_crafting_container *);
 maage_status maage_base_entity_models(maage_content_context *, maage_base_ids *);
 maage_status maage_base_entities(maage_content_context *, maage_base_ids *);
 maage_status maage_base_entity_creative(maage_content_context *, const maage_base_ids *);

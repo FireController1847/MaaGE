@@ -244,7 +244,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
   never acquire plant support requirements. Preserve each block's distinct rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD13` metadata embeds one checksummed
+  worlds. Canonical UUIDs identify them. `MGWRLD14` metadata embeds one checksummed
   `MGIDMAP2` World dictionary for blocks, states (block identity plus metadata), items,
   biomes and entity types; `MGRGN2` region headers bind its UUID. `MGCHNK9` palettes, stacks and
   entities carry numeric saved IDs only. Block-entity records bind registered codecs through the owning saved block identity, not runtime handler order. Resolve names once at open, retain both
@@ -273,6 +273,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   unreturned inputs on allocation failure, never an open table/derived result. No table
   storage or recipe book is implied. Furnace inventories are persistent World-owned
   block entities; shared container actions never transfer their ownership on closure.
+  Chests retain independent persistent 27-slot halves; registered containers compose
+  validated single/double views and atomic owner transfers. Copied registered models
+  carry lid poses without exposing inventory storage to the Client.
   Separate finalized numeric smelting/fuel registries drive 200-tick owner processing,
   with extraction-only fractional XP, lit-state preservation and periodic save snapshots. See [crafting](docs/world-and-gameplay.md#crafting-and-furnaces).
 - Sprint eligibility/tap timers are Server-owned; Player owns movement multiplier,

@@ -64,15 +64,16 @@ static void base_container_presentation(maage_container_definition *definition) 
 }
 maage_status maage_base_containers(maage_content_context *context, maage_base_ids *ids) {
     maage_container_definition definition;
-    maage_container_slot_definition player_slots[5], table_slots[10], furnace_slots[3];
+    maage_container_slot_definition player_slots[5], table_slots[10], furnace_slots[3], chest_slots[54];
     maage_container_progress_definition progress[2];
-    maage_texture_id inventory, table, furnace, tabs;
+    maage_texture_id inventory, table, furnace, tabs, chest;
     maage_status result;
-    unsigned int i;
+    unsigned int i, large, rows;
     result = base_container_texture(context, "minecraft/textures/gui/container/inventory.png", &inventory);
     if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/crafting_table.png", &table);
     if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/furnace.png", &furnace);
     if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/creative_inventory/tabs.png", &tabs);
+    if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/generic_54.png", &chest);
     if (maage_status_failed(result)) return result;
 
     base_container_presentation(&definition);
@@ -157,6 +158,38 @@ maage_status maage_base_containers(maage_content_context *context, maage_base_id
     definition.presentation.title_centered = 1;
     definition.presentation.inventory_title = "Inventory";
     result = maage_container_register(context->containers, "minecraft:furnace", &definition);
-    if (!maage_status_failed(result)) ids->container_furnace = definition.id;
+    if (maage_status_failed(result)) return result;
+    ids->container_furnace = definition.id;
+    for (large = 0; large < 2; ++large) {
+        rows = large ? 6 : 3;
+        base_container_presentation(&definition);
+        memset(chest_slots, 0, sizeof(chest_slots));
+        for (i = 0; i < rows * 9; ++i) {
+            base_container_slot(&chest_slots[i], MAAGE_SLOT_CRAFT_INPUT, i, 0, 8 + (int) (i % 9) * 18, 18 + (int) (i / 9) * 18);
+            chest_slots[i].flags = MAAGE_CONTAINER_SLOT_INSERT | MAAGE_CONTAINER_SLOT_EXTRACT;
+        }
+        definition.context = ids;
+        definition.slots = chest_slots;
+        definition.slot_count = rows * 9;
+        definition.opened = maage_base_chest_opened;
+        definition.closed = maage_base_chest_closed;
+        definition.accessible = maage_base_chest_access;
+        definition.action = maage_base_chest_action;
+        definition.sample = maage_base_chest_sample;
+        definition.presentation.background = chest;
+        definition.presentation.height = rows * 18 + 114;
+        definition.presentation.background_split = rows * 18 + 17;
+        definition.presentation.background_bottom = 126;
+        definition.presentation.title = large ? "Large Chest" : "Chest";
+        definition.presentation.title_x = 8;
+        definition.presentation.title_y = 6;
+        definition.presentation.inventory_title = "Inventory";
+        definition.presentation.inventory_y = (int) rows * 18 + 20;
+        definition.presentation.inventory_slot_y = (int) rows * 18 + 31;
+        definition.presentation.hotbar_y = (int) rows * 18 + 89;
+        result = maage_container_register(context->containers, large ? "minecraft:large_chest" : "minecraft:chest", &definition);
+        if (maage_status_failed(result)) return result;
+        ids->container_chest[large] = definition.id;
+    }
     return result;
 }

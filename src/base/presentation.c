@@ -2,6 +2,12 @@
 #include "maage/block_geometry.h"
 #include <string.h>
 
+static maage_status base_entity_geometry(const void *context, const maage_block_geometry_query *query, const maage_block_geometry_sink *sink) {
+    (void) context;
+    (void) query;
+    (void) sink;
+    return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
+}
 maage_status maage_base_geometry(maage_content_context *context, maage_base_ids *ids) {
     maage_block_geometry_definition definition;
     maage_status result;
@@ -13,7 +19,11 @@ maage_status maage_base_geometry(maage_content_context *context, maage_base_ids 
     result = maage_block_geometry_register(context->geometry, "minecraft:cross", &definition, &ids->geometry_cross);
     if (maage_status_failed(result)) return result;
     definition.primitive = MAAGE_BLOCK_MESH_TORCH;
-    return maage_block_geometry_register(context->geometry, "minecraft:torch", &definition, &ids->geometry_torch);
+    result = maage_block_geometry_register(context->geometry, "minecraft:torch", &definition, &ids->geometry_torch);
+    if (maage_status_failed(result)) return result;
+    definition.primitive = MAAGE_BLOCK_GEOMETRY_CUSTOM;
+    definition.emit = base_entity_geometry;
+    return maage_block_geometry_register(context->geometry, "minecraft:block_entity", &definition, &ids->geometry_entity);
 }
 
 maage_block_state_id maage_base_item_icon(const maage_item_definition *item, unsigned int metadata) {

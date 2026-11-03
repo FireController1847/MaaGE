@@ -15,5 +15,5 @@ void main()
 {
     vec4 texel = texture(maage_atlas, maage_shader_tile_uv(maage_fragment_uv, maage_tile));
     if (maage_shader_cutout(maage_fragment_material, texel.a)) discard;
-    maage_result = maage_shader_fog(maage_shader_mesh_color(texel, maage_fragment_color, maage_fragment_light, maage_fragment_material, maage.lighting), maage_fog_position, maage_fragment_material, maage.fog, maage.fog_distance);
+    maage_result = maage_shader_fog(maage_shader_mesh_color(texel, maage_fragment_color, maage_fragment_light, maage_fragment_material, maage.lighting, maage.parameters), maage_fog_position, maage_fragment_material, maage.fog, maage.fog_distance);
 }
