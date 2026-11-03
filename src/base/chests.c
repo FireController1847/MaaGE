@@ -297,12 +297,29 @@ static maage_status chest_initialize(const maage_block_entity_handler *handler, 
     if (!loaded) state->revision = 1;
     return chest_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_INITIALIZE);
 }
-static unsigned int chest_facing(const base_chest_group *group) {
+static int chest_opaque(const maage_world *world, int x, int y, int z) {
+    const maage_block_state_definition *state = chest_block(world, x, y, z);
+    const maage_block_definition *block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
+    return block ? block->opaque : -1;
+}
+static unsigned int chest_facing(const maage_world *world, const base_chest_group *group) {
+    static const int front_x[4] = {0, -1, 0, 1}, front_z[4] = {1, 0, -1, 0};
     unsigned int facing = group->blocks[0]->metadata;
+    unsigned int half;
+    int front = 0, back = 0, blocked;
     if (group->count == 2) {
-        if (group->x[0] != group->x[1] && (facing & 1U)) facing = 0;
-        if (group->z[0] != group->z[1] && !(facing & 1U)) facing = 1;
+        if (group->x[0] != group->x[1] && (facing & 1U)) facing = !(group->blocks[1]->metadata & 1U) ? group->blocks[1]->metadata : 0;
+        if (group->z[0] != group->z[1] && !(facing & 1U)) facing = group->blocks[1]->metadata & 1U ? group->blocks[1]->metadata : 1;
     }
+    for (half = 0; half < group->count; ++half) {
+        blocked = chest_opaque(world, group->x[half] + front_x[facing], group->y, group->z[half] + front_z[facing]);
+        if (blocked < 0) return facing;
+        front |= blocked;
+        blocked = chest_opaque(world, group->x[half] - front_x[facing], group->y, group->z[half] - front_z[facing]);
+        if (blocked < 0) return facing;
+        back |= blocked;
+    }
+    if (front && !back) facing = (facing + 2) & 3U;
     return facing;
 }
 static maage_status chest_tick(const maage_block_entity_handler *handler, maage_world *world, int x, int y, int z, const maage_block_state_definition *block, void *data, maage_block_state_id *replacement) {
@@ -312,10 +329,11 @@ static maage_status chest_tick(const maage_block_entity_handler *handler, maage_
     double position[3];
     maage_status result;
     unsigned int previous = state->previous_lid;
-    (void) block;
-    (void) replacement;
     result = chest_group(world, x, y, z, 0, &group);
     if (maage_status_failed(result)) return result;
+    /* Persist one group facing through ordinary expected-state replacement;
+     * both independent inventories retain their existing block entities. */
+    *replacement = ids->chest_states[block->block_id == ids->block_trapped_chest][chest_facing(world, &group)];
     if (group.x[0] == x && group.z[0] == z && ((state->viewer && !state->lid) || (!state->viewer && state->lid == 5))) {
         position[0] = (group.x[0] + group.x[group.count - 1]) * 0.5 + 0.5;
         position[1] = y + 0.5;
@@ -326,7 +344,7 @@ static maage_status chest_tick(const maage_block_entity_handler *handler, maage_
     state->previous_lid = state->lid;
     if (state->viewer && state->lid < 10) ++state->lid;
     else if (!state->viewer && state->lid) --state->lid;
-    return chest_status(state->lid != state->previous_lid || previous != state->previous_lid ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
+    return chest_status(*replacement != block->id || state->lid != state->previous_lid || previous != state->previous_lid ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
 }
 static maage_status chest_present(const maage_block_entity_handler *handler, const maage_world *world, int x, int y, int z, const maage_block_state_definition *block, const void *data, maage_block_entity_view *view) {
     const maage_base_ids *ids = (const maage_base_ids *) handler->context;
@@ -348,7 +366,7 @@ static maage_status chest_present(const maage_block_entity_handler *handler, con
         view->secondary_z = group.z[1];
         view->secondary_state = group.blocks[1]->id;
     }
-    facing = chest_facing(&group);
+    facing = chest_facing(world, &group);
     view->identity = state->identity;
     view->model = ids->chest_models[block->block_id == ids->block_trapped_chest][group.count - 1];
     view->rotation[1] = 3.141592653589793 - facing * 1.5707963267948966;
