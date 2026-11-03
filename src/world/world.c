@@ -1492,6 +1492,8 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world = (maage_world *) calloc(1, sizeof(*world));
     if (!world) goto allocation_failed;
     result = maage_entities_create(&world->entities);
+    if (!maage_status_failed(result) && config->entity_types) result = maage_entities_bind_types(world->entities, config->entity_types);
+    if (!maage_status_failed(result) && config->entity_policy) result = maage_entities_set_policy(world->entities, config->entity_policy);
     if (maage_status_failed(result)) {
         maage_entities_destroy(world->entities);
         free(world);
@@ -1499,6 +1501,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     }
     world->diagnostics = maage_log_enabled(config->presentation_only ? "maage.client.world.latency" : "maage.server.world.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     world->config = *config;
+    world->config.entity_policy = NULL; /* The entity store copied this startup policy. */
     world->config.job_memory_budget = memory_budget;
     world->config.generation_policy = policy;
     world->leaves_mode = MAAGE_LEAVES_FANCY;
@@ -3350,4 +3353,16 @@ const maage_smelting_registry *maage_world_smelting_registry(const maage_world *
 }
 const maage_fuel_registry *maage_world_fuel_registry(const maage_world *world) {
     return world ? world->config.fuels : NULL;
+}
+
+const maage_entity_type_registry *maage_world_entity_types(const maage_world *world) {
+    return world ? world->config.entity_types : NULL;
+}
+
+int maage_world_simulation_contains(const maage_world *world, double x, double z) {
+    int dx, dz;
+    if (!world || world->config.presentation_only || !(x > -MAAGE_WORLD_LIMIT && x < MAAGE_WORLD_LIMIT && z > -MAAGE_WORLD_LIMIT && z < MAAGE_WORLD_LIMIT)) return 0;
+    dx = maage_world_chunk_coordinate((int) floor(x)) - world->center_x;
+    dz = maage_world_chunk_coordinate((int) floor(z)) - world->center_z;
+    return dx >= -world->config.simulation_distance && dx <= world->config.simulation_distance && dz >= -world->config.simulation_distance && dz <= world->config.simulation_distance;
 }

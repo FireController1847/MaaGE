@@ -63,6 +63,9 @@ struct maage_random_tick_state;
 struct maage_item_registry;
 struct maage_smelting_registry;
 struct maage_fuel_registry;
+struct maage_entity_type_registry;
+struct maage_entity_policy;
+const struct maage_entity_type_registry *maage_world_entity_types(const maage_world *world);
 const struct maage_smelting_registry *maage_world_smelting_registry(const maage_world *world);
 const struct maage_fuel_registry *maage_world_fuel_registry(const maage_world *world);
 typedef enum maage_chunk_state {
@@ -84,12 +87,16 @@ typedef enum maage_world_cache_policy {
 /* Runtime behavior callbacks receiving World can query its immutable execution
  * value; worker jobs and presentation replicas never borrow Server state. */
 const maage_execution_context *maage_world_execution(const maage_world *world);
+/* Owner simulation square; does not load or request terrain. */
+int maage_world_simulation_contains(const maage_world *world, double x, double z);
 typedef struct maage_world_config {
     maage_execution_context execution; /* Required: Client replica or authoritative Server owner. */
     const maage_block_registry *registry;
     const struct maage_item_registry *items; /* finalized; borrowed for block drops */
     const struct maage_smelting_registry *smelting;
     const struct maage_fuel_registry *fuels;
+    const struct maage_entity_type_registry *entity_types; /* Immutable logical types, borrowed. */
+    const struct maage_entity_policy *entity_policy;       /* Optional copied owner scheduling/population policy. */
     const maage_biome_registry *biomes;
     maage_world_seed seed;
     maage_world_store *store; /* borrowed; close after world destruction */

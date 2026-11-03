@@ -10,7 +10,7 @@ Every applicable module completes the current stage before the next begins: **DE
 
 `minecraft` is the ordinary built-in root module. It registers `minecraft:*`, binds internal references in INTERNAL, and declares no EXTERNAL, COMPATIBILITY or initializer. Recipes, smelting, fluids, containers, sounds, Creative and generation retain public registrations.
 
-A root owns its namespace; submodules share that namespace without owning existing parent/sibling definitions. Composition-local registry scopes enforce ownership across named blocks, items, biomes, fluids, geometry, containers, Creative tabs, sounds, block-entity codecs and generation registrations. Duplicate identities, foreign updates and conflicting singleton bindings fail. Unregistration and intentional replacement remain unsupported. Failed registration must abort its callback; ignored ownership violations still fail composition.
+A root owns its namespace; submodules share that namespace without owning existing parent/sibling definitions. Composition-local registry scopes enforce ownership across named blocks, items, biomes, fluids, geometry, containers, Creative tabs, sounds, entity types, models, block-entity codecs and generation registrations. Duplicate identities, foreign updates and conflicting singleton bindings fail. Unregistration and intentional replacement remain unsupported. Failed registration must abort its callback; ignored ownership violations still fail composition.
 
 Name resolution and `maage_content_module_data` require an explicit direct dependency for another module's content/state; INTERNAL permits only the current module. Numeric getters remain direct O(1) services for trusted native code. No name resolution is added to gameplay loops.
 
@@ -24,7 +24,7 @@ Shared DEFINE/bind callbacks are pure composition work. Optional `side_bind_inte
 
 Client creates one finalized logical composition. `maage_client_resources_load` consumes its numeric presentation sources directly; there is no preliminary composition. LOAD decodes sources, constructs the atlas and samples colormaps. `maage_content_view_create` copies resolved state/geometry appearances and biome colors while borrowing immutable logical names, types, items and behavior. It performs no registration or finalization. These immutable presentation snapshots are independently destroyable and can be created repeatedly. `maage_content_load_complete` publishes Client readiness; `maage_content_initialize` rejects repeated or premature initialization. Resource refreshes never call initialization.
 
-Integrated Server obtains the same submitted descriptors through the finalized Client identity peer, independently composes headless content on its owner thread, validates numeric identities, then initializes before opening World/storage or publishing packets. Dedicated Server does the same with its dedicated context and application composition. Neither requires Client resources or devices. World scheduling, authority and persistence formats remain unchanged.
+Integrated Server obtains the same submitted descriptors through the finalized Client identity peer, independently composes headless content on its owner thread, validates numeric identities, then initializes before opening World/storage or publishing packets. Dedicated Server does the same with its dedicated context and application composition. Neither requires Client resources or devices. Entity and model definitions compose on both sides; only Client LOAD creates texture sheets and GPU geometry.
 
 Peer validation compares named domain/owner/ID maps, state `(block, metadata)` maps, logical texture descriptors and Creative entry identities. Behavior callbacks and runtime-owned state may differ with coherent IDs. Side-only registrations remain supported for independent compositions; mismatching session peers are rejected. Remote negotiation, hidden Server-only IDs crossing a session and optional-dependency discovery remain unimplemented.
 
@@ -41,12 +41,14 @@ Central Log category `maage.content` retains shared lifecycle summaries with exp
 | `containers.h` | Copied layouts, slot/progress descriptors and Server-owner open/access/policy/action/sample/retryable-close callbacks. Independently paged transport windows do not cap registrations. Transaction failure retains item ownership; custom backing stores stay module-owned. |
 | `fluids.h` | Fluid identities and copied state maps for schedules, propagation, contact, physics, material and immersion; finalized dispatch is numeric. |
 | `block_geometry.h` | Optimized primitives or immutable worker-safe quad providers. Allocation-free count/write passes agree; collision/selection bounds are separate from visual geometry. |
+| `entity_types.h`, `entities.h` | Registered living/projectile definitions, copied loot and biome spawn rules, owner behavior/interaction callbacks, independent flat instance state and explicit versioned codecs; World retains item/falling/living/projectile instances. |
+| `models.h` | Copied transformable parts/cuboids, numeric texture/material references, named channels resolved at boundaries, geometry providers and hierarchy/animation callbacks. Client caches emitted geometry per immutable resource generation. |
 | `sounds.h` | Registered resources/events/music/ambience independent of playback; Client owns decode, voice and device capacity. |
 | `crafting.h`, `smelting.h` | Numeric recipes, smelting and fuel policy used by the authoritative owner. |
 
-No API registry has an artificial limit derived from transport page size, GPU working set or simultaneous sound voices. Saved block/state/item/biome IDs use the World dictionary; other runtime IDs follow the deterministic current composition.
+No API registry has an artificial limit derived from transport page size, GPU working set or simultaneous sound voices. Saved block/state/item/biome/entity-type IDs use the World dictionary; other runtime IDs follow the deterministic current composition.
 
-Entity and block-entity registration/codecs remain distinct facilities. Dynamic module loading/discovery, scripting and remote content negotiation are not implemented.
+Entity types, live instances, block entities and presentation models remain distinct facilities. `maage_entity_type_register` assigns a type ID; `maage_entities_spawn_type` assigns an instance ID. `maage_entity_type_update` binds copied references before finalization. Runtime definitions and callbacks borrow module context; each instance and checkpoint owns its flat custom state. `maage_item_registry_bind_model` changes only item presentation; item placement and inventory ownership stay in their existing paths. Dynamic module loading/discovery, scripting and remote content negotiation are not implemented.
 
 ## Creative Catalogs
 

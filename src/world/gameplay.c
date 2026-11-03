@@ -53,6 +53,23 @@ static void maage_gameplay_sound(maage_gameplay_sound_sink *sink, unsigned int k
         ++sink->dropped;
     }
 }
+static void maage_gameplay_entity_sound(void *context, unsigned long id, const double position[3], double intensity, double pitch) {
+    maage_gameplay_sound_sink *sink = (maage_gameplay_sound_sink *) context;
+    maage_sound_event *event;
+    if (!sink->enabled) return;
+    if (sink->written == sink->capacity) {
+        ++sink->dropped;
+        return;
+    }
+    event = &sink->events[sink->written++];
+    memset(event, 0, sizeof(*event));
+    event->event_id = id;
+    event->tick = sink->game->ticks;
+    event->sequence = sink->game->sound_sequence++;
+    memcpy(event->position, position, sizeof(event->position));
+    event->intensity = intensity;
+    event->pitch = pitch;
+}
 /* Isolated sound variation never advances world-generation randomness. */
 static double maage_gameplay_sound_random(maage_gameplay *game) {
     game->sound_random = (game->sound_random * 1664525UL + 1013904223UL) & 4294967295UL;
@@ -657,7 +674,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     maage_fluid_id fluid;
     const maage_fluid_definition *entered_fluid, *current_fluid;
     maage_gameplay_sound_sink sink;
-    int grounded, sprint_jump, jumped, eating;
+    int grounded, sprint_jump, jumped, eating, entity_handled = 0;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_TICK, 0);
     if (written) *written = 0;
     if ((capacity && (!events || !written)) || (events && !written) ||
@@ -778,7 +795,18 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     result = maage_gameplay_target(game, player, world, intent->movement.yaw, intent->pitch);
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return maage_gameplay_sound_result(result, &sink, written, trace);
     maage_gameplay_food(game, player, world, items, intent, &sink, &eating);
-    if (intent->attack) {
+    if (intent->use && (intent->use_pressed || !game->use_held)) game->use_delay = 0;
+    if (intent->attack || (intent->use && !eating)) {
+        result = maage_entities_player_action(maage_world_entities(world), world, items, player, game, intent->movement.yaw, intent->pitch, intent->attack ? (intent->attack_pressed ? 1 : 2) : 0, intent->use && !eating, &entity_handled, maage_gameplay_entity_sound, &sink, trace);
+        if (maage_status_failed(result)) return maage_gameplay_sound_result(result, &sink, written, trace);
+        if (entity_handled) {
+            game->breaking_active = 0;
+            game->break_progress = 0;
+            game->dig_ticks = 0;
+            if (intent->attack_pressed) maage_gameplay_swing(game, 1U);
+        }
+    }
+    if (intent->attack && !entity_handled) {
         if (intent->attack_pressed) {
             game->attack_held = 0;
             game->attack_miss_delay = 0;
@@ -800,8 +828,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
         game->dig_ticks = game->attack_miss_delay = 0;
     }
     game->attack_held = intent->attack;
-    if (intent->use && !eating) {
-        if (intent->use_pressed || !game->use_held) game->use_delay = 0;
+    if (intent->use && !eating && !entity_handled) {
         result = maage_gameplay_action_result(maage_gameplay_place(game, player, world, items, intent->movement.yaw, intent->descend, &sink), world, trace);
         if (maage_status_failed(result)) return maage_gameplay_sound_result(result, &sink, written, trace);
         if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;

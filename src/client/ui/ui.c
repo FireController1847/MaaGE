@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "../item_models.h"
 #include "maage/log.h"
 #include "maage/time.h"
 #include <stdlib.h>
@@ -105,6 +106,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->height = 240;
     ui->gui_scale = 1;
     ui->renderer = renderer;
+    ui->models = game_resources ? maage_content_models(game_resources->content) : NULL;
     ui->window = window;
     ui->last_nonwindowed_mode = ui->confirmed_fullscreen_style = MAAGE_CLIENT_BORDERLESS;
     ui->fps_step = 26;
@@ -167,6 +169,7 @@ void maage_client_ui_notice_time(maage_client_ui *ui, double now) {
 maage_status maage_client_ui_destroy(maage_client_ui *ui) {
     if (!ui) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_render_texture_destroy(ui->resources.texture);
+    maage_client_item_icon_cache_destroy(ui->model_icons);
     free(ui->creative_filter);
     free(ui->commands);
     free(ui->debug_cache.vertices);
@@ -631,6 +634,9 @@ maage_status maage_client_ui_reload_prepare(maage_client_ui *ui, const char *dir
 }
 void maage_client_ui_reload_commit(maage_client_ui *ui, maage_client_ui_reload *candidate, const maage_client_resources *resources) {
     maage_render_texture *old = ui->resources.texture;
+    maage_client_item_icon_cache_destroy(ui->model_icons);
+    ui->model_icons = NULL;
+    ui->models = maage_content_models(resources->content);
     ui->resources = candidate->resources;
     ui->batch.texture = ui->resources.texture;
     ui->blocks = maage_content_view_blocks(resources->view);

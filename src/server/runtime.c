@@ -26,6 +26,7 @@ struct maage_server_runtime {
     maage_server_config config;
     char *instance_root, *world_id, *world_name;
     maage_generation_policy policy;
+    maage_entity_policy entity_policy;
     maage_mutex *mutex;
     maage_condition *wake;
     maage_thread *thread;
@@ -170,6 +171,17 @@ static void server_emit_effect(maage_server_runtime *runtime, const maage_sound_
 
 static void server_emit_sound(maage_server_runtime *runtime, const maage_sound_event *sound) {
     server_emit_effect(runtime, sound, NULL, 0);
+}
+static void server_entity_sound(void *context, unsigned long sound_id, const double position[3], double intensity, double pitch) {
+    maage_server_runtime *runtime = (maage_server_runtime *) context;
+    maage_sound_event sound;
+    memset(&sound, 0, sizeof(sound));
+    sound.event_id = sound_id;
+    sound.tick = runtime->tick + 1;
+    sound.intensity = intensity;
+    sound.pitch = pitch;
+    memcpy(sound.position, position, sizeof(sound.position));
+    server_emit_sound(runtime, &sound);
 }
 static void server_player_motion(const maage_server_runtime *runtime, maage_session_player_motion *motion) {
     memcpy(motion->velocity, runtime->player.velocity, sizeof(motion->velocity));
@@ -546,7 +558,7 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
      * publication. No pointers into mutable World storage cross threads. */
     for (i = 0; i < maage_entities_count(entities); ++i)
         if (server_entity_visible(runtime, maage_entities_at(entities, i))) ++visible;
-    if (visible) view.entities = (maage_entity *) malloc(visible * sizeof(*view.entities));
+    if (visible) view.entities = (maage_entity_view *) malloc(visible * sizeof(*view.entities));
     if (visible && !view.entities) {
         result = server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SNAPSHOT);
         if (runtime->entity_publication_failure != result) server_status_event(runtime, result, NULL);
@@ -555,7 +567,7 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
         runtime->entity_publication_failure = 0;
         for (i = 0; i < maage_entities_count(entities); ++i) {
             entity = maage_entities_at(entities, i);
-            if (server_entity_visible(runtime, entity)) view.entities[view.count++] = *entity;
+            if (server_entity_visible(runtime, entity)) maage_entity_copy_view(entity, &view.entities[view.count++]);
         }
         view.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
         view.session_epoch = 1;
@@ -719,6 +731,8 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     world_config.execution = *maage_content_execution(runtime->content);
     world_config.registry = maage_content_blocks(runtime->content);
     world_config.items = items;
+    world_config.entity_types = maage_content_entity_types(runtime->content);
+    world_config.entity_policy = runtime->config.entity_policy;
     world_config.smelting = maage_content_smelting(runtime->content);
     world_config.fuels = maage_content_fuels(runtime->content);
     world_config.biomes = maage_content_biomes(runtime->content);
@@ -887,6 +901,8 @@ static maage_status server_tick(maage_server_runtime *runtime, double scheduled_
             }
         }
     }
+    result = maage_entities_living_tick(maage_world_entities(runtime->world), runtime->world, maage_content_items(runtime->content), &runtime->player, &runtime->game, server_entity_sound, runtime, trace);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_TICK);
     server_service_container(runtime);
     server_predictions(runtime);
     world_began = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
@@ -1104,6 +1120,10 @@ maage_status maage_server_runtime_create(const maage_server_config *config, maag
     if (!runtime) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     runtime->diagnostics = maage_log_enabled("maage.server.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     runtime->config = *config;
+    if (config->entity_policy) {
+        runtime->entity_policy = *config->entity_policy;
+        runtime->config.entity_policy = &runtime->entity_policy;
+    }
     runtime->instance_root = server_copy(config->instance_root);
     runtime->world_id = server_copy(config->world_id);
     runtime->world_name = server_copy(config->world_name);

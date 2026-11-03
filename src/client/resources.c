@@ -51,6 +51,19 @@ static int maage_client_texture_source(const maage_client_resources *resources, 
 static const char *maage_client_source_name(const maage_client_resources *resources, unsigned long source) {
     return maage_presentation_source(maage_content_presentation(resources->content), source);
 }
+static int maage_client_source_sheet(const maage_presentation_registry *registry, unsigned long source, unsigned int *width, unsigned int *height) {
+    const maage_texture_definition *texture;
+    size_t i;
+    for (i = 0; i < maage_presentation_texture_count(registry); ++i) {
+        texture = maage_presentation_texture(registry, (maage_texture_id) i);
+        if (texture->source == source && texture->sheet_width) {
+            *width = texture->sheet_width;
+            *height = texture->sheet_height;
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static void maage_client_colormap(const maage_image *map, double temperature, double rainfall, float color[3]) {
     const unsigned char *pixel;
@@ -110,6 +123,7 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     int i, j, x, y, sx, sy, edge = 16, tile, source_index, stage, ok = 0;
     int columns = 32, rows, tile_x, tile_y, skin_y;
     int frame, animation_y, frame_edge, frame_tile, custom_height = 0, custom_x, custom_y, custom_frames, shelf_x, shelf_y, shelf_height;
+    unsigned int sheet_width = 0, sheet_height = 0;
     if (!resources || !content || !maage_block_registry_is_finalized(maage_content_blocks(content))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !resources ? 1 : 2);
     memset(&missing, 0, sizeof(missing));
     memset(resources, 0, sizeof(*resources));
@@ -193,7 +207,7 @@ maage_status maage_client_resources_load(const char *application_data, const maa
         if (!maage_status_failed(result)) {
             /* Normalize each valid source independently into the canonical
              * 16px atlas. One unusual texture cannot resize unrelated tiles. */
-            if (((unsigned long) i == bindings->grass || (unsigned long) i == bindings->foliage) ? (sources[i].width != 256 || sources[i].height != 256) : ((unsigned long) i == bindings->skin ? (sources[i].width != 64 || sources[i].height != 64) : (sources[i].height != sources[i].width && !(maage_presentation_source_animated(catalog, (unsigned long) i)))))
+            if (maage_client_source_sheet(catalog, (unsigned long) i, &sheet_width, &sheet_height) ? ((double) sources[i].width * sheet_height != (double) sources[i].height * sheet_width) : (((unsigned long) i == bindings->grass || (unsigned long) i == bindings->foliage) ? (sources[i].width != 256 || sources[i].height != 256) : ((unsigned long) i == bindings->skin ? (sources[i].width != 64 || sources[i].height != 64) : (sources[i].height != sources[i].width && !(maage_presentation_source_animated(catalog, (unsigned long) i))))))
                 result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
         }
         if (!maage_status_failed(result) && maage_presentation_source_animated(catalog, (unsigned long) i) && (sources[i].height < sources[i].width || sources[i].height % sources[i].width != 0)) result = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD_TEXTURE, 0);
@@ -233,7 +247,15 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     animation_y = tile * rows;
     for (i = 0; i < (int) resources->texture_count; ++i) {
         texture = maage_presentation_texture(catalog, (maage_texture_id) i);
-        if (!texture->frame_ticks || texture->source == MAAGE_CONTENT_ID_INVALID || !sources[texture->source].pixels) continue;
+        if ((!texture->frame_ticks && !texture->sheet_width) || texture->source == MAAGE_CONTENT_ID_INVALID || !sources[texture->source].pixels) continue;
+        if (texture->sheet_width) {
+            if (texture->sheet_width > INT_MAX - 2U || texture->sheet_height > INT_MAX - 2U) goto done;
+            regions[region_count].texture = (size_t) i;
+            regions[region_count].width = (int) texture->sheet_width + 2;
+            regions[region_count++].height = (int) texture->sheet_height + 2;
+            if ((int) texture->sheet_width + 2 > resources->image.width) resources->image.width = (int) texture->sheet_width + 2;
+            continue;
+        }
         custom_frames = sources[texture->source].height / sources[texture->source].width;
         if (texture->frame_edge > INT_MAX - 2U) goto done;
         frame_edge = texture->frame_edge ? (int) texture->frame_edge : edge;
@@ -336,8 +358,24 @@ maage_status maage_client_resources_load(const char *application_data, const maa
         custom_x = regions[region_index].x;
         custom_y = regions[region_index].y;
         texture = maage_presentation_texture(catalog, (maage_texture_id) i);
-        if (!texture->frame_ticks || texture->source == MAAGE_CONTENT_ID_INVALID || !sources[texture->source].pixels) continue;
+        if ((!texture->frame_ticks && !texture->sheet_width) || texture->source == MAAGE_CONTENT_ID_INVALID || !sources[texture->source].pixels) continue;
         selected = &sources[texture->source];
+        if (texture->sheet_width) {
+            for (y = 0; y < (int) texture->sheet_height + 2; ++y)
+                for (x = 0; x < (int) texture->sheet_width + 2; ++x) {
+                    sx = x == 0 ? 0 : (x > (int) texture->sheet_width ? (int) texture->sheet_width - 1 : x - 1);
+                    sy = y == 0 ? 0 : (y > (int) texture->sheet_height ? (int) texture->sheet_height - 1 : y - 1);
+                    pixel = resources->image.pixels + (size_t) (custom_y + y) * resources->image.stride + (size_t) (custom_x + x) * 4;
+                    source = selected->pixels + (size_t) ((double) sy * selected->height / texture->sheet_height) * selected->stride + (size_t) ((double) sx * selected->width / texture->sheet_width) * 4;
+                    memcpy(pixel, source, 4);
+                    if (texture->opaque) pixel[3] = 255;
+                }
+            resources->uv[i][0] = (float) (custom_x + 1) / resources->image.width;
+            resources->uv[i][1] = (float) (custom_y + 1) / resources->image.height;
+            resources->uv[i][2] = (float) (custom_x + texture->sheet_width + 1) / resources->image.width;
+            resources->uv[i][3] = (float) (custom_y + texture->sheet_height + 1) / resources->image.height;
+            continue;
+        }
         custom_frames = selected->height / selected->width;
         frame_edge = texture->frame_edge ? (int) texture->frame_edge : edge;
         frame_tile = frame_edge + 2;

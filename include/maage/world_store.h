@@ -47,11 +47,11 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
  * independent region files may be written concurrently; each region serializes
  * its own index and append operations without a global World lock. Player inventories and
- * World entities use numeric saved IDs. The cached, checksummed MGIDMAP1 header
+ * World entities use numeric saved item/state/type IDs. The cached, checksummed MGIDMAP2 header
  * retains stable saved IDs and both numeric translation directions. Dictionary
  * extensions publish atomically before new IDs can be saved by workers.
  * Environment, random ticks, generation settings and gameplay share the same
- * atomic metadata replacement (MGWRLD10 only). */
+ * atomic metadata replacement (MGWRLD13 only). */
 maage_status maage_world_store_save(maage_world_store *store, const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world, const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);
@@ -62,7 +62,7 @@ maage_status maage_world_store_close(maage_world_store *store);
  * parallel, with a short per-region lock for indexed reads and appends.
  * Detached loaded columns transfer to caller. Only WORLD_IO/LOAD/NOT_FOUND
  * permits generation; registry NOT_FOUND means an unmapped save identity.
- * MGCHNK7 palettes contain numeric saved IDs, remapped through the open store;
+ * MGCHNK9 palettes contain numeric saved IDs, remapped through the open store;
  * 8-bit biome/16-bit state indices are local palette indices. No names are
  * resolved or dictionaries rebuilt during chunk I/O. MGRGN2 headers bind the
  * World map UUID; passed registries must be the ones borrowed at open.

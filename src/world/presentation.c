@@ -56,6 +56,7 @@ maage_status maage_presentation_texture_register(maage_presentation_registry *re
     maage_texture_definition *grown;
     size_t count;
     if (!registry || registry->finalized || !definition || !id || (definition->opaque != 0 && definition->opaque != 1) || (definition->pingpong != 0 && definition->pingpong != 1) || (definition->source != MAAGE_CONTENT_ID_INVALID && definition->source >= registry->source_count) || (definition->fallback != MAAGE_CONTENT_ID_INVALID && definition->fallback >= registry->source_count)) return presentation_status(MAAGE_STATUS_INVALID_ARGUMENT);
+    if ((definition->sheet_width == 0) != (definition->sheet_height == 0) || (definition->sheet_width && (definition->frame_ticks || definition->frame_edge))) return presentation_status(MAAGE_STATUS_INVALID_ARGUMENT);
     count = registry->texture_count + 1;
     if (!count || count > 4294967295UL || count > (size_t) - 1 / sizeof(*grown)) return presentation_status(MAAGE_STATUS_BUFFER_OVERFLOW);
     grown = (maage_texture_definition *) realloc(registry->textures, count * sizeof(*grown));

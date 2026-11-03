@@ -15,8 +15,12 @@ enum {
 };
 enum {
     MAAGE_ITEM_MODEL_BLOCK = 0,
-    MAAGE_ITEM_MODEL_SPRITE = 1
+    MAAGE_ITEM_MODEL_SPRITE = 1,
+    MAAGE_ITEM_MODEL_REGISTERED = 2
 };
+typedef struct maage_item_model_transform {
+    double translation[3], rotation[3], scale; /* Model units to centered item; zero scale means one. */
+} maage_item_model_transform;
 /* Item identities are allocated independently of blocks and states. */
 struct maage_item_definition;
 typedef maage_status (*maage_item_placement)(const struct maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
@@ -29,6 +33,7 @@ typedef struct maage_item_definition {
     unsigned int max_stack, durability, tool_class, tool_level, max_metadata;
     /* Nonzero durability is the inclusive maximum usable damage value. */
     double mining_speed;
+    unsigned int attack_damage;           /* Zero uses the ordinary one-point unarmed attack. */
     unsigned int food_hunger, food_ticks; /* food_ticks == 0 is not edible. */
     double food_saturation;
     int food_always_edible;
@@ -38,7 +43,9 @@ typedef struct maage_item_definition {
     const char *(*variant_name)(const struct maage_item_definition *, unsigned int);
     /* Optional immutable tooltip lines, borrowed from module-owned data. */
     const char *(*tooltip)(const struct maage_item_definition *, unsigned int);
-    unsigned int model;         /* Shared numeric presentation category. */
+    unsigned int model; /* Shared numeric presentation category. */
+    unsigned long registered_model, spawn_type;
+    maage_item_model_transform presentation;
     unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;
     const char *display_name;
@@ -66,6 +73,9 @@ typedef struct maage_item_registry maage_item_registry;
 maage_status maage_item_registry_create(size_t capacity, maage_item_registry **output);
 maage_status maage_item_registry_destroy(maage_item_registry *registry);
 maage_status maage_item_registry_register(maage_item_registry *registry, const char *external_name, maage_item_definition *definition);
+/* Module-owned presentation binding before finalization; leaves placement,
+ * inventory identity and gameplay definitions unchanged. */
+maage_status maage_item_registry_bind_model(maage_item_registry *, maage_item_id, unsigned long, const maage_item_model_transform *);
 maage_status maage_item_registry_finalize(maage_item_registry *registry);
 int maage_item_registry_is_finalized(const maage_item_registry *registry);
 const maage_item_definition *maage_item_registry_get(const maage_item_registry *registry, maage_item_id id);

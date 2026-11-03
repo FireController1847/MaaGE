@@ -1,6 +1,10 @@
 #include "item_models.h"
+#include "maage/models.h"
+#include "maage/internal/registry_pages.h"
+#include "player_model.h"
 #include "maage/block_geometry.h"
 #include <limits.h>
+#include <float.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -165,6 +169,134 @@ static maage_status maage_item_geometry_quad(void *opaque, const maage_block_geo
     if (maage_status_failed(result)) work->result = result;
     return result;
 }
+typedef struct maage_registered_item_work {
+    const maage_item_definition *item;
+    const maage_model_definition *model;
+    const float (*textures)[4];
+    size_t texture_count;
+    maage_texture_id texture;
+    float matrix[16];
+    maage_mesh_vertex *vertices;
+    unsigned int *indices;
+    size_t faces, capacity;
+    maage_client_item_icon_sink icon;
+    void *context;
+    maage_status failure;
+} maage_registered_item_work;
+static void maage_registered_item_matrix(const maage_item_definition *item, float matrix[16]) {
+    unsigned int axis;
+    maage_player_matrix_identity(matrix);
+    maage_player_matrix_translate(matrix, item->presentation.translation[0] - 0.5, item->presentation.translation[1] - 0.5, item->presentation.translation[2] - 0.5);
+    for (axis = 0; axis < 3; ++axis)
+        maage_player_matrix_rotate(matrix, axis, item->presentation.rotation[axis]);
+    maage_player_matrix_scale(matrix, item->presentation.scale ? item->presentation.scale : 1, item->presentation.scale ? item->presentation.scale : 1, item->presentation.scale ? item->presentation.scale : 1);
+}
+static maage_status maage_registered_item_quad(void *opaque, const maage_model_quad *quad) {
+    static const unsigned int winding[6] = {0, 1, 2, 0, 2, 3};
+    maage_registered_item_work *work = (maage_registered_item_work *) opaque;
+    maage_render_ui_vertex icon[4];
+    maage_mesh_vertex *vertex;
+    const float *uv;
+    double positions[4][3], a[3], b[3], normal[3], length, shade;
+    unsigned int corner, axis, k, first, second, base;
+    maage_status result;
+    if (maage_status_failed(work->failure)) return work->failure;
+    if (!quad || quad->face >= 6 || quad->material > MAAGE_MESH_MATERIAL_TRANSLUCENT || work->texture >= work->texture_count) return work->failure = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+    for (corner = 0; corner < 4; ++corner) {
+        for (axis = 0; axis < 3; ++axis)
+            if (!(quad->positions[corner][axis] >= -FLT_MAX && quad->positions[corner][axis] <= FLT_MAX)) return work->failure = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+        for (axis = 0; axis < 2; ++axis)
+            if (!(quad->uv[corner][axis] >= 0 && quad->uv[corner][axis] <= 1)) return work->failure = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+    }
+    for (corner = 0; corner < 4; ++corner)
+        for (axis = 0; axis < 3; ++axis) {
+            positions[corner][axis] = work->matrix[12 + axis];
+            for (k = 0; k < 3; ++k)
+                positions[corner][axis] += work->matrix[k * 4 + axis] * quad->positions[corner][k];
+            if (!(positions[corner][axis] >= -FLT_MAX && positions[corner][axis] <= FLT_MAX)) return work->failure = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+        }
+    for (axis = 0; axis < 3; ++axis) {
+        a[axis] = positions[1][axis] - positions[0][axis];
+        b[axis] = positions[2][axis] - positions[0][axis];
+    }
+    length = 0;
+    for (axis = 0; axis < 3; ++axis) {
+        first = (axis + 1) % 3;
+        second = (axis + 2) % 3;
+        normal[axis] = a[first] * b[second] - a[second] * b[first];
+        length += normal[axis] * normal[axis];
+    }
+    if (!(length > 0)) return work->failure = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+    length = sqrt(length);
+    for (axis = 0; axis < 3; ++axis)
+        normal[axis] /= length;
+    shade = 0.5 + 0.5 * (normal[1] > 0 ? normal[1] : 0) + 0.1 * fabs(normal[0]) + 0.3 * fabs(normal[2]);
+    uv = work->textures[work->texture];
+    if (work->icon) {
+        if (-normal[0] + normal[1] + normal[2] <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
+        shade = 0.5 + 0.5 * (normal[1] > 0 ? normal[1] : 0) + 0.137 * fabs(normal[0]) - 0.065 * fabs(normal[2]);
+        for (corner = 0; corner < 4; ++corner) {
+            icon[corner].position[0] = (float) ((positions[corner][0] + positions[corner][2]) * 7.071067812 + 8);
+            icon[corner].position[1] = (float) ((positions[corner][2] - positions[corner][0]) * 3.535533906 - positions[corner][1] * 8.660254038 + 8);
+            for (axis = 0; axis < 2; ++axis)
+                icon[corner].uv[axis] = uv[axis] + quad->uv[corner][axis] * (uv[axis + 2] - uv[axis]);
+            for (axis = 0; axis < 3; ++axis)
+                icon[corner].color[axis] = (float) shade;
+            icon[corner].color[3] = 1;
+        }
+        result = work->icon(work->context, icon);
+        if (maage_status_failed(result)) work->failure = result;
+        return result;
+    }
+    if (work->faces >= UINT_MAX / 4U || work->faces >= (size_t) - 1 / 6 || (work->vertices && work->faces >= work->capacity)) return work->failure = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+    if (!work->vertices) {
+        ++work->faces;
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+    }
+    base = (unsigned int) (work->faces * 4);
+    for (corner = 0; corner < 4; ++corner) {
+        vertex = &work->vertices[work->faces * 4 + corner];
+        memset(vertex, 0, sizeof(*vertex));
+        for (axis = 0; axis < 3; ++axis) {
+            vertex->position[axis] = (float) positions[corner][axis];
+            vertex->color[axis] = (float) shade;
+        }
+        for (axis = 0; axis < 2; ++axis)
+            vertex->uv[axis] = uv[axis] + quad->uv[corner][axis] * (uv[axis + 2] - uv[axis]);
+        vertex->color[3] = 1;
+        vertex->material = (float) quad->material;
+        vertex->light[0] = 1;
+    }
+    for (corner = 0; corner < 6; ++corner)
+        work->indices[work->faces * 6 + corner] = base + winding[corner];
+    ++work->faces;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
+static maage_status maage_registered_item_emit(const maage_model_registry *models, maage_registered_item_work *work) {
+    maage_model_sink sink;
+    maage_status result;
+    float transform[16], part_matrix[16];
+    size_t part;
+    int visible;
+    work->model = maage_model_registry_get(models, work->item->registered_model);
+    if (!work->model) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+    maage_registered_item_matrix(work->item, transform);
+    maage_player_matrix_scale(transform, work->model->scale, work->model->scale, work->model->scale);
+    sink.quad = maage_registered_item_quad;
+    sink.context = work;
+    for (part = 0; part < work->model->part_count; ++part) {
+        work->texture = work->model->parts[part].texture_id == MAAGE_CONTENT_ID_INVALID ? work->model->texture_id : work->model->parts[part].texture_id;
+        if (work->texture >= work->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+        result = maage_model_part_matrix(work->model, NULL, part, part_matrix, &visible);
+        if (maage_status_failed(result)) return result;
+        maage_player_matrix_multiply(work->matrix, transform, part_matrix);
+        if (!visible) continue;
+        result = maage_model_emit_part(work->model, part, &sink);
+        if (maage_status_failed(work->failure)) return work->failure;
+        if (maage_status_failed(result)) return result;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
 static maage_status maage_item_model_generate(const maage_client_resources *resources, const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, maage_mesh_vertex *vertices, unsigned int *indices, size_t capacity, maage_mesh_data *data) {
     const maage_item_definition *item;
     const maage_block_state_definition *state;
@@ -173,6 +305,7 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
     maage_block_geometry_query query;
     maage_block_geometry_sink sink;
     maage_item_geometry_work work;
+    maage_registered_item_work registered;
     maage_status result;
     maage_texture_id texture;
     size_t faces = 0, i;
@@ -182,7 +315,18 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
     if (!resources || !stack || !data || !(item = maage_item_registry_get(items, stack->item_id))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
     state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->metadata) : NULL;
     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-    if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
+    if (item->model == MAAGE_ITEM_MODEL_REGISTERED) {
+        memset(&registered, 0, sizeof(registered));
+        registered.item = item;
+        registered.textures = resources->uv;
+        registered.texture_count = resources->texture_count;
+        registered.vertices = vertices;
+        registered.indices = indices;
+        registered.capacity = capacity;
+        result = maage_registered_item_emit(maage_content_models(resources->content), &registered);
+        if (maage_status_failed(result)) return result;
+        faces = registered.faces;
+    } else if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
         texture = maage_client_item_texture(item, stack->metadata);
         if (texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
         if (vertices && capacity < 66U) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
@@ -346,7 +490,7 @@ static maage_status maage_item_icon_quad(void *opaque, const maage_block_geometr
     if (maage_status_failed(result)) work->result = result;
     return result;
 }
-maage_status maage_client_item_icon(const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float (*textures)[4], size_t texture_count, maage_client_item_icon_sink sink, void *context) {
+maage_status maage_client_item_icon(const maage_model_registry *models, const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float (*textures)[4], size_t texture_count, maage_client_item_icon_sink sink, void *context) {
     static const unsigned int visible[3] = {MAAGE_FACE_NEGATIVE_X, MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_POSITIVE_Y};
     /* GUI light rig: ambient 0.4 plus two diffuse 0.6 lights,
      * evaluated for the orthographic item transform's visible face normals. */
@@ -359,6 +503,7 @@ maage_status maage_client_item_icon(const maage_item_registry *items, const maag
     maage_block_geometry_query query;
     maage_block_geometry_sink geometry_sink;
     maage_item_icon_work work;
+    maage_registered_item_work registered;
     maage_render_ui_vertex vertices[4], *vertex;
     maage_status result;
     const float *uv;
@@ -369,6 +514,15 @@ maage_status maage_client_item_icon(const maage_item_registry *items, const maag
     if (!stack || !grass || !textures || !sink || !(item = maage_item_registry_get(items, stack->item_id))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
     state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->metadata) : NULL;
     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    if (item->model == MAAGE_ITEM_MODEL_REGISTERED) {
+        memset(&registered, 0, sizeof(registered));
+        registered.item = item;
+        registered.textures = textures;
+        registered.texture_count = texture_count;
+        registered.icon = sink;
+        registered.context = context;
+        return maage_registered_item_emit(models, &registered);
+    }
     if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
         texture = maage_client_item_texture(item, stack->metadata);
         if (texture >= texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
@@ -436,4 +590,87 @@ maage_status maage_client_item_icon(const maage_item_registry *items, const maag
         }
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+}
+
+typedef struct maage_client_icon_variant {
+    maage_render_ui_vertex *vertices;
+    size_t count, capacity;
+    maage_status result;
+} maage_client_icon_variant;
+typedef struct maage_client_icon_item {
+    maage_registry_pages variants;
+} maage_client_icon_item;
+struct maage_client_item_icon_cache {
+    maage_registry_pages items;
+};
+static maage_status maage_client_icon_cache_quad(void *opaque, const maage_render_ui_vertex vertices[4]) {
+    maage_client_icon_variant *variant = (maage_client_icon_variant *) opaque;
+    if (variant->count >= (size_t) - 1 / (4 * sizeof(*vertices)) || (variant->vertices && variant->count >= variant->capacity)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+    if (variant->vertices) memcpy(variant->vertices + variant->count * 4, vertices, 4 * sizeof(*vertices));
+    ++variant->count;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
+maage_status maage_client_item_icon_cached(maage_client_item_icon_cache **cache, const maage_model_registry *models, const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float (*textures)[4], size_t texture_count, maage_client_item_icon_sink sink, void *context) {
+    const maage_item_definition *definition = stack ? maage_item_registry_get(items, stack->item_id) : NULL;
+    maage_client_icon_item *item;
+    maage_client_icon_variant *variant;
+    maage_status result;
+    size_t i;
+    void **slot;
+    if (!cache || !definition || !sink || !maage_item_stack_valid(items, stack)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
+    if (definition->model != MAAGE_ITEM_MODEL_REGISTERED) return maage_client_item_icon(models, items, blocks, stack, grass, textures, texture_count, sink, context);
+    if (!*cache) {
+        *cache = (maage_client_item_icon_cache *) calloc(1, sizeof(**cache));
+        if (!*cache) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+    }
+    slot = maage_registry_pages_find(&(*cache)->items, stack->item_id);
+    if (!slot) slot = maage_registry_pages_ensure(&(*cache)->items, stack->item_id);
+    if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+    if (!*slot) {
+        *slot = calloc(1, sizeof(*item));
+        if (!*slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+    }
+    item = (maage_client_icon_item *) *slot;
+    slot = maage_registry_pages_find(&item->variants, stack->metadata);
+    if (!slot) slot = maage_registry_pages_ensure(&item->variants, stack->metadata);
+    if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+    variant = (maage_client_icon_variant *) *slot;
+    if (!variant) {
+        variant = (maage_client_icon_variant *) calloc(1, sizeof(*variant));
+        if (!variant) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+        *slot = variant;
+        result = maage_client_item_icon(models, items, blocks, stack, grass, textures, texture_count, maage_client_icon_cache_quad, variant);
+        if (maage_status_failed(result)) return variant->result = result;
+        variant->capacity = variant->count;
+        if (variant->count) {
+            variant->vertices = (maage_render_ui_vertex *) malloc(variant->count * 4 * sizeof(*variant->vertices));
+            if (!variant->vertices) return variant->result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+            variant->count = 0;
+            result = maage_client_item_icon(models, items, blocks, stack, grass, textures, texture_count, maage_client_icon_cache_quad, variant);
+            if (maage_status_failed(result)) return variant->result = result;
+            if (variant->count != variant->capacity) return variant->result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
+        }
+        variant->result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+    }
+    if (maage_status_failed(variant->result)) return variant->result;
+    for (i = 0; i < variant->count; ++i) {
+        result = sink(context, variant->vertices + i * 4);
+        if (maage_status_failed(result)) return result;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+}
+static void maage_client_icon_variant_destroy(void *opaque) {
+    maage_client_icon_variant *variant = (maage_client_icon_variant *) opaque;
+    free(variant->vertices);
+    free(variant);
+}
+static void maage_client_icon_item_destroy(void *opaque) {
+    maage_client_icon_item *item = (maage_client_icon_item *) opaque;
+    maage_registry_pages_destroy(&item->variants, maage_client_icon_variant_destroy);
+    free(item);
+}
+void maage_client_item_icon_cache_destroy(maage_client_item_icon_cache *cache) {
+    if (!cache) return;
+    maage_registry_pages_destroy(&cache->items, maage_client_icon_item_destroy);
+    free(cache);
 }

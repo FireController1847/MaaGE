@@ -281,6 +281,9 @@ static maage_status content_validate_presentation(const maage_content_context *c
     const maage_fluid_definition *fluid;
     const maage_container_definition *container;
     const maage_block_geometry_definition *geometry;
+    const maage_model_definition *model;
+    const maage_entity_type_definition *entity;
+    const maage_item_definition *item;
     size_t i, j;
     for (i = 0; i < maage_block_registry_state_count(context->blocks); ++i) {
         state = maage_block_registry_state(context->blocks, (maage_block_state_id) i);
@@ -295,6 +298,23 @@ static maage_status content_validate_presentation(const maage_content_context *c
         if (!geometry) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (j = 0; j < geometry->appearance_count; ++j)
             if (!content_face_registered(context, &geometry->appearances[j])) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    }
+    for (i = 0; i < maage_model_registry_count(context->models); ++i) {
+        model = maage_model_registry_get(context->models, (maage_model_id) i + 1);
+        if (!model || !maage_presentation_texture(context->presentation, model->texture_id)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        for (j = 0; j < model->part_count; ++j)
+            if (model->parts[j].texture_id != MAAGE_CONTENT_ID_INVALID && !maage_presentation_texture(context->presentation, model->parts[j].texture_id)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    }
+    for (i = 0; i < maage_entity_type_count(context->entity_types); ++i) {
+        entity = maage_entity_type_at(context->entity_types, i);
+        if (!entity || (entity->model_id && !maage_model_registry_get(context->models, entity->model_id)) || (entity->model_id && !maage_presentation_texture(context->presentation, entity->texture_id))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        for (j = 0; j < entity->texture_count; ++j)
+            if (!maage_presentation_texture(context->presentation, entity->textures[j])) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        if ((entity->ambient_sound && !maage_sound_get(context->sounds, entity->ambient_sound)) || (entity->hurt_sound && !maage_sound_get(context->sounds, entity->hurt_sound)) || (entity->death_sound && !maage_sound_get(context->sounds, entity->death_sound)) || (entity->attack_sound && !maage_sound_get(context->sounds, entity->attack_sound))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    }
+    for (i = 0; i < maage_item_registry_count(context->items); ++i) {
+        item = maage_item_registry_at(context->items, i);
+        if (!item || (item->model == MAAGE_ITEM_MODEL_REGISTERED && !maage_model_registry_get(context->models, item->registered_model)) || (item->spawn_type && !maage_entity_type_get(context->entity_types, item->spawn_type))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     for (i = 0; i < maage_fluid_count(context->fluids); ++i) {
         fluid = maage_fluid_get(context->fluids, (maage_fluid_id) i + 1);
@@ -313,7 +333,7 @@ static maage_status content_validate_presentation(const maage_content_context *c
  * This rejects callbacks which continue after a failed registration. */
 static maage_status content_validate_registrations(const maage_content *content, maage_content_failure *failure) {
     const maage_content_context *context = &content->context;
-    size_t actual[CONTENT_ORE + 1], claimed[CONTENT_ORE + 1], i;
+    size_t actual[CONTENT_MODEL + 1], claimed[CONTENT_MODEL + 1], i;
     memset(claimed, 0, sizeof(claimed));
     actual[CONTENT_BLOCK] = content_blocks_identity_count(context->blocks, CONTENT_BLOCK);
     actual[CONTENT_ITEM] = maage_item_registry_count(context->items);
@@ -330,9 +350,11 @@ static maage_status content_validate_registrations(const maage_content *content,
     actual[CONTENT_ENTITY] = content_blocks_identity_count(context->blocks, CONTENT_ENTITY);
     actual[CONTENT_FEATURE] = content_blocks_identity_count(context->blocks, CONTENT_FEATURE);
     actual[CONTENT_ORE] = content_blocks_identity_count(context->blocks, CONTENT_ORE);
+    actual[CONTENT_ENTITY_TYPE] = maage_entity_type_count(context->entity_types);
+    actual[CONTENT_MODEL] = maage_model_registry_count(context->models);
     for (i = 0; i < content->policy.count; ++i)
-        if (content->policy.identities[i].domain <= CONTENT_ORE) ++claimed[content->policy.identities[i].domain];
-    for (i = 0; i <= CONTENT_ORE; ++i)
+        if (content->policy.identities[i].domain <= CONTENT_MODEL) ++claimed[content->policy.identities[i].domain];
+    for (i = 0; i <= CONTENT_MODEL; ++i)
         if (actual[i] != claimed[i]) {
             failure->dependency_name = content_policy_domain_name((content_domain) i);
             failure->reason = "Callback continued after unsuccessful registration";
@@ -402,6 +424,8 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     if (!maage_status_failed(result)) result = maage_block_geometry_create(&context->geometry);
     if (!maage_status_failed(result)) result = maage_container_registry_create(&context->containers);
     if (!maage_status_failed(result)) result = maage_sound_registry_create(&context->sounds);
+    if (!maage_status_failed(result)) result = maage_entity_type_registry_create(&context->entity_types);
+    if (!maage_status_failed(result)) result = maage_model_registry_create(&context->models);
     if (!maage_status_failed(result)) result = maage_block_registry_bind_fluids(context->blocks, context->fluids);
     if (!maage_status_failed(result)) result = maage_block_registry_bind_geometry(context->blocks, context->geometry);
     if (!maage_status_failed(result)) result = maage_block_registry_bind_containers(context->blocks, context->containers);
@@ -416,6 +440,8 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     content_creative_policy(context->creative, &content->policy);
     content_sounds_policy(context->sounds, &content->policy);
     content_presentation_policy(context->presentation, &content->policy);
+    content_entity_types_policy(context->entity_types, &content->policy);
+    content_models_policy(context->models, &content->policy);
     for (phase = MAAGE_CONTENT_PHASE_DEFINE; phase <= MAAGE_CONTENT_PHASE_BIND_COMPATIBILITY; phase = (maage_content_phase) (phase + 1)) {
         result = content_modules_run(content, config, phase, trace);
         if (maage_status_failed(result)) goto failed;
@@ -492,11 +518,17 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     config->failure->dependency_name = "maage_fuel_finalize";
     result = maage_fuel_finalize(context->fuels);
     if (maage_status_failed(result)) goto failed;
+    config->failure->dependency_name = "maage_model_registry_finalize";
+    result = maage_model_registry_finalize(context->models);
+    if (maage_status_failed(result)) goto failed;
+    config->failure->dependency_name = "maage_entity_type_finalize";
+    result = maage_entity_type_finalize(context->entity_types, context->items, context->blocks, context->biomes);
+    if (maage_status_failed(result)) goto failed;
     config->failure->dependency_name = NULL;
     content->policy.engine = 0;
     content->policy.sealed = 1;
     content->finalized = 1;
-    maage_log_info("maage.content", "%s | FINALIZE | blocks=%lu states=%lu items=%lu biomes=%lu creative_tabs=%lu sounds=%lu.", content_side_name(config->execution.side), (unsigned long) maage_block_registry_block_count(context->blocks), (unsigned long) maage_block_registry_state_count(context->blocks), (unsigned long) maage_item_registry_count(context->items), (unsigned long) maage_biome_registry_count(context->biomes), (unsigned long) maage_creative_tab_count(context->creative), (unsigned long) maage_sound_count(context->sounds));
+    maage_log_info("maage.content", "%s | FINALIZE | blocks=%lu states=%lu items=%lu biomes=%lu creative_tabs=%lu sounds=%lu entity_types=%lu models=%lu.", content_side_name(config->execution.side), (unsigned long) maage_block_registry_block_count(context->blocks), (unsigned long) maage_block_registry_state_count(context->blocks), (unsigned long) maage_item_registry_count(context->items), (unsigned long) maage_biome_registry_count(context->biomes), (unsigned long) maage_creative_tab_count(context->creative), (unsigned long) maage_sound_count(context->sounds), (unsigned long) maage_entity_type_count(context->entity_types), (unsigned long) maage_model_registry_count(context->models));
     if (config->identity_peer) {
         result = maage_content_validate_identity(content, config->identity_peer, trace);
         if (maage_status_failed(result)) {
@@ -526,6 +558,12 @@ failed:
     maage_content_destroy(content);
     return result;
 }
+const maage_entity_type_registry *maage_content_entity_types(const maage_content *content) {
+    return content ? content->context.entity_types : NULL;
+}
+const maage_model_registry *maage_content_models(const maage_content *content) {
+    return content ? content->context.models : NULL;
+}
 const maage_block_registry *maage_content_blocks(const maage_content *content) {
     return content ? content->context.blocks : NULL;
 }
@@ -547,6 +585,8 @@ const maage_fuel_registry *maage_content_fuels(const maage_content *content) {
 maage_status maage_content_destroy(maage_content *content) {
     content_owner *node, *next;
     if (!content) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    maage_entity_type_destroy(content->context.entity_types);
+    maage_model_registry_destroy(content->context.models);
     maage_creative_destroy(content->context.creative);
     maage_presentation_destroy(content->context.presentation);
     maage_smelting_destroy(content->context.smelting);
@@ -648,7 +688,7 @@ maage_status maage_content_validate_identity(const maage_content *content, const
     for (i = 0; i < maage_presentation_texture_count(a->presentation); ++i) {
         texture = maage_presentation_texture(a->presentation, (maage_texture_id) i);
         peer_texture = maage_presentation_texture(b->presentation, (maage_texture_id) i);
-        if (texture->source != peer_texture->source || texture->fallback != peer_texture->fallback || texture->opaque != peer_texture->opaque || texture->frame_ticks != peer_texture->frame_ticks || texture->pingpong != peer_texture->pingpong || texture->frame_edge != peer_texture->frame_edge) return content_identity_mismatch(content, trace, 33, NULL);
+        if (texture->source != peer_texture->source || texture->fallback != peer_texture->fallback || texture->opaque != peer_texture->opaque || texture->frame_ticks != peer_texture->frame_ticks || texture->pingpong != peer_texture->pingpong || texture->frame_edge != peer_texture->frame_edge || texture->sheet_width != peer_texture->sheet_width || texture->sheet_height != peer_texture->sheet_height) return content_identity_mismatch(content, trace, 33, NULL);
     }
     if (maage_creative_entry_count(a->creative) != maage_creative_entry_count(b->creative)) return content_identity_mismatch(content, trace, 34, NULL);
     for (i = 0; i < maage_creative_entry_count(a->creative); ++i) {

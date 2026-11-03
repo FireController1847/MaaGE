@@ -13,6 +13,17 @@ typedef struct maage_base_biome_decoration {
 
 #define MAAGE_BASE_ITEM_TEXTURE_COUNT 64U
 #define MAAGE_BASE_BIOME_COUNT 6
+enum {
+    MAAGE_BASE_MOB_PIG,
+    MAAGE_BASE_MOB_COW,
+    MAAGE_BASE_MOB_SHEEP,
+    MAAGE_BASE_MOB_CHICKEN,
+    MAAGE_BASE_MOB_ZOMBIE,
+    MAAGE_BASE_MOB_SKELETON,
+    MAAGE_BASE_MOB_CREEPER,
+    MAAGE_BASE_MOB_SPIDER,
+    MAAGE_BASE_MOB_COUNT
+};
 
 /* Stable numeric presentation tile slots, not runtime resource paths.
  * The Client resolves these into atlas UVs once, before publication. */
@@ -52,6 +63,10 @@ typedef struct maage_base_biome_decoration {
  * this table through const accessors; publication/finalization ends mutation.
  * Array indices below describe properties, never content identities. */
 typedef struct maage_base_ids {
+    unsigned long mob_types[MAAGE_BASE_MOB_COUNT], mob_models[MAAGE_BASE_MOB_COUNT], mob_textures[MAAGE_BASE_MOB_COUNT];
+    unsigned long spawn_eggs[MAAGE_BASE_MOB_COUNT], arrow_type, arrow_model, arrow_texture, sheep_fleece;
+    unsigned long item_feather, item_leather, item_bone, item_rotten_flesh, item_string, item_gunpowder, item_egg, item_arrow, item_spider_eye, item_milk_bucket;
+    unsigned long block_wool, item_wool, wool_states[16], wool_textures[16];
     unsigned long material_default, material_stone, material_grass, material_dirt, material_wood, material_sand, material_gravel, material_snow;
     unsigned long material_metal, material_glass, material_water, material_lava, material_foliage, material_cloth, material_ladder, material_anvil;
     unsigned long container_player, container_table, container_furnace;

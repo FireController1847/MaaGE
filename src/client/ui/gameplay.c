@@ -50,7 +50,7 @@ void maage_client_ui_stack(maage_client_ui *ui, const maage_item_stack *stack, f
     icon.ui = ui;
     icon.x = x;
     icon.y = y;
-    result = maage_client_item_icon(ui->items, ui->blocks, stack, ui->inventory_grass_color, ui->item_uv, ui->item_texture_count, maage_client_ui_icon_quad, &icon);
+    result = maage_client_item_icon_cached(&ui->model_icons, ui->models, ui->items, ui->blocks, stack, ui->inventory_grass_color, ui->item_uv, ui->item_texture_count, maage_client_ui_icon_quad, &icon);
     if (maage_status_failed(result)) {
         ui->draw_result = result;
         return;

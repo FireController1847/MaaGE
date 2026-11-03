@@ -13,6 +13,11 @@ maage_status maage_furnace_content_items(maage_content_context *, maage_base_ids
 maage_status maage_base_blocks(maage_content_context *, maage_base_ids *);
 maage_status maage_base_creative(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_items(maage_content_context *, maage_base_ids *);
+maage_status maage_base_chest_models(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_chest_models_bind(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_entity_models(maage_content_context *, maage_base_ids *);
+maage_status maage_base_entities(maage_content_context *, maage_base_ids *);
+maage_status maage_base_entity_creative(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_bind(maage_content_context *, maage_base_ids *);
 maage_status maage_base_recipes(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_smelting(maage_content_context *, const maage_base_ids *);

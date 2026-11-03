@@ -32,7 +32,7 @@ static void player_held_matrix(float matrix[16], const maage_item_definition *it
     const double radians = 0.017453292519943295;
     maage_player_matrix_translate(matrix, model == MAAGE_SKIN_SLIM ? 0.5 : 1, -7, 1);
     maage_player_matrix_scale(matrix, 16, 16, 16);
-    if (item->model == MAAGE_ITEM_MODEL_BLOCK) {
+    if (item->model != MAAGE_ITEM_MODEL_SPRITE) {
         maage_player_matrix_translate(matrix, 0, -0.1875, -0.3125);
         maage_player_matrix_rotate(matrix, 0, -20 * radians);
         maage_player_matrix_rotate(matrix, 1, -45 * radians);

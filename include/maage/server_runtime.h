@@ -25,6 +25,7 @@ typedef struct maage_server_config {
     maage_world_seed seed;
     /* Optional policy applies only at creation; existing worlds retain theirs. */
     const maage_generation_policy *generation_policy;
+    const maage_entity_policy *entity_policy; /* Optional copied runtime spawning/work policy. */
     unsigned int world_workers;
     int render_distance;
     /* -1 retains the saved mode, 0 Survival, 1 Creative. */

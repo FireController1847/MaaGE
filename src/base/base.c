@@ -78,6 +78,9 @@ maage_status base_tool(maage_content_context *context, const char *name, const c
     item.tool_class = tool_class;
     item.tool_level = level;
     item.mining_speed = speed;
+    if (tool_class == MAAGE_TOOL_PICKAXE) item.attack_damage = 3 + level;
+    else if (tool_class == MAAGE_TOOL_AXE) item.attack_damage = 4 + level;
+    else if (tool_class == MAAGE_TOOL_SHOVEL) item.attack_damage = 2 + level;
     item.model = MAAGE_ITEM_MODEL_SPRITE;
     item.texture_index = texture;
     item.texture_id = MAAGE_BASE_TEXTURE_ITEMS + texture;
@@ -120,7 +123,11 @@ static maage_status maage_base_define(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_containers(context, ids);
     if (!maage_status_failed(result)) result = maage_base_blocks(context, ids);
     if (!maage_status_failed(result)) result = maage_base_items(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_chest_models(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_entity_models(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_entities(context, ids);
     if (!maage_status_failed(result)) result = maage_base_creative(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_entity_creative(context, ids);
     return result;
 }
 static maage_status maage_base_bind_internal(maage_content_context *context) {
@@ -129,6 +136,7 @@ static maage_status maage_base_bind_internal(maage_content_context *context) {
     size_t i;
     maage_status result = maage_base_bind(context, ids);
     if (!maage_status_failed(result)) result = maage_base_resolve_blocks(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_chest_models_bind(context, ids);
     if (!maage_status_failed(result)) result = maage_base_fluids_resolve(context, ids);
     if (!maage_status_failed(result)) result = maage_base_furnace_entity(context, ids);
     if (maage_status_failed(result)) return result;

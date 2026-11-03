@@ -7,7 +7,8 @@ typedef struct maage_texture_definition {
     int opaque;
     unsigned int frame_ticks; /* Zero static; otherwise vertically stacked square frames. */
     int pingpong;
-    unsigned int frame_edge; /* Zero uses the atlas block edge; otherwise exact target frame pixels. */
+    unsigned int frame_edge;                /* Zero uses the atlas block edge; otherwise exact target frame pixels. */
+    unsigned int sheet_width, sheet_height; /* Both nonzero preserve a full static model sheet. */
 } maage_texture_definition;
 /* Application presentation roles are explicit bindings, never special paths. */
 typedef struct maage_presentation_bindings {

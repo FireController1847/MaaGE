@@ -82,6 +82,8 @@ struct maage_client_ui {
     maage_item_stack inventory_last_stack;
     unsigned int inventory_last_slot, inventory_last_button;
     double inventory_last_click;
+    const maage_model_registry *models;
+    struct maage_client_item_icon_cache *model_icons;
     const float (*item_uv)[4];
     size_t item_texture_count;
     maage_client_ui_resources resources;

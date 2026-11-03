@@ -132,6 +132,7 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->count >= 4294967295UL) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     definition->id = (unsigned long) registry->count + 1;
+    if (definition->model > MAAGE_ITEM_MODEL_REGISTERED || (definition->model == MAAGE_ITEM_MODEL_REGISTERED && (!definition->registered_model || definition->registered_model == MAAGE_CONTENT_ID_INVALID))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (!definition->max_stack || definition->max_stack > 64 ||
         (definition->durability && definition->max_stack != 1) ||
         !(definition->mining_speed >= 1 && definition->mining_speed <= 1024))
@@ -214,6 +215,20 @@ maage_status maage_item_registry_finalize(maage_item_registry *registry) {
     }
     registry->finalized = 1;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+}
+maage_status maage_item_registry_bind_model(maage_item_registry *registry, maage_item_id id, unsigned long model, const maage_item_model_transform *transform) {
+    maage_item_slot *slot = maage_item_slot_get(registry, id);
+    maage_status result;
+    unsigned int axis;
+    if (!registry || registry->finalized || !slot || !model || model == MAAGE_CONTENT_ID_INVALID || !transform || !(transform->scale >= 0 && transform->scale <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_SET, 0);
+    for (axis = 0; axis < 3; ++axis)
+        if (!(transform->translation[axis] >= -DBL_MAX && transform->translation[axis] <= DBL_MAX && transform->rotation[axis] >= -DBL_MAX && transform->rotation[axis] <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_SET, 0);
+    result = content_policy_update(registry->policy, CONTENT_ITEM, slot->name);
+    if (maage_status_failed(result)) return result;
+    slot->definition.model = MAAGE_ITEM_MODEL_REGISTERED;
+    slot->definition.registered_model = model;
+    slot->definition.presentation = *transform;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
 int maage_item_registry_is_finalized(const maage_item_registry *registry) {
     return registry && registry->finalized;

@@ -7,6 +7,7 @@ static maage_status base_texture(maage_content_context *context, maage_base_ids 
     texture.frame_ticks = frame_ticks;
     texture.pingpong = pingpong;
     texture.frame_edge = 0;
+    texture.sheet_width = texture.sheet_height = 0;
     return maage_presentation_texture_register(context->presentation, &texture, &ids->textures[slot]);
 }
 maage_status maage_base_textures(maage_content_context *context, maage_base_ids *ids) {
@@ -319,7 +320,7 @@ maage_status maage_base_textures(maage_content_context *context, maage_base_ids 
     if (maage_status_failed(result)) return result;
     result = maage_presentation_source_register(context->presentation, "minecraft/textures/entity/chest/normal.png", &ids->sources[152]);
     if (maage_status_failed(result)) return result;
-    result = maage_presentation_source_register(context->presentation, "minecraft/textures/entity/chest/normal.png", &ids->sources[153]);
+    result = maage_presentation_source_register(context->presentation, "minecraft/textures/entity/chest/trapped.png", &ids->sources[153]);
     if (maage_status_failed(result)) return result;
     result = maage_presentation_source_register(context->presentation, "minecraft/textures/blocks/bookshelf.png", &ids->sources[154]);
     if (maage_status_failed(result)) return result;
@@ -765,6 +766,7 @@ maage_status maage_base_textures(maage_content_context *context, maage_base_ids 
     flow.frame_ticks = 0;
     flow.pingpong = 0;
     flow.frame_edge = 0;
+    flow.sheet_width = flow.sheet_height = 0;
     result = maage_presentation_texture_register(context->presentation, &flow, &ids->texture_water_overlay);
     if (maage_status_failed(result)) return result;
     flow.source = ids->sources[62];

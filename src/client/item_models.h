@@ -14,5 +14,10 @@ void maage_client_item_box(const float grass_color[3], maage_mesh_vertex *vertic
 /* Streams projected quads in 16x16 slot coordinates and world-atlas UVs;
  * consumer batching owns storage and failures stop generation immediately. */
 typedef maage_status (*maage_client_item_icon_sink)(void *context, const maage_render_ui_vertex vertices[4]);
-maage_status maage_client_item_icon(const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float (*textures)[4], size_t texture_count, maage_client_item_icon_sink sink, void *context);
+maage_status maage_client_item_icon(const maage_model_registry *models, const maage_item_registry *items, const maage_block_registry *blocks, const maage_item_stack *stack, const float grass[3], const float (*textures)[4], size_t texture_count, maage_client_item_icon_sink sink, void *context);
+typedef struct maage_client_item_icon_cache maage_client_item_icon_cache;
+/* Registered model icons retain their projected quads for one resource
+ * generation. Lazy creation occurs once per encountered numeric variant. */
+maage_status maage_client_item_icon_cached(maage_client_item_icon_cache **, const maage_model_registry *, const maage_item_registry *, const maage_block_registry *, const maage_item_stack *, const float[3], const float (*)[4], size_t, maage_client_item_icon_sink, void *);
+void maage_client_item_icon_cache_destroy(maage_client_item_icon_cache *);
 #endif

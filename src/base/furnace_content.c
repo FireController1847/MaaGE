@@ -1067,6 +1067,7 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     item.food_saturation = 0;
     item.durability = 59;
     item.break_wear = 1;
+    item.attack_damage = 5;
     result = base_item_register(context, "minecraft:wooden_sword", &item, 200, &ids->item_wooden_sword);
     if (maage_status_failed(result)) return result;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);

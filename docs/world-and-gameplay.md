@@ -12,9 +12,9 @@ A 16³ section holds numeric states. Published snapshots use adaptive uniform/pa
 
 ## Persistence and Identity
 
-Worlds reside under `instances/<uuid>/worlds/<uuid>/`. Current formats: `MGWRLD12` metadata with one checksummed `MGIDMAP1` identity dictionary, `MGRGN2` region files and `MGCHNK9` chunk records. The dictionary maps saved numeric block/state/item/biome IDs to current finalized definitions at open; saved states reference block identity plus metadata. Persisted chunk/region records contain numeric IDs only, compression/checksums and registered block-entity codecs selected by owning saved block identity. Missing, malformed or duplicate identities fail explicitly.
+Worlds reside under `instances/<uuid>/worlds/<uuid>/`. Current formats: `MGWRLD13` metadata with one checksummed `MGIDMAP2` identity dictionary, `MGRGN2` region files and `MGCHNK9` chunk records. The dictionary maps saved numeric block/state/item/biome/entity-type IDs to current finalized definitions at open; saved states reference block identity plus metadata. Persisted chunk/region records contain numeric IDs only, compression/checksums and registered block-entity codecs selected by owning saved block identity. Missing, malformed or duplicate identities fail explicitly.
 
-Owner edits create immutable save snapshots; async region writers clear dirty state only when the saved revision remains current. Metadata checkpoints player/inventory, weather/environment, RNG and retained active/dormant entities after a successful World flush. No open temporary GUI results or pointers are stored. Older development formats have no migration or automatic deletion. Details: `include/maage/world_store.h`, `src/world/{store,region_store}.c`.
+Owner edits create immutable save snapshots; async region writers clear dirty state only when the saved revision remains current. Metadata checkpoints player/inventory, weather/environment, RNG and retained active/dormant entities after a successful World flush. Living checkpoints include orientation, health, variants, timers, goals, damage attribution and effect cursors; optional module state uses exact-size versioned word/stack codecs. Drop, behavior and spawn RNG streams and the rotating simulation cursor continue across saves. No open temporary GUI results or pointers are stored. Older development formats have no migration or automatic deletion. Details: `include/maage/world_store.h`, `src/world/{store,region_store}.c`.
 
 ## Random Ticks and Growth
 
@@ -24,9 +24,17 @@ Registered random behaviors include grass, saplings, leaves, farmland/wheat, cac
 
 ## Entities and Item Drops
 
-World owns growable typed entities with monotonic instance IDs distinct from content IDs. Current types are items and falling blocks, not mobs. The Server owns swept collision, pickup, active age and delay; entities freeze when required terrain is unavailable. Dormant and active entities belong to the World checkpoint rather than per-column files.
+World owns growable typed entities with monotonic instance IDs distinct from content IDs. Item/falling records coexist with dynamically registered living/projectile types in the same store. Type definitions are immutable Content registrations; instance IDs, optional module state and active/dormant ownership are separate. The Server owns swept collision, pickup, active age and delay; entities freeze when required terrain is unavailable. Dormant and active entities belong to the World checkpoint rather than per-column files.
 
 Mining reserves capacity for every drop before expected-state removal/tool wear/RNG changes. Drops become World item entities, never instant inventory grants. Q, Control-Q and cursor drops follow the same owner path. Pickup fills existing compatible stacks, keeps residual quantities in their entities and publishes copy-only cues. The Client's 0.15-second pickup interpolation is decorative; there is no gameplay magnet. Sand/gravel transfer into owned falling-block entities and either place saved state at landing or convert to item ownership without duplicating quantities. See `include/maage/entities.h` and `src/world/entities.c`.
+
+## Living Entities and Natural Spawning
+
+Content registers pig, cow, sheep, chicken, zombie, skeleton, creeper, spider and arrow definitions with copied dimensions, attributes, loot, sounds, models and spawn rules. Server owner callbacks compose wandering/panic, obstacle steering/jumping, pursuit/line of sight, melee, ranged shots and retained explosions. Shared swept bodies handle gravity, fluids and environmental damage. Sheep own colored fleece/shearing/grazing state, chickens own egg timers and slow falling, and cows exchange buckets for milk. Creative catalogs expose eight registered spawn eggs; Server ray/reach and selected-stack validation remain authoritative.
+
+`maage_entity_policy` configures rotating tick work, spawn attempts/intervals, class populations and player distances through World/Server creation. Finalization indexes weighted rules by numeric biome/classification; owner attempts inspect already loaded terrain, light, time, surface, fluid and collision without loading chunks. Base passive rules select grass in plains/forest/taiga/hills with light9–15; hostile rules use light0–7. Death publication retains pending transformed stacks and cursors when capacity fails; custom flat state and incremental effects checkpoint with the same World metadata. XP currently credits an attributed player directly; XP orb entities are not implemented.
+
+Navigation is local obstacle steering rather than a global route planner. Breeding, riding, milk consumption/status effects, complete mob-specific parity and remote entity wire encoding remain future work. Source implementation has not established gameplay, visual or performance correctness.
 
 ## Crafting and Furnaces
 
@@ -36,7 +44,7 @@ Crafting Table storage is temporary: close returns cursor/inputs to inventory an
 
 ## Creative Inventory Transactions
 
-Session protocol 23 replaces the full-cursor Creative pick with typed catalog/player-slot, clone, hotbar, drop, destroy and clear actions. The Server validates Creative mode, health, the accessible personal container's identity and exact revision, registered tab/entry scope, item/metadata/damage/count validity and slot/action bounds. Relative operations run in owner FIFO order; stale commands fail explicitly. Generic personal slot commands cannot bypass Creative policy.
+Session protocol 24 replaces the full-cursor Creative pick with typed catalog/player-slot, clone, hotbar, drop, destroy and clear actions. The Server validates Creative mode, health, the accessible personal container's identity and exact revision, registered tab/entry scope, item/metadata/damage/count validity and slot/action bounds. Relative operations run in owner FIFO order; stale commands fail explicitly. Generic personal slot commands cannot bypass Creative policy.
 
 Catalog selection owns no storage. Shared `maage_inventory_operate` transactions preflight player-slot changes in a copied inventory before commit, including distribution, collection, hotbar swaps and bounded transfers. Cursor and selected-slot ownership remain in the existing inventory/checkpoint. Deletion creates no entities; drops reserve World entity capacity before ownership changes. Creative closure drops its carried stack before normal container teardown, retaining it and retrying when reservation fails. Survival crafting/table/furnace closure and persistent block-entity ownership use their existing paths.
 

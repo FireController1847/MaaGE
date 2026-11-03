@@ -16,7 +16,7 @@ extern "C" {
  * explicitly, not memcpy C layouts (including unsigned long and padding).
  * Local hosting validates the independently composed Server against its Client
  * content identity peer before World startup or publishing any numeric data. */
-#define MAAGE_SESSION_PROTOCOL_VERSION 23U
+#define MAAGE_SESSION_PROTOCOL_VERSION 24U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -153,7 +153,7 @@ typedef struct maage_session_snapshot {
 typedef struct maage_session_entities {
     unsigned int protocol_version;
     unsigned long session_epoch, world_epoch, tick, sequence;
-    maage_entity *entities;
+    maage_entity_view *entities;
     size_t count;
     double offered_at; /* Optional local diagnostic clock, otherwise -1. */
 } maage_session_entities;

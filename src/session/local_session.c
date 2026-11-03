@@ -370,7 +370,7 @@ maage_status maage_local_session_destroy(maage_local_session *session) {
 }
 
 maage_status maage_local_session_offer_entities(maage_local_session *session, maage_session_entities *view) {
-    maage_entity *retired = NULL;
+    maage_entity_view *retired = NULL;
     maage_status result;
     if (!session || !view || view->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         !view->session_epoch || !view->world_epoch || !view->sequence ||
