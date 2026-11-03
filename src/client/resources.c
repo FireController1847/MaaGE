@@ -101,6 +101,7 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     const maage_image *selected;
     maage_biome_definition *biome;
     maage_status result;
+    maage_content_config catalog_config;
     maage_status_trace source_trace, recovered_trace;
     char path[MAAGE_PATH_CAPACITY];
     unsigned char *pixel, *source;
@@ -112,7 +113,12 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     memset(resources, 0, sizeof(*resources));
     resources->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     resources->recovery_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ATLAS, 0);
-    result = maage_application_content_create(registration, &resources->catalog, trace);
+    catalog_config = *registration;
+    catalog_config.execution.side = MAAGE_EXECUTION_CLIENT;
+    catalog_config.execution.capabilities = MAAGE_EXECUTION_PRESENTATION;
+    catalog_config.catalog_only = 1;
+    catalog_config.identity_peer = NULL;
+    result = maage_content_create(&catalog_config, &resources->catalog, trace);
     if (maage_status_failed(result)) {
         resources->recovery_status = result;
         goto done;
@@ -455,13 +461,16 @@ maage_status maage_client_content_create(const maage_client_resources *resources
         !resources ? 0 : (!biomes ? 1 : 2));
     if (!biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
     memset(&config, 0, sizeof(config));
+    config.execution.side = MAAGE_EXECUTION_CLIENT;
+    config.execution.capabilities = MAAGE_EXECUTION_PRESENTATION;
+    config.identity_peer = resources->catalog;
     config.modules = resources->modules;
     config.module_count = resources->module_count;
     config.resolver = maage_client_content_resolve;
     config.appearance_resolver = maage_client_content_resolve_appearance;
     config.resolver_context = (void *) resources;
     config.presentation_biomes = biomes;
-    result = maage_application_content_create(&config, output, trace);
+    result = maage_content_create(&config, output, trace);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
     maage_log_info("maage.client.world", "Finalized %lu block types / %lu states; direct numeric runtime indexing.", (unsigned long) maage_block_registry_block_count(maage_content_blocks(*output)), (unsigned long) maage_block_registry_state_count(maage_content_blocks(*output)));
     return result;

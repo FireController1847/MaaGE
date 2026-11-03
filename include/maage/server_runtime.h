@@ -32,16 +32,18 @@ typedef struct maage_server_config {
     /* 0 chooses established game defaults; otherwise (0, 64]. */
     double interaction_range;
     unsigned int execution_mode;
-    /* Borrowed, immutable/finalized for the full runtime lifetime. NULL requests
-     * the shared, graphics-free built-in content bootstrap. */
-    const maage_content *content;
+    /* Borrowed finalized Client identity peer for integrated hosting. Server
+     * independently composes the same descriptors on its owner thread; no live
+     * registry or callback state is shared. NULL selects application composition
+     * for dedicated hosting. Peer/descriptors outlive join/destroy. */
+    const maage_content *content_peer;
     /* Optional bounded copy transport; NULL is valid for dedicated hosting. */
     maage_local_session *session;
 } maage_server_config;
 
 /* Create copies string/options inputs. World, storage and workers are created
  * on the authoritative thread after start, never by Client/render threads.
- * The caller retains borrowed content and session through join/destroy. */
+ * The caller retains borrowed identity peer and session through join/destroy. */
 maage_status maage_server_runtime_create(const maage_server_config *config, maage_server_runtime **output, maage_status_trace *trace);
 maage_status maage_server_runtime_start(maage_server_runtime *runtime, maage_status_trace *trace);
 /* Safe on a different thread, idempotent, and wakes the tick scheduler. */

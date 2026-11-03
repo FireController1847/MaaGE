@@ -1,8 +1,10 @@
+#include "registry_policy.h"
 #include "maage/block_geometry.h"
 #include <stdlib.h>
 #include <string.h>
 
 struct maage_block_geometry_registry {
+    content_policy *policy;
     maage_block_geometry_definition *definitions;
     char **names;
     maage_block_geometry_id *buckets;
@@ -55,11 +57,16 @@ maage_status maage_block_geometry_destroy(maage_block_geometry_registry *registr
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
 maage_status maage_block_geometry_register(maage_block_geometry_registry *registry, const char *name, const maage_block_geometry_definition *definition, maage_block_geometry_id *id) {
+    maage_status policy_result;
     maage_block_geometry_definition *definitions, definition_copy;
     maage_block_face_definition *appearances = NULL;
     maage_block_geometry_id *buckets;
     char **names, *copy;
     size_t capacity, count, index, bucket;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_GEOMETRY, name, (unsigned long) (registry->count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (id) *id = 0;
     if (!registry || registry->finalized || !id || !definition || !geometry_name_valid(name) || definition->primitive > MAAGE_BLOCK_GEOMETRY_CUSTOM || (definition->primitive == MAAGE_BLOCK_GEOMETRY_CUSTOM ? !definition->emit : definition->emit != NULL) || (definition->appearance_count && !definition->appearances)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (definition->appearance_count > (size_t) - 1 / sizeof(*appearances)) return geometry_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
@@ -125,7 +132,12 @@ maage_status maage_block_geometry_register(maage_block_geometry_registry *regist
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
 maage_status maage_block_geometry_update_appearance(maage_block_geometry_registry *registry, maage_block_geometry_id id, size_t index, const maage_block_face_definition *appearance) {
+    maage_status policy_result;
     maage_block_geometry_definition *definition;
+    if (registry) {
+        policy_result = content_policy_update(registry->policy, CONTENT_GEOMETRY, maage_block_geometry_name(registry, id));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !appearance || !id || id > registry->count || !maage_block_face_definition_valid(appearance)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (registry->finalized) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_UPDATE);
     definition = &registry->definitions[id - 1];
@@ -134,7 +146,12 @@ maage_status maage_block_geometry_update_appearance(maage_block_geometry_registr
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
 maage_status maage_block_geometry_finalize(maage_block_geometry_registry *registry) {
+    maage_status policy_result;
     size_t geometry, appearance;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     for (geometry = 0; geometry < registry->count; ++geometry)
         for (appearance = 0; appearance < registry->definitions[geometry].appearance_count; ++appearance)
@@ -155,7 +172,12 @@ const char *maage_block_geometry_name(const maage_block_geometry_registry *regis
     return registry && id && id <= registry->count ? registry->names[id - 1] : NULL;
 }
 maage_status maage_block_geometry_resolve(const maage_block_geometry_registry *registry, const char *name, maage_block_geometry_id *id) {
+    maage_status policy_result;
     if (id) *id = 0;
+    if (registry) {
+        policy_result = content_policy_read(registry->policy, CONTENT_GEOMETRY, name);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !name || !id) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     if (registry->bucket_count) *id = registry->buckets[geometry_bucket(registry, name)];
     return geometry_status(*id ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
@@ -196,4 +218,8 @@ maage_status maage_block_geometry_cuboid(const maage_block_geometry_sink *sink, 
         if (maage_status_failed(result)) return result;
     }
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MESH);
+}
+
+void content_geometry_policy(maage_block_geometry_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

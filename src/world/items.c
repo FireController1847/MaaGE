@@ -1,3 +1,4 @@
+#include "registry_policy.h"
 #include "maage/items.h"
 #include "maage/content.h"
 #include "world_internal.h"
@@ -12,6 +13,7 @@ typedef struct maage_item_slot {
     char *name, *display;
 } maage_item_slot;
 struct maage_item_registry {
+    content_policy *policy;
     maage_registry_pages block_items;
     maage_registry_pages slots;
     maage_item_id *ordered;
@@ -118,9 +120,14 @@ maage_status maage_item_registry_destroy(maage_item_registry *registry) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_status maage_item_registry_register(maage_item_registry *registry, const char *name, maage_item_definition *definition) {
+    maage_status policy_result;
     size_t i, length, display_length, bucket;
     maage_item_slot *slot;
     int colon = 0, found;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_ITEM, name, (unsigned long) (registry->count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !definition || !name || !definition->display_name) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->count >= 4294967295UL) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -192,8 +199,13 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
 maage_status maage_item_registry_finalize(maage_item_registry *registry) {
+    maage_status policy_result;
     size_t i;
     const maage_item_definition *item;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !registry->count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     for (i = 0; i < registry->count; ++i) {
@@ -433,8 +445,13 @@ const char *maage_item_registry_name(const maage_item_registry *registry, maage_
     return slot ? slot->name : NULL;
 }
 maage_status maage_item_registry_resolve_name(const maage_item_registry *registry, const char *name, maage_item_id *id) {
+    maage_status policy_result;
     size_t bucket;
     int found;
+    if (registry) {
+        policy_result = content_policy_read(registry->policy, CONTENT_ITEM, name);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !name || !id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     bucket = maage_item_name_bucket(registry, name, &found);
     if (!found) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
@@ -487,4 +504,8 @@ maage_status maage_item_generate_drops(const maage_block_registry *blocks, const
         drops->stacks[drops->count++] = drops->stacks[i];
     }
     return maage_status_make(drops->count ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
+
+void content_items_policy(maage_item_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

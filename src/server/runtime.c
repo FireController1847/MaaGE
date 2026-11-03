@@ -694,12 +694,17 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     const maage_item_registry *items;
     maage_status result;
     char error[256];
-    if (!runtime->config.content) {
-        maage_application_content_config(&content_config);
-        result = maage_application_content_create(&content_config, &runtime->owned_content, trace);
-        if (maage_status_failed(result)) return result;
+    maage_application_content_config(&content_config);
+    content_config.execution.side = runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? MAAGE_EXECUTION_INTEGRATED_SERVER : MAAGE_EXECUTION_DEDICATED_SERVER;
+    content_config.execution.capabilities = MAAGE_EXECUTION_AUTHORITY | MAAGE_EXECUTION_HEADLESS;
+    if (runtime->config.content_peer) {
+        result = maage_content_composition(runtime->config.content_peer, &content_config.modules, &content_config.module_count);
+        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_INITIALIZE);
+        content_config.identity_peer = runtime->config.content_peer;
     }
-    runtime->content = runtime->config.content ? runtime->config.content : runtime->owned_content;
+    result = maage_content_create(&content_config, &runtime->owned_content, trace);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_INITIALIZE);
+    runtime->content = runtime->owned_content;
     if (!maage_block_registry_is_finalized(maage_content_blocks(runtime->content)) || !maage_item_registry_is_finalized(maage_content_items(runtime->content))) return MAAGE_STATUS_TRACE(trace, server_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_INITIALIZE), MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_INITIALIZE);
     items = maage_content_items(runtime->content);
     memset(&runtime->record, 0, sizeof(runtime->record));
@@ -711,6 +716,7 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     }
     result = maage_world_config_init(&world_config);
     if (maage_status_failed(result)) return result;
+    world_config.execution = *maage_content_execution(runtime->content);
     world_config.registry = maage_content_blocks(runtime->content);
     world_config.items = items;
     world_config.smelting = maage_content_smelting(runtime->content);
@@ -1082,7 +1088,8 @@ maage_status maage_server_runtime_create(const maage_server_config *config, maag
         (config->interaction_range != 0.0 &&
          (!server_finite(config->interaction_range) ||
           config->interaction_range <= 0.0 || config->interaction_range > 64.0)) ||
-        (config->execution_mode == MAAGE_SERVER_INTEGRATED && !config->session) ||
+        (config->execution_mode == MAAGE_SERVER_INTEGRATED && (!config->session || !config->content_peer)) ||
+        (config->session && !config->content_peer) ||
         (config->generation_policy &&
          !maage_generation_policy_valid(config->generation_policy)))
         return MAAGE_STATUS_TRACE(trace, server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_CREATE);

@@ -1,3 +1,4 @@
+#include "registry_policy.h"
 #include "maage/fluids.h"
 #include "maage/blocks.h"
 #include "maage/internal/registry_pages.h"
@@ -12,6 +13,7 @@ typedef struct maage_fluid_slot {
     unsigned long *states;
 } maage_fluid_slot;
 struct maage_fluid_registry {
+    content_policy *policy;
     maage_registry_pages definitions;
     maage_fluid_slot **names;
     size_t count, buckets;
@@ -79,10 +81,15 @@ maage_status maage_fluid_registry_create(maage_fluid_registry **output) {
     return fluid_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
 }
 maage_status maage_fluid_register(maage_fluid_registry *registry, const char *name, maage_fluid_definition *definition) {
+    maage_status policy_result;
     maage_fluid_slot *slot, **names;
     size_t buckets, index, bucket, length;
     void **entry;
     maage_fluid_id id;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_FLUID, name, (unsigned long) (registry->count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !fluid_name_valid(name) || !fluid_valid(definition)) return fluid_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     bucket = fluid_bucket(registry, name);
     if (registry->names[bucket]) return fluid_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
@@ -141,8 +148,13 @@ maage_status maage_fluid_register(maage_fluid_registry *registry, const char *na
     return fluid_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
 maage_status maage_fluid_update(maage_fluid_registry *registry, const maage_fluid_definition *definition) {
+    maage_status policy_result;
     maage_fluid_slot *slot;
     unsigned long *states = NULL;
+    if (registry) {
+        policy_result = content_policy_update(registry->policy, CONTENT_FLUID, definition ? maage_fluid_name(registry, definition->id) : NULL);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !fluid_valid(definition)) return fluid_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);
     slot = fluid_slot(registry, definition->id);
     if (!slot) return fluid_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_SET);
@@ -159,9 +171,14 @@ maage_status maage_fluid_update(maage_fluid_registry *registry, const maage_flui
     return fluid_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
 }
 maage_status maage_fluid_finalize(maage_fluid_registry *registry, const maage_block_registry *blocks) {
+    maage_status policy_result;
     size_t index, level;
     const maage_fluid_definition *fluid;
     const maage_block_state_definition *state;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !blocks) return fluid_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     for (index = 0; index < registry->count; ++index) {
         fluid = maage_fluid_get(registry, (maage_fluid_id) index + 1);
@@ -185,8 +202,13 @@ const maage_fluid_definition *maage_fluid_get(const maage_fluid_registry *regist
     return slot ? &slot->definition : NULL;
 }
 maage_status maage_fluid_resolve(const maage_fluid_registry *registry, const char *name, maage_fluid_id *id) {
+    maage_status policy_result;
     size_t bucket;
     if (id) *id = MAAGE_CONTENT_ID_INVALID;
+    if (registry) {
+        policy_result = content_policy_read(registry->policy, CONTENT_FLUID, name);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !name || !id) return fluid_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     bucket = fluid_bucket(registry, name);
     if (!registry->names[bucket]) return fluid_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
@@ -206,4 +228,8 @@ maage_status maage_fluid_destroy(maage_fluid_registry *registry) {
 }
 unsigned int maage_fluid_properties(const maage_fluid_definition *definition) {
     return definition ? (definition->swimming ? MAAGE_FLUID_PROPERTY_SWIMMING : 0U) | (definition->submerges ? MAAGE_FLUID_PROPERTY_SUBMERGES : 0U) | (definition->resets_fall ? MAAGE_FLUID_PROPERTY_RESETS_FALL : 0U) : 0;
+}
+
+void content_fluids_policy(maage_fluid_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

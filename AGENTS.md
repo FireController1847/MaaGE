@@ -159,7 +159,14 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 
 ## Numeric Identity and Content
 
-- `MaaGE::Base` registers the built-in game through the same public content/behavior APIs as other statically linked modules; generic World/Server code must not consult its private reference table. Module callbacks/data outlive finalized registries and jobs.
+- `MaaGE::Base` is the `minecraft` root module and uses the same public APIs as other
+  statically linked modules; generic World/Server code never consults its private references.
+  Submodules have one colon, explicitly depend on their root and share its namespace without
+  replacing identities. Preserve stable dependency order and DEFINE → BIND 1: INT → BIND 2: EXT
+  → BIND 3: FIX → FINALIZE → INITIALIZE. Catalogs skip runtime hooks/initialization; Client,
+  integrated Server and dedicated Server have explicit local execution contexts and independent
+  module state. Validate peer numeric identities before initialization/World/session use.
+  Module descriptors/callbacks/data outlive finalized registries and jobs.
 - Block types, states, items and biomes are distinct automatically allocated numeric
   domains. Registration assigns IDs and captures built-in references; finalized
   tables are immutable. ID-to-definition access is deterministic direct O(1).

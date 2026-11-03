@@ -1,3 +1,4 @@
+#include "registry_policy.h"
 #include "maage/creative.h"
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@ typedef struct creative_tab {
     size_t count;
 } creative_tab;
 struct maage_creative_registry {
+    content_policy *policy;
     const maage_item_registry *items;
     const maage_presentation_registry *presentation;
     creative_tab *tabs;
@@ -102,8 +104,13 @@ maage_status maage_creative_destroy(maage_creative_registry *registry) {
     return creative_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
 maage_status maage_creative_tab_register(maage_creative_registry *registry, const char *name, maage_creative_tab_definition *definition) {
+    maage_status policy_result;
     creative_tab tab, *tabs;
     size_t i, bucket, buckets, *names;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_CREATIVE, name, (unsigned long) (registry->tab_count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || !creative_name_valid(name) || !definition->title || !*definition->title || definition->kind > MAAGE_CREATIVE_INVENTORY || (definition->icon_quad_count && !definition->icon_quads)) return creative_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (registry->tab_count >= 4294967294UL || definition->icon_quad_count > (size_t) - 1 / sizeof(*tab.quads)) return creative_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     if (registry->names[creative_bucket(registry, name)]) return creative_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
@@ -150,8 +157,13 @@ maage_status maage_creative_tab_register(maage_creative_registry *registry, cons
     return creative_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
 maage_status maage_creative_tab_resolve(const maage_creative_registry *registry, const char *name, maage_creative_tab_id *id) {
+    maage_status policy_result;
     size_t value;
     if (id) *id = 0;
+    if (registry) {
+        policy_result = content_policy_read(registry->policy, CONTENT_CREATIVE, name);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !name || !id) return creative_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     value = registry->names[creative_bucket(registry, name)];
     *id = (maage_creative_tab_id) value;
@@ -197,11 +209,16 @@ static int creative_stack_compare(const void *a, const void *b) {
     return creative_search_compare(a, b);
 }
 maage_status maage_creative_finalize(maage_creative_registry *registry) {
+    maage_status policy_result;
     creative_tab **tabs;
     const maage_creative_entry **entries, *entry, *previous;
     const maage_creative_icon_quad *quad;
     maage_status result;
     size_t i, j, k, count;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized) return creative_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     if (registry->tab_count > (size_t) - 1 / sizeof(*tabs) || registry->tab_count > (size_t) - 1 / sizeof(*registry->order) || registry->entry_count > (size_t) - 1 / sizeof(*entries) || registry->entry_count > (size_t) - 1 / sizeof(maage_creative_entry_id)) return creative_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE);
     tabs = registry->tab_count ? (creative_tab **) malloc(registry->tab_count * sizeof(*tabs)) : NULL;
@@ -290,4 +307,8 @@ const maage_creative_entry_id *maage_creative_view(const maage_creative_registry
     const creative_tab *tab = registry && registry->finalized && id && id <= registry->tab_count ? &registry->tabs[id - 1] : NULL;
     if (count) *count = tab ? tab->count : 0;
     return tab ? tab->view : NULL;
+}
+
+void content_creative_policy(maage_creative_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

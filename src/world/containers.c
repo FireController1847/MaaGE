@@ -1,3 +1,4 @@
+#include "registry_policy.h"
 #include "maage/containers.h"
 #include "maage/gameplay.h"
 #include "maage/internal/registry_pages.h"
@@ -11,6 +12,7 @@ typedef struct container_entry {
     char *name, *title, *inventory_title;
 } container_entry;
 struct maage_container_registry {
+    content_policy *policy;
     maage_registry_pages entries;
     container_entry **names;
     size_t count, buckets;
@@ -88,11 +90,16 @@ maage_status maage_container_registry_destroy(maage_container_registry *registry
     return container_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
 maage_status maage_container_register(maage_container_registry *registry, const char *name, maage_container_definition *definition) {
+    maage_status policy_result;
     container_entry *entry, **names;
     size_t i, j, bucket, buckets;
     void **destination;
     const maage_container_slot_definition *slot;
     const maage_container_progress_definition *progress;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_CONTAINER, name, (unsigned long) (registry->count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !container_name_valid(name) || !definition || (definition->grid_width && definition->grid_width != 2 && definition->grid_width != 3) || !definition->presentation.width || !definition->presentation.height || !definition->presentation.texture_edge || (definition->slot_count && !definition->slots) || (definition->progress_count && !definition->progress) || (definition->creative_catalog && (!definition->personal || !definition->presentation.creative_width || !definition->presentation.creative_height)) || (!definition->grid_width && !definition->action) || (!definition->personal && !definition->accessible)) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (registry->count >= MAAGE_CONTENT_ID_INVALID - 1UL || definition->slot_count > 4294967295UL || definition->slot_count > (size_t) - 1 / sizeof(*entry->slots) || definition->progress_count > 4294967295UL || definition->progress_count > (size_t) - 1 / sizeof(*entry->progress)) return container_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     if (definition->creative_catalog && (!definition->personal || !definition->presentation.show_inventory || definition->presentation.creative_width != 195 || definition->presentation.creative_height != 136 || definition->presentation.texture_edge != 256)) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
@@ -161,6 +168,11 @@ allocation_failure:
     return container_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_REGISTER);
 }
 maage_status maage_container_finalize(maage_container_registry *registry) {
+    maage_status policy_result;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized) return container_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     registry->finalized = 1;
     return container_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
@@ -180,15 +192,25 @@ const char *maage_container_name(const maage_container_registry *registry, maage
     return entry ? entry->name : NULL;
 }
 maage_status maage_container_resolve(const maage_container_registry *registry, const char *name, maage_container_id *id) {
+    maage_status policy_result;
     container_entry *entry;
     if (id) *id = 0;
+    if (registry) {
+        policy_result = content_policy_read(registry->policy, CONTENT_CONTAINER, name);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !name || !id) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
     entry = registry->names[container_bucket(registry, name)];
     if (entry) *id = entry->definition.id;
     return container_status(entry ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
 }
 maage_status maage_container_bind_inventory(maage_container_registry *registry, maage_container_id id) {
+    maage_status policy_result;
     const maage_container_definition *definition = maage_container_get(registry, id);
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_INVENTORY_BINDING, "inventory", 0);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || !definition->personal) return container_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);
     registry->inventory = id;
     return container_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
@@ -345,4 +367,8 @@ maage_status maage_container_close(const maage_container_registry *registry, maa
         memset(game->crafting.progress, 0, sizeof(game->crafting.progress));
     }
     return result;
+}
+
+void content_containers_policy(maage_container_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

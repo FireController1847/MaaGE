@@ -20,6 +20,7 @@ typedef struct maage_biome_registry {
     void **name_buckets;
     void *extension_pages;
     void *extensions;
+    void *ownership_policy; /* Private composition scope, NULL for standalone registries. */
     int finalized;
 } maage_biome_registry;
 /* Initialize empty registries; register names before finalizing.

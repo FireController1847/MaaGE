@@ -921,7 +921,7 @@ choose_world:
     server_config.initial_game_mode = options.mode;
     server_config.interaction_range = options.reach;
     server_config.execution_mode = MAAGE_SERVER_INTEGRATED;
-    server_config.content = content;
+    server_config.content_peer = content;
     server_config.session = session;
     operation = maage_server_runtime_create(&server_config, &server, trace);
     if (maage_status_failed(operation)) goto done;
@@ -976,6 +976,7 @@ choose_world:
     maage_world_config_init(&visual_config);
     visual_config.registry = blocks;
     visual_config.items = items;
+    visual_config.execution = *maage_content_execution(content);
     visual_config.biomes = maage_content_biomes(content);
     visual_config.presentation_only = 1;
     visual_config.simulation_distance = 0;

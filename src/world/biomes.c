@@ -1,3 +1,4 @@
+#include "registry_policy.h"
 #include "maage/biome.h"
 #include "maage/internal/registry_pages.h"
 #include <stdlib.h>
@@ -96,6 +97,7 @@ maage_status maage_biome_registry_destroy(maage_biome_registry *registry) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 maage_status maage_biome_registry_register(maage_biome_registry *registry, const char *name, maage_biome_definition *definition) {
+    maage_status policy_result;
     maage_biome_extension *node;
     maage_status result;
     size_t bucket;
@@ -103,6 +105,10 @@ maage_status maage_biome_registry_register(maage_biome_registry *registry, const
     maage_registry_pages *pages;
     void **entry;
     size_t length;
+    if (registry) {
+        policy_result = content_policy_register((content_policy *) registry->ownership_policy, CONTENT_BIOME, name, (unsigned long) registry->count);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !definition || !maage_biome_name_valid(name) || (definition->display_name && strlen(definition->display_name) > 127))
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -188,7 +194,12 @@ static int maage_biome_valid(maage_biome_definition *definition) {
     return 1;
 }
 maage_status maage_biome_registry_finalize(maage_biome_registry *registry) {
+    maage_status policy_result;
     maage_biome_extension *entry;
+    if (registry) {
+        policy_result = content_policy_finalize((content_policy *) registry->ownership_policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     if (registry->finalized) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_FINALIZE, 0);
     for (entry = (maage_biome_extension *) registry->extensions; entry; entry = entry->next)
@@ -214,8 +225,13 @@ const char *maage_biome_registry_name(const maage_biome_registry *registry, maag
     return entry ? entry->name : NULL;
 }
 maage_status maage_biome_registry_resolve_name(const maage_biome_registry *registry, const char *name, maage_biome_id *id) {
+    maage_status policy_result;
     size_t bucket;
     int found;
+    if (registry) {
+        policy_result = content_policy_read((content_policy *) registry->ownership_policy, CONTENT_BIOME, name);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || !name || !id) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     if (!registry->name_capacity) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     bucket = biome_name_bucket(registry, name, &found);
@@ -229,8 +245,13 @@ size_t maage_biome_registry_count(const maage_biome_registry *registry) {
 }
 
 maage_status maage_biome_registry_update(maage_biome_registry *registry, const maage_biome_definition *definition) {
+    maage_status policy_result;
     maage_biome_extension *entry;
     void **slot;
+    if (registry) {
+        policy_result = content_policy_update((content_policy *) registry->ownership_policy, CONTENT_BIOME, definition ? maage_biome_registry_name(registry, definition->id) : NULL);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || !registry->extension_pages) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     slot = maage_registry_pages_find((maage_registry_pages *) registry->extension_pages, definition->id);
     entry = slot ? (maage_biome_extension *) *slot : NULL;

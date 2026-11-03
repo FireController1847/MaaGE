@@ -110,7 +110,7 @@ static maage_status maage_base_define(maage_content_context *context) {
         return result;
     }
     context->module_data = ids;
-    /* Definitions precede every module's cross-domain resolution phase. */
+    /* Definitions precede every module's internal binding stage. */
     result = maage_base_textures(context, ids);
     if (!maage_status_failed(result)) result = maage_base_sounds(context, ids);
     if (!maage_status_failed(result)) result = maage_base_bind(context, ids);
@@ -123,7 +123,7 @@ static maage_status maage_base_define(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_creative(context, ids);
     return result;
 }
-static maage_status maage_base_resolve(maage_content_context *context) {
+static maage_status maage_base_bind_internal(maage_content_context *context) {
     maage_base_ids *ids = (maage_base_ids *) context->module_data;
     maage_biome_definition biome;
     size_t i;
@@ -147,5 +147,6 @@ static maage_status maage_base_resolve(maage_content_context *context) {
     return result;
 }
 const maage_content_module maage_base_module = {
-    "minecraft:base", NULL, 0,
-    maage_base_define, maage_base_resolve, NULL};
+    "minecraft", NULL, 0,
+    maage_base_define, maage_base_bind_internal, NULL, NULL,
+    0, 0, NULL, NULL, NULL, NULL};

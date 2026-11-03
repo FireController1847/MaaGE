@@ -13,7 +13,9 @@ extern "C" {
 #endif
 
 /* Numeric local-session contract. Future network encoding must serialize fields
- * explicitly, not memcpy C layouts (including unsigned long and padding). */
+ * explicitly, not memcpy C layouts (including unsigned long and padding).
+ * Local hosting validates the independently composed Server against its Client
+ * content identity peer before World startup or publishing any numeric data. */
 #define MAAGE_SESSION_PROTOCOL_VERSION 23U
 
 typedef enum maage_session_command_kind {

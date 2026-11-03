@@ -1,7 +1,9 @@
+#include "registry_policy.h"
 #include "maage/presentation.h"
 #include <stdlib.h>
 #include <string.h>
 struct maage_presentation_registry {
+    content_policy *policy;
     maage_presentation_bindings bindings;
     char **sources;
     maage_texture_definition *textures;
@@ -64,6 +66,11 @@ maage_status maage_presentation_texture_register(maage_presentation_registry *re
     return presentation_status(MAAGE_STATUS_SUCCESS);
 }
 maage_status maage_presentation_finalize(maage_presentation_registry *registry) {
+    maage_status policy_result;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized) return presentation_status(MAAGE_STATUS_INVALID_STATE);
     registry->finalized = 1;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_FINALIZE, 0);
@@ -82,6 +89,11 @@ const maage_texture_definition *maage_presentation_texture(const maage_presentat
 }
 
 maage_status maage_presentation_bind(maage_presentation_registry *registry, const maage_presentation_bindings *bindings) {
+    maage_status policy_result;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_PRESENTATION_BINDINGS, "bindings", 0);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !bindings) return presentation_status(MAAGE_STATUS_INVALID_STATE);
     registry->bindings = *bindings;
     return presentation_status(MAAGE_STATUS_SUCCESS);
@@ -95,4 +107,8 @@ int maage_presentation_source_animated(const maage_presentation_registry *regist
     for (i = 0; i < registry->texture_count; ++i)
         if (registry->textures[i].source == source && registry->textures[i].frame_ticks) return 1;
     return 0;
+}
+
+void content_presentation_policy(maage_presentation_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

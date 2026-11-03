@@ -180,6 +180,9 @@ static int maage_world_cache_bound(int radius, unsigned int configured, unsigned
     *limit = (unsigned int) (footprint + extra);
     return 1;
 }
+const maage_execution_context *maage_world_execution(const maage_world *world) {
+    return world ? &world->config.execution : NULL;
+}
 maage_status maage_world_config_init(maage_world_config *config) {
     if (!config) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     memset(config, 0, sizeof(*config));
@@ -1454,6 +1457,8 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     maage_status result;
     if (output) *output = NULL;
     if (!config || !output) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, config ? 1 : 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
+    if ((config->presentation_only && (config->execution.side != MAAGE_EXECUTION_CLIENT || config->execution.capabilities != MAAGE_EXECUTION_PRESENTATION)) ||
+        (!config->presentation_only && ((config->execution.side != MAAGE_EXECUTION_INTEGRATED_SERVER && config->execution.side != MAAGE_EXECUTION_DEDICATED_SERVER) || config->execution.capabilities != (MAAGE_EXECUTION_AUTHORITY | MAAGE_EXECUTION_HEADLESS)))) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     if (!maage_world_memory_budget(config->job_memory_budget, &memory_budget)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     if (config->initial_random_ticks && !maage_random_tick_state_valid(config->initial_random_ticks)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     if (config->initial_random_ticks) initial_random = *config->initial_random_ticks;

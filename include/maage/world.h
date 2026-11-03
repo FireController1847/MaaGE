@@ -1,6 +1,7 @@
 #ifndef MAAGE_WORLD_H
 #define MAAGE_WORLD_H
 #include "maage/blocks.h"
+#include "maage/execution.h"
 #include "maage/geometry.h"
 #include "maage/seed.h"
 #include "maage/biome.h"
@@ -80,7 +81,11 @@ typedef enum maage_world_cache_policy {
     MAAGE_WORLD_CACHE_RECLAIM_ON_SHRINK = 0, /* Default: reclaim unneeded columns. */
     MAAGE_WORLD_CACHE_RETAIN_ON_SHRINK = 1   /* Preserve fast re-expansion. */
 } maage_world_cache_policy;
+/* Runtime behavior callbacks receiving World can query its immutable execution
+ * value; worker jobs and presentation replicas never borrow Server state. */
+const maage_execution_context *maage_world_execution(const maage_world *world);
 typedef struct maage_world_config {
+    maage_execution_context execution; /* Required: Client replica or authoritative Server owner. */
     const maage_block_registry *registry;
     const struct maage_item_registry *items; /* finalized; borrowed for block drops */
     const struct maage_smelting_registry *smelting;

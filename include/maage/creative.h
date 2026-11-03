@@ -37,7 +37,7 @@ typedef struct maage_creative_entry {
 } maage_creative_entry;
 /* Owned by Content; borrows its item/presentation registries. Names, labels,
  * descriptors and icon geometry are copied. Register tabs in define and numeric
- * item assignments in define/resolve. No implicit metadata enumeration or caps.
+ * item assignments in DEFINE or binding. No implicit metadata enumeration or caps.
  * Search and inventory are optional singleton roles; category tabs are growable.
  * Finalization validates every stack/texture and prepares immutable ordered
  * entry-ID views. IDs are direct O(1); names resolve only at module boundaries. */

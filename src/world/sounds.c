@@ -1,3 +1,4 @@
+#include "registry_policy.h"
 #include "maage/sounds.h"
 #include "maage/internal/registry_pages.h"
 #include <stdlib.h>
@@ -14,6 +15,7 @@ typedef struct sound_store {
     size_t count, buckets;
 } sound_store;
 struct maage_sound_registry {
+    content_policy *policy;
     sound_store resources, events, materials, music, ambient;
     maage_sound_bindings bindings;
     int finalized;
@@ -155,10 +157,15 @@ maage_status maage_sound_registry_destroy(maage_sound_registry *registry) {
     return sound_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
 maage_status maage_sound_resource_register(maage_sound_registry *registry, const char *name, maage_sound_resource_definition *definition) {
+    maage_status policy_result;
     maage_sound_resource_definition registered;
     char *path;
     size_t length;
     maage_status result;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_SOUND_RESOURCE, name, (unsigned long) (registry->resources.count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || !definition->path || !*definition->path || *definition->path == '/' || strchr(definition->path, '\\') || strchr(definition->path, ':') || strstr(definition->path, "..") || (definition->streamed != 0 && definition->streamed != 1)) return sound_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     length = strlen(definition->path);
     if (length == (size_t) - 1) return sound_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
@@ -173,9 +180,14 @@ maage_status maage_sound_resource_register(maage_sound_registry *registry, const
     return result;
 }
 maage_status maage_sound_register(maage_sound_registry *registry, const char *name, maage_sound_definition *definition) {
+    maage_status policy_result;
     maage_sound_definition registered;
     maage_sound_resource_id *resources;
     maage_status result;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_SOUND, name, (unsigned long) (registry->events.count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || definition->bus >= MAAGE_SOUND_BUS_COUNT || (definition->positional != 0 && definition->positional != 1) || !(definition->gain >= 0 && definition->gain <= FLT_MAX / 16 && definition->pitch > 0 && definition->pitch <= FLT_MAX / 4 && definition->distance > 0 && definition->distance <= FLT_MAX / 16)) return sound_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     result = sound_resources_copy(definition->resources, definition->resource_count, &resources);
     if (maage_status_failed(result)) return result;
@@ -187,16 +199,26 @@ maage_status maage_sound_register(maage_sound_registry *registry, const char *na
     return result;
 }
 maage_status maage_sound_material_register(maage_sound_registry *registry, const char *name, maage_sound_material_definition *definition) {
+    maage_status policy_result;
     maage_sound_material_definition registered;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_MATERIAL, name, (unsigned long) (registry->materials.count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition) return sound_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     registered = *definition;
     registered.id = (unsigned long) registry->materials.count + 1;
     return sound_store_add(&registry->materials, name, &registered, sizeof(registered), NULL, &definition->id);
 }
 maage_status maage_sound_music_register(maage_sound_registry *registry, const char *name, maage_sound_music_definition *definition) {
+    maage_status policy_result;
     maage_sound_music_definition registered;
     maage_sound_resource_id *resources;
     maage_status result;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_MUSIC, name, (unsigned long) (registry->music.count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || !definition->resource_count || !(definition->minimum_delay >= 0 && definition->minimum_delay <= DBL_MAX && definition->maximum_delay >= definition->minimum_delay && definition->maximum_delay <= DBL_MAX / 2 && definition->initial_delay >= 0 && definition->initial_delay <= DBL_MAX / 2 && definition->retry_delay > 0 && definition->retry_delay <= DBL_MAX / 2 && definition->unavailable_delay > 0 && definition->unavailable_delay <= DBL_MAX / 2)) return sound_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     result = sound_resources_copy(definition->resources, definition->resource_count, &resources);
     if (maage_status_failed(result)) return result;
@@ -208,26 +230,41 @@ maage_status maage_sound_music_register(maage_sound_registry *registry, const ch
     return result;
 }
 maage_status maage_sound_ambient_register(maage_sound_registry *registry, const char *name, const maage_sound_ambient_definition *definition) {
+    maage_status policy_result;
     /* Ambient callbacks have no runtime numeric identity requirement; retain
      * one private ID before their copied descriptor for boundary diagnostics. */
     ambient_record registered;
     unsigned long id;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_AMBIENT, name, (unsigned long) (registry->ambient.count + 1));
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !definition || !definition->update || !(definition->interval > 0 && definition->interval <= DBL_MAX / 2)) return sound_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     registered.id = (unsigned long) registry->ambient.count + 1;
     registered.definition = *definition;
     return sound_store_add(&registry->ambient, name, &registered, sizeof(registered), NULL, &id);
 }
 maage_status maage_sound_bind(maage_sound_registry *registry, const maage_sound_bindings *bindings) {
+    maage_status policy_result;
+    if (registry) {
+        policy_result = content_policy_register(registry->policy, CONTENT_SOUND_BINDINGS, "bindings", 0);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized || !bindings) return sound_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     registry->bindings = *bindings;
     return sound_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
 maage_status maage_sound_finalize(maage_sound_registry *registry) {
+    maage_status policy_result;
     const maage_sound_definition *event;
     const maage_sound_music_definition *music;
     const maage_sound_material_definition *material;
     const maage_sound_resource_definition *resource;
     size_t i, j;
+    if (registry) {
+        policy_result = content_policy_finalize(registry->policy);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
     if (!registry || registry->finalized) return sound_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     for (i = 1; i <= registry->events.count; ++i) {
         event = maage_sound_get(registry, (maage_sound_id) i);
@@ -295,15 +332,39 @@ const char *maage_sound_name(const maage_sound_registry *registry, maage_sound_i
     return record ? record->name : NULL;
 }
 maage_status maage_sound_resolve(const maage_sound_registry *registry, const char *name, maage_sound_id *id) {
+    maage_status result;
+    if (id) *id = MAAGE_CONTENT_ID_INVALID;
+    if (registry) {
+        result = content_policy_read(registry->policy, CONTENT_SOUND, name);
+        if (maage_status_failed(result)) return result;
+    }
     return sound_store_resolve(registry ? &registry->events : NULL, name, id);
 }
 maage_status maage_sound_resource_resolve(const maage_sound_registry *registry, const char *name, maage_sound_resource_id *id) {
+    maage_status result;
+    if (id) *id = MAAGE_CONTENT_ID_INVALID;
+    if (registry) {
+        result = content_policy_read(registry->policy, CONTENT_SOUND_RESOURCE, name);
+        if (maage_status_failed(result)) return result;
+    }
     return sound_store_resolve(registry ? &registry->resources : NULL, name, id);
 }
 maage_status maage_sound_material_resolve(const maage_sound_registry *registry, const char *name, maage_sound_material_id *id) {
+    maage_status result;
+    if (id) *id = MAAGE_CONTENT_ID_INVALID;
+    if (registry) {
+        result = content_policy_read(registry->policy, CONTENT_MATERIAL, name);
+        if (maage_status_failed(result)) return result;
+    }
     return sound_store_resolve(registry ? &registry->materials : NULL, name, id);
 }
 maage_status maage_sound_music_resolve(const maage_sound_registry *registry, const char *name, maage_sound_music_id *id) {
+    maage_status result;
+    if (id) *id = MAAGE_CONTENT_ID_INVALID;
+    if (registry) {
+        result = content_policy_read(registry->policy, CONTENT_MUSIC, name);
+        if (maage_status_failed(result)) return result;
+    }
     return sound_store_resolve(registry ? &registry->music : NULL, name, id);
 }
 maage_status maage_sound_select(const maage_sound_registry *registry, unsigned int action, maage_sound_material_id material, maage_sound_id *id) {
@@ -314,4 +375,8 @@ maage_status maage_sound_select(const maage_sound_registry *registry, unsigned i
     if (material && !definition) return sound_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
     *id = definition ? definition->actions[action] : registry->bindings.actions[action];
     return sound_status(*id ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, MAAGE_OPERATION_RESOLVE);
+}
+
+void content_sounds_policy(maage_sound_registry *registry, content_policy *policy) {
+    registry->policy = policy;
 }

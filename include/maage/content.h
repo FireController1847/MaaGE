@@ -1,6 +1,7 @@
 #ifndef MAAGE_CONTENT_H
 #define MAAGE_CONTENT_H
 #include "maage/blocks.h"
+#include "maage/execution.h"
 #include "maage/presentation.h"
 #include "maage/biome.h"
 #include "maage/items.h"
@@ -17,7 +18,9 @@ typedef struct maage_content_module maage_content_module;
 typedef enum maage_content_phase {
     MAAGE_CONTENT_PHASE_MODULES = 0,
     MAAGE_CONTENT_PHASE_DEFINE,
-    MAAGE_CONTENT_PHASE_RESOLVE,
+    MAAGE_CONTENT_PHASE_BIND_INT,
+    MAAGE_CONTENT_PHASE_BIND_EXT,
+    MAAGE_CONTENT_PHASE_BIND_FIX,
     MAAGE_CONTENT_PHASE_FINALIZE,
     MAAGE_CONTENT_PHASE_INITIALIZE
 } maage_content_phase;
@@ -27,6 +30,9 @@ typedef struct maage_content_failure {
     const char *module_name, *dependency_name;
     maage_content_phase phase;
     maage_status result;
+    const char *reason;     /* Static diagnostic, not an additional outcome. */
+    char content_name[256]; /* Bounded diagnostic copy; long identities may be truncated. */
+    maage_execution_context execution;
 } maage_content_failure;
 typedef struct maage_content_context {
     maage_presentation_registry *presentation;
@@ -45,19 +51,27 @@ typedef struct maage_content_context {
     const struct maage_content_config *config;
     const maage_content_module *module; /* Current callback only; never retain context. */
     void *module_data;                  /* Preserved across this module's phases; own() owns its lifetime. */
-    void *lifecycle;                    /* Private composition state; use maage_content_module_data. */
+    maage_execution_context execution;  /* Copy for runtime behavior; never retain context. */
+    maage_content_phase phase;
+    maage_status_trace *trace; /* Task-owned callback trace; never retain. */
+    void *lifecycle;           /* Private composition state; use maage_content_module_data. */
 } maage_content_context;
 /* Registration copies definitions. Context data and callbacks must outlive all
  * readers/jobs; own() transfers data only on SUCCESS, destroyed after registries. */
 maage_status maage_content_own(maage_content_context *context, void *data, void (*destroy)(void *));
 typedef maage_status (*maage_content_registration)(maage_content_context *context);
 struct maage_content_module {
-    const char *name; /* Unique namespaced identity, independent of registration position. */
+    const char *name; /* Root, or root:submodule with an explicit root dependency. */
     const char *const *dependencies;
     size_t dependency_count;
-    maage_content_registration define;     /* Independent definitions; dependencies have defined first. */
-    maage_content_registration resolve;    /* All modules have defined; bind numeric cross-references. */
-    maage_content_registration initialize; /* All registries are immutable; prepare runtime data. */
+    maage_content_registration define;                       /* Pure definitions, also used by resource catalogs. */
+    maage_content_registration bind_int, bind_ext, bind_fix; /* Pure numeric bindings. */
+    /* Optional runtime-side binding opportunities, at each corresponding stage.
+     * Zero sides means no side hooks or initializer. EXT additionally requires dependencies;
+     * a non-NULL FIX callback explicitly declares compatibility work. */
+    unsigned int sides, required_capabilities;
+    maage_content_registration side_bind_int, side_bind_ext, side_bind_fix;
+    maage_content_registration initialize; /* Once, after immutable finalization; never for catalogs. */
 };
 /* Registration/initialization boundary lookup only. A known module may publish
  * NULL data; missing modules fail explicitly. Resolve content names through the
@@ -72,6 +86,9 @@ typedef maage_status (*maage_content_appearance_resolver)(void *context, const m
 typedef struct maage_content_config {
     const maage_content_module *const *modules;
     size_t module_count;
+    maage_execution_context execution;                     /* Required; explicit side and facilities. */
+    int catalog_only;                                      /* Pure DEFINE/bind/finalize; skip side hooks and initialization. */
+    const maage_content *identity_peer;                    /* Optional exact numeric identity check before initialize. */
     maage_content_failure *failure;                        /* Optional caller-owned creation failure output. */
     maage_content_presentation_resolver resolver;          /* NULL = headless */
     maage_content_appearance_resolver appearance_resolver; /* NULL for headless. */
@@ -79,10 +96,10 @@ typedef struct maage_content_config {
     const maage_biome_registry *presentation_biomes;
 } maage_content_config;
 /* Validate the complete dependency graph before callbacks, then execute all
- * define callbacks, all resolve callbacks, finalization, and all initialize
+ * DEFINE, BIND 1: INT, BIND 2: EXT, BIND 3: FIX, FINALIZE and INITIALIZE
  * callbacks. Stable topological order chooses the earliest submitted ready
  * module, preserving deterministic numeric registration order across frontends.
- * Arrays, descriptors and config borrow only through this call. Callbacks and
+ * Descriptor arrays borrow for content lifetime; config borrows through this call. Callbacks and
  * registered behavior data outlive all registry users/jobs; own() can retain data.
  * The engine supplies no built-in game. output resets to NULL on failure.
  * Destroy after World and its jobs stop. */
@@ -99,5 +116,13 @@ const maage_sound_registry *maage_content_sounds(const maage_content *content);
 const maage_container_registry *maage_content_containers(const maage_content *content);
 const maage_fluid_registry *maage_content_fluids(const maage_content *content);
 const maage_block_geometry_registry *maage_content_geometry(const maage_content *content);
+/* Boundary-only validation. Rejects differing numeric identity maps before any
+ * local session traffic; side-only networked identities need future negotiation. */
+maage_status maage_content_validate_identity(const maage_content *content, const maage_content *peer, maage_status_trace *trace);
+const maage_execution_context *maage_content_execution(const maage_content *content);
+const char *maage_content_phase_name(maage_content_phase phase);
+/* Descriptors remain borrowed for content lifetime so another runtime can compose
+ * the same submitted module set independently. No callback state is shared. */
+maage_status maage_content_composition(const maage_content *content, const maage_content_module *const **modules, size_t *count);
 maage_status maage_content_destroy(maage_content *content);
 #endif
