@@ -70,8 +70,9 @@ static int session_command_valid(const maage_session_command *command) {
         return command->paused == 0 || command->paused == 1;
     case MAAGE_CMD_VIEW:
         return command->render_radius > 0 && command->render_radius <= MAAGE_WORLD_MAX_RADIUS;
+    case MAAGE_CMD_CREATIVE_ACTION:
+        return command->container_identity != 0 && command->container_identity <= 4294967295UL && command->container_revision != 0 && command->container_revision <= 4294967295UL && command->creative.tab != 0 && command->creative.tab < MAAGE_CONTENT_ID_INVALID && command->creative.entry < MAAGE_CONTENT_ID_INVALID && command->creative.kind >= MAAGE_CREATIVE_TAKE && command->creative.kind <= MAAGE_CREATIVE_OUTSIDE && command->creative.secondary <= 1 && command->creative.hotbar < MAAGE_HOTBAR_SLOTS;
     case MAAGE_CMD_INPUT:
-    case MAAGE_CMD_CREATIVE_PICK:
     case MAAGE_CMD_RESPAWN:
     case MAAGE_CMD_DISCONNECT:
         return 1;

@@ -54,7 +54,7 @@ static void base_container_presentation(maage_container_definition *definition) 
     definition->presentation.width = 176;
     definition->presentation.height = 166;
     definition->presentation.texture_edge = 256;
-    definition->presentation.creative_background = MAAGE_CONTENT_ID_INVALID;
+    definition->presentation.creative_tabs = MAAGE_CONTENT_ID_INVALID;
     definition->presentation.inventory_x = 8;
     definition->presentation.inventory_y = 72;
     definition->presentation.show_inventory = 1;
@@ -66,14 +66,13 @@ maage_status maage_base_containers(maage_content_context *context, maage_base_id
     maage_container_definition definition;
     maage_container_slot_definition player_slots[5], table_slots[10], furnace_slots[3];
     maage_container_progress_definition progress[2];
-    maage_texture_id inventory, table, furnace, creative, scrollbar;
+    maage_texture_id inventory, table, furnace, tabs;
     maage_status result;
     unsigned int i;
     result = base_container_texture(context, "minecraft/textures/gui/container/inventory.png", &inventory);
     if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/crafting_table.png", &table);
     if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/furnace.png", &furnace);
-    if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/creative_inventory/tab_items.png", &creative);
-    if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/creative_inventory/tabs.png", &scrollbar);
+    if (!maage_status_failed(result)) result = base_container_texture(context, "minecraft/textures/gui/container/creative_inventory/tabs.png", &tabs);
     if (maage_status_failed(result)) return result;
 
     base_container_presentation(&definition);
@@ -86,8 +85,7 @@ maage_status maage_base_containers(maage_content_context *context, maage_base_id
     definition.personal = 1;
     definition.creative_catalog = 1;
     definition.presentation.background = inventory;
-    definition.presentation.creative_background = creative;
-    definition.presentation.creative_scrollbar = scrollbar;
+    definition.presentation.creative_tabs = tabs;
     definition.presentation.creative_width = 195;
     definition.presentation.creative_height = 136;
     definition.presentation.title = "Crafting";

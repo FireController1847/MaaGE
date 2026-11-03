@@ -4,6 +4,7 @@
 #include "maage/presentation.h"
 #include "maage/biome.h"
 #include "maage/items.h"
+#include "maage/creative.h"
 #include "maage/crafting.h"
 #include "maage/smelting.h"
 #include "maage/fluids.h"
@@ -32,6 +33,7 @@ typedef struct maage_content_context {
     maage_block_registry *blocks;
     maage_biome_registry *biomes;
     maage_item_registry *items;
+    maage_creative_registry *creative;
     maage_recipe_registry *recipes;
     maage_smelting_registry *smelting;
     maage_fuel_registry *fuels;
@@ -70,8 +72,8 @@ typedef maage_status (*maage_content_appearance_resolver)(void *context, const m
 typedef struct maage_content_config {
     const maage_content_module *const *modules;
     size_t module_count;
-    maage_content_failure *failure;               /* Optional caller-owned creation failure output. */
-    maage_content_presentation_resolver resolver; /* NULL = headless */
+    maage_content_failure *failure;                        /* Optional caller-owned creation failure output. */
+    maage_content_presentation_resolver resolver;          /* NULL = headless */
     maage_content_appearance_resolver appearance_resolver; /* NULL for headless. */
     void *resolver_context;
     const maage_biome_registry *presentation_biomes;
@@ -89,6 +91,7 @@ const maage_presentation_registry *maage_content_presentation(const maage_conten
 const maage_block_registry *maage_content_blocks(const maage_content *content);
 const maage_biome_registry *maage_content_biomes(const maage_content *content);
 const maage_item_registry *maage_content_items(const maage_content *content);
+const maage_creative_registry *maage_content_creative(const maage_content *content);
 const maage_recipe_registry *maage_content_recipes(const maage_content *content);
 const maage_smelting_registry *maage_content_smelting(const maage_content *content);
 const maage_fuel_registry *maage_content_fuels(const maage_content *content);

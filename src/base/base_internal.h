@@ -11,6 +11,7 @@ maage_status maage_content_register_state(maage_block_registry *, const maage_ba
 maage_status maage_furnace_content_blocks(maage_block_registry *, maage_base_ids *, const maage_content_config *);
 maage_status maage_furnace_content_items(maage_content_context *, maage_base_ids *);
 maage_status maage_base_blocks(maage_content_context *, maage_base_ids *);
+maage_status maage_base_creative(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_items(maage_content_context *, maage_base_ids *);
 maage_status maage_base_bind(maage_content_context *, maage_base_ids *);
 maage_status maage_base_recipes(maage_content_context *, const maage_base_ids *);

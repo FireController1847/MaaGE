@@ -120,6 +120,7 @@ static maage_status maage_base_define(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_containers(context, ids);
     if (!maage_status_failed(result)) result = maage_base_blocks(context, ids);
     if (!maage_status_failed(result)) result = maage_base_items(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_creative(context, ids);
     return result;
 }
 static maage_status maage_base_resolve(maage_content_context *context) {

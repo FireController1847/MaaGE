@@ -18,30 +18,6 @@ maage_status maage_crafting_refresh(maage_crafting_container *container, const m
     if (!maage_status_failed(result)) container->output = match.output;
     return maage_status_failed(result) ? result : crafting_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
-static maage_status quick_move(maage_item_stack *source, maage_inventory *inventory, const maage_item_registry *items, unsigned int first, unsigned int end) {
-    const maage_item_definition *item;
-    maage_item_stack *destination;
-    unsigned int pass, i, amount, original;
-    if (!maage_item_stack_valid(items, source)) return crafting_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_MUTATE);
-    if (!source->count) return crafting_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
-    original = source->count;
-    item = maage_item_registry_get(items, source->item_id);
-    for (pass = 0; pass < 2; ++pass)
-        for (i = first; i < end && source->count; ++i) {
-            destination = &inventory->slots[i];
-            if (destination == source || (pass == 0 ? (!destination->count || !stacks_equal(source, destination)) : destination->count)) continue;
-            amount = item->max_stack - destination->count;
-            if (amount > source->count) amount = source->count;
-            if (!destination->count) {
-                *destination = *source;
-                destination->count = 0;
-            }
-            destination->count += amount;
-            source->count -= amount;
-        }
-    if (!source->count) memset(source, 0, sizeof(*source));
-    return crafting_status(original == source->count ? MAAGE_STATUS_NOOP : MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MUTATE);
-}
 static maage_status craft_once(maage_crafting_container *container, maage_inventory *inventory, const maage_item_registry *items, const maage_recipe_match *match, int quick) {
     maage_inventory next;
     maage_item_stack grid[MAAGE_CRAFTING_CELLS], *cursor;
@@ -102,9 +78,7 @@ maage_status maage_crafting_click(maage_crafting_container *container, maage_inv
     if (group != MAAGE_SLOT_CRAFT_RESULT) {
         source = group == MAAGE_SLOT_INVENTORY ? &inventory->slots[slot] : &container->inputs[slot];
         if (action == MAAGE_SLOT_QUICK_MOVE)
-            result = quick_move(source, inventory, items,
-                                group == MAAGE_SLOT_INVENTORY && slot < 9 ? 9U : 0U,
-                                group == MAAGE_SLOT_INVENTORY && slot >= 9 ? 9U : MAAGE_INVENTORY_SLOTS);
+            result = maage_inventory_transfer(source, inventory, items, group == MAAGE_SLOT_INVENTORY && slot < 9 ? 9U : 0U, group == MAAGE_SLOT_INVENTORY && slot >= 9 ? 9U : MAAGE_INVENTORY_SLOTS);
         else
             result = maage_item_stack_click(source, &inventory->cursor, items, action == MAAGE_SLOT_SECONDARY);
         if (maage_status_failed(result)) return result;

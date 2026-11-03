@@ -821,7 +821,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_ui_create(renderer, window, directory, &resources, &ui, trace);
     if (maage_status_failed(operation)) goto done;
-    operation = maage_client_ui_set_content(ui, items, blocks, resources.inventory_grass_color, resources.uv, resources.texture_count);
+    operation = maage_client_ui_set_content(ui, items, blocks, maage_content_creative(content), resources.inventory_grass_color, resources.uv, resources.texture_count);
     if (maage_status_failed(operation)) goto done;
     operation = maage_client_frontend_create(ui, instance, content, &frontend, trace);
     if (maage_status_failed(operation)) goto done;
@@ -1055,6 +1055,7 @@ choose_world:
             ui_input.secondary_pressed = input.secondary_pressed;
             ui_input.inventory = maage_control_gui_pressed(controls, controls->inventory, &input);
             ui_input.shift = input.keys[MAAGE_INPUT_KEY_SHIFT];
+            ui_input.text = input.text;
         }
         ui_input.mouse_x = (float) input.mouse_x;
         ui_input.mouse_y = (float) input.mouse_y;

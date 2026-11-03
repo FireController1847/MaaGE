@@ -167,7 +167,8 @@ void maage_client_ui_notice_time(maage_client_ui *ui, double now) {
 maage_status maage_client_ui_destroy(maage_client_ui *ui) {
     if (!ui) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_render_texture_destroy(ui->resources.texture);
-    free(ui->creative_items);
+    free(ui->creative_filter);
+    free(ui->commands);
     free(ui->debug_cache.vertices);
     free(ui->vertices);
     free(ui->projective_depth);
@@ -195,10 +196,11 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         ui->dragging_sensitivity = ui->dragging_controls = 0;
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     }
+    if (ui->inventory_drag_active && (!input->raw || !input->raw->focused || input->raw->focus_lost || ui->mode_pending || ui->mode_changing || framebuffer_width <= 0 || framebuffer_height <= 0)) maage_client_ui_inventory_reset(ui);
     if (framebuffer_width <= 0 || framebuffer_height <= 0 || window_width <= 0 || window_height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     ui->route_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
-    scale = framebuffer_width / 320;
-    vertical = framebuffer_height / 240;
+    scale = (int) (framebuffer_width - (ui->safe_area.left + ui->safe_area.right) * (double) framebuffer_width / window_width) / 320;
+    vertical = (int) (framebuffer_height - (ui->safe_area.top + ui->safe_area.bottom) * (double) framebuffer_height / window_height) / 240;
     if (scale > vertical) scale = vertical;
     if (scale < 1) scale = 1;
     if (ui->requested_scale && scale > ui->requested_scale) scale = ui->requested_scale;
@@ -238,7 +240,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
     }
     id = maage_client_ui_current(ui);
-    if (input->inventory && ui->has_snapshot && (!id || id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE)) {
+    if (input->inventory && !maage_client_ui_search_focused(ui) && ui->has_snapshot && (!id || id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE)) {
         if (id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE) return maage_client_ui_back(ui);
         if (!id && !ui->container_command_pending) {
             maage_session_command command;
@@ -597,7 +599,8 @@ maage_status maage_client_ui_open_root(maage_client_ui *ui, maage_client_ui_scre
         ui->container_command_pending = 0;
         ui->container_command_sequence = 0;
         ui->container_close_requested = 0;
-        ui->command_read = ui->command_write = ui->command_count = 0;
+        ui->command_read = ui->command_count = ui->container_queued = 0;
+        maage_client_ui_inventory_reset(ui);
     }
     return maage_client_ui_open(ui, id);
 }

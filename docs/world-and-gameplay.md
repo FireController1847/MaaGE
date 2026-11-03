@@ -34,6 +34,12 @@ One finalized growable recipe registry serves temporary 2x2 inventory and 3x3 ta
 
 Crafting Table storage is temporary: close returns cursor/inputs to inventory and reserves item entities for overflow. Failed closure retains unreturned stacks for retry/checkpoint; the open table and derived result are not saved. Furnaces instead use persistent World-owned block entities, registered codecs and containers. Separate numeric smelting/fuel registries drive 200-step owner cooking, snapshot progress and extraction-only fractional XP. GUI progress draws integer steps from authoritative copies, not Client timers. See `include/maage/{crafting,smelting,furnace,containers,block_entity}.h`.
 
+## Creative Inventory Transactions
+
+Session protocol 23 replaces the full-cursor Creative pick with typed catalog/player-slot, clone, hotbar, drop, destroy and clear actions. The Server validates Creative mode, health, the accessible personal container's identity and exact revision, registered tab/entry scope, item/metadata/damage/count validity and slot/action bounds. Relative operations run in owner FIFO order; stale commands fail explicitly. Generic personal slot commands cannot bypass Creative policy.
+
+Catalog selection owns no storage. Shared `maage_inventory_operate` transactions preflight player-slot changes in a copied inventory before commit, including distribution, collection, hotbar swaps and bounded transfers. Cursor and selected-slot ownership remain in the existing inventory/checkpoint. Deletion creates no entities; drops reserve World entity capacity before ownership changes. Creative closure drops its carried stack before normal container teardown, retaining it and retrying when reservation fails. Survival crafting/table/furnace closure and persistent block-entity ownership use their existing paths.
+
 ## Current Limits
 
 MaaGE does not yet implement general mobs/AI, complete combat/Survival, redstone, dimensions or remote multiplayer. Neither generator nor presentation promises exact Minecraft 1.7.10 parity. See [the roadmap](development-roadmap.md) for plans and [AGENTS.md](../AGENTS.md) for durable rules.

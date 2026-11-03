@@ -197,7 +197,7 @@ static maage_status content_validate_presentation(const maage_content_context *c
     }
     for (i = 0; i < maage_container_count(context->containers); ++i) {
         container = maage_container_get(context->containers, (maage_container_id) i + 1);
-        if (!container || !maage_presentation_texture(context->presentation, container->presentation.background) || (container->creative_catalog && (!maage_presentation_texture(context->presentation, container->presentation.creative_background) || !maage_presentation_texture(context->presentation, container->presentation.creative_scrollbar)))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        if (!container || !maage_presentation_texture(context->presentation, container->presentation.background) || (container->creative_catalog && (!maage_presentation_texture(context->presentation, container->presentation.creative_tabs) || !maage_creative_tab_count(context->creative)))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (j = 0; j < container->progress_count; ++j)
             if (!maage_presentation_texture(context->presentation, container->progress[j].texture)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
@@ -233,6 +233,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     if (!maage_status_failed(result)) result = maage_biome_registry_init(context->biomes);
     if (!maage_status_failed(result)) result = maage_block_registry_create(0, 0, &context->blocks);
     if (!maage_status_failed(result)) result = maage_item_registry_create(0, &context->items);
+    if (!maage_status_failed(result)) result = maage_creative_create(context->items, context->presentation, &context->creative);
     if (!maage_status_failed(result)) result = maage_recipe_registry_create(context->items, &context->recipes);
     if (!maage_status_failed(result)) result = maage_smelting_registry_create(context->items, &context->smelting);
     if (!maage_status_failed(result)) result = maage_fuel_registry_create(context->items, &context->fuels);
@@ -326,6 +327,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     }
     result = maage_presentation_finalize(context->presentation);
     if (!maage_status_failed(result)) result = maage_item_registry_finalize(context->items);
+    if (!maage_status_failed(result)) result = maage_creative_finalize(context->creative);
     if (!maage_status_failed(result)) result = maage_sound_finalize(context->sounds);
     if (!maage_status_failed(result)) result = maage_fluid_finalize(context->fluids, context->blocks);
     if (!maage_status_failed(result)) result = maage_block_geometry_finalize(context->geometry);
@@ -375,6 +377,7 @@ const maage_fuel_registry *maage_content_fuels(const maage_content *content) {
 maage_status maage_content_destroy(maage_content *content) {
     content_owner *node, *next;
     if (!content) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    maage_creative_destroy(content->context.creative);
     maage_presentation_destroy(content->context.presentation);
     maage_smelting_destroy(content->context.smelting);
     maage_fuel_destroy(content->context.fuels);
@@ -414,4 +417,8 @@ const maage_container_registry *maage_content_containers(const maage_content *co
 
 const maage_sound_registry *maage_content_sounds(const maage_content *content) {
     return content ? content->context.sounds : NULL;
+}
+
+const maage_creative_registry *maage_content_creative(const maage_content *content) {
+    return content ? content->context.creative : NULL;
 }

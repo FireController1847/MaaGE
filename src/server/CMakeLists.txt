@@ -1,7 +1,7 @@
 if(NOT TARGET MaaGE::World OR NOT TARGET MaaGE::Thread OR NOT TARGET MaaGE::Session)
     message(FATAL_ERROR "The reusable authoritative Server requires MAAGE_BUILD_WORLD=ON and MaaGE::Thread and MaaGE::Session.")
 endif()
-add_library(maage_server_core STATIC ../application/content_modules.c server.c runtime.c)
+add_library(maage_server_core STATIC ../application/content_modules.c server.c runtime.c creative.c)
 add_library(MaaGE::Server ALIAS maage_server_core)
 add_dependencies(maage_server_core maage_versions)
 maage_configure_portable_target(maage_server_core)

@@ -1,3 +1,4 @@
+#include "creative.h"
 #include "../application/content_modules.h"
 #include "maage/server_runtime.h"
 #include "maage/content.h"
@@ -217,6 +218,13 @@ static maage_status server_reject(maage_server_runtime *runtime, unsigned char c
 
 static maage_status server_close_container(maage_server_runtime *runtime) {
     maage_status result;
+    const maage_container_definition *definition = maage_container_get(maage_content_containers(runtime->content), runtime->game.crafting.kind);
+    runtime->publication_dirty = 1;
+    if (definition && definition->creative_catalog && runtime->game.mode == MAAGE_GAME_MODE_CREATIVE && runtime->game.health && runtime->game.inventory.cursor.count) {
+        runtime->game.crafting.closing = 1;
+        result = maage_gameplay_drop(&runtime->game, &runtime->player, runtime->world, maage_content_items(runtime->content), runtime->yaw, runtime->pitch, MAAGE_INVENTORY_SLOTS, 1);
+        if (maage_status_failed(result)) return result;
+    }
     result = maage_container_close(maage_content_containers(runtime->content), runtime->world, &runtime->game, &runtime->player);
     runtime->publication_dirty = 1;
     return result;
@@ -401,6 +409,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
                 server_service_container(runtime);
                 return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
             }
+            if (runtime->game.mode == MAAGE_GAME_MODE_CREATIVE && maage_container_get(maage_content_containers(runtime->content), runtime->game.crafting.kind)->creative_catalog) return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
             result = maage_container_action(maage_content_containers(runtime->content), runtime->world, &runtime->game, &runtime->player, maage_content_recipes(runtime->content), command->container_revision, command->slot_group, command->container_slot, command->slot_action);
         }
         runtime->publication_dirty = 1;
@@ -411,14 +420,8 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         if (!maage_status_failed(result) && runtime->game.crafting.kind) ++runtime->game.crafting.revision;
         runtime->publication_dirty = 1;
         break;
-    case MAAGE_CMD_CREATIVE_PICK:
-        if (runtime->game.mode != MAAGE_GAME_MODE_CREATIVE || !runtime->game.health ||
-            !maage_container_get(maage_content_containers(runtime->content), runtime->game.crafting.kind) || !maage_container_get(maage_content_containers(runtime->content), runtime->game.crafting.kind)->creative_catalog || runtime->game.crafting.closing ||
-            command->container_identity != runtime->game.crafting.identity)
-            return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
-        result = maage_inventory_creative(&runtime->game.inventory, items, command->item_id, command->item_metadata);
-        if (!maage_status_failed(result)) ++runtime->game.crafting.revision;
-        runtime->publication_dirty = 1;
+    case MAAGE_CMD_CREATIVE_ACTION:
+        result = maage_server_creative_action(runtime->content, runtime->world, &runtime->game, &runtime->player, command, runtime->yaw, runtime->pitch);
         break;
     case MAAGE_CMD_GAME_MODE:
         if (command->game_mode != MAAGE_GAME_MODE_SURVIVAL && command->game_mode != MAAGE_GAME_MODE_CREATIVE) return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SET);

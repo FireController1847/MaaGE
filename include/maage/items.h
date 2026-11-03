@@ -36,6 +36,8 @@ typedef struct maage_item_definition {
     maage_block_state_id (*icon_state)(const struct maage_item_definition *, unsigned int);
     maage_texture_id (*icon_texture)(const struct maage_item_definition *, unsigned int);
     const char *(*variant_name)(const struct maage_item_definition *, unsigned int);
+    /* Optional immutable tooltip lines, borrowed from module-owned data. */
+    const char *(*tooltip)(const struct maage_item_definition *, unsigned int);
     unsigned int model;         /* Shared numeric presentation category. */
     unsigned int texture_index; /* Builtin item-atlas tile, initialization only. */
     maage_texture_id texture_id;
@@ -84,7 +86,28 @@ maage_status maage_inventory_add(maage_inventory *inventory, const maage_item_re
 maage_status maage_item_stack_click(maage_item_stack *source, maage_item_stack *cursor, const maage_item_registry *registry, int secondary);
 /* Primary picks up/merges/swaps; secondary picks up half or places one. */
 maage_status maage_inventory_click(maage_inventory *inventory, const maage_item_registry *registry, unsigned int slot, int secondary);
-maage_status maage_inventory_creative(maage_inventory *inventory, const maage_item_registry *registry, maage_item_id item, unsigned int metadata);
+/* Merge into [first,end), excluding the source if it belongs to that range.
+ * Validate all involved stacks before mutation; retain any untransferred source.
+ * Existing compatible stacks precede empty slots. */
+maage_status maage_inventory_transfer(maage_item_stack *, maage_inventory *, const maage_item_registry *, unsigned int first, unsigned int end);
+enum {
+    MAAGE_INVENTORY_CLICK = 1,
+    MAAGE_INVENTORY_QUICK_MOVE,
+    MAAGE_INVENTORY_HOTBAR_SWAP,
+    MAAGE_INVENTORY_CLONE,
+    MAAGE_INVENTORY_COLLECT,
+    MAAGE_INVENTORY_DISTRIBUTE,
+    MAAGE_INVENTORY_QUICK_MOVE_MATCHING
+};
+typedef struct maage_inventory_operation {
+    unsigned int kind, slot, hotbar, secondary;
+    maage_item_stack match;                     /* Validated value for a shift-double-click transfer. */
+    unsigned char slots[MAAGE_INVENTORY_SLOTS]; /* Distribution membership, no borrowed storage. */
+} maage_inventory_operation;
+/* Atomic value-only player-slot transactions. hotbar_only restricts accessible
+ * slots and makes quick-move delete a catalog hotbar stack (Creative only). Clone requires
+ * creative. Distribution and collection share these rules with GUI previews. */
+maage_status maage_inventory_operate(maage_inventory *, const maage_item_registry *, const maage_inventory_operation *, int creative, int hotbar_only);
 maage_status maage_item_placement_state(const maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
 /* Pure numeric rules; randomness is caller-owned and committed with mutation. */
 int maage_item_can_harvest(const maage_item_definition *tool, const maage_block_definition *block);

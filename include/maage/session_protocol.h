@@ -6,6 +6,7 @@
 #include "maage/entities.h"
 #include "maage/status.h"
 #include "maage/sounds.h"
+#include "maage/creative.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,12 +14,12 @@ extern "C" {
 
 /* Numeric local-session contract. Future network encoding must serialize fields
  * explicitly, not memcpy C layouts (including unsigned long and padding). */
-#define MAAGE_SESSION_PROTOCOL_VERSION 22U
+#define MAAGE_SESSION_PROTOCOL_VERSION 23U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
     MAAGE_CMD_HOTBAR = 2,
-    MAAGE_CMD_CREATIVE_PICK = 4,
+    MAAGE_CMD_CREATIVE_ACTION = 4,
     MAAGE_CMD_GAME_MODE = 5,
     MAAGE_CMD_RESPAWN = 6,
     MAAGE_CMD_PAUSE = 7,
@@ -33,6 +34,25 @@ typedef enum maage_session_command_kind {
     MAAGE_CMD_CONTAINER_PAGE = 16
 } maage_session_command_kind;
 
+enum {
+    MAAGE_CREATIVE_TAKE = 1,
+    MAAGE_CREATIVE_TAKE_STACK,
+    MAAGE_CREATIVE_CLONE,
+    MAAGE_CREATIVE_HOTBAR,
+    MAAGE_CREATIVE_DROP,
+    MAAGE_CREATIVE_PLAYER_SLOT,
+    MAAGE_CREATIVE_PLAYER_DROP,
+    MAAGE_CREATIVE_DESTROY,
+    MAAGE_CREATIVE_CLEAR,
+    MAAGE_CREATIVE_OUTSIDE
+};
+typedef struct maage_creative_action {
+    unsigned int kind, secondary, hotbar;
+    maage_creative_tab_id tab;     /* Policy/entry scope only; tab selection is local. */
+    maage_creative_entry_id entry; /* Zero denotes an empty catalog cell. */
+    maage_inventory_operation inventory;
+} maage_creative_action;
+
 typedef struct maage_session_command {
     unsigned int protocol_version;
     unsigned int kind;
@@ -43,7 +63,9 @@ typedef struct maage_session_command {
     unsigned int inventory_slot;
     /* OPEN requests the player container only; tables open from authoritative
      * use/raycast. CLOSE/SLOT require the current nonzero container identity.
-     * RESULT also requires the published revision. No Client stacks/recipes. */
+     * RESULT and Creative actions require the published revision. Creative
+     * references immutable catalog entry IDs; match stacks are comparison keys,
+     * never Client-owned inventory or claimed outputs. */
     unsigned long container_identity, container_revision;
     unsigned long container_view_first;
     unsigned int slot_group, container_slot, slot_action;
@@ -53,8 +75,7 @@ typedef struct maage_session_command {
     maage_world_target predicted_target;       /* Request only; never a claimed mutation. */
     maage_block_state_id predicted_state;      /* PLACE_PREVIEW result to acknowledge, never execute. */
     int secondary_click;
-    maage_item_id item_id;
-    unsigned int item_metadata;
+    maage_creative_action creative;
     unsigned int game_mode; /* Request; server validates and applies rules. */
     int paused;             /* Request, not a write into authoritative simulation. */
     int render_radius;

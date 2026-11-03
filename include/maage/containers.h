@@ -33,8 +33,9 @@ typedef struct maage_container_progress_definition {
     int vertical, require_active;
 } maage_container_progress_definition;
 typedef struct maage_container_presentation {
-    maage_texture_id background, creative_background, creative_scrollbar;
+    maage_texture_id background, creative_tabs;
     unsigned int texture_edge, width, height, creative_width, creative_height;
+    /* creative_catalog uses the shared 195x136 layout and 256px tab sprites. */
     const char *title, *inventory_title;
     int title_x, title_y, title_centered, inventory_x, inventory_y;
     int player_preview, show_inventory;

@@ -62,10 +62,13 @@ void maage_client_ui_notify(maage_client_ui *ui, maage_status result, double now
 void maage_client_ui_notice_time(maage_client_ui *ui, double now);
 maage_status maage_client_ui_destroy(maage_client_ui *ui);
 /* Immutable numeric content borrowed for icons; Server snapshots copied by value. */
-maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_registry *items, const maage_block_registry *blocks, const float inventory_grass_color[3], const float (*item_uv)[4], size_t texture_count);
+maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_registry *items, const maage_block_registry *blocks, const maage_creative_registry *creative, const float inventory_grass_color[3], const float (*item_uv)[4], size_t texture_count);
 maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_session_snapshot *snapshot);
-/* NOOP when empty. FIFO of authoritative commands; a full queue returns
- * BUFFER_OVERFLOW and retains the unconsumed request for caller feedback. */
+/* Growable FIFO retains accepted input through transport backpressure. NOOP
+ * while empty or awaiting an inventory acknowledgement. Allocation failures
+ * report explicitly before accepting the new request. One acknowledged
+ * container transaction supplies the revision for the next Creative operation;
+ * registered output slots retain the observed result revision. */
 void maage_client_ui_command_submitted(maage_client_ui *ui, const maage_session_command *command, unsigned long sequence);
 maage_status maage_client_ui_take_command(maage_client_ui *ui, maage_session_command *command);
 /* On local transport BUFFER_OVERFLOW, restore the just-taken command at the

@@ -12,6 +12,7 @@ typedef unsigned int maage_input_key;
 #define MAAGE_INPUT_KEY_D 7U
 #define MAAGE_INPUT_KEY_E 8U
 #define MAAGE_INPUT_KEY_Q 20U
+#define MAAGE_INPUT_KEY_T 23U
 #define MAAGE_INPUT_KEY_SPACE 44U
 #define MAAGE_INPUT_KEY_ESCAPE 41U
 #define MAAGE_INPUT_KEY_F3 60U
@@ -19,6 +20,9 @@ typedef unsigned int maage_input_key;
 #define MAAGE_INPUT_KEY_F11 68U
 #define MAAGE_INPUT_KEY_ENTER 40U
 #define MAAGE_INPUT_KEY_TAB 43U
+#define MAAGE_INPUT_KEY_HOME 74U
+#define MAAGE_INPUT_KEY_DELETE 76U
+#define MAAGE_INPUT_KEY_END 77U
 #define MAAGE_INPUT_KEY_UP 82U
 #define MAAGE_INPUT_KEY_DOWN 81U
 #define MAAGE_INPUT_KEY_LEFT 80U

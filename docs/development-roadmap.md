@@ -7,7 +7,7 @@ This is a source-level view of existing foundations and planned work—not autho
 | Area | Present in source | Principal gaps |
 | --- | --- | --- |
 | Applications | Native Core/World/Session, independent Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote networking, Server administration GUI and hosting workflow |
-| Presentation | Metal/Vulkan, modern OpenGL scene path, limited legacy/Software; Title/world/options/Controls/inventory UI, configurable input, visual replica/light, GPU streaming, player appearance and audio | Programmer platform validation, Wayland capture, secondary renderer coverage and visual polish |
+| Presentation | Metal/Vulkan, modern OpenGL scene path, limited legacy/Software; Title/world/options/Controls/inventory UI, registered Creative tabs/search, configurable input, visual replica/light, GPU streaming, player appearance and audio | Programmer platform validation, Wayland capture, secondary renderer coverage and visual polish |
 | Content and world | Dependency-ordered static modules, Base content, growable numeric registries, registered fluids/geometry/containers/sounds, regional generation, async I/O and region saves | No dynamic module loader, scripting, modpack distribution or remote content negotiation |
 | Gameplay | Movement, mining/placement, typed item/falling entities, drops, support/random ticks, saplings/wheat, food use, transactional 2x2/3x3 crafting and persistent furnaces | Full Survival, mobs/combat/AI, redstone, enchanting, dimensions and endgame |
 | Launcher/resources | Microsoft access verification, profile-specific skin cache, verified reconstructed assets, UUID instances and exact Client package selection | Remote package deployment and modpack install support |

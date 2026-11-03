@@ -11,7 +11,7 @@ The Client owns UI, controls, camera, sound and visuals; the Server alone owns g
 | 0 | Gameplay | Hotbar, HUD/vitals and F3; nonmodal |
 | 1 | Pause | Resume, Options, Save/Quit |
 | 2 | Options | FOV, Video, Sound, Controls |
-| 3 | Inventory | Survival 2x2 crafting or Creative catalog |
+| 3 | Inventory | Survival 2x2 crafting or registered Creative tabs/search/player inventory |
 | 4 | Title | Panorama, Singleplayer, Options, Quit |
 | 5 | Worlds | Asynchronous catalog and world actions |
 | 6 | Create World | Name, seed, game mode |
@@ -26,6 +26,18 @@ The Client owns UI, controls, camera, sound and visuals; the Server alone owns g
 Drawing and hit testing share computed bounds within the native safe viewport. Text entry currently supports ASCII; unimplemented settings/actions remain disabled or absent. Pause/Options stop owner gameplay and music but retain safe streaming; inventory/table release capture without pausing. Save/Quit flushes asynchronously; Quit hides the window while pending teardown completes.
 
 Actions live in a growable Client registry. Bindings use USB HID keyboard usages or one-based mouse buttons, translated by each OS adapter. Remapping waits for a new edge; Escape unassigns, focus loss cancels, duplicate bindings remain independent, and per-action/whole-list Reset restore defaults. System Escape/F3/F11 and GUI transfer modifiers are not gameplay bindings. `config/options.ini` stores `[controls]` as `key:<usage>`, `mouse:<button>` or `none`, and `[mouse]` sensitivity 0..100 (default 50) with invert; malformed entries retain defaults. `[video] render_distance` defaults to 8, usually offered as 1..32 but explicitly larger valid choices remain representable. CLI overrides startup preferences. Changing distance does not regenerate terrain.
+
+## Creative Inventory
+
+The personal container's Creative presentation uses a 195x136 logical panel, 9x5 catalog, authoritative nine-slot hotbar and the original registered `creative_inventory/{tabs,tab_items,tab_item_search,tab_inventory}.png` resources. Selected tabs draw after the panel; unselected tabs draw before it. Extra registered categories page ten at a time, retaining Search and Survival Inventory on the right. Layout, slot hover bounds, scrollbar travel and safe-area scaling share the input/drawing geometry. Selecting a tab or reopening resets scrolling; reopening retains the selected tab and clears its query.
+
+Search stays focused in its tab, accepts up to fifteen ASCII characters and filters a reusable ordered entry-ID view against metadata-specific display names and registered tooltip text. Matching is case-insensitive; empty results have no active scrollbar. Backspace, Delete, selection and cursor movement edit locally. The default chat key T selects Search from another tab; while Search is focused, the inventory binding types instead of closing. Escape closes. Hotbar bindings retain their empty-cursor shortcut precedence.
+
+Catalog primary/secondary clicks take one item, increase/decrease matching carried quantities, or clear a different carried stack. Shift-primary fills the stack; middle-click clones into an empty cursor. Number bindings replace a real hotbar slot with a full catalog stack; drop bindings create one item or, with Control, a full stack. Player slots use shared stack clicks, splitting, swaps, transfers, drag distribution and double-click collection. Shift-clicking the catalog hotbar deletes that stack; the Survival Inventory tab transfers between main inventory and hotbar instead. Shift-double-click transfers matching stacks from the source region.
+
+Survival Inventory uses the Creative inventory background, shared player preview, real main inventory/hotbar and a destroy slot. Unsupported equipment positions are decorative, with no fabricated storage or crafting state. Destroy consumes the cursor without entities; shift-destroy atomically clears player inventory, cursor and temporary player inputs. Outside clicks and normal Creative cursor closure use the reserved owner drop path. Changing tabs retains the cursor.
+
+The UI queues typed requests without changing authoritative stacks. Its growable FIFO retains accepted clicks across transport backpressure, allowing one container request at a time; Creative actions acquire the next acknowledged revision, while registered output slots retain their observed result revision. Tab scope is captured with each request, while search/tab selection itself remains local. Inventory, crafting-table and furnace layouts continue through the registered container screen and atlas. Compilation, input feel and visual fidelity still require programmer verification.
 
 ## Replica and Asynchronous Presentation
 
@@ -49,4 +61,4 @@ The Server owns sprint eligibility; Client FOV smoothing changes the world view 
 
 ## Current Limits
 
-Creative has one catalog without categories/search. Armor/capes, remote players, complete Survival UI, effects/particles, exact reference lightmaps and portions of secondary rendering are incomplete. Wayland does not yet provide Client relative mouse capture. Source-level contracts are not runtime/platform verification.
+Armor/equipment storage, enchantments, potion behavior, capes, remote players, complete combat/Survival, effects/particles, exact reference lightmaps and portions of secondary rendering are incomplete. Unsupported items are absent from Creative categories; some tabs are empty. Wayland does not yet provide Client relative mouse capture. Source-level contracts are not runtime/platform verification.

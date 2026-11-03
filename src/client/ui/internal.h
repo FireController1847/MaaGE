@@ -6,7 +6,7 @@
 #include "maage/internal/registry_pages.h"
 
 /* The original GUI resources occupy the first 512 atlas rows. */
-#define MAAGE_CLIENT_UI_COMMAND_CAPACITY 64U
+#define MAAGE_CLIENT_UI_COMMAND_INITIAL_CAPACITY 64U
 #define MAAGE_CLIENT_UI_BLOCK_ATLAS_Y 512
 typedef struct maage_client_ui_screen {
     maage_client_ui_screen_draw draw;
@@ -63,14 +63,25 @@ struct maage_client_ui {
     double highlight_until;
     int has_snapshot, container_command_pending, container_close_requested;
     unsigned long container_command_sequence;
-    maage_session_command commands[MAAGE_CLIENT_UI_COMMAND_CAPACITY];
-    unsigned int command_read, command_write, command_count;
+    maage_session_command *commands;
+    size_t command_read, command_count, command_capacity, container_queued;
     maage_client_ui_click_callback click;
     void *click_context;
-    unsigned int creative_page;
-    int creative_dragging;
-    maage_item_stack *creative_items;
-    size_t creative_count;
+    const maage_creative_registry *creative;
+    maage_creative_tab_id creative_tab, creative_tabs[12];
+    maage_creative_entry_id *creative_filter;
+    const maage_creative_entry_id *creative_view;
+    size_t creative_count, creative_row, creative_tab_page, creative_page_count;
+    float creative_scroll;
+    int creative_dragging, creative_search_reset;
+    char creative_query[16];
+    size_t creative_query_cursor, creative_query_anchor;
+    maage_creative_tab_id creative_pressed_tab;
+    maage_inventory_operation inventory_drag;
+    int inventory_drag_active, inventory_last_shift;
+    maage_item_stack inventory_last_stack;
+    unsigned int inventory_last_slot, inventory_last_button;
+    double inventory_last_click;
     const float (*item_uv)[4];
     size_t item_texture_count;
     maage_client_ui_resources resources;
@@ -127,7 +138,11 @@ maage_status maage_client_ui_inventory_register(maage_client_ui *ui);
 maage_status maage_client_ui_queue_command(maage_client_ui *ui, const maage_session_command *command);
 void maage_client_ui_queue_game_mode(maage_client_ui *ui);
 void maage_client_ui_queue_respawn(maage_client_ui *ui);
-void maage_client_ui_player_preview(maage_client_ui *ui, maage_client_ui_rect frame);
+void maage_client_ui_player_preview(maage_client_ui *ui, maage_client_ui_rect frame, int compact);
+void maage_client_ui_stack(maage_client_ui *, const maage_item_stack *, float, float);
+int maage_client_ui_search_focused(const maage_client_ui *ui);
+void maage_client_ui_inventory_reset(maage_client_ui *ui);
+void maage_client_ui_inventory_opened(maage_client_ui *ui);
 void maage_client_ui_gameplay_draw(maage_client_ui *ui);
 /* Appends already-clipped quads, rebasing indices into the current frame. */
 int maage_client_ui_append_quads(maage_client_ui *ui, const maage_render_ui_vertex *vertices, size_t count);

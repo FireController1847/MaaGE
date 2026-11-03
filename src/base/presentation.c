@@ -48,6 +48,8 @@ const char *maage_base_item_name(const maage_item_definition *item, unsigned int
     if (item->has_block && item->block_id == ids->block_planks && metadata < 6) return planks[metadata];
     if (item->id == ids->item_dye && metadata == 2) return "Cactus Green";
     if (item->id == ids->item_fish && metadata == 1) return "Raw Salmon";
+    if (item->id == ids->item_fish && metadata == 2) return "Clownfish";
+    if (item->id == ids->item_fish && metadata == 3) return "Pufferfish";
     if (item->id == ids->item_cooked_fish && metadata == 1) return "Cooked Salmon";
     if (metadata <= 2) {
         if (item->has_block && item->block_id == ids->block_log) return logs[metadata];
