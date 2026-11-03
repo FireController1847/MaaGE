@@ -266,11 +266,17 @@ static maage_status item_entities_registered_draw(maage_client_item_entities *vi
     }
     return item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_PRESENT);
 }
-static int item_entities_block_ready(const maage_world *world, int x, int z) {
-    const maage_chunk *chunk, *neighbors[8];
-    const maage_block_registry *blocks;
-    const maage_biome_registry *biomes;
-    return maage_world_mesh_can_present(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z)) && maage_world_present_inputs(world, x, z, &chunk, neighbors, &blocks, &biomes);
+static int item_entities_block_ready(const maage_world *world, const maage_client_chunk_mesh *columns, size_t column_count, int x, int z) {
+    size_t i;
+    int column_x = maage_world_chunk_coordinate(x), column_z = maage_world_chunk_coordinate(z);
+    if (!maage_world_mesh_can_present(world, column_x, column_z)) return 0;
+    for (i = 0; i < column_count; ++i) {
+        if (columns[i].used && columns[i].x == column_x && columns[i].z == column_z) {
+            /* Empty column meshes also receive the validated first-frame flag. */
+            return columns[i].presented || columns[i].first_frame;
+        }
+    }
+    return 0;
 }
 static maage_status item_entities_block_draw(maage_client_item_entities *view, const maage_block_entity_view *entity, const maage_session_snapshot *snapshot, maage_world *world, double alpha, size_t *count, maage_status_trace *trace) {
     const maage_model_definition *model = maage_model_registry_get(view->registered, entity->model);
@@ -671,8 +677,8 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     }
     for (i = 0; i < view->current.block_count; ++i) {
         block_view = &view->current.blocks[i];
-        if (!item_entities_block_ready(visual_world, block_view->x, block_view->z) || maage_world_get(visual_world, block_view->x, block_view->y, block_view->z) != block_view->state) continue;
-        if (block_view->secondary_state != MAAGE_CONTENT_ID_INVALID && (!item_entities_block_ready(visual_world, block_view->secondary_x, block_view->secondary_z) || maage_world_get(visual_world, block_view->secondary_x, block_view->secondary_y, block_view->secondary_z) != block_view->secondary_state)) continue;
+        if (!item_entities_block_ready(visual_world, columns, column_count, block_view->x, block_view->z) || maage_world_get(visual_world, block_view->x, block_view->y, block_view->z) != block_view->state) continue;
+        if (block_view->secondary_state != MAAGE_CONTENT_ID_INVALID && (!item_entities_block_ready(visual_world, columns, column_count, block_view->secondary_x, block_view->secondary_z) || maage_world_get(visual_world, block_view->secondary_x, block_view->secondary_y, block_view->secondary_z) != block_view->secondary_state)) continue;
         result = item_entities_block_draw(view, block_view, snapshot, visual_world, alpha, &count, trace);
         if (maage_status_failed(result)) {
             if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) return result;
