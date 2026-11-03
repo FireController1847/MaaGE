@@ -785,7 +785,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     size_t draw_count, resident_count, slot_index, first_count;
     int drop_latched = 0, drop_stack = 0;
     unsigned int drop_slot = 0;
-    int valid_snapshot = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
+    int valid_snapshot = 0, connected = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0;
     int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
@@ -1023,6 +1023,7 @@ choose_world:
             last_seen_tick = latest.tick;
             selected_hotbar = queued_hotbar = (int) latest.player.inventory.selected;
             valid_snapshot = 1;
+            connected = 1;
             break;
         }
         if (maage_status_failed(operation) && maage_status_code(operation) != MAAGE_STATUS_NOOP) goto done;
@@ -1779,6 +1780,10 @@ return_to_title:
     result = maage_window_capture_mouse(window, 0);
     if (maage_status_failed(result)) goto window_failed;
     maage_server_runtime_request_stop(server);
+    if (connected) {
+        maage_log_info("maage.client", "Disconnected from integrated Server.");
+        connected = 0;
+    }
     /* The Server flushes and the Client replica workers drain on a separate
      * lifecycle Jobs worker. Do not join a saving world on the UI thread. */
     if (retired_resources.view) retired_in_shutdown = 1;
@@ -1824,6 +1829,7 @@ done:
      * World workers, or a disk sync. Retain all borrowed resources until
      * their background operations finish after the UI is hidden. */
     if (window) (void) maage_window_set_visible(window, 0);
+    maage_log_info("maage.client", "Client shutting down.");
     if (options_ready && ui) {
         operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);
         if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to persist config/options.ini during shutdown.");
@@ -1837,6 +1843,10 @@ done:
     /* Stop command production first. The Server controls all authoritative
      * World flush/persistence; no Client World store/save API is ever invoked. */
     if (server) maage_server_runtime_request_stop(server);
+    if (connected) {
+        maage_log_info("maage.client", "Disconnected from integrated Server.");
+        connected = 0;
+    }
     if (ui) maage_client_ui_set_click_callback(ui, NULL, NULL);
     operation = maage_client_audio_service_destroy(audio, &cleanup_trace);
     if (maage_status_failed(operation)) retain_content = 1;

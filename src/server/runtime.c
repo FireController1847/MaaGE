@@ -1053,6 +1053,7 @@ static void server_thread_entry(void *context) {
         if (maage_status_failed(runtime->result)) break;
     }
 shutdown:
+    maage_log_info("maage.server", "%s Server shutting down.", runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? "Integrated" : "Dedicated");
     server_close_world(runtime, &trace);
     server_publish_status(runtime);
     if (runtime->config.session) {
