@@ -3,6 +3,7 @@
 #include "maage/items.h"
 #include "maage/player.h"
 #include "maage/entity_types.h"
+#include "maage/seed.h"
 /* Instance identity, distinct from type, item and block identities. Never reused
  * within a world. Explicit encoding uses 32-bit words, never native layouts. */
 typedef unsigned long maage_entity_id;
@@ -126,6 +127,9 @@ maage_status maage_entities_create(maage_entities **output);
 maage_status maage_entities_destroy(maage_entities *entities);
 maage_status maage_entities_reserve(maage_entities *entities, size_t additional);
 maage_status maage_entities_bind_types(maage_entities *, const maage_entity_type_registry *);
+/* Derive independent entity, behavior and spawn RNG states once from a new
+ * World's seed. Restoring a checkpoint replaces all three saved states. */
+maage_status maage_entities_seed(maage_entities *, maage_world_seed);
 maage_status maage_entity_policy_init(maage_entity_policy *);
 maage_status maage_entities_set_policy(maage_entities *, const maage_entity_policy *);
 maage_status maage_entities_spawn_type(maage_entities *, maage_world *, maage_entity_type_id, const double[3], unsigned long variant, int persistent, maage_entity_id *);

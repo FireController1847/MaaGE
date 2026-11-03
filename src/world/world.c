@@ -1492,6 +1492,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world = (maage_world *) calloc(1, sizeof(*world));
     if (!world) goto allocation_failed;
     result = maage_entities_create(&world->entities);
+    if (!maage_status_failed(result) && !config->presentation_only) result = maage_entities_seed(world->entities, config->seed);
     if (!maage_status_failed(result) && config->entity_types) result = maage_entities_bind_types(world->entities, config->entity_types);
     if (!maage_status_failed(result) && config->entity_policy) result = maage_entities_set_policy(world->entities, config->entity_policy);
     if (maage_status_failed(result)) {

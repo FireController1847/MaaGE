@@ -587,6 +587,20 @@ maage_status maage_entities_set_policy(maage_entities *entities, const maage_ent
     entities->policy = *policy;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SET);
 }
+static unsigned long entity_seed_stream(maage_world_seed seed, unsigned long domain) {
+    unsigned long value = ((seed.low ^ domain) * 1664525UL + seed.high + 1013904223UL) & 0xffffffffUL;
+    value ^= value >> 16;
+    value = (value * 2246822519UL) & 0xffffffffUL;
+    value ^= value >> 13;
+    return value & 0xffffffffUL;
+}
+maage_status maage_entities_seed(maage_entities *entities, maage_world_seed seed) {
+    if (!entities || entities->count || entities->next_id != 1 || seed.low > 0xffffffffUL || seed.high > 0xffffffffUL) return entity_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_INITIALIZE);
+    entities->random = entity_seed_stream(seed, 0x7c5a3491UL);
+    entities->behavior_random = entity_seed_stream(seed, 0x36e18b27UL);
+    entities->spawn_random = entity_seed_stream(seed, 0xa415cb73UL);
+    return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_INITIALIZE);
+}
 maage_status maage_entities_bind_types(maage_entities *entities, const maage_entity_type_registry *types) {
     if (!entities || !maage_entity_type_registry_is_finalized(types) || (entities->types && entities->types != types && entities->count)) return entity_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_INITIALIZE);
     entities->types = types;
@@ -638,8 +652,13 @@ maage_status maage_entities_spawn_type(maage_entities *entities, maage_world *wo
     const maage_entity_type_definition *definition = entities ? maage_entity_type_get(entities->types, type) : NULL;
     maage_entity entity;
     maage_status result;
+    unsigned int axis;
     if (id) *id = 0;
     if (!entities || !world || !position || !definition || variant > 4294967295UL || (persistent != 0 && persistent != 1) || definition->classification == MAAGE_ENTITY_CLASS_PROJECTILE) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    /* Reject nonfinite and unbounded coordinates before floor-to-int casts in
+     * collision/loaded-column queries. */
+    for (axis = 0; axis < 3; ++axis)
+        if (!(position[axis] > -MAAGE_WORLD_LIMIT && position[axis] < MAAGE_WORLD_LIMIT)) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
     if (!entity_body_fits(world, position, definition->width, definition->height, 0)) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_CREATE);
     memset(&entity, 0, sizeof(entity));
     entity.id = entities->next_id;
