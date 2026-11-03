@@ -1,4 +1,7 @@
 #include "../application/content_modules.h"
+#ifdef MAAGE_CLIENT_MACOS_DOCK_NAME
+#include "macos/dock_name.h"
+#endif
 #include "maage/window.h"
 #include "maage/client.h"
 #include "maage/input.h"
@@ -845,6 +848,11 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     result = maage_window_create(system, &window_config, &window, trace);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) goto window_failed;
     maage_status_trace_init(trace);
+#ifdef MAAGE_CLIENT_MACOS_DOCK_NAME
+    operation = maage_client_dock_name(trace);
+    if (!maage_status_is_success(operation)) MAAGE_LOG_VERBOSE_EVENT("maage.client.desktop", maage_log_trace_status(MAAGE_LOG_VERBOSE, "maage.client.desktop", operation, trace, "Optional Dock display name unavailable; retaining the system label."));
+    maage_status_trace_init(trace);
+#endif
     operation = maage_client_resources_set_window_icon(directory, window, trace);
     if (!maage_status_is_success(operation)) maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.resources", operation, trace, "Client icon unavailable; retaining the platform default. Reconstructed icons: %s/minecraft/assets/reconst/icons", directory);
     maage_status_trace_init(trace);

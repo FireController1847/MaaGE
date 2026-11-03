@@ -40,6 +40,13 @@ set_target_properties(maage_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${MAAGE_OUTPUT_DIRECTORY}/bin/$<CONFIG>/${MAAGE_CLIENT_ARTIFACT}-${MAAGE_TARGET_SYSTEM}-${MAAGE_CLIENT_ARCH}")
 set(MAAGE_CLIENT_MANIFEST "$<TARGET_FILE_DIR:maage_client>/maage-client.json")
 if(MAAGE_PLATFORM_MACOS)
+    option(MAAGE_CLIENT_MACOS_DOCK_NAME "Attempt optional private LaunchServices Client naming" ON)
+    if(MAAGE_CLIENT_MACOS_DOCK_NAME)
+        find_library(MAAGE_CLIENT_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+        target_link_libraries(maage_client PRIVATE "${MAAGE_CLIENT_COREFOUNDATION_FRAMEWORK}")
+        target_sources(maage_client PRIVATE macos/dock_name.c)
+        target_compile_definitions(maage_client PRIVATE MAAGE_CLIENT_MACOS_DOCK_NAME "MAAGE_CLIENT_DISPLAY_NAME=\"${MAAGE_CLIENT_NAME}\"")
+    endif()
     set_target_properties(maage_client PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
     # This Launcher-managed executable has no bundle Info.plist. Embed its
     # generated plist into Mach-O so AppKit opts out of notch compatibility mode.

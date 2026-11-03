@@ -66,3 +66,5 @@ The Server owns sprint eligibility; Client FOV smoothing changes the world view 
 ## Current Limits
 
 Armor/equipment storage, enchantments, potion behavior, capes, remote players, complete combat/Survival, effects/particles, exact reference lightmaps and portions of secondary rendering are incomplete. Unsupported items are absent from Creative categories; some tabs are empty. Wayland does not yet provide Client relative mouse capture. Source-level contracts are not runtime/platform verification.
+
+On macOS, Client startup optionally requests its product name through dynamically resolved private LaunchServices symbols after AppKit launches. Missing framework/symbols/application identity or a rejected update retain the system Dock label and produce only a VERBOSE diagnostic. `MAAGE_CLIENT_MACOS_DOCK_NAME=OFF` omits this adapter. Private ABI compatibility and actual Dock behavior remain OS-dependent; the Client remains a standalone executable.
