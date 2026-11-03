@@ -70,7 +70,8 @@ maage_status maage_base_chest_models_bind(maage_content_context *context, const 
     unsigned int i;
     memset(&transform, 0, sizeof(transform));
     transform.rotation[1] = 3.14159265358979323846;
-    transform.translation[0] = transform.translation[2] = 1;
+    /* Registered cuboids occupy model coordinates 0..16; centering is already
+     * performed by the generic item projection's half-unit translation. */
     transform.scale = 1;
     for (i = 0; i < 2; ++i) {
         result = maage_model_registry_resolve(context->models, names[i], &model);

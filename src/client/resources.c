@@ -306,12 +306,13 @@ maage_status maage_client_resources_load(const char *application_data, const maa
         texture = stage >= 0 ? NULL : maage_presentation_texture(catalog, (maage_texture_id) i);
         if (texture && (source_index < 0 || !sources[source_index].pixels) && texture->fallback != MAAGE_CONTENT_ID_INVALID) source_index = (int) texture->fallback;
         selected = source_index >= 0 && sources[source_index].pixels ? &sources[source_index] : &missing;
+        /* The canonical tile is square; registered entity sheets need independent X/Y sampling. */
         for (y = 0; y < tile; ++y) {
             sy = y == 0 ? 0 : (y > edge ? edge - 1 : y - 1);
             for (x = 0; x < tile; ++x) {
                 sx = x == 0 ? 0 : (x > edge ? edge - 1 : x - 1);
                 pixel = resources->image.pixels + (size_t) (tile_y + y) * resources->image.stride + (size_t) (tile_x + x) * 4;
-                source = selected->pixels + (size_t) (sy * selected->width / edge) * selected->stride + (size_t) (sx * selected->width / edge) * 4;
+                source = selected->pixels + (size_t) (sy * selected->height / edge) * selected->stride + (size_t) (sx * selected->width / edge) * 4;
                 memcpy(pixel, source, 4);
                 /* An unavailable crack stage is an omitted decoration. */
                 if (stage >= 0 && selected == &missing) memset(pixel, 0, 4);

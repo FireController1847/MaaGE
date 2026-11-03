@@ -50,4 +50,4 @@ Catalog selection owns no storage. Shared `maage_inventory_operate` transactions
 
 ## Current Limits
 
-MaaGE does not yet implement general mobs/AI, complete combat/Survival, redstone, dimensions or remote multiplayer. Neither generator nor presentation promises exact Minecraft 1.7.10 parity. See [the roadmap](development-roadmap.md) for plans and [AGENTS.md](../AGENTS.md) for durable rules.
+MaaGE has an initial registered passive/hostile mob roster and local behavior system; richer AI/navigation, complete combat/Survival, redstone, dimensions and remote multiplayer remain future work. Neither generator nor presentation promises exact Minecraft 1.7.10 parity. See [the roadmap](development-roadmap.md) for plans and [AGENTS.md](../AGENTS.md) for durable rules.
