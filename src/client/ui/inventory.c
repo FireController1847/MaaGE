@@ -706,7 +706,12 @@ static void creative_draw_search(maage_client_ui *ui, maage_client_ui_rect frame
     }
     ui->clip = previous;
 }
-static void inventory_tooltip_measure(const maage_client_ui *ui, const char *text, float *width, unsigned int *lines) {
+static unsigned int inventory_tooltip_advance(const maage_client_ui *ui, char character, int bold) {
+    unsigned int glyph = (unsigned char) (character >= 32 && character <= 126 ? character : '?');
+    /* The extra bold stroke consumes one logical pixel per glyph. */
+    return ui->resources.glyph_width[glyph] + (bold ? 1U : 0U);
+}
+static void inventory_tooltip_measure(const maage_client_ui *ui, const char *text, float *width, unsigned int *lines, int bold) {
     float current = 0;
     if (!text || !*text) return;
     ++*lines;
@@ -715,42 +720,50 @@ static void inventory_tooltip_measure(const maage_client_ui *ui, const char *tex
             if (current > *width) *width = current;
             current = 0;
             ++*lines;
-        } else current += ui->resources.glyph_width[(unsigned char) (*text >= 32 && *text <= 126 ? *text : '?')];
+        } else current += inventory_tooltip_advance(ui, *text, bold);
         ++text;
     }
     if (current > *width) *width = current;
 }
 static void inventory_tooltip_line(maage_client_ui *ui, const char *text, float x, float *y, float red, float green, float blue, int bold) {
+    const char *cursor;
     char character[2];
-    float origin = x;
+    float origin = x, line_y = *y, offset, shade;
+    unsigned int pass;
     if (!text || !*text) return;
     character[1] = '\0';
-    while (*text) {
-        if (*text == '\n') {
-            x = origin;
-            *y += 10;
-        } else {
-            character[0] = *text;
-            maage_client_ui_text_shadow(ui, character, x, *y, MAAGE_CLIENT_UI_LEFT, red, green, blue);
-            if (bold) maage_client_ui_text(ui, character, x + 1, *y, MAAGE_CLIENT_UI_LEFT, red, green, blue);
-            x += ui->resources.glyph_width[(unsigned char) (*text >= 32 && *text <= 126 ? *text : '?')];
+    /* Finish the complete shadow before drawing either foreground stroke. */
+    for (pass = 0; pass < 2; ++pass) {
+        offset = pass ? 0 : 1;
+        shade = pass ? 1 : 0.25f;
+        x = origin + offset;
+        line_y = *y + offset;
+        for (cursor = text; *cursor; ++cursor) {
+            if (*cursor == '\n') {
+                x = origin + offset;
+                line_y += 10;
+            } else {
+                character[0] = *cursor;
+                maage_client_ui_text(ui, character, x, line_y, MAAGE_CLIENT_UI_LEFT, red * shade, green * shade, blue * shade);
+                if (bold) maage_client_ui_text(ui, character, x + 1, line_y, MAAGE_CLIENT_UI_LEFT, red * shade, green * shade, blue * shade);
+                x += inventory_tooltip_advance(ui, *cursor, bold);
+            }
         }
-        ++text;
     }
-    *y += 10;
+    *y = line_y + 10;
 }
 static void inventory_tooltip(maage_client_ui *ui, const char *title, const char *category, const char *extra, const char *item_tooltip) {
     maage_client_ui_rect rectangle, panel, previous;
     unsigned int lines = 0;
     float width = 0, y;
     if (!title || ui->snapshot.player.inventory.cursor.count || ui->inventory_drag_active || ui->content.width <= 8 || ui->content.height <= 16) return;
-    inventory_tooltip_measure(ui, title, &width, &lines);
-    inventory_tooltip_measure(ui, category, &width, &lines);
-    inventory_tooltip_measure(ui, extra, &width, &lines);
-    inventory_tooltip_measure(ui, item_tooltip, &width, &lines);
+    inventory_tooltip_measure(ui, title, &width, &lines, 0);
+    inventory_tooltip_measure(ui, category, &width, &lines, 1);
+    inventory_tooltip_measure(ui, extra, &width, &lines, 0);
+    inventory_tooltip_measure(ui, item_tooltip, &width, &lines, 0);
     rectangle.x = ui->mouse_x + 12;
     rectangle.y = ui->mouse_y - 12;
-    rectangle.width = width + (category ? 1 : 0);
+    rectangle.width = width;
     rectangle.height = lines == 1 ? 8 : 10.0f * lines;
     if (rectangle.width > ui->content.width - 8) rectangle.width = ui->content.width - 8;
     if (rectangle.height > ui->content.height - 8) rectangle.height = ui->content.height - 8;
