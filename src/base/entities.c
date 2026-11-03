@@ -231,6 +231,9 @@ static maage_status base_wool(maage_content_context *context, maage_base_ids *id
         state.metadata = color;
         for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
             state.faces[face].texture_id = ids->wool_textures[color];
+            /* A texture identity does not substitute for a valid local UV
+             * rectangle; the Client remaps these coordinates into its atlas. */
+            state.faces[face].uv[2] = state.faces[face].uv[3] = 1;
             for (channel = 0; channel < 4; ++channel)
                 state.faces[face].tint[channel] = 1;
         }
