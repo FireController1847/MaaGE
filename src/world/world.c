@@ -1577,8 +1577,8 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->config.initial_environment = NULL;
     world->rate_time = maage_time_monotonic_seconds();
     maage_jobs_snapshot(world->jobs, &stats);
-    maage_log_info((world->config.presentation_only ? "maage.client.world.jobs" : "maage.server.world.jobs"), "Logical CPUs=%u%s; CPU workers=%u; I/O workers=%u; shared job capacity=%u; cache capacity=%u; immutable commits.", stats.logical_processors, stats.logical_processors ? "" : " (unknown)", stats.workers, io_workers, job_limit, cache_limit);
-    maage_log_info((world->config.presentation_only ? "maage.client.world.jobs" : "maage.server.world.jobs"), "Transient admission=%.1f MiB; independent save allowance=%.1f MiB; oversized work proceeds alone.", (double) world->config.job_memory_budget / 1048576.0, (double) (world->config.job_memory_budget / 4U) / 1048576.0);
+    maage_log_info((world->config.presentation_only ? "maage.client.world" : "maage.server.world"), "Logical CPUs=%u%s; CPU workers=%u; I/O workers=%u; shared job capacity=%u; cache capacity=%u; immutable commits.", stats.logical_processors, stats.logical_processors ? "" : " (unknown)", stats.workers, io_workers, job_limit, cache_limit);
+    maage_log_info((world->config.presentation_only ? "maage.client.world" : "maage.server.world"), "Transient admission=%.1f MiB; independent save allowance=%.1f MiB; oversized work proceeds alone.", (double) world->config.job_memory_budget / 1048576.0, (double) (world->config.job_memory_budget / 4U) / 1048576.0);
     result = config->presentation_only ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0) : maage_world_schedule(world);
     *output = world;
     if (maage_status_failed(result)) {
