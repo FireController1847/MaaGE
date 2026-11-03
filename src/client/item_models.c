@@ -313,7 +313,7 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
     float tint[4] = {1, 1, 1, 1}, material;
     double minimum[3], maximum[3];
     if (!resources || !stack || !data || !(item = maage_item_registry_get(items, stack->item_id))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
-    state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->metadata) : NULL;
+    state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->variant) : NULL;
     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
     if (item->model == MAAGE_ITEM_MODEL_REGISTERED) {
         memset(&registered, 0, sizeof(registered));
@@ -329,7 +329,7 @@ static maage_status maage_item_model_generate(const maage_client_resources *reso
     } else if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
         if (item->sprite_layer_count > (size_t) - 1 / 66 || (vertices && capacity < 66 * (item->sprite_layer_count ? item->sprite_layer_count : 1))) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_MESH, 0);
         for (layer = 0; layer < (item->sprite_layer_count ? item->sprite_layer_count : 1); ++layer) {
-            texture = item->sprite_layer_count ? item->sprite_layers[layer].texture : maage_client_item_texture(item, stack->metadata);
+            texture = item->sprite_layer_count ? item->sprite_layers[layer].texture : maage_client_item_texture(item, stack->variant);
             if (texture >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_LOOKUP, 0);
             if (item->sprite_layer_count) memcpy(tint, item->sprite_layers[layer].tint, sizeof(tint));
             else if (state) maage_client_item_face_tint(resources->inventory_grass_color, &state->faces[MAAGE_FACE_POSITIVE_Z], state->faces[MAAGE_FACE_POSITIVE_Z].tint_mode, tint);
@@ -516,7 +516,7 @@ maage_status maage_client_item_icon(const maage_model_registry *models, const ma
     unsigned int corner, axis, layer;
     maage_texture_id texture;
     if (!stack || !grass || !textures || !sink || !(item = maage_item_registry_get(items, stack->item_id))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
-    state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->metadata) : NULL;
+    state = item->has_block ? maage_client_item_icon_state(blocks, item, stack->variant) : NULL;
     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
     if (item->model == MAAGE_ITEM_MODEL_REGISTERED) {
         memset(&registered, 0, sizeof(registered));
@@ -529,7 +529,7 @@ maage_status maage_client_item_icon(const maage_model_registry *models, const ma
     }
     if (item->model == MAAGE_ITEM_MODEL_SPRITE) {
         for (i = 0; i < (item->sprite_layer_count ? item->sprite_layer_count : 1); ++i) {
-            texture = item->sprite_layer_count ? item->sprite_layers[i].texture : maage_client_item_texture(item, stack->metadata);
+            texture = item->sprite_layer_count ? item->sprite_layers[i].texture : maage_client_item_texture(item, stack->variant);
             if (texture >= texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, 0);
             for (axis = 0; axis < 4; ++axis)
                 tint[axis] = item->sprite_layer_count ? item->sprite_layers[i].tint[axis] : 1;
@@ -639,8 +639,8 @@ maage_status maage_client_item_icon_cached(maage_client_item_icon_cache **cache,
         if (!*slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
     }
     item = (maage_client_icon_item *) *slot;
-    slot = maage_registry_pages_find(&item->variants, stack->metadata);
-    if (!slot) slot = maage_registry_pages_ensure(&item->variants, stack->metadata);
+    slot = maage_registry_pages_find(&item->variants, stack->variant);
+    if (!slot) slot = maage_registry_pages_ensure(&item->variants, stack->variant);
     if (!slot) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
     variant = (maage_client_icon_variant *) *slot;
     if (!variant) {

@@ -39,8 +39,8 @@ maage_status maage_client_resources_load(const char *application_data, const maa
 maage_status maage_client_resources_set_window_icon(const char *application_data, maage_window *window, maage_status_trace *trace);
 /* Pure fixed item/inventory color transform; world biome tinting stays in mesh. */
 void maage_client_item_face_tint(const float grass_color[3], const maage_block_face_definition *face, unsigned int mode, float color[4]);
-const maage_block_state_definition *maage_client_item_icon_state(const maage_block_registry *blocks, const maage_item_definition *item, unsigned int metadata);
+const maage_block_state_definition *maage_client_item_icon_state(const maage_block_registry *blocks, const maage_item_definition *item, maage_item_variant_id variant);
 const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack);
-maage_texture_id maage_client_item_texture(const maage_item_definition *item, unsigned int metadata);
+maage_texture_id maage_client_item_texture(const maage_item_definition *item, maage_item_variant_id variant);
 maage_status maage_client_resources_destroy(maage_client_resources *resources);
 #endif

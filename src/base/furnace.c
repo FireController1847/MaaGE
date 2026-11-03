@@ -5,7 +5,7 @@ static maage_status furnace_status(unsigned char code, unsigned char operation) 
     return maage_status_make(code, MAAGE_CONTEXT_WORLD, operation, 0);
 }
 static int furnace_equal(const maage_item_stack *a, const maage_item_stack *b) {
-    return a->item_id == b->item_id && a->metadata == b->metadata && a->damage == b->damage;
+    return a->item_id == b->item_id && a->variant == b->variant && a->damage == b->damage;
 }
 int maage_furnace_valid(const maage_furnace_state *state, const maage_item_registry *items) {
     unsigned int i;
@@ -29,14 +29,14 @@ maage_status maage_furnace_tick(maage_furnace_state *state, const maage_item_reg
     if (!maage_furnace_valid(state, items)) return furnace_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_TICK);
     if (state->revision >= 4294967295UL - 1UL) return furnace_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_TICK);
     if (!state->burn && !state->cook && (!state->slots[0].count || !state->slots[1].count)) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
-    recipe = maage_smelting_find(recipes, state->slots[0].item_id, state->slots[0].metadata);
+    recipe = maage_smelting_find(recipes, state->slots[0].item_id, state->slots[0].variant);
     can_cook = furnace_can_cook(state, recipe, items);
     if (state->burn) {
         --state->burn;
         changed = 1;
     }
     if (!state->burn && can_cook && state->slots[1].count) {
-        fuel = maage_fuel_find(fuels, state->slots[1].item_id, state->slots[1].metadata);
+        fuel = maage_fuel_find(fuels, state->slots[1].item_id, state->slots[1].variant);
         if (fuel) {
             state->burn = state->duration = fuel->ticks;
             if (!--state->slots[1].count) state->slots[1] = fuel->remainder;
@@ -100,8 +100,8 @@ maage_status maage_furnace_click(maage_furnace_state *state, maage_inventory *in
             if (maage_status_failed(result)) return result;
             source->count = remaining;
             if (!remaining) memset(source, 0, sizeof(*source));
-        } else if (maage_smelting_find(recipes, source->item_id, source->metadata)) furnace_merge(source, &next.slots[0], items);
-        else if (maage_fuel_find(fuels, source->item_id, source->metadata)) furnace_merge(source, &next.slots[1], items);
+        } else if (maage_smelting_find(recipes, source->item_id, source->variant)) furnace_merge(source, &next.slots[0], items);
+        else if (maage_fuel_find(fuels, source->item_id, source->variant)) furnace_merge(source, &next.slots[1], items);
         else {
             first = slot < 9 ? 9 : 0;
             end = slot < 9 ? MAAGE_INVENTORY_SLOTS : 9;
@@ -118,7 +118,7 @@ maage_status maage_furnace_click(maage_furnace_state *state, maage_inventory *in
             if (!source->count) memset(source, 0, sizeof(*source));
         } else furnace_merge(source, &carried.cursor, items);
     } else {
-        if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && carried.cursor.count && !maage_fuel_find(fuels, carried.cursor.item_id, carried.cursor.metadata) && !maage_item_registry_get(items, carried.cursor.item_id)->fuel_container) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
+        if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && carried.cursor.count && !maage_fuel_find(fuels, carried.cursor.item_id, carried.cursor.variant) && !maage_item_registry_get(items, carried.cursor.item_id)->fuel_container) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
         if (group == MAAGE_SLOT_CRAFT_INPUT && slot == 1 && (carried.cursor.count && maage_item_registry_get(items, carried.cursor.item_id)->fuel_container) && carried.cursor.count > 1) {
             if (source->count) return furnace_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
             *source = carried.cursor;
@@ -128,7 +128,7 @@ maage_status maage_furnace_click(maage_furnace_state *state, maage_inventory *in
         } else result = maage_item_stack_click(source, &carried.cursor, items, action == MAAGE_SLOT_SECONDARY);
         if (maage_status_failed(result)) return result;
     }
-    if (group == MAAGE_SLOT_CRAFT_RESULT) *experience = (before - source->count) * maage_smelting_experience(recipes, extracted.item_id, extracted.metadata);
+    if (group == MAAGE_SLOT_CRAFT_RESULT) *experience = (before - source->count) * maage_smelting_experience(recipes, extracted.item_id, extracted.variant);
     changed = !furnace_equal(&carried.cursor, &inventory->cursor) || carried.cursor.count != inventory->cursor.count;
     for (i = 0; i < 3 && !changed; ++i)
         changed = !furnace_equal(&next.slots[i], &state->slots[i]) || next.slots[i].count != state->slots[i].count;

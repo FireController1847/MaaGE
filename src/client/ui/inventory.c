@@ -183,7 +183,7 @@ static int creative_contains_text(const char *haystack, const char *needle) {
 }
 static const char *inventory_item_tooltip(const maage_client_ui *ui, const maage_item_stack *stack) {
     const maage_item_definition *item = stack && stack->count ? maage_item_registry_get(ui->items, stack->item_id) : NULL;
-    return item && item->tooltip ? item->tooltip(item, stack->metadata) : NULL;
+    return item && item->tooltip ? item->tooltip(item, stack->variant) : NULL;
 }
 static void creative_filter(maage_client_ui *ui) {
     const maage_creative_tab_definition *tab = inventory_tab(ui);
@@ -456,7 +456,7 @@ static int creative_navigation_input(maage_client_ui *ui, const maage_client_ui_
 }
 static int creative_drag_eligible(const maage_client_ui *ui, unsigned int slot) {
     const maage_item_stack *cursor = &ui->snapshot.player.inventory.cursor, *source = &ui->snapshot.player.inventory.slots[slot];
-    return cursor->count && (!source->count || (source->item_id == cursor->item_id && source->metadata == cursor->metadata && source->damage == cursor->damage));
+    return cursor->count && (!source->count || (source->item_id == cursor->item_id && source->variant == cursor->variant && source->damage == cursor->damage));
 }
 static unsigned int inventory_input(maage_client_ui *ui, const maage_client_ui_input *input, void *context) {
     const maage_container_definition *definition = inventory_definition(ui);

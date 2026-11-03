@@ -17,7 +17,7 @@ static void base_block(maage_block_definition *block, const maage_base_ids *ids,
     block->selection_shape.maximum[0] = block->selection_shape.maximum[1] = block->selection_shape.maximum[2] = 1;
     if (solid) block->collision_shape = block->selection_shape;
 }
-maage_status maage_content_register_state(maage_block_registry *registry, const maage_base_ids *ids, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, unsigned int metadata, int texture) {
+maage_status maage_content_register_state(maage_block_registry *registry, const maage_base_ids *ids, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, unsigned int configuration, int texture) {
     maage_block_state_definition state;
     const maage_block_definition *definition;
     int face, channel, selected, species, log_axis;
@@ -25,33 +25,36 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
     memset(&state, 0, sizeof(state));
     state.id = (unsigned long) maage_block_registry_state_count(registry);
     state.block_id = block;
-    state.metadata = metadata;
-    state.geometry_key = metadata;
+    result = maage_base_state_properties(ids, block, configuration, &state.properties);
+    if (maage_status_failed(result)) return result;
+    state.geometry_variant = block == ids->block_torch ? configuration : (block == ids->block_furnace ? configuration & 3U : 0);
+    state.geometry_key = configuration;
     state.geometry_grouped = block == ids->block_leaves || block == ids->block_sapling || block == ids->block_farmland;
     state.texture_axis = 0;
     (void) config;
-    if (block == ids->block_leaves) state.geometry_key = metadata & 3U;
-    if (block == ids->block_sapling) state.geometry_key = metadata & 7U;
-    if (block == ids->block_farmland) state.geometry_key = metadata != 0;
-    if (block == ids->block_lit_furnace) state.presentation_effect = 1;
+    if (block == ids->block_leaves) state.geometry_key = configuration & 3U;
+    if (block == ids->block_sapling) state.geometry_key = configuration & 7U;
+    if (block == ids->block_farmland) state.geometry_key = configuration != 0;
+    if (block == ids->block_furnace && (configuration & 4U)) state.presentation_effect = 1;
 
     definition = maage_block_registry_block(registry, block);
     if (!definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    state.emitted_light = block == ids->block_furnace ? ((configuration & 4U) ? 13U : 0U) : definition->emitted_light;
     state.random_ticks = definition->random_tick != NULL ||
                          block == ids->block_leaves || block == ids->block_lava || block == ids->block_torch ||
-                         (block == ids->block_water && metadata != 0);
-    if (block == ids->block_torch && metadata >= 1 && metadata <= 4) {
+                         (block == ids->block_water && configuration != 0);
+    if (block == ids->block_torch && configuration >= 1 && configuration <= 4) {
         state.selection_shape.minimum[0] = state.selection_shape.minimum[2] = 0.35;
         state.selection_shape.maximum[0] = state.selection_shape.maximum[2] = 0.65;
         state.selection_shape.minimum[1] = 0.2;
         state.selection_shape.maximum[1] = 0.8;
-        log_axis = metadata <= 2 ? 0 : 2;
-        state.selection_shape.minimum[log_axis] = metadata & 1 ? 0.0 : 0.7;
-        state.selection_shape.maximum[log_axis] = metadata & 1 ? 0.3 : 1.0;
+        log_axis = configuration <= 2 ? 0 : 2;
+        state.selection_shape.minimum[log_axis] = configuration & 1 ? 0.0 : 0.7;
+        state.selection_shape.maximum[log_axis] = configuration & 1 ? 0.3 : 1.0;
     }
     if (block == ids->block_water || block == ids->block_lava) {
         state.fluid_kind = block == ids->block_water ? ids->fluid_water : ids->fluid_lava;
-        state.fluid_level = metadata;
+        state.fluid_level = configuration;
     }
     for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
         for (channel = 0; channel < 4; ++channel)
@@ -62,7 +65,7 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_BASE_TEXTURE_DIRT;
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_BASE_TEXTURE_GRASS_TOP;
         }
-        if (block == ids->block_farmland) selected = face == MAAGE_FACE_POSITIVE_Y ? MAAGE_BASE_TEXTURE_FARMLAND + (metadata ? 1 : 0) : MAAGE_BASE_TEXTURE_DIRT;
+        if (block == ids->block_farmland) selected = face == MAAGE_FACE_POSITIVE_Y ? MAAGE_BASE_TEXTURE_FARMLAND + (configuration ? 1 : 0) : MAAGE_BASE_TEXTURE_DIRT;
         if (block == ids->block_sandstone) {
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_BASE_TEXTURE_SANDSTONE_TOP;
             if (face == MAAGE_FACE_NEGATIVE_Y) selected = MAAGE_BASE_TEXTURE_SANDSTONE_BOTTOM;
@@ -70,26 +73,26 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
         if (block == ids->block_crafting_table) {
             selected = face == MAAGE_FACE_POSITIVE_Y ? MAAGE_BASE_TEXTURE_CRAFTING_TOP : (face == MAAGE_FACE_NEGATIVE_Y ? MAAGE_BASE_TEXTURE_EXTRA + 1 : ((face == MAAGE_FACE_NEGATIVE_X || face == MAAGE_FACE_NEGATIVE_Z) ? MAAGE_BASE_TEXTURE_CRAFTING_FRONT : MAAGE_BASE_TEXTURE_CRAFTING_SIDE));
         }
-        if (block == ids->block_furnace || block == ids->block_lit_furnace) {
+        if (block == ids->block_furnace) {
             static const unsigned int fronts[4] = {MAAGE_FACE_NEGATIVE_Z, MAAGE_FACE_POSITIVE_X, MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_NEGATIVE_X};
             selected = MAAGE_BASE_TEXTURE_FURNACE;
             if (face == MAAGE_FACE_NEGATIVE_Y || face == MAAGE_FACE_POSITIVE_Y) selected += 1;
-            else if ((unsigned int) face == fronts[metadata]) selected += block == ids->block_lit_furnace ? 3 : 2;
+            else if ((unsigned int) face == fronts[configuration & 3U]) selected += (configuration & 4U) ? 3 : 2;
         }
-        if (block == ids->block_sand && metadata == 1) selected = MAAGE_BASE_TEXTURE_FURNACE_VARIANTS;
-        if (block == ids->block_planks && metadata) selected = metadata >= 3 ? MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 6 + (int) metadata - 3 : (metadata == 1 ? MAAGE_BASE_TEXTURE_SPRUCE_PLANKS : MAAGE_BASE_TEXTURE_BIRCH_PLANKS);
+        if (block == ids->block_sand && configuration == 1) selected = MAAGE_BASE_TEXTURE_FURNACE_VARIANTS;
+        if (block == ids->block_planks && configuration) selected = configuration >= 3 ? MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 6 + (int) configuration - 3 : (configuration == 1 ? MAAGE_BASE_TEXTURE_SPRUCE_PLANKS : MAAGE_BASE_TEXTURE_BIRCH_PLANKS);
         if (block == ids->block_log) {
-            species = metadata & 3;
+            species = configuration & 3;
             selected = species == 3 ? MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 1 : MAAGE_BASE_TEXTURE_EXTRA + (species == 1 ? 26 : (species == 2 ? 29 : 6));
-            log_axis = (metadata & 12) == 4 ? 0 : ((metadata & 12) == 8 ? 2 : 1);
+            log_axis = (configuration & 12) == 4 ? 0 : ((configuration & 12) == 8 ? 2 : 1);
             if (face / 2 == log_axis) ++selected;
         } else if (block == ids->block_log2) {
-            species = metadata & 1U;
-            log_axis = (metadata & 12) == 4 ? 0 : ((metadata & 12) == 8 ? 2 : 1);
+            species = configuration & 1U;
+            log_axis = (configuration & 12) == 4 ? 0 : ((configuration & 12) == 8 ? 2 : 1);
             selected = species ? MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 3 : MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 6;
             if (face / 2 == log_axis) selected = MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + (species ? 4 : 5);
         } else if (block == ids->block_leaves) {
-            species = metadata & MAAGE_LEAF_SPECIES_MASK;
+            species = configuration & MAAGE_LEAF_SPECIES_MASK;
             selected = MAAGE_BASE_TEXTURE_EXTRA + (species == 1 ? 28 : (species == 2 ? 31 : 8));
         } else if (block == ids->block_cactus) {
             if (face == MAAGE_FACE_POSITIVE_Y) selected = MAAGE_BASE_TEXTURE_EXTRA + 23;
@@ -103,16 +106,16 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
                 state.faces[face].overlay_tint_mode = MAAGE_BLOCK_TINT_GRASS;
             }
         }
-        if (block == ids->block_tall_grass && metadata) state.faces[face].tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
+        if (block == ids->block_tall_grass && configuration) state.faces[face].tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
         if (block == ids->block_leaves) {
-            unsigned long color = (metadata & 3U) == 1 ? 6396257UL : 8431445UL;
-            if (!(metadata & 3U)) state.faces[face].tint_mode = MAAGE_BLOCK_TINT_FOLIAGE;
-            state.fast_texture = (metadata & 3U) == 1 ? MAAGE_BASE_TEXTURE_LEAVES_OPAQUE_SPRUCE : ((metadata & 3U) == 2 ? MAAGE_BASE_TEXTURE_LEAVES_OPAQUE_BIRCH : MAAGE_BASE_TEXTURE_LEAVES_OPAQUE_OAK);
-            if (metadata & 3U)
+            unsigned long color = (configuration & 3U) == 1 ? 6396257UL : 8431445UL;
+            if (!(configuration & 3U)) state.faces[face].tint_mode = MAAGE_BLOCK_TINT_FOLIAGE;
+            state.fast_texture = (configuration & 3U) == 1 ? MAAGE_BASE_TEXTURE_LEAVES_OPAQUE_SPRUCE : ((configuration & 3U) == 2 ? MAAGE_BASE_TEXTURE_LEAVES_OPAQUE_BIRCH : MAAGE_BASE_TEXTURE_LEAVES_OPAQUE_OAK);
+            if (configuration & 3U)
                 for (channel = 0; channel < 3; ++channel)
                     state.faces[face].tint[channel] = (float) ((color >> ((2 - channel) * 8)) & 255UL) / 255;
         }
-        if (block == ids->block_log) state.texture_axis = (metadata & 12) == 4 ? 1 : ((metadata & 12) == 8 ? 3 : 2);
+        if (block == ids->block_log) state.texture_axis = (configuration & 12) == 4 ? 1 : ((configuration & 12) == 8 ? 3 : 2);
         state.faces[face].texture_id = ids->textures[selected];
         if (state.fluid_kind) {
             state.faces[face].has_flow_texture = 1;
@@ -137,7 +140,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     base_block(&block, ids, 0, 0, 0);
     block.behavior_context = ids;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:air", &block);
+    result = maage_base_register_block(registry, "minecraft:air", &block);
     if (maage_status_failed(result)) return result;
     ids->block_air = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_air, block.id, 0, 0);
@@ -151,7 +154,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool = MAAGE_TOOL_PICKAXE;
     block.harvest_requires_tool = 1;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:stone", &block);
+    result = maage_base_register_block(registry, "minecraft:stone", &block);
     if (maage_status_failed(result)) return result;
     ids->block_stone = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_stone, block.id, 0, 0);
@@ -163,7 +166,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool = MAAGE_TOOL_SHOVEL;
     block.random_tick = maage_random_tick_grass;
     block.material = ids->material_grass;
-    result = maage_block_registry_register_block(registry, "minecraft:grass", &block);
+    result = maage_base_register_block(registry, "minecraft:grass", &block);
     if (maage_status_failed(result)) return result;
     ids->block_grass = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_grass, block.id, 0, 2);
@@ -174,7 +177,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.drop_count = 1;
     block.required_tool = MAAGE_TOOL_SHOVEL;
     block.material = ids->material_dirt;
-    result = maage_block_registry_register_block(registry, "minecraft:dirt", &block);
+    result = maage_base_register_block(registry, "minecraft:dirt", &block);
     if (maage_status_failed(result)) return result;
     ids->block_dirt = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_dirt, block.id, 0, 1);
@@ -183,7 +186,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     base_block(&block, ids, 1, 1, -1);
     block.behavior_context = ids;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:bedrock", &block);
+    result = maage_base_register_block(registry, "minecraft:bedrock", &block);
     if (maage_status_failed(result)) return result;
     ids->block_bedrock = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_bedrock, block.id, 0, 4);
@@ -194,7 +197,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.light_opacity = 3;
     block.material = ids->material_water;
     block.mesh_material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
-    result = maage_block_registry_register_block(registry, "minecraft:water", &block);
+    result = maage_base_register_block(registry, "minecraft:water", &block);
     if (maage_status_failed(result)) return result;
     ids->block_water = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_water, block.id, 0, 5);
@@ -207,7 +210,8 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.falls = 1;
     block.material = ids->material_sand;
     block.drops = maage_base_drop_species;
-    result = maage_block_registry_register_block(registry, "minecraft:sand", &block);
+    block.drops = maage_base_drop_sand;
+    result = maage_base_register_block(registry, "minecraft:sand", &block);
     if (maage_status_failed(result)) return result;
     ids->block_sand = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_sand, block.id, 0, 6);
@@ -220,7 +224,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.falls = 1;
     block.material = ids->material_gravel;
     block.drops = maage_base_drop_gravel;
-    result = maage_block_registry_register_block(registry, "minecraft:gravel", &block);
+    result = maage_base_register_block(registry, "minecraft:gravel", &block);
     if (maage_status_failed(result)) return result;
     ids->block_gravel = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_gravel, block.id, 0, 7);
@@ -232,7 +236,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool = MAAGE_TOOL_PICKAXE;
     block.harvest_requires_tool = 1;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:sandstone", &block);
+    result = maage_base_register_block(registry, "minecraft:sandstone", &block);
     if (maage_status_failed(result)) return result;
     ids->block_sandstone = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_sandstone, block.id, 0, 8);
@@ -248,7 +252,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 0;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:cobblestone", &block);
+    result = maage_base_register_block(registry, "minecraft:cobblestone", &block);
     if (maage_status_failed(result)) return result;
     ids->block_cobblestone = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_cobblestone, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 0);
@@ -263,7 +267,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool = MAAGE_TOOL_AXE;
     block.material = ids->material_wood;
     block.drops = maage_base_drop_planks;
-    result = maage_block_registry_register_block(registry, "minecraft:planks", &block);
+    result = maage_base_register_block(registry, "minecraft:planks", &block);
     if (maage_status_failed(result)) return result;
     ids->block_planks = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_planks, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 1);
@@ -278,7 +282,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool = MAAGE_TOOL_AXE;
     block.material = ids->material_wood;
     block.use = maage_base_table_use;
-    result = maage_block_registry_register_block(registry, "minecraft:crafting_table", &block);
+    result = maage_base_register_block(registry, "minecraft:crafting_table", &block);
     if (maage_status_failed(result)) return result;
     ids->block_crafting_table = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_crafting_table, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 0);
@@ -294,7 +298,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 2;
     block.material = ids->material_metal;
-    result = maage_block_registry_register_block(registry, "minecraft:gold_block", &block);
+    result = maage_base_register_block(registry, "minecraft:gold_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_gold_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_gold_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE - MAAGE_BASE_TEXTURE_EXTRA);
@@ -310,7 +314,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 1;
     block.material = ids->material_metal;
-    result = maage_block_registry_register_block(registry, "minecraft:iron_block", &block);
+    result = maage_base_register_block(registry, "minecraft:iron_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_iron_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_iron_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 1 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -326,7 +330,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 2;
     block.material = ids->material_metal;
-    result = maage_block_registry_register_block(registry, "minecraft:diamond_block", &block);
+    result = maage_base_register_block(registry, "minecraft:diamond_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_diamond_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_diamond_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 2 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -342,7 +346,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 1;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:lapis_block", &block);
+    result = maage_base_register_block(registry, "minecraft:lapis_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_lapis_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_lapis_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 3 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -358,7 +362,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 2;
     block.material = ids->material_metal;
-    result = maage_block_registry_register_block(registry, "minecraft:emerald_block", &block);
+    result = maage_base_register_block(registry, "minecraft:emerald_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_emerald_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_emerald_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 4 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -374,7 +378,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 0;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:redstone_block", &block);
+    result = maage_base_register_block(registry, "minecraft:redstone_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_redstone_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_redstone_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 5 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -390,7 +394,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 0;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:coal_block", &block);
+    result = maage_base_register_block(registry, "minecraft:coal_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_coal_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_coal_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 6 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -406,7 +410,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 0;
     block.material = ids->material_snow;
-    result = maage_block_registry_register_block(registry, "minecraft:snow_block", &block);
+    result = maage_base_register_block(registry, "minecraft:snow_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_snow_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_snow_block, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + MAAGE_BASE_TEXTURE_STORAGE + 7 - MAAGE_BASE_TEXTURE_EXTRA);
@@ -419,7 +423,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.emitted_light = 15;
     block.use_neighbor_brightness = 1;
     block.material = ids->material_lava;
-    result = maage_block_registry_register_block(registry, "minecraft:lava", &block);
+    result = maage_base_register_block(registry, "minecraft:lava", &block);
     if (maage_status_failed(result)) return result;
     ids->block_lava = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_lava, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 2);
@@ -435,7 +439,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 2;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:gold_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:gold_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_gold_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_gold_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 3);
@@ -451,7 +455,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 1;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:iron_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:iron_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_iron_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_iron_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 4);
@@ -467,7 +471,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 0;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:coal_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:coal_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_coal_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_coal_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 5);
@@ -483,7 +487,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.material = ids->material_wood;
     block.changed = maage_leaves_changed;
     block.drops = maage_base_drop_species;
-    result = maage_block_registry_register_block(registry, "minecraft:log", &block);
+    result = maage_base_register_block(registry, "minecraft:log", &block);
     if (maage_status_failed(result)) return result;
     ids->block_log = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_log, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 6);
@@ -505,7 +509,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.special_tool_speed = 15;
     block.tool_wear_class = MAAGE_TOOL_SHEARS;
     block.drops = maage_base_drop_leaves;
-    result = maage_block_registry_register_block(registry, "minecraft:leaves", &block);
+    result = maage_base_register_block(registry, "minecraft:leaves", &block);
     if (maage_status_failed(result)) return result;
     ids->block_leaves = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_leaves, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 8);
@@ -522,7 +526,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool_level = 1;
     block.material = ids->material_stone;
     block.drops = maage_base_drop_lapis;
-    result = maage_block_registry_register_block(registry, "minecraft:lapis_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:lapis_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_lapis_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_lapis_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 9);
@@ -548,7 +552,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.tool_wear_class = MAAGE_TOOL_SHEARS;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
     block.drops = maage_base_drop_grass;
-    result = maage_block_registry_register_block(registry, "minecraft:tall_grass", &block);
+    result = maage_base_register_block(registry, "minecraft:tall_grass", &block);
     if (maage_status_failed(result)) return result;
     ids->block_tall_grass = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_tall_grass, block.id, 1, MAAGE_BASE_TEXTURE_EXTRA + 10);
@@ -574,7 +578,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.tool_wear_class = MAAGE_TOOL_SHEARS;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
     block.drops = maage_base_drop_bush;
-    result = maage_block_registry_register_block(registry, "minecraft:dead_bush", &block);
+    result = maage_base_register_block(registry, "minecraft:dead_bush", &block);
     if (maage_status_failed(result)) return result;
     ids->block_dead_bush = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_dead_bush, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 11);
@@ -598,7 +602,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[1] = 0.6;
     block.material = ids->material_foliage;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
-    result = maage_block_registry_register_block(registry, "minecraft:dandelion", &block);
+    result = maage_base_register_block(registry, "minecraft:dandelion", &block);
     if (maage_status_failed(result)) return result;
     ids->block_dandelion = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_dandelion, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 12);
@@ -622,7 +626,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[1] = 0.6;
     block.material = ids->material_foliage;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
-    result = maage_block_registry_register_block(registry, "minecraft:poppy", &block);
+    result = maage_base_register_block(registry, "minecraft:poppy", &block);
     if (maage_status_failed(result)) return result;
     ids->block_poppy = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_poppy, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 13);
@@ -646,7 +650,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[1] = 0.4;
     block.material = ids->material_foliage;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
-    result = maage_block_registry_register_block(registry, "minecraft:brown_mushroom", &block);
+    result = maage_base_register_block(registry, "minecraft:brown_mushroom", &block);
     if (maage_status_failed(result)) return result;
     ids->block_brown_mushroom = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_brown_mushroom, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 14);
@@ -670,7 +674,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[1] = 0.4;
     block.material = ids->material_foliage;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
-    result = maage_block_registry_register_block(registry, "minecraft:red_mushroom", &block);
+    result = maage_base_register_block(registry, "minecraft:red_mushroom", &block);
     if (maage_status_failed(result)) return result;
     ids->block_red_mushroom = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_red_mushroom, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 15);
@@ -686,7 +690,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 0;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:mossy_cobblestone", &block);
+    result = maage_base_register_block(registry, "minecraft:mossy_cobblestone", &block);
     if (maage_status_failed(result)) return result;
     ids->block_mossy_cobblestone = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_mossy_cobblestone, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 16);
@@ -702,7 +706,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 3;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:obsidian", &block);
+    result = maage_base_register_block(registry, "minecraft:obsidian", &block);
     if (maage_status_failed(result)) return result;
     ids->block_obsidian = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_obsidian, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 17);
@@ -724,7 +728,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[1] = 0.6;
     block.material = ids->material_wood;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
-    result = maage_block_registry_register_block(registry, "minecraft:torch", &block);
+    result = maage_base_register_block(registry, "minecraft:torch", &block);
     if (maage_status_failed(result)) return result;
     ids->block_torch = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_torch, block.id, 5, MAAGE_BASE_TEXTURE_EXTRA + 18);
@@ -740,7 +744,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 2;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:diamond_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:diamond_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_diamond_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_diamond_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 19);
@@ -757,7 +761,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.required_tool_level = 2;
     block.material = ids->material_stone;
     block.drops = maage_base_drop_redstone;
-    result = maage_block_registry_register_block(registry, "minecraft:redstone_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:redstone_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_redstone_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_redstone_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 20);
@@ -783,7 +787,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.material = ids->material_snow;
     block.snow_cover = 1;
     block.unsupported_no_drops = 1;
-    result = maage_block_registry_register_block(registry, "minecraft:snow", &block);
+    result = maage_base_register_block(registry, "minecraft:snow", &block);
     if (maage_status_failed(result)) return result;
     ids->block_snow = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_snow, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 21);
@@ -803,7 +807,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.flow_permeable = 1;
     block.cull_same = 1;
     block.drop_count = 0;
-    result = maage_block_registry_register_block(registry, "minecraft:ice", &block);
+    result = maage_base_register_block(registry, "minecraft:ice", &block);
     if (maage_status_failed(result)) return result;
     ids->block_ice = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_ice, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 32);
@@ -830,7 +834,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.material = ids->material_cloth;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
     block.mesh_inset = 1;
-    result = maage_block_registry_register_block(registry, "minecraft:cactus", &block);
+    result = maage_base_register_block(registry, "minecraft:cactus", &block);
     if (maage_status_failed(result)) return result;
     ids->block_cactus = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_cactus, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 22);
@@ -846,7 +850,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.harvest_requires_tool = 1;
     block.required_tool_level = 2;
     block.material = ids->material_stone;
-    result = maage_block_registry_register_block(registry, "minecraft:emerald_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:emerald_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_emerald_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_emerald_ore, block.id, 0, MAAGE_BASE_TEXTURE_EXTRA + 25);
@@ -898,14 +902,14 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.material = ids->material_foliage;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
     block.drops = maage_base_drop_species;
-    result = maage_block_registry_register_block(registry, "minecraft:sapling", &block);
+    result = maage_base_register_block(registry, "minecraft:sapling", &block);
     if (maage_status_failed(result)) goto failed;
     ids->block_sapling = block.id;
     for (flags = 0; flags < 2; ++flags)
         for (species = 0; species < 3; ++species) {
-            unsigned int metadata = (unsigned int) species | (flags ? 8U : 0U);
+            unsigned int configuration = (unsigned int) species | (flags ? 8U : 0U);
             int texture = MAAGE_BASE_TEXTURE_ITEMS + (species ? 25 + species : 23);
-            result = maage_content_register_state(registry, ids, config, &ids->saplings[metadata], ids->block_sapling, metadata, texture);
+            result = maage_content_register_state(registry, ids, config, &ids->saplings[configuration], ids->block_sapling, configuration, texture);
             if (maage_status_failed(result)) goto failed;
         }
     ids->state_sapling = ids->saplings[0];
@@ -929,7 +933,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.unsupported_replaces = 1;
     block.unsupported_state = ids->state_dirt;
     block.land = maage_base_farmland_land;
-    result = maage_block_registry_register_block(registry, "minecraft:farmland", &block);
+    result = maage_base_register_block(registry, "minecraft:farmland", &block);
     if (maage_status_failed(result)) goto failed;
     ids->block_farmland = block.id;
     for (i = 0; i < 8; ++i) {
@@ -953,7 +957,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.material = ids->material_foliage;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
     block.drops = maage_base_drop_wheat;
-    result = maage_block_registry_register_block(registry, "minecraft:wheat", &block);
+    result = maage_base_register_block(registry, "minecraft:wheat", &block);
     if (maage_status_failed(result)) goto failed;
     ids->block_wheat = block.id;
     for (i = 0; i < 8; ++i) {

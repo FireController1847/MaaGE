@@ -281,7 +281,7 @@ static void maage_mesh_fluid_flow(const maage_block_registry *registry, const ma
     flow[1] = length > 0 ? (float) (vector[2] / length) : 0;
 }
 
-static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, size_t face_index, int x, int y, int z, unsigned int face, const maage_block_face_definition *definition, const float uv[4], const maage_block_shape *shape, unsigned int model, unsigned int metadata, int log_axis, float material, float tint[4][3], int smooth_tint, const float animation[3], const float fluid_heights[4], const float fluid_flow[2], const maage_mesh_illumination *illumination) {
+static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, size_t face_index, int x, int y, int z, unsigned int face, const maage_block_face_definition *definition, const float uv[4], const maage_block_shape *shape, unsigned int model, unsigned int geometry_variant, int log_axis, float material, float tint[4][3], int smooth_tint, const float animation[3], const float fluid_heights[4], const float fluid_flow[2], const maage_mesh_illumination *illumination) {
     static const unsigned int offsets[2][6] = {{0, 1, 2, 0, 2, 3}, {0, 1, 3, 1, 2, 3}};
     static const float shade[MAAGE_FACE_COUNT] = {0.6f, 0.6f, 0.5f, 1.0f, 0.8f, 0.8f};
     static const int cross_corners[4][4][3] = {
@@ -353,9 +353,9 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
         } else if (model == MAAGE_BLOCK_MESH_TORCH) {
             u = (7.0f + 2.0f * u) / 16.0f;
             v = face == MAAGE_FACE_POSITIVE_Y ? (6.0f + 2.0f * v) / 16.0f : (face == MAAGE_FACE_NEGATIVE_Y ? (13.0f + 2.0f * v) / 16.0f : (6.0f + 10.0f * v) / 16.0f);
-            if (metadata >= 1 && metadata <= 4) {
+            if (geometry_variant >= 1 && geometry_variant <= 4) {
                 shear = -0.1f - 0.4f * (1.0f - local[1]);
-                local[metadata <= 2 ? 0 : 2] += metadata & 1 ? shear : -shear;
+                local[geometry_variant <= 2 ? 0 : 2] += geometry_variant & 1 ? shear : -shear;
                 local[1] += 0.2f;
             }
         }
@@ -480,7 +480,7 @@ static maage_status maage_mesh_custom_quad_write(maage_mesh_custom_work *work, c
         outward = 1;
         for (corner = 0; corner < 4; ++corner)
             if (quad->positions[corner][quad->face / 2] != (float) (quad->face & 1U)) outward = 0;
-        maage_mesh_lighting(work->blocks, work->chunk, work->neighbors, work->x, work->y, work->z, quad->face, outward || work->block->use_neighbor_brightness, !work->block->emitted_light && !work->state->fluid_kind, work->block->emitted_light, &illumination);
+        maage_mesh_lighting(work->blocks, work->chunk, work->neighbors, work->x, work->y, work->z, quad->face, outward || work->block->use_neighbor_brightness, !work->state->emitted_light && !work->state->fluid_kind, work->state->emitted_light, &illumination);
         for (layer = 0; layer < layers; ++layer) {
             uv = layer ? appearance->overlay_uv : appearance->uv;
             tint_mode = layer ? appearance->overlay_tint_mode : appearance->tint_mode;
@@ -730,13 +730,13 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                                 }
                                 colors_ready = 1;
                             }
-                            smooth = model == MAAGE_BLOCK_MESH_CUBE && !current->emitted_light && !state->fluid_kind && !current->mesh_inset;
+                            smooth = model == MAAGE_BLOCK_MESH_CUBE && !state->emitted_light && !state->fluid_kind && !current->mesh_inset;
                             /* A recessed top with neighbor brightness samples
                              * above its surface, outside the opaque cell.
                              * Geometric boundary checks still own face culling. */
-                            if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, current->emitted_light, &illumination);
-                            else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary || (model == MAAGE_BLOCK_MESH_CUBE && current->use_neighbor_brightness && face == MAAGE_FACE_POSITIVE_Y), smooth, current->emitted_light, &illumination);
-                            maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->metadata, log_axis, material, tint_mode ? colors[tint_mode] : neutral, tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
+                            if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, state->emitted_light, &illumination);
+                            else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary || (model == MAAGE_BLOCK_MESH_CUBE && current->use_neighbor_brightness && face == MAAGE_FACE_POSITIVE_Y), smooth, state->emitted_light, &illumination);
+                            maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->geometry_variant, log_axis, material, tint_mode ? colors[tint_mode] : neutral, tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
                             if (!overlay && !reverse && !state->fluid_kind && model == MAAGE_BLOCK_MESH_CUBE && material == MAAGE_MESH_MATERIAL_OPAQUE && log_axis < 0 && uv[2] > uv[0] && uv[3] > uv[1] && face_shape.minimum[0] == 0 && face_shape.minimum[1] == 0 && face_shape.minimum[2] == 0 && face_shape.maximum[0] == 1 && face_shape.maximum[1] == 1 && face_shape.maximum[2] == 1) {
                                 maage_mesh_vertex *quad = vertices + face_count * 4;
                                 for (corner = 1; corner < 4; ++corner)
@@ -748,7 +748,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                                         quad[corner].uv[1] = quad[corner].uv[1] == uv[1] ? 0 : 1;
                                     }
                             }
-                            if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->metadata, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], definition->overlay_tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, NULL, NULL, NULL, &illumination);
+                            if (overlay) maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->geometry_variant, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], definition->overlay_tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, NULL, NULL, NULL, &illumination);
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));
                         }
                         if (owners) {

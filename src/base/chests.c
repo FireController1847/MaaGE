@@ -57,7 +57,8 @@ static maage_status chest_group(const maage_world *world, int x, int y, int z, i
 }
 static unsigned long chest_type(const maage_world *world, const maage_block_state_definition *state) {
     const maage_block_definition *block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-    return block && block->use == maage_base_chest_use && block->entity ? block->entity->id : 0;
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), state);
+    return block && ids && (block->id == ids->block_chest || block->id == ids->block_trapped_chest) && block->entity ? block->entity->id : 0;
 }
 static maage_status chest_read(const maage_world *world, base_chest_group *group) {
     unsigned int half;
@@ -118,11 +119,11 @@ maage_status maage_base_chest_can_place(const maage_world *world, int x, int y, 
     *valid = 1;
     return chest_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_QUERY);
 }
-maage_status maage_base_chest_placement(const maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state) {
+maage_status maage_base_chest_placement(const maage_item_definition *item, maage_item_variant_id variant, maage_block_face face, double yaw, maage_block_state_id *state) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
     unsigned int direction = (unsigned int) ((long) floor(yaw * 2 / 3.141592653589793 + 0.5) & 3L);
     (void) face;
-    if (metadata) return chest_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_QUERY);
+    if (variant) return chest_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_QUERY);
     *state = ids->chest_states[item->block_id == ids->block_trapped_chest][direction];
     return chest_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_QUERY);
 }
@@ -228,7 +229,7 @@ maage_status maage_base_chest_sample(const void *context, const maage_world *wor
 static void chest_merge(maage_item_stack *source, maage_item_stack *destination, const maage_item_registry *items) {
     const maage_item_definition *item;
     unsigned int amount;
-    if (!source->count || (destination->count && (source->item_id != destination->item_id || source->metadata != destination->metadata || source->damage != destination->damage))) return;
+    if (!source->count || (destination->count && (source->item_id != destination->item_id || source->variant != destination->variant || source->damage != destination->damage))) return;
     item = maage_item_registry_get(items, source->item_id);
     amount = item->max_stack - destination->count;
     if (amount > source->count) amount = source->count;
@@ -283,7 +284,7 @@ static int chest_valid(const maage_block_entity_handler *handler, const maage_bl
     const maage_base_ids *ids = (const maage_base_ids *) handler->context;
     const base_chest_state *state = (const base_chest_state *) data;
     unsigned int slot;
-    if (!block || (block->block_id != ids->block_chest && block->block_id != ids->block_trapped_chest) || block->metadata >= 4 || !state->revision || state->revision > 4294967295UL || state->viewer > 4294967295UL || state->lid > 10 || state->previous_lid > 10) return 0;
+    if (!block || (block->block_id != ids->block_chest && block->block_id != ids->block_trapped_chest) || maage_base_state_value(ids->blocks, block, ids->property_facing) >= 4 || !state->revision || state->revision > 4294967295UL || state->viewer > 4294967295UL || state->lid > 10 || state->previous_lid > 10) return 0;
     for (slot = 0; slot < BASE_CHEST_SLOTS; ++slot)
         if (!maage_item_stack_valid(items, &state->slots[slot])) return 0;
     return 1;
@@ -303,13 +304,14 @@ static int chest_opaque(const maage_world *world, int x, int y, int z) {
     return block ? block->opaque : -1;
 }
 static unsigned int chest_facing(const maage_world *world, const base_chest_group *group) {
+    const maage_base_ids *ids = maage_base_state_references(maage_world_registry(world), group->blocks[0]);
     static const int front_x[4] = {0, -1, 0, 1}, front_z[4] = {1, 0, -1, 0};
-    unsigned int facing = group->blocks[0]->metadata;
+    unsigned int facing = maage_base_state_value(ids->blocks, group->blocks[0], ids->property_facing);
     unsigned int half;
     int front = 0, back = 0, blocked;
     if (group->count == 2) {
-        if (group->x[0] != group->x[1] && (facing & 1U)) facing = !(group->blocks[1]->metadata & 1U) ? group->blocks[1]->metadata : 0;
-        if (group->z[0] != group->z[1] && !(facing & 1U)) facing = group->blocks[1]->metadata & 1U ? group->blocks[1]->metadata : 1;
+        if (group->x[0] != group->x[1] && (facing & 1U)) facing = !(maage_base_state_value(ids->blocks, group->blocks[1], ids->property_facing) & 1U) ? maage_base_state_value(ids->blocks, group->blocks[1], ids->property_facing) : 0;
+        if (group->z[0] != group->z[1] && !(facing & 1U)) facing = maage_base_state_value(ids->blocks, group->blocks[1], ids->property_facing) & 1U ? maage_base_state_value(ids->blocks, group->blocks[1], ids->property_facing) : 1;
     }
     for (half = 0; half < group->count; ++half) {
         blocked = chest_opaque(world, group->x[half] + front_x[facing], group->y, group->z[half] + front_z[facing]);

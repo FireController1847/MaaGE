@@ -60,7 +60,8 @@ typedef struct maage_gameplay {
     double footstep_distance;
     unsigned int dig_ticks;
     maage_item_id breaking_item;
-    unsigned int breaking_metadata, breaking_damage;
+    maage_item_variant_id breaking_variant;
+    unsigned int breaking_damage;
     int attack_held, use_held, audio_initialized, swimming;
 } maage_gameplay;
 typedef struct maage_gameplay_intent {

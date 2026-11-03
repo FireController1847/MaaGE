@@ -18,8 +18,8 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const
     maage_status result;
     int radius, dx, dy, dz, nx, ny, nz;
     if (before->block_id == after->block_id) return maage_leaves_noop();
-    if (before->block_id == ids->block_log) radius = 4;
-    else if (before->block_id == ids->block_leaves) radius = 1;
+    if (maage_base_state_tag(ids, before, ids->tag_log)) radius = 4;
+    else if (maage_base_state_tag(ids, before, ids->tag_leaves)) radius = 1;
     else
         return maage_leaves_noop();
     /* The mutation already owns an edit batch. Flag-only recursive mutations
@@ -34,8 +34,8 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const
                 if (ny < 0 || ny >= MAAGE_WORLD_HEIGHT) continue;
                 leaf = maage_block_registry_state(blocks, maage_world_get(world, nx, ny, nz));
                 if (!leaf) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-                if (leaf->block_id != ids->block_leaves || (leaf->metadata & (MAAGE_LEAF_PERSISTENT | MAAGE_LEAF_CHECK_DECAY))) continue;
-                result = maage_block_leaves_state(maage_world_registry(world), ids, leaf->metadata | MAAGE_LEAF_CHECK_DECAY, &marked);
+                if (!maage_base_state_tag(ids, leaf, ids->tag_leaves) || maage_base_state_value(blocks, leaf, ids->property_persistent) || maage_base_state_value(blocks, leaf, ids->property_check_decay)) continue;
+                result = maage_block_state_change(blocks, leaf, ids->property_check_decay, 1, &marked);
                 if (!maage_status_failed(result)) result = maage_world_set(world, nx, ny, nz, leaf->id, marked);
                 if (maage_status_failed(result)) return result;
             }
@@ -57,7 +57,7 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
     unsigned long drop_random;
     size_t i;
     maage_status result, mutation;
-    if ((state->metadata & MAAGE_LEAF_PERSISTENT) || !(state->metadata & MAAGE_LEAF_CHECK_DECAY)) return maage_leaves_noop();
+    if (maage_base_state_value(blocks, state, ids->property_persistent) || !maage_base_state_value(blocks, state, ids->property_check_decay)) return maage_leaves_noop();
     /* Require the radius-five neighborhood before searching the radius-four
      * support cube. Outside vertical world bounds is known air. */
     if (x - 5 <= -MAAGE_WORLD_LIMIT || x + 5 >= MAAGE_WORLD_LIMIT || z - 5 <= -MAAGE_WORLD_LIMIT || z + 5 >= MAAGE_WORLD_LIMIT) return maage_leaves_noop();
@@ -70,8 +70,8 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
                 cell = ((dy + 4) * MAAGE_LEAF_EDGE + dz + 4) * MAAGE_LEAF_EDGE + dx + 4;
                 neighbor = maage_block_registry_state(blocks, maage_world_get(world, x + dx, y + dy, z + dz));
                 if (!neighbor) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-                support[cell] = neighbor->block_id == ids->block_leaves ? -2 : -1;
-                if (neighbor->block_id == ids->block_log) {
+                support[cell] = maage_base_state_tag(ids, neighbor, ids->tag_leaves) ? -2 : -1;
+                if (maage_base_state_tag(ids, neighbor, ids->tag_log)) {
                     support[cell] = 0;
                     queue[tail++] = (unsigned short) cell;
                 }
@@ -97,7 +97,7 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
         }
     }
     if (support[MAAGE_LEAF_CENTER] >= 0) {
-        result = maage_block_leaves_state(maage_world_registry(world), ids, state->metadata & ~MAAGE_LEAF_CHECK_DECAY, &checked);
+        result = maage_block_state_change(blocks, state, ids->property_check_decay, 0, &checked);
         return maage_status_failed(result) ? result : maage_world_set(world, x, y, z, state->id, checked);
     }
     /* Reuse the established ordinary-drop rules without consuming the player

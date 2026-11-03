@@ -380,11 +380,11 @@ static void maage_client_environment_particles(maage_client_environment *view, c
                 view->particles[index].position[0] = x + 0.5;
                 view->particles[index].position[1] = y + maage_client_particle_random(view, 65536UL) / 65536.0 * 0.375;
                 view->particles[index].position[2] = z + 0.5;
-                if (state->metadata & 1U) {
-                    view->particles[index].position[0] += state->metadata == 1 ? 0.52 : -0.52;
+                if (state->geometry_variant & 1U) {
+                    view->particles[index].position[0] += state->geometry_variant == 1 ? 0.52 : -0.52;
                     view->particles[index].position[2] += offset;
                 } else {
-                    view->particles[index].position[2] += state->metadata == 2 ? 0.52 : -0.52;
+                    view->particles[index].position[2] += state->geometry_variant == 2 ? 0.52 : -0.52;
                     view->particles[index].position[0] += offset;
                 }
                 view->particles[index].age = 0;

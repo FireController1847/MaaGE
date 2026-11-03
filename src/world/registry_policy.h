@@ -20,6 +20,10 @@ typedef enum content_domain {
     CONTENT_ORE,
     CONTENT_ENTITY_TYPE,
     CONTENT_MODEL,
+    CONTENT_PROPERTY,
+    CONTENT_PROPERTY_VALUE,
+    CONTENT_TAG,
+    CONTENT_BEHAVIOR,
     CONTENT_BLOCK_BINDINGS,
     CONTENT_SOUND_BINDINGS,
     CONTENT_PRESENTATION_BINDINGS,
@@ -53,8 +57,11 @@ size_t content_blocks_identity_count(const maage_block_registry *, content_domai
 const char *content_policy_domain_name(content_domain);
 maage_status content_blocks_view(const maage_block_registry *, const maage_block_geometry_registry *, const maage_content_view_config *, maage_block_registry **);
 maage_status content_geometry_view(const maage_block_geometry_registry *, const maage_content_view_config *, maage_block_geometry_registry **);
+maage_status content_traits_read_set(const maage_traits_registry *, maage_property_set_id);
+void content_traits_policy(maage_traits_registry *, content_policy *);
 void content_blocks_policy(maage_block_registry *, content_policy *);
 void content_items_policy(maage_item_registry *, content_policy *);
+maage_status content_items_failure(const maage_item_registry *, maage_status, const char *, const char *);
 void content_fluids_policy(maage_fluid_registry *, content_policy *);
 void content_geometry_policy(maage_block_geometry_registry *, content_policy *);
 void content_containers_policy(maage_container_registry *, content_policy *);

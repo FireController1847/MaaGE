@@ -16,7 +16,7 @@ extern "C" {
  * explicitly, not memcpy C layouts (including unsigned long and padding).
  * Local hosting validates the independently composed Server against its Client
  * content identity peer before World startup or publishing any numeric data. */
-#define MAAGE_SESSION_PROTOCOL_VERSION 25U
+#define MAAGE_SESSION_PROTOCOL_VERSION 26U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -122,7 +122,8 @@ typedef struct maage_session_player_view {
     maage_world_target target, breaking;
     double break_progress;
     maage_item_id breaking_item;
-    unsigned int breaking_metadata, breaking_damage;
+    maage_item_variant_id breaking_variant;
+    unsigned int breaking_damage;
     unsigned long blocks_broken, last_break_tick;
     maage_world_target last_break;
     unsigned long swing_tick;

@@ -92,8 +92,6 @@ maage_status maage_base_resolve_blocks(maage_content_context *context, const maa
     if (maage_status_failed(result)) return result;
     result = base_bind_drop(context, ids->block_furnace, ids->item_furnace);
     if (maage_status_failed(result)) return result;
-    result = base_bind_drop(context, ids->block_lit_furnace, ids->item_furnace);
-    if (maage_status_failed(result)) return result;
     result = base_bind_drop(context, ids->block_clay, ids->item_clay_ball);
     if (maage_status_failed(result)) return result;
     result = base_bind_drop(context, ids->block_hardened_clay, ids->item_hardened_clay);

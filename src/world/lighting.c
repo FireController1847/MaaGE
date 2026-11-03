@@ -69,7 +69,7 @@ maage_status maage_light_provisional_cell(maage_chunk *chunk, const maage_chunk 
         if (!opacity && sky < 15) opacity = 1;
         sky = sky > opacity ? sky - opacity : 0;
     }
-    emission = block->emitted_light;
+    emission = state->emitted_light;
     opacity = block->light_opacity;
     if (!opacity || (opacity >= 15 && emission)) opacity = 1;
     if (opacity < 15)
@@ -190,7 +190,7 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
             goto done;
         }
         sky = maage_chunk_direct_sky_get(chunk, cell);
-        emitted = block->emitted_light;
+        emitted = state->emitted_light;
         opacity = block->light_opacity;
         if (!opacity || (opacity >= 15 && emitted)) opacity = 1;
         if (opacity < 15)

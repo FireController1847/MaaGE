@@ -288,7 +288,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     harvest = maage_item_can_harvest(tool, block);
     starting = !game->breaking_active || !maage_gameplay_same_target(&game->breaking, &game->target) ||
                game->breaking_item != (held->count ? held->item_id : 0) ||
-               game->breaking_metadata != (held->count ? held->metadata : 0) ||
+               game->breaking_variant != (held->count ? held->variant : 0) ||
                game->breaking_damage != (held->count ? held->damage : 0);
     if (starting) {
         game->breaking = game->target;
@@ -296,7 +296,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
         game->break_progress = 0;
         game->dig_ticks = 0;
         game->breaking_item = held->count ? held->item_id : 0;
-        game->breaking_metadata = held->count ? held->metadata : 0;
+        game->breaking_variant = held->count ? held->variant : 0;
         game->breaking_damage = held->count ? held->damage : 0;
     }
     if (game->mode == MAAGE_GAME_MODE_CREATIVE || block->hardness == 0) progress = 1;
@@ -338,7 +338,7 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
     maage_entities_set_random(entities, random);
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         maage_gameplay_exhaust(game, 0.025);
-        if (tool && tool->durability && tool->break_wear && (tool->break_wear == 2 ? block->tool_wear_class == tool->tool_class : block->hardness != 0)) {
+        if (tool && tool->durability && tool->break_wear && (tool->break_wear == 2 ? block->has_tool_wear && maage_item_has_tag(tool, block->tool_wear_class) : block->hardness != 0)) {
             /* Maximum damage is still a usable final state. Check before
              * incrementing so even the full unsigned domain cannot wrap. */
             if (held->damage == tool->durability) {
@@ -392,7 +392,7 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
         }
     }
     if (!item->has_block) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
-    result = maage_item_placement_state(item, held->metadata, target->face, yaw, placed);
+    result = maage_item_placement_state(item, held->variant, target->face, yaw, placed);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     state = maage_block_registry_state(maage_world_registry(world), *placed);
     block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
@@ -597,7 +597,7 @@ static void maage_gameplay_food(maage_gameplay *game, const maage_player *player
         memset(&game->food, 0, sizeof(game->food));
         return;
     }
-    if (active && (game->food.slot != game->inventory.selected || game->food.stack.item_id != held->item_id || game->food.stack.metadata != held->metadata || game->food.stack.damage != held->damage)) {
+    if (active && (game->food.slot != game->inventory.selected || game->food.stack.item_id != held->item_id || game->food.stack.variant != held->variant || game->food.stack.damage != held->damage)) {
         memset(&game->food, 0, sizeof(game->food));
         game->use_delay = 4;
         *handled = 1;

@@ -103,12 +103,12 @@ static maage_status base_sheep_interact(const maage_entity_type_definition *defi
     maage_item_stack wool;
     unsigned long random;
     maage_status result;
-    if (action != MAAGE_ENTITY_INTERACT_USE || !held || held->tool_class != MAAGE_TOOL_SHEARS || (entity->payload.living.flags & MAAGE_ENTITY_STATE_SHEARED)) return base_entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    if (action != MAAGE_ENTITY_INTERACT_USE || !held || !maage_traits_has(ids->traits, MAAGE_TRAIT_ITEM, held->id, ids->tool_tags[MAAGE_TOOL_SHEARS]) || (entity->payload.living.flags & MAAGE_ENTITY_STATE_SHEARED)) return base_entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     random = state->random;
     memset(&wool, 0, sizeof(wool));
     wool.item_id = ids->item_wool;
     wool.count = 1 + (unsigned int) (((random * 1664525UL + 1013904223UL) & 0xffffffffUL) % 3);
-    wool.metadata = (unsigned int) (entity->payload.living.variant & 15UL);
+    wool.variant = (unsigned int) (entity->payload.living.variant & 15UL);
     result = maage_entities_shear(context, entity, &wool);
     if (!maage_status_failed(result) && context->handled) base_mob_random(state);
     return result;
@@ -164,23 +164,23 @@ static maage_status base_entity_item(maage_content_context *context, const char 
     if (!maage_status_failed(result)) *id = item.id;
     return result;
 }
-static maage_block_state_id base_wool_icon(const maage_item_definition *item, unsigned int metadata) {
-    return ((const maage_base_ids *) item->behavior_context)->wool_states[metadata & 15U];
+static maage_block_state_id base_wool_icon(const maage_item_definition *item, maage_item_variant_id variant) {
+    return ((const maage_base_ids *) item->behavior_context)->wool_states[variant & 15U];
 }
-static maage_status base_wool_place(const maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state) {
+static maage_status base_wool_place(const maage_item_definition *item, maage_item_variant_id variant, maage_block_face face, double yaw, maage_block_state_id *state) {
     (void) face;
     (void) yaw;
-    *state = base_wool_icon(item, metadata);
+    if (variant >= item->variant_count) return base_entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    *state = item->variants[variant].placement_state_id;
     return base_entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
-static const char *base_wool_name(const maage_item_definition *item, unsigned int metadata) {
+static const char *base_wool_name(const maage_item_definition *item, maage_item_variant_id variant) {
     static const char *const names[] = {"White Wool", "Orange Wool", "Magenta Wool", "Light Blue Wool", "Yellow Wool", "Lime Wool", "Pink Wool", "Gray Wool", "Light Gray Wool", "Cyan Wool", "Purple Wool", "Blue Wool", "Brown Wool", "Green Wool", "Red Wool", "Black Wool"};
     (void) item;
-    return names[metadata & 15U];
+    return names[variant & 15U];
 }
 static maage_status base_wool_drops(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
-    const maage_base_ids *ids = (const maage_base_ids *) block->behavior_context;
+    const maage_base_ids *ids = maage_base_state_references(blocks, state);
     (void) items;
     (void) tool;
     (void) random;
@@ -188,12 +188,12 @@ static maage_status base_wool_drops(const maage_block_registry *blocks, const ma
     drops->count = 1;
     drops->stacks[0].item_id = ids->item_wool;
     drops->stacks[0].count = 1;
-    drops->stacks[0].metadata = state->metadata;
-    return base_entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
+    drops->stacks[0].variant = 0;
+    return maage_item_variant_change(items, drops->stacks[0].item_id, 0, ids->property_color, maage_base_state_value(blocks, state, ids->property_color), &drops->stacks[0].variant);
 }
 static maage_status base_sheep_loot(const maage_entity_type_definition *definition, const maage_entity *entity, maage_item_stack *stack) {
     const maage_base_ids *ids = (const maage_base_ids *) definition->behavior_context;
-    if (stack->item_id == ids->item_wool) stack->metadata = (unsigned int) (entity->payload.living.variant & 15UL);
+    if (stack->item_id == ids->item_wool) stack->variant = (unsigned int) (entity->payload.living.variant & 15UL);
     return base_entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
 static maage_status base_wool(maage_content_context *context, maage_base_ids *ids) {
@@ -219,7 +219,7 @@ static maage_status base_wool(maage_content_context *context, maage_base_ids *id
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.collision_shape.maximum[0] = block.collision_shape.maximum[1] = block.collision_shape.maximum[2] = 1;
     block.selection_shape = block.collision_shape;
-    result = maage_block_registry_register_block(context->blocks, "minecraft:wool", &block);
+    result = maage_base_register_block(context->blocks, "minecraft:wool", &block);
     if (maage_status_failed(result)) return result;
     ids->block_wool = block.id;
     for (color = 0; color < 16; ++color) {
@@ -228,7 +228,8 @@ static maage_status base_wool(maage_content_context *context, maage_base_ids *id
         if (maage_status_failed(result)) return result;
         memset(&state, 0, sizeof(state));
         state.block_id = ids->block_wool;
-        state.metadata = color;
+        result = maage_base_state_properties(ids, ids->block_wool, color, &state.properties);
+        if (maage_status_failed(result)) return result;
         for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
             state.faces[face].texture_id = ids->wool_textures[color];
             /* A texture identity does not substitute for a valid local UV
@@ -245,7 +246,7 @@ static maage_status base_wool(maage_content_context *context, maage_base_ids *id
     item.behavior_context = ids;
     item.display_name = "Wool";
     item.max_stack = 64;
-    item.max_metadata = 15;
+    item.variant_count = 16;
     item.has_block = 1;
     item.block_id = ids->block_wool;
     item.icon_state_id = item.placement_state_id = ids->wool_states[0];
@@ -255,6 +256,7 @@ static maage_status base_wool(maage_content_context *context, maage_base_ids *id
     item.texture_id = ids->wool_textures[0];
     item.mining_speed = 1;
     result = maage_item_registry_register(context->items, "minecraft:wool", &item);
+    if (!maage_status_failed(result)) result = maage_base_item_variants(context, &item, "minecraft:wool");
     if (!maage_status_failed(result)) ids->item_wool = item.id;
     return result;
 }
@@ -568,7 +570,7 @@ maage_status maage_base_entity_creative(maage_content_context *context, const ma
     entry.stack.item_id = ids->item_wool;
     entry.tab = building;
     for (i = 0; i < 16; ++i) {
-        entry.stack.metadata = i;
+        entry.stack.variant = i;
         entry.order = entry.search_order = 35 * 32 + (long) i;
         result = maage_creative_entry_register(context->creative, &entry);
         if (maage_status_failed(result)) return result;

@@ -199,7 +199,6 @@ int maage_chunk_sky_equal(const maage_chunk *left, const maage_chunk *right) {
 #error Chunk state storage requires an unsigned int with at least 32 bits
 #endif
 
-
 /* Only section contents are palette-compressed, never registry identities or
  * the World API. Packing is best-effort at immutable publication boundaries:
  * allocation pressure leaves a correct, directly indexed section in place. */
@@ -217,7 +216,8 @@ maage_section *maage_section_create(maage_block_state_id air) {
         maage_section_destroy(section);
         return NULL;
     }
-    for (i = 0; i < MAAGE_SECTION_VOLUME; ++i) section->states[i] = (unsigned int) air;
+    for (i = 0; i < MAAGE_SECTION_VOLUME; ++i)
+        section->states[i] = (unsigned int) air;
     return section;
 }
 void maage_section_destroy(maage_section *section) {
@@ -250,7 +250,8 @@ maage_status maage_section_expand(maage_section *section) {
     if (section->states) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_COPY, 0);
     states = (unsigned int *) malloc(MAAGE_SECTION_VOLUME * sizeof(*states));
     if (!states) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
-    for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell) states[cell] = section->palette[maage_section_index(section, cell)];
+    for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell)
+        states[cell] = section->palette[maage_section_index(section, cell)];
     section->states = states;
     if (section->payload) maage_section_payload_release(section->payload);
     else {
@@ -318,7 +319,8 @@ static void maage_section_compact(maage_section *section) {
     for (cell = 0; cell < MAAGE_SECTION_VOLUME; ++cell) {
         state = section->states[cell];
         bucket = (unsigned int) ((state * 2654435761UL) & 8191UL);
-        while (slots[bucket] && palette[slots[bucket] - 1U] != state) bucket = (bucket + 1U) & 8191U;
+        while (slots[bucket] && palette[slots[bucket] - 1U] != state)
+            bucket = (bucket + 1U) & 8191U;
         if (!slots[bucket]) {
             palette[count] = state;
             slots[bucket] = ++count;
@@ -444,7 +446,8 @@ allocation:
 void maage_chunk_compact(maage_chunk *chunk) {
     int section;
     if (!chunk) return;
-    for (section = 0; section < 16; ++section) maage_section_compact(chunk->sections[section]);
+    for (section = 0; section < 16; ++section)
+        maage_section_compact(chunk->sections[section]);
     maage_chunk_sky_compact(chunk);
 }
 
@@ -567,15 +570,13 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
 
 unsigned char maage_chunk_presentation_light(const maage_chunk *chunk, const maage_block_registry *blocks, int x, int y, int z) {
     const maage_block_state_definition *state;
-    const maage_block_definition *block;
     if (y >= 256) return 240;
     if (y < 0) return 0;
     if (chunk->direct_sky) return maage_chunk_light(chunk, x, y, z);
     state = maage_block_registry_state(blocks, maage_chunk_get(chunk, x, y, z));
-    block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
     /* This is never stored in numerical light buffers. Roofed terrain has a
      * modest sky approximation; calculated cave darkness is left untouched. */
-    return (unsigned char) ((y >= chunk->heightmap[z * 16 + x] ? 240 : 64) | (block ? block->emitted_light : 0));
+    return (unsigned char) ((y >= chunk->heightmap[z * 16 + x] ? 240 : 64) | (state ? state->emitted_light : 0));
 }
 
 int maage_chunk_x(const maage_chunk *chunk) {

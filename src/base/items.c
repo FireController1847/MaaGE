@@ -133,7 +133,8 @@ maage_status maage_base_items(maage_content_context *context, maage_base_ids *id
     item.display_name = "Shears";
     item.behavior_context = ids;
     item.durability = 238;
-    item.tool_class = MAAGE_TOOL_SHEARS;
+    item.tool_tag = ids->tool_tags[MAAGE_TOOL_SHEARS];
+    item.has_tool_tag = 1;
     item.break_wear = 2;
     result = base_item_register(context, "minecraft:shears", &item, 0, &ids->item_shears);
     if (maage_status_failed(result)) return result;
@@ -145,7 +146,7 @@ maage_status maage_base_items(maage_content_context *context, maage_base_ids *id
     item.texture_id = MAAGE_BASE_TEXTURE_ITEMS + 16;
     item.display_name = "Coal";
     item.behavior_context = ids;
-    item.max_metadata = 1;
+    item.variant_count = 2;
     result = base_item_register(context, "minecraft:coal", &item, 1600, &ids->item_coal);
     if (maage_status_failed(result)) return result;
     memset(&item, 0, sizeof(item));
@@ -219,7 +220,7 @@ maage_status maage_base_items(maage_content_context *context, maage_base_ids *id
     item.texture_id = MAAGE_BASE_TEXTURE_ITEMS + 23;
     item.display_name = "Oak Sapling";
     item.behavior_context = ids;
-    item.max_metadata = 2;
+    item.variant_count = 3;
     item.has_block = 1;
     item.block_id = ids->block_sapling;
     item.placement_state_id = ids->state_sapling;

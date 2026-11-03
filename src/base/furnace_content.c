@@ -34,7 +34,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_stone;
     block.use = maage_base_furnace_use;
-    result = maage_block_registry_register_block(registry, "minecraft:furnace", &block);
+    result = maage_base_register_block(registry, "minecraft:furnace", &block);
     if (maage_status_failed(result)) return result;
     ids->block_furnace = block.id;
     for (facing = 0; facing < 4; ++facing) {
@@ -42,28 +42,8 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
         if (maage_status_failed(result)) return result;
     }
 
-    memset(&block, 0, sizeof(block));
-    block.material_solid = block.opaque = block.solid = block.selectable = 1;
-    block.light_opacity = 15;
-    block.emitted_light = 13;
-    block.hardness = 3.5;
-    block.required_tool = MAAGE_TOOL_PICKAXE;
-    block.harvest_requires_tool = 1;
-    block.drop_count = 1;
-    block.collision_shape.maximum[0] = block.collision_shape.maximum[1] = block.collision_shape.maximum[2] = 1;
-    block.selection_shape = block.collision_shape;
-    block.behavior_context = ids;
-    block.geometry_id = ids->geometry_cube;
-    block.item_drag = 0.588;
-    block.flow_permeable = 0;
-    block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
-    block.material = ids->material_stone;
-    block.use = maage_base_furnace_use;
-    result = maage_block_registry_register_block(registry, "minecraft:lit_furnace", &block);
-    if (maage_status_failed(result)) return result;
-    ids->block_lit_furnace = block.id;
     for (facing = 0; facing < 4; ++facing) {
-        result = maage_content_register_state(registry, ids, config, &ids->furnaces[1][facing], block.id, facing, MAAGE_BASE_TEXTURE_FURNACE);
+        result = maage_content_register_state(registry, ids, config, &ids->furnaces[1][facing], ids->block_furnace, facing + 4U, MAAGE_BASE_TEXTURE_FURNACE);
         if (maage_status_failed(result)) return result;
     }
 
@@ -89,7 +69,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.material = ids->material_glass;
     block.mesh_material = MAAGE_MESH_MATERIAL_CUTOUT;
     block.drop_count = 0;
-    result = maage_block_registry_register_block(registry, "minecraft:glass", &block);
+    result = maage_base_register_block(registry, "minecraft:glass", &block);
     if (maage_status_failed(result)) return result;
     ids->block_glass = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_glass, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 0);
@@ -115,7 +95,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
     block.drop_count = 4;
-    result = maage_block_registry_register_block(registry, "minecraft:clay", &block);
+    result = maage_base_register_block(registry, "minecraft:clay", &block);
     if (maage_status_failed(result)) return result;
     ids->block_clay = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_clay, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 1);
@@ -141,7 +121,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:hardened_clay", &block);
+    result = maage_base_register_block(registry, "minecraft:hardened_clay", &block);
     if (maage_status_failed(result)) return result;
     ids->block_hardened_clay = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_hardened_clay, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 2);
@@ -167,7 +147,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:netherrack", &block);
+    result = maage_base_register_block(registry, "minecraft:netherrack", &block);
     if (maage_status_failed(result)) return result;
     ids->block_netherrack = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_netherrack, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 3);
@@ -193,7 +173,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:nether_brick", &block);
+    result = maage_base_register_block(registry, "minecraft:nether_brick", &block);
     if (maage_status_failed(result)) return result;
     ids->block_nether_brick = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_nether_brick, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 4);
@@ -219,7 +199,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:quartz_ore", &block);
+    result = maage_base_register_block(registry, "minecraft:quartz_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_quartz_ore = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_quartz_ore, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 5);
@@ -246,7 +226,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_wood;
     block.drops = maage_base_drop_species;
-    result = maage_block_registry_register_block(registry, "minecraft:log2", &block);
+    result = maage_base_register_block(registry, "minecraft:log2", &block);
     if (maage_status_failed(result)) return result;
     ids->block_log2 = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_log2, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 6);
@@ -272,7 +252,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:chest", &block);
+    result = maage_base_register_block(registry, "minecraft:chest", &block);
     if (maage_status_failed(result)) return result;
     ids->block_chest = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_chest, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
@@ -303,7 +283,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:trapped_chest", &block);
+    result = maage_base_register_block(registry, "minecraft:trapped_chest", &block);
     if (maage_status_failed(result)) return result;
     ids->block_trapped_chest = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_trapped_chest, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
@@ -334,7 +314,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:bookshelf", &block);
+    result = maage_base_register_block(registry, "minecraft:bookshelf", &block);
     if (maage_status_failed(result)) return result;
     ids->block_bookshelf = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_bookshelf, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 9);
@@ -360,7 +340,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:fence", &block);
+    result = maage_base_register_block(registry, "minecraft:fence", &block);
     if (maage_status_failed(result)) return result;
     ids->block_fence = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_fence, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 10);
@@ -386,7 +366,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:fence_gate", &block);
+    result = maage_base_register_block(registry, "minecraft:fence_gate", &block);
     if (maage_status_failed(result)) return result;
     ids->block_fence_gate = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_fence_gate, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 11);
@@ -412,7 +392,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:wooden_pressure_plate", &block);
+    result = maage_base_register_block(registry, "minecraft:wooden_pressure_plate", &block);
     if (maage_status_failed(result)) return result;
     ids->block_wooden_pressure_plate = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_wooden_pressure_plate, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 12);
@@ -438,7 +418,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:trapdoor", &block);
+    result = maage_base_register_block(registry, "minecraft:trapdoor", &block);
     if (maage_status_failed(result)) return result;
     ids->block_trapdoor = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_trapdoor, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 13);
@@ -464,7 +444,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:wooden_slab", &block);
+    result = maage_base_register_block(registry, "minecraft:wooden_slab", &block);
     if (maage_status_failed(result)) return result;
     ids->block_wooden_slab = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_wooden_slab, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 14);
@@ -490,7 +470,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:oak_stairs", &block);
+    result = maage_base_register_block(registry, "minecraft:oak_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_oak_stairs = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_oak_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 15);
@@ -516,7 +496,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:spruce_stairs", &block);
+    result = maage_base_register_block(registry, "minecraft:spruce_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_spruce_stairs = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_spruce_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 16);
@@ -542,7 +522,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:birch_stairs", &block);
+    result = maage_base_register_block(registry, "minecraft:birch_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_birch_stairs = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_birch_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 17);
@@ -568,7 +548,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:jungle_stairs", &block);
+    result = maage_base_register_block(registry, "minecraft:jungle_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_jungle_stairs = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_jungle_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 18);
@@ -594,7 +574,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:acacia_stairs", &block);
+    result = maage_base_register_block(registry, "minecraft:acacia_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_acacia_stairs = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_acacia_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 19);
@@ -620,7 +600,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:dark_oak_stairs", &block);
+    result = maage_base_register_block(registry, "minecraft:dark_oak_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_dark_oak_stairs = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_dark_oak_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 20);
@@ -646,7 +626,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:jukebox", &block);
+    result = maage_base_register_block(registry, "minecraft:jukebox", &block);
     if (maage_status_failed(result)) return result;
     ids->block_jukebox = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_jukebox, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 21);
@@ -672,7 +652,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:noteblock", &block);
+    result = maage_base_register_block(registry, "minecraft:noteblock", &block);
     if (maage_status_failed(result)) return result;
     ids->block_noteblock = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_noteblock, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 22);
@@ -698,7 +678,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:daylight_detector", &block);
+    result = maage_base_register_block(registry, "minecraft:daylight_detector", &block);
     if (maage_status_failed(result)) return result;
     ids->block_daylight_detector = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_daylight_detector, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 23);
@@ -724,7 +704,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:brown_mushroom_block", &block);
+    result = maage_base_register_block(registry, "minecraft:brown_mushroom_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_brown_mushroom_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_brown_mushroom_block, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 24);
@@ -750,7 +730,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     block.unsupported_no_drops = 0;
     block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.material = ids->material_default;
-    result = maage_block_registry_register_block(registry, "minecraft:red_mushroom_block", &block);
+    result = maage_base_register_block(registry, "minecraft:red_mushroom_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_red_mushroom_block = block.id;
     result = maage_content_register_state(registry, ids, config, &ids->state_red_mushroom_block, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 25);
@@ -758,15 +738,15 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     ids->logs2[0] = ids->state_log2;
     for (lit = 0; lit < 3; ++lit)
         for (facing = 0; facing < 2; ++facing) {
-            unsigned int metadata = lit * 4U + facing;
-            if (!metadata) continue;
-            result = maage_content_register_state(registry, ids, config, &ids->logs2[metadata], ids->block_log2, metadata, 0);
+            unsigned int configuration = lit * 4U + facing;
+            if (!configuration) continue;
+            result = maage_content_register_state(registry, ids, config, &ids->logs2[configuration], ids->block_log2, configuration, 0);
             if (maage_status_failed(result)) return result;
         }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
 }
 
-static maage_status furnace_placement(const maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state);
+static maage_status furnace_placement(const maage_item_definition *item, maage_item_variant_id variant, maage_block_face face, double yaw, maage_block_state_id *state);
 maage_status maage_furnace_content_items(maage_content_context *context, maage_base_ids *ids) {
     maage_item_definition item;
     maage_status result;
@@ -880,7 +860,7 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     item.behavior_context = ids;
     item.food_hunger = 0;
     item.food_saturation = 0;
-    item.max_metadata = 15;
+    item.variant_count = 16;
     result = base_item_register(context, "minecraft:dye", &item, 0, &ids->item_dye);
     if (maage_status_failed(result)) return result;
     memset(&item, 0, sizeof(item));
@@ -984,7 +964,7 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     item.food_hunger = 2;
     item.food_saturation = 0.1;
     item.food_ticks = 32;
-    item.max_metadata = 3;
+    item.variant_count = 4;
     result = base_item_register(context, "minecraft:fish", &item, 0, &ids->item_fish);
     if (maage_status_failed(result)) return result;
     memset(&item, 0, sizeof(item));
@@ -998,7 +978,7 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     item.food_hunger = 5;
     item.food_saturation = 0.6;
     item.food_ticks = 32;
-    item.max_metadata = 1;
+    item.variant_count = 2;
     result = base_item_register(context, "minecraft:cooked_fish", &item, 0, &ids->item_cooked_fish);
     if (maage_status_failed(result)) return result;
     memset(&item, 0, sizeof(item));
@@ -1082,10 +1062,10 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     if (maage_status_failed(result)) return result;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
 }
-static maage_status furnace_placement(const maage_item_definition *item, unsigned int metadata, maage_block_face face, double yaw, maage_block_state_id *state) {
+static maage_status furnace_placement(const maage_item_definition *item, maage_item_variant_id variant, maage_block_face face, double yaw, maage_block_state_id *state) {
     double turn = fmod(yaw / 1.5707963267948966 + 0.5, 4.0);
     (void) face;
-    if (metadata) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RESOLVE, 0);
+    if (variant) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RESOLVE, 0);
     if (turn < 0) turn += 4;
     *state = ((const maage_base_ids *) item->behavior_context)->furnaces[0][((unsigned int) turn + 2U) % 4U];
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
@@ -1110,11 +1090,11 @@ maage_status maage_base_smelting(maage_content_context *context, const maage_bas
     if (maage_status_failed(result)) return result;
     result = base_smelt(context->smelting, ids->item_cobblestone, 0U, ids->item_stone, 0U, 0.1);
     if (maage_status_failed(result)) return result;
-    result = base_smelt(context->smelting, ids->item_sand, MAAGE_SMELTING_METADATA_ANY, ids->item_glass, 0U, 0.1);
+    result = base_smelt(context->smelting, ids->item_sand, MAAGE_SMELTING_VARIANT_ANY, ids->item_glass, 0U, 0.1);
     if (maage_status_failed(result)) return result;
-    result = base_smelt(context->smelting, ids->item_log, 65535U, ids->item_coal, 1U, 0.15);
+    result = base_smelt(context->smelting, ids->item_log, MAAGE_SMELTING_VARIANT_ANY, ids->item_coal, 1U, 0.15);
     if (maage_status_failed(result)) return result;
-    result = base_smelt(context->smelting, ids->item_log2, 65535U, ids->item_coal, 1U, 0.15);
+    result = base_smelt(context->smelting, ids->item_log2, MAAGE_SMELTING_VARIANT_ANY, ids->item_coal, 1U, 0.15);
     if (maage_status_failed(result)) return result;
     result = base_smelt(context->smelting, ids->item_clay_ball, 0U, ids->item_brick, 0U, 0.3);
     if (maage_status_failed(result)) return result;

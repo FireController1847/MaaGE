@@ -3,7 +3,7 @@
 #include <string.h>
 
 const char *content_policy_domain_name(content_domain domain) {
-    static const char *const names[] = {"blocks", "items", "biomes", "fluids", "geometry", "containers", "creative tabs", "sound resources", "sounds", "sound materials", "music", "ambience", "block entities", "generation features", "ores", "entity types", "models", "block bindings", "sound bindings", "presentation bindings", "inventory binding"};
+    static const char *const names[] = {"blocks", "items", "biomes", "fluids", "geometry", "containers", "creative tabs", "sound resources", "sounds", "sound materials", "music", "ambience", "block entities", "generation features", "ores", "entity types", "models", "properties", "property values", "tags", "behaviors", "block bindings", "sound bindings", "presentation bindings", "inventory binding"};
     return names[(unsigned int) domain];
 }
 static void policy_target(content_policy *policy, const char *name) {

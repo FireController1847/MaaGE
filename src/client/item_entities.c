@@ -11,7 +11,7 @@
 typedef struct maage_item_models {
     maage_render_mesh **variants;
     maage_status *results;
-    unsigned int count;
+    size_t count;
 } maage_item_models;
 typedef struct maage_client_model_cache {
     maage_render_mesh **parts;
@@ -93,8 +93,9 @@ maage_status maage_client_item_entities_create(maage_renderer *renderer, maage_r
     if (!view->ordered) goto failed;
     for (i = 0; i < view->model_count; ++i) {
         item = maage_item_registry_at(items, i);
-        if (item->max_metadata == (unsigned int) -1) goto failed;
-        view->ordered[i].count = item->max_metadata + 1;
+
+        view->ordered[i].count = item->variant_count;
+        if (item->variant_count > (size_t) - 1 / sizeof(maage_render_mesh *) || item->variant_count > (size_t) - 1 / sizeof(maage_status)) goto failed;
         view->ordered[i].variants = (maage_render_mesh **) calloc(view->ordered[i].count, sizeof(maage_render_mesh *));
         view->ordered[i].results = (maage_status *) calloc(view->ordered[i].count, sizeof(maage_status));
         slot = maage_registry_pages_ensure(&view->models, item->id);
@@ -113,22 +114,22 @@ static maage_status item_entities_model(maage_client_item_entities *view, const 
     maage_mesh_data data;
     maage_status result;
     *notice = 0;
-    if (!models || stack->metadata >= models->count || !maage_item_stack_valid(view->items, stack)) return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOOKUP);
-    if (!models->variants[stack->metadata]) {
+    if (!models || stack->variant >= models->count || !maage_item_stack_valid(view->items, stack)) return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOOKUP);
+    if (!models->variants[stack->variant]) {
         double began = view->diagnostics ? maage_time_monotonic_seconds() : -1, upload_at;
-        if (maage_status_failed(models->results[stack->metadata])) return models->results[stack->metadata];
+        if (maage_status_failed(models->results[stack->variant])) return models->results[stack->variant];
         result = maage_client_item_model_create(&view->resources, view->items, view->blocks, stack, &data);
         upload_at = view->diagnostics ? maage_time_monotonic_seconds() : -1;
-        if (!maage_status_failed(result)) result = maage_renderer_upload_geometry(view->renderer, &data, view->atlas, &models->variants[stack->metadata], trace);
+        if (!maage_status_failed(result)) result = maage_renderer_upload_geometry(view->renderer, &data, view->atlas, &models->variants[stack->variant], trace);
         maage_client_item_model_destroy(&data);
-        if (view->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "item=%lu metadata=%u model_ms=%.3f upload_api_ms=%.3f", (unsigned long) stack->item_id, stack->metadata, (upload_at - began) * 1000, (maage_time_monotonic_seconds() - upload_at) * 1000));
-        models->results[stack->metadata] = result;
+        if (view->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "item=%lu variant=%lu model_ms=%.3f upload_api_ms=%.3f", (unsigned long) stack->item_id, stack->variant, (upload_at - began) * 1000, (maage_time_monotonic_seconds() - upload_at) * 1000));
+        models->results[stack->variant] = result;
         if (maage_status_failed(result)) {
             *notice = 1;
             return result;
         }
     }
-    *mesh = models->variants[stack->metadata];
+    *mesh = models->variants[stack->variant];
     return item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_LOOKUP);
 }
 static maage_status item_entities_registered_model(maage_client_item_entities *view, maage_model_id model_id, maage_texture_id texture, unsigned long variant, maage_client_model_cache **output, int *notice, maage_status_trace *trace) {
@@ -757,7 +758,7 @@ static void item_entities_variant_destroy(void *opaque) {
 maage_status maage_client_item_entities_destroy(maage_client_item_entities *view) {
     size_t i, part;
     maage_client_model_cache *cache, *next;
-    unsigned int variant;
+    maage_item_variant_id variant;
     maage_status result, outcome = item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
     if (!view) return item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
     maage_client_item_entities_clear(view);

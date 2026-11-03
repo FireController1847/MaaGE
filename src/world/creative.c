@@ -205,7 +205,7 @@ static int creative_search_compare(const void *a, const void *b) {
 static int creative_stack_compare(const void *a, const void *b) {
     const maage_creative_entry *const *left = (const maage_creative_entry *const *) a, *const *right = (const maage_creative_entry *const *) b;
     if ((*left)->stack.item_id != (*right)->stack.item_id) return (*left)->stack.item_id < (*right)->stack.item_id ? -1 : 1;
-    if ((*left)->stack.metadata != (*right)->stack.metadata) return (*left)->stack.metadata < (*right)->stack.metadata ? -1 : 1;
+    if ((*left)->stack.variant != (*right)->stack.variant) return (*left)->stack.variant < (*right)->stack.variant ? -1 : 1;
     return creative_search_compare(a, b);
 }
 maage_status maage_creative_finalize(maage_creative_registry *registry) {
@@ -248,7 +248,7 @@ maage_status maage_creative_finalize(maage_creative_registry *registry) {
             k = 0;
             for (j = 0; j < count; ++j) {
                 entry = entries[j];
-                if (previous && previous->stack.item_id == entry->stack.item_id && previous->stack.metadata == entry->stack.metadata) continue;
+                if (previous && previous->stack.item_id == entry->stack.item_id && previous->stack.variant == entry->stack.variant) continue;
                 entries[k++] = previous = entry;
             }
             count = k;

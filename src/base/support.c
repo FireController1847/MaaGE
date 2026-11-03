@@ -34,8 +34,8 @@ static maage_status base_survival(const maage_world *world, int x, int y, int z,
         return result;
     }
     if (policy == 1) {
-        if (state->metadata < 1 || state->metadata > 5) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
-        result = maage_support_block(world, x + torch_support[state->metadata][0], y + torch_support[state->metadata][1], z + torch_support[state->metadata][2], &neighbor, &block);
+        if (maage_base_state_value(maage_world_registry(world), state, ids->property_attachment) < 1 || maage_base_state_value(maage_world_registry(world), state, ids->property_attachment) > 5) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
+        result = maage_support_block(world, x + torch_support[maage_base_state_value(maage_world_registry(world), state, ids->property_attachment)][0], y + torch_support[maage_base_state_value(maage_world_registry(world), state, ids->property_attachment)][1], z + torch_support[maage_base_state_value(maage_world_registry(world), state, ids->property_attachment)][2], &neighbor, &block);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) *valid = maage_support_full(block, neighbor);
         return result;
     }
@@ -43,18 +43,18 @@ static maage_status base_survival(const maage_world *world, int x, int y, int z,
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (policy == 2) {
         maage_environment_state environment;
-        *valid = below->block_id == ids->block_farmland;
+        *valid = maage_base_state_tag(ids, below, ids->tag_farmland);
         if (!*valid) return maage_support_status(MAAGE_STATUS_SUCCESS);
         result = maage_world_sample_light(world, x, y, z, &light);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
         maage_world_environment(world, &environment);
         *valid = (light >> 4) == 15 || (light & 15) >= 8 || (int) (light >> 4) - (int) maage_environment_sky_subtracted(&environment) >= 8;
     } else if (policy == 3) {
-        *valid = below->block_id == ids->block_dirt || below->block_id == ids->block_grass;
+        *valid = maage_base_state_tag(ids, below, ids->tag_soil);
     } else if (policy == 4) {
-        *valid = below->block_id == ids->block_dirt || below->block_id == ids->block_sand;
+        *valid = below->block_id == ids->block_dirt || maage_base_state_tag(ids, below, ids->tag_sand);
     } else if (policy == 5) {
-        if (below->block_id != ids->block_sand && below->block_id != ids->block_cactus) return maage_support_status(MAAGE_STATUS_SUCCESS);
+        if (!maage_base_state_tag(ids, below, ids->tag_sand) && below->block_id != state->block_id) return maage_support_status(MAAGE_STATUS_SUCCESS);
         for (side = 0; side < 4; ++side) {
             result = maage_support_block(world, x + sides[side][0], y, z + sides[side][1], &neighbor, &block);
             if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
@@ -63,7 +63,7 @@ static maage_status base_survival(const maage_world *world, int x, int y, int z,
         *valid = 1;
     } else if (policy == 6) {
         *valid = below->block_id != ids->block_ice &&
-                 (below->block_id == ids->block_leaves || (below->block_id == ids->block_snow && (below->metadata & 7U) == 7U) ||
+                 (maage_base_state_tag(ids, below, ids->tag_leaves) ||
                   (block->opaque && block->material_solid));
     } else if (policy == 7) {
         if (!block->opaque) return maage_support_status(MAAGE_STATUS_SUCCESS);

@@ -176,7 +176,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   reload never initializes or registers again. Client/integrated/dedicated Server retain explicit
   contexts and independent module state. Validate peer identities before initialization/World/session use.
   Module descriptors/callbacks/data outlive finalized registries and jobs.
-- Block types, states, items, biomes, entity types and models are distinct automatically allocated numeric
+- Block types, states, items, tags, properties, identity values, behaviors, biomes, entity types and models are distinct automatically allocated numeric
   domains. Registration assigns IDs and captures built-in references; finalized
   tables are immutable. ID-to-definition access is deterministic direct O(1).
   Unknown/unregistered IDs fail explicitly rather than substituting unrelated blocks.
@@ -184,8 +184,17 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   hashing is collision-checked expected O(1), not worst-case O(1). No identifier strings,
   name comparisons/lookups, paths, decoding or per-block/face allocation in gameplay,
   collision, generation, lighting, meshing or rendering loops. Resolve atlas UVs first.
-- States reference numeric types/properties; items have their own registry and portable
-  fixed-size stacks carrying count, metadata and damage. Display names are presentation.
+- The composition-owned Traits registry provides namespaced typed properties, extensible identity
+  values, flattened domain-aware tags and explicitly ordered behavior providers. Content modules
+  define every tag and its meaning. Every block implements at least one tag; required properties
+  validate across constants and sparse registered state configurations. Finalization compiles
+  numeric membership and dispatch, rejects conflicting exclusive or unordered composed handlers,
+  and freezes definitions. Tool eligibility, effectiveness and conditional wear use registered
+  item-domain capability tags. No per-cell property allocation or runtime name lookup.
+- States reference blocks and immutable typed property configurations; items have one local
+  numeric variant registry backed by the same property system and portable fixed-size stacks
+  carrying item/variant IDs, count and damage. Recipes accept domain-aware item tags and
+  compile deterministic property-preserving output projections. Display names are presentation.
   Content/recipes are growable without arbitrary registry-count ceilings.
 
 ## World, Jobs and Persistence
@@ -234,7 +243,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   aggregate work. Simulation square defaults to radius 8, independent of rendering/cache.
   Eligibility counts and immutable callbacks avoid sampling scans. Coordinate, behavior
   and weather RNG streams/checkpoints remain separate and never reseed on resume.
-  Saplings retain species/stage metadata and grow through shared tree features with
+  Saplings retain typed species/stage properties and grow through shared tree features with
   complete detached placement preflight; absent terrain defers growth.
   Preserve numeric leaf species/persistent/check flags, bounded connected log support,
   unavailable-neighborhood deferral and capacity-preflighted drops; no immediate leaf
@@ -244,9 +253,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
   never acquire plant support requirements. Preserve each block's distinct rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD14` metadata embeds one checksummed
-  `MGIDMAP2` World dictionary for blocks, states (block identity plus metadata), items,
-  biomes and entity types; `MGRGN2` region headers bind its UUID. `MGCHNK9` palettes, stacks and
+  worlds. Canonical UUIDs identify them. `MGWRLD15` metadata embeds one checksummed
+  `MGIDMAP3` World dictionary for blocks, states (block identity plus canonical typed properties),
+  items, item variants, biomes and entity types; `MGRGN2` region headers bind its UUID. `MGCHNK10` palettes, stacks and
   entities carry numeric saved IDs only. Block-entity records bind registered codecs through the owning saved block identity, not runtime handler order. Resolve names once at open, retain both
   numeric translation directions, and atomically publish map extensions before jobs
   can save new IDs. Never reinterpret saved IDs or duplicate dictionaries per chunk.
@@ -281,7 +290,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Sprint eligibility/tap timers are Server-owned; Player owns movement multiplier,
   jump impulse and collision cancellation. Dynamic sprint/world FOV stays independent
   of saved base and fixed hand projection; duplicate snapshots do not restart smoothing.
-  Food use is owner-timed with numeric item metadata and copied progress for Client poses;
+  Food use is owner-timed with numeric item variants and copied progress for Client poses;
   current respawn retains inventory at session spawn.
 - Client screens/layout/input live under `src/client/ui/`, not controller `frontend.c`.
   Controller owns catalog Jobs, lifecycle and Options persistence. Reuse one numeric

@@ -7,7 +7,7 @@ static maage_status entity_status(unsigned char code) {
 static int furnace_entity_valid(const maage_block_entity_handler *handler, const maage_block_state_definition *block, const maage_item_registry *items, const void *data) {
     const maage_base_ids *ids = (const maage_base_ids *) handler->context;
     const maage_furnace_state *state = (const maage_furnace_state *) data;
-    return block && (block->block_id == ids->block_furnace || block->block_id == ids->block_lit_furnace) && block->metadata < 4 && maage_furnace_valid(state, items) && (state->burn != 0) == (block->block_id == ids->block_lit_furnace);
+    return block && block->block_id == ids->block_furnace && maage_base_state_value(ids->blocks, block, ids->property_facing) < 4 && maage_furnace_valid(state, items) && (state->burn != 0) == (maage_base_state_value(ids->blocks, block, ids->property_lit) != 0);
 }
 static maage_status furnace_entity_initialize(const maage_block_entity_handler *handler, const maage_block_state_definition *block, void *data, unsigned long identity, int loaded) {
     const maage_base_ids *ids = (const maage_base_ids *) handler->context;
@@ -25,7 +25,7 @@ static maage_status furnace_entity_tick(const maage_block_entity_handler *handle
     (void) y;
     (void) z;
     result = maage_furnace_tick(state, maage_world_item_registry(world), maage_world_smelting_registry(world), maage_world_fuel_registry(world));
-    if (!maage_status_failed(result)) *replacement = ids->furnaces[state->burn ? 1 : 0][block->metadata];
+    if (!maage_status_failed(result)) result = maage_block_state_change(maage_world_registry(world), block, ids->property_lit, state->burn != 0, replacement);
     return result;
 }
 static int furnace_entity_commit(const void *before, const void *after) {
@@ -83,16 +83,13 @@ maage_status maage_base_furnace_entity(maage_content_context *context, const maa
     block = *maage_block_registry_block(context->blocks, ids->block_furnace);
     block.entity = registered;
     result = maage_block_registry_update_block(context->blocks, &block);
-    if (maage_status_failed(result)) return result;
-    block = *maage_block_registry_block(context->blocks, ids->block_lit_furnace);
-    block.entity = registered;
-    return maage_block_registry_update_block(context->blocks, &block);
+    return result;
 }
 static unsigned long furnace_type(const maage_world *world, int x, int y, int z) {
     const maage_block_registry *blocks = maage_world_registry(world);
     const maage_block_state_definition *state = maage_block_registry_state(blocks, maage_world_get(world, x, y, z));
     const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-    return block && block->use == maage_base_furnace_use && block->entity ? block->entity->id : 0;
+    return block && block->entity && block->entity->tick == furnace_entity_tick ? block->entity->id : 0;
 }
 maage_status maage_world_furnace_get(const maage_world *world, int x, int y, int z, maage_furnace_state *state) {
     return maage_world_entity_read(world, x, y, z, furnace_type(world, x, y, z), state, sizeof(*state));

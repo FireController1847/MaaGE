@@ -221,7 +221,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         prediction->progress = 0;
     } else {
         stack = &snapshot->player.inventory.slots[hotbar];
-        if (!prediction->targeting || target.x != prediction->target.x || target.y != prediction->target.y || target.z != prediction->target.z || target.state_id != prediction->target.state_id || stack->item_id != prediction->held.item_id || stack->metadata != prediction->held.metadata || stack->damage != prediction->held.damage || pressed) {
+        if (!prediction->targeting || target.x != prediction->target.x || target.y != prediction->target.y || target.z != prediction->target.z || target.state_id != prediction->target.state_id || stack->item_id != prediction->held.item_id || stack->variant != prediction->held.variant || stack->damage != prediction->held.damage || pressed) {
             prediction->targeting = 1;
             prediction->target = target;
             prediction->held = *stack;
@@ -239,7 +239,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
         damage = snapshot->player.game_mode == MAAGE_GAME_MODE_CREATIVE ? 1 : maage_item_mining_damage(tool, block, snapshot->player.player.grounded, snapshot->player.submerged);
         matching = snapshot->tick > prediction->started_tick && snapshot->gameplay_command_sequence >= prediction->started_sequence &&
                    snapshot->player.breaking_active && snapshot->player.breaking.x == target.x && snapshot->player.breaking.y == target.y && snapshot->player.breaking.z == target.z && snapshot->player.breaking.state_id == target.state_id &&
-                   snapshot->player.breaking_item == (stack->count ? stack->item_id : 0) && snapshot->player.breaking_metadata == (stack->count ? stack->metadata : 0) && snapshot->player.breaking_damage == (stack->count ? stack->damage : 0);
+                   snapshot->player.breaking_item == (stack->count ? stack->item_id : 0) && snapshot->player.breaking_variant == (stack->count ? stack->variant : 0) && snapshot->player.breaking_damage == (stack->count ? stack->damage : 0);
         completed = snapshot->player.blocks_broken > prediction->started_breaks && snapshot->player.last_break_tick > prediction->started_tick &&
                     snapshot->player.last_break.x == target.x && snapshot->player.last_break.y == target.y && snapshot->player.last_break.z == target.z && snapshot->player.last_break.state_id == target.state_id;
         /* A press speculates only the owner's first damage step. Thereafter

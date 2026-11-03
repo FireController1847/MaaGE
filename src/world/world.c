@@ -2413,7 +2413,7 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
     flags_only = maage_world_geometry_equal(world->config.registry, old_state, new_state);
     /* A replication delta map is needed only for columns with actual changes.
      * Reserve it before any private mutation or support-side effects. */
-    if ((before->light_opacity != after->light_opacity || before->emitted_light != after->emitted_light) && !slot->light_cells) {
+    if ((before->light_opacity != after->light_opacity || old_state->emitted_light != new_state->emitted_light) && !slot->light_cells) {
         slot->light_cells = (unsigned char *) calloc(8192UL, 1);
         if (!slot->light_cells) {
             ++world->stats.rejected_mutations;
@@ -2522,7 +2522,7 @@ maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_bloc
     }
     if (old_state->random_ticks) --copy->random_tick_counts[y / 16];
     if (new_state->random_ticks) ++copy->random_tick_counts[y / 16];
-    if (before->light_opacity != after->light_opacity || before->emitted_light != after->emitted_light) {
+    if (before->light_opacity != after->light_opacity || old_state->emitted_light != new_state->emitted_light) {
         unsigned int cell = (unsigned int) ((y * 16 + local_z) * 16 + local_x);
         slot->edit_light = 1;
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
@@ -3099,13 +3099,13 @@ static maage_status maage_world_visual_cell(const maage_world *world, maage_worl
     old_block = before ? maage_block_registry_block(world->config.registry, before->block_id) : NULL;
     new_block = after ? maage_block_registry_block(world->config.registry, after->block_id) : NULL;
     if (!old_block || !new_block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-    if ((old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) && !slot->light_cells) {
+    if ((old_block->light_opacity != new_block->light_opacity || before->emitted_light != after->emitted_light) && !slot->light_cells) {
         slot->light_cells = (unsigned char *) calloc(8192UL, 1);
         if (!slot->light_cells) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     }
     result = maage_chunk_set(chunk, x, y, z, state);
     if (maage_status_failed(result)) return result;
-    if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
+    if (old_block->light_opacity != new_block->light_opacity || before->emitted_light != after->emitted_light) {
         const maage_chunk *inputs[4];
         maage_world_slot *neighbors[8];
         int side;
@@ -3116,7 +3116,7 @@ static maage_status maage_world_visual_cell(const maage_world *world, maage_worl
         if (maage_status_failed(result)) return result;
     }
     if (!maage_world_geometry_equal(world->config.registry, before, after)) slot->geometry_changed = 1;
-    if (old_block->light_opacity != new_block->light_opacity || old_block->emitted_light != new_block->emitted_light) {
+    if (old_block->light_opacity != new_block->light_opacity || before->emitted_light != after->emitted_light) {
         slot->light_cells[cell / 8] |= (unsigned char) (1U << (cell % 8));
         slot->light_changed = 1;
     }

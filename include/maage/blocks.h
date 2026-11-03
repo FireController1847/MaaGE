@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include "maage/content_ids.h"
+#include "maage/traits.h"
 #include "maage/fluids.h"
 #include "maage/sounds.h"
 #include "maage/status.h"
@@ -103,7 +104,9 @@ typedef struct maage_block_definition {
     maage_block_geometry_id geometry_id; /* Registered geometry; resolved before finalization. */
     unsigned int mesh_shape;             /* Cached optimized primitive tag from the geometry registry. */
     double hardness;                     /* Negative: unbreakable in Survival. */
-    unsigned int required_tool, required_tool_level;
+    maage_tag_id required_tool;          /* Item-domain effectiveness/harvest capability. */
+    unsigned int required_tool_level;
+    int has_required_tool;
     int harvest_requires_tool;  /* Effectiveness and harvest eligibility differ. */
     unsigned long drop_item_id; /* Independent item domain; bound before finalize. */
     unsigned int drop_count;
@@ -113,8 +116,8 @@ typedef struct maage_block_definition {
     void (*bounds)(const struct maage_world *, int, int, int, const struct maage_block_state_definition *, maage_block_shape *);
     unsigned int contact_damage;
     maage_block_shape contact_shape; /* Damaging shell may differ from physical collision. */
-    /* Called only on the World owner for eligible states. NULL retains sampling
-     * eligibility without behavior when a required system is unimplemented. */
+    /* Finalization fills these numeric tag dispatch adapters. Content binds
+     * behavior providers and clears construction callbacks before finalization. */
     maage_block_random_tick_callback random_tick;
     maage_block_survival_callback survives;
     maage_block_survival_callback can_place; /* Destination validation only; never persistent support. */
@@ -129,7 +132,8 @@ typedef struct maage_block_definition {
     maage_sound_material_id material;
     unsigned int mesh_material, foliage, snow_cover, flow_permeable;
     unsigned int mesh_inset, cull_same;
-    unsigned int tool_wear_class, special_tool_class;
+    maage_tag_id tool_wear_class, special_tool_class;
+    int has_tool_wear, has_special_tool;
     double special_tool_speed, item_drag;
     int unsupported_no_drops, unsupported_replaces;
     maage_block_state_id unsupported_state;
@@ -140,11 +144,12 @@ typedef struct maage_block_definition {
 typedef struct maage_block_state_definition {
     maage_block_state_id id;
     maage_block_id block_id;
-    /* Numeric property payload; no text at runtime. */
-    unsigned int metadata;
-    int geometry_grouped;      /* Explicit opt-in; ordinary states always invalidate geometry. */
-    unsigned int geometry_key; /* Equal keys preserve geometry epochs only when physical bounds also agree. */
-    unsigned int texture_axis; /* 0 = ordinary; 1..3 = X/Y/Z. */
+    maage_property_set_id properties; /* Canonical typed configuration; registry-owned. */
+    unsigned int emitted_light;       /* Resolved per-state emission, 0..15. */
+    unsigned int geometry_variant;    /* Resolved primitive parameter, independent of state identity. */
+    int geometry_grouped;             /* Explicit opt-in; ordinary states always invalidate geometry. */
+    unsigned int geometry_key;        /* Equal keys preserve geometry epochs only when physical bounds also agree. */
+    unsigned int texture_axis;        /* 0 = ordinary; 1..3 = X/Y/Z. */
     unsigned int presentation_effect;
     maage_block_shape mesh_bounds;
 
@@ -163,6 +168,28 @@ typedef struct maage_block_state_definition {
     maage_texture_id fast_texture;
     float leaf_fast_uv[4];
 } maage_block_state_definition;
+
+/* Typed payload shared by numeric lifecycle dispatch and module-owned adapters.
+ * Input pointers borrow only this call. Predicate handlers preserve prior false;
+ * exclusive output events are validated during trait finalization. */
+typedef struct maage_block_behavior_call {
+    unsigned long event;
+    const maage_block_registry *blocks;
+    const struct maage_item_registry *items;
+    struct maage_world *world;
+    const struct maage_world *read_world;
+    int x, y, z;
+    const maage_block_state_definition *state, *before, *after;
+    struct maage_random_tick_context *random_tick;
+    int *valid;
+    const struct maage_item_definition *tool;
+    unsigned long *random;
+    struct maage_item_drops *drops;
+    const struct maage_world_target *target;
+    struct maage_crafting_container *container;
+    double distance;
+    maage_block_state_id *replacement;
+} maage_block_behavior_call;
 
 /* Pure validation/lookup services shared by registered appearances and World.
  * Collision returns zero for empty bounds; shape may be NULL for a predicate. */
@@ -193,6 +220,10 @@ maage_status maage_block_registry_bind_fluids(maage_block_registry *registry, co
 const maage_fluid_registry *maage_block_registry_fluids(const maage_block_registry *registry);
 maage_status maage_block_registry_bind_geometry(maage_block_registry *registry, const struct maage_block_geometry_registry *geometry);
 const struct maage_block_geometry_registry *maage_block_registry_geometry(const maage_block_registry *registry);
+maage_status maage_block_registry_bind_traits(maage_block_registry *, const maage_traits_registry *);
+const maage_traits_registry *maage_block_registry_traits(const maage_block_registry *);
+int maage_block_state_value(const maage_block_registry *, const maage_block_state_definition *, maage_property_id, maage_property_value *);
+maage_status maage_block_state_change(const maage_block_registry *, const maage_block_state_definition *, maage_property_id, maage_property_value, maage_block_state_id *);
 maage_status maage_block_registry_finalize(maage_block_registry *registry);
 int maage_block_registry_is_finalized(const maage_block_registry *registry);
 size_t maage_block_registry_block_count(const maage_block_registry *registry);
@@ -224,11 +255,11 @@ const maage_block_state_definition *maage_block_registry_state(const maage_block
  * downward wall currents for falling fluid. Borrowed definitions stay immutable. */
 double maage_block_fluid_height(const maage_block_state_definition *state);
 void maage_block_fluid_flow(const maage_block_registry *registry, const maage_block_state_definition *state, const maage_block_state_definition *sides[4], const maage_block_state_definition *below[4], const maage_block_state_definition *above[4], double flow[3]);
-/* Stable names and (block name, metadata) are persistence/import identities.
+/* Stable names and canonical typed property configurations are persistence/import identities.
  * These functions are for registration and file I/O, never gameplay loops.
- * Within one block, state metadata must be unique. */
+ * Within one block, property configurations must be unique. */
 const char *maage_block_registry_block_name(const maage_block_registry *registry, maage_block_id id);
-maage_status maage_block_registry_resolve_state(const maage_block_registry *registry, maage_block_id block, unsigned int metadata, maage_block_state_id *id);
+maage_status maage_block_registry_resolve_state(const maage_block_registry *registry, maage_block_id block, maage_property_set_id properties, maage_block_state_id *id);
 
 #ifdef __cplusplus
 }

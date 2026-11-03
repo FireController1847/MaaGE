@@ -214,7 +214,7 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_sessi
         const maage_item_stack *selected = maage_inventory_selected(&snapshot->player.inventory);
         const maage_item_definition *definition = selected && ui->items ? maage_item_registry_get(ui->items, selected->item_id) : NULL;
         if (!selected || !selected->count) ui->highlight_until = 0;
-        else if (!ui->has_snapshot || selected->item_id != ui->highlighted_item.item_id || ((!definition || !definition->durability) && selected->metadata != ui->highlighted_item.metadata)) ui->highlight_until = ui->notice_now + 2.0;
+        else if (!ui->has_snapshot || selected->item_id != ui->highlighted_item.item_id || ((!definition || !definition->durability) && selected->variant != ui->highlighted_item.variant)) ui->highlight_until = ui->notice_now + 2.0;
         if (selected) ui->highlighted_item = *selected;
     }
     if (!ui->has_snapshot || ui->snapshot.player.crafting.identity != snapshot->player.crafting.identity || ui->snapshot.player.crafting.kind != snapshot->player.crafting.kind || ui->snapshot.player.game_mode != snapshot->player.game_mode) maage_client_ui_inventory_reset(ui);

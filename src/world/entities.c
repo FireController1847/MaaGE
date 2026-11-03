@@ -91,10 +91,46 @@ const maage_item_stack *maage_entity_stack(const maage_entity *entity) {
     if (!entity) return NULL;
     return entity->type == MAAGE_ENTITY_ITEM ? &entity->payload.item : (entity->type == MAAGE_ENTITY_FALLING_BLOCK ? &entity->payload.falling.stack : NULL);
 }
+/* Item variants project a subset of a block state's properties. A unique match
+ * retains exact falling geometry without allocating a per-entity property map. */
+static maage_status falling_variant(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, maage_item_id item_id, maage_item_variant_id *output) {
+    const maage_item_definition *item = maage_item_registry_get(items, item_id);
+    const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    const maage_traits_registry *traits = maage_item_registry_traits(items);
+    const maage_item_variant_definition *row;
+    const maage_property_set *properties, *constants;
+    maage_property_value value;
+    size_t variant, property, phase, matches = 0;
+    int equal;
+    if (!blocks || !state || !block || !block->falls || block->drop_item_id != item_id || !item || !item->has_block || item->block_id != state->block_id || !output) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    constants = maage_property_set_get(traits, maage_traits_constants(traits, MAAGE_TRAIT_ITEM, item_id));
+    if (!constants) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_RESOLVE);
+    for (variant = 0; variant < item->variant_count; ++variant) {
+        row = maage_item_variant_get(items, item_id, (maage_item_variant_id) variant);
+        properties = row ? maage_property_set_get(traits, row->properties) : NULL;
+        if (!properties) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_RESOLVE);
+        equal = 1;
+        for (phase = 0; phase < 2 && equal; ++phase) {
+            if (phase) properties = constants;
+            for (property = 0; property < properties->count; ++property)
+                if (!maage_block_state_value(blocks, state, properties->values[property].property, &value) || value != properties->values[property].value) {
+                    equal = 0;
+                    break;
+                }
+        }
+        if (equal) {
+            *output = (maage_item_variant_id) variant;
+            ++matches;
+        }
+    }
+    return entity_status(matches == 1 ? MAAGE_STATUS_SUCCESS : (matches ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOT_FOUND), MAAGE_OPERATION_RESOLVE);
+}
 int maage_entity_valid(const maage_entity *entity, const maage_item_registry *items) {
     const maage_item_stack *stack = maage_entity_stack(entity);
     const maage_item_definition *item;
-    maage_block_state_id state;
+    maage_item_variant_id variant;
+    const maage_block_registry *blocks;
+    const maage_block_state_definition *state;
     unsigned int axis;
     if (!entity || !entity->id || entity->id >= 4294967295UL || entity->age > 4294967295UL || entity->pickup_delay > 32767 || (entity->grounded != 0 && entity->grounded != 1)) return 0;
     if (entity->type == MAAGE_ENTITY_ITEM || entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
@@ -108,7 +144,9 @@ int maage_entity_valid(const maage_entity *entity, const maage_item_registry *it
     } else return 0;
     if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
         item = maage_item_registry_get(items, stack->item_id);
-        if (stack->count != 1 || !item || !item->has_block || maage_status_failed(maage_item_placement_state(item, stack->metadata, MAAGE_FACE_POSITIVE_Y, 0, &state)) || state != entity->payload.falling.state) return 0;
+        blocks = maage_item_registry_blocks(items);
+        state = maage_block_registry_state(blocks, entity->payload.falling.state);
+        if (stack->count != 1 || !item || maage_status_failed(falling_variant(blocks, items, state, stack->item_id, &variant)) || variant != stack->variant) return 0;
         if (entity->payload.falling.source[1] < 0 || entity->payload.falling.source[1] >= MAAGE_WORLD_HEIGHT) return 0;
         for (axis = 0; axis < 3; ++axis)
             if (entity->payload.falling.source[axis] <= -MAAGE_WORLD_LIMIT || entity->payload.falling.source[axis] >= MAAGE_WORLD_LIMIT) return 0;
@@ -230,7 +268,8 @@ maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_
     entity.payload.falling.state = state_id;
     entity.payload.falling.stack.item_id = block->drop_item_id;
     entity.payload.falling.stack.count = 1;
-    entity.payload.falling.stack.metadata = state->metadata;
+    result = falling_variant(maage_world_registry(world), items, state, entity.payload.falling.stack.item_id, &entity.payload.falling.stack.variant);
+    if (maage_status_failed(result)) return result;
     entity.payload.falling.source[0] = x;
     entity.payload.falling.source[1] = y;
     entity.payload.falling.source[2] = z;
@@ -446,7 +485,7 @@ maage_status maage_entities_tick(maage_entities *entities, maage_world *world, c
                             other = &entities->data[j];
                             if (j <= i || other->type != MAAGE_ENTITY_ITEM || !other->payload.item.count ||
                                 other->payload.item.item_id != entity->payload.item.item_id ||
-                                other->payload.item.metadata != entity->payload.item.metadata ||
+                                other->payload.item.variant != entity->payload.item.variant ||
                                 other->payload.item.damage != entity->payload.item.damage ||
                                 other->payload.item.count + entity->payload.item.count > item->max_stack ||
                                 fabs(other->position[0] - entity->position[0]) > 0.75 ||
@@ -1206,7 +1245,7 @@ static maage_status entity_living_death(maage_entity_context *context, maage_ent
                 if (maage_status_failed(result)) return result;
             }
             item = maage_item_registry_get(context->items, stack.item_id);
-            if (!item || !item->max_stack || stack.metadata > item->max_metadata || stack.damage > item->durability) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_VALIDATE);
+            if (!item || !item->max_stack || stack.variant >= item->variant_count || stack.damage > item->durability) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_VALIDATE);
             entity->payload.living.effect_cursor = stack.count;
             entity->payload.living.pending_drop = stack;
             entity->payload.living.pending_drop.count = stack.count ? 1 : 0;
@@ -1247,7 +1286,7 @@ maage_status maage_entities_shear(maage_entity_context *context, maage_entity *e
     double velocity[3] = {0, 0.15, 0};
     if (!context || !entity || !wool || !context->held || entity->type != MAAGE_ENTITY_LIVING) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MUTATE);
     tool = maage_item_registry_get(context->items, context->held->item_id);
-    if (!tool || tool->tool_class != MAAGE_TOOL_SHEARS || !context->held->count || !entity->payload.living.health || (entity->payload.living.flags & MAAGE_ENTITY_STATE_SHEARED)) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
+    if (!tool || !context->held->count || !entity->payload.living.health || (entity->payload.living.flags & MAAGE_ENTITY_STATE_SHEARED)) return entity_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_MUTATE);
     if (!maage_item_stack_valid(context->items, wool) || !wool->count) return entity_status(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_VALIDATE);
     result = maage_entities_reserve(context->entities, 1);
     if (maage_status_failed(result)) return result;
@@ -1548,7 +1587,7 @@ maage_status maage_entities_player_action(maage_entities *entities, maage_world 
             position[0] = gameplay->target.x + face_x[gameplay->target.face] + 0.5;
             position[1] = gameplay->target.y + face_y[gameplay->target.face];
             position[2] = gameplay->target.z + face_z[gameplay->target.face] + 0.5;
-            result = maage_entities_spawn_type(entities, world, item->spawn_type, position, held->metadata, 1, NULL);
+            result = maage_entities_spawn_type(entities, world, item->spawn_type, position, held->variant, 1, NULL);
             *handled = 1;
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS && gameplay->mode != MAAGE_GAME_MODE_CREATIVE && !--held->count) memset(held, 0, sizeof(*held));
             return result;

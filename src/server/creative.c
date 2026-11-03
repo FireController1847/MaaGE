@@ -63,7 +63,7 @@ maage_status maage_server_creative_action(const maage_content *content, maage_wo
             if (maage_status_failed(result)) return result;
             ++game->crafting.revision;
             return result;
-        } else if (entry && cursor->count && cursor->item_id == entry->stack.item_id && cursor->metadata == entry->stack.metadata && cursor->damage == entry->stack.damage) {
+        } else if (entry && cursor->count && cursor->item_id == entry->stack.item_id && cursor->variant == entry->stack.variant && cursor->damage == entry->stack.damage) {
             if (action->secondary) {
                 if (--cursor->count == 0) memset(cursor, 0, sizeof(*cursor));
             } else if (action->kind == MAAGE_CREATIVE_TAKE_STACK) cursor->count = item->max_stack;

@@ -14,7 +14,8 @@ typedef struct maage_block_entity_view {
     maage_model_animation animation;
 } maage_block_entity_view;
 
-/* Portable codec services translate item IDs through the World dictionary.
+/* Portable codec services translate item and variant IDs through the World dictionary.
+ * A stack occupies 13 bytes: saved item (4), count (1), saved variant (4), damage (4).
  * Exactly encoded_size bytes must be consumed. Statuses preserve I/O failures.
  * The service/context is borrowed only during one encode/decode invocation. */
 typedef struct maage_entity_codec {

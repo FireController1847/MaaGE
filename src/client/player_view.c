@@ -38,7 +38,7 @@ static void player_held_matrix(float matrix[16], const maage_item_definition *it
         maage_player_matrix_rotate(matrix, 1, -45 * radians);
         maage_player_matrix_scale(matrix, 0.375, 0.375, 0.375);
     } else {
-        if (item->tool_class) {
+        if (item->has_tool_tag) {
             maage_player_matrix_translate(matrix, 0, -0.1875, 0);
             maage_player_matrix_scale(matrix, 0.625, -0.625, 0.625);
             maage_player_matrix_rotate(matrix, 0, 100 * radians);
@@ -59,7 +59,7 @@ static void player_held_matrix(float matrix[16], const maage_item_definition *it
         maage_player_matrix_translate(matrix, 0.9375, 0.0625, 0);
         maage_player_matrix_rotate(matrix, 2, 3.141592653589793);
         maage_player_matrix_translate(matrix, 0.5, 0.5, 0);
-        if (item->tool_class) {
+        if (item->has_tool_tag) {
             /* Both icon faces have identical XY/UVs. Exchange their thickness
              * planes to cancel the tool profile's reflection and retain the
              * shared culled pipelines, without mirroring its visible texture. */
@@ -140,7 +140,7 @@ maage_status maage_client_player_view_update(maage_client_player_view *view, maa
     if (relative > 1.308996938995747) relative = 1.308996938995747;
     if (relative < -1.308996938995747) relative = -1.308996938995747;
     maage_player_pose_calculate(resources->skin_model, phase, amount * view->gait_sign, age, relative, pitch, swing, item != NULL, snapshot->player.sneaking, &pose);
-    if (food && food->amount > 0 && (!item || (food->item == held->item_id && food->metadata == held->metadata))) {
+    if (food && food->amount > 0 && (!item || (food->item == held->item_id && food->variant == held->variant))) {
         double weight = food->amount * (1 - pow(1 - food->progress, 27));
         double motion = fabs(cos(food->remaining * 0.7853981633974483)) * 0.08;
         pose.rotation[MAAGE_PLAYER_RIGHT_ARM][0] += (1.5 - pitch * 0.5 + motion - pose.rotation[MAAGE_PLAYER_RIGHT_ARM][0]) * weight;

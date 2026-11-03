@@ -260,7 +260,7 @@ maage_status maage_generation_grow_tree(const maage_base_ids *ids, maage_world *
             if (state->block_id != ids->block_dirt && state->block_id != ids->block_grass) return result;
             state = maage_block_registry_state(blocks, maage_world_get(world, x + dx, y, z + dz));
             if (!state) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
-            if (state->block_id != ids->block_sapling || (state->metadata & 7U) != species) return result;
+            if (state->block_id != ids->block_sapling || maage_base_state_value(blocks, state, ids->property_wood) != ids->wood_values[species]) return result;
         }
     /* Keep a clear trunk corridor and headroom as well as every emitted cell;
      * a hollow canopy must not permit solid obstacles through its interior. */

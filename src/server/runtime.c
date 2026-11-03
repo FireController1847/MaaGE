@@ -641,7 +641,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.breaking = runtime->game.breaking;
     snapshot.player.break_progress = runtime->game.break_progress;
     snapshot.player.breaking_item = runtime->game.breaking_item;
-    snapshot.player.breaking_metadata = runtime->game.breaking_metadata;
+    snapshot.player.breaking_variant = runtime->game.breaking_variant;
     snapshot.player.breaking_damage = runtime->game.breaking_damage;
     snapshot.player.blocks_broken = runtime->game.blocks_broken;
     snapshot.player.last_break = runtime->game.last_break;

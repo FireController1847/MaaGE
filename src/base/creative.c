@@ -48,7 +48,7 @@ static maage_status base_creative_bricks(maage_content_context *context, maage_c
 }
 typedef struct base_creative_assignment {
     size_t item_offset;
-    unsigned int tab, first_metadata, last_metadata;
+    unsigned int tab, first_variant, last_variant;
     long order;
 } base_creative_assignment;
 #define BASE_CREATIVE_ITEM(item, tab, first, last, order) {offsetof(maage_base_ids, item), tab, first, last, order}
@@ -56,7 +56,7 @@ maage_status maage_base_creative(maage_content_context *context, const maage_bas
     static const char *const names[] = {"building_blocks", "decoration_blocks", "redstone", "transportation", "miscellaneous", "search", "foodstuffs", "tools", "combat", "brewing", "materials", "survival_inventory"};
     static const char *const titles[] = {"Building Blocks", "Decoration Blocks", "Redstone", "Transportation", "Miscellaneous", "Search Items", "Foodstuffs", "Tools", "Combat", "Brewing", "Materials", "Survival Inventory"};
     /* Explicit display order and visible variants are independent of item IDs
-     * and max_metadata. Internal huge-mushroom blocks have no catalog entry. */
+     * and variant_count. Internal huge-mushroom blocks have no catalog entry. */
     static const base_creative_assignment assignments[] = {
         BASE_CREATIVE_ITEM(item_stone, 0, 0, 0, 1), BASE_CREATIVE_ITEM(item_grass, 0, 0, 0, 2), BASE_CREATIVE_ITEM(item_dirt, 0, 0, 0, 3),
         BASE_CREATIVE_ITEM(item_cobblestone, 0, 0, 0, 4), BASE_CREATIVE_ITEM(item_planks, 0, 0, 5, 5), BASE_CREATIVE_ITEM(item_sapling, 1, 0, 2, 6),
@@ -100,7 +100,7 @@ maage_status maage_base_creative(maage_content_context *context, const maage_bas
     maage_texture_id backgrounds[3];
     maage_status result;
     size_t i;
-    unsigned int metadata, material, tool;
+    unsigned int variant, material, tool;
     result = base_creative_texture(context, "minecraft/textures/gui/container/creative_inventory/tab_items.png", 256, &backgrounds[0]);
     if (!maage_status_failed(result)) result = base_creative_texture(context, "minecraft/textures/gui/container/creative_inventory/tab_item_search.png", 256, &backgrounds[1]);
     if (!maage_status_failed(result)) result = base_creative_texture(context, "minecraft/textures/gui/container/creative_inventory/tab_inventory.png", 256, &backgrounds[2]);
@@ -150,9 +150,9 @@ maage_status maage_base_creative(maage_content_context *context, const maage_bas
     for (i = 0; i < sizeof(assignments) / sizeof(assignments[0]); ++i) {
         entry.tab = tabs[assignments[i].tab];
         entry.stack.item_id = MAAGE_BASE_ID(ids, assignments[i].item_offset);
-        for (metadata = assignments[i].first_metadata; metadata <= assignments[i].last_metadata; ++metadata) {
-            entry.stack.metadata = metadata;
-            entry.order = entry.search_order = assignments[i].order * 32 + (entry.stack.item_id == ids->item_lapis ? 4 : metadata);
+        for (variant = assignments[i].first_variant; variant <= assignments[i].last_variant; ++variant) {
+            entry.stack.variant = variant;
+            entry.order = entry.search_order = assignments[i].order * 32 + (entry.stack.item_id == ids->item_lapis ? 4 : variant);
             result = maage_creative_entry_register(context->creative, &entry);
             if (maage_status_failed(result)) return result;
         }
@@ -161,7 +161,7 @@ maage_status maage_base_creative(maage_content_context *context, const maage_bas
         for (tool = 0; tool < 4; ++tool) {
             entry.tab = tabs[7];
             entry.stack.item_id = ids->tools[material][tool];
-            entry.stack.metadata = 0;
+            entry.stack.variant = 0;
             entry.order = entry.search_order = tool_order[material][tool] * 32;
             result = maage_creative_entry_register(context->creative, &entry);
             if (maage_status_failed(result)) return result;

@@ -6,7 +6,7 @@ static maage_status crafting_status(unsigned char code, unsigned char operation)
     return maage_status_make(code, MAAGE_CONTEXT_WORLD, operation, 0);
 }
 static int stacks_equal(const maage_item_stack *a, const maage_item_stack *b) {
-    return a->item_id == b->item_id && a->metadata == b->metadata && a->damage == b->damage;
+    return a->item_id == b->item_id && a->variant == b->variant && a->damage == b->damage;
 }
 maage_status maage_crafting_refresh(maage_crafting_container *container, const maage_recipe_registry *recipes) {
     maage_recipe_match match;

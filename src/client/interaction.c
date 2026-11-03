@@ -93,7 +93,7 @@ static maage_status maage_first_person_upload(maage_client_first_person *visual,
     else {
         maage_item_stack stack;
         stack.item_id = visual->item_id;
-        stack.metadata = visual->metadata;
+        stack.variant = visual->variant;
         stack.count = 1;
         stack.damage = 0;
         item = maage_item_registry_get(items, visual->item_id);
@@ -126,7 +126,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     maage_status result;
     float matrix[16], projection[16], sky = 1, emission = 0;
     double target, amount, lag, arc, swing, wave, root_wave, square_wave, focal, eating = 0, ease, bounce;
-    unsigned int metadata;
+    maage_item_variant_id variant;
     int changed = 0;
     if (!visual || !renderer || !atlas || !items || !blocks || !snapshot || !effects || !(aspect > 0) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     if (!visible) {
@@ -136,14 +136,14 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     }
     selected = maage_inventory_selected(&snapshot->player.inventory);
     item_id = selected && selected->count ? selected->item_id : 0;
-    metadata = item_id ? selected->metadata : 0;
+    variant = item_id ? selected->variant : 0;
     if (elapsed < 0) elapsed = 0;
     if (elapsed > 0.1) elapsed = 0.1;
     if (!visual->initialized || visual->session_epoch != snapshot->session_epoch || visual->world_epoch != snapshot->world_epoch || visual->life != snapshot->player.motion.life) {
         visual->initialized = 1;
         visual->equipped = 1;
         visual->item_id = item_id;
-        visual->metadata = metadata;
+        visual->variant = variant;
         visual->arm_yaw = yaw;
         visual->arm_pitch = pitch;
         visual->session_epoch = snapshot->session_epoch;
@@ -151,7 +151,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
         visual->life = snapshot->player.motion.life;
         changed = 1;
     }
-    target = visual->item_id == item_id && visual->metadata == metadata ? 1 : 0;
+    target = visual->item_id == item_id && visual->variant == variant ? 1 : 0;
     amount = elapsed * 8;
     if (target > visual->equipped) {
         visual->equipped += amount;
@@ -160,9 +160,9 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
         visual->equipped -= amount;
         if (visual->equipped < target) visual->equipped = target;
     }
-    if (visual->equipped < 0.1 && (visual->item_id != item_id || visual->metadata != metadata)) {
+    if (visual->equipped < 0.1 && (visual->item_id != item_id || visual->variant != variant)) {
         visual->item_id = item_id;
-        visual->metadata = metadata;
+        visual->variant = variant;
         changed = 1;
     }
     if (changed) {
@@ -190,7 +190,7 @@ maage_status maage_client_first_person_update(maage_client_first_person *visual,
     lag = 1 - exp(-elapsed * 13.862943611);
     visual->arm_yaw = yaw - arc * (1 - lag);
     visual->arm_pitch += (pitch - visual->arm_pitch) * lag;
-    if (food && food->item == visual->item_id && food->metadata == visual->metadata) eating = food->amount;
+    if (food && food->item == visual->item_id && food->variant == visual->variant) eating = food->amount;
     swing = swing_progress * (1 - eating);
     if (swing < 0) swing = 0;
     if (swing > 1) swing = 1;
@@ -419,7 +419,7 @@ void maage_client_food_animation_update(maage_client_food_animation *animation, 
     }
     if (elapsed < 0) elapsed = 0;
     if (elapsed > 0.1) elapsed = 0.1;
-    active = held_use && snapshot->player.health && use->remaining && use->duration && held && held->count && held->item_id == use->stack.item_id && held->metadata == use->stack.metadata;
+    active = held_use && snapshot->player.health && use->remaining && use->duration && held && held->count && held->item_id == use->stack.item_id && held->variant == use->stack.variant;
     if (active) {
         if (animation->started != use->started_tick || animation->tick != snapshot->tick) {
             animation->age = 0;
@@ -427,7 +427,7 @@ void maage_client_food_animation_update(maage_client_food_animation *animation, 
             animation->tick = snapshot->tick;
         } else if (!snapshot->paused) animation->age += elapsed;
         animation->item = held->item_id;
-        animation->metadata = held->metadata;
+        animation->variant = held->variant;
         fraction = animation->age * 20;
         if (fraction > 1) fraction = 1;
         animation->remaining = use->remaining + 1.0 - fraction;

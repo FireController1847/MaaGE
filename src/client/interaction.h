@@ -16,7 +16,7 @@ double maage_client_swing_update(maage_client_swing *swing, const maage_session_
 typedef struct maage_client_food_animation {
     unsigned long session, world, life, started, tick;
     maage_item_id item;
-    unsigned int metadata;
+    maage_item_variant_id variant;
     double age, remaining, progress, amount;
 } maage_client_food_animation;
 /* One interpolated owner-use timeline; no predicted inventory mutation. */
@@ -34,7 +34,7 @@ typedef struct maage_client_first_person {
     const maage_client_resources *resources;
     maage_render_mesh *mesh;
     maage_item_id item_id;
-    unsigned int metadata;
+    maage_item_variant_id variant;
     unsigned long session_epoch, world_epoch, life;
     int initialized, sprite;
     double equipped, arm_yaw, arm_pitch;
@@ -45,7 +45,7 @@ typedef struct maage_client_first_person {
 maage_status maage_client_interaction_init(maage_client_interaction_visual *visual, const maage_client_resources *resources);
 maage_status maage_client_interaction_update(maage_client_interaction_visual *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const struct maage_client_prediction *prediction, maage_status_trace *trace);
 maage_status maage_client_first_person_init(maage_client_first_person *visual, const maage_client_resources *resources);
-/* Geometry is cached across frames. Only item/metadata changes upload it;
+/* Geometry is cached across frames. Only item/variant changes upload it;
  * camera, equip, swing, bobbing and sampled light are frame uniforms. Copied
  * snapshots/events remain the only source of player/gameplay state. */
 maage_status maage_client_first_person_update(maage_client_first_person *visual, maage_renderer *renderer, maage_render_texture *atlas, const maage_item_registry *items, const maage_block_registry *blocks, const maage_session_snapshot *snapshot, const maage_client_camera_effects *effects, double yaw, double pitch, double elapsed, double aspect, double swing_progress, const maage_client_food_animation *food, int visible, maage_status_trace *trace);

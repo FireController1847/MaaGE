@@ -340,8 +340,8 @@ maage_status maage_container_action(const maage_container_registry *registry, ma
         if ((slot->flags & MAAGE_CONTAINER_SLOT_REVISION) && revision != observed.revision) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_VALIDATE, MAAGE_DETAIL_STALE);
         source = &observed.view[i - observed.view_first];
         cursor = &game->inventory.cursor;
-        if (!(slot->flags & MAAGE_CONTAINER_SLOT_EXTRACT) && (!cursor->count || action == MAAGE_SLOT_QUICK_MOVE || (source->count && (source->item_id != cursor->item_id || source->metadata != cursor->metadata || source->damage != cursor->damage)))) return container_status(MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
-        if (!(slot->flags & MAAGE_CONTAINER_SLOT_INSERT) && cursor->count && (action != MAAGE_SLOT_QUICK_MOVE) && (!source->count || source->item_id != cursor->item_id || source->metadata != cursor->metadata || source->damage != cursor->damage)) return container_status(MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
+        if (!(slot->flags & MAAGE_CONTAINER_SLOT_EXTRACT) && (!cursor->count || action == MAAGE_SLOT_QUICK_MOVE || (source->count && (source->item_id != cursor->item_id || source->variant != cursor->variant || source->damage != cursor->damage)))) return container_status(MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
+        if (!(slot->flags & MAAGE_CONTAINER_SLOT_INSERT) && cursor->count && (action != MAAGE_SLOT_QUICK_MOVE) && (!source->count || source->item_id != cursor->item_id || source->variant != cursor->variant || source->damage != cursor->damage)) return container_status(MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
         if (!(slot->flags & (MAAGE_CONTAINER_SLOT_INSERT | MAAGE_CONTAINER_SLOT_EXTRACT))) return container_status(MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_MUTATE);
         if (definition->policy) {
             result = definition->policy(definition->context, world, game, slot, action);

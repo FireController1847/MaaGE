@@ -3,15 +3,22 @@
 #include "maage/items.h"
 
 #define MAAGE_CRAFTING_CELLS 9U
-#define MAAGE_RECIPE_METADATA_ANY 65535U
+#define MAAGE_RECIPE_VARIANT_ANY MAAGE_CONTENT_ID_INVALID
 enum {
     MAAGE_RECIPE_SHAPED = 1,
     MAAGE_RECIPE_SHAPELESS = 2
 };
 typedef unsigned long maage_recipe_id;
+enum {
+    MAAGE_RECIPE_CHOICE_ITEM = 0,
+    MAAGE_RECIPE_CHOICE_TAG = 1
+};
 typedef struct maage_recipe_choice {
     maage_item_id item;
-    unsigned int metadata;
+    maage_item_variant_id variant;
+    maage_tag_id tag;
+    unsigned int kind;
+    maage_property_set_id properties; /* Optional exact typed value constraints. */
 } maage_recipe_choice;
 /* Each ingredient occupies one cell and consumes quantity units. Shapeless
  * duplicates require distinct cells. Alternatives allow
@@ -22,11 +29,24 @@ typedef struct maage_recipe_ingredient {
     unsigned int quantity;
     maage_item_stack remainder; /* Per occupied cell, returned once per craft. */
 } maage_recipe_ingredient;
+typedef struct maage_recipe_property_binding {
+    maage_property_id source, target;
+} maage_recipe_property_binding;
+/* Project one matched ingredient's properties onto a unique output candidate.
+ * Finalization compiles every eligible input variant; missing or ambiguous
+ * output configurations fail composition instead of choosing registration order. */
+typedef struct maage_recipe_projection {
+    unsigned int ingredient;
+    maage_tag_id output_tag;
+    const maage_recipe_property_binding *properties;
+    size_t property_count;
+} maage_recipe_projection;
 typedef struct maage_recipe_definition {
     unsigned int kind, width, height, ingredient_count;
     int mirror;
     maage_recipe_ingredient ingredients[MAAGE_CRAFTING_CELLS];
     maage_item_stack output;
+    maage_recipe_projection projection;
 } maage_recipe_definition;
 typedef struct maage_recipe_match {
     maage_recipe_id recipe;

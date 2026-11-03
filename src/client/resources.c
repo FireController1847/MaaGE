@@ -492,9 +492,10 @@ void maage_client_item_face_tint(const float grass_color[3], const maage_block_f
     color[3] = face->tint[3];
 }
 
-const maage_block_state_definition *maage_client_item_icon_state(const maage_block_registry *blocks, const maage_item_definition *item, unsigned int metadata) {
+const maage_block_state_definition *maage_client_item_icon_state(const maage_block_registry *blocks, const maage_item_definition *item, maage_item_variant_id variant) {
     if (!item) return NULL;
-    return maage_block_registry_state(blocks, item->icon_state ? item->icon_state(item, metadata) : item->icon_state_id);
+    if (variant >= item->variant_count) return NULL;
+    return maage_block_registry_state(blocks, item->variants[variant].icon_state_id);
 }
 
 maage_status maage_client_resources_destroy(maage_client_resources *resources) {
@@ -509,11 +510,11 @@ maage_status maage_client_resources_destroy(maage_client_resources *resources) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
-maage_texture_id maage_client_item_texture(const maage_item_definition *item, unsigned int metadata) {
-    return item ? (item->icon_texture ? item->icon_texture(item, metadata) : item->texture_id) : MAAGE_CONTENT_ID_INVALID;
+maage_texture_id maage_client_item_texture(const maage_item_definition *item, maage_item_variant_id variant) {
+    return item && variant < item->variant_count ? item->variants[variant].texture_id : MAAGE_CONTENT_ID_INVALID;
 }
 
 const char *maage_client_item_name(const maage_item_registry *items, const maage_item_stack *stack) {
     const maage_item_definition *item = stack ? maage_item_registry_get(items, stack->item_id) : NULL;
-    return item ? (item->variant_name ? item->variant_name(item, stack->metadata) : item->display_name) : "";
+    return item && stack->variant < item->variant_count ? (item->variants[stack->variant].display_name ? item->variants[stack->variant].display_name : item->display_name) : "";
 }

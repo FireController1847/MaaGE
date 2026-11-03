@@ -9,8 +9,8 @@ const maage_base_ids *maage_base_generation_references(const maage_block_registr
     return bindings ? (const maage_base_ids *) bindings->generation_context : NULL;
 }
 const maage_base_ids *maage_base_state_references(const maage_block_registry *registry, const maage_block_state_definition *state) {
-    const maage_block_definition *block = state ? maage_block_registry_block(registry, state->block_id) : NULL;
-    return block ? (const maage_base_ids *) block->behavior_context : NULL;
+    (void) state;
+    return maage_base_generation_references(registry);
 }
 
 maage_status maage_base_bind(maage_content_context *context, maage_base_ids *ids) {
@@ -28,7 +28,7 @@ maage_status maage_base_bind(maage_content_context *context, maage_base_ids *ids
 maage_status base_item_register(maage_content_context *context, const char *name, maage_item_definition *item, unsigned long fuel_ticks, maage_item_id *id) {
     maage_fuel_definition fuel;
     maage_status result;
-    if (item->max_metadata) {
+    if (item->variant_count > 1) {
         if (item->has_block) item->icon_state = maage_base_item_icon;
         item->icon_texture = maage_base_item_texture;
         item->variant_name = maage_base_item_name;
@@ -37,10 +37,12 @@ maage_status base_item_register(maage_content_context *context, const char *name
     result = maage_item_registry_register(context->items, name, item);
     if (maage_status_failed(result)) return result;
     *id = item->id;
+    result = maage_base_item_variants(context, item, name);
+    if (maage_status_failed(result)) return result;
     if (fuel_ticks) {
         memset(&fuel, 0, sizeof(fuel));
         fuel.item = item->id;
-        fuel.metadata = MAAGE_SMELTING_METADATA_ANY;
+        fuel.variant = MAAGE_SMELTING_VARIANT_ANY;
         fuel.ticks = fuel_ticks;
         if (item->container_item) {
             fuel.remainder.item_id = item->container_item;
@@ -50,7 +52,7 @@ maage_status base_item_register(maage_content_context *context, const char *name
     }
     return result;
 }
-maage_status base_block_item(maage_content_context *context, const char *name, const char *label, maage_block_id block, maage_block_state_id state, unsigned int metadata, maage_item_placement placement, unsigned long fuel, maage_item_id *id) {
+maage_status base_block_item(maage_content_context *context, const char *name, const char *label, maage_block_id block, maage_block_state_id state, unsigned int variant_limit, maage_item_placement placement, unsigned long fuel, maage_item_id *id) {
     maage_item_definition item;
     const maage_block_definition *type = maage_block_registry_block(context->blocks, block);
     const maage_block_state_definition *icon = maage_block_registry_state(context->blocks, state);
@@ -64,7 +66,7 @@ maage_status base_block_item(maage_content_context *context, const char *name, c
     item.mining_speed = 1;
     item.texture_id = maage_base_logical_texture((const maage_base_ids *) item.behavior_context, icon->faces[MAAGE_FACE_POSITIVE_Z].texture_id);
     item.model = type->mesh_shape == MAAGE_BLOCK_MESH_CUBE ? MAAGE_ITEM_MODEL_BLOCK : MAAGE_ITEM_MODEL_SPRITE;
-    item.max_metadata = metadata;
+    item.variant_count = (size_t) variant_limit + 1;
     item.placement = placement;
     item.display_name = label;
     return base_item_register(context, name, &item, fuel, id);
@@ -75,7 +77,8 @@ maage_status base_tool(maage_content_context *context, const char *name, const c
     item.behavior_context = context->module_data;
     item.max_stack = 1;
     item.durability = durability;
-    item.tool_class = tool_class;
+    item.tool_tag = ((const maage_base_ids *) context->module_data)->tool_tags[tool_class];
+    item.has_tool_tag = 1;
     item.tool_level = level;
     item.mining_speed = speed;
     if (tool_class == MAAGE_TOOL_PICKAXE) item.attack_damage = 3 + level;
@@ -90,13 +93,13 @@ maage_status base_tool(maage_content_context *context, const char *name, const c
     if (tool_class == MAAGE_TOOL_HOE) item.use_placement = maage_base_hoe_placement;
     return base_item_register(context, name, &item, fuel, id);
 }
-maage_status base_smelt(maage_smelting_registry *registry, maage_item_id input, unsigned int metadata, maage_item_id output, unsigned int output_metadata, double xp) {
+maage_status base_smelt(maage_smelting_registry *registry, maage_item_id input, maage_item_variant_id variant, maage_item_id output, maage_item_variant_id output_variant, double xp) {
     maage_smelting_recipe recipe;
     memset(&recipe, 0, sizeof(recipe));
     recipe.input = input;
-    recipe.metadata = metadata;
+    recipe.variant = variant;
     recipe.output.item_id = output;
-    recipe.output.metadata = output_metadata;
+    recipe.output.variant = output_variant;
     recipe.output.count = 1;
     recipe.experience = xp;
     return maage_smelting_register(registry, &recipe);
@@ -114,7 +117,8 @@ static maage_status maage_base_define(maage_content_context *context) {
     }
     context->module_data = ids;
     /* Definitions precede every module's internal binding stage. */
-    result = maage_base_textures(context, ids);
+    result = maage_base_traits(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_textures(context, ids);
     if (!maage_status_failed(result)) result = maage_base_sounds(context, ids);
     if (!maage_status_failed(result)) result = maage_base_bind(context, ids);
     if (!maage_status_failed(result)) result = maage_base_biomes(context->biomes, ids);
@@ -140,6 +144,7 @@ static maage_status maage_base_bind_internal(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_fluids_resolve(context, ids);
     if (!maage_status_failed(result)) result = maage_base_furnace_entity(context, ids);
     if (!maage_status_failed(result)) result = maage_base_chests_bind(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_traits_bind(context, ids);
     if (maage_status_failed(result)) return result;
     for (i = 0; i < MAAGE_BASE_BIOME_COUNT; ++i) {
         biome = *maage_biome_registry_get(context->biomes, ids->biome_ids[i]);
