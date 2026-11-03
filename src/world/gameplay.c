@@ -97,20 +97,13 @@ static void maage_gameplay_begin_life(maage_gameplay *game) {
     game->jump_repeat_ticks = 0;
 }
 maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items) {
-    const maage_item_definition *item;
-    unsigned int i;
     if (!game) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+    (void) items;
     memset(game, 0, sizeof(*game));
     maage_gameplay_begin_life(game);
     game->mode = MAAGE_GAME_MODE_CREATIVE;
     game->health = game->hunger = 20;
     game->saturation = 5;
-    for (i = 0; i < MAAGE_HOTBAR_SLOTS; ++i) {
-        item = maage_item_registry_at(items, i);
-        if (!item) break;
-        game->inventory.slots[i].item_id = item->id;
-        game->inventory.slots[i].count = item->max_stack;
-    }
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
 }
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode) {

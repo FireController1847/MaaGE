@@ -750,7 +750,6 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     if (runtime->config.initial_game_mode >= 0) {
         result = maage_gameplay_set_mode(&runtime->game, (unsigned int) runtime->config.initial_game_mode);
         if (maage_status_failed(result)) return result;
-        if (runtime->record.new_world && runtime->config.initial_game_mode == MAAGE_GAME_MODE_SURVIVAL) memset(&runtime->game.inventory, 0, sizeof(runtime->game.inventory));
     }
     runtime->game.reach = runtime->config.interaction_range;
     runtime->yaw = runtime->record.yaw;
