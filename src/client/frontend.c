@@ -130,6 +130,7 @@ static void front_shutdown_run(void *context, const maage_job_token *token) {
         return; /* A failed worker drain still owns its snapshots. */
     }
     shutdown->visual = NULL;
+    maage_log_info("maage.client", "Disconnected from integrated server.");
     shutdown->result = result;
     maage_job_set_result(token, result);
 }

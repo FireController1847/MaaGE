@@ -29,7 +29,7 @@ struct maage_server_runtime {
     maage_mutex *mutex;
     maage_condition *wake;
     maage_thread *thread;
-    int started, joined, stop, finished, paused;
+    int started, joined, stop, finished, ready, paused;
     maage_status result;
     maage_status_trace trace;
     maage_content *owned_content;
@@ -950,7 +950,10 @@ static void server_thread_entry(void *context) {
         center_z = maage_world_chunk_coordinate((int) floor(runtime->player.position[2]));
         spawn_ready = maage_world_chunk_loaded(runtime->world, center_x, center_z);
         if (spawn_ready && !ready_logged) {
-            maage_log_info("maage.server", "%s Server ready.", runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? "Integrated" : "Dedicated");
+            maage_log_info("maage.server", "%s server ready.", runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? "Integrated" : "Dedicated");
+            maage_mutex_lock(runtime->mutex);
+            runtime->ready = 1;
+            maage_mutex_unlock(runtime->mutex);
             ready_logged = 1;
         }
         if (runtime->paused || !spawn_ready) {
@@ -1053,7 +1056,7 @@ static void server_thread_entry(void *context) {
         if (maage_status_failed(runtime->result)) break;
     }
 shutdown:
-    maage_log_info("maage.server", "%s Server shutting down.", runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? "Integrated" : "Dedicated");
+    maage_log_info("maage.server", "%s server shutting down...", runtime->config.execution_mode == MAAGE_SERVER_INTEGRATED ? "Integrated" : "Dedicated");
     server_close_world(runtime, &trace);
     server_publish_status(runtime);
     if (runtime->config.session) {
@@ -1162,6 +1165,15 @@ void maage_server_runtime_request_stop(maage_server_runtime *runtime) {
     runtime->stop = 1;
     maage_condition_broadcast(runtime->wake);
     maage_mutex_unlock(runtime->mutex);
+}
+
+int maage_server_runtime_ready(maage_server_runtime *runtime) {
+    int ready;
+    if (!runtime) return 0;
+    maage_mutex_lock(runtime->mutex);
+    ready = runtime->ready && !runtime->stop && !runtime->finished;
+    maage_mutex_unlock(runtime->mutex);
+    return ready;
 }
 
 int maage_server_runtime_finished(maage_server_runtime *runtime) {

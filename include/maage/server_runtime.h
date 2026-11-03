@@ -46,6 +46,9 @@ typedef struct maage_server_config {
  * The caller retains borrowed identity peer and session through join/destroy. */
 maage_status maage_server_runtime_create(const maage_server_config *config, maage_server_runtime **output, maage_status_trace *trace);
 maage_status maage_server_runtime_start(maage_server_runtime *runtime, maage_status_trace *trace);
+/* True only after the owner has loaded the spawn column, not merely started.
+ * Nonblocking and synchronized for Client bootstrap polling. */
+int maage_server_runtime_ready(maage_server_runtime *runtime);
 /* Safe on a different thread, idempotent, and wakes the tick scheduler. */
 void maage_server_runtime_request_stop(maage_server_runtime *runtime);
 /* May block; never call on the Server thread or a rendering hot path. Returns

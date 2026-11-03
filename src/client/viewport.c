@@ -1023,20 +1023,22 @@ choose_world:
             last_seen_tick = latest.tick;
             selected_hotbar = queued_hotbar = (int) latest.player.inventory.selected;
             valid_snapshot = 1;
-            connected = 1;
-            break;
         }
         if (maage_status_failed(operation) && maage_status_code(operation) != MAAGE_STATUS_NOOP) goto done;
         if (maage_server_runtime_finished(server)) {
             operation = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_START, 0);
-            failure_message = "The authoritative Server exited before producing an initial snapshot.";
+            failure_message = "The integrated server exited before becoming ready.";
             goto done;
+        }
+        if (valid_snapshot && maage_server_runtime_ready(server)) {
+            connected = 1;
+            break;
         }
         now = maage_time_monotonic_seconds();
         if (now < 0.0) goto clock_failed;
         if (now - startup_began >= 120.0) {
             operation = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_START, 0);
-            failure_message = "Integrated Server bootstrap timed out without a copied snapshot.";
+            failure_message = "Integrated server startup timed out before readiness.";
             goto done;
         }
         operation = maage_client_frontend_loading(frontend, trace);
@@ -1090,7 +1092,7 @@ choose_world:
     received_time = diagnostic_time = mesh_activity.sample_start = last;
     maage_client_ui_notify(ui, resource_notice, last);
     if (audio_notice) maage_client_ui_notify(ui, audio_notice, last);
-    maage_log_info("maage.client", "Connected to integrated Server.");
+    maage_log_info("maage.client", "Connected to integrated server.");
     for (;;) {
         maage_status_trace_init(trace);
         MAAGE_STATUS_TRACE(trace, 0, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
@@ -1780,15 +1782,12 @@ return_to_title:
     result = maage_window_capture_mouse(window, 0);
     if (maage_status_failed(result)) goto window_failed;
     maage_server_runtime_request_stop(server);
-    if (connected) {
-        maage_log_info("maage.client", "Disconnected from integrated Server.");
-        connected = 0;
-    }
     /* The Server flushes and the Client replica workers drain on a separate
      * lifecycle Jobs worker. Do not join a saving world on the UI thread. */
     if (retired_resources.view) retired_in_shutdown = 1;
     operation = maage_client_frontend_leave_world(frontend, server, session, visual_world, trace);
     if (maage_status_failed(operation)) goto done;
+    connected = 0; /* The shutdown worker now owns the eventual disconnect. */
     server = NULL;
     server_started = 0;
     session = NULL;
@@ -1829,7 +1828,7 @@ done:
      * World workers, or a disk sync. Retain all borrowed resources until
      * their background operations finish after the UI is hidden. */
     if (window) (void) maage_window_set_visible(window, 0);
-    maage_log_info("maage.client", "Client shutting down.");
+    maage_log_info("maage.client", "Client shutting down...");
     if (options_ready && ui) {
         operation = maage_client_options_store(frontend, ui, &saved_video_options, 1);
         if (maage_status_failed(operation)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.options", operation, "Unable to persist config/options.ini during shutdown.");
@@ -1843,10 +1842,6 @@ done:
     /* Stop command production first. The Server controls all authoritative
      * World flush/persistence; no Client World store/save API is ever invoked. */
     if (server) maage_server_runtime_request_stop(server);
-    if (connected) {
-        maage_log_info("maage.client", "Disconnected from integrated Server.");
-        connected = 0;
-    }
     if (ui) maage_client_ui_set_click_callback(ui, NULL, NULL);
     operation = maage_client_audio_service_destroy(audio, &cleanup_trace);
     if (maage_status_failed(operation)) retain_content = 1;
@@ -1903,6 +1898,7 @@ done:
         maage_client_cleanup_result(maage_local_session_close(session), &outcome, &cleanup_trace, trace);
         maage_client_cleanup_result(maage_local_session_destroy(session), &outcome, &cleanup_trace, trace);
     }
+    if (connected) maage_log_info("maage.client", "Disconnected from integrated server.");
     /* Failed worker teardown retains its borrowed immutable definitions. */
     if (!retain_content) {
         maage_client_cleanup_result(maage_client_resources_destroy(&retired_resources), &outcome, &cleanup_trace, trace);
