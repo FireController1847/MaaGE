@@ -1,5 +1,5 @@
 # GUI identity is shared by CMake target configuration and build-time metadata.
-set(MAAGE_LAUNCHER_NAME "MaaGE")
+set(MAAGE_LAUNCHER_NAME "MaaGE Launcher")
 set(MAAGE_LAUNCHER_IDENTIFIER "org.maage.launcher")
 set(MAAGE_LAUNCHER_ICON_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/src/launcher/icons")
 set(MAAGE_LAUNCHER_ICON_FILE "icon.icns")

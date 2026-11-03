@@ -2,12 +2,12 @@
 set(MAAGE_LAUNCHER_VERSION_MAJOR 1)
 set(MAAGE_LAUNCHER_VERSION_MINOR 0)
 set(MAAGE_LAUNCHER_VERSION_PATCH 0)
-set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.41")
+set(MAAGE_LAUNCHER_VERSION_PRERELEASE "alpha.42")
 
 set(MAAGE_CLIENT_VERSION_MAJOR 0)
 set(MAAGE_CLIENT_VERSION_MINOR 1)
 set(MAAGE_CLIENT_VERSION_PATCH 0)
-set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.126")
+set(MAAGE_CLIENT_VERSION_PRERELEASE "alpha.127")
 
 set(MAAGE_SERVER_VERSION_MAJOR 1)
 set(MAAGE_SERVER_VERSION_MINOR 0)
@@ -83,6 +83,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
 <dict>
     <key>CFBundleExecutable</key><string>maage-client</string>
     <key>CFBundleName</key><string>@MAAGE_CLIENT_NAME@</string>
+    <key>CFBundleDisplayName</key><string>@MAAGE_CLIENT_NAME@</string>
     <key>CFBundleIdentifier</key><string>@MAAGE_CLIENT_IDENTIFIER@</string>
     <key>CFBundleShortVersionString</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>
     <key>CFBundleVersion</key><string>@MAAGE_VERSION_MAJOR@.@MAAGE_VERSION_MINOR@.@MAAGE_VERSION_PATCH@</string>

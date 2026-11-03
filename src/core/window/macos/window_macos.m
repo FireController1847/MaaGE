@@ -336,12 +336,18 @@ static void maage_cocoa_presentation(maage_window_system *system) {
 
 static maage_status maage_cocoa_init(maage_window_system *system) {
     maage_cocoa_system *native;
+    NSString *application_name;
     if (![NSThread isMainThread]) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, MAAGE_DETAIL_WRONG_THREAD);
     if (maage_cocoa_active) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     native = calloc(1, sizeof(*native));
     if (!native) return MAAGE_STATUS_VALUE(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WINDOW, MAAGE_OPERATION_INITIALIZE, 0);
     system->platform = native;
     native->pool = [[NSAutoreleasePool alloc] init];
+    /* Standalone executables must publish their product name before AppKit
+     * registers the process with the desktop; the window title is separate. */
+    application_name = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDisplayName"];
+    if (![application_name isKindOfClass:[NSString class]] || ![application_name length]) application_name = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+    if ([application_name isKindOfClass:[NSString class]] && [application_name length]) [[NSProcessInfo processInfo] setProcessName:application_name];
     [NSApplication sharedApplication];
     native->presentation = [NSApp presentationOptions];
     native->previous_delegate = [[NSApp delegate] retain];
