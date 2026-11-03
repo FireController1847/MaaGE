@@ -108,7 +108,7 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
         supported = extensions ? extensions(bootstrap_dc) : NULL;
         create = (maage_wgl_create_context) maage_wgl_address("wglCreateContextAttribsARB");
         if (!create || !maage_opengl_extension(supported, "WGL_ARB_create_context") || !maage_opengl_extension(supported, "WGL_ARB_create_context_profile")) {
-            maage_log_warning("maage.render.opengl", "WGL_ARB_create_context/profile or its entry point is unavailable.");
+            maage_log_warning("maage.client.render", "WGL_ARB_create_context/profile or its entry point is unavailable.");
             goto cleanup;
         }
         if (!selected) {
@@ -120,7 +120,7 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
         }
     } else if (!selected) selected = ChoosePixelFormat(native->window_dc, &format);
     if (!selected || !maage_wgl_format(native->window_dc, selected, &native->format)) {
-        maage_log_warning("maage.render.opengl", "The window has no compatible double-buffered RGB8 WGL pixel format.");
+        maage_log_warning("maage.client.render", "The window has no compatible double-buffered RGB8 WGL pixel format.");
         goto cleanup;
     }
     native->selected = selected;

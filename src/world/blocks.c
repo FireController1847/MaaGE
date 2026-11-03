@@ -67,6 +67,8 @@ typedef struct maage_state_slot {
 } maage_state_slot;
 
 struct maage_block_registry {
+    const maage_block_registry *view_source;
+    maage_block_state_definition *view_states;
     content_policy *policy;
     maage_registry_bindings bindings;
     const maage_fluid_registry *fluids;
@@ -228,6 +230,11 @@ maage_status maage_block_registry_create(size_t block_capacity, size_t state_cap
 }
 maage_status maage_block_registry_destroy(maage_block_registry *registry) {
     if (!registry) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    if (registry->view_source) {
+        free(registry->view_states);
+        free(registry);
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    }
     {
         size_t i;
         for (i = 0; i < registry->entity_count; ++i) {
@@ -516,7 +523,9 @@ const maage_block_definition *maage_block_registry_block(const maage_block_regis
     return entry && *entry ? &((maage_block_slot *) *entry)->definition : NULL;
 }
 const maage_block_state_definition *maage_block_registry_state(const maage_block_registry *registry, maage_block_state_id id) {
-    void **entry = registry ? maage_registry_pages_find(&registry->states, id) : NULL;
+    void **entry;
+    if (registry && registry->view_source) return id < registry->state_count ? &registry->view_states[id] : NULL;
+    entry = registry ? maage_registry_pages_find(&registry->states, id) : NULL;
     return entry && *entry ? &((maage_state_slot *) *entry)->definition : NULL;
 }
 const char *maage_block_registry_block_name(const maage_block_registry *registry, maage_block_id id) {
@@ -712,4 +721,42 @@ size_t content_blocks_identity_count(const maage_block_registry *registry, conte
     default:
         return 0;
     }
+}
+
+maage_status content_blocks_view(const maage_block_registry *source, const maage_block_geometry_registry *geometry, const maage_content_view_config *config, maage_block_registry **output) {
+    maage_block_registry *view;
+    maage_block_state_definition *state;
+    const maage_block_state_definition *logical;
+    maage_status result;
+    size_t i, face;
+    *output = NULL;
+    if (!source || !source->finalized || source->view_source || !config || !config->resolver || source->state_count > (size_t) - 1 / sizeof(*state)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    view = (maage_block_registry *) malloc(sizeof(*view));
+    if (!view) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    *view = *source;
+    view->view_source = source;
+    view->geometry = geometry;
+    view->view_states = (maage_block_state_definition *) calloc(source->state_count, sizeof(*state));
+    if (!view->view_states) {
+        free(view);
+        return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    }
+    for (i = 0; i < source->state_count; ++i) {
+        logical = maage_block_registry_state(source, (maage_block_state_id) i);
+        state = &view->view_states[i];
+        *state = *logical;
+        result = config->resolver(config->context, logical, state->faces, state->leaf_fast_uv);
+        for (face = 0; face < MAAGE_FACE_COUNT && !maage_status_failed(result); ++face)
+            if (!maage_block_face_definition_valid(&state->faces[face]) || state->faces[face].texture_id != logical->faces[face].texture_id || state->faces[face].overlay_texture != logical->faces[face].overlay_texture || state->faces[face].snow_texture != logical->faces[face].snow_texture || state->faces[face].flow_texture != logical->faces[face].flow_texture || state->faces[face].has_flow_texture != logical->faces[face].has_flow_texture) result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+        if (maage_status_failed(result)) {
+            maage_block_registry_destroy(view);
+            return result;
+        }
+    }
+    *output = view;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
+
+const maage_block_registry *maage_block_registry_identity_source(const maage_block_registry *registry) {
+    return registry && registry->view_source ? registry->view_source : registry;
 }

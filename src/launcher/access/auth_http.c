@@ -182,7 +182,7 @@ maage_status maage_auth_request_timed(long timeout_seconds, const char *endpoint
     }
 #undef MAAGE_AUTH_CURL
     if (observer->cancelled(observer->context)) goto done;
-    maage_log_verbose("maage.launcher.access.http", "%s %s started.", body ? "POST" : "GET", route);
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "%s %s started.", body ? "POST" : "GET", route));
     performed = 1;
     result = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status);
@@ -220,20 +220,20 @@ done:
         if (*status) maage_status_trace_record(observer->trace, outcome, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, __FILE__, (unsigned long) __LINE__, *status);
     }
     if (observer->cancelled(observer->context)) maage_log_info("maage.launcher.access.http", "Request cancelled: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else if (!performed) maage_log_verbose("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int) result);
-    else if (http->oversized) maage_log_verbose("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
-    else if (result != CURLE_OK) maage_log_verbose("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int) result, curl_easy_strerror(result), *status, elapsed);
+    else if (!performed) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "Cannot %s for %s (curl=%d).", setup, route, (int) result));
+    else if (http->oversized) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "Response size limit exceeded: %s (HTTP %ld; %.3f s).", route, *status, elapsed));
+    else if (result != CURLE_OK) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "Transport/TLS request failed: %s (curl=%d: %s; HTTP %ld; %.3f s).", route, (int) result, curl_easy_strerror(result), *status, elapsed));
     else if (*status != 200) {
         error = maage_auth_error_name(maage_access_json_string(json, "error"));
-        if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down")) maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed);
+        if (!strcmp(error, "authorization_pending") || !strcmp(error, "slow_down")) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "%s: HTTP %ld; %s (%.3f s).", route, *status, error, elapsed));
         else {
-            maage_log_verbose("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed);
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "%s: HTTP %ld; %s; %s (%.3f s).", route, *status, error, maage_auth_error(json), elapsed));
             xerr = maage_auth_number(json, "XErr");
-            if (xerr >= 0) maage_log_verbose("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr);
+            if (xerr >= 0) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "Xbox service error code XErr=%.0f.", xerr));
         }
-    } else if (!json) maage_log_verbose("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed);
+    } else if (!json) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "Malformed JSON response: %s (HTTP %ld; %.3f s).", route, *status, elapsed));
     else
-        maage_log_verbose("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.http", maage_log_debug("maage.launcher.access.http", "%s completed: HTTP %ld (%.3f s).", route, *status, elapsed));
     if (curl) curl_easy_cleanup(curl);
     if (authorization) {
         maage_crypto_clear(authorization, strlen(authorization));

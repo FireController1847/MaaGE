@@ -20,7 +20,7 @@ void maage_client_prediction_confirm(maage_client_prediction *prediction, const 
     for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)
         if (prediction->entries[i].active && !prediction->entries[i].confirmed && prediction->entries[i].id == event->prediction) {
             if (event->block.x != prediction->entries[i].target.x || event->block.y != prediction->entries[i].target.y || event->block.z != prediction->entries[i].target.z) return;
-            if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu accepted=%d acknowledgment_ms=%.3f owner_tick=%lu prediction_tick=%lu event_transport_ms=%.3f", event->prediction, event->accepted, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, event->tick, prediction->entries[i].tick, event->emitted_at >= 0 ? (maage_time_monotonic_seconds() - event->emitted_at) * 1000 : -1);
+            if (prediction->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "action=%lu accepted=%d acknowledgment_ms=%.3f owner_tick=%lu prediction_tick=%lu event_transport_ms=%.3f", event->prediction, event->accepted, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, event->tick, prediction->entries[i].tick, event->emitted_at >= 0 ? (maage_time_monotonic_seconds() - event->emitted_at) * 1000 : -1));
             prediction->entries[i].confirmed = event->accepted ? 1 : -1;
             memcpy(prediction->entries[i].revisions, event->column_revisions, sizeof(event->column_revisions));
             /* Rejected geometry is rebuilt from the effective confirmed state
@@ -164,7 +164,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     if (hotbar >= MAAGE_HOTBAR_SLOTS) return maage_prediction_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (prediction->session != snapshot->session_epoch || prediction->world != snapshot->world_epoch) {
         maage_client_prediction_destroy(prediction);
-        prediction->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
+        prediction->diagnostics = maage_log_enabled("maage.client.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
         prediction->session = snapshot->session_epoch;
         prediction->world = snapshot->world_epoch;
         ++prediction->generation;
@@ -198,7 +198,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
                     if (maage_world_chunk_loaded(visual, dx, dz) && (!column || column->presentation_generation < prediction->entries[i].generation || !maage_world_mesh_current(visual, dx, dz, column->visual_revision))) ready = 0;
                 }
             if (ready && !prediction->entries[i].sound_pending) {
-                if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu accepted=%d reconciled_geometry_ms=%.3f frames=%lu", prediction->entries[i].id, prediction->entries[i].confirmed > 0, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, prediction->frame - prediction->entries[i].frame);
+                if (prediction->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "action=%lu accepted=%d reconciled_geometry_ms=%.3f frames=%lu", prediction->entries[i].id, prediction->entries[i].confirmed > 0, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000, prediction->frame - prediction->entries[i].frame));
                 prediction->entries[i].active = 0;
                 ++prediction->generation;
             }
@@ -267,7 +267,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
             prediction->entries[vacant].predicted_at = prediction->diagnostics ? maage_time_monotonic_seconds() : -1;
             prediction->entries[vacant].frame = prediction->frame;
             prediction->entries[vacant].tick = completed ? snapshot->player.last_break_tick : snapshot->tick + 1;
-            if (prediction->diagnostics) maage_log_info("maage.client.latency", "action=%lu input_sequence=%lu input_to_prediction_ms=%.3f predicted_at=%.6f tick=%lu start_tick=%lu mining_started_at=%.6f owner_progress=%.6f damage=%.6f next_tick_at=%.6f", prediction->next_id + 1, prediction->started_sequence, (prediction->entries[vacant].predicted_at - prediction->input_at) * 1000, prediction->entries[vacant].predicted_at, snapshot->tick, prediction->started_tick, prediction->started_at, snapshot->player.break_progress, damage, snapshot->next_tick_at);
+            if (prediction->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "action=%lu input_sequence=%lu input_to_prediction_ms=%.3f predicted_at=%.6f tick=%lu start_tick=%lu mining_started_at=%.6f owner_progress=%.6f damage=%.6f next_tick_at=%.6f", prediction->next_id + 1, prediction->started_sequence, (prediction->entries[vacant].predicted_at - prediction->input_at) * 1000, prediction->entries[vacant].predicted_at, snapshot->tick, prediction->started_tick, prediction->started_at, snapshot->player.break_progress, damage, snapshot->next_tick_at));
             prediction->entries[vacant].active = 1;
             prediction->entries[vacant].id = ++prediction->next_id;
             prediction->entries[vacant].target = target;
@@ -327,7 +327,7 @@ maage_status maage_client_prediction_prepare(maage_client_prediction *prediction
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (prediction->diagnostics)
         for (i = 0; i < MAAGE_CLIENT_PREDICTIONS; ++i)
-            if (prediction->entries[i].active && prediction->entries[i].frame == prediction->frame) maage_log_info("maage.client.latency", "action=%lu prediction_geometry_ms=%.3f frames=0", prediction->entries[i].id, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000);
+            if (prediction->entries[i].active && prediction->entries[i].frame == prediction->frame) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "action=%lu prediction_geometry_ms=%.3f frames=0", prediction->entries[i].id, (maage_time_monotonic_seconds() - prediction->entries[i].predicted_at) * 1000));
     return result;
 }
 maage_status maage_client_prediction_destroy(maage_client_prediction *prediction) {

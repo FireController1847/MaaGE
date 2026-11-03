@@ -54,7 +54,7 @@ typedef struct maage_world_slot {
     int mesh_predicted, light_changed, geometry_changed;
     double mesh_completed_at, initialized_at, mesh_retry_at;
     maage_chunk_snapshot *authority;
-    unsigned char *light_cells; /* Lazily reserved for changed light cells. */
+    unsigned char *light_cells;    /* Lazily reserved for changed light cells. */
     unsigned char *transfer_cells; /* Lazy 8 KiB delta map; only dirty Server columns need one. */
     maage_chunk_snapshot *data;
     maage_world_task *work, *light_work, *save;
@@ -576,7 +576,7 @@ static void maage_world_initial_report(maage_world *world, maage_world_slot *slo
     if (!world->diagnostics || slot->initial_ready_reported) return;
     slot->initial_ready_reported = 1;
     now = maage_time_monotonic_seconds();
-    maage_log_info("maage.world.latency", "owner=%s phase=%s column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", world->config.presentation_only ? "initial_light_ready" : "initial_blocks_ready", slot->x, slot->z, slot->revision, slot->block_revision, (now - slot->initialized_at) * 1000);
+    MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=%s phase=%s column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", world->config.presentation_only ? "initial_light_ready" : "initial_blocks_ready", slot->x, slot->z, slot->revision, slot->block_revision, (now - slot->initialized_at) * 1000));
 }
 static void maage_world_invalidate(maage_world *world, maage_world_slot *slot, int light) {
     slot->mesh_dirty = 1;
@@ -626,7 +626,7 @@ static void maage_world_failure_status(maage_world *world, maage_world_slot *slo
         ++world->stats.failure_reports;
         maage_status_trace_init(&world->trace);
         MAAGE_STATUS_TRACE(&world->trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE);
-        maage_log_trace_status(MAAGE_LOG_FATAL, "maage.world", result, &world->trace, "%s", error);
+        maage_log_trace_status(MAAGE_LOG_FATAL, (world->config.presentation_only ? "maage.client.world" : "maage.server.world"), result, &world->trace, "%s", error);
     }
 }
 static void maage_world_failure(maage_world *world, maage_world_slot *slot, const char *error) {
@@ -727,7 +727,7 @@ static void maage_world_commit_edits(maage_world *world) {
             maage_world_invalidate(world, slot, slot->edit_light);
             slot->geometry_epoch = slot->data_epoch = slot->revision;
             slot->block_revision = slot->revision;
-            if (world->diagnostics) maage_log_info("maage.world.latency", "owner=server mutation_revision=%lu column=%d,%d mutated_at=%.6f", slot->block_revision, slot->x, slot->z, maage_time_monotonic_seconds());
+            if (world->diagnostics) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=server mutation_revision=%lu column=%d,%d mutated_at=%.6f", slot->block_revision, slot->x, slot->z, maage_time_monotonic_seconds()));
             maage_world_invalidate_neighbors(world, slot->x, slot->z, 15U);
             maage_world_cancel(world, slot->work);
             slot->work = NULL;
@@ -931,7 +931,7 @@ static maage_status maage_world_publish_light(maage_world *world, maage_world_sl
     maage_world_light_neighbors(world, slot->x, slot->z, boundaries);
     if (!slot->initial_light) {
         slot->initial_light = 1;
-        if (world->diagnostics) maage_log_info("maage.world.latency", "owner=%s phase=initial_local_light_committed column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", slot->x, slot->z, slot->revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000);
+        if (world->diagnostics) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=%s phase=initial_local_light_committed column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", slot->x, slot->z, slot->revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000));
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LIGHT, 0);
 }
@@ -1005,7 +1005,7 @@ static maage_status maage_world_collect(maage_world *world, unsigned budget) {
         } else if (stale || (obsolete && task->kind != MAAGE_JOB_SAVE)) {
             ++world->stats.stale_jobs;
             disposition = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_JOB, MAAGE_DETAIL_STALE);
-        } else if (task->kind == MAAGE_JOB_MESH && (!maage_world_inputs_current(world, slot, task, 1) || task->leaves_mode != world->leaves_mode || task->biome_blend != world->biome_blend || (!slot->presented && (!maage_world_initial_ready(slot) || !maage_world_inputs_current(world, slot, task, 0))))) {
+        } else if (task->kind == MAAGE_JOB_MESH && (task->blocks != world->config.registry || !maage_world_inputs_current(world, slot, task, 1) || task->leaves_mode != world->leaves_mode || task->biome_blend != world->biome_blend || (!slot->presented && (!maage_world_initial_ready(slot) || !maage_world_inputs_current(world, slot, task, 0))))) {
             ++world->stats.stale_jobs;
             disposition = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_JOB, MAAGE_DETAIL_STALE);
             slot->mesh_dirty = 1;
@@ -1022,7 +1022,7 @@ static maage_status maage_world_collect(maage_world *world, unsigned budget) {
                 world->reported_failures[task->kind - 1] = task->status;
                 ++world->stats.failure_reports;
                 maage_log_trace_status(optional ? MAAGE_LOG_WARNING : MAAGE_LOG_FATAL,
-                                       "maage.world.jobs", task->status, &world->trace, "Job %lu; column %d,%d: %s%s",
+                                       (world->config.presentation_only ? "maage.client.world.jobs" : "maage.server.world.jobs"), task->status, &world->trace, "Job %lu; column %d,%d: %s%s",
                                        task->id, task->x, task->z, *task->error ? task->error : "World task failed.",
                                        optional ? " Retaining the previous visual; retrying with bounded backoff." : " World stopped safely.");
             }
@@ -1047,7 +1047,7 @@ static maage_status maage_world_collect(maage_world *world, unsigned budget) {
                 slot->light_epoch = slot->revision;
                 slot->light_boundaries = 15U;
                 slot->initialized_at = world->diagnostics ? maage_time_monotonic_seconds() : -1;
-                if (world->diagnostics) maage_log_info("maage.world.latency", "owner=server phase=blocks_initialized source=%s column=%d,%d revision=%lu state=%lu run_ms=%.3f", task->kind == MAAGE_JOB_LOAD ? "load" : "generation", slot->x, slot->z, slot->revision, slot->block_revision, completion.run_seconds * 1000);
+                if (world->diagnostics) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=server phase=blocks_initialized source=%s column=%d,%d revision=%lu state=%lu run_ms=%.3f", task->kind == MAAGE_JOB_LOAD ? "load" : "generation", slot->x, slot->z, slot->revision, slot->block_revision, completion.run_seconds * 1000));
                 if (task->kind == MAAGE_JOB_LOAD) ++world->stats.loaded_from_disk;
                 else {
                     ++world->stats.generated;
@@ -1080,7 +1080,7 @@ static maage_status maage_world_collect(maage_world *world, unsigned budget) {
             slot->mesh_presentation_generation = task->presentation_generation;
             slot->mesh_failed_revision = 0;
             slot->mesh_retry_at = 0;
-            if (world->diagnostics && !slot->presented) maage_log_info("maage.world.latency", "owner=%s phase=initial_mesh_completed column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", slot->x, slot->z, slot->mesh_revision, slot->mesh_state_revision, (completion.completed_at - slot->initialized_at) * 1000);
+            if (world->diagnostics && !slot->presented) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=%s phase=initial_mesh_completed column=%d,%d revision=%lu state=%lu initial_ms=%.3f", world->config.presentation_only ? "client" : "server", slot->x, slot->z, slot->mesh_revision, slot->mesh_state_revision, (completion.completed_at - slot->initialized_at) * 1000));
             ++world->stats.meshes;
             if (!slot->mesh_linked) {
                 slot->mesh_linked = 1;
@@ -1091,7 +1091,7 @@ static maage_status maage_world_collect(maage_world *world, unsigned budget) {
                 world->mesh_tail = slot;
             }
         }
-        if (world->diagnostics) maage_log_info("maage.world.latency", "owner=%s kind=%d job=%lu column=%d,%d revision=%lu queue_ms=%.3f run_ms=%.3f cancelled=%d stale=%d", world->config.presentation_only ? "client" : "server", task->kind, task->id, task->x, task->z, task->revision, completion.queue_seconds * 1000, completion.run_seconds * 1000, completion.cancelled, maage_status_detail(disposition) == MAAGE_DETAIL_STALE);
+        if (world->diagnostics) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=%s kind=%d job=%lu column=%d,%d revision=%lu queue_ms=%.3f run_ms=%.3f cancelled=%d stale=%d", world->config.presentation_only ? "client" : "server", task->kind, task->id, task->x, task->z, task->revision, completion.queue_seconds * 1000, completion.run_seconds * 1000, completion.cancelled, maage_status_detail(disposition) == MAAGE_DETAIL_STALE));
         ++world->stats.completed_jobs;
         world->stats.last_job_result = disposition;
         world->stats.last_job_operation_result = completion.operation_result;
@@ -1497,7 +1497,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
         free(world);
         return result;
     }
-    world->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
+    world->diagnostics = maage_log_enabled(config->presentation_only ? "maage.client.world.latency" : "maage.server.world.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     world->config = *config;
     world->config.job_memory_budget = memory_budget;
     world->config.generation_policy = policy;
@@ -1577,8 +1577,8 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->config.initial_environment = NULL;
     world->rate_time = maage_time_monotonic_seconds();
     maage_jobs_snapshot(world->jobs, &stats);
-    maage_log_info("maage.world.jobs", "Logical CPUs=%u%s; CPU workers=%u; I/O workers=%u; shared job capacity=%u; cache capacity=%u; immutable commits.", stats.logical_processors, stats.logical_processors ? "" : " (unknown)", stats.workers, io_workers, job_limit, cache_limit);
-    maage_log_info("maage.world.jobs", "Transient admission=%.1f MiB; independent save allowance=%.1f MiB; oversized work proceeds alone.", (double) world->config.job_memory_budget / 1048576.0, (double) (world->config.job_memory_budget / 4U) / 1048576.0);
+    maage_log_info((world->config.presentation_only ? "maage.client.world.jobs" : "maage.server.world.jobs"), "Logical CPUs=%u%s; CPU workers=%u; I/O workers=%u; shared job capacity=%u; cache capacity=%u; immutable commits.", stats.logical_processors, stats.logical_processors ? "" : " (unknown)", stats.workers, io_workers, job_limit, cache_limit);
+    maage_log_info((world->config.presentation_only ? "maage.client.world.jobs" : "maage.server.world.jobs"), "Transient admission=%.1f MiB; independent save allowance=%.1f MiB; oversized work proceeds alone.", (double) world->config.job_memory_budget / 1048576.0, (double) (world->config.job_memory_budget / 4U) / 1048576.0);
     result = config->presentation_only ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0) : maage_world_schedule(world);
     *output = world;
     if (maage_status_failed(result)) {
@@ -1623,6 +1623,31 @@ maage_status maage_world_set_render_distance(maage_world *world, int distance, u
         maage_world_reset_visual_frontiers(world);
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+maage_status maage_world_refresh_presentation(maage_world *world, const maage_block_registry *blocks, const maage_biome_registry *biomes) {
+    maage_world_slot *slot;
+    const maage_biome_registry *old_source, *new_source;
+    if (!world || world->stopped || world->failed || !world->config.presentation_only || !blocks || !biomes || !biomes->finalized || !maage_block_registry_is_finalized(blocks)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
+    old_source = world->config.biomes->view_source ? world->config.biomes->view_source : world->config.biomes;
+    new_source = biomes->view_source ? biomes->view_source : biomes;
+    if (maage_block_registry_identity_source(blocks) != maage_block_registry_identity_source(world->config.registry) || old_source != new_source) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_PRESENT, 0);
+    world->config.registry = blocks;
+    world->config.biomes = biomes;
+    for (slot = world->chunks; slot; slot = slot->next) {
+        if (!maage_world_complete(slot)) continue;
+        maage_world_invalidate(world, slot, 0);
+        if (slot->work && slot->work->kind == MAAGE_JOB_MESH) maage_world_cancel(world, slot->work);
+    }
+    world->scan_ring = world->scan_step = 0;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
+}
+int maage_world_presentation_borrowed(const maage_world *world, const maage_block_registry *blocks) {
+    unsigned int i;
+    if (!world || !blocks) return 0;
+    if (world->config.registry == blocks) return 1;
+    for (i = 0; i < world->task_limit; ++i)
+        if (world->tasks[i].id && world->tasks[i].blocks == blocks) return 1;
+    return 0;
 }
 maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode) {
     maage_world_slot *slot;
@@ -1712,7 +1737,7 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
                     if (slot->pending_mesh) ++upload;
                 }
             }
-            maage_log_info("maage.world.latency", "owner=%s center=%d,%d resident=%u missing_interest=%lu awaiting_blocks=%u initializing_light=%u awaiting_light=%u awaiting_mesh=%u awaiting_upload=%u accepted=%u stale=%lu cancelled=%lu", world->config.presentation_only ? "client" : "server", cx, cz, world->count, (unsigned long) (edge * edge - received), blocks, initial, light, mesh, upload, world->active, world->stats.stale_jobs, world->stats.cancelled_jobs);
+            MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=%s center=%d,%d resident=%u missing_interest=%lu awaiting_blocks=%u initializing_light=%u awaiting_light=%u awaiting_mesh=%u awaiting_upload=%u accepted=%u stale=%lu cancelled=%lu", world->config.presentation_only ? "client" : "server", cx, cz, world->count, (unsigned long) (edge * edge - received), blocks, initial, light, mesh, upload, world->active, world->stats.stale_jobs, world->stats.cancelled_jobs));
             world->diagnostic_at = now;
         }
     }
@@ -1894,7 +1919,7 @@ void maage_world_get_stats(maage_world *world, maage_world_stats *stats) {
     stats->reserved_job_bytes = world->reserved_bytes + world->save_bytes;
     stats->pending_mesh_bytes = world->pending_mesh_bytes;
     stats->resident_storage_bytes = sizeof(*world) + world->bucket_count * sizeof(*world->buckets) +
-        (size_t) world->task_limit * (sizeof(*world->tasks) + sizeof(*world->observations) + sizeof(*world->free_tasks));
+                                    (size_t) world->task_limit * (sizeof(*world->tasks) + sizeof(*world->observations) + sizeof(*world->free_tasks));
     for (index = 0; index < world->task_limit; ++index)
         if (world->tasks[index].light_cells) stats->resident_storage_bytes += 8192UL;
     radius = world->config.render_distance + 1;
@@ -2149,7 +2174,7 @@ maage_status maage_world_mesh_presented(maage_world *world, int x, int z, unsign
     if (!slot->presented) {
         slot->presented = 1;
         maage_world_advance_frontier(world, maage_world_visual_sector(x - world->center_x, z - world->center_z));
-        if (world->diagnostics) maage_log_info("maage.world.latency", "owner=client phase=first_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f", x, z, revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000);
+        if (world->diagnostics) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=client phase=first_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f", x, z, revision, slot->block_revision, (maage_time_monotonic_seconds() - slot->initialized_at) * 1000));
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
 }
@@ -3214,7 +3239,7 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
         slot->mesh_failed_revision = 0;
         slot->mesh_retry_at = 0;
         slot->initialized_at = world->diagnostics ? maage_time_monotonic_seconds() : -1;
-        if (world->diagnostics) maage_log_info("maage.world.latency", "owner=client phase=blocks_initialized source=import column=%d,%d state=%lu", slot->x, slot->z, slot->block_revision);
+        if (world->diagnostics) MAAGE_LOG_VERBOSE_EVENT((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), maage_log_verbose((world->config.presentation_only ? "maage.client.world.latency" : "maage.server.world.latency"), "owner=client phase=blocks_initialized source=import column=%d,%d state=%lu", slot->x, slot->z, slot->block_revision));
     }
     maage_world_visual_changed(world, slot);
     if (!update->base_revision) maage_world_light_neighbors(world, slot->x, slot->z, 15U);

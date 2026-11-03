@@ -79,7 +79,7 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
                 maage_glx_error = 0;
             }
             if (configs) XFree(configs);
-        } else maage_log_warning("maage.render.opengl", "GLX_ARB_create_context/profile or its entry point is unavailable.");
+        } else maage_log_warning("maage.client.render", "GLX_ARB_create_context/profile or its entry point is unavailable.");
     } else if (glXGetConfig(native->display, visual, GLX_DOUBLEBUFFER, &id) == 0 && id) native->context = glXCreateContext(native->display, visual, NULL, True);
     XSync(native->display, False);
     if (maage_glx_error && native->context) {
@@ -93,7 +93,7 @@ maage_status maage_opengl_context_create(maage_renderer *renderer, int modern) {
     XSetErrorHandler(previous);
     XFree(visual);
     if (!native->context || maage_glx_error) {
-        maage_log_warning("maage.render.opengl", "No compatible %s GLX context is available for the window's double-buffered RGB visual.", modern ? "3.3 Core" : "legacy");
+        maage_log_warning("maage.client.render", "No compatible %s GLX context is available for the window's double-buffered RGB visual.", modern ? "3.3 Core" : "legacy");
         return maage_glx_result(renderer, 0, MAAGE_OPERATION_INITIALIZE);
     }
     if (maage_opengl_extension(extensions, "GLX_EXT_swap_control")) native->swap_ext = (PFNGLXSWAPINTERVALEXTPROC) glXGetProcAddressARB((const GLubyte *) "glXSwapIntervalEXT");

@@ -135,9 +135,16 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   never invent function names or native stack frames. Hold the log lock for the entire
   multiline event; filter before formatting. Preserve severity, sinks and ordinary messages.
 - Log once at the handling boundary through named `maage.*` loggers. Severity and
-  verbosity are independent. Levels are exactly VERBOSE/INFO/WARNING/ERROR/FATAL;
-  defaults are Debug VERBOSE, otherwise INFO. Overrides inherit at dot boundaries;
-  precedence is defaults → optional INI → explicit `--log-*`. Pad after closing brackets.
+  verbosity are independent. Levels are VERBOSE/DEBUG/INFO/WARNING/ERROR/FATAL/OFF;
+  defaults are Debug DEBUG, otherwise INFO. DEBUG covers ordinary development/resource
+  diagnostics; VERBOSE is explicit high-frequency detail. First-party VERBOSE call sites
+  compile out outside Debug; Release accepts VERBOSE thresholds but emits DEBUG and higher.
+  Use C90 argument gates for DEBUG/VERBOSE. Atomic minimum filtering and native thread-local
+  threshold caching avoid disabled-event locking; configuration/output stay synchronized.
+  Overrides inherit at dot boundaries; precedence is defaults → optional INI → explicit
+  `--log-*`. Shared content uses `maage.content` with side labels; runtime logs use
+  `maage.client.*`/`maage.server.*`, rendering always `maage.client.render`. Keep generic
+  Core/Launcher categories independent. Pad after closing brackets.
 - Logging stays synchronous, thread-safe, bounded, C90 and headless-safe. FATAL does
   not exit itself. Flush each record; keep captured stdout/stderr unbuffered. Files
   permit external read/write/rename (Windows share read/write/delete); no exclusive file lock.
@@ -162,10 +169,12 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - `MaaGE::Base` is the `minecraft` root module and uses the same public APIs as other
   statically linked modules; generic World/Server code never consults its private references.
   Submodules have one colon, explicitly depend on their root and share its namespace without
-  replacing identities. Preserve stable dependency order and DEFINE → BIND 1: INT → BIND 2: EXT
-  → BIND 3: FIX → FINALIZE → INITIALIZE. Catalogs skip runtime hooks/initialization; Client,
-  integrated Server and dedicated Server have explicit local execution contexts and independent
-  module state. Validate peer numeric identities before initialization/World/session use.
+  replacing identities. Preserve stable dependency order and DEFINE → BIND, INTERNAL → BIND, EXTERNAL
+  → BIND, COMPATIBILITY → FINALIZE → LOAD → INITIALIZE (Server omits LOAD). Client composes
+  logical content once; repeatable resource generations share immutable definitions/IDs and
+  retain old appearances for borrowing jobs. Initialize once after required Client resources;
+  reload never initializes or registers again. Client/integrated/dedicated Server retain explicit
+  contexts and independent module state. Validate peer identities before initialization/World/session use.
   Module descriptors/callbacks/data outlive finalized registries and jobs.
 - Block types, states, items and biomes are distinct automatically allocated numeric
   domains. Registration assigns IDs and captures built-in references; finalized

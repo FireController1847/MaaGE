@@ -120,9 +120,9 @@ static int maage_access_policy(maage_access *a) {
         maage_access_profile *p = &a->view.profiles[i];
         if (p->state != MAAGE_ACCESS_VERIFIED) continue;
         if (a->revoked || !p->connected || now < a->timing[i].starts || now >= a->timing[i].deadlines || wall < p->last_verified || wall >= p->last_verified + 3600) {
-            maage_log_verbose("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected                                      ? "account disconnected"
-                                                                                                                            : now < a->timing[i].starts || wall < p->last_verified ? "clock changed or unavailable"
-                                                                                                                                                                                   : "lease expired");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Verification lease invalidated (%s).", a->revoked ? "service closing" : !p->connected                                      ? "account disconnected"
+                                                                                                                                                                         : now < a->timing[i].starts || wall < p->last_verified ? "clock changed or unavailable"
+                                                                                                                                                                                                                                : "lease expired"));
             p->state = MAAGE_ACCESS_EXPIRED;
             a->timing[i].deadlines = 0;
             strcpy(p->detail, "Verification lease expired. MaaGE will refresh this session securely.");
@@ -310,14 +310,14 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
     if (fseek(file, 0, SEEK_END) || (size = (size_t) ftell(file)) > 8UL * 1024UL * 1024UL || fseek(file, 0, SEEK_SET)) {
         fclose(file);
         a->loaded = -1;
-        maage_log_verbose("maage.launcher.access", "Profile registry exceeds safe metadata size or cannot be read.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Profile registry exceeds safe metadata size or cannot be read."));
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     data = (char *) malloc(size + 1);
     if (!data) {
         fclose(file);
         a->loaded = -1;
-        maage_log_verbose("maage.launcher.access", "Cannot allocate profile metadata.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot allocate profile metadata."));
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     count = fread(data, 1, size, file);
@@ -327,14 +327,14 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
     free(data);
     if (!root) {
         a->loaded = -1;
-        maage_log_verbose("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Profile registry is malformed or oversized; cached metadata cannot grant access."));
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
     if (!json_object_object_get_ex(root, "version", &version) ||
         !json_object_is_type(version, json_type_int) || json_object_get_int(version) != 3 ||
         !json_object_object_get_ex(root, "profiles", &list) || !json_object_is_type(list, json_type_array)) {
         a->loaded = -1;
-        maage_log_verbose("maage.launcher.access", "Profile registry has an unsupported version or invalid profiles array; recreate config/minecraft-profiles.json.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Profile registry has an unsupported version or invalid profiles array; recreate config/minecraft-profiles.json."));
         json_object_put(root);
         return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
     }
@@ -347,7 +347,7 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
             name = maage_access_json_string(item, "name");
             if (!maage_access_username(name) || !maage_access_uuid(maage_access_json_string(item, "uuid"), uuid) || maage_access_find(a, uuid) < a->view.count) continue;
             if (a->view.count == UINT_MAX || maage_status_failed(maage_access_reserve(a, a->view.count + 1))) {
-                maage_log_verbose("maage.launcher.access", "Cannot allocate additional profile metadata; remaining entries not loaded.");
+                MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot allocate additional profile metadata; remaining entries not loaded."));
                 strcpy(a->view.status, "Cannot load all saved accounts: insufficient memory.");
                 a->loaded = -1;
                 result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD, 0);
@@ -388,7 +388,7 @@ static maage_status maage_access_save(maage_access *a, maage_status_trace *trace
     int ok = 0, entries_ok = 1;
     maage_status result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE, 0);
     if (a->loaded < 0) {
-        maage_log_verbose("maage.launcher.access", "Profile registry could not be loaded completely; refusing to overwrite saved account metadata.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Profile registry could not be loaded completely; refusing to overwrite saved account metadata."));
         return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE, 0);
     }
     if (maage_status_failed(result = maage_access_path(a, path, "minecraft-profiles.json", trace)) || maage_status_failed(result = maage_access_path(a, temporary, "minecraft-profiles.part", trace)) || maage_status_failed(result = maage_access_path(a, lockpath, "minecraft-profiles.lock", trace))) return result;
@@ -495,17 +495,17 @@ static maage_status maage_access_authenticate(maage_access *a, int operation) {
     observer.trace = &trace;
     maage_log_info("maage.launcher.access", "Starting account %s.", operation_name);
     if (!s) {
-        maage_log_verbose("maage.launcher.access", "Cannot allocate account authentication session.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot allocate account authentication session."));
         goto done;
     }
     if (operation == 4) {
         if (maage_status_failed(result = maage_access_credential_lock(a, a->selected, &refresh_lock, &trace))) {
-            maage_log_verbose("maage.launcher.access", "Cannot acquire account update lock; refresh not started.");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot acquire account update lock; refresh not started."));
             strcpy(detail, "This account is being updated by another MaaGE process. Wait and retry Refresh.");
             goto done;
         }
         if (maage_status_failed(result = maage_profile_store_load(a->root, a->selected, s, &trace))) {
-            maage_log_verbose("maage.launcher.access", "Saved OAuth account unavailable, invalid, or not decryptable; interactive sign-in required.");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Saved OAuth account unavailable, invalid, or not decryptable; interactive sign-in required."));
             strcpy(detail, "No saved Microsoft session. Sign in with Microsoft to reconnect this account.");
             goto done;
         }
@@ -517,7 +517,7 @@ static maage_status maage_access_authenticate(maage_access *a, int operation) {
         maage_access_lock(a);
         i = maage_access_find(a, s->uuid);
         if (i == a->view.count && (i == UINT_MAX || maage_status_failed(maage_access_reserve(a, i + 1)))) {
-            maage_log_verbose("maage.launcher.access", "Cannot allocate authenticated profile metadata.");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot allocate authenticated profile metadata."));
             result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_REGISTER, 0);
             ok = 0;
             strcpy(detail, "Cannot allocate another account profile. Check available memory.");
@@ -527,7 +527,7 @@ static maage_status maage_access_authenticate(maage_access *a, int operation) {
     if (ok && !maage_access_cancelled(a) && !refresh_lock) {
         result = maage_access_credential_lock(a, s->uuid, &refresh_lock, &trace);
         if (!refresh_lock) {
-            maage_log_verbose("maage.launcher.access", "Cannot acquire account update lock; sign-in credentials not saved.");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot acquire account update lock; sign-in credentials not saved."));
             ok = 0;
             strcpy(detail, "This account is being updated by another MaaGE process. Retry sign-in when it finishes.");
         }
@@ -537,7 +537,7 @@ static maage_status maage_access_authenticate(maage_access *a, int operation) {
         saved = !maage_status_failed(result);
         ok = saved;
         if (!saved) {
-            maage_log_verbose("maage.launcher.access", "Account encryption/atomic persistence failed after Java verification; access denied.");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Account encryption/atomic persistence failed after Java verification; access denied."));
             strcpy(detail, "Java access verified, but MaaGE could not encrypt/save the account. Check data-folder permissions and retry.");
         } else {
             maage_log_info("maage.launcher.access", "Verified OAuth account encrypted and saved.");
@@ -576,12 +576,12 @@ done:
     maage_access_unlock(a);
     if (saved && !ok && s) {
         s->verified_at = s->verified_until = 0;
-        if (maage_status_failed(maage_profile_store_save(a->root, s, &trace))) maage_log_verbose("maage.launcher.access", "Cannot persist verification lease invalidation after cancellation.");
+        if (maage_status_failed(maage_profile_store_save(a->root, s, &trace))) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot persist verification lease invalidation after cancellation."));
     }
     child = maage_access_save(a, &trace);
     if (maage_status_failed(child)) {
         if (!maage_status_failed(result)) result = child;
-        maage_log_verbose("maage.launcher.access", "Profile registry persistence failed; new access lease revoked.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Profile registry persistence failed; new access lease revoked."));
         maage_access_lock(a);
         i = s && *s->uuid ? maage_access_find(a, s->uuid) : maage_access_find(a, a->selected);
         if (i < a->view.count) {
@@ -592,7 +592,7 @@ done:
         ok = 0;
         if (saved && s) {
             s->verified_at = s->verified_until = 0;
-            if (maage_status_failed(maage_profile_store_save(a->root, s, &trace))) maage_log_verbose("maage.launcher.access", "Cannot persist revoked lease after registry failure.");
+            if (maage_status_failed(maage_profile_store_save(a->root, s, &trace))) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot persist revoked lease after registry failure."));
         }
         maage_access_status(a, "Cannot save profile registry. Check MaaGE data-folder permissions before continuing.");
     }
@@ -679,7 +679,7 @@ static void *maage_access_worker(void *context)
         removed = !maage_status_failed(result);
         if (removed) maage_log_info("maage.launcher.access", "%s completed: MaaGE credentials removed.", a->operation == 3 ? "Account removal" : "Sign-out");
         else
-            maage_log_verbose("maage.launcher.access", "%s failed: %s; current access revoked.", a->operation == 3 ? "Account removal" : "Sign-out", lock ? "credential deletion failed" : "account update lock unavailable");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "%s failed: %s; current access revoked.", a->operation == 3 ? "Account removal" : "Sign-out", lock ? "credential deletion failed" : "account update lock unavailable"));
         maage_access_lock(a);
         i = maage_access_find(a, a->selected);
         if (i < a->view.count) {
@@ -700,7 +700,7 @@ static void *maage_access_worker(void *context)
         child = maage_access_save(a, &a->trace);
         if (maage_status_failed(child)) {
             if (!maage_status_failed(result)) result = child;
-            maage_log_verbose("maage.launcher.access", "Cannot persist account registry after credential removal.");
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot persist account registry after credential removal."));
             maage_access_status(a, "Could not save account registry changes. Check data-folder permissions.");
         }
         maage_storage_release(lock);
@@ -788,7 +788,7 @@ static maage_status maage_access_begin(maage_access *a, int operation, const cha
     a->has_thread = native == 0;
 #endif
     if (!a->has_thread) {
-        maage_log_verbose("maage.launcher.access", "Cannot start account worker (operation=%d).", operation);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot start account worker (operation=%d).", operation));
         a->view.busy = 0;
         strcpy(a->view.status, "Cannot start account worker. Retry.");
     }

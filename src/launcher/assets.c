@@ -403,7 +403,7 @@ static maage_status maage_assets_install(maage_assets *assets, char error[512]) 
     for (i = 0; i < sizeof(directories) / sizeof(directories[0]); ++i) {
         maage_storage_join(path, sizeof(path), assets->root, directories[i]);
         if (maage_status_failed(result = maage_storage_directories(path))) goto storage_error;
-        maage_log_verbose("maage.launcher.assets", "Directory ready: %s", path);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.assets", maage_log_debug("maage.launcher.assets", "Directory ready: %s", path));
     }
     maage_storage_join(metadata_path, sizeof(metadata_path), assets->root, "minecraft/metadata/1.7.10.json");
     maage_storage_join(index_path, sizeof(index_path), assets->root, "minecraft/assets/indexes/1.7.10.json");
@@ -497,7 +497,7 @@ static maage_status maage_assets_install(maage_assets *assets, char error[512]) 
         logical[i].name = list[i].name = iterator.key;
         text = maage_assets_string(iterator.val, "hash");
         if (!maage_assets_hash(text) || !maage_assets_size(iterator.val, MAAGE_OBJECT_LIMIT, &size)) goto metadata_error;
-        maage_log_verbose("maage.launcher.assets", "Indexed '%s': SHA-1 %s, %.0f bytes", iterator.key, text, size);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.assets", maage_log_debug("maage.launcher.assets", "Indexed '%s': SHA-1 %s, %.0f bytes", iterator.key, text, size));
         strcpy(list[i].hash, text);
         strcpy(logical[i].hash, text);
         list[i].size = size;
@@ -565,7 +565,7 @@ static maage_status maage_assets_install(maage_assets *assets, char error[512]) 
             if (!same) same = !maage_status_failed(result = maage_assets_file(assets, path, list[i].hash, list[i].size));
         }
         if (same) {
-            maage_log_verbose("maage.launcher.assets", "Using verified cached object for '%s': %s (SHA-1 %s)", list[i].name, path, list[i].hash);
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.assets", maage_log_debug("maage.launcher.assets", "Using verified cached object for '%s': %s (SHA-1 %s)", list[i].name, path, list[i].hash));
             maage_assets_lock(assets);
             ++assets->progress.valid_cached_objects;
             maage_assets_unlock(assets);
@@ -705,7 +705,7 @@ static maage_status maage_assets_install(maage_assets *assets, char error[512]) 
             if (!same) same = !maage_status_failed(result = maage_assets_file(assets, destination, object->hash, object->size));
         }
         if (same) {
-            maage_log_verbose("maage.launcher.assets", "Using verified reconstructed resource '%s': %s (object %s)", logical[i].name, destination, object->hash);
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.assets", maage_log_debug("maage.launcher.assets", "Using verified reconstructed resource '%s': %s (object %s)", logical[i].name, destination, object->hash));
             logical[i].verified = 1;
             ++reconstructed;
             strcpy(logical[i].fingerprint, fingerprint);

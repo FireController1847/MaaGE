@@ -10,6 +10,7 @@ extern "C" {
 
 typedef enum maage_log_level {
     MAAGE_LOG_VERBOSE,
+    MAAGE_LOG_DEBUG,
     MAAGE_LOG_INFO,
     MAAGE_LOG_WARNING,
     MAAGE_LOG_ERROR,
@@ -27,7 +28,7 @@ typedef struct maage_log_config {
     int capture_stdio;
 } maage_log_config;
 
-/* Defaults: Debug VERBOSE, other build configurations INFO; console enabled,
+/* Defaults: Debug DEBUG, other build configurations INFO; console enabled,
  * file disabled, local timestamps enabled. Thresholds include the selected
  * level and every more severe level. Build classification is compiled into Log.
  * init copies strings; caller storage need only survive the call. Precedence:
@@ -85,11 +86,23 @@ maage_status maage_log_status(maage_log_level level, const char *logger, maage_s
  * the entire event. No trace formatting or allocation occurs if filtered;
  * trace/source strings are borrowed only during this call. */
 maage_status maage_log_trace_status(maage_log_level level, const char *logger, maage_status result, const maage_status_trace *trace, const char *format, ...);
+maage_status maage_log_debug(const char *logger, const char *format, ...);
 maage_status maage_log_verbose(const char *logger, const char *format, ...);
 maage_status maage_log_warning(const char *logger, const char *format, ...);
 maage_status maage_log_info(const char *logger, const char *format, ...);
 maage_status maage_log_error(const char *logger, const char *format, ...);
 maage_status maage_log_fatal(const char *logger, const char *format, ...);
+
+/* C90 statement gates: disabled events do not evaluate message arguments.
+ * VERBOSE instrumentation is absent unless the target enables it (Debug only).
+ * Release accepts VERBOSE thresholds but emits DEBUG and higher only. Exported
+ * functions remain available across configurations; use these gates at call sites. */
+#define MAAGE_LOG_DEBUG_EVENT(logger, expression) do { if (maage_log_enabled((logger), MAAGE_LOG_DEBUG)) (void) (expression); } while (0)
+#ifdef MAAGE_LOG_VERBOSE_INSTRUMENTATION
+#define MAAGE_LOG_VERBOSE_EVENT(logger, expression) do { if (maage_log_enabled((logger), MAAGE_LOG_VERBOSE)) (void) (expression); } while (0)
+#else
+#define MAAGE_LOG_VERBOSE_EVENT(logger, expression) do { } while (0)
+#endif
 
 #ifdef __cplusplus
 }

@@ -18,10 +18,11 @@ typedef struct maage_content_module maage_content_module;
 typedef enum maage_content_phase {
     MAAGE_CONTENT_PHASE_MODULES = 0,
     MAAGE_CONTENT_PHASE_DEFINE,
-    MAAGE_CONTENT_PHASE_BIND_INT,
-    MAAGE_CONTENT_PHASE_BIND_EXT,
-    MAAGE_CONTENT_PHASE_BIND_FIX,
+    MAAGE_CONTENT_PHASE_BIND_INTERNAL,
+    MAAGE_CONTENT_PHASE_BIND_EXTERNAL,
+    MAAGE_CONTENT_PHASE_BIND_COMPATIBILITY,
     MAAGE_CONTENT_PHASE_FINALIZE,
+    MAAGE_CONTENT_PHASE_LOAD,
     MAAGE_CONTENT_PHASE_INITIALIZE
 } maage_content_phase;
 /* Failure names borrow the submitted descriptors; consume diagnostics before
@@ -64,14 +65,14 @@ struct maage_content_module {
     const char *name; /* Root, or root:submodule with an explicit root dependency. */
     const char *const *dependencies;
     size_t dependency_count;
-    maage_content_registration define;                       /* Pure definitions, also used by resource catalogs. */
-    maage_content_registration bind_int, bind_ext, bind_fix; /* Pure numeric bindings. */
+    maage_content_registration define;                                           /* Logical definitions only. */
+    maage_content_registration bind_internal, bind_external, bind_compatibility; /* Numeric bindings before finalization. */
     /* Optional runtime-side binding opportunities, at each corresponding stage.
-     * Zero sides means no side hooks or initializer. EXT additionally requires dependencies;
-     * a non-NULL FIX callback explicitly declares compatibility work. */
+     * Zero sides means no side hooks or initializer. EXTERNAL additionally requires dependencies;
+     * a non-NULL COMPATIBILITY callback explicitly declares compatibility work. */
     unsigned int sides, required_capabilities;
-    maage_content_registration side_bind_int, side_bind_ext, side_bind_fix;
-    maage_content_registration initialize; /* Once, after immutable finalization; never for catalogs. */
+    maage_content_registration side_bind_internal, side_bind_external, side_bind_compatibility;
+    maage_content_registration initialize; /* Once, after immutable finalization; after LOAD on Client. */
 };
 /* Registration/initialization boundary lookup only. A known module may publish
  * NULL data; missing modules fail explicitly. Resolve content names through the
@@ -86,24 +87,34 @@ typedef maage_status (*maage_content_appearance_resolver)(void *context, const m
 typedef struct maage_content_config {
     const maage_content_module *const *modules;
     size_t module_count;
-    maage_execution_context execution;                     /* Required; explicit side and facilities. */
-    int catalog_only;                                      /* Pure DEFINE/bind/finalize; skip side hooks and initialization. */
-    const maage_content *identity_peer;                    /* Optional exact numeric identity check before initialize. */
-    maage_content_failure *failure;                        /* Optional caller-owned creation failure output. */
-    maage_content_presentation_resolver resolver;          /* NULL = headless */
-    maage_content_appearance_resolver appearance_resolver; /* NULL for headless. */
-    void *resolver_context;
-    const maage_biome_registry *presentation_biomes;
+    maage_execution_context execution;  /* Required; explicit side and facilities. */
+    const maage_content *identity_peer; /* Optional exact numeric identity check before initialize. */
+    maage_content_failure *failure;     /* Optional caller-owned creation failure output. */
 } maage_content_config;
-/* Validate the complete dependency graph before callbacks, then execute all
- * DEFINE, BIND 1: INT, BIND 2: EXT, BIND 3: FIX, FINALIZE and INITIALIZE
- * callbacks. Stable topological order chooses the earliest submitted ready
- * module, preserving deterministic numeric registration order across frontends.
- * Descriptor arrays borrow for content lifetime; config borrows through this call. Callbacks and
- * registered behavior data outlive all registry users/jobs; own() can retain data.
- * The engine supplies no built-in game. output resets to NULL on failure.
- * Destroy after World and its jobs stop. */
+/* Stable dependency-ordered DEFINE/binding/FINALIZE. Server initializes after
+ * identity validation; Client defers initialization until LOAD is complete.
+ * Descriptor arrays/code borrow for content lifetime. Logical definitions are
+ * immutable; physical resources belong to independently owned presentation views. */
 maage_status maage_content_create(const maage_content_config *config, maage_content **output, maage_status_trace *trace);
+/* Client LOAD completion can be repeated; initialize is once per composition.
+ * Both calls run on the owner thread. Client initialization requires LOAD. */
+maage_status maage_content_load_complete(maage_content *content, maage_status_trace *trace);
+maage_status maage_content_initialize(maage_content *content, maage_status_trace *trace);
+typedef struct maage_content_view maage_content_view;
+typedef struct maage_content_view_config {
+    maage_content_presentation_resolver resolver;
+    maage_content_appearance_resolver appearance_resolver;
+    void *context;
+    const maage_biome_definition *biomes; /* Copied presentation colors, indexed by unchanged biome ID. */
+    size_t biome_count;
+} maage_content_view_config;
+/* No registration or finalization: shares types/items/names/behavior and copies
+ * only resolved state appearances, geometry appearances and biome presentation.
+ * Immutable views and their logical content outlive every borrowing job/mesh. */
+maage_status maage_content_view_create(const maage_content *content, const maage_content_view_config *config, maage_content_view **output, maage_status_trace *trace);
+const maage_block_registry *maage_content_view_blocks(const maage_content_view *view);
+const maage_biome_registry *maage_content_view_biomes(const maage_content_view *view);
+maage_status maage_content_view_destroy(maage_content_view *view);
 const maage_presentation_registry *maage_content_presentation(const maage_content *content);
 const maage_block_registry *maage_content_blocks(const maage_content *content);
 const maage_biome_registry *maage_content_biomes(const maage_content *content);

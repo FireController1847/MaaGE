@@ -233,7 +233,7 @@ typedef struct maage_column_update {
     int unload; /* Ordered interest removal; no cells/biomes, exact acknowledged base. */
     size_t count;
     maage_column_cell *cells;
-    maage_biome_id *biomes; /* 256 entries on complete publications only */
+    maage_biome_id *biomes;            /* 256 entries on complete publications only */
     maage_column_section sections[16]; /* Complete publications only; no lighting. */
 } maage_column_update;
 maage_status maage_world_next_column(maage_world *world, maage_column_update **output);
@@ -268,6 +268,11 @@ maage_status maage_world_stream(maage_world *world, double x, double z, double y
 maage_status maage_world_set_render_distance(maage_world *world, int distance, unsigned int cache_capacity);
 /* Runtime visual change: invalidate meshes, preserve columns and lighting.
  * The next nonblocking World stream schedules replacement CPU mesh jobs. */
+/* Owner-only atomic presentation publication; no job wait or World restart.
+ * Numeric logical identity must be unchanged. Retain old views until borrowed()
+ * returns zero (or successful World destruction). */
+maage_status maage_world_refresh_presentation(maage_world *world, const maage_block_registry *blocks, const maage_biome_registry *biomes);
+int maage_world_presentation_borrowed(const maage_world *world, const maage_block_registry *blocks);
 maage_status maage_world_set_leaves_mode(maage_world *world, maage_leaves_mode mode);
 /* Presentation replicas only; invalidates geometry without scheduling light. */
 maage_status maage_world_set_biome_blend(maage_world *world, maage_biome_blend blend);

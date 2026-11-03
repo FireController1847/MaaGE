@@ -40,7 +40,7 @@ typedef struct maage_block_geometry_definition {
     unsigned int primitive;
     maage_block_geometry_provider emit;
     const void *context;
-    const maage_block_face_definition *appearances; /* Copied, then resolved before finalization. */
+    const maage_block_face_definition *appearances; /* Logical appearances; Client LOAD resolves independent snapshots. */
     size_t appearance_count;
 } maage_block_geometry_definition;
 

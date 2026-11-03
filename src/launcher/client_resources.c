@@ -193,7 +193,7 @@ maage_status maage_client_resources_open(const char *archive_path, const char *a
         if (maage_status_failed(result)) goto failed;
         result = observer->collision(observer->context, entry->name, entry->hash, entry->size, error);
         if (maage_status_failed(result)) goto failed;
-        maage_log_verbose("maage.launcher.assets", "Client resource '%s' -> '%s': SHA-1 %s, %.0f bytes", entry->archive_name, entry->name, entry->hash, entry->size);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.assets", maage_log_debug("maage.launcher.assets", "Client resource '%s' -> '%s': SHA-1 %s, %.0f bytes", entry->archive_name, entry->name, entry->hash, entry->size));
         observer->progress(observer->context, MAAGE_CLIENT_INSPECT, (unsigned long) i + 1, resources->count, entry->name, 0);
     }
     maage_log_info("maage.launcher.assets", "Verified client archive: %lu applicable resources, %.0f expanded bytes", resources->count, expanded);
@@ -257,7 +257,7 @@ maage_status maage_client_resources_reconstruct(maage_client_resources *resource
                                                                                                                                                                             : "ZIP extraction",
                            path, entry->hash, entry->size);
         } else
-            maage_log_verbose("maage.launcher.assets", "Using verified client resource '%s': %s", entry->name, path);
+            MAAGE_LOG_DEBUG_EVENT("maage.launcher.assets", maage_log_debug("maage.launcher.assets", "Using verified client resource '%s': %s", entry->name, path));
         result = observer->record(observer->context, entry->name, entry->archive_name, entry->hash, entry->size, entry->fingerprint);
         if (maage_status_failed(result)) goto failed;
         observer->progress(observer->context, MAAGE_CLIENT_RECONSTRUCT, i + 1, resources->count, entry->name, changed);

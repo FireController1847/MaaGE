@@ -49,6 +49,8 @@ maage_status content_policy_finalize(content_policy *);
 void content_policy_destroy(content_policy *);
 size_t content_blocks_identity_count(const maage_block_registry *, content_domain);
 const char *content_policy_domain_name(content_domain);
+maage_status content_blocks_view(const maage_block_registry *, const maage_block_geometry_registry *, const maage_content_view_config *, maage_block_registry **);
+maage_status content_geometry_view(const maage_block_geometry_registry *, const maage_content_view_config *, maage_block_geometry_registry **);
 void content_blocks_policy(maage_block_registry *, content_policy *);
 void content_items_policy(maage_item_registry *, content_policy *);
 void content_fluids_policy(maage_fluid_registry *, content_policy *);

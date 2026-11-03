@@ -118,7 +118,7 @@ maage_status content_policy_read(content_policy *policy, content_domain domain, 
     if (!index) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     identity = &policy->identities[index - 1];
     if (identity->owner == policy->context->module) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
-    if (policy->context->phase != MAAGE_CONTENT_PHASE_BIND_INT)
+    if (policy->context->phase != MAAGE_CONTENT_PHASE_BIND_INTERNAL)
         for (i = 0; i < policy->context->module->dependency_count; ++i)
             if (!strcmp(policy->context->module->dependencies[i], identity->owner->name)) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
     return policy_fail(policy, MAAGE_STATUS_ACCESS_DENIED, "External reference requires a declared dependency and external phase", identity->owner->name);

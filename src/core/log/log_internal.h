@@ -32,6 +32,12 @@ maage_status maage_log_configure(const maage_log_config *config, int argc, char 
 /* Caller holds the log lock; root failure precedes the chronological trail. */
 void maage_log_format_status(maage_status result, const maage_status_trace *trace, const char *description, char *buffer, size_t capacity);
 
+/* Atomic conservative minimum across root and overrides; publication holds the
+ * log lock. Native atomics stay in the platform adapter, never portable callers. */
+int maage_log_filter_minimum(void);
+int maage_log_filter_cached(const char *logger, maage_log_level *level);
+void maage_log_filter_cache(const char *logger, maage_log_level level);
+void maage_log_filter_publish(int minimum);
 void maage_log_lock(void);
 void maage_log_unlock(void);
 /* Native bounded formatting and local-time APIs stay behind this boundary. */

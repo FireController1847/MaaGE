@@ -202,7 +202,7 @@ maage_status maage_client_ui_resources_load(maage_client_ui_resources *resources
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
         goto done;
     }
-    maage_log_info("maage.client.ui", "Resolved inventory, HUD, font and borrowed block images into one GUI atlas.");
+    MAAGE_LOG_DEBUG_EVENT("maage.client.resources", maage_log_debug("maage.client.resources", "Resolved GUI, font and block images into one atlas."));
     ok = 1;
 done:
     for (i = 0; i < 3; ++i)

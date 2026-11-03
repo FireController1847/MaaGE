@@ -79,6 +79,11 @@ maage_status maage_biome_registry_init(maage_biome_registry *registry) {
 maage_status maage_biome_registry_destroy(maage_biome_registry *registry) {
     maage_biome_extension *node, *next;
     if (!registry) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
+    if (registry->view_source) {
+        free(registry->view_definitions);
+        memset(registry, 0, sizeof(*registry));
+        return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
+    }
     node = (maage_biome_extension *) registry->extensions;
     while (node) {
         next = node->next;
@@ -215,6 +220,7 @@ static const maage_biome_extension *maage_biome_extension_get(const maage_biome_
 const maage_biome_definition *maage_biome_registry_get(const maage_biome_registry *registry, maage_biome_id id) {
     const maage_biome_extension *entry;
     if (!registry) return NULL;
+    if (registry->view_source) return id < registry->count ? &registry->view_definitions[id] : NULL;
     entry = maage_biome_extension_get(registry, id);
     return entry ? &entry->definition : NULL;
 }

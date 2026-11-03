@@ -34,7 +34,7 @@ static char *maage_log_trim(char *text) {
 }
 
 static maage_status maage_log_parse_level(const char *text, maage_log_level *level) {
-    static const char *names[] = {"VERBOSE", "INFO", "WARNING", "ERROR", "FATAL", "OFF"};
+    static const char *names[] = {"VERBOSE", "DEBUG", "INFO", "WARNING", "ERROR", "FATAL", "OFF"};
     int index;
     for (index = 0; index <= (int) MAAGE_LOG_OFF; ++index) {
         if (strcmp(text, names[index]) == 0) {

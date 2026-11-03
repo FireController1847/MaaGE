@@ -324,7 +324,7 @@ maage_status maage_region_store_destroy(maage_region_store *store) {
         next = region->next;
         operation = region_compact_on_close(store, region);
         if (maage_status_failed(operation)) {
-            maage_log_status(MAAGE_LOG_WARNING, "maage.world.storage", operation, "Region compaction could not complete; the previously committed region remains authoritative.");
+            maage_log_status(MAAGE_LOG_WARNING, "maage.server.storage", operation, "Region compaction could not complete; the previously committed region remains authoritative.");
             if (!maage_status_failed(result)) result = operation;
         }
         if (region->file && fclose(region->file)) result = region_status(MAAGE_STATUS_IO_ERROR, MAAGE_OPERATION_CLOSE);

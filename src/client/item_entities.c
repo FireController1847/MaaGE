@@ -14,7 +14,7 @@ typedef struct maage_item_models {
 struct maage_client_item_entities {
     maage_renderer *renderer;
     maage_render_texture *atlas;
-    const maage_client_resources *resources;
+    maage_client_resources resources; /* Borrowed arrays, captured by value across staged publication. */
     const maage_item_registry *items;
     const maage_block_registry *blocks;
     maage_registry_pages models;
@@ -50,10 +50,10 @@ maage_status maage_client_item_entities_create(maage_renderer *renderer, maage_r
     if (!view) return result;
     view->renderer = renderer;
     view->atlas = atlas;
-    view->resources = resources;
+    view->resources = *resources;
     view->items = items;
     view->blocks = blocks;
-    view->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
+    view->diagnostics = maage_log_enabled("maage.client.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     view->model_count = maage_item_registry_count(items);
     view->ordered = (maage_item_models *) calloc(view->model_count, sizeof(*view->ordered));
     if (!view->ordered) goto failed;
@@ -83,11 +83,11 @@ static maage_status item_entities_model(maage_client_item_entities *view, const 
     if (!models->variants[stack->metadata]) {
         double began = view->diagnostics ? maage_time_monotonic_seconds() : -1, upload_at;
         if (maage_status_failed(models->results[stack->metadata])) return models->results[stack->metadata];
-        result = maage_client_item_model_create(view->resources, view->items, view->blocks, stack, &data);
+        result = maage_client_item_model_create(&view->resources, view->items, view->blocks, stack, &data);
         upload_at = view->diagnostics ? maage_time_monotonic_seconds() : -1;
         if (!maage_status_failed(result)) result = maage_renderer_upload_geometry(view->renderer, &data, view->atlas, &models->variants[stack->metadata], trace);
         maage_client_item_model_destroy(&data);
-        if (view->diagnostics) maage_log_info("maage.client.latency", "item=%lu metadata=%u model_ms=%.3f upload_api_ms=%.3f", (unsigned long) stack->item_id, stack->metadata, (upload_at - began) * 1000, (maage_time_monotonic_seconds() - upload_at) * 1000);
+        if (view->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "item=%lu metadata=%u model_ms=%.3f upload_api_ms=%.3f", (unsigned long) stack->item_id, stack->metadata, (upload_at - began) * 1000, (maage_time_monotonic_seconds() - upload_at) * 1000));
         models->results[stack->metadata] = result;
         if (maage_status_failed(result)) {
             *notice = 1;
@@ -159,7 +159,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
             free(view->current.entities);
             view->current = incoming;
             if (view->diagnostics) view->diagnostic_received_at = maage_time_monotonic_seconds();
-            if (view->diagnostics) maage_log_info("maage.client.latency", "entity_sequence=%lu entity_tick=%lu count=%lu first_entity=%lu last_entity=%lu received_at=%.6f entity_transport_ms=%.3f", incoming.sequence, incoming.tick, (unsigned long) incoming.count, incoming.count ? incoming.entities[0].id : 0UL, incoming.count ? incoming.entities[incoming.count - 1].id : 0UL, view->diagnostic_received_at, incoming.offered_at >= 0 ? (view->diagnostic_received_at - incoming.offered_at) * 1000 : -1);
+            if (view->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "entity_sequence=%lu entity_tick=%lu count=%lu first_entity=%lu last_entity=%lu received_at=%.6f entity_transport_ms=%.3f", incoming.sequence, incoming.tick, (unsigned long) incoming.count, incoming.count ? incoming.entities[0].id : 0UL, incoming.count ? incoming.entities[incoming.count - 1].id : 0UL, view->diagnostic_received_at, incoming.offered_at >= 0 ? (view->diagnostic_received_at - incoming.offered_at) * 1000 : -1));
         } else
             free(incoming.entities);
     } else if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_INVALID_STATE) return result;
@@ -208,7 +208,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
         }
         if (view->diagnostics && entity->id > view->submitted_entity) {
             if (entity->id > view->prepared_entity) view->prepared_entity = entity->id;
-            maage_log_info("maage.client.latency", "prepared_entity=%lu entity_sequence=%lu prepared_at=%.6f", entity->id, view->current.sequence, maage_time_monotonic_seconds());
+            MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "prepared_entity=%lu entity_sequence=%lu prepared_at=%.6f", entity->id, view->current.sequence, maage_time_monotonic_seconds()));
         }
         if (entity->type == MAAGE_ENTITY_FALLING_BLOCK) {
             draw = &view->draws[count++];
@@ -314,7 +314,7 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     if (!maage_status_failed(result) && view->diagnostics && view->current.sequence != view->prepared_sequence) {
         view->prepared_sequence = view->current.sequence;
         view->prepared_at = maage_time_monotonic_seconds();
-        maage_log_info("maage.client.latency", "entity_sequence=%lu entity_tick=%lu prepared_at=%.6f receive_prepare_ms=%.3f instances=%lu", view->current.sequence, view->current.tick, view->prepared_at, (view->prepared_at - view->diagnostic_received_at) * 1000, (unsigned long) (count - additional_count));
+        MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "entity_sequence=%lu entity_tick=%lu prepared_at=%.6f receive_prepare_ms=%.3f instances=%lu", view->current.sequence, view->current.tick, view->prepared_at, (view->prepared_at - view->diagnostic_received_at) * 1000, (unsigned long) (count - additional_count)));
     }
     return maage_status_failed(result) || !outcome ? result : outcome;
 }
@@ -323,7 +323,7 @@ void maage_client_item_entities_submitted(maage_client_item_entities *view) {
     if (!view || !view->diagnostics || view->prepared_sequence == view->submitted_sequence) return;
     now = maage_time_monotonic_seconds();
     view->submitted_sequence = view->prepared_sequence;
-    maage_log_info("maage.client.latency", "entity_sequence=%lu entity_tick=%lu submitted_at=%.6f prepare_submit_ms=%.3f newest_prepared_entity=%lu", view->submitted_sequence, view->current.tick, now, (now - view->prepared_at) * 1000, view->prepared_entity);
+    MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "entity_sequence=%lu entity_tick=%lu submitted_at=%.6f prepare_submit_ms=%.3f newest_prepared_entity=%lu", view->submitted_sequence, view->current.tick, now, (now - view->prepared_at) * 1000, view->prepared_entity));
     view->submitted_entity = view->prepared_entity;
 }
 maage_status maage_client_item_entities_destroy(maage_client_item_entities *view) {

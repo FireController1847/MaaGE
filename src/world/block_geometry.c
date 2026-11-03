@@ -4,6 +4,7 @@
 #include <string.h>
 
 struct maage_block_geometry_registry {
+    int view;
     content_policy *policy;
     maage_block_geometry_definition *definitions;
     char **names;
@@ -47,12 +48,12 @@ maage_status maage_block_geometry_destroy(maage_block_geometry_registry *registr
     size_t i;
     if (!registry) return geometry_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
     for (i = 0; i < registry->count; ++i) {
-        free(registry->names[i]);
+        if (!registry->view) free(registry->names[i]);
         free((void *) registry->definitions[i].appearances);
     }
-    free(registry->names);
+    if (!registry->view) free(registry->names);
     free(registry->definitions);
-    free(registry->buckets);
+    if (!registry->view) free(registry->buckets);
     free(registry);
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
 }
@@ -222,4 +223,48 @@ maage_status maage_block_geometry_cuboid(const maage_block_geometry_sink *sink, 
 
 void content_geometry_policy(maage_block_geometry_registry *registry, content_policy *policy) {
     registry->policy = policy;
+}
+
+maage_status content_geometry_view(const maage_block_geometry_registry *source, const maage_content_view_config *config, maage_block_geometry_registry **output) {
+    maage_block_geometry_registry *view;
+    maage_block_face_definition *faces;
+    maage_status result;
+    size_t i, j, count;
+    *output = NULL;
+    if (!source || !source->finalized || !config || !config->appearance_resolver || source->count > (size_t) - 1 / sizeof(*view->definitions)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_RESOLVE);
+    view = (maage_block_geometry_registry *) malloc(sizeof(*view));
+    if (!view) return geometry_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_RESOLVE);
+    *view = *source;
+    view->view = 1;
+    view->count = 0;
+    view->definitions = source->count ? (maage_block_geometry_definition *) calloc(source->count, sizeof(*view->definitions)) : NULL;
+    if (source->count && !view->definitions) {
+        free(view);
+        return geometry_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_RESOLVE);
+    }
+    for (i = 0; i < source->count; ++i) {
+        count = source->definitions[i].appearance_count;
+        if (count > (size_t) - 1 / sizeof(*faces)) {
+            maage_block_geometry_destroy(view);
+            return geometry_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_RESOLVE);
+        }
+        faces = count ? (maage_block_face_definition *) malloc(count * sizeof(*faces)) : NULL;
+        if (count && !faces) {
+            maage_block_geometry_destroy(view);
+            return geometry_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_RESOLVE);
+        }
+        view->definitions[i] = source->definitions[i];
+        view->definitions[i].appearances = faces;
+        ++view->count;
+        for (j = 0; j < count; ++j) {
+            result = config->appearance_resolver(config->context, &source->definitions[i].appearances[j], &faces[j]);
+            if (!maage_status_failed(result) && (!maage_block_face_definition_valid(&faces[j]) || faces[j].texture_id != source->definitions[i].appearances[j].texture_id || faces[j].overlay_texture != source->definitions[i].appearances[j].overlay_texture || faces[j].snow_texture != source->definitions[i].appearances[j].snow_texture || faces[j].flow_texture != source->definitions[i].appearances[j].flow_texture || faces[j].has_flow_texture != source->definitions[i].appearances[j].has_flow_texture)) result = geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_RESOLVE);
+            if (maage_status_failed(result)) {
+                maage_block_geometry_destroy(view);
+                return result;
+            }
+        }
+    }
+    *output = view;
+    return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_RESOLVE);
 }

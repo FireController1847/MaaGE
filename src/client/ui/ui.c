@@ -610,3 +610,39 @@ maage_renderer *maage_client_ui_renderer(const maage_client_ui *ui) {
 maage_window *maage_client_ui_window(const maage_client_ui *ui) {
     return ui ? ui->window : NULL;
 }
+
+struct maage_client_ui_reload {
+    maage_client_ui_resources resources;
+};
+maage_status maage_client_ui_reload_prepare(maage_client_ui *ui, const char *directory, const maage_client_resources *resources, maage_client_ui_reload **output, maage_status_trace *trace) {
+    maage_client_ui_reload *candidate;
+    maage_status result;
+    if (output) *output = NULL;
+    if (!ui || !output || !resources) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD, 0);
+    candidate = (maage_client_ui_reload *) calloc(1, sizeof(*candidate));
+    if (!candidate) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_LOAD, 0);
+    result = maage_client_ui_resources_load(&candidate->resources, ui->renderer, directory, resources, trace);
+    if (maage_status_failed(result)) {
+        maage_client_ui_reload_destroy(candidate);
+        return result;
+    }
+    *output = candidate;
+    return result;
+}
+void maage_client_ui_reload_commit(maage_client_ui *ui, maage_client_ui_reload *candidate, const maage_client_resources *resources) {
+    maage_render_texture *old = ui->resources.texture;
+    ui->resources = candidate->resources;
+    ui->batch.texture = ui->resources.texture;
+    ui->blocks = maage_content_view_blocks(resources->view);
+    ui->item_uv = resources->uv;
+    ui->item_texture_count = resources->texture_count;
+    memcpy(ui->inventory_grass_color, resources->inventory_grass_color, sizeof(ui->inventory_grass_color));
+    ui->debug_cache.valid = 0;
+    free(candidate);
+    maage_render_texture_destroy(old);
+}
+void maage_client_ui_reload_destroy(maage_client_ui_reload *candidate) {
+    if (!candidate) return;
+    maage_render_texture_destroy(candidate->resources.texture);
+    free(candidate);
+}

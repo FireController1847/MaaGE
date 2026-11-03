@@ -14,9 +14,9 @@ static maage_status maage_vulkan_reject(maage_renderer *renderer, VkPhysicalDevi
     (void) native;
     if (physical) {
         vkGetPhysicalDeviceProperties(physical, &properties);
-        maage_log_status(MAAGE_LOG_WARNING, "maage.render.vulkan", result, "Device '%s' rejected: %s (vendor=0x%04lX, device=0x%04lX).", properties.deviceName, reason, (unsigned long) properties.vendorID, (unsigned long) properties.deviceID);
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result, "Device '%s' rejected: %s (vendor=0x%04lX, device=0x%04lX).", properties.deviceName, reason, (unsigned long) properties.vendorID, (unsigned long) properties.deviceID);
     } else
-        maage_log_status(MAAGE_LOG_WARNING, "maage.render.vulkan", result, "Initialization rejected: %s", reason);
+        maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result, "Initialization rejected: %s", reason);
     return maage_status_trace_record(renderer->operation_trace, result, MAAGE_CONTEXT_RENDER, renderer->trace_operation, file, line, 0);
 }
 #define maage_vulkan_unsupported(physical, reason) \
@@ -454,7 +454,7 @@ maage_status maage_vulkan_platform_create(maage_renderer *renderer) {
         value = vkCreateSemaphore(native->device, &semaphore, NULL, &native->frames[index].acquired);
         if (value != VK_SUCCESS) return maage_vulkan_result(value);
     }
-    maage_log_info("maage.render.vulkan", "Device '%s'; graphics/present queues %lu/%lu; %s.", renderer->device_name, (unsigned long) native->graphics_family, (unsigned long) native->present_family, native->maintenance ? "maintenance1 presentation fences" : "baseline per-image presentation semaphores");
+    maage_log_info("maage.client.render", "Device '%s'; graphics/present queues %lu/%lu; %s.", renderer->device_name, (unsigned long) native->graphics_family, (unsigned long) native->present_family, native->maintenance ? "maintenance1 presentation fences" : "baseline per-image presentation semaphores");
     return maage_vulkan_status(renderer, MAAGE_STATUS_SUCCESS, 0);
 }
 static void maage_vulkan_drop_swapchain(maage_renderer *renderer) {

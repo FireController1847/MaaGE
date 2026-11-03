@@ -171,7 +171,7 @@ maage_status maage_sound_catalog_poll(maage_sound_catalog *catalog, double now) 
             } else {
                 if (buffer) (void) catalog->port.release_buffer(catalog->audio, buffer, NULL);
                 if (maage_status_code(result) != MAAGE_STATUS_ALLOCATION_FAILED && maage_status_code(result) != MAAGE_STATUS_BUFFER_OVERFLOW) slot->state = 5;
-                if (slot->state == 5) maage_log_status(MAAGE_LOG_WARNING, "maage.audio.catalog", result, "Sound unavailable: %s", slot->path);
+                if (slot->state == 5) maage_log_status(MAAGE_LOG_WARNING, "maage.client.audio.catalog", result, "Sound unavailable: %s", slot->path);
             }
             slot->replay = 0;
         }

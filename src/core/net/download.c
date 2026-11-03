@@ -110,7 +110,7 @@ static maage_status maage_transfer_start(maage_transfer *transfer, CURLM *multi,
     transfer->active = 1;
     ++transfer->attempts;
     maage_log_info("maage.core.download", "Downloading (attempt %u/%u): %s -> %s", transfer->attempts, options->max_attempts, maage_download_public(options, transfer->request->url), maage_download_public(options, transfer->request->destination));
-    maage_log_verbose("maage.core.download", "Temporary file: %s; expected bytes: %.0f; SHA-1: %s", maage_download_public(options, transfer->temporary), transfer->request->size, maage_download_public(options, transfer->request->sha1 ? transfer->request->sha1 : "not supplied"));
+    MAAGE_LOG_DEBUG_EVENT("maage.core.download", maage_log_debug("maage.core.download", "Temporary file: %s; expected bytes: %.0f; SHA-1: %s", maage_download_public(options, transfer->temporary), transfer->request->size, maage_download_public(options, transfer->request->sha1 ? transfer->request->sha1 : "not supplied")));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_START, 0);
 }
 static void maage_transfer_close(maage_transfer *transfer, CURLM *multi) {
@@ -215,7 +215,7 @@ maage_status maage_download_batch_with_options(const maage_download_request *req
             maage_transfer_close(transfer, multi);
             if (active) --active;
             if (maage_transfer_cancel((void *) observer)) goto cleanup;
-            maage_log_verbose("maage.core.download", "Verifying transfer: %s (%.0f bytes received)", maage_download_public(options, transfer->temporary), transfer->received);
+            MAAGE_LOG_DEBUG_EVENT("maage.core.download", maage_log_debug("maage.core.download", "Verifying transfer: %s (%.0f bytes received)", maage_download_public(options, transfer->temporary), transfer->received));
             child = maage_download_result((CURLcode) transfer->result, MAAGE_OPERATION_DOWNLOAD);
             if (!maage_status_failed(child)) child = maage_storage_stat(transfer->temporary, &size, fingerprint);
             if (!maage_status_failed(child) && transfer->request->size >= 0 && size != transfer->request->size) child = maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_DOWNLOAD, MAAGE_OPERATION_VERIFY, 0);

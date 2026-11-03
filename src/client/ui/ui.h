@@ -62,6 +62,12 @@ void maage_client_ui_notify(maage_client_ui *ui, maage_status result, double now
 void maage_client_ui_notice_time(maage_client_ui *ui, double now);
 maage_status maage_client_ui_destroy(maage_client_ui *ui);
 /* Immutable numeric content borrowed for icons; Server snapshots copied by value. */
+typedef struct maage_client_ui_reload maage_client_ui_reload;
+/* Prepare without touching active UI. Publish on the render owner between frames;
+ * commit consumes the candidate and preserves screen/inventory/navigation state. */
+maage_status maage_client_ui_reload_prepare(maage_client_ui *ui, const char *directory, const maage_client_resources *resources, maage_client_ui_reload **output, maage_status_trace *trace);
+void maage_client_ui_reload_commit(maage_client_ui *ui, maage_client_ui_reload *candidate, const maage_client_resources *resources);
+void maage_client_ui_reload_destroy(maage_client_ui_reload *candidate);
 maage_status maage_client_ui_set_content(maage_client_ui *ui, const maage_item_registry *items, const maage_block_registry *blocks, const maage_creative_registry *creative, const float inventory_grass_color[3], const float (*item_uv)[4], size_t texture_count);
 maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_session_snapshot *snapshot);
 /* Growable FIFO retains accepted input through transport backpressure. NOOP

@@ -5,13 +5,27 @@
 
 /* Keep empty tables in zero-fill storage instead of embedding them in the file. */
 #if defined(MAAGE_LOG_BUILD_DEBUG)
-#define MAAGE_LOG_DEFAULT_LEVEL MAAGE_LOG_VERBOSE
+#define MAAGE_LOG_DEFAULT_LEVEL MAAGE_LOG_DEBUG
 #else
 #define MAAGE_LOG_DEFAULT_LEVEL MAAGE_LOG_INFO
 #endif
 static char maage_log_path_storage[MAAGE_LOG_PATH_SIZE];
 maage_log_state maage_log_current = {
     {MAAGE_LOG_DEFAULT_LEVEL, 1, 0, 1, NULL, NULL, 0}, maage_log_path_storage, NULL, 0, 0, NULL, 0};
+
+static void maage_log_publish_filter(void) {
+    size_t i;
+    int minimum = maage_log_current.config.level;
+    for (i = 0; i < maage_log_current.count; ++i)
+        if ((int) maage_log_current.overrides[i].level < minimum) minimum = maage_log_current.overrides[i].level;
+    maage_log_filter_publish(minimum);
+}
+static int maage_log_may_emit(maage_log_level level) {
+#ifndef MAAGE_LOG_VERBOSE_INSTRUMENTATION
+    if (level == MAAGE_LOG_VERBOSE) return 0;
+#endif
+    return level >= MAAGE_LOG_VERBOSE && level < MAAGE_LOG_OFF && (int) level >= maage_log_filter_minimum();
+}
 
 maage_status maage_log_config_init(maage_log_config *config) {
     if (!config) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_INITIALIZE, 0);
@@ -66,6 +80,7 @@ maage_status maage_log_init(const maage_log_config *config, int argc, char *cons
     maage_log_current.overrides = NULL;
     maage_log_current.count = maage_log_current.capacity = 0;
     result = maage_log_configure(config, argc, argv);
+    maage_log_publish_filter();
     crash = maage_log_crash_start(maage_log_current.output);
     if (maage_status_failed(crash)) {
         maage_status_trace_init(&trace);
@@ -109,6 +124,7 @@ maage_status maage_log_set_level(const char *logger, maage_log_level level) {
     maage_status result;
     maage_log_lock();
     result = maage_log_override_set(logger, level);
+    maage_log_publish_filter();
     maage_log_unlock();
     return result;
 }
@@ -117,6 +133,9 @@ static int maage_log_is_enabled(const char *logger, maage_log_level level) {
     maage_log_level effective = maage_log_current.config.level;
     size_t index, length, best = 0;
     if (level < MAAGE_LOG_VERBOSE || level >= MAAGE_LOG_OFF) return 0;
+#ifndef MAAGE_LOG_VERBOSE_INSTRUMENTATION
+    if (level == MAAGE_LOG_VERBOSE) return 0;
+#endif
     if (!logger || !*logger) logger = "maage";
     for (index = 0; index < maage_log_current.count; ++index) {
         length = strlen(maage_log_current.overrides[index].name);
@@ -125,11 +144,15 @@ static int maage_log_is_enabled(const char *logger, maage_log_level level) {
             effective = maage_log_current.overrides[index].level;
         }
     }
+    maage_log_filter_cache(logger, effective);
     return effective != MAAGE_LOG_OFF && level >= effective;
 }
 
 int maage_log_enabled(const char *logger, maage_log_level level) {
     int result;
+    maage_log_level effective;
+    if (!maage_log_may_emit(level)) return 0;
+    if (maage_log_filter_cached(logger, &effective)) return effective != MAAGE_LOG_OFF && level >= effective;
     maage_log_lock();
     result = maage_log_is_enabled(logger, level);
     maage_log_unlock();
@@ -146,7 +169,7 @@ static maage_status maage_log_sink(FILE *sink, const char *timestamp, const char
 }
 
 maage_status maage_log_emit(maage_log_level level, const char *logger, const char *message) {
-    static const char *names[] = {"VERBOSE", "INFO", "WARNING", "ERROR", "FATAL"};
+    static const char *names[] = {"VERBOSE", "DEBUG", "INFO", "WARNING", "ERROR", "FATAL"};
     char timestamp[32];
     maage_status result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WRITE, 0), child;
     int error = level >= MAAGE_LOG_ERROR;
@@ -167,6 +190,7 @@ maage_status maage_log_vwrite(maage_log_level level, const char *logger, const c
     static const char truncated[] = "... [truncated]";
     int length;
     maage_status result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WRITE, 0);
+    if (!maage_log_may_emit(level)) return result;
     if (!format) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CORE, MAAGE_OPERATION_WRITE, 2);
     maage_log_lock();
     if (maage_log_is_enabled(logger, level)) {
@@ -256,6 +280,7 @@ static maage_status maage_log_vtrace_status(maage_log_level level, const char *l
     size_t used;
     int length;
     maage_status written = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_WRITE, 0);
+    if (!maage_log_may_emit(level)) return written;
     maage_log_lock();
     if (maage_log_is_enabled(logger, level)) {
         description[0] = 0;
@@ -303,6 +328,7 @@ maage_status maage_log_trace_status(maage_log_level level, const char *logger, m
         return result;                                               \
     }
 
+MAAGE_LOG_FUNCTION(maage_log_debug, MAAGE_LOG_DEBUG)
 MAAGE_LOG_FUNCTION(maage_log_verbose, MAAGE_LOG_VERBOSE)
 MAAGE_LOG_FUNCTION(maage_log_info, MAAGE_LOG_INFO)
 MAAGE_LOG_FUNCTION(maage_log_warning, MAAGE_LOG_WARNING)
@@ -332,6 +358,7 @@ maage_status maage_log_shutdown(void) {
     maage_log_current.overrides = NULL;
     maage_log_current.count = maage_log_current.capacity = 0;
     maage_log_config_init(&maage_log_current.config);
+    maage_log_publish_filter();
     maage_log_unlock();
     return result;
 }

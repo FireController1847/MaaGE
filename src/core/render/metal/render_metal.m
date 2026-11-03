@@ -887,35 +887,32 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
         [CATransaction commit];
         [CATransaction flush];
     }
-    if (!native->sample_start) native->sample_start = started;
-    ++native->sample_frames;
-    acquired = CACurrentMediaTime();
-    if (acquired - native->sample_start >= 5.0) {
-        double drawable_seconds;
-        unsigned long presented, deferred, unavailable, mismatched;
-        maage_mutex_lock(native->present_mutex);
-        drawable_seconds = native->drawable_seconds;
-        presented = native->presented;
-        deferred = native->deferred_frames;
-        unavailable = native->drawable_misses;
-        mismatched = native->size_misses;
-        native->drawable_seconds = 0;
-        native->presented = 0;
-        native->deferred_frames = native->drawable_misses = native->size_misses = 0;
-        maage_mutex_unlock(native->present_mutex);
-        maage_log_verbose("maage.render.metal", "GPU submissions=%.1f/s; presentation submissions=%.1f/s (not scanout); display sync=%s; path=%s; drawable wait=%.3fms/presentation; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame; backpressure skips=%lu; drawable unavailable=%lu; size mismatches=%lu.",
-                          native->sample_frames / (acquired - native->sample_start),
-                          presented / (acquired - native->sample_start),
-                          native->layer.displaySyncEnabled ? "on" : "off", asynchronous ? "mailbox" : "direct",
-                          presented ? drawable_seconds * 1000.0 / presented : 0,
-                          native->wait_seconds * 1000.0 / native->sample_frames,
-                          native->gpu_samples ? native->gpu_seconds * 1000.0 / native->gpu_samples : 0,
-                          deferred, unavailable, mismatched);
-        native->sample_start = acquired;
-        native->sample_frames = 0;
-        native->wait_seconds = native->gpu_seconds = 0;
-        native->gpu_samples = 0;
+#ifdef MAAGE_LOG_VERBOSE_INSTRUMENTATION
+    if (maage_log_enabled("maage.client.render", MAAGE_LOG_VERBOSE)) {
+        if (!native->sample_start) native->sample_start = started;
+        ++native->sample_frames;
+        acquired = CACurrentMediaTime();
+        if (acquired - native->sample_start >= 5.0) {
+            double drawable_seconds;
+            unsigned long presented, deferred, unavailable, mismatched;
+            maage_mutex_lock(native->present_mutex);
+            drawable_seconds = native->drawable_seconds;
+            presented = native->presented;
+            deferred = native->deferred_frames;
+            unavailable = native->drawable_misses;
+            mismatched = native->size_misses;
+            native->drawable_seconds = 0;
+            native->presented = 0;
+            native->deferred_frames = native->drawable_misses = native->size_misses = 0;
+            maage_mutex_unlock(native->present_mutex);
+            MAAGE_LOG_VERBOSE_EVENT("maage.client.render", maage_log_verbose("maage.client.render", "GPU submissions=%.1f/s; presentation submissions=%.1f/s (not scanout); display sync=%s; path=%s; drawable wait=%.3fms/presentation; GPU slot wait=%.3fms/frame; GPU render=%.3fms/frame; backpressure skips=%lu; drawable unavailable=%lu; size mismatches=%lu.", native->sample_frames / (acquired - native->sample_start), presented / (acquired - native->sample_start), native->layer.displaySyncEnabled ? "on" : "off", asynchronous ? "mailbox" : "direct", presented ? drawable_seconds * 1000.0 / presented : 0, native->wait_seconds * 1000.0 / native->sample_frames, native->gpu_samples ? native->gpu_seconds * 1000.0 / native->gpu_samples : 0, deferred, unavailable, mismatched));
+            native->sample_start = acquired;
+            native->sample_frames = 0;
+            native->wait_seconds = native->gpu_seconds = 0;
+            native->gpu_samples = 0;
+        }
     }
+#endif
     [pool drain];
     return result;
 }

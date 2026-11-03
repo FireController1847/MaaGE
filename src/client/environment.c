@@ -80,7 +80,7 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
     maage_status_trace source_trace, recovered_trace;
     int i, y, ok = 0;
     if (output) *output = NULL;
-    if (!output || !renderer || !resources || !resources->catalog) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !renderer ? 0 : 2);
+    if (!output || !renderer || !resources || !resources->content) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !renderer ? 0 : 2);
     if (!resources->image.pixels || !resources->uv || !resources->source_results || resources->image.width < 16 || resources->image.height < 16 || (size_t) resources->image.width > (size_t) - 1 / 4 || resources->image.stride < (size_t) resources->image.width * 4 || (size_t) resources->image.height > (size_t) - 1 / resources->image.stride) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     view = (maage_client_environment *) calloc(1, sizeof(*view));
@@ -88,9 +88,9 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
     view->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     memset(&atlas, 0, sizeof(atlas));
     memset(&source, 0, sizeof(source));
-    presentation = maage_content_presentation(resources->catalog);
+    presentation = maage_content_presentation(resources->content);
     bindings = maage_presentation_get_bindings(presentation);
-    fluids = maage_content_fluids(resources->catalog);
+    fluids = maage_content_fluids(resources->content);
     view->fluid_count = maage_fluid_count(fluids);
     if (!bindings || view->fluid_count > (size_t) (INT_MAX - 256) / 16 || view->fluid_count >= (size_t) - 1 / sizeof(*view->fluid_overlays)) {
         result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);

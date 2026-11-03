@@ -66,7 +66,7 @@ static maage_status maage_gl_load(maage_renderer *renderer) {
     int missing = 0;
 #define MAAGE_GL_LOAD(result, name, arguments) \
     native->gl.name = (maage_gl_##name) maage_opengl_context_proc(renderer, "gl" #name); \
-    if (!native->gl.name) { maage_log_warning("maage.render.opengl", "Required function gl%s is unavailable.", #name); missing = 1; }
+    if (!native->gl.name) { maage_log_warning("maage.client.render", "Required function gl%s is unavailable.", #name); missing = 1; }
     MAAGE_GL_FUNCTIONS(MAAGE_GL_LOAD)
 #undef MAAGE_GL_LOAD
     if (missing) return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
@@ -86,7 +86,7 @@ static maage_status maage_gl_shader(maage_renderer *renderer, GLenum stage, cons
         message[0] = 0;
         native->gl.GetShaderInfoLog(shader, sizeof(message), NULL, message);
         message[sizeof(message) - 1] = 0;
-        maage_log_error("maage.render.opengl", "GLSL %s %s compilation failed: %s", label, stage == MAAGE_GL_VERTEX_SHADER ? "vertex" : "fragment", message);
+        maage_log_error("maage.client.render", "GLSL %s %s compilation failed: %s", label, stage == MAAGE_GL_VERTEX_SHADER ? "vertex" : "fragment", message);
         native->gl.DeleteShader(shader);
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
@@ -113,7 +113,7 @@ static maage_status maage_gl_program_create(maage_renderer *renderer, maage_gl_p
                 message[0] = 0;
                 native->gl.GetProgramInfoLog(program->name, sizeof(message), NULL, message);
                 message[sizeof(message) - 1] = 0;
-                maage_log_error("maage.render.opengl", "GLSL %s program linking failed: %s", label, message);
+                maage_log_error("maage.client.render", "GLSL %s program linking failed: %s", label, message);
                 result = MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
             }
         }
@@ -121,14 +121,14 @@ static maage_status maage_gl_program_create(maage_renderer *renderer, maage_gl_p
     if (shaders[0]) native->gl.DeleteShader(shaders[0]);
     if (shaders[1]) native->gl.DeleteShader(shaders[1]);
     if (maage_status_failed(result)) return result;
-    program->matrix = native->gl.GetUniformLocation(program->name, "maage.matrix");
-    program->lighting = native->gl.GetUniformLocation(program->name, "maage.lighting");
-    program->fog = native->gl.GetUniformLocation(program->name, "maage.fog");
-    program->fog_distance = native->gl.GetUniformLocation(program->name, "maage.fog_distance");
-    program->parameters = native->gl.GetUniformLocation(program->name, "maage.parameters");
+    program->matrix = native->gl.GetUniformLocation(program->name, "maage.client.render");
+    program->lighting = native->gl.GetUniformLocation(program->name, "maage.client.render");
+    program->fog = native->gl.GetUniformLocation(program->name, "maage.client.render");
+    program->fog_distance = native->gl.GetUniformLocation(program->name, "maage.client.render");
+    program->parameters = native->gl.GetUniformLocation(program->name, "maage.client.render");
     sampler = native->gl.GetUniformLocation(program->name, "maage_source");
     if (sampler < 0 || program->parameters < 0 || (mesh && (program->matrix < 0 || program->lighting < 0 || program->fog < 0 || program->fog_distance < 0))) {
-        maage_log_warning("maage.render.opengl", "GLSL %s program is missing required active uniforms.", label);
+        maage_log_warning("maage.client.render", "GLSL %s program is missing required active uniforms.", label);
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_DEPENDENCY_FAILURE, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     native->gl.UseProgram(program->name);
@@ -154,7 +154,7 @@ static maage_status maage_gl_target_size(maage_renderer *renderer, maage_gl_targ
     GLint depth_bits = 0, stencil_bits = 0;
     if (target->framebuffer && target->width == width && target->height == height) return MAAGE_STATUS_VALUE(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESIZE, 0);
     if (width <= 0 || height <= 0 || width > native->target_limit || height > native->target_limit || width > native->viewport_limit[0] || height > native->viewport_limit[1]) {
-        maage_log_warning("maage.render.opengl", "Framebuffer %dx%d exceeds texture/renderbuffer/viewport limits (%d, %dx%d).", width, height, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
+        maage_log_warning("maage.client.render", "Framebuffer %dx%d exceeds texture/renderbuffer/viewport limits (%d, %dx%d).", width, height, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_RESIZE, 0);
     }
     memset(&replacement, 0, sizeof(replacement));
@@ -194,7 +194,7 @@ static maage_status maage_gl_target_size(maage_renderer *renderer, maage_gl_targ
     complete = native->gl.CheckFramebufferStatus(MAAGE_GL_FRAMEBUFFER);
     result = maage_opengl_check(renderer, MAAGE_OPERATION_RESIZE);
     if (!maage_status_failed(result) && (!replacement.framebuffer || !replacement.color || (depth && (!replacement.depth || depth_bits < 24 || stencil_bits < 8)) || complete != MAAGE_GL_FRAMEBUFFER_COMPLETE)) {
-        maage_log_warning("maage.render.opengl", "Framebuffer initialization failed: status 0x%04lX, depth %d, stencil %d.", (unsigned long) complete, depth_bits, stencil_bits);
+        maage_log_warning("maage.client.render", "Framebuffer initialization failed: status 0x%04lX, depth %d, stencil %d.", (unsigned long) complete, depth_bits, stencil_bits);
         result = maage_status_trace_record(renderer->operation_trace, MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_RESIZE, 0), MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_RESIZE, __FILE__, __LINE__, (long) complete);
     }
     if (!maage_status_failed(result)) {
@@ -552,7 +552,7 @@ static maage_status maage_gl_create_texture(maage_renderer *renderer, maage_rend
 static void maage_gl_release_result(maage_renderer *renderer, maage_status result) {
     if (!maage_status_failed(result) || maage_status_failed(renderer->failure)) return;
     renderer->failure = result;
-    maage_log_trace_status(MAAGE_LOG_ERROR, "maage.render.opengl", result, renderer->operation_trace, "Native resource release failed; the renderer requires destruction.");
+    maage_log_trace_status(MAAGE_LOG_ERROR, "maage.client.render", result, renderer->operation_trace, "Native resource release failed; the renderer requires destruction.");
 }
 static void maage_gl_destroy_texture(maage_render_texture *resource) {
     maage_gl_texture *texture = resource->platform;
@@ -652,7 +652,8 @@ static size_t maage_gl_mesh_allocation_bytes(const maage_render_mesh *mesh) {
     unsigned int slot;
     if (!geometry) return 0;
     bytes = geometry->vertex_bytes + geometry->index_bytes + geometry->surface_bytes;
-    for (slot = 0; slot < MAAGE_GL_FRAME_SLOTS * 2; ++slot) bytes += geometry->sorted[slot].capacity;
+    for (slot = 0; slot < MAAGE_GL_FRAME_SLOTS * 2; ++slot)
+        bytes += geometry->sorted[slot].capacity;
     return bytes;
 }
 static void maage_gl_destroy_mesh(maage_render_mesh *mesh) {
@@ -691,7 +692,7 @@ static maage_status maage_gl_limit(maage_renderer *renderer, GLenum parameter, c
     maage_status result;
     glGetIntegerv(parameter, value);
     result = maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE);
-    if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.render.opengl", result, "Required capability query %s (0x%04lX) failed.", name, (unsigned long) parameter);
+    if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.client.render", result, "Required capability query %s (0x%04lX) failed.", name, (unsigned long) parameter);
     return result;
 }
 static maage_status maage_gl_limits(maage_renderer *renderer) {
@@ -716,9 +717,9 @@ static maage_status maage_gl_limits(maage_renderer *renderer) {
     MAAGE_GL_TRY(maage_gl_limit(renderer, GL_MAX_VIEWPORT_DIMS, "GL_MAX_VIEWPORT_DIMS", native->viewport_limit));
     glGetBooleanv(GL_DOUBLEBUFFER, &double_buffer);
     MAAGE_GL_TRY(maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE));
-    maage_log_info("maage.render.opengl", "GLSL %.120s; profile 0x%lX; attributes %d; fragment textures %d; vertex/fragment uniform components %d/%d; vertex-output/fragment-input components %d/%d; max texture %u; renderbuffer %d; viewport %dx%d.", language ? language : "unavailable", (unsigned long) profile, attributes, units, vertex_uniforms, fragment_uniforms, vertex_outputs, fragment_inputs, renderer->capabilities.max_texture_dimension_2d, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
+    maage_log_info("maage.client.render", "GLSL %.120s; profile 0x%lX; attributes %d; fragment textures %d; vertex/fragment uniform components %d/%d; vertex-output/fragment-input components %d/%d; max texture %u; renderbuffer %d; viewport %dx%d.", language ? language : "unavailable", (unsigned long) profile, attributes, units, vertex_uniforms, fragment_uniforms, vertex_outputs, fragment_inputs, renderer->capabilities.max_texture_dimension_2d, native->target_limit, native->viewport_limit[0], native->viewport_limit[1]);
     if (!language || sscanf(language, "%d.%d", &major, &minor) != 2 || major < 3 || (major == 3 && minor < 30) || !(profile & MAAGE_GL_CONTEXT_CORE_PROFILE_BIT) || !double_buffer || attributes < 6 || units < 1 || vertex_units < 1 || vertex_uniforms < 24 || fragment_uniforms < 28 || vertex_outputs < 20 || fragment_inputs < 16 || !renderer->capabilities.max_texture_dimension_2d || native->target_limit <= 0 || native->viewport_limit[0] <= 0 || native->viewport_limit[1] <= 0) {
-        maage_log_warning("maage.render.opengl", "Required GLSL 3.30, core profile, double buffering, vertex layout, uniform/varying capacity, or framebuffer limits are unavailable.");
+        maage_log_warning("maage.client.render", "Required GLSL 3.30, core profile, double buffering, vertex layout, uniform/varying capacity, or framebuffer limits are unavailable.");
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     if ((unsigned int) native->target_limit > renderer->capabilities.max_texture_dimension_2d) native->target_limit = (GLint) renderer->capabilities.max_texture_dimension_2d;
@@ -789,8 +790,8 @@ static maage_status maage_opengl_modern_create(maage_renderer *renderer) {
     renderer->operation_trace = &vsync_trace;
     result = maage_opengl_context_vsync(renderer, 1);
     renderer->operation_trace = caller_trace;
-    if (maage_status_failed(result)) maage_log_trace_status(MAAGE_LOG_VERBOSE, "maage.render.opengl", result, &vsync_trace, "Native VSync control is unavailable; driver synchronization policy remains active.");
-    maage_log_info("maage.render.opengl", "Scene, UI, RGBA8/depth24/stencil8 framebuffers, Gaussian composition and fences initialized; capabilities 0x%08lX, %u frame slots.", renderer->capabilities.features, renderer->capabilities.max_frames_in_flight);
+    if (maage_status_failed(result)) MAAGE_LOG_VERBOSE_EVENT("maage.client.render", maage_log_trace_status(MAAGE_LOG_VERBOSE, "maage.client.render", result, &vsync_trace, "Native VSync control is unavailable; driver synchronization policy remains active."));
+    maage_log_info("maage.client.render", "Scene, UI, RGBA8/depth24/stencil8 framebuffers, Gaussian composition and fences initialized; capabilities 0x%08lX, %u frame slots.", renderer->capabilities.features, renderer->capabilities.max_frames_in_flight);
     return maage_opengl_check(renderer, MAAGE_OPERATION_INITIALIZE);
 }
 static maage_status maage_opengl_modern_destroy(maage_renderer *renderer) {

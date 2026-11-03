@@ -18,7 +18,7 @@ struct maage_content {
     maage_biome_registry biomes;
     content_policy policy;
     const maage_content_module *const *submitted;
-    int finalized;
+    int finalized, loaded, initialized;
     content_module_slot *modules;
     size_t module_count, *order;
 };
@@ -63,7 +63,7 @@ maage_status maage_content_module_data(const maage_content_context *context, con
     if (context->module && context->module != content->modules[index].definition) {
         for (dependency = 0; dependency < context->module->dependency_count; ++dependency)
             if (!strcmp(context->module->dependencies[dependency], name)) break;
-        if (context->phase == MAAGE_CONTENT_PHASE_BIND_INT || dependency == context->module->dependency_count) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+        if (context->phase == MAAGE_CONTENT_PHASE_BIND_INTERNAL || dependency == context->module->dependency_count) return maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     }
     *data = context->module == content->modules[index].definition ? context->module_data : content->modules[index].data;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
@@ -95,7 +95,7 @@ static maage_status content_modules_order(maage_content *content, const maage_co
                 result = content_failure(config, module, NULL, MAAGE_CONTENT_PHASE_MODULES, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0), "Duplicate module identity");
                 goto done;
             }
-        maage_log_verbose("maage.content", "Module %s: %s; dependencies=%lu.", module->name, strchr(module->name, ':') ? "submodule" : "root", (unsigned long) module->dependency_count);
+        MAAGE_LOG_DEBUG_EVENT("maage.content", maage_log_debug("maage.content", "Module %s: %s; dependencies=%lu.", module->name, strchr(module->name, ':') ? "submodule" : "root", (unsigned long) module->dependency_count));
         content->modules[i].definition = module;
     }
     content->module_count = config->module_count;
@@ -116,7 +116,7 @@ static maage_status content_modules_order(maage_content *content, const maage_co
                 result = content_failure(config, module, content->modules[parent].definition->name, MAAGE_CONTENT_PHASE_MODULES, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0), "Submodule must explicitly depend on its root parent");
                 goto done;
             }
-            maage_log_verbose("maage.content", "Submodule %s: parent=%s, shared namespace enforced.", module->name, content->modules[parent].definition->name);
+            MAAGE_LOG_DEBUG_EVENT("maage.content", maage_log_debug("maage.content", "Submodule %s: parent=%s, shared namespace enforced.", module->name, content->modules[parent].definition->name));
         }
         for (j = 0; j < module->dependency_count; ++j) {
             if (!content_module_name_valid(module->dependencies[j])) {
@@ -127,7 +127,7 @@ static maage_status content_modules_order(maage_content *content, const maage_co
                 result = content_failure(config, module, module->dependencies[j], MAAGE_CONTENT_PHASE_MODULES, maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0), "Missing dependency");
                 goto done;
             }
-            maage_log_verbose("maage.content", "Dependency validated: %s -> %s.", module->name, module->dependencies[j]);
+            MAAGE_LOG_DEBUG_EVENT("maage.content", maage_log_debug("maage.content", "Dependency validated: %s -> %s.", module->name, module->dependencies[j]));
             for (k = 0; k < j; ++k)
                 if (!strcmp(module->dependencies[j], module->dependencies[k])) {
                     result = content_failure(config, module, module->dependencies[j], MAAGE_CONTENT_PHASE_MODULES, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0), "Duplicate dependency");
@@ -160,7 +160,7 @@ static maage_status content_modules_order(maage_content *content, const maage_co
         }
         content->order[position] = i;
         selected[i] = 1;
-        maage_log_verbose("maage.content", "Loading order %lu: %s.", (unsigned long) position + 1, content->modules[i].definition->name);
+        MAAGE_LOG_DEBUG_EVENT("maage.content", maage_log_debug("maage.content", "Loading order %lu: %s.", (unsigned long) position + 1, content->modules[i].definition->name));
     }
 done:
     free(selected);
@@ -172,14 +172,16 @@ const char *maage_content_phase_name(maage_content_phase phase) {
         return "MODULES";
     case MAAGE_CONTENT_PHASE_DEFINE:
         return "DEFINE";
-    case MAAGE_CONTENT_PHASE_BIND_INT:
-        return "BIND 1: INT";
-    case MAAGE_CONTENT_PHASE_BIND_EXT:
-        return "BIND 2: EXT";
-    case MAAGE_CONTENT_PHASE_BIND_FIX:
-        return "BIND 3: FIX";
+    case MAAGE_CONTENT_PHASE_BIND_INTERNAL:
+        return "BIND, INTERNAL";
+    case MAAGE_CONTENT_PHASE_BIND_EXTERNAL:
+        return "BIND, EXTERNAL";
+    case MAAGE_CONTENT_PHASE_BIND_COMPATIBILITY:
+        return "BIND, COMPATIBILITY";
     case MAAGE_CONTENT_PHASE_FINALIZE:
         return "FINALIZE";
+    case MAAGE_CONTENT_PHASE_LOAD:
+        return "LOAD";
     case MAAGE_CONTENT_PHASE_INITIALIZE:
         return "INITIALIZE";
     }
@@ -200,47 +202,43 @@ static maage_status content_modules_run(maage_content *content, const maage_cont
     maage_content_registration callbacks[2];
     content_module_slot *slot;
     const maage_content_module *module;
-    const char *skip;
+    int worked, detail;
+    double began;
     size_t i, hook;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
     unsigned char operation = phase == MAAGE_CONTENT_PHASE_DEFINE ? MAAGE_OPERATION_REGISTER : (phase == MAAGE_CONTENT_PHASE_INITIALIZE ? MAAGE_OPERATION_INITIALIZE : MAAGE_OPERATION_RESOLVE);
     content->context.phase = phase;
-    maage_log_verbose("maage.content", "%s beginning: side=%s catalog=%d.", maage_content_phase_name(phase), content_side_name(config->execution.side), config->catalog_only);
+    detail = maage_log_enabled("maage.content", MAAGE_LOG_DEBUG);
     for (i = 0; i < content->module_count; ++i) {
         slot = &content->modules[content->order[i]];
         module = slot->definition;
         callbacks[1] = NULL;
+        worked = 0;
+        began = detail ? maage_time_monotonic_seconds() : -1;
         switch (phase) {
         case MAAGE_CONTENT_PHASE_DEFINE:
             callbacks[0] = module->define;
             break;
-        case MAAGE_CONTENT_PHASE_BIND_INT:
-            callbacks[0] = module->bind_int;
-            callbacks[1] = module->side_bind_int;
+        case MAAGE_CONTENT_PHASE_BIND_INTERNAL:
+            callbacks[0] = module->bind_internal;
+            callbacks[1] = module->side_bind_internal;
             break;
-        case MAAGE_CONTENT_PHASE_BIND_EXT:
-            callbacks[0] = module->bind_ext;
-            callbacks[1] = module->side_bind_ext;
+        case MAAGE_CONTENT_PHASE_BIND_EXTERNAL:
+            callbacks[0] = module->bind_external;
+            callbacks[1] = module->side_bind_external;
             break;
-        case MAAGE_CONTENT_PHASE_BIND_FIX:
-            callbacks[0] = module->bind_fix;
-            callbacks[1] = module->side_bind_fix;
+        case MAAGE_CONTENT_PHASE_BIND_COMPATIBILITY:
+            callbacks[0] = module->bind_compatibility;
+            callbacks[1] = module->side_bind_compatibility;
             break;
         default:
             callbacks[0] = module->initialize;
             break;
         }
         for (hook = 0; hook < 2; ++hook) {
-            skip = !callbacks[hook] ? "no callback declared" : NULL;
-            if (phase == MAAGE_CONTENT_PHASE_BIND_EXT && !module->dependency_count) skip = "no external dependencies";
-            if (config->catalog_only && (hook || phase == MAAGE_CONTENT_PHASE_INITIALIZE)) skip = "pure resource catalog";
-            if ((hook || phase == MAAGE_CONTENT_PHASE_INITIALIZE) && !(module->sides & config->execution.side)) skip = "execution side not selected";
-            if (skip) {
-                maage_log_verbose("maage.content", "%s: %s %s skipped (%s).", maage_content_phase_name(phase), module->name, hook ? "side hook" : "shared callback", skip);
-                continue;
-            }
+            if (!callbacks[hook] || (phase == MAAGE_CONTENT_PHASE_BIND_EXTERNAL && !module->dependency_count) || ((hook || phase == MAAGE_CONTENT_PHASE_INITIALIZE) && !(module->sides & config->execution.side))) continue;
             if ((hook || phase == MAAGE_CONTENT_PHASE_INITIALIZE) && (module->required_capabilities & config->execution.capabilities) != module->required_capabilities) return content_failure(config, module, NULL, phase, maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_REGISTRY, operation, 0), "Required side capability unavailable");
-            maage_log_verbose("maage.content", "%s: %s %s executing; side=%s.", maage_content_phase_name(phase), module->name, hook ? "side hook" : "shared callback", content_side_name(config->execution.side));
+            worked = 1;
             content->context.module = module;
             content->context.module_data = slot->data;
             result = callbacks[hook](&content->context);
@@ -257,10 +255,9 @@ static maage_status content_modules_run(maage_content *content, const maage_cont
                 maage_log_trace_status(MAAGE_LOG_WARNING, "maage.content", result, trace, "%s: %s completed with warning; side=%s.", maage_content_phase_name(phase), module->name, content_side_name(config->execution.side));
                 maage_status_trace_init(trace);
             }
-            maage_log_verbose("maage.content", "%s: %s callback complete.", maage_content_phase_name(phase), module->name);
         }
+        if (worked && detail) MAAGE_LOG_DEBUG_EVENT("maage.content", maage_log_debug("maage.content", "%s | %s | %s | Complete (%.3f ms).", content_side_name(config->execution.side), module->name, maage_content_phase_name(phase), began >= 0 ? (maage_time_monotonic_seconds() - began) * 1000 : 0));
     }
-    maage_log_verbose("maage.content", "%s complete.", maage_content_phase_name(phase));
     return outcome;
 }
 
@@ -277,9 +274,6 @@ maage_status maage_content_own(maage_content_context *context, void *data, void 
 }
 static int content_face_registered(const maage_content_context *context, const maage_block_face_definition *face) {
     return face && maage_presentation_texture(context->presentation, face->texture_id) && (!face->overlay_texture || maage_presentation_texture(context->presentation, face->overlay_texture)) && (!face->snow_texture || maage_presentation_texture(context->presentation, face->snow_texture)) && (!face->has_flow_texture || maage_presentation_texture(context->presentation, face->flow_texture));
-}
-static int content_face_identity_equal(const maage_block_face_definition *left, const maage_block_face_definition *right) {
-    return left->texture_id == right->texture_id && left->overlay_texture == right->overlay_texture && left->snow_texture == right->snow_texture && left->has_flow_texture == right->has_flow_texture && left->flow_texture == right->flow_texture;
 }
 static maage_status content_validate_presentation(const maage_content_context *context) {
     const maage_block_state_definition *state;
@@ -355,13 +349,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     double began = maage_time_monotonic_seconds(), ended;
     maage_content_phase phase;
     maage_status result, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
-    size_t i, appearance_index;
-    const maage_block_geometry_definition *geometry;
-    maage_block_face_definition appearance, logical_appearance;
-    maage_block_state_definition state, logical;
-    maage_biome_definition tinted;
-    const maage_biome_definition *presentation_biome;
-    unsigned int side;
+    size_t i;
     const maage_item_definition *item;
     const maage_block_definition *block;
     const maage_biome_definition *biome;
@@ -397,7 +385,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
         result = content_failure(config, NULL, NULL, MAAGE_CONTENT_PHASE_MODULES, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0), "Invalid execution side/capabilities");
         goto failed;
     }
-    maage_log_info("maage.content", "Loading %lu modules: side=%s catalog=%d.", (unsigned long) config->module_count, content_side_name(config->execution.side), config->catalog_only);
+    maage_log_info("maage.content", "Loading %lu modules (%s).", (unsigned long) config->module_count, content_side_name(config->execution.side));
     context->biomes = &content->biomes;
     context->lifecycle = content;
     result = content_modules_order(content, config);
@@ -428,14 +416,14 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     content_creative_policy(context->creative, &content->policy);
     content_sounds_policy(context->sounds, &content->policy);
     content_presentation_policy(context->presentation, &content->policy);
-    for (phase = MAAGE_CONTENT_PHASE_DEFINE; phase <= MAAGE_CONTENT_PHASE_BIND_FIX; phase = (maage_content_phase) (phase + 1)) {
+    for (phase = MAAGE_CONTENT_PHASE_DEFINE; phase <= MAAGE_CONTENT_PHASE_BIND_COMPATIBILITY; phase = (maage_content_phase) (phase + 1)) {
         result = content_modules_run(content, config, phase, trace);
         if (maage_status_failed(result)) goto failed;
         if (maage_status_is_warning(result) && !maage_status_is_warning(outcome)) outcome = result;
     }
     content->policy.engine = 1;
     context->phase = MAAGE_CONTENT_PHASE_FINALIZE;
-    maage_log_verbose("maage.content", "FINALIZE beginning: side=%s.", content_side_name(config->execution.side));
+
     if (config->failure) config->failure->phase = MAAGE_CONTENT_PHASE_FINALIZE;
     if (maage_block_registry_fluids(context->blocks) != context->fluids || maage_block_registry_geometry(context->blocks) != context->geometry || maage_block_registry_containers(context->blocks) != context->containers || maage_block_registry_sounds(context->blocks) != context->sounds) {
         result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
@@ -447,24 +435,6 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     config->failure->dependency_name = "presentation references";
     result = content_validate_presentation(context);
     if (maage_status_failed(result)) goto failed;
-    if (config->presentation_biomes) {
-        if (maage_biome_registry_count(config->presentation_biomes) != maage_biome_registry_count(context->biomes)) {
-            result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-            goto failed;
-        }
-        for (i = 0; i < maage_biome_registry_count(context->biomes); ++i) {
-            tinted = *maage_biome_registry_get(context->biomes, (maage_biome_id) i);
-            presentation_biome = maage_biome_registry_get(config->presentation_biomes, (maage_biome_id) i);
-            if (!presentation_biome || strcmp(maage_biome_registry_name(context->biomes, (maage_biome_id) i), maage_biome_registry_name(config->presentation_biomes, (maage_biome_id) i))) {
-                result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-                goto failed;
-            }
-            memcpy(tinted.grass_color, presentation_biome->grass_color, sizeof(tinted.grass_color));
-            memcpy(tinted.foliage_color, presentation_biome->foliage_color, sizeof(tinted.foliage_color));
-            result = maage_biome_registry_update(context->biomes, &tinted);
-            if (maage_status_failed(result)) goto failed;
-        }
-    }
     for (i = 0; i < maage_item_registry_count(context->items); ++i) {
         item = maage_item_registry_at(context->items, i);
         if (item->has_block && (!maage_block_registry_block(context->blocks, item->block_id) || !maage_block_registry_state(context->blocks, item->placement_state_id) || !maage_block_registry_state(context->blocks, item->icon_state_id))) {
@@ -484,37 +454,6 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
         if (!biome || !maage_block_registry_state(context->blocks, biome->surface) || !maage_block_registry_state(context->blocks, biome->filler)) {
             result = maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
             goto failed;
-        }
-    }
-    if (config->resolver)
-        for (i = 0; i < maage_block_registry_state_count(context->blocks); ++i) {
-            state = *maage_block_registry_state(context->blocks, (maage_block_state_id) i);
-            logical = state;
-            result = config->resolver(config->resolver_context, &logical, state.faces, state.leaf_fast_uv);
-            if (!maage_status_failed(result))
-                for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
-                    if (!content_face_identity_equal(&state.faces[side], &logical.faces[side])) {
-                        result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-                        break;
-                    }
-                }
-            if (!maage_status_failed(result)) result = maage_block_registry_update_state(context->blocks, &state);
-            if (maage_status_failed(result)) goto failed;
-        }
-    for (i = 0; i < maage_block_geometry_count(context->geometry); ++i) {
-        geometry = maage_block_geometry_get(context->geometry, (maage_block_geometry_id) i + 1);
-        if (geometry->appearance_count && config->resolver && !config->appearance_resolver) {
-            result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-            goto failed;
-        }
-        if (!config->appearance_resolver) continue;
-        for (appearance_index = 0; appearance_index < geometry->appearance_count; ++appearance_index) {
-            logical_appearance = geometry->appearances[appearance_index];
-            appearance = logical_appearance;
-            result = config->appearance_resolver(config->resolver_context, &logical_appearance, &appearance);
-            if (!maage_status_failed(result) && !content_face_identity_equal(&appearance, &logical_appearance)) result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
-            if (!maage_status_failed(result)) result = maage_block_geometry_update_appearance(context->geometry, (maage_block_geometry_id) i + 1, appearance_index, &appearance);
-            if (maage_status_failed(result)) goto failed;
         }
     }
     config->failure->dependency_name = "maage_presentation_finalize";
@@ -557,22 +496,26 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     content->policy.engine = 0;
     content->policy.sealed = 1;
     content->finalized = 1;
-    maage_log_info("maage.content", "FINALIZE complete: blocks=%lu states=%lu items=%lu biomes=%lu creative_tabs=%lu sounds=%lu.", (unsigned long) maage_block_registry_block_count(context->blocks), (unsigned long) maage_block_registry_state_count(context->blocks), (unsigned long) maage_item_registry_count(context->items), (unsigned long) maage_biome_registry_count(context->biomes), (unsigned long) maage_creative_tab_count(context->creative), (unsigned long) maage_sound_count(context->sounds));
+    maage_log_info("maage.content", "%s | FINALIZE | blocks=%lu states=%lu items=%lu biomes=%lu creative_tabs=%lu sounds=%lu.", content_side_name(config->execution.side), (unsigned long) maage_block_registry_block_count(context->blocks), (unsigned long) maage_block_registry_state_count(context->blocks), (unsigned long) maage_item_registry_count(context->items), (unsigned long) maage_biome_registry_count(context->biomes), (unsigned long) maage_creative_tab_count(context->creative), (unsigned long) maage_sound_count(context->sounds));
     if (config->identity_peer) {
         result = maage_content_validate_identity(content, config->identity_peer, trace);
         if (maage_status_failed(result)) {
-            config->failure->reason = "Numeric Client/Server or resource-catalog identity mismatch";
+            config->failure->reason = "Numeric Client/Server identity mismatch";
             goto failed;
         }
     }
-    result = content_modules_run(content, config, MAAGE_CONTENT_PHASE_INITIALIZE, trace);
-    if (maage_status_failed(result)) goto failed;
-    if (maage_status_is_warning(result) && !maage_status_is_warning(outcome)) outcome = result;
+    if (config->execution.side != MAAGE_EXECUTION_CLIENT) {
+        result = content_modules_run(content, config, MAAGE_CONTENT_PHASE_INITIALIZE, trace);
+        if (maage_status_failed(result)) goto failed;
+        content->initialized = 1;
+        if (maage_status_is_warning(result) && !maage_status_is_warning(outcome)) outcome = result;
+        maage_log_info("maage.content", "%s | INITIALIZE | Complete.", content_side_name(config->execution.side));
+    }
     context->config = NULL;
     context->trace = NULL;
     ended = maage_time_monotonic_seconds();
-    if (began >= 0 && ended >= began) maage_log_info("maage.content", "Loaded %lu modules successfully: side=%s catalog=%d elapsed=%.3f ms.", (unsigned long) content->module_count, content_side_name(config->execution.side), config->catalog_only, (ended - began) * 1000);
-    else maage_log_info("maage.content", "Loaded %lu modules successfully: side=%s catalog=%d elapsed unavailable.", (unsigned long) content->module_count, content_side_name(config->execution.side), config->catalog_only);
+    if (began >= 0 && ended >= began) maage_log_info("maage.content", "Composed %lu modules successfully: side=%s elapsed=%.3f ms.", (unsigned long) content->module_count, content_side_name(config->execution.side), (ended - began) * 1000);
+    else maage_log_info("maage.content", "Composed %lu modules successfully: side=%s elapsed unavailable.", (unsigned long) content->module_count, content_side_name(config->execution.side));
     if (config->failure) memset(config->failure, 0, sizeof(*config->failure));
     *output = content;
     return outcome;
@@ -713,6 +656,39 @@ maage_status maage_content_validate_identity(const maage_content *content, const
         peer_entry = maage_creative_get(b->creative, (maage_creative_entry_id) i + 1);
         if (!entry || !peer_entry || entry->tab != peer_entry->tab || entry->stack.item_id != peer_entry->stack.item_id || entry->stack.metadata != peer_entry->stack.metadata || entry->stack.count != peer_entry->stack.count || entry->stack.damage != peer_entry->stack.damage) return content_identity_mismatch(content, trace, 34, NULL);
     }
-    maage_log_verbose("maage.content", "Numeric identities validated: %s -> %s.", content_side_name(a->execution.side), content_side_name(b->execution.side));
+    MAAGE_LOG_DEBUG_EVENT("maage.content", maage_log_debug("maage.content", "Numeric identities validated: %s -> %s.", content_side_name(a->execution.side), content_side_name(b->execution.side)));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
+
+maage_status maage_content_load_complete(maage_content *content, maage_status_trace *trace) {
+    if (!content || !content->finalized || content->context.execution.side != MAAGE_EXECUTION_CLIENT) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_LOAD);
+    content->loaded = 1;
+    content->context.phase = MAAGE_CONTENT_PHASE_LOAD;
+    maage_log_info("maage.content", "Client | LOAD | Resources ready.");
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0);
+}
+maage_status maage_content_initialize(maage_content *content, maage_status_trace *trace) {
+    maage_content_config config;
+    maage_content_failure failure;
+    maage_status result;
+    if (!content || !content->finalized || content->initialized || (content->context.execution.side == MAAGE_EXECUTION_CLIENT && !content->loaded)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_INITIALIZE);
+    memset(&config, 0, sizeof(config));
+    memset(&failure, 0, sizeof(failure));
+    config.execution = content->context.execution;
+    config.modules = content->submitted;
+    config.module_count = content->module_count;
+    config.failure = &failure;
+    content->initialized = -1; /* Failed partial initialization cannot be retried. */
+    content->context.trace = trace;
+    content->context.config = &config;
+    result = content_modules_run(content, &config, MAAGE_CONTENT_PHASE_INITIALIZE, trace);
+    content->context.config = NULL;
+    content->context.trace = NULL;
+    if (maage_status_failed(result)) {
+        maage_log_trace_status(MAAGE_LOG_ERROR, "maage.content", result, trace, "%s | %s | INITIALIZE | %s.", content_side_name(config.execution.side), failure.module_name ? failure.module_name : "<registries>", failure.reason ? failure.reason : "Failed");
+        return result;
+    }
+    content->initialized = 1;
+    maage_log_info("maage.content", "%s | INITIALIZE | Complete.", content_side_name(config.execution.side));
+    return result;
 }

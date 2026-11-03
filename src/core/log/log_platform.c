@@ -5,6 +5,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "log_internal.h"
+#include <limits.h>
 #include <time.h>
 #include <errno.h>
 #include <string.h>
@@ -357,5 +358,87 @@ done:
     if (saved_error >= 0) close(saved_error);
     errno = failure;
     return ok;
+}
+#endif
+
+#ifdef MAAGE_LOG_BUILD_DEBUG
+#define MAAGE_LOG_INITIAL_MINIMUM MAAGE_LOG_DEBUG
+#else
+#define MAAGE_LOG_INITIAL_MINIMUM MAAGE_LOG_INFO
+#endif
+#ifdef _WIN32
+static volatile LONG maage_log_minimum = MAAGE_LOG_INITIAL_MINIMUM, maage_log_generation = 1;
+static int maage_log_filter_generation(void) {
+    return (int) InterlockedCompareExchange(&maage_log_generation, 0, 0);
+}
+int maage_log_filter_minimum(void) {
+    return (int) InterlockedCompareExchange(&maage_log_minimum, 0, 0);
+}
+void maage_log_filter_publish(int minimum) {
+    int generation = maage_log_filter_generation();
+    InterlockedExchange(&maage_log_minimum, (LONG) minimum);
+    InterlockedExchange(&maage_log_generation, generation && generation < INT_MAX ? generation + 1 : 0);
+}
+#define MAAGE_LOG_NATIVE_TLS __declspec(thread)
+#elif defined(__GNUC__) || defined(__clang__)
+static int maage_log_minimum = MAAGE_LOG_INITIAL_MINIMUM, maage_log_generation = 1;
+static int maage_log_filter_generation(void) {
+    return __atomic_load_n(&maage_log_generation, __ATOMIC_ACQUIRE);
+}
+int maage_log_filter_minimum(void) {
+    return __atomic_load_n(&maage_log_minimum, __ATOMIC_ACQUIRE);
+}
+void maage_log_filter_publish(int minimum) {
+    int generation = maage_log_filter_generation();
+    __atomic_store_n(&maage_log_minimum, minimum, __ATOMIC_RELEASE);
+    __atomic_store_n(&maage_log_generation, generation && generation < INT_MAX ? generation + 1 : 0, __ATOMIC_RELEASE);
+}
+#define MAAGE_LOG_NATIVE_TLS __thread
+#else
+/* Unrecognized native compilers retain synchronized correctness. */
+static int maage_log_minimum = MAAGE_LOG_INITIAL_MINIMUM;
+int maage_log_filter_minimum(void) {
+    int result;
+    maage_log_lock();
+    result = maage_log_minimum;
+    maage_log_unlock();
+    return result;
+}
+void maage_log_filter_publish(int minimum) {
+    maage_log_minimum = minimum;
+}
+#endif
+#ifdef MAAGE_LOG_NATIVE_TLS
+/* One last-category cache per native thread: bounded, allocation-free and
+ * refreshed under the existing log lock after configuration publication.
+ * Saturation disables caching rather than allowing an epoch to wrap. */
+static MAAGE_LOG_NATIVE_TLS struct {
+    int generation;
+    maage_log_level level;
+    char name[MAAGE_LOG_NAME_SIZE];
+} maage_log_local_filter;
+int maage_log_filter_cached(const char *logger, maage_log_level *level) {
+    int generation = maage_log_filter_generation();
+    if (!logger || !*logger) logger = "maage";
+    if (!generation || generation != maage_log_local_filter.generation || strcmp(logger, maage_log_local_filter.name)) return 0;
+    *level = maage_log_local_filter.level;
+    return 1;
+}
+void maage_log_filter_cache(const char *logger, maage_log_level level) {
+    if (!logger || !*logger) logger = "maage";
+    if (strlen(logger) >= sizeof(maage_log_local_filter.name)) return;
+    strcpy(maage_log_local_filter.name, logger);
+    maage_log_local_filter.level = level;
+    maage_log_local_filter.generation = maage_log_filter_generation();
+}
+#else
+int maage_log_filter_cached(const char *logger, maage_log_level *level) {
+    (void) logger;
+    (void) level;
+    return 0;
+}
+void maage_log_filter_cache(const char *logger, maage_log_level level) {
+    (void) logger;
+    (void) level;
 }
 #endif

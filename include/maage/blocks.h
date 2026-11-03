@@ -102,7 +102,7 @@ typedef struct maage_block_definition {
     int selectable, replaceable;
     maage_block_geometry_id geometry_id; /* Registered geometry; resolved before finalization. */
     unsigned int mesh_shape;             /* Cached optimized primitive tag from the geometry registry. */
-    double hardness;         /* Negative: unbreakable in Survival. */
+    double hardness;                     /* Negative: unbreakable in Survival. */
     unsigned int required_tool, required_tool_level;
     int harvest_requires_tool;  /* Effectiveness and harvest eligibility differ. */
     unsigned long drop_item_id; /* Independent item domain; bound before finalize. */
@@ -175,6 +175,8 @@ int maage_block_collision_shape(const maage_block_definition *block, const maage
  * Block and state sequences are independent; air is resolved during registration
  * and implicit empty sections retain its actual assigned state. */
 maage_status maage_block_registry_create(size_t block_capacity, size_t state_capacity, maage_block_registry **output);
+/* Logical identity behind an immutable Client presentation view. */
+const maage_block_registry *maage_block_registry_identity_source(const maage_block_registry *registry);
 maage_status maage_block_registry_destroy(maage_block_registry *registry);
 maage_status maage_block_registry_register_block(maage_block_registry *registry, const char *external_name, maage_block_definition *definition);
 maage_status maage_block_registry_register_state(maage_block_registry *registry, maage_block_state_definition *definition);

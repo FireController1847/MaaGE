@@ -2,7 +2,7 @@ add_library(maage_log STATIC log.c log_config.c log_platform.c log_archive.c log
 add_library(MaaGE::Log ALIAS maage_log)
 maage_configure_portable_target(maage_log)
 target_include_directories(maage_log PUBLIC "${PROJECT_SOURCE_DIR}/include")
-target_compile_definitions(maage_log PRIVATE "$<$<CONFIG:Debug>:MAAGE_LOG_BUILD_DEBUG=1>")
+target_compile_definitions(maage_log PRIVATE "$<$<CONFIG:Debug>:MAAGE_LOG_BUILD_DEBUG=1>" PUBLIC "$<$<CONFIG:Debug>:MAAGE_LOG_VERBOSE_INSTRUMENTATION=1>")
 target_link_libraries(maage_log PUBLIC MaaGE::Status PRIVATE MaaGE::GZip)
 if(NOT MAAGE_PLATFORM_WINDOWS)
     find_package(Threads REQUIRED)

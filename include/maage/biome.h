@@ -16,6 +16,8 @@ typedef struct maage_biome_definition {
     float grass_color[3], foliage_color[3];
 } maage_biome_definition;
 typedef struct maage_biome_registry {
+    const struct maage_biome_registry *view_source;
+    maage_biome_definition *view_definitions; /* Owned presentation colors; other payloads borrow source. */
     size_t count, name_capacity;
     void **name_buckets;
     void *extension_pages;

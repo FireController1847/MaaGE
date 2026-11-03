@@ -42,9 +42,9 @@ maage_status maage_opengl_create(maage_renderer *renderer, int modern) {
     version = (const char *) glGetString(GL_VERSION);
     device = (const char *) glGetString(GL_RENDERER);
     vendor = (const char *) glGetString(GL_VENDOR);
-    maage_log_info("maage.render.opengl", "OpenGL version: %.160s; device: %.200s; vendor: %.160s.", version ? version : "unavailable", device ? device : "unavailable", vendor ? vendor : "unavailable");
+    maage_log_info("maage.client.render", "OpenGL version: %.160s; device: %.200s; vendor: %.160s.", version ? version : "unavailable", device ? device : "unavailable", vendor ? vendor : "unavailable");
     if (!version || sscanf(version, "%d.%d", &major, &minor) != 2 || (modern ? (major < 3 || (major == 3 && minor < 3)) : (major < 1 || (major == 1 && minor < 1)))) {
-        maage_log_warning("maage.render.opengl", "Required OpenGL version %s is unavailable.", modern ? "3.3 Core" : "1.1");
+        maage_log_warning("maage.client.render", "Required OpenGL version %s is unavailable.", modern ? "3.3 Core" : "1.1");
         return MAAGE_STATUS_VALUE(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_INITIALIZE, 0);
     }
     if (device) {

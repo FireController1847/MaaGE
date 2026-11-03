@@ -78,7 +78,7 @@ maage_status maage_access_verify(const char *token, char uuid[33], char name[17]
     if (!profile || status != 200) goto done;
     text = maage_access_json_string(profile, "name");
     if (!maage_access_username(text) || !maage_access_uuid(maage_access_json_string(profile, "id"), normalized) || (*uuid && strcmp(normalized, uuid))) {
-        maage_log_verbose("maage.launcher.access.verify", "Profile response rejected: invalid Java identity or mismatch with selected account.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.verify", maage_log_debug("maage.launcher.access.verify", "Profile response rejected: invalid Java identity or mismatch with selected account."));
         strcpy(detail, "Minecraft Java profile missing or different from the selected account. Sign in with the correct Microsoft account.");
         goto done;
     }
@@ -89,13 +89,13 @@ maage_status maage_access_verify(const char *token, char uuid[33], char name[17]
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && entitlements) game = maage_access_java_items(entitlements, 0);
-    maage_log_verbose("maage.launcher.access.verify", "Store entitlement check: explicit Java entitlement %s.", game ? "present" : "not confirmed");
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.verify", maage_log_debug("maage.launcher.access.verify", "Store entitlement check: explicit Java entitlement %s.", game ? "present" : "not confirmed"));
     strcpy(store_error, detail);
     /* The license endpoint includes non-store access (e.g. subscriptions).
      * Its signed aggregate has item name/source, not per-item signatures.
      * Treat source as opaque; it is not a permanent-ownership warranty. */
     if (maage_status_failed(maage_auth_random(random, sizeof(random)))) {
-        maage_log_verbose("maage.launcher.access.verify", "Cannot generate entitlement request identifier; verification stopped.");
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.verify", maage_log_debug("maage.launcher.access.verify", "Cannot generate entitlement request identifier; verification stopped."));
         strcpy(detail, "Cannot generate a secure entitlement request identifier.");
         goto done;
     }
@@ -107,7 +107,7 @@ maage_status maage_access_verify(const char *token, char uuid[33], char name[17]
     if (status == 401) state = MAAGE_ACCESS_EXPIRED;
     if (status == 401 || status == 403 || cancelled(context)) goto done;
     if (status == 200 && license) licensed = maage_access_java_items(license, 1);
-    maage_log_verbose("maage.launcher.access.verify", "License entitlement check: explicit Java entitlement %s.", licensed ? "present" : "not confirmed");
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.verify", maage_log_debug("maage.launcher.access.verify", "License entitlement check: explicit Java entitlement %s.", licensed ? "present" : "not confirmed"));
     if (game || licensed) {
         strcpy(uuid, normalized);
         state = MAAGE_ACCESS_VERIFIED;
@@ -126,7 +126,7 @@ maage_status maage_access_verify(const char *token, char uuid[33], char name[17]
 done:
     if (state == MAAGE_ACCESS_VERIFIED)
         maage_log_info("maage.launcher.access.verify", "Java access verified (store entitlement=%s; license entitlement=%s).", game ? "confirmed" : "not confirmed", licensed ? "confirmed" : "not confirmed");
-    else if (!cancelled(context)) maage_log_verbose("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed");
+    else if (!cancelled(context)) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.verify", maage_log_debug("maage.launcher.access.verify", "Java verification failed: %s. No access lease granted.", !profile_valid ? "profile could not be validated" : "explicit Java entitlement could not be confirmed"));
     maage_auth_json_free(profile);
     maage_auth_json_free(entitlements);
     maage_auth_json_free(license);

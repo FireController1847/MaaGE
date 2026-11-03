@@ -158,6 +158,9 @@ function(maage_configure_portable_target target)
         C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
     )
     target_include_directories(${target} PRIVATE "${PROJECT_BINARY_DIR}/generated")
+    # Keep first-party call-site instrumentation consistent even through private
+    # static-library dependency edges; Log also exports this policy to consumers.
+    target_compile_definitions(${target} PRIVATE "$<$<CONFIG:Debug>:MAAGE_LOG_VERBOSE_INSTRUMENTATION=1>")
 endfunction()
 
 add_subdirectory(src/core)

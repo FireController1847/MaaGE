@@ -256,7 +256,7 @@ static void server_record_action(maage_server_runtime *runtime, int placing) {
             n = (unsigned int) (dx + 1 + 3 * (dz + 1));
             runtime->actions[i].revisions[n] = maage_world_column_revision(runtime->world, maage_world_chunk_coordinate(target->x + dx), maage_world_chunk_coordinate(target->z + dz));
         }
-    if (runtime->diagnostics) maage_log_info("maage.server.latency", "mutation_tick=%lu command_sequence=%lu placing=%d block=%d,%d,%d revision=%lu completed_at=%.6f", runtime->actions[i].tick, runtime->actions[i].command_sequence, placing, target->x, target->y, target->z, runtime->actions[i].revisions[4], runtime->actions[i].completed_at);
+    if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "mutation_tick=%lu command_sequence=%lu placing=%d block=%d,%d,%d revision=%lu completed_at=%.6f", runtime->actions[i].tick, runtime->actions[i].command_sequence, placing, target->x, target->y, target->z, runtime->actions[i].revisions[4], runtime->actions[i].completed_at));
     runtime->action_cursor = (i + 1U) % 32U;
 }
 
@@ -281,7 +281,7 @@ static void server_predictions(maage_server_runtime *runtime) {
                 event->status = server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_MUTATE);
                 event->tick = runtime->actions[action].tick;
                 memcpy(event->column_revisions, runtime->actions[action].revisions, sizeof(event->column_revisions));
-                if (runtime->diagnostics) maage_log_info("maage.server.latency", "action=%lu mutation_tick=%lu completed_at=%.6f confirmation_ready_at=%.6f", event->prediction, event->tick, runtime->actions[action].completed_at, maage_time_monotonic_seconds());
+                if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "action=%lu mutation_tick=%lu completed_at=%.6f confirmation_ready_at=%.6f", event->prediction, event->tick, runtime->actions[action].completed_at, maage_time_monotonic_seconds()));
                 runtime->actions[action].available = 0;
                 runtime->predictions[i].resolved = 1;
                 break;
@@ -311,14 +311,14 @@ static void server_predictions(maage_server_runtime *runtime) {
             server_capture_failure(runtime, result, NULL);
             break;
         }
-        if (runtime->diagnostics) maage_log_info("maage.server.latency", "action=%lu accepted=%d revision=%lu owner_tick=%lu acknowledgment_offered_at=%.6f event_queue_ms=%.3f", event->prediction, event->accepted, event->column_revisions[4], event->tick, maage_time_monotonic_seconds(), (maage_time_monotonic_seconds() - event->emitted_at) * 1000);
+        if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "action=%lu accepted=%d revision=%lu owner_tick=%lu acknowledgment_offered_at=%.6f event_queue_ms=%.3f", event->prediction, event->accepted, event->column_revisions[4], event->tick, maage_time_monotonic_seconds(), (maage_time_monotonic_seconds() - event->emitted_at) * 1000));
         runtime->predictions[i].active = 0;
     }
 }
 static maage_status server_predict_request(maage_server_runtime *runtime, const maage_session_command *command) {
     unsigned int i;
     if (!command->prediction || command->prediction <= runtime->last_prediction || command->prediction > 4294967295UL || !command->prediction_revision || !command->prediction_command_sequence || command->prediction_command_sequence >= command->sequence) return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
-    if (runtime->diagnostics) maage_log_info("maage.server.latency", "action=%lu sequence=%lu input_sequence=%lu received_at=%.6f tick=%lu base_revision=%lu", command->prediction, command->sequence, command->prediction_command_sequence, maage_time_monotonic_seconds(), runtime->tick, command->prediction_revision);
+    if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "action=%lu sequence=%lu input_sequence=%lu received_at=%.6f tick=%lu base_revision=%lu", command->prediction, command->sequence, command->prediction_command_sequence, maage_time_monotonic_seconds(), runtime->tick, command->prediction_revision));
     runtime->last_prediction = command->prediction;
     for (i = 0; i < 32 && runtime->predictions[i].active; ++i) {
     }
@@ -457,7 +457,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         result = maage_world_set_render_distance(runtime->world, command->render_radius, 0);
         if (!maage_status_failed(result)) {
             if (command->render_radius != runtime->config.render_distance) {
-                maage_log_info("maage.server.view", "Render distance updated from %d to %d chunks.", runtime->config.render_distance, command->render_radius);
+                MAAGE_LOG_VERBOSE_EVENT("maage.server.view", maage_log_verbose("maage.server.view", "Render distance updated from %d to %d chunks.", runtime->config.render_distance, command->render_radius));
                 runtime->publication_dirty = 1;
             }
             runtime->config.render_distance = command->render_radius;
@@ -519,9 +519,9 @@ static maage_status server_take_commands(maage_server_runtime *runtime) {
         }
         {
             double began = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
-            if (runtime->diagnostics && (command.prediction || command.intent.attack_pressed || command.intent.use_pressed)) maage_log_info("maage.server.latency", "action=%lu command_sequence=%lu kind=%u received_at=%.6f applied_at=%.6f tick=%lu command_queue_ms=%.3f fifo_wait_ms=%.3f input_age_ms=%.3f", command.prediction, command.sequence, command.kind, received_at, began, runtime->tick, command.sent_at >= 0 ? (received_at - command.sent_at) * 1000 : -1, (began - received_at) * 1000, command.sampled_at >= 0 ? (began - command.sampled_at) * 1000 : -1);
+            if (runtime->diagnostics && (command.prediction || command.intent.attack_pressed || command.intent.use_pressed)) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "action=%lu command_sequence=%lu kind=%u received_at=%.6f applied_at=%.6f tick=%lu command_queue_ms=%.3f fifo_wait_ms=%.3f input_age_ms=%.3f", command.prediction, command.sequence, command.kind, received_at, began, runtime->tick, command.sent_at >= 0 ? (received_at - command.sent_at) * 1000 : -1, (began - received_at) * 1000, command.sampled_at >= 0 ? (began - command.sampled_at) * 1000 : -1));
             (void) server_apply_command(runtime, &command); /* rejected action is not fatal */
-            if (runtime->diagnostics && command.prediction) maage_log_info("maage.server.latency", "action=%lu command_ms=%.3f", command.prediction, (maage_time_monotonic_seconds() - began) * 1000);
+            if (runtime->diagnostics && command.prediction) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "action=%lu command_ms=%.3f", command.prediction, (maage_time_monotonic_seconds() - began) * 1000));
         }
         if (command.kind == MAAGE_CMD_DISCONNECT) break;
     }
@@ -565,7 +565,7 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
         view.offered_at = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
         result = maage_local_session_offer_entities(runtime->config.session, &view);
         if (maage_status_failed(result)) server_status_event(runtime, result, NULL);
-        if (runtime->diagnostics) maage_log_info("maage.server.latency", "entity_sequence=%lu entity_tick=%lu count=%lu offered_at=%.6f", view.sequence, tick, (unsigned long) visible, view.offered_at);
+        if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "entity_sequence=%lu entity_tick=%lu count=%lu offered_at=%.6f", view.sequence, tick, (unsigned long) visible, view.offered_at));
         free(view.entities);
     }
 }
@@ -676,7 +676,7 @@ static void server_offer_columns(maage_server_runtime *runtime) {
         accepted = *update; /* Copy identity before queue ownership can reach the Client. */
         result = maage_local_session_offer_column(runtime->config.session, &outgoing);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
-            if (runtime->diagnostics) maage_log_info("maage.server.latency", "phase=column_offered initial=%d unload=%d column=%d,%d revision=%lu offered_at=%.6f tick=%lu", accepted.base_revision == 0, accepted.unload, accepted.x, accepted.z, accepted.revision, outgoing.offered_at, runtime->tick);
+            if (runtime->diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "phase=column_offered initial=%d unload=%d column=%d,%d revision=%lu offered_at=%.6f tick=%lu", accepted.base_revision == 0, accepted.unload, accepted.x, accepted.z, accepted.revision, outgoing.offered_at, runtime->tick));
             result = maage_world_ack_column(runtime->world, &accepted);
         }
         maage_column_update_destroy(outgoing.column);
@@ -852,10 +852,10 @@ static maage_status server_tick(maage_server_runtime *runtime, double scheduled_
         server_record_action(runtime, 0);
         if (runtime->diagnostics)
             for (i = entities_before; i < maage_entities_count(maage_world_entities(runtime->world)); ++i)
-                maage_log_info("maage.server.latency", "drop_entity=%lu mutation_tick=%lu block=%d,%d,%d created_by=%.6f", maage_entities_at(maage_world_entities(runtime->world), i)->id, runtime->game.ticks, runtime->game.last_break.x, runtime->game.last_break.y, runtime->game.last_break.z, gameplay_finished);
+                MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "drop_entity=%lu mutation_tick=%lu block=%d,%d,%d created_by=%.6f", maage_entities_at(maage_world_entities(runtime->world), i)->id, runtime->game.ticks, runtime->game.last_break.x, runtime->game.last_break.y, runtime->game.last_break.z, gameplay_finished));
     }
     if (runtime->game.blocks_placed != placed) server_record_action(runtime, 1);
-    if (runtime->diagnostics && (intent.attack || intent.attack_pressed)) maage_log_info("maage.server.latency", "gameplay_tick=%lu command_sequence=%lu input_sequence=%lu scheduled_at=%.6f began_at=%.6f schedule_late_ms=%.3f input_schedule_ms=%.3f gameplay_ms=%.3f progress=%.6f cooldown=%u active=%d target=%d,%d,%d grounded=%d submerged=%d", runtime->game.ticks, runtime->gameplay_command_sequence, runtime->input_sequence, scheduled_at, began, (began - scheduled_at) * 1000, runtime->input_sequence != runtime->consumed_input_sequence && runtime->input_received_at >= 0 ? (began - runtime->input_received_at) * 1000 : -1, (gameplay_finished - began) * 1000, runtime->game.break_progress, runtime->game.break_delay, runtime->game.breaking_active, runtime->game.target.x, runtime->game.target.y, runtime->game.target.z, runtime->player.grounded, maage_player_submerged(&runtime->player, runtime->world));
+    if (runtime->diagnostics && (intent.attack || intent.attack_pressed)) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "gameplay_tick=%lu command_sequence=%lu input_sequence=%lu scheduled_at=%.6f began_at=%.6f schedule_late_ms=%.3f input_schedule_ms=%.3f gameplay_ms=%.3f progress=%.6f cooldown=%u active=%d target=%d,%d,%d grounded=%d submerged=%d", runtime->game.ticks, runtime->gameplay_command_sequence, runtime->input_sequence, scheduled_at, began, (began - scheduled_at) * 1000, runtime->input_sequence != runtime->consumed_input_sequence && runtime->input_received_at >= 0 ? (began - runtime->input_received_at) * 1000 : -1, (gameplay_finished - began) * 1000, runtime->game.break_progress, runtime->game.break_delay, runtime->game.breaking_active, runtime->game.target.x, runtime->game.target.y, runtime->game.target.z, runtime->player.grounded, maage_player_submerged(&runtime->player, runtime->world)));
     runtime->consumed_input_sequence = runtime->input_sequence;
     runtime->sneaking = intent.descend && !runtime->game.flying && runtime->game.health != 0;
     /* Effects describe outcomes already resolved by authoritative gameplay.
@@ -892,7 +892,7 @@ static maage_status server_tick(maage_server_runtime *runtime, double scheduled_
     server_predictions(runtime);
     world_began = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
     result = maage_world_tick(runtime->world);
-    if (runtime->diagnostics && intent.attack) maage_log_info("maage.server.latency", "gameplay_tick=%lu post_gameplay_ms=%.3f world_tick_ms=%.3f", runtime->game.ticks, (world_began - gameplay_finished) * 1000, (maage_time_monotonic_seconds() - world_began) * 1000);
+    if (runtime->diagnostics && intent.attack) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "gameplay_tick=%lu post_gameplay_ms=%.3f world_tick_ms=%.3f", runtime->game.ticks, (world_began - gameplay_finished) * 1000, (maage_time_monotonic_seconds() - world_began) * 1000));
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_TICK);
     ++runtime->tick;
     result = server_emit_motion(runtime, trace);
@@ -1095,7 +1095,7 @@ maage_status maage_server_runtime_create(const maage_server_config *config, maag
         return MAAGE_STATUS_TRACE(trace, server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE), MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_CREATE);
     runtime = (maage_server_runtime *) calloc(1, sizeof(*runtime));
     if (!runtime) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
-    runtime->diagnostics = getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
+    runtime->diagnostics = maage_log_enabled("maage.server.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     runtime->config = *config;
     runtime->instance_root = server_copy(config->instance_root);
     runtime->world_id = server_copy(config->world_id);

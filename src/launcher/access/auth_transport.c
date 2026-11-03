@@ -61,7 +61,7 @@ static int maage_auth_network(void) {
 #ifdef _WIN32
     WSADATA data;
     int result = WSAStartup(MAKEWORD(2, 2), &data);
-    if (result) maage_log_verbose("maage.launcher.access.callback", "Cannot initialize loopback transport (OS error=%d).", result);
+    if (result) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.callback", maage_log_debug("maage.launcher.access.callback", "Cannot initialize loopback transport (OS error=%d).", result));
     return result == 0;
 #else
     return 1;
@@ -194,7 +194,7 @@ static maage_status maage_auth_http_reply(maage_auth_listener *listener, int sta
         if (count <= 0) break;
         sent += (size_t) count;
     }
-    if (sent != size) maage_log_verbose("maage.launcher.access.callback", "Browser callback page could not be fully delivered; authorization result unchanged.");
+    if (sent != size) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.callback", maage_log_debug("maage.launcher.access.callback", "Browser callback page could not be fully delivered; authorization result unchanged."));
     maage_auth_client_close(listener);
     return maage_status_make(sent == size ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_WRITE, 0);
 }
@@ -354,7 +354,7 @@ maage_status maage_auth_receive(maage_auth_listener *listener, char *query, size
         return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_READ, 0);
     }
     if (!accepted) {
-        maage_log_verbose("maage.launcher.access.callback", "Rejected loopback request: %s (HTTP %d); authorization remains pending.", reason, status);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.access.callback", maage_log_debug("maage.launcher.access.callback", "Rejected loopback request: %s (HTTP %d); authorization remains pending.", reason, status));
         maage_auth_http_reply(listener, status);
         return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_READ, 0);
     }

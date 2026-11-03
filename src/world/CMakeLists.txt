@@ -1,5 +1,5 @@
 find_package(ZLIB 1.2.3 REQUIRED)
-add_library(maage_world STATIC content.c registry_policy.c presentation.c fluids.c block_geometry.c containers.c creative.c sounds.c blocks.c chunk.c world.c raycast.c mesh.c player.c items.c recipes.c crafting.c smelting.c entities.c gameplay.c
+add_library(maage_world STATIC content.c content_presentation.c registry_policy.c presentation.c fluids.c block_geometry.c containers.c creative.c sounds.c blocks.c chunk.c world.c raycast.c mesh.c player.c items.c recipes.c crafting.c smelting.c entities.c gameplay.c
     seed.c biomes.c generation.c lighting.c store.c region_store.c environment.c random_ticks.c support.c)
 add_library(MaaGE::World ALIAS maage_world)
 maage_configure_portable_target(maage_world)

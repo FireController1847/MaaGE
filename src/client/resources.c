@@ -1,5 +1,4 @@
 #include "resources.h"
-#include "../application/content_modules.h"
 #include "maage/minecraft_assets.h"
 #include "maage/storage.h"
 #include "maage/log.h"
@@ -46,11 +45,11 @@ done:
 }
 
 static int maage_client_texture_source(const maage_client_resources *resources, maage_texture_id texture) {
-    const maage_texture_definition *definition = maage_presentation_texture(maage_content_presentation(resources->catalog), texture);
+    const maage_texture_definition *definition = maage_presentation_texture(maage_content_presentation(resources->content), texture);
     return definition && definition->source != MAAGE_CONTENT_ID_INVALID ? (int) definition->source : -1;
 }
 static const char *maage_client_source_name(const maage_client_resources *resources, unsigned long source) {
-    return maage_presentation_source(maage_content_presentation(resources->catalog), source);
+    return maage_presentation_source(maage_content_presentation(resources->content), source);
 }
 
 static void maage_client_colormap(const maage_image *map, double temperature, double rainfall, float color[3]) {
@@ -88,7 +87,10 @@ static int maage_client_animation_order(const void *left, const void *right) {
     return a->texture < b->texture ? -1 : a->texture != b->texture;
 }
 
-maage_status maage_client_resources_load(const char *application_data, const maage_content_config *registration, maage_client_resources *resources, maage_biome_registry *biomes, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace) {
+static maage_status maage_client_content_resolve(void *, const maage_block_state_definition *, maage_block_face_definition[MAAGE_FACE_COUNT], float[4]);
+static maage_status maage_client_content_resolve_appearance(void *, const maage_block_face_definition *, maage_block_face_definition *);
+
+maage_status maage_client_resources_load(const char *application_data, const maage_content *content, maage_client_resources *resources, const maage_skin_reference *player, maage_client_resource_checkpoint checkpoint, void *context, maage_status_trace *trace) {
     static const float default_grass[3] = {0.50f, 0.72f, 0.35f};
     static const float default_foliage[3] = {0.35f, 0.66f, 0.30f};
     maage_image *sources = NULL, missing;
@@ -101,43 +103,24 @@ maage_status maage_client_resources_load(const char *application_data, const maa
     const maage_image *selected;
     maage_biome_definition *biome;
     maage_status result;
-    maage_content_config catalog_config;
+    maage_content_view_config view_config;
     maage_status_trace source_trace, recovered_trace;
     char path[MAAGE_PATH_CAPACITY];
     unsigned char *pixel, *source;
     int i, j, x, y, sx, sy, edge = 16, tile, source_index, stage, ok = 0;
     int columns = 32, rows, tile_x, tile_y, skin_y;
     int frame, animation_y, frame_edge, frame_tile, custom_height = 0, custom_x, custom_y, custom_frames, shelf_x, shelf_y, shelf_height;
-    if (!resources || !registration || !biomes || biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !resources ? 1 : 2);
+    if (!resources || !content || !maage_block_registry_is_finalized(maage_content_blocks(content))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !resources ? 1 : 2);
     memset(&missing, 0, sizeof(missing));
     memset(resources, 0, sizeof(*resources));
     resources->load_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD_TEXTURE, 0);
     resources->recovery_status = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_ATLAS, 0);
-    catalog_config = *registration;
-    catalog_config.execution.side = MAAGE_EXECUTION_CLIENT;
-    catalog_config.execution.capabilities = MAAGE_EXECUTION_PRESENTATION;
-    catalog_config.catalog_only = 1;
-    catalog_config.identity_peer = NULL;
-    result = maage_content_create(&catalog_config, &resources->catalog, trace);
-    if (maage_status_failed(result)) {
-        resources->recovery_status = result;
-        goto done;
-    }
-    /* Copy every composed biome for Client-only tint resolution; module order
-     * and persistent names retain the catalog's authoritative numeric IDs. */
-    for (i = 0; (size_t) i < maage_biome_registry_count(maage_content_biomes(resources->catalog)); ++i) {
-        const maage_biome_registry *registered = maage_content_biomes(resources->catalog);
-        tinted = *maage_biome_registry_get(registered, (maage_biome_id) i);
-        result = maage_biome_registry_register(biomes, maage_biome_registry_name(registered, (maage_biome_id) i), &tinted);
-        if (maage_status_failed(result) || tinted.id != (maage_biome_id) i) {
-            resources->recovery_status = maage_status_failed(result) ? result : maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_REGISTER, 0);
-            goto done;
-        }
-    }
-    catalog = maage_content_presentation(resources->catalog);
+    resources->content = content;
+    if (maage_biome_registry_count(maage_content_biomes(content)) > (size_t) - 1 / sizeof(*resources->biomes)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, 0);
+    resources->biomes = (maage_biome_definition *) calloc(maage_biome_registry_count(maage_content_biomes(content)), sizeof(*resources->biomes));
+    if (!resources->biomes) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_LOAD, 0);
+    catalog = maage_content_presentation(resources->content);
     bindings = maage_presentation_get_bindings(catalog);
-    resources->modules = registration->modules;
-    resources->module_count = registration->module_count;
     resources->texture_count = maage_presentation_texture_count(catalog);
     resources->source_count = maage_presentation_source_count(catalog);
     if (resources->texture_count > INT_MAX - MAAGE_CLIENT_BREAK_STAGES - 31 || resources->source_count > INT_MAX || resources->texture_count > (size_t) - 1 / sizeof(*regions) || resources->texture_count > (size_t) - 1 / sizeof(*resources->uv) || resources->source_count > (size_t) - 1 / sizeof(*sources) || resources->source_count > (size_t) - 1 / sizeof(*resources->source_results)) {
@@ -220,17 +203,17 @@ maage_status maage_client_resources_load(const char *application_data, const maa
             maage_client_resource_failure(resources, i, result, &source_trace);
             if (resources->failed_resources == 1) recovered_trace = source_trace;
         } else
-            maage_log_verbose("maage.client.resources", "Loaded %s (%dx%d).", maage_client_source_name(resources, (unsigned long) i), sources[i].width, sources[i].height);
+            MAAGE_LOG_DEBUG_EVENT("maage.client.resources", maage_log_debug("maage.client.resources", "Loaded %s (%dx%d).", maage_client_source_name(resources, (unsigned long) i), sources[i].width, sources[i].height));
     }
     if (sources[bindings->grass].pixels) maage_client_colormap(&sources[bindings->grass], 0.5, 1.0, resources->inventory_grass_color);
     else
         memcpy(resources->inventory_grass_color, default_grass, sizeof(default_grass));
-    for (i = 0; (size_t) i < maage_biome_registry_count(biomes); ++i) {
-        if (!maage_biome_registry_get(biomes, (maage_biome_id) i)) {
+    for (i = 0; (size_t) i < maage_biome_registry_count(maage_content_biomes(content)); ++i) {
+        if (!maage_biome_registry_get(maage_content_biomes(content), (maage_biome_id) i)) {
             resources->recovery_status = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
             goto done;
         }
-        tinted = *maage_biome_registry_get(biomes, (maage_biome_id) i);
+        tinted = *maage_biome_registry_get(maage_content_biomes(content), (maage_biome_id) i);
         biome = &tinted;
         /* Absent optional colormaps use fixed, bounded green presentation tints. */
         if (sources[bindings->grass].pixels) maage_client_colormap(&sources[bindings->grass], biome->temperature, biome->rainfall, biome->grass_color);
@@ -239,11 +222,7 @@ maage_status maage_client_resources_load(const char *application_data, const maa
         if (sources[bindings->foliage].pixels) maage_client_colormap(&sources[bindings->foliage], biome->temperature, biome->rainfall, biome->foliage_color);
         else
             memcpy(biome->foliage_color, default_foliage, sizeof(default_foliage));
-        result = maage_biome_registry_update(biomes, biome);
-        if (maage_status_failed(result)) {
-            resources->recovery_status = result;
-            goto done;
-        }
+        resources->biomes[i] = tinted;
     }
     resources->recovery_status = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
     rows = ((int) resources->texture_count + MAAGE_CLIENT_BREAK_STAGES + columns - 1) / columns;
@@ -404,7 +383,18 @@ done:
         maage_image_destroy(&resources->image);
         memset(&resources->atlas, 0, sizeof(resources->atlas));
     }
+    if (ok) {
+        memset(&view_config, 0, sizeof(view_config));
+        view_config.resolver = maage_client_content_resolve;
+        view_config.appearance_resolver = maage_client_content_resolve_appearance;
+        view_config.context = resources;
+        view_config.biomes = resources->biomes;
+        view_config.biome_count = maage_biome_registry_count(maage_content_biomes(content));
+        resources->recovery_status = maage_content_view_create(content, &view_config, &resources->view, trace);
+        if (maage_status_failed(resources->recovery_status)) ok = 0;
+    }
     if (!ok) return MAAGE_STATUS_PROPAGATE(trace, resources->recovery_status, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE);
+    MAAGE_LOG_DEBUG_EVENT("maage.client.resources", maage_log_debug("maage.client.resources", "LOAD prepared %lu sources / %lu textures; atlas=%dx%d.", (unsigned long) resources->source_count, (unsigned long) resources->texture_count, resources->atlas.width, resources->atlas.height));
     if (trace && resources->failed_resources) *trace = recovered_trace;
     return MAAGE_STATUS_PROPAGATE(trace, maage_status_make(resources->failed_resources ? MAAGE_STATUS_PARTIAL : MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
 }
@@ -412,7 +402,7 @@ done:
 /* Presentation is resolved once from the Client-owned atlas. All block and
  * state identity, geometry, gameplay and persistence fields are World-owned. */
 static int maage_client_texture_available(const maage_client_resources *resources, maage_texture_id id) {
-    const maage_texture_definition *texture = maage_presentation_texture(maage_content_presentation(resources->catalog), id);
+    const maage_texture_definition *texture = maage_presentation_texture(maage_content_presentation(resources->content), id);
     return texture && ((texture->source < resources->source_count && !maage_status_failed(resources->source_results[texture->source])) || (texture->fallback < resources->source_count && !maage_status_failed(resources->source_results[texture->fallback])));
 }
 static maage_status maage_client_content_resolve_appearance(void *context, const maage_block_face_definition *logical, maage_block_face_definition *face) {
@@ -423,7 +413,7 @@ static maage_status maage_client_content_resolve_appearance(void *context, const
     if (face->texture_id >= resources->texture_count) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_RESOLVE, 0);
     memcpy(face->uv, resources->uv[face->texture_id], sizeof(face->uv));
     memcpy(face->animation, resources->texture_animation[face->texture_id], sizeof(face->animation));
-    texture = maage_presentation_texture(maage_content_presentation(resources->catalog), face->texture_id);
+    texture = maage_presentation_texture(maage_content_presentation(resources->content), face->texture_id);
     if (!texture || texture->source == MAAGE_CONTENT_ID_INVALID || maage_status_failed(resources->source_results[texture->source])) {
         face->tint_mode = face->overlay_tint_mode = 0;
         face->tint[0] = face->tint[1] = face->tint[2] = face->tint[3] = 1;
@@ -452,30 +442,6 @@ static maage_status maage_client_content_resolve(void *context, const maage_bloc
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
 }
 
-maage_status maage_client_content_create(const maage_client_resources *resources, const maage_biome_registry *biomes, maage_content **output, maage_status_trace *trace) {
-    maage_content_config config;
-    maage_status result;
-    if (output) *output = NULL;
-    if (!resources || !biomes || !output) return maage_status_make(
-        MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE,
-        !resources ? 0 : (!biomes ? 1 : 2));
-    if (!biomes->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
-    memset(&config, 0, sizeof(config));
-    config.execution.side = MAAGE_EXECUTION_CLIENT;
-    config.execution.capabilities = MAAGE_EXECUTION_PRESENTATION;
-    config.identity_peer = resources->catalog;
-    config.modules = resources->modules;
-    config.module_count = resources->module_count;
-    config.resolver = maage_client_content_resolve;
-    config.appearance_resolver = maage_client_content_resolve_appearance;
-    config.resolver_context = (void *) resources;
-    config.presentation_biomes = biomes;
-    result = maage_content_create(&config, output, trace);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE);
-    maage_log_info("maage.client.world", "Finalized %lu block types / %lu states; direct numeric runtime indexing.", (unsigned long) maage_block_registry_block_count(maage_content_blocks(*output)), (unsigned long) maage_block_registry_state_count(maage_content_blocks(*output)));
-    return result;
-}
-
 void maage_client_item_face_tint(const float grass_color[3], const maage_block_face_definition *face, unsigned int mode, float color[4]) {
     static const float foliage_color[3] = {72.0f / 255, 181.0f / 255, 24.0f / 255};
     int channel;
@@ -495,7 +461,8 @@ const maage_block_state_definition *maage_client_item_icon_state(const maage_blo
 maage_status maage_client_resources_destroy(maage_client_resources *resources) {
     if (!resources) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_image_destroy(&resources->image);
-    maage_content_destroy(resources->catalog);
+    maage_content_view_destroy(resources->view);
+    free(resources->biomes);
     free(resources->source_results);
     free(resources->uv);
     free(resources->texture_animation);
