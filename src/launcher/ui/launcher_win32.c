@@ -25,6 +25,8 @@
 #define MAAGE_UI_REMOVE 133
 #define MAAGE_UI_DEFAULT 134
 #define MAAGE_UI_OPEN_FOLDER 135
+#define MAAGE_UI_CANCEL_NEW 136
+#define MAAGE_UI_ACTIVE 137
 #define MAAGE_UI_CLIENTS 140
 #define MAAGE_UI_CLIENT_CHOICE 141
 #define MAAGE_UI_CLIENT_IMPORT 142
@@ -35,10 +37,12 @@
 typedef struct maage_launcher_win32 {
     maage_launcher_ui *state;
     HWND window, navigation[5], account, installation, list, name, arguments, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
+    HWND clients_label, clients_import, clients_replace, clients_remove, installations_label, list_hint, new_button, editor_heading, editor_hint, name_label, client_label, arguments_label;
+    HWND save_button, duplicate_button, remove_button, default_button, active_button, cancel_button, folder_button;
     maage_launcher_win32_style native;
     HBRUSH background, sidebar;
     unsigned revision, client_revision;
-    int result, updating, scroll[5], scrollbar_visible;
+    int result, updating, creating, previous_row, scroll[5], scrollbar_visible;
 } maage_launcher_win32;
 static void maage_ui_text(HWND control, const char *text) {
     wchar_t wide[MAAGE_PATH_CAPACITY];
@@ -53,13 +57,75 @@ static HWND maage_ui_label(maage_launcher_win32 *ui, int page, const wchar_t *ti
 static HWND maage_ui_button(maage_launcher_win32 *ui, int page, const wchar_t *title, int x, int y, int width, int id) {
     return maage_ui_control(ui, page, L"BUTTON", title, WS_TABSTOP | BS_PUSHBUTTON, x, y, width, 32, id);
 }
+
+/* Installation management uses a two-pane editor when space allows. On compact
+ * windows it stacks the panes and scrolls the content; the native list keeps its
+ * own keyboard, accessibility and selection behavior. All positions are 96-DPI. */
+static void maage_ui_installation_place(maage_launcher_win32 *ui, HWND control, int x, int y, int width, int height, int offset, int bottom) {
+    int shown_height, visible;
+    if (!control) return;
+    y -= offset;
+    shown_height = control == ui->list ? height : height > 36 ? 36 : height;
+    visible = y >= 78 && y + shown_height <= bottom;
+    if (control == ui->list) {
+        if (y < 78) {
+            height -= 78 - y;
+            y = 78;
+        }
+        if (y + height > bottom) height = bottom - y;
+        visible = height >= 48;
+    }
+    if (control == ui->cancel_button && !ui->creating) visible = 0;
+    if (control == ui->remove_button && ui->creating) visible = 0;
+    if (visible) MoveWindow(control, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y), maage_launcher_win32_scale(&ui->native, width), maage_launcher_win32_scale(&ui->native, height), TRUE);
+    ShowWindow(control, visible ? SW_SHOW : SW_HIDE);
+}
+
+static void maage_ui_installations_layout(maage_launcher_win32 *ui, int width, int height) {
+    int left = 198, full = width - 230, stacked = full < 680, bottom = height - 100;
+    int list_width = stacked ? full : full * 42 / 100;
+    int editor_x = stacked ? left : left + list_width + 24;
+    int editor_width = stacked ? full : full - list_width - 24;
+    int editor_y = stacked ? 560 : 206;
+    int offset = ui->scroll[MAAGE_PAGE_INSTALLATIONS], list_offset = stacked ? offset : 0;
+    int action_width = (editor_width - 20) / 3, secondary_width = (editor_width - 10) / 2;
+    int client_width = stacked ? (full - 20) / 3 : 182;
+    maage_ui_text(ui->list_hint, stacked ? "Select to edit, then scroll down." : "Select to edit; double-click to activate.");
+    maage_ui_installation_place(ui, ui->clients_label, left, 78, full, 26, offset, bottom);
+    maage_ui_installation_place(ui, ui->clients, left, 110, full, 240, offset, bottom);
+    maage_ui_installation_place(ui, ui->clients_import, left, 151, client_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->clients_replace, left + client_width + 10, 151, client_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->clients_remove, left + (ui->clients_replace ? 2 * (client_width + 10) : 0), 151, client_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->installations_label, left, 205, list_width - 120, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->new_button, left + list_width - 116, 205, 116, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->list_hint, left, 244, list_width, 28, offset, bottom);
+    maage_ui_installation_place(ui, ui->list, left, 280, list_width, stacked ? 235 : height > 680 ? height - 400 : 280, list_offset, bottom);
+    maage_ui_installation_place(ui, ui->editor_heading, editor_x, editor_y, editor_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->editor_hint, editor_x, editor_y + 38, editor_width, 42, offset, bottom);
+    maage_ui_installation_place(ui, ui->name_label, editor_x, editor_y + 88, editor_width, 24, offset, bottom);
+    maage_ui_installation_place(ui, ui->name, editor_x, editor_y + 112, editor_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->client_label, editor_x, editor_y + 158, editor_width, 24, offset, bottom);
+    maage_ui_installation_place(ui, ui->client_choice, editor_x, editor_y + 184, editor_width, 220, offset, bottom);
+    maage_ui_installation_place(ui, ui->arguments_label, editor_x, editor_y + 232, editor_width, 24, offset, bottom);
+    maage_ui_installation_place(ui, ui->arguments, editor_x, editor_y + 258, editor_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->save_button, editor_x, editor_y + 311, action_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->duplicate_button, editor_x + action_width + 10, editor_y + 311, action_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->remove_button, editor_x + 2 * (action_width + 10), editor_y + 311, action_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->cancel_button, editor_x + 2 * (action_width + 10), editor_y + 311, action_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->default_button, editor_x, editor_y + 353, secondary_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->active_button, editor_x + secondary_width + 10, editor_y + 353, secondary_width, 32, offset, bottom);
+    maage_ui_installation_place(ui, ui->folder_button, editor_x, editor_y + 396, editor_width < 245 ? editor_width : 245, 32, offset, bottom);
+    ListView_SetColumnWidth(ui->list, 0, maage_launcher_win32_scale(&ui->native, list_width - 132));
+    ListView_SetColumnWidth(ui->list, 1, maage_launcher_win32_scale(&ui->native, 120));
+}
+
 /* Only the main content scrolls. Sidebar navigation and the status footer
  * remain visible, even when a compact window needs additional page height. */
 static void maage_ui_layout(maage_launcher_win32 *ui) {
     RECT rect;
     SCROLLINFO scroll;
     unsigned i;
-    int width, height, x, y, w, h, center, page, narrow, virtual_height;
+    int width, height, x, y, w, h, center, page, narrow;
     int top = 78, bottom, content_bottom = 0, max_scroll, visible_scroll, visible;
     if (!ui->native.count) return;
     GetClientRect(ui->window, &rect);
@@ -67,9 +133,8 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
     height = MulDiv(rect.bottom, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
     page = (int) ui->state->page;
     narrow = width < 860;
-    virtual_height = height < 740 ? 740 : height;
     bottom = height - 100;
-    if (page == MAAGE_PAGE_INSTALLATIONS) content_bottom = virtual_height - 100 + (narrow ? 86 : 0);
+    if (page == MAAGE_PAGE_INSTALLATIONS) content_bottom = width - 230 < 680 ? 1000 : 635;
     else if (page == MAAGE_PAGE_SETTINGS) content_bottom = 566;
     else if (page == MAAGE_PAGE_ABOUT) content_bottom = 584;
     max_scroll = content_bottom - bottom;
@@ -100,10 +165,14 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
         w = c->width;
         h = c->height;
         visible = c->page < 0 || c->page == page;
-        if (y < 0) y += c->page == MAAGE_PAGE_INSTALLATIONS ? virtual_height : height;
+        if (c->page == MAAGE_PAGE_INSTALLATIONS) {
+            if (page != MAAGE_PAGE_INSTALLATIONS) ShowWindow(c->handle, SW_HIDE);
+            continue;
+        }
+        if (y < 0) y += height;
         if (x < 0) x += width;
         if (w < 0) w += width;
-        if (h < 0) h += c->page == MAAGE_PAGE_INSTALLATIONS ? virtual_height : height;
+        if (h < 0) h += height;
         if (c->page == MAAGE_PAGE_PLAY && c->y >= 150) {
             x = center - w / 2;
             y = height / 2 + c->y - 285;
@@ -113,35 +182,14 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
             y = 76;
             w = width - 335;
         } else if (c->page == MAAGE_PAGE_PLAY && narrow && c->y == 25 && c->x < 0) y = 76;
-        if (c->page == MAAGE_PAGE_INSTALLATIONS && narrow) {
-            if (c->y == 150 && c->x >= 592) {
-                x = 198;
-                y += 44;
-            } else if (c->y >= 198 || c->y < 0) y += 44;
-            if (c->y == -185) {
-                int column = (c->x - 198) / 128;
-                x = 198 + (column < 3 ? column * 115 : (column - 3) * 135);
-                w = column == 4 ? 155 : column == 2 ? 120 : 110;
-                if (column >= 3) y += 42;
-            }
-            if (c->y == -140) y += 42;
-        }
         if (c->page >= MAAGE_PAGE_INSTALLATIONS && c->page == page && c->y != 25) {
             y -= ui->scroll[page];
-            /* Keep the scrolling page out of the fixed header and footer.
-             * The installations list can shrink while crossing either edge. */
-            if (c->handle == ui->list) {
-                if (y < top) {
-                    h -= top - y;
-                    y = top;
-                }
-                if (y + h > bottom) h = bottom - y;
-                if (h < 48) visible = 0;
-            } else if (y < top || y + (h > 36 ? 36 : h) > bottom) visible = 0;
+            if (y < top || y + (h > 36 ? 36 : h) > bottom) visible = 0;
         }
         if (visible) MoveWindow(c->handle, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y), maage_launcher_win32_scale(&ui->native, w), maage_launcher_win32_scale(&ui->native, h), TRUE);
         ShowWindow(c->handle, visible ? SW_SHOW : SW_HIDE);
     }
+    if (page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_layout(ui, width, height);
     for (i = 0; i < 5; ++i)
         SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned) page ? BST_CHECKED : BST_UNCHECKED, 0);
     InvalidateRect(ui->window, NULL, TRUE);
@@ -149,8 +197,11 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
 static int maage_ui_selected(maage_launcher_win32 *ui) {
     return ListView_GetNextItem(ui->list, -1, LVNI_SELECTED);
 }
-static void maage_ui_installations_reload(maage_launcher_win32 *ui) {
+static void maage_ui_client_choices(maage_launcher_win32 *ui, int row);
+static void maage_ui_editor_bind(maage_launcher_win32 *ui);
+static void maage_ui_installations_reload(maage_launcher_win32 *ui, int preferred) {
     unsigned i;
+    int active = -1, row;
     wchar_t wide[160];
     LVITEMW item;
     ui->updating = 1;
@@ -165,20 +216,23 @@ static void maage_ui_installations_reload(maage_launcher_win32 *ui) {
         item.pszText = wide;
         SendMessageW(ui->list, LVM_INSERTITEMW, 0, (LPARAM) &item);
         item.iSubItem = 1;
-        {
-            wchar_t summary[384];
-            MultiByteToWideChar(CP_UTF8, 0, maage_launcher_installation_client(ui->state, i), -1, summary, 384);
-            item.pszText = summary;
-            SendMessageW(ui->list, LVM_SETITEMTEXTW, i, (LPARAM) &item);
-        }
-        item.iSubItem = 2;
-        item.pszText = entry->id == ui->state->default_id ? L"Default" : entry->id == ui->state->selected ? L"Selected"
-                                                                                                          : L"";
+        item.pszText = entry->id == ui->state->selected && entry->id == ui->state->default_id ? L"Active / Default"
+                       : entry->id == ui->state->selected ? L"Active"
+                       : entry->id == ui->state->default_id ? L"Default" : L"";
         SendMessageW(ui->list, LVM_SETITEMTEXTW, i, (LPARAM) &item);
         SendMessageW(ui->installation, CB_ADDSTRING, 0, (LPARAM) wide);
-        if (entry->id == ui->state->selected) SendMessageW(ui->installation, CB_SETCURSEL, i, 0);
+        if (entry->id == ui->state->selected) {
+            active = (int) i;
+            SendMessageW(ui->installation, CB_SETCURSEL, i, 0);
+        }
+    }
+    if (!ui->creating && ui->state->count) {
+        row = preferred >= 0 && (unsigned) preferred < ui->state->count ? preferred : active >= 0 ? active : 0;
+        ListView_SetItemState(ui->list, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_EnsureVisible(ui->list, row, FALSE);
     }
     ui->updating = 0;
+    if (!ui->creating) maage_ui_editor_bind(ui);
 }
 static void maage_ui_client_choices(maage_launcher_win32 *ui, int row) {
     unsigned i;
@@ -196,6 +250,82 @@ static void maage_ui_client_choices(maage_launcher_win32 *ui, int row) {
         if (!strcmp(selected, b->id)) SendMessageW(ui->client_choice, CB_SETCURSEL, i + 1, 0);
     }
 }
+
+/* Highlighted row means editing, not activation. Activation and default are
+ * separate persisted choices and are never changed just by inspecting a row. */
+static void maage_ui_enabled(HWND control, int enabled) {
+    if (IsWindowEnabled(control) != !!enabled) EnableWindow(control, enabled);
+}
+
+static void maage_ui_editor_status(maage_launcher_win32 *ui) {
+    int row = maage_ui_selected(ui);
+    int editing = !ui->creating && row >= 0 && (unsigned) row < ui->state->count;
+    int busy = ui->state->client_job != NULL;
+    const char *hint = "Select a row on the left to edit its configuration.";
+    if (ui->creating) {
+        maage_ui_text(ui->editor_heading, "Create installation");
+        hint = "Enter a name and optional Client build, then choose Create.";
+    } else if (editing) {
+        maage_installation *entry = &ui->state->installations[row];
+        maage_ui_text(ui->editor_heading, "Edit installation");
+        if (entry->id == ui->state->selected && entry->id == ui->state->default_id) hint = "Active for Play and Default. Save changes before switching rows.";
+        else if (entry->id == ui->state->selected) hint = "Active for Play. Save changes before switching rows.";
+        else if (entry->id == ui->state->default_id) hint = "Default installation. Not active for Play. Save changes before switching rows.";
+        else hint = "Selected for editing only. Use Make Active for Play to launch this one.";
+    } else maage_ui_text(ui->editor_heading, "Select an installation");
+    maage_ui_text(ui->editor_hint, hint);
+    maage_ui_text(ui->save_button, ui->creating ? "Create" : "Save Changes");
+    maage_ui_enabled(ui->name, (editing || ui->creating) && !busy);
+    maage_ui_enabled(ui->client_choice, (editing || ui->creating) && !busy);
+    maage_ui_enabled(ui->arguments, (editing || ui->creating) && !busy);
+    maage_ui_enabled(ui->new_button, !busy && !ui->creating);
+    maage_ui_enabled(ui->save_button, (editing || ui->creating) && !busy);
+    maage_ui_enabled(ui->duplicate_button, editing && !busy);
+    maage_ui_enabled(ui->remove_button, editing && ui->state->count > 1 && !busy);
+    maage_ui_enabled(ui->default_button, editing && ui->state->installations[row].id != ui->state->default_id && !busy);
+    maage_ui_enabled(ui->active_button, editing && ui->state->installations[row].id != ui->state->selected && !busy);
+    maage_ui_enabled(ui->folder_button, editing);
+    maage_ui_enabled(ui->cancel_button, ui->creating);
+}
+
+
+/* A role change must not erase edits currently staged in the detail pane. */
+static void maage_ui_installations_roles(maage_launcher_win32 *ui) {
+    unsigned i;
+    int active = -1;
+    LVITEMW item;
+    memset(&item, 0, sizeof(item));
+    ui->updating = 1;
+    for (i = 0; i < ui->state->count; ++i) {
+        maage_installation *entry = &ui->state->installations[i];
+        item.iItem = (int) i;
+        item.iSubItem = 1;
+        item.pszText = entry->id == ui->state->selected && entry->id == ui->state->default_id ? L"Active / Default"
+                       : entry->id == ui->state->selected ? L"Active"
+                       : entry->id == ui->state->default_id ? L"Default" : L"";
+        SendMessageW(ui->list, LVM_SETITEMTEXTW, i, (LPARAM) &item);
+        if (entry->id == ui->state->selected) active = (int) i;
+    }
+    if (active >= 0) SendMessageW(ui->installation, CB_SETCURSEL, active, 0);
+    ui->updating = 0;
+    maage_ui_editor_status(ui);
+}
+
+static void maage_ui_editor_bind(maage_launcher_win32 *ui) {
+    int row = maage_ui_selected(ui);
+    if (ui->creating) return;
+    if (row >= 0 && (unsigned) row < ui->state->count) {
+        maage_ui_text(ui->name, ui->state->installations[row].name);
+        maage_ui_text(ui->arguments, ui->state->installations[row].arguments);
+    } else {
+        maage_ui_text(ui->name, "");
+        maage_ui_text(ui->arguments, "");
+        row = -1;
+    }
+    maage_ui_client_choices(ui, row);
+    maage_ui_editor_status(ui);
+}
+
 static void maage_ui_refresh(maage_launcher_win32 *ui) {
     maage_launcher_ui *state = ui->state;
     unsigned i;
@@ -246,8 +376,8 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
         }
         SendMessageW(ui->clients, CB_SETCURSEL, 0, 0);
         ui->client_revision = state->client_revision;
-        maage_ui_client_choices(ui, maage_ui_selected(ui));
-        maage_ui_installations_reload(ui);
+        maage_ui_installations_reload(ui, maage_ui_selected(ui));
+        if (ui->creating) maage_ui_client_choices(ui, -1);
     }
 #if MAAGE_LAUNCHER_DEVELOPMENT
     if (state->client_confirmation) {
@@ -272,8 +402,7 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
     maage_ui_text(ui->account_status, state->account_status);
     maage_ui_text(ui->error, state->error);
     maage_ui_text(ui->repair, state->accounts.allowed ? "Repair Assets..." : "Verify Minecraft Access...");
-    for (i = 1; i < 6; ++i)
-        EnableWindow(GetDlgItem(ui->window, MAAGE_UI_NEW + (int) i), maage_ui_selected(ui) >= 0);
+    maage_ui_editor_status(ui);
 }
 static void maage_ui_open_installation(maage_launcher_win32 *ui) {
     int row = maage_ui_selected(ui);
@@ -282,28 +411,67 @@ static void maage_ui_open_installation(maage_launcher_win32 *ui) {
     if (row < 0 || maage_status_failed(maage_launcher_installation_directory(ui->state, (unsigned) row, path))) return;
     if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, MAAGE_PATH_CAPACITY) || (INT_PTR) ShellExecuteW(ui->window, L"open", wide, NULL, NULL, SW_SHOWNORMAL) <= 32) strcpy(ui->state->error, "Windows could not open the installation folder in File Explorer.");
 }
+
 static void maage_ui_installation_action(maage_launcher_win32 *ui, int id) {
-    int row = maage_ui_selected(ui);
+    int row = maage_ui_selected(ui), preferred = row, creating = ui->creating;
     wchar_t wide[128];
     char name[512];
     wchar_t wide_arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY];
     char arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY], client_id[65];
     const char *client = "";
     LRESULT selected;
-    if (id != MAAGE_UI_NEW && row < 0) return;
+    maage_status result;
+    if (id == MAAGE_UI_NEW) {
+        ui->previous_row = row;
+        ui->creating = 1;
+        ui->updating = 1;
+        ListView_SetItemState(ui->list, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+        ui->updating = 0;
+        maage_ui_text(ui->name, "New Installation");
+        maage_ui_text(ui->arguments, "");
+        maage_ui_client_choices(ui, -1);
+        maage_ui_editor_status(ui);
+        ui->scroll[MAAGE_PAGE_INSTALLATIONS] = 470;
+        maage_ui_layout(ui);
+        SetFocus(ui->name);
+        SendMessageW(ui->name, EM_SETSEL, 0, -1);
+        return;
+    }
+    if (id == MAAGE_UI_CANCEL_NEW) {
+        if (!ui->creating) return;
+        ui->creating = 0;
+        ui->scroll[MAAGE_PAGE_INSTALLATIONS] = 0;
+        maage_ui_installations_reload(ui, ui->previous_row);
+        maage_ui_layout(ui);
+        return;
+    }
+    if (id == MAAGE_UI_ACTIVE) {
+        if (row < 0 || creating) return;
+        result = maage_launcher_installation_select(ui->state, (unsigned) row);
+        if (!maage_status_failed(result)) maage_ui_installations_roles(ui);
+        maage_ui_refresh(ui);
+        return;
+    }
+    if ((!creating && row < 0) || (creating && id != MAAGE_UI_EDIT)) return;
     if (id == MAAGE_UI_REMOVE) {
-        if (MessageBoxW(ui->window, L"Remove this MaaGE instance? Its gameplay folder will be archived, preserving worlds and private files. Shared resources and accounts are preserved.", L"Remove Installation", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) maage_launcher_installation_remove(ui->state, (unsigned) row);
-    } else if (id == MAAGE_UI_DEFAULT) maage_launcher_installation_default(ui->state, (unsigned) row);
+        if (MessageBoxW(ui->window, L"Remove this MaaGE instance? Its gameplay folder will be archived, preserving worlds and private files. Shared resources and accounts are preserved.", L"Remove Installation", MB_OKCANCEL | MB_ICONQUESTION) != IDOK) return;
+        result = maage_launcher_installation_remove(ui->state, (unsigned) row);
+        if ((unsigned) preferred >= ui->state->count) preferred = (int) ui->state->count - 1;
+    } else if (id == MAAGE_UI_DEFAULT) result = maage_launcher_installation_default(ui->state, (unsigned) row);
     else {
         GetWindowTextW(ui->name, wide, 128);
-        WideCharToMultiByte(CP_UTF8, 0, wide, -1, name, sizeof(name), NULL, NULL);
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, name, sizeof(name), NULL, NULL)) {
+            strcpy(ui->state->error, "Installation name must contain valid UTF-8.");
+            maage_ui_refresh(ui);
+            return;
+        }
         if (id == MAAGE_UI_DUPLICATE) {
             strcpy(name, ui->state->installations[row].name);
             strcat(name, " Copy");
         }
         selected = SendMessageW(ui->client_choice, CB_GETCURSEL, 0, 0);
         if (selected > 0 && (unsigned) selected <= ui->state->clients->count) client = ui->state->clients->builds[selected - 1].id;
-        if (id == MAAGE_UI_DUPLICATE && row >= 0) client = ui->state->installations[row].client;
+        if (id == MAAGE_UI_DUPLICATE) client = ui->state->installations[row].client;
         GetWindowTextW(ui->arguments, wide_arguments, MAAGE_INSTANCE_ARGUMENTS_CAPACITY);
         if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_arguments, -1, arguments, sizeof(arguments), NULL, NULL)) {
             strcpy(ui->state->error, "Client arguments must be valid UTF-8 within 4095 bytes.");
@@ -312,9 +480,16 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id) {
         }
         if (id == MAAGE_UI_DUPLICATE) strcpy(arguments, ui->state->installations[row].arguments);
         strcpy(client_id, client);
-        maage_launcher_installation_write(ui->state, id == MAAGE_UI_EDIT ? row : -1, name, client_id, arguments);
+        result = maage_launcher_installation_write(ui->state, id == MAAGE_UI_EDIT && !creating ? row : -1, name, client_id, arguments);
+        if (id == MAAGE_UI_DUPLICATE || creating) preferred = (int) ui->state->count - 1;
     }
-    maage_ui_installations_reload(ui);
+    if (!maage_status_failed(result)) {
+        ui->creating = 0;
+        if (creating) ui->scroll[MAAGE_PAGE_INSTALLATIONS] = 0;
+        if (id == MAAGE_UI_DEFAULT) maage_ui_installations_roles(ui);
+        else maage_ui_installations_reload(ui, preferred);
+        if (creating) maage_ui_layout(ui);
+    }
     maage_ui_refresh(ui);
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
@@ -358,9 +533,6 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_DPICHANGED: {
         maage_status result = maage_launcher_win32_dpi_changed(&ui->native, wparam, lparam);
         if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", result, "Could not update Launcher DPI.");
-        ListView_SetColumnWidth(ui->list, 0, maage_launcher_win32_scale(&ui->native, 245));
-        ListView_SetColumnWidth(ui->list, 1, maage_launcher_win32_scale(&ui->native, 260));
-        ListView_SetColumnWidth(ui->list, 2, maage_launcher_win32_scale(&ui->native, 100));
         maage_ui_layout(ui);
         return 0;
     }
@@ -467,10 +639,10 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             ui->revision = 0;
         }
         if (id == MAAGE_UI_INSTALLATION && event == CBN_SELCHANGE && !ui->updating) {
-            maage_launcher_installation_select(ui->state, (unsigned) SendMessageW(ui->installation, CB_GETCURSEL, 0, 0));
-            maage_ui_installations_reload(ui);
+            maage_status result = maage_launcher_installation_select(ui->state, (unsigned) SendMessageW(ui->installation, CB_GETCURSEL, 0, 0));
+            if (!maage_status_failed(result)) maage_ui_installations_roles(ui);
         }
-        if (id >= MAAGE_UI_NEW && id <= MAAGE_UI_DEFAULT) maage_ui_installation_action(ui, id);
+        if ((id >= MAAGE_UI_NEW && id <= MAAGE_UI_DEFAULT) || id == MAAGE_UI_CANCEL_NEW || id == MAAGE_UI_ACTIVE) maage_ui_installation_action(ui, id);
         if (id == MAAGE_UI_OPEN_FOLDER) maage_ui_open_installation(ui);
         if (id == MAAGE_UI_VERIFY && ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
         if (id == MAAGE_UI_PROJECT && (INT_PTR) ShellExecuteW(window, L"open", L"https://github.com/FireController1847/MaaGE", NULL, NULL, SW_SHOWNORMAL) <= 32) strcpy(ui->state->error, "Windows could not open the project link in your browser.");
@@ -484,14 +656,20 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     }
     case WM_NOTIFY:
         if (((NMHDR *) lparam)->code == NM_CUSTOMDRAW) return maage_launcher_win32_button(&ui->native, lparam);
-        if (((NMHDR *) lparam)->hwndFrom == ui->list && ((NMHDR *) lparam)->code == LVN_ITEMCHANGED && !ui->updating) {
+        if (((NMHDR *) lparam)->hwndFrom == ui->list && !ui->updating) {
             int row = maage_ui_selected(ui);
-            if (row >= 0) {
-                maage_ui_text(ui->name, ui->state->installations[row].name);
-                maage_ui_text(ui->arguments, ui->state->installations[row].arguments);
-                maage_ui_client_choices(ui, row);
+            if (((NMHDR *) lparam)->code == NM_DBLCLK && row >= 0 && !ui->creating) {
+                maage_ui_installation_action(ui, MAAGE_UI_ACTIVE);
+                return 0;
             }
-            maage_ui_refresh(ui);
+            if (((NMHDR *) lparam)->code == LVN_ITEMCHANGED) {
+                if (ui->creating && row >= 0) {
+                    ui->creating = 0;
+                    maage_ui_layout(ui);
+                }
+                maage_ui_editor_bind(ui);
+                maage_ui_refresh(ui);
+            }
         }
         return 0;
     case WM_MEASUREITEM:
@@ -581,42 +759,47 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
     SetWindowLongPtrW(control, GWL_STYLE, GetWindowLongPtrW(control, GWL_STYLE) | SS_CENTER);
     maage_ui_label(&ui, 1, L"No announcements yet\nNews will appear here when a source is configured. For now, follow development on GitHub.", 198, 100, -230, 72);
     maage_ui_button(&ui, 1, L"Open MaaGE Project", 198, 188, 200, MAAGE_UI_PROJECT);
-    maage_ui_label(&ui, 2, L"Installed Clients", 198, 78, -230, 26);
+    ui.clients_label = maage_ui_label(&ui, 2, L"Installed Clients", 198, 78, -230, 26);
     ui.clients = maage_ui_control(&ui, 2, L"COMBOBOX", L"Installed Client builds", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 198, 110, -230, 240, MAAGE_UI_CLIENTS);
 #if MAAGE_LAUNCHER_DEVELOPMENT
-    maage_ui_button(&ui, 2, L"Import Local Client...", 198, 150, 200, MAAGE_UI_CLIENT_IMPORT);
-    maage_ui_button(&ui, 2, L"Replace Client...", 410, 150, 170, MAAGE_UI_CLIENT_REPLACE);
-    maage_ui_button(&ui, 2, L"Remove Client...", 592, 150, 170, MAAGE_UI_CLIENT_REMOVE);
+    ui.clients_import = maage_ui_button(&ui, 2, L"Import Local Client...", 198, 150, 200, MAAGE_UI_CLIENT_IMPORT);
+    ui.clients_replace = maage_ui_button(&ui, 2, L"Replace Client...", 410, 150, 170, MAAGE_UI_CLIENT_REPLACE);
+    ui.clients_remove = maage_ui_button(&ui, 2, L"Remove Client...", 592, 150, 170, MAAGE_UI_CLIENT_REMOVE);
 #else
-    maage_ui_button(&ui, 2, L"Remove Client...", 410, 150, 170, MAAGE_UI_CLIENT_REMOVE);
+    ui.clients_remove = maage_ui_button(&ui, 2, L"Remove Client...", 198, 150, 170, MAAGE_UI_CLIENT_REMOVE);
 #endif
-    maage_ui_label(&ui, 2, L"MaaGE Installations - shared Minecraft 1.7.10 resources", 198, 198, -230, 26);
-    ui.list = maage_ui_control(&ui, 2, WC_LISTVIEWW, L"MaaGE installations", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 230, -230, -650, MAAGE_UI_LIST);
-    ListView_SetExtendedListViewStyle(ui.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    ui.installations_label = maage_ui_label(&ui, 2, L"Installations", 198, 205, 250, 32);
+    SendMessageW(ui.installations_label, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
+    ui.new_button = maage_ui_button(&ui, 2, L"+ New", 198, 205, 116, MAAGE_UI_NEW);
+    ui.list_hint = maage_ui_label(&ui, 2, L"Select to edit; double-click to activate.", 198, 244, 320, 28);
+    ui.list = maage_ui_control(&ui, 2, WC_LISTVIEWW, L"MaaGE installations", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 280, 350, 330, MAAGE_UI_LIST);
+    ListView_SetExtendedListViewStyle(ui.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
     memset(&column, 0, sizeof(column));
     column.mask = LVCF_TEXT | LVCF_WIDTH;
-    column.pszText = L"Name";
-    column.cx = maage_launcher_win32_scale(&ui.native, 245);
+    column.pszText = L"Installation";
+    column.cx = maage_launcher_win32_scale(&ui.native, 220);
     SendMessageW(ui.list, LVM_INSERTCOLUMNW, 0, (LPARAM) &column);
-    column.pszText = L"Configuration";
-    column.cx = maage_launcher_win32_scale(&ui.native, 260);
+    column.pszText = L"Role";
+    column.cx = maage_launcher_win32_scale(&ui.native, 120);
     SendMessageW(ui.list, LVM_INSERTCOLUMNW, 1, (LPARAM) &column);
-    column.pszText = L"Status";
-    column.cx = maage_launcher_win32_scale(&ui.native, 100);
-    SendMessageW(ui.list, LVM_INSERTCOLUMNW, 2, (LPARAM) &column);
-    maage_ui_label(&ui, 2, L"Configuration name", 198, -385, 200, 26);
-    ui.name = maage_ui_control(&ui, 2, L"EDIT", L"New Installation", WS_TABSTOP | ES_AUTOHSCROLL, 198, -355, -230, 30, MAAGE_UI_NAME);
+    ui.editor_heading = maage_ui_label(&ui, 2, L"Edit installation", 540, 206, 470, 32);
+    SendMessageW(ui.editor_heading, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
+    ui.editor_hint = maage_ui_label(&ui, 2, L"", 540, 244, 470, 42);
+    ui.name_label = maage_ui_label(&ui, 2, L"Installation name", 540, 294, 400, 24);
+    ui.name = maage_ui_control(&ui, 2, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 540, 318, 470, 32, MAAGE_UI_NAME);
     SendMessageW(ui.name, EM_SETLIMITTEXT, 95, 0);
-    ui.client_choice = maage_ui_control(&ui, 2, L"COMBOBOX", L"Client build", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 198, -310, -230, 220, MAAGE_UI_CLIENT_CHOICE);
-    maage_ui_label(&ui, 2, L"Client CLI arguments (quote values containing spaces)", 198, -270, -230, 26);
-    ui.arguments = maage_ui_control(&ui, 2, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 198, -240, -230, 30, MAAGE_UI_ARGUMENTS);
+    ui.client_label = maage_ui_label(&ui, 2, L"Client build", 540, 364, 400, 24);
+    ui.client_choice = maage_ui_control(&ui, 2, L"COMBOBOX", L"Client build", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 540, 390, 470, 220, MAAGE_UI_CLIENT_CHOICE);
+    ui.arguments_label = maage_ui_label(&ui, 2, L"Client CLI arguments (quote values containing spaces)", 540, 438, 470, 24);
+    ui.arguments = maage_ui_control(&ui, 2, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 540, 464, 470, 32, MAAGE_UI_ARGUMENTS);
     SendMessageW(ui.arguments, EM_SETLIMITTEXT, MAAGE_INSTANCE_ARGUMENTS_CAPACITY - 1, 0);
-    {
-        const wchar_t *titles[] = {L"New", L"Save", L"Duplicate", L"Remove", L"Set as Default"};
-        for (i = 0; i < 5; ++i)
-            maage_ui_button(&ui, 2, titles[i], 198 + i * 128, -185, 118, MAAGE_UI_NEW + i);
-    }
-    maage_ui_button(&ui, 2, L"Open installation folder", 198, -140, 240, MAAGE_UI_OPEN_FOLDER);
+    ui.save_button = maage_ui_button(&ui, 2, L"Save Changes", 540, 517, 140, MAAGE_UI_EDIT);
+    ui.duplicate_button = maage_ui_button(&ui, 2, L"Duplicate", 690, 517, 140, MAAGE_UI_DUPLICATE);
+    ui.remove_button = maage_ui_button(&ui, 2, L"Remove", 840, 517, 140, MAAGE_UI_REMOVE);
+    ui.cancel_button = maage_ui_button(&ui, 2, L"Cancel", 840, 517, 140, MAAGE_UI_CANCEL_NEW);
+    ui.default_button = maage_ui_button(&ui, 2, L"Set as Default", 540, 559, 220, MAAGE_UI_DEFAULT);
+    ui.active_button = maage_ui_button(&ui, 2, L"Make Active for Play", 770, 559, 220, MAAGE_UI_ACTIVE);
+    ui.folder_button = maage_ui_button(&ui, 2, L"Open installation folder", 540, 602, 245, MAAGE_UI_OPEN_FOLDER);
     maage_ui_label(&ui, 3, L"Launcher", 198, 80, 250, 26);
     maage_ui_label(&ui, 3, L"Startup opens Play after account and resource preparation.", 198, 110, -230, 26);
     maage_ui_button(&ui, 3, L"Manage Minecraft Accounts...", 198, 146, 245, MAAGE_UI_MANAGE);
@@ -649,7 +832,7 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
         DestroyWindow(ui.window);
         goto cleanup;
     }
-    maage_ui_installations_reload(&ui);
+    maage_ui_installations_reload(&ui, -1);
     maage_ui_refresh(&ui);
     maage_ui_layout(&ui);
     SetFocus(ui.navigation[0]);
