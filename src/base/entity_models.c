@@ -75,9 +75,10 @@ static maage_status base_sheep_animate(const void *context, const maage_model_an
         {1, 1, 1}, {0.85, 0.5, 0.2}, {0.7, 0.3, 0.85}, {0.4, 0.6, 0.85}, {0.9, 0.9, 0.2}, {0.5, 0.8, 0.1}, {0.95, 0.5, 0.65}, {0.3, 0.3, 0.3}, {0.6, 0.6, 0.6}, {0.3, 0.5, 0.6}, {0.5, 0.25, 0.7}, {0.2, 0.3, 0.7}, {0.4, 0.3, 0.2}, {0.4, 0.5, 0.2}, {0.6, 0.2, 0.2}, {0.1, 0.1, 0.1}};
     unsigned int channel;
     if (part < 6) return base_quadruped_animate(context, animation, part, transform);
+    if (animation->variant >= 16) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
     transform->visible = !(animation->flags & MAAGE_ENTITY_STATE_SHEARED);
     for (channel = 0; channel < 3; ++channel)
-        transform->tint[channel] = colors[animation->variant & 15UL][channel];
+        transform->tint[channel] = colors[animation->variant][channel];
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
 }
 static maage_status base_chicken_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {

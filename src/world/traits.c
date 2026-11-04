@@ -1,4 +1,5 @@
 #include "maage/traits.h"
+#include "maage/blocks.h"
 #include "registry_policy.h"
 #include <stdlib.h>
 #include <string.h>
@@ -20,8 +21,7 @@ typedef struct trait_value {
 typedef struct trait_tag {
     maage_tag_definition definition;
     const char *name;
-    unsigned char *flat;
-    int visiting, complete;
+    unsigned char *flat[2]; /* Only IDs up to this tag can occur in its closure. */
 } trait_tag;
 typedef struct trait_behavior {
     maage_behavior_definition definition;
@@ -218,7 +218,8 @@ maage_status maage_traits_registry_destroy(maage_traits_registry *registry) {
         free((void *) registry->tags[i].definition.required);
         free((void *) registry->tags[i].definition.includes);
         free((void *) registry->tags[i].definition.behaviors);
-        free(registry->tags[i].flat);
+        free(registry->tags[i].flat[0]);
+        free(registry->tags[i].flat[1]);
     }
     for (i = 0; i < registry->behavior_count; ++i)
         free((void *) registry->behaviors[i].definition.after);
@@ -360,12 +361,17 @@ static int trait_assignment_compare(const void *left, const void *right) {
     return a->property < b->property ? -1 : a->property > b->property;
 }
 static int trait_set_equal(const maage_property_set *set, const maage_property_assignment *values, size_t count) {
-    size_t i, j;
+    size_t i, low, high, middle;
     if (set->count != count) return 0;
     for (i = 0; i < count; ++i) {
-        for (j = 0; j < count && set->values[j].property != values[i].property; ++j) {
+        low = 0;
+        high = count;
+        while (low < high) {
+            middle = low + (high - low) / 2;
+            if (set->values[middle].property < values[i].property) low = middle + 1;
+            else high = middle;
         }
-        if (j == count || set->values[j].value != values[i].value) return 0;
+        if (low == count || set->values[low].property != values[i].property || set->values[low].value != values[i].value) return 0;
     }
     return 1;
 }
@@ -515,11 +521,11 @@ maage_status maage_behavior_register(maage_traits_registry *registry, const char
     trait_behavior *slot;
     maage_behavior_id *after;
     size_t i, j;
-    if (!registry || !definition || !definition->callback || !definition->event || (definition->mode != MAAGE_BEHAVIOR_COMPOSE && definition->mode != MAAGE_BEHAVIOR_EXCLUSIVE) || (definition->after_count && !definition->after)) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Invalid behavior contract");
+    if (!registry || !definition || !definition->callback || !definition->event || !definition->domains || (definition->domains & ~(MAAGE_TRAIT_BLOCK | MAAGE_TRAIT_ITEM)) || (definition->event <= MAAGE_BEHAVIOR_IMPORT && definition->domains != MAAGE_TRAIT_BLOCK) || (definition->mode != MAAGE_BEHAVIOR_COMPOSE && definition->mode != MAAGE_BEHAVIOR_EXCLUSIVE) || (definition->after_count && !definition->after)) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Invalid behavior contract or lifecycle domain");
     if (registry->finalized) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
     for (i = 0; i < definition->after_count; ++i) {
         const maage_behavior_definition *dependency = maage_behavior_get(registry, definition->after[i]);
-        if (!dependency || dependency->event != definition->event || dependency->order > definition->order) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Behavior dependency is missing, has a different event or contradicts ordering");
+        if (!dependency || dependency->event != definition->event || dependency->order > definition->order || (dependency->domains & definition->domains) != definition->domains) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Behavior dependency is missing, has incompatible domains or event, or contradicts ordering");
         for (j = 0; j < i; ++j)
             if (definition->after[j] == definition->after[i]) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Duplicate behavior dependency");
         result = content_policy_read(registry->policy, CONTENT_BEHAVIOR, maage_behavior_name(registry, definition->after[i]));
@@ -548,7 +554,8 @@ maage_status maage_tag_register(maage_traits_registry *registry, const char *nam
     maage_property_id *required;
     maage_tag_id *includes;
     maage_behavior_id *behaviors;
-    size_t i, j;
+    unsigned char *flat[2] = {NULL, NULL};
+    size_t i, j, domain, bytes, parent_bytes, byte;
     if (!registry || !definition || !definition->domains || (definition->domains & ~(MAAGE_TRAIT_BLOCK | MAAGE_TRAIT_ITEM)) || (definition->required_count && !definition->required) || (definition->include_count && !definition->includes) || (definition->behavior_count && !definition->behaviors)) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Invalid tag contract");
     if (registry->finalized) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
     for (i = 0; i < definition->required_count; ++i) {
@@ -560,20 +567,42 @@ maage_status maage_tag_register(maage_traits_registry *registry, const char *nam
     }
     for (i = 0; i < definition->include_count; ++i) {
         const maage_tag_definition *parent = maage_tag_get(registry, definition->includes[i]);
-        if (!parent || (parent->domains & definition->domains) != definition->domains) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Included tag does not cover the requested domains");
+        if (!parent || !(parent->domains & definition->domains)) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Included tag has no shared content domain");
         for (j = 0; j < i; ++j)
             if (definition->includes[j] == definition->includes[i]) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Duplicate included tag");
         result = content_policy_read(registry->policy, CONTENT_TAG, maage_tag_name(registry, definition->includes[i]));
         if (maage_status_failed(result)) return result;
     }
     for (i = 0; i < definition->behavior_count; ++i) {
-        if (!maage_behavior_get(registry, definition->behaviors[i])) return trait_fail(registry, MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_REGISTER, name, "Tag references an unregistered behavior");
+        const maage_behavior_definition *behavior = maage_behavior_get(registry, definition->behaviors[i]);
+        if (!behavior) return trait_fail(registry, MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_REGISTER, name, "Tag references an unregistered behavior");
+        if (!(behavior->domains & definition->domains)) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Behavior has no shared tag domain");
         for (j = 0; j < i; ++j)
             if (definition->behaviors[j] == definition->behaviors[i]) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Duplicate behavior contribution");
         result = content_policy_read(registry->policy, CONTENT_BEHAVIOR, maage_behavior_name(registry, definition->behaviors[i]));
         if (maage_status_failed(result)) return result;
     }
     if (registry->tag_count >= MAAGE_CONTENT_ID_INVALID) return trait_fail(registry, MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER, name, "Tag ID domain exhausted");
+    if (registry->tag_count > (size_t) - 1 - 8) return trait_fail(registry, MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER, name, "Tag membership size overflow");
+    bytes = (registry->tag_count + 8) / 8;
+    /* Includes always name earlier tags. Compile each domain in that topological
+     * order; narrower included contracts cannot leak through another domain. */
+    for (domain = 0; domain < 2; ++domain) {
+        if (!(definition->domains & (domain == 0 ? MAAGE_TRAIT_BLOCK : MAAGE_TRAIT_ITEM))) continue;
+        flat[domain] = (unsigned char *) calloc(bytes, 1);
+        if (!flat[domain]) {
+            free(flat[0]);
+            free(flat[1]);
+            return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_REGISTER, name, "Flattened tag contract allocation");
+        }
+        flat[domain][registry->tag_count / 8] |= (unsigned char) (1U << (registry->tag_count % 8));
+        for (i = 0; i < definition->include_count; ++i) {
+            if (!registry->tags[definition->includes[i]].flat[domain]) continue;
+            parent_bytes = ((size_t) definition->includes[i] + 8) / 8;
+            for (byte = 0; byte < parent_bytes; ++byte)
+                flat[domain][byte] |= registry->tags[definition->includes[i]].flat[domain][byte];
+        }
+    }
     required = (maage_property_id *) trait_copy(definition->required, definition->required_count, sizeof(*required));
     includes = (maage_tag_id *) trait_copy(definition->includes, definition->include_count, sizeof(*includes));
     behaviors = (maage_behavior_id *) trait_copy(definition->behaviors, definition->behavior_count, sizeof(*behaviors));
@@ -581,6 +610,8 @@ maage_status maage_tag_register(maage_traits_registry *registry, const char *nam
         free(required);
         free(includes);
         free(behaviors);
+        free(flat[0]);
+        free(flat[1]);
         return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_REGISTER, name, "Tag contract allocation");
     }
     slot = &registry->tags[registry->tag_count];
@@ -589,6 +620,8 @@ maage_status maage_tag_register(maage_traits_registry *registry, const char *nam
         free(required);
         free(includes);
         free(behaviors);
+        free(flat[0]);
+        free(flat[1]);
         return result;
     }
     definition->id = (unsigned long) registry->tag_count++;
@@ -596,6 +629,8 @@ maage_status maage_tag_register(maage_traits_registry *registry, const char *nam
     slot->definition.required = required;
     slot->definition.includes = includes;
     slot->definition.behaviors = behaviors;
+    slot->flat[0] = flat[0];
+    slot->flat[1] = flat[1];
     return result;
 }
 static const char *trait_subject_name(const maage_traits_registry *registry, unsigned int domain, unsigned long id) {
@@ -655,32 +690,27 @@ maage_status maage_traits_assign(maage_traits_registry *registry, unsigned int d
     if (id >= registry->subject_count[index]) registry->subject_count[index] = (size_t) id + 1;
     return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_REGISTER);
 }
-static int trait_tag_contains(const maage_traits_registry *registry, maage_tag_id id, maage_tag_id target, size_t remaining) {
-    const maage_tag_definition *tag = maage_tag_get(registry, id);
-    size_t i;
-    if (id == target) return tag != NULL;
-    if (!tag || !remaining) return 0;
-    for (i = 0; i < tag->include_count; ++i)
-        if (trait_tag_contains(registry, tag->includes[i], target, remaining - 1)) return 1;
-    return 0;
-}
 int maage_traits_has(const maage_traits_registry *registry, unsigned int domain, unsigned long id, maage_tag_id tag) {
     const trait_subject *subject = trait_subject_get(registry, domain, id);
-    size_t i;
+    size_t i, index;
+    const unsigned char *flat;
     if (!subject || tag >= registry->tag_count) return 0;
     if (subject->membership) return (subject->membership[tag / 8] & (1U << (tag % 8))) != 0;
-    for (i = 0; i < subject->tag_count; ++i)
-        if (trait_tag_contains(registry, subject->tags[i], tag, registry->tag_count)) return 1;
+    index = domain == MAAGE_TRAIT_BLOCK ? 0 : 1;
+    for (i = 0; i < subject->tag_count; ++i) {
+        flat = registry->tags[subject->tags[i]].flat[index];
+        if (tag <= subject->tags[i] && flat && (flat[tag / 8] & (1U << (tag % 8)))) return 1;
+    }
     return 0;
 }
 maage_property_set_id maage_traits_constants(const maage_traits_registry *registry, unsigned int domain, unsigned long id) {
     const trait_subject *subject = trait_subject_get(registry, domain, id);
-    return subject ? subject->constants : (registry && domain == MAAGE_TRAIT_ITEM && id < MAAGE_CONTENT_ID_INVALID ? 0 : MAAGE_CONTENT_ID_INVALID);
+    return subject ? subject->constants : MAAGE_CONTENT_ID_INVALID;
 }
 int maage_traits_value(const maage_traits_registry *registry, unsigned int domain, unsigned long id, maage_property_set_id state, maage_property_id property, maage_property_value *value) {
     const trait_subject *subject = trait_subject_get(registry, domain, id);
-    if (!registry || (domain != MAAGE_TRAIT_BLOCK && domain != MAAGE_TRAIT_ITEM) || id >= MAAGE_CONTENT_ID_INVALID || (domain == MAAGE_TRAIT_BLOCK && !subject)) return 0;
-    return maage_property_set_value(registry, state, property, value) || (subject && maage_property_set_value(registry, subject->constants, property, value));
+    if (!subject || !maage_property_set_get(registry, state)) return 0;
+    return maage_property_set_value(registry, subject->constants, property, value) || maage_property_set_value(registry, state, property, value);
 }
 maage_status maage_traits_validate(const maage_traits_registry *registry, unsigned int domain, unsigned long id, maage_property_set_id state) {
     const trait_subject *subject = trait_subject_get(registry, domain, id);
@@ -688,8 +718,7 @@ maage_status maage_traits_validate(const maage_traits_registry *registry, unsign
     const maage_tag_definition *tag;
     size_t i, j;
     maage_property_value constant;
-    if (!set || (domain != MAAGE_TRAIT_BLOCK && domain != MAAGE_TRAIT_ITEM) || id >= MAAGE_CONTENT_ID_INVALID || (domain == MAAGE_TRAIT_BLOCK && (!subject || !subject->tag_count))) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
-    if (!subject) return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_VALIDATE);
+    if (!set || !subject || (domain == MAAGE_TRAIT_BLOCK && !subject->tag_count)) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
     for (i = 0; i < set->count; ++i)
         if (maage_property_set_value(registry, subject->constants, set->values[i].property, &constant)) return trait_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
     for (i = 0; i < registry->tag_count; ++i) {
@@ -700,61 +729,46 @@ maage_status maage_traits_validate(const maage_traits_registry *registry, unsign
     }
     return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_VALIDATE);
 }
-static maage_status trait_tag_flatten(maage_traits_registry *registry, maage_tag_id id, size_t bytes) {
-    trait_tag *tag = &registry->tags[id];
-    maage_status result;
-    size_t i, byte;
-    if (tag->complete) return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
-    if (tag->visiting) return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, tag->name, "Tag contract cycle");
-    tag->visiting = 1;
-    tag->flat = (unsigned char *) calloc(bytes, 1);
-    if (!tag->flat) return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE, tag->name, "Flattened tag contract allocation");
-    tag->flat[id / 8] |= (unsigned char) (1U << (id % 8));
-    for (i = 0; i < tag->definition.include_count; ++i) {
-        result = trait_tag_flatten(registry, tag->definition.includes[i], bytes);
-        if (maage_status_failed(result)) return result;
-        for (byte = 0; byte < bytes; ++byte)
-            tag->flat[byte] |= registry->tags[tag->definition.includes[i]].flat[byte];
+static int trait_behavior_after(const maage_traits_registry *registry, maage_behavior_id id, maage_behavior_id target, unsigned char *reachable) {
+    const maage_behavior_definition *definition;
+    size_t i, j;
+    if (id <= target) return 0;
+    memset(reachable, 0, registry->behavior_count);
+    reachable[id] = 1;
+    /* Dependencies only reference earlier providers, so descending IDs visit
+     * the whole reachable graph without recursion or repeated branch walks. */
+    for (i = (size_t) id + 1; i > target + 1; --i) {
+        if (!reachable[i - 1]) continue;
+        definition = maage_behavior_get(registry, (maage_behavior_id) (i - 1));
+        for (j = 0; j < definition->after_count; ++j) {
+            if (definition->after[j] == target) return 1;
+            reachable[definition->after[j]] = 1;
+        }
     }
-    tag->visiting = 0;
-    tag->complete = 1;
-    return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
-}
-static int trait_behavior_after(const maage_traits_registry *registry, maage_behavior_id id, maage_behavior_id target, size_t remaining) {
-    const maage_behavior_definition *definition = maage_behavior_get(registry, id);
-    size_t i;
-    if (!definition || !remaining) return 0;
-    for (i = 0; i < definition->after_count; ++i)
-        if (definition->after[i] == target || trait_behavior_after(registry, definition->after[i], target, remaining - 1)) return 1;
     return 0;
 }
-static maage_status trait_subject_compile(maage_traits_registry *registry, unsigned int domain, unsigned long id, size_t bytes) {
+static maage_status trait_subject_compile(maage_traits_registry *registry, unsigned int domain, unsigned long id, size_t bytes, unsigned char *selected, unsigned char *reachable, maage_behavior_id *pending) {
     trait_subject *subject = &registry->subjects[domain == MAAGE_TRAIT_BLOCK ? 0 : 1][id];
     const maage_behavior_definition *a, *b;
     const maage_tag_definition *tag;
-    unsigned char *selected;
-    maage_behavior_id *pending;
-    size_t i, j, byte, count = 0, best, position, k;
+    size_t i, j, byte, count = 0, best, position, k, index, tag_bytes;
     int ready;
     const char *name = trait_subject_name(registry, domain, id);
     if (!subject->assigned) return trait_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_FINALIZE);
     subject->membership = bytes ? (unsigned char *) calloc(bytes, 1) : NULL;
     if (bytes && !subject->membership) return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE, name, "Membership allocation");
-    for (i = 0; i < subject->tag_count; ++i)
-        for (byte = 0; byte < bytes; ++byte)
-            subject->membership[byte] |= registry->tags[subject->tags[i]].flat[byte];
-    selected = registry->behavior_count ? (unsigned char *) calloc(registry->behavior_count, 1) : NULL;
-    pending = registry->behavior_count ? (maage_behavior_id *) malloc(registry->behavior_count * sizeof(*pending)) : NULL;
-    if (registry->behavior_count && (!selected || !pending)) {
-        free(selected);
-        free(pending);
-        return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE, name, "Behavior composition allocation");
+    index = domain == MAAGE_TRAIT_BLOCK ? 0 : 1;
+    for (i = 0; i < subject->tag_count; ++i) {
+        tag_bytes = ((size_t) subject->tags[i] + 8) / 8;
+        for (byte = 0; byte < tag_bytes; ++byte)
+            subject->membership[byte] |= registry->tags[subject->tags[i]].flat[index][byte];
     }
+    if (selected) memset(selected, 0, registry->behavior_count);
     for (i = 0; i < registry->tag_count; ++i) {
         if (!maage_traits_has(registry, domain, id, (unsigned long) i)) continue;
         tag = &registry->tags[i].definition;
         for (j = 0; j < tag->behavior_count; ++j)
-            if (!selected[tag->behaviors[j]]) {
+            if ((maage_behavior_get(registry, tag->behaviors[j])->domains & domain) && !selected[tag->behaviors[j]]) {
                 selected[tag->behaviors[j]] = 1;
                 pending[count++] = tag->behaviors[j];
             }
@@ -762,32 +776,16 @@ static maage_status trait_subject_compile(maage_traits_registry *registry, unsig
     for (i = 0; i < count; ++i) {
         a = maage_behavior_get(registry, pending[i]);
         for (j = 0; j < a->after_count; ++j)
-            if (!selected[a->after[j]]) {
-                free(selected);
-                free(pending);
-                return trait_fail(registry, MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_FINALIZE, name, "Behavior requires a provider absent from the effective contract");
-            }
+            if (!selected[a->after[j]]) return trait_fail(registry, MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_FINALIZE, name, "Behavior requires a provider absent from the effective contract");
         for (j = 0; j < i; ++j) {
             b = maage_behavior_get(registry, pending[j]);
             if (a->event != b->event) continue;
-            if (a->mode == MAAGE_BEHAVIOR_EXCLUSIVE || b->mode == MAAGE_BEHAVIOR_EXCLUSIVE) {
-                free(selected);
-                free(pending);
-                return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, name, "Conflicting exclusive behavior providers");
-            }
-            if (a->order == b->order && !trait_behavior_after(registry, a->id, b->id, registry->behavior_count) && !trait_behavior_after(registry, b->id, a->id, registry->behavior_count)) {
-                free(selected);
-                free(pending);
-                return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, name, "Composable behaviors require explicit ordering");
-            }
+            if (a->mode == MAAGE_BEHAVIOR_EXCLUSIVE || b->mode == MAAGE_BEHAVIOR_EXCLUSIVE) return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, name, "Conflicting exclusive behavior providers");
+            if (a->order == b->order && !trait_behavior_after(registry, a->id, b->id, reachable) && !trait_behavior_after(registry, b->id, a->id, reachable)) return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, name, "Composable behaviors require explicit ordering");
         }
     }
     subject->dispatch = count ? (maage_behavior_id *) malloc(count * sizeof(*subject->dispatch)) : NULL;
-    if (count && !subject->dispatch) {
-        free(selected);
-        free(pending);
-        return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE, name, "Behavior dispatch allocation");
-    }
+    if (count && !subject->dispatch) return trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE, name, "Behavior dispatch allocation");
     if (selected) memset(selected, 0, registry->behavior_count);
     for (position = 0; position < count; ++position) {
         best = count;
@@ -804,39 +802,62 @@ static maage_status trait_subject_compile(maage_traits_registry *registry, unsig
                 if (a->event < b->event || (a->event == b->event && a->order < b->order)) best = i;
             }
         }
-        if (best == count) {
-            free(selected);
-            free(pending);
-            return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, name, "Cyclic behavior ordering");
-        }
+        if (best == count) return trait_fail(registry, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE, name, "Cyclic behavior ordering");
         k = pending[best];
         selected[k] = 1;
         subject->dispatch[position] = (unsigned long) k;
     }
     subject->dispatch_count = count;
-    free(selected);
-    free(pending);
     return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
 }
 maage_status maage_traits_registry_finalize(maage_traits_registry *registry) {
     maage_status result;
     size_t i, domain, bytes;
+    unsigned char *selected = NULL, *reachable = NULL;
+    maage_behavior_id *pending = NULL;
     if (!registry || registry->finalized) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     result = content_policy_finalize(registry->policy);
     if (maage_status_failed(result)) return result;
     if (registry->tag_count > (size_t) - 1 - 7) return trait_fail(registry, MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE, NULL, "Tag membership size overflow");
     bytes = (registry->tag_count + 7) / 8;
-    for (i = 0; i < registry->tag_count; ++i) {
-        result = trait_tag_flatten(registry, (unsigned long) i, bytes);
-        if (maage_status_failed(result)) return result;
+    if (registry->behavior_count) {
+        selected = (unsigned char *) malloc(registry->behavior_count);
+        reachable = (unsigned char *) malloc(registry->behavior_count);
+        pending = (maage_behavior_id *) malloc(registry->behavior_count * sizeof(*pending));
+        if (!selected || !reachable || !pending) {
+            result = trait_fail(registry, MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE, NULL, "Behavior composition workspace allocation");
+            goto failed;
+        }
     }
     for (domain = 0; domain < 2; ++domain)
         for (i = 0; i < registry->subject_count[domain]; ++i) {
-            result = trait_subject_compile(registry, domain == 0 ? MAAGE_TRAIT_BLOCK : MAAGE_TRAIT_ITEM, (unsigned long) i, bytes);
-            if (maage_status_failed(result)) return result;
+            result = trait_subject_compile(registry, domain == 0 ? MAAGE_TRAIT_BLOCK : MAAGE_TRAIT_ITEM, (unsigned long) i, bytes, selected, reachable, pending);
+            if (maage_status_failed(result)) goto failed;
         }
+    free(selected);
+    free(reachable);
+    free(pending);
+    for (i = 0; i < registry->tag_count; ++i) {
+        free(registry->tags[i].flat[0]);
+        free(registry->tags[i].flat[1]);
+        registry->tags[i].flat[0] = NULL;
+        registry->tags[i].flat[1] = NULL;
+    }
     registry->finalized = 1;
     return trait_result(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
+failed:
+    free(selected);
+    free(reachable);
+    free(pending);
+    for (domain = 0; domain < 2; ++domain)
+        for (i = 0; i < registry->subject_count[domain]; ++i) {
+            free(registry->subjects[domain][i].membership);
+            free(registry->subjects[domain][i].dispatch);
+            registry->subjects[domain][i].membership = NULL;
+            registry->subjects[domain][i].dispatch = NULL;
+            registry->subjects[domain][i].dispatch_count = 0;
+        }
+    return result;
 }
 int maage_traits_has_behavior(const maage_traits_registry *registry, unsigned int domain, unsigned long id, unsigned long event) {
     const trait_subject *subject = trait_subject_get(registry, domain, id);
@@ -852,16 +873,45 @@ int maage_traits_has_behavior(const maage_traits_registry *registry, unsigned in
         if (!maage_traits_has(registry, domain, id, (maage_tag_id) i)) continue;
         tag = maage_tag_get(registry, (maage_tag_id) i);
         for (j = 0; j < tag->behavior_count; ++j)
-            if (maage_behavior_get(registry, tag->behaviors[j])->event == event) return 1;
+            if ((maage_behavior_get(registry, tag->behaviors[j])->domains & domain) && maage_behavior_get(registry, tag->behaviors[j])->event == event) return 1;
     }
     return 0;
+}
+static int trait_block_state_valid(const maage_block_registry *blocks, const maage_block_state_definition *state) {
+    const maage_block_state_definition *registered = state ? maage_block_registry_state(blocks, state->id) : NULL;
+    return registered && registered->block_id == state->block_id && registered->properties == state->properties;
+}
+static int trait_block_call_valid(const maage_traits_registry *registry, unsigned long subject, unsigned long event, const maage_block_behavior_call *call) {
+    if (call->event != event || maage_block_registry_traits(call->blocks) != registry || !trait_block_state_valid(call->blocks, call->state) || call->state->block_id != subject) return 0;
+    switch (event) {
+    case MAAGE_BEHAVIOR_RANDOM_TICK:
+        return call->world && call->random_tick;
+    case MAAGE_BEHAVIOR_SCHEDULED_TICK:
+        return call->world != NULL;
+    case MAAGE_BEHAVIOR_SURVIVES:
+    case MAAGE_BEHAVIOR_CAN_PLACE:
+        return call->read_world && call->valid;
+    case MAAGE_BEHAVIOR_DROPS:
+        return call->items && call->random && call->drops;
+    case MAAGE_BEHAVIOR_USE:
+        return call->world && call->target && call->container;
+    case MAAGE_BEHAVIOR_LAND:
+        return call->world && call->random;
+    case MAAGE_BEHAVIOR_CHANGED:
+        return call->world && trait_block_state_valid(call->blocks, call->before) && trait_block_state_valid(call->blocks, call->after) && (call->state->id == call->before->id || call->state->id == call->after->id);
+    case MAAGE_BEHAVIOR_IMPORT:
+        return call->replacement != NULL;
+    default:
+        return 0;
+    }
 }
 maage_status maage_traits_dispatch(const maage_traits_registry *registry, unsigned int domain, unsigned long id, unsigned long event, void *call) {
     const trait_subject *subject = trait_subject_get(registry, domain, id);
     const maage_behavior_definition *behavior;
     maage_status result, outcome = trait_result(MAAGE_STATUS_NOOP, MAAGE_OPERATION_TICK);
     size_t low = 0, high, middle, i;
-    if (!registry || !registry->finalized || !subject || !call) return trait_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
+    if (!registry || !registry->finalized || !subject || !call || !event || (event <= MAAGE_BEHAVIOR_IMPORT && domain != MAAGE_TRAIT_BLOCK)) return trait_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
+    if (event <= MAAGE_BEHAVIOR_IMPORT && !trait_block_call_valid(registry, id, event, (const maage_block_behavior_call *) call)) return trait_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
     high = subject->dispatch_count;
     while (low < high) {
         middle = low + (high - low) / 2;
@@ -871,6 +921,7 @@ maage_status maage_traits_dispatch(const maage_traits_registry *registry, unsign
     for (i = low; i < subject->dispatch_count; ++i) {
         behavior = maage_behavior_get(registry, subject->dispatch[i]);
         if (behavior->event != event) break;
+        if (!(behavior->domains & domain)) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_TICK);
         result = behavior->callback(behavior->context, call);
         if (maage_status_failed(result)) return result;
         if (!maage_status_is_warning(outcome) && maage_status_code(result) != MAAGE_STATUS_NOOP) outcome = result;
@@ -904,7 +955,7 @@ maage_status maage_traits_validate_identity(const maage_traits_registry *a, cons
     for (i = 0; i < a->behavior_count; ++i) {
         ba = &a->behaviors[i].definition;
         bb = &b->behaviors[i].definition;
-        if (strcmp(a->behaviors[i].name, b->behaviors[i].name) || ba->event != bb->event || ba->mode != bb->mode || ba->order != bb->order || ba->after_count != bb->after_count) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
+        if (strcmp(a->behaviors[i].name, b->behaviors[i].name) || ba->event != bb->event || ba->domains != bb->domains || ba->mode != bb->mode || ba->order != bb->order || ba->after_count != bb->after_count) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
         for (j = 0; j < ba->after_count; ++j)
             if (ba->after[j] != bb->after[j]) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
     }

@@ -28,7 +28,7 @@ maage_status maage_base_geometry(maage_content_context *context, maage_base_ids 
 
 maage_block_state_id maage_base_item_icon(const maage_item_definition *item, maage_item_variant_id variant) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
-    unsigned int species = variant & 3U;
+    maage_item_variant_id species = variant;
     if (item->block_id == ids->block_log && species <= 3) return ids->logs[species];
     if (item->block_id == ids->block_leaves && species <= 2) return ids->leaves[species];
     if (item->block_id == ids->block_planks && variant < 6) return ids->planks[variant];
@@ -46,12 +46,13 @@ maage_texture_id maage_base_item_texture(const maage_item_definition *item, maag
     return item->texture_id;
 }
 const char *maage_base_item_name(const maage_item_definition *item, maage_item_variant_id variant) {
-    const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
+    const maage_base_ids *ids;
     static const char *const logs[] = {"Oak Log", "Spruce Log", "Birch Log", "Jungle Log"};
     static const char *const leaves[] = {"Oak Leaves", "Spruce Leaves", "Birch Leaves"};
     static const char *const planks[] = {"Oak Planks", "Spruce Planks", "Birch Planks", "Jungle Planks", "Acacia Planks", "Dark Oak Planks"};
     static const char *const saplings[] = {"Oak Sapling", "Spruce Sapling", "Birch Sapling"};
     if (!item) return "";
+    ids = (const maage_base_ids *) item->behavior_context;
     if (item->has_block && item->block_id == ids->block_sand && variant == 1) return "Red Sand";
     if (item->has_block && item->block_id == ids->block_log2) return variant ? "Dark Oak Log" : "Acacia Log";
     if (item->has_block && item->block_id == ids->block_log && variant < 4) return logs[variant];

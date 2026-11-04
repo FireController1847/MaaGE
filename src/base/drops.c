@@ -79,19 +79,7 @@ maage_status maage_base_drop_species(const maage_block_registry *blocks, const m
     (void) random;
     drop->item_id = block->drop_item_id;
     drop->count = block->drop_count;
-    return maage_item_variant_change(items, drop->item_id, 0, ids->property_wood, maage_base_state_value(blocks, state, ids->property_wood), &drop->variant);
-}
-
-maage_status maage_base_drop_planks(const maage_block_registry *blocks, const maage_item_registry *items, const maage_block_state_definition *state, const maage_item_definition *tool, unsigned long *random, maage_item_drops *drops) {
-    const maage_base_ids *ids = maage_base_state_references(blocks, state);
-    const maage_block_definition *block = maage_block_registry_block(blocks, state->block_id);
-    maage_item_stack *drop = &drops->stacks[0];
-    (void) items;
-    (void) ids;
-    (void) tool;
-    (void) random;
-    drop->item_id = block->drop_item_id;
-    drop->count = block->drop_count;
+    if (!drop->count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESOLVE, 0);
     return maage_item_variant_change(items, drop->item_id, 0, ids->property_wood, maage_base_state_value(blocks, state, ids->property_wood), &drop->variant);
 }
 

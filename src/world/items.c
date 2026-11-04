@@ -43,6 +43,22 @@ static maage_item_slot *maage_item_slot_get(const maage_item_registry *registry,
     void **entry = registry ? maage_registry_pages_find(&registry->slots, id) : NULL;
     return entry ? (maage_item_slot *) *entry : NULL;
 }
+static maage_status maage_item_read_block(const maage_item_registry *registry, maage_block_id block) {
+    const char *name = maage_block_registry_block_name(registry->blocks, block);
+    if (!name) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    return content_policy_read(registry->policy, CONTENT_BLOCK, name);
+}
+static maage_status maage_item_read_variant(const maage_item_registry *registry, const maage_item_definition *item, const maage_item_variant_definition *variant) {
+    const maage_block_state_definition *placement, *icon;
+    maage_status result;
+    if (!item->has_block) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+    placement = maage_block_registry_state(registry->blocks, variant->placement_state_id);
+    icon = maage_block_registry_state(registry->blocks, variant->icon_state_id);
+    if (!placement || placement->block_id != item->block_id || !icon) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    result = maage_item_read_block(registry, placement->block_id);
+    if (maage_status_failed(result)) return result;
+    return maage_item_read_block(registry, icon->block_id);
+}
 static void maage_item_slot_destroy(maage_item_slot *slot) {
     size_t i;
     if (!slot) return;
@@ -153,15 +169,23 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
         if (maage_status_failed(policy_result)) return policy_result;
     }
     if (!registry || !definition || !name || !definition->display_name) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
-    if (registry->finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if (registry->finalized || !registry->traits) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (registry->count >= MAAGE_CONTENT_ID_INVALID - 1UL) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     definition->id = (unsigned long) registry->count + 1;
-    if (definition->has_tool_tag != 0 && definition->has_tool_tag != 1) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
+    if ((definition->has_block != 0 && definition->has_block != 1) || (definition->has_tool_tag != 0 && definition->has_tool_tag != 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     if (definition->has_tool_tag) {
         maage_tag_id resolved;
         const maage_tag_definition *tag = maage_tag_get(registry->traits, definition->tool_tag);
         if (!tag || !(tag->domains & MAAGE_TRAIT_ITEM)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
         policy_result = maage_tag_find(registry->traits, maage_tag_name(registry->traits, definition->tool_tag), &resolved);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
+    if (definition->has_block) {
+        policy_result = maage_item_read_block(registry, definition->block_id);
+        if (maage_status_failed(policy_result)) return policy_result;
+    }
+    if (definition->container_item) {
+        policy_result = content_policy_read(registry->policy, CONTENT_ITEM, maage_item_registry_name(registry, definition->container_item));
         if (maage_status_failed(policy_result)) return policy_result;
     }
     if (definition->model > MAAGE_ITEM_MODEL_REGISTERED || (definition->model == MAAGE_ITEM_MODEL_REGISTERED && (!definition->registered_model || definition->registered_model == MAAGE_CONTENT_ID_INVALID))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -243,6 +267,12 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
             slot->variants[i].placement_state_id = definition->placement_state_id;
             slot->variants[i].texture_id = definition->texture_id;
         }
+        policy_result = maage_item_read_variant(registry, definition, &slot->variants[i]);
+        if (maage_status_failed(policy_result)) {
+            slot->variants[i].display_name = NULL;
+            maage_item_slot_destroy(slot);
+            return policy_result;
+        }
         if (slot->variants[i].display_name) {
             length = strlen(slot->variants[i].display_name);
             if (!length || length > 127) {
@@ -278,6 +308,8 @@ maage_status maage_item_registry_register(maage_item_registry *registry, const c
     }
     registry->name_buckets[bucket] = registry->count + 1;
     registry->ordered[registry->count++] = definition->id;
+    policy_result = maage_traits_assign(registry->traits, MAAGE_TRAIT_ITEM, definition->id, NULL, 0, 0);
+    if (maage_status_failed(policy_result)) return policy_result;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
 }
 maage_status maage_item_registry_finalize(maage_item_registry *registry) {
@@ -286,6 +318,7 @@ maage_status maage_item_registry_finalize(maage_item_registry *registry) {
     maage_item_slot *slot;
     maage_status result;
     const maage_item_definition *item;
+    const maage_block_state_definition *placement;
     if (registry) {
         policy_result = content_policy_finalize(registry->policy);
         if (maage_status_failed(policy_result)) return policy_result;
@@ -300,6 +333,7 @@ maage_status maage_item_registry_finalize(maage_item_registry *registry) {
     for (i = 0; i < registry->count; ++i) {
         slot = maage_item_slot_get(registry, registry->ordered[i]);
         item = &slot->definition;
+        if (item->has_block && (!registry->blocks || !maage_block_registry_block(registry->blocks, item->block_id))) return content_items_failure(registry, maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0), slot->name, "Placeable item references an unregistered block");
         if (item->has_tool_tag && !maage_item_has_tag(item, item->tool_tag)) return content_items_failure(registry, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0), slot->name, "Item tool classification requires membership in its registered item tag");
         if (item->variant_count > ((size_t) - 1 - 1) / 2 || item->variant_count * 2 + 1 > (size_t) - 1 / sizeof(*slot->variant_buckets)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         slot->variant_bucket_count = item->variant_count * 2 + 1;
@@ -307,6 +341,10 @@ maage_status maage_item_registry_finalize(maage_item_registry *registry) {
         slot->variant_buckets = (size_t *) calloc(slot->variant_bucket_count, sizeof(*slot->variant_buckets));
         if (!slot->variant_buckets) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (j = 0; j < item->variant_count; ++j) {
+            if (item->has_block) {
+                placement = maage_block_registry_state(registry->blocks, item->variants[j].placement_state_id);
+                if (!placement || placement->block_id != item->block_id || !maage_block_registry_state(registry->blocks, item->variants[j].icon_state_id)) return content_items_failure(registry, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0), slot->name, "Item variant requires registered appearance and placement on its declared block");
+            }
             result = maage_traits_validate(registry->traits, MAAGE_TRAIT_ITEM, item->id, item->variants[j].properties);
             if (maage_status_failed(result)) return content_items_failure(registry, result, slot->name, "Item variant violates its composed tag property contract");
             bucket = (size_t) (item->variants[j].properties * 2654435761UL) % slot->variant_bucket_count;
@@ -374,6 +412,8 @@ maage_status maage_inventory_add(maage_inventory *inventory, const maage_item_re
     if (uninserted) *uninserted = stack ? stack->count : 0;
     if (!inventory || !maage_item_stack_valid(registry, stack) || !uninserted)
         return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, !inventory ? 0 : (!uninserted ? 3 : 2));
+    for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
+        if (!maage_item_stack_valid(registry, &inventory->slots[i])) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
     if (!stack->count) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     item = maage_item_registry_get(registry, stack->item_id);
     remaining = stack->count;
@@ -558,7 +598,8 @@ maage_status maage_inventory_operate(maage_inventory *inventory, const maage_ite
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }
 maage_status maage_item_placement_state(const maage_item_definition *item, maage_item_variant_id variant, maage_block_face face, double yaw, maage_block_state_id *state) {
-    if (!item || !item->has_block || !state || face >= MAAGE_FACE_COUNT || !(yaw >= -DBL_MAX && yaw <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RESOLVE, 0);
+    if (state) *state = MAAGE_CONTENT_ID_INVALID;
+    if (!item || !item->has_block || !state || (unsigned int) face >= MAAGE_FACE_COUNT || !(yaw >= -DBL_MAX && yaw <= DBL_MAX)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RESOLVE, 0);
     if (variant >= item->variant_count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_RESOLVE, 0);
     if (item->placement) return item->placement(item, variant, face, yaw, state);
 
@@ -640,7 +681,7 @@ void content_items_policy(maage_item_registry *registry, content_policy *policy)
 }
 
 maage_status maage_item_registry_bind_traits(maage_item_registry *registry, maage_traits_registry *traits) {
-    if (!registry || !traits || registry->finalized || registry->traits || registry->count) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_SET, 0);
+    if (!registry || !traits || registry->finalized || registry->traits || registry->count || (registry->blocks && maage_block_registry_traits(registry->blocks) != traits)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_SET, 0);
     registry->traits = traits;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -648,7 +689,7 @@ const maage_traits_registry *maage_item_registry_traits(const maage_item_registr
     return registry ? registry->traits : NULL;
 }
 maage_status maage_item_registry_bind_blocks(maage_item_registry *registry, const maage_block_registry *blocks) {
-    if (!registry || !blocks || registry->finalized || registry->blocks) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_SET, 0);
+    if (!registry || !blocks || registry->finalized || registry->blocks || (registry->traits && maage_block_registry_traits(blocks) != registry->traits)) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_SET, 0);
     registry->blocks = blocks;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
 }
@@ -666,6 +707,8 @@ maage_status maage_item_registry_variant_bind(maage_item_registry *registry, maa
     result = content_policy_update(registry->policy, CONTENT_ITEM, slot->name);
     if (maage_status_failed(result)) return result;
     result = content_traits_read_set(registry->traits, copy.properties);
+    if (maage_status_failed(result)) return result;
+    result = maage_item_read_variant(registry, &slot->definition, &copy);
     if (maage_status_failed(result)) return result;
     if (definition->display_name) {
         length = strlen(definition->display_name);
@@ -702,8 +745,8 @@ const maage_item_variant_definition *maage_item_variant_get(const maage_item_reg
 maage_status maage_item_variant_resolve(const maage_item_registry *registry, maage_item_id item, maage_property_set_id properties, maage_item_variant_id *variant) {
     maage_item_slot *slot = maage_item_slot_get(registry, item);
     const maage_item_definition *definition = slot ? &slot->definition : NULL;
-    size_t i, bucket;
-    if (!variant || !definition) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    size_t i, bucket, match = (size_t) - 1;
+    if (!variant || !definition || !maage_property_set_get(registry->traits, properties)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     if (registry->finalized) {
         bucket = (size_t) (properties * 2654435761UL) % slot->variant_bucket_count;
         while (slot->variant_buckets[bucket]) {
@@ -718,10 +761,12 @@ maage_status maage_item_variant_resolve(const maage_item_registry *registry, maa
     }
     for (i = 0; i < definition->variant_count; ++i)
         if (definition->variants[i].properties == properties) {
-            *variant = (maage_item_variant_id) i;
-            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+            if (match != (size_t) - 1) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+            match = i;
         }
-    return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    if (match == (size_t) - 1) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    *variant = (maage_item_variant_id) match;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
 }
 int maage_item_variant_value(const maage_item_registry *registry, maage_item_id item, maage_item_variant_id variant, maage_property_id property, maage_property_value *value) {
     const maage_item_variant_definition *definition = maage_item_variant_get(registry, item, variant);

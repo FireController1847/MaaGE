@@ -460,7 +460,10 @@ maage_status maage_block_state_change(const maage_block_registry *registry, cons
     maage_property_set_id properties;
     maage_status result;
     maage_property_value constant;
+    const maage_block_state_definition *registered;
     if (!registry || !state || !output) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+    registered = maage_block_registry_state(registry, state->id);
+    if (!registered || registered->block_id != state->block_id || registered->properties != state->properties) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
     if (maage_property_set_value(registry->traits, maage_traits_constants(registry->traits, MAAGE_TRAIT_BLOCK, state->block_id), property, &constant)) {
         if (constant != value) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
         *output = state->id;

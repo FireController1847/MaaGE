@@ -54,7 +54,8 @@ typedef struct maage_property_set {
 typedef maage_status (*maage_behavior_callback)(const void *context, void *call);
 typedef struct maage_behavior_definition {
     maage_behavior_id id;
-    unsigned long event; /* Numeric event contract; built-in lifecycle events above. */
+    unsigned long event;  /* Numeric event contract; built-in lifecycle events above. */
+    unsigned int domains; /* Applicable subject domains; built-in lifecycle events are block-only. */
     unsigned int mode;
     long order; /* Ascending, then explicit dependency order. Equal unordered handlers conflict. */
     const maage_behavior_id *after;
@@ -67,7 +68,7 @@ typedef struct maage_tag_definition {
     unsigned int domains; /* Bit mask; membership always names its domain explicitly. */
     const maage_property_id *required;
     size_t required_count;
-    const maage_tag_id *includes; /* Flattened contracts; cycles rejected. */
+    const maage_tag_id *includes; /* Earlier registered tags; contracts apply only in shared domains. */
     size_t include_count;
     const maage_behavior_id *behaviors;
     size_t behavior_count;
@@ -117,6 +118,8 @@ maage_property_set_id maage_traits_constants(const maage_traits_registry *, unsi
 int maage_traits_value(const maage_traits_registry *, unsigned int domain, unsigned long subject, maage_property_set_id state, maage_property_id, maage_property_value *);
 maage_status maage_traits_validate(const maage_traits_registry *, unsigned int domain, unsigned long subject, maage_property_set_id state);
 int maage_traits_has_behavior(const maage_traits_registry *, unsigned int domain, unsigned long subject, unsigned long event);
+/* Built-in events require a block subject and maage_block_behavior_call payload.
+ * Custom event payloads follow their registered providers' domain-specific contract. */
 maage_status maage_traits_dispatch(const maage_traits_registry *, unsigned int domain, unsigned long subject, unsigned long event, void *call);
 /* Canonical peer comparison includes schemas, contracts, configurations, membership and dispatch identity. */
 maage_status maage_traits_validate_identity(const maage_traits_registry *, const maage_traits_registry *);

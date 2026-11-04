@@ -13,7 +13,7 @@ maage_status maage_base_items(maage_content_context *context, maage_base_ids *id
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:bedrock", "Bedrock", ids->block_bedrock, ids->state_bedrock, 0, NULL, 0, &ids->item_bedrock);
     if (maage_status_failed(result)) return result;
-    result = base_block_item(context, "minecraft:sand", "Sand", ids->block_sand, ids->state_sand, 1, maage_base_place_sand, 0, &ids->item_sand);
+    result = base_block_item(context, "minecraft:sand", "Sand", ids->block_sand, ids->state_sand, 1, NULL, 0, &ids->item_sand);
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:gravel", "Gravel", ids->block_gravel, ids->state_gravel, 0, NULL, 0, &ids->item_gravel);
     if (maage_status_failed(result)) return result;
@@ -21,7 +21,7 @@ maage_status maage_base_items(maage_content_context *context, maage_base_ids *id
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:cobblestone", "Cobblestone", ids->block_cobblestone, ids->state_cobblestone, 0, NULL, 0, &ids->item_cobblestone);
     if (maage_status_failed(result)) return result;
-    result = base_block_item(context, "minecraft:planks", "Oak Planks", ids->block_planks, ids->state_planks, 5, maage_base_place_planks, 300, &ids->item_planks);
+    result = base_block_item(context, "minecraft:planks", "Oak Planks", ids->block_planks, ids->state_planks, 5, NULL, 300, &ids->item_planks);
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:gold_ore", "Gold Ore", ids->block_gold_ore, ids->state_gold_ore, 0, NULL, 0, &ids->item_gold_ore);
     if (maage_status_failed(result)) return result;
@@ -225,7 +225,6 @@ maage_status maage_base_items(maage_content_context *context, maage_base_ids *id
     item.block_id = ids->block_sapling;
     item.placement_state_id = ids->state_sapling;
     item.icon_state_id = ids->state_sapling;
-    item.placement = maage_base_place_sapling;
     result = base_item_register(context, "minecraft:sapling", &item, 100, &ids->item_sapling);
     if (maage_status_failed(result)) return result;
     memset(&item, 0, sizeof(item));

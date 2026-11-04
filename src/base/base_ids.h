@@ -65,10 +65,11 @@ enum {
 typedef struct maage_base_ids {
     const maage_traits_registry *traits;
     const maage_block_registry *blocks;
+    const maage_item_registry *items;
     maage_property_id property_wood, property_axis, property_persistent, property_check_decay, property_stage, property_age, property_crop_age, property_moisture, property_facing, property_lit, property_color, property_sand, property_attachment, property_fluid_level, property_grass_variant, property_plant_variant;
     maage_property_value wood_values[6];
     maage_tag_id tool_tags[6]; /* Private constructor selectors index registered item capabilities. */
-    maage_tag_id tag_wood, tag_log, tag_planks, tag_leaves, tag_soil, tag_sand, tag_farmland, tag_crop;
+    maage_tag_id tag_wood, tag_log, tag_planks, tag_leaves, tag_soil, tag_sand, tag_farmland, tag_crop, tag_axial, tag_soil_plant, tag_plant_support_tick, tag_mushroom, tag_cactus, tag_wood_drops;
     unsigned long mob_types[MAAGE_BASE_MOB_COUNT], mob_models[MAAGE_BASE_MOB_COUNT], mob_textures[MAAGE_BASE_MOB_COUNT];
     unsigned long spawn_eggs[MAAGE_BASE_MOB_COUNT], arrow_type, arrow_model, arrow_texture, sheep_fleece;
     unsigned long item_feather, item_leather, item_bone, item_rotten_flesh, item_string, item_gunpowder, item_egg, item_arrow, item_spider_eye, item_milk_bucket;
@@ -289,11 +290,6 @@ typedef struct maage_base_ids {
     unsigned long water[16], lava[16], cactus[16], biome_grass[6], tools[5][4];
 } maage_base_ids;
 
-enum {
-    MAAGE_LEAF_SPECIES_MASK = 3U,
-    MAAGE_LEAF_PERSISTENT = 4U,
-    MAAGE_LEAF_CHECK_DECAY = 8U
-};
 /* Composition-local immutable Base references; generation and registered behavior
  * providers share this lifetime without depending on an adopting block context. */
 const maage_base_ids *maage_base_generation_references(const maage_block_registry *registry);

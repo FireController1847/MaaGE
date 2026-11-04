@@ -11,8 +11,7 @@ static maage_status maage_leaves_noop(void) {
 
 maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const maage_block_state_definition *before, const maage_block_state_definition *after) {
     const maage_block_registry *blocks = maage_world_registry(world);
-    const maage_block_definition *previous = maage_block_registry_block(blocks, before->block_id);
-    const maage_base_ids *ids = maage_base_state_references(blocks, previous && previous->changed == maage_leaves_changed ? before : after);
+    const maage_base_ids *ids = maage_base_state_references(blocks, before);
     const maage_block_state_definition *leaf;
     maage_block_state_id marked;
     maage_status result;

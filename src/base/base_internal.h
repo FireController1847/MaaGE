@@ -17,13 +17,12 @@ enum {
 maage_status maage_base_traits(maage_content_context *, maage_base_ids *);
 maage_status maage_base_traits_bind(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_register_block(maage_block_registry *, const char *, maage_block_definition *);
-maage_status maage_base_state_properties(const maage_base_ids *, maage_block_id, unsigned int, maage_property_set_id *);
 maage_status maage_base_change_property(maage_world *, int, int, int, const maage_block_state_definition *, maage_property_id, maage_property_value);
 maage_property_value maage_base_state_value(const maage_block_registry *, const maage_block_state_definition *, maage_property_id);
 int maage_base_state_tag(const maage_base_ids *, const maage_block_state_definition *, maage_tag_id);
 maage_status maage_base_item_variants(maage_content_context *, const maage_item_definition *, const char *);
 #define MAAGE_BASE_ID(ids, offset) (*(const unsigned long *) ((const unsigned char *) (ids) + (offset)))
-maage_status maage_content_register_state(maage_block_registry *, const maage_base_ids *, const maage_content_config *, maage_block_state_id *, maage_block_id, unsigned int, int);
+maage_status maage_content_register_state(maage_block_registry *, const maage_base_ids *, const maage_content_config *, maage_block_state_id *, maage_block_id, const maage_property_assignment *, size_t, int);
 maage_status maage_furnace_content_blocks(maage_block_registry *, maage_base_ids *, const maage_content_config *);
 maage_status maage_furnace_content_items(maage_content_context *, maage_base_ids *);
 maage_status maage_base_blocks(maage_content_context *, maage_base_ids *);
@@ -72,7 +71,6 @@ maage_status maage_support_dead_bush(const maage_world *, int, int, int, const m
 maage_status maage_support_torch(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
 maage_status maage_support_cactus(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
 maage_status maage_support_snow(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
-maage_status maage_support_sapling(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
 maage_status maage_support_farmland(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
 maage_status maage_support_wheat(const maage_world *, int, int, int, const maage_block_state_definition *, int *);
 maage_block_state_id maage_base_item_icon(const maage_item_definition *, maage_item_variant_id);
@@ -164,16 +162,11 @@ maage_status maage_base_drop_redstone(const maage_block_registry *, const maage_
 maage_status maage_base_drop_lapis(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
 maage_status maage_base_drop_gravel(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
 maage_status maage_base_drop_species(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
-maage_status maage_base_drop_planks(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
 maage_status maage_base_drop_leaves(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
 maage_status maage_base_drop_grass(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
 maage_status maage_base_drop_bush(const maage_block_registry *, const maage_item_registry *, const maage_block_state_definition *, const maage_item_definition *, unsigned long *, maage_item_drops *);
-maage_status maage_base_place_sand(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
-maage_status maage_base_place_planks(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
 maage_status maage_base_place_log(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
-maage_status maage_base_place_log2(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
 maage_status maage_base_place_leaves(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
-maage_status maage_base_place_sapling(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
 maage_status maage_base_place_torch(const maage_item_definition *, maage_item_variant_id, maage_block_face, double, maage_block_state_id *);
 maage_status maage_base_furnace_action(maage_world *, struct maage_gameplay *, unsigned long, unsigned int, unsigned int, unsigned int);
 maage_status maage_base_furnace_sample(const maage_world *, maage_crafting_container *);

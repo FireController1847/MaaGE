@@ -119,7 +119,7 @@ maage_status maage_smelting_register(maage_smelting_registry *registry, const ma
     return result;
 }
 maage_status maage_smelting_finalize(maage_smelting_registry *registry) {
-    if (!registry || registry->inputs.finalized || registry->inputs.failed || registry->outputs.failed) return smelting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
+    if (!registry || registry->inputs.finalized || registry->inputs.failed || registry->outputs.failed || !maage_item_registry_is_finalized(registry->inputs.items)) return smelting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     registry->inputs.finalized = registry->outputs.finalized = 1;
     return smelting_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
 }
@@ -169,7 +169,7 @@ maage_status maage_fuel_register(maage_fuel_registry *registry, const maage_fuel
     return smelting_expand(&registry->table, &entry);
 }
 maage_status maage_fuel_finalize(maage_fuel_registry *registry) {
-    if (!registry || registry->table.finalized || registry->table.failed) return smelting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
+    if (!registry || registry->table.finalized || registry->table.failed || !maage_item_registry_is_finalized(registry->table.items)) return smelting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     registry->table.finalized = 1;
     return smelting_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
 }

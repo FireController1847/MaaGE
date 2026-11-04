@@ -76,7 +76,7 @@ maage_status maage_recipe_registry_register(maage_recipe_registry *registry, con
     maage_recipe_choice *choices;
     const maage_item_definition *item;
     unsigned int i, cells, size = 0;
-    size_t j, capacity;
+    size_t j, k, capacity;
     if (id) *id = 0;
     if (!registry || !definition) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (registry->finalized) return recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
@@ -100,6 +100,8 @@ maage_status maage_recipe_registry_register(maage_recipe_registry *registry, con
             if (maage_status_failed(result)) return result;
             result = recipe_read_property(traits, definition->projection.properties[j].target);
             if (maage_status_failed(result)) return result;
+            for (k = 0; k < j; ++k)
+                if (definition->projection.properties[k].target == definition->projection.properties[j].target) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
         }
     } else {
         result = recipe_read_item(registry->items, definition->output.item_id);
@@ -184,6 +186,27 @@ static int projection_compare(const void *left, const void *right) {
     if (a->item != b->item) return a->item < b->item ? -1 : 1;
     return a->variant < b->variant ? -1 : (a->variant != b->variant);
 }
+typedef struct recipe_projection_candidate {
+    maage_item_stack output;
+    const maage_property_value *values;
+} recipe_projection_candidate;
+static unsigned long projection_hash(const maage_property_value *values, size_t count) {
+    unsigned long hash = 2166136261UL;
+    size_t i;
+    for (i = 0; i < count; ++i)
+        hash = (hash ^ values[i]) * 16777619UL;
+    return hash;
+}
+static size_t projection_bucket(const recipe_projection_candidate *candidates, const size_t *buckets, size_t bucket_count, const maage_property_value *values, size_t count) {
+    size_t bucket = (size_t) (projection_hash(values, count) % bucket_count), index, i;
+    while ((index = buckets[bucket]) != 0) {
+        for (i = 0; i < count && candidates[index - 1].values[i] == values[i]; ++i) {
+        }
+        if (i == count) break;
+        bucket = (bucket + 1) % bucket_count;
+    }
+    return bucket;
+}
 static maage_status recipe_compile_projection(maage_recipe_registry *registry, recipe_entry *entry) {
     const maage_recipe_projection *projection = &entry->definition.projection;
     const maage_recipe_ingredient *ingredient;
@@ -191,11 +214,14 @@ static maage_status recipe_compile_projection(maage_recipe_registry *registry, r
     const maage_property_definition *source_property, *target_property;
     const maage_tag_definition *tag;
     const maage_traits_registry *traits = maage_item_registry_traits(registry->items);
+    recipe_projection_candidate *candidates = NULL;
     recipe_projection_entry *grown;
-    maage_property_value source, target;
-    maage_item_stack stack, resolved;
-    size_t i, j, k, v, out_variant, matches, capacity = 0;
-    if (!projection->property_count) return recipe_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
+    maage_property_value *values = NULL, *keys = NULL, *key;
+    size_t *buckets = NULL;
+    maage_item_stack stack;
+    maage_status result = recipe_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
+    size_t i, j, k, v, candidate_count = 0, candidate_capacity = 0, bucket_count, bucket, capacity = 0;
+    if (!projection->property_count) return result;
     free(entry->projection);
     entry->projection = NULL;
     entry->projection_count = 0;
@@ -206,6 +232,50 @@ static maage_status recipe_compile_projection(maage_recipe_registry *registry, r
         target_property = maage_property_get(traits, projection->properties[k].target);
         if (!source_property || !target_property || source_property->kind != target_property->kind || (source_property->kind == MAAGE_PROPERTY_IDENTITY && source_property->id != target_property->id)) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
     }
+    /* Build one numeric output index per projection. Each input variant then
+     * resolves its property tuple without rescanning all registered outputs. */
+    for (i = 0; i < maage_item_registry_count(registry->items); ++i) {
+        output = maage_item_registry_at(registry->items, i);
+        if (!maage_traits_has(traits, MAAGE_TRAIT_ITEM, output->id, projection->output_tag)) continue;
+        if (output->variant_count > (size_t) - 1 - candidate_capacity) return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE);
+        candidate_capacity += output->variant_count;
+    }
+    if (!candidate_capacity) return content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE), maage_tag_name(traits, projection->output_tag), "Recipe property projection has no output candidates");
+    if (candidate_capacity > ((size_t) - 1 - 1) / 2 || candidate_capacity > (size_t) - 1 / sizeof(*candidates) || projection->property_count > (size_t) - 1 / sizeof(*keys) / candidate_capacity) return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE);
+    bucket_count = candidate_capacity * 2 + 1;
+    if (bucket_count > (size_t) - 1 / sizeof(*buckets)) return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE);
+    candidates = (recipe_projection_candidate *) malloc(candidate_capacity * sizeof(*candidates));
+    keys = (maage_property_value *) malloc(candidate_capacity * projection->property_count * sizeof(*keys));
+    values = (maage_property_value *) malloc(projection->property_count * sizeof(*values));
+    buckets = (size_t *) calloc(bucket_count, sizeof(*buckets));
+    if (!candidates || !keys || !values || !buckets) {
+        result = recipe_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE);
+        goto done;
+    }
+    for (i = 0; i < maage_item_registry_count(registry->items); ++i) {
+        output = maage_item_registry_at(registry->items, i);
+        if (!maage_traits_has(traits, MAAGE_TRAIT_ITEM, output->id, projection->output_tag)) continue;
+        for (v = 0; v < output->variant_count; ++v) {
+            key = &keys[candidate_count * projection->property_count];
+            for (k = 0; k < projection->property_count; ++k)
+                if (!maage_item_variant_value(registry->items, output->id, (maage_item_variant_id) v, projection->properties[k].target, &key[k])) break;
+            if (k != projection->property_count) continue;
+            bucket = projection_bucket(candidates, buckets, bucket_count, key, projection->property_count);
+            if (buckets[bucket]) {
+                result = content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE), maage_item_registry_name(registry->items, output->id), "Recipe property projection has multiple matching output variants");
+                goto done;
+            }
+            candidates[candidate_count].values = key;
+            candidates[candidate_count].output = entry->definition.output;
+            candidates[candidate_count].output.item_id = output->id;
+            candidates[candidate_count].output.variant = (maage_item_variant_id) v;
+            if (!maage_item_stack_valid(registry->items, &candidates[candidate_count].output)) {
+                result = content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE), maage_item_registry_name(registry->items, output->id), "Recipe projected output stack is invalid");
+                goto done;
+            }
+            buckets[bucket] = ++candidate_count;
+        }
+    }
     ingredient = &entry->definition.ingredients[projection->ingredient];
     for (i = 0; i < maage_item_registry_count(registry->items); ++i) {
         input = maage_item_registry_at(registry->items, i);
@@ -215,39 +285,44 @@ static maage_status recipe_compile_projection(maage_recipe_registry *registry, r
         for (v = 0; v < input->variant_count; ++v) {
             stack.variant = (maage_item_variant_id) v;
             if (!ingredient_matches(registry->items, ingredient, &stack)) continue;
-            if (stack.count > input->max_stack) return recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
-            memset(&resolved, 0, sizeof(resolved));
-            matches = 0;
-            for (j = 0; j < maage_item_registry_count(registry->items); ++j) {
-                output = maage_item_registry_at(registry->items, j);
-                if (!maage_traits_has(traits, MAAGE_TRAIT_ITEM, output->id, projection->output_tag)) continue;
-                for (out_variant = 0; out_variant < output->variant_count; ++out_variant) {
-                    for (k = 0; k < projection->property_count; ++k)
-                        if (!maage_item_variant_value(registry->items, input->id, (maage_item_variant_id) v, projection->properties[k].source, &source) || !maage_item_variant_value(registry->items, output->id, (maage_item_variant_id) out_variant, projection->properties[k].target, &target) || source != target) break;
-                    if (k != projection->property_count) continue;
-                    ++matches;
-                    resolved = entry->definition.output;
-                    resolved.item_id = output->id;
-                    resolved.variant = (maage_item_variant_id) out_variant;
-                }
+            if (stack.count > input->max_stack) {
+                result = recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
+                goto done;
             }
-            if (matches != 1) return content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE), maage_item_registry_name(registry->items, input->id), matches ? "Recipe property projection has multiple matching output variants" : "Recipe property projection has no matching output variant");
-            if (!maage_item_stack_valid(registry->items, &resolved)) return content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE), maage_item_registry_name(registry->items, resolved.item_id), "Recipe projected output stack is invalid");
+            for (k = 0; k < projection->property_count; ++k)
+                if (!maage_item_variant_value(registry->items, input->id, (maage_item_variant_id) v, projection->properties[k].source, &values[k])) break;
+            bucket = k == projection->property_count ? projection_bucket(candidates, buckets, bucket_count, values, projection->property_count) : bucket_count;
+            if (bucket == bucket_count || !buckets[bucket]) {
+                result = content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE), maage_item_registry_name(registry->items, input->id), "Recipe property projection has no matching output variant");
+                goto done;
+            }
             if (entry->projection_count == capacity) {
                 capacity = capacity ? capacity * 2 : 16;
-                if (capacity < entry->projection_count || capacity > (size_t) - 1 / sizeof(*grown)) return recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE);
+                if (capacity < entry->projection_count || capacity > (size_t) - 1 / sizeof(*grown)) {
+                    result = recipe_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_FINALIZE);
+                    goto done;
+                }
                 grown = (recipe_projection_entry *) realloc(entry->projection, capacity * sizeof(*grown));
-                if (!grown) return recipe_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE);
+                if (!grown) {
+                    result = recipe_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_FINALIZE);
+                    goto done;
+                }
                 entry->projection = grown;
             }
-            entry->projection[entry->projection_count].item = input->id;
-            entry->projection[entry->projection_count].variant = (maage_item_variant_id) v;
-            entry->projection[entry->projection_count++].output = resolved;
+            j = entry->projection_count++;
+            entry->projection[j].item = input->id;
+            entry->projection[j].variant = (maage_item_variant_id) v;
+            entry->projection[j].output = candidates[buckets[bucket] - 1].output;
         }
     }
-    if (!entry->projection_count) return content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE), maage_tag_name(traits, projection->output_tag), "Recipe property projection has no eligible input variants");
-    qsort(entry->projection, entry->projection_count, sizeof(*entry->projection), projection_compare);
-    return recipe_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
+    if (!entry->projection_count) result = content_items_failure(registry->items, recipe_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE), maage_tag_name(traits, projection->output_tag), "Recipe property projection has no eligible input variants");
+    else qsort(entry->projection, entry->projection_count, sizeof(*entry->projection), projection_compare);
+done:
+    free(buckets);
+    free(values);
+    free(keys);
+    free(candidates);
+    return result;
 }
 maage_status maage_recipe_registry_finalize(maage_recipe_registry *registry) {
     maage_status result;

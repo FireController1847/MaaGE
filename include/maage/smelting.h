@@ -17,7 +17,8 @@ typedef struct maage_fuel_definition {
     maage_item_stack remainder;
 } maage_fuel_definition;
 /* Registries own copied definitions and borrow finalized items. Registration
- * rejects overlapping numeric keys; finalization publishes immutable hash tables.
+ * rejects overlapping numeric keys; finalization requires finalized items and
+ * publishes immutable hash tables.
  * Lookups allocate nothing, including damaged wooden tools. */
 maage_status maage_smelting_registry_create(const maage_item_registry *items, maage_smelting_registry **output);
 maage_status maage_smelting_register(maage_smelting_registry *registry, const maage_smelting_recipe *recipe);

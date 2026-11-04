@@ -92,10 +92,6 @@ maage_status maage_support_plant(const maage_world *world, int x, int y, int z, 
     return base_survival(world, x, y, z, state, valid, 3);
 }
 
-maage_status maage_support_sapling(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
-    return base_survival(world, x, y, z, state, valid, 3);
-}
-
 maage_status maage_support_dead_bush(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
     return base_survival(world, x, y, z, state, valid, 4);
 }

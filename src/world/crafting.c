@@ -66,8 +66,8 @@ maage_status maage_crafting_click(maage_crafting_container *container, maage_inv
     maage_recipe_id original = 0;
     maage_status result, outcome;
     unsigned int i, width;
-    if (!container || !inventory || action < MAAGE_SLOT_PRIMARY || action > MAAGE_SLOT_QUICK_MOVE || group < MAAGE_SLOT_INVENTORY || group > MAAGE_SLOT_CRAFT_RESULT) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
-    if (!container->kind || container->closing || !container->grid_width) return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MUTATE);
+    if (!container || !inventory || !items || !recipes || action < MAAGE_SLOT_PRIMARY || action > MAAGE_SLOT_QUICK_MOVE || group < MAAGE_SLOT_INVENTORY || group > MAAGE_SLOT_CRAFT_RESULT) return crafting_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+    if (!container->kind || container->closing || (container->grid_width != 2 && container->grid_width != 3)) return crafting_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_MUTATE);
     if (container->revision >= 4294967295UL - 64UL) return crafting_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_MUTATE);
     width = container->grid_width;
     if ((group == MAAGE_SLOT_INVENTORY && slot >= MAAGE_INVENTORY_SLOTS) ||

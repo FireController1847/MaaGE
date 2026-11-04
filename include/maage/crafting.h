@@ -34,7 +34,8 @@ typedef struct maage_recipe_property_binding {
 } maage_recipe_property_binding;
 /* Project one matched ingredient's properties onto a unique output candidate.
  * Finalization compiles every eligible input variant; missing or ambiguous
- * output configurations fail composition instead of choosing registration order. */
+ * output configurations fail composition instead of choosing registration order.
+ * Each target property appears once; distinct source properties may be projected. */
 typedef struct maage_recipe_projection {
     unsigned int ingredient;
     maage_tag_id output_tag;

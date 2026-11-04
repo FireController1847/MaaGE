@@ -194,9 +194,24 @@ void maage_client_ui_gameplay_draw(maage_client_ui *ui) {
 }
 
 maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_session_snapshot *snapshot) {
+    const maage_crafting_container *container;
+    const maage_container_definition *container_definition = NULL;
+    size_t i;
     int respawned, opened;
     if (!ui || !snapshot) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
     if (snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
+    container = &snapshot->player.crafting;
+    if (snapshot->player.inventory.selected >= MAAGE_HOTBAR_SLOTS || container->view_count > MAAGE_CONTAINER_VIEW_SLOTS || container->progress_count > MAAGE_CONTAINER_VIEW_SLOTS || !maage_item_stack_valid(ui->items, &snapshot->player.inventory.cursor) || !maage_item_stack_valid(ui->items, &snapshot->player.food.stack) || !maage_item_stack_valid(ui->items, &container->output)) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
+    for (i = 0; i < MAAGE_INVENTORY_SLOTS; ++i)
+        if (!maage_item_stack_valid(ui->items, &snapshot->player.inventory.slots[i])) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
+    for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
+        if (!maage_item_stack_valid(ui->items, &container->inputs[i])) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
+    for (i = 0; i < container->view_count; ++i)
+        if (!maage_item_stack_valid(ui->items, &container->view[i])) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
+    if (container->kind) {
+        container_definition = maage_container_get(maage_block_registry_containers(ui->blocks), container->kind);
+        if (!container_definition || container->grid_width != container_definition->grid_width || (container->view_count && (container->view_first >= container_definition->slot_count || container->view_count > container_definition->slot_count - container->view_first)) || (container->progress_count && (container->view_first >= container_definition->progress_count || container->progress_count > container_definition->progress_count - container->view_first))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
+    }
     opened = snapshot->player.crafting.kind && (!ui->has_snapshot || ui->snapshot.player.crafting.identity != snapshot->player.crafting.identity || !ui->snapshot.player.crafting.kind);
     respawned = ui->has_snapshot && ui->snapshot.player.health == 0 && snapshot->player.health != 0;
     if (!ui->has_snapshot || snapshot->session_epoch != ui->snapshot.session_epoch || snapshot->world_epoch != ui->snapshot.world_epoch || snapshot->player.motion.life != ui->snapshot.player.motion.life || snapshot->player.game_mode != ui->snapshot.player.game_mode || snapshot->tick < ui->snapshot.tick) {
@@ -237,10 +252,8 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_sessi
         }
     }
     if (snapshot->player.crafting.kind) {
-        const maage_container_definition *definition = maage_container_get(maage_block_registry_containers(ui->blocks), ui->snapshot.player.crafting.kind);
         maage_client_ui_screen_id desired;
-        if (!definition || snapshot->player.crafting.view_count > MAAGE_CONTAINER_VIEW_SLOTS || snapshot->player.crafting.progress_count > MAAGE_CONTAINER_VIEW_SLOTS || (snapshot->player.crafting.view_count && (snapshot->player.crafting.view_first >= definition->slot_count || snapshot->player.crafting.view_count > definition->slot_count - snapshot->player.crafting.view_first)) || (snapshot->player.crafting.progress_count && (snapshot->player.crafting.view_first >= definition->progress_count || snapshot->player.crafting.progress_count > definition->progress_count - snapshot->player.crafting.view_first))) return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SNAPSHOT, 0);
-        desired = definition->personal ? MAAGE_CLIENT_UI_INVENTORY : MAAGE_CLIENT_UI_CRAFTING_TABLE;
+        desired = container_definition->personal ? MAAGE_CLIENT_UI_INVENTORY : MAAGE_CLIENT_UI_CRAFTING_TABLE;
         if (maage_client_ui_current(ui) != desired) {
             maage_status result;
             /* The Server opens containers only from gameplay; a late snapshot

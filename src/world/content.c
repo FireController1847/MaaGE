@@ -798,11 +798,11 @@ maage_status maage_content_validate_identity(const maage_content *content, const
     for (i = 0; i < maage_item_registry_count(a->items); ++i) {
         item = maage_item_registry_at(a->items, i);
         peer_item = maage_item_registry_at(b->items, i);
-        if (!item || !peer_item || item->id != peer_item->id || item->variant_count != peer_item->variant_count) return content_identity_mismatch(content, trace, 36, NULL);
+        if (!item || !peer_item || item->id != peer_item->id || item->variant_count != peer_item->variant_count || item->has_block != peer_item->has_block || (item->has_block && item->block_id != peer_item->block_id)) return content_identity_mismatch(content, trace, 36, NULL);
         for (j = 0; j < item->variant_count; ++j) {
             variant = maage_item_variant_get(a->items, item->id, (maage_item_variant_id) j);
             peer_variant = maage_item_variant_get(b->items, peer_item->id, (maage_item_variant_id) j);
-            if (!variant || !peer_variant || variant->properties != peer_variant->properties) return content_identity_mismatch(content, trace, 36, NULL);
+            if (!variant || !peer_variant || variant->properties != peer_variant->properties || variant->texture_id != peer_variant->texture_id || (item->has_block && (variant->icon_state_id != peer_variant->icon_state_id || variant->placement_state_id != peer_variant->placement_state_id))) return content_identity_mismatch(content, trace, 36, NULL);
         }
     }
     if (maage_block_registry_state_count(a->blocks) != maage_block_registry_state_count(b->blocks)) return content_identity_mismatch(content, trace, 32, NULL);

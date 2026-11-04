@@ -5,15 +5,23 @@
 maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_base_ids *ids, const maage_content_config *config) {
     maage_block_definition block;
     maage_status result;
-    unsigned int lit, facing;
-    result = maage_content_register_state(registry, ids, config, &ids->state_red_sand, ids->block_sand, 1, MAAGE_BASE_TEXTURE_FURNACE_VARIANTS);
+    unsigned int species, facing, axis;
+    maage_property_assignment properties[2];
+    properties[0].property = ids->property_sand;
+    properties[0].value = 1;
+    result = maage_content_register_state(registry, ids, config, &ids->state_red_sand, ids->block_sand, properties, 1, MAAGE_BASE_TEXTURE_FURNACE_VARIANTS);
     if (maage_status_failed(result)) return result;
+    properties[0].property = ids->property_wood;
     for (facing = 3; facing < 6; ++facing) {
-        result = maage_content_register_state(registry, ids, config, &ids->planks[facing], ids->block_planks, facing, 0);
+        properties[0].value = ids->wood_values[facing];
+        result = maage_content_register_state(registry, ids, config, &ids->planks[facing], ids->block_planks, properties, 1, 0);
         if (maage_status_failed(result)) return result;
     }
-    for (facing = 3; facing < 12; facing += 4) {
-        result = maage_content_register_state(registry, ids, config, &ids->logs[facing], ids->block_log, facing, 0);
+    properties[0].value = ids->wood_values[3];
+    properties[1].property = ids->property_axis;
+    for (axis = 0; axis < 3; ++axis) {
+        properties[1].value = axis;
+        result = maage_content_register_state(registry, ids, config, &ids->logs[axis * 4 + 3], ids->block_log, properties, 2, 0);
         if (maage_status_failed(result)) return result;
     }
 
@@ -37,13 +45,19 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:furnace", &block);
     if (maage_status_failed(result)) return result;
     ids->block_furnace = block.id;
+    properties[0].property = ids->property_facing;
+    properties[1].property = ids->property_lit;
+    properties[1].value = 0;
     for (facing = 0; facing < 4; ++facing) {
-        result = maage_content_register_state(registry, ids, config, &ids->furnaces[0][facing], block.id, facing, MAAGE_BASE_TEXTURE_FURNACE);
+        properties[0].value = facing;
+        result = maage_content_register_state(registry, ids, config, &ids->furnaces[0][facing], block.id, properties, 2, MAAGE_BASE_TEXTURE_FURNACE);
         if (maage_status_failed(result)) return result;
     }
 
+    properties[1].value = 1;
     for (facing = 0; facing < 4; ++facing) {
-        result = maage_content_register_state(registry, ids, config, &ids->furnaces[1][facing], ids->block_furnace, facing + 4U, MAAGE_BASE_TEXTURE_FURNACE);
+        properties[0].value = facing;
+        result = maage_content_register_state(registry, ids, config, &ids->furnaces[1][facing], ids->block_furnace, properties, 2, MAAGE_BASE_TEXTURE_FURNACE);
         if (maage_status_failed(result)) return result;
     }
 
@@ -72,7 +86,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:glass", &block);
     if (maage_status_failed(result)) return result;
     ids->block_glass = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_glass, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 0);
+    result = maage_content_register_state(registry, ids, config, &ids->state_glass, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 0);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -98,7 +112,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:clay", &block);
     if (maage_status_failed(result)) return result;
     ids->block_clay = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_clay, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 1);
+    result = maage_content_register_state(registry, ids, config, &ids->state_clay, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 1);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -124,7 +138,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:hardened_clay", &block);
     if (maage_status_failed(result)) return result;
     ids->block_hardened_clay = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_hardened_clay, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 2);
+    result = maage_content_register_state(registry, ids, config, &ids->state_hardened_clay, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 2);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -150,7 +164,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:netherrack", &block);
     if (maage_status_failed(result)) return result;
     ids->block_netherrack = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_netherrack, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 3);
+    result = maage_content_register_state(registry, ids, config, &ids->state_netherrack, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 3);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -176,7 +190,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:nether_brick", &block);
     if (maage_status_failed(result)) return result;
     ids->block_nether_brick = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_nether_brick, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 4);
+    result = maage_content_register_state(registry, ids, config, &ids->state_nether_brick, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 4);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -202,7 +216,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:quartz_ore", &block);
     if (maage_status_failed(result)) return result;
     ids->block_quartz_ore = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_quartz_ore, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 5);
+    result = maage_content_register_state(registry, ids, config, &ids->state_quartz_ore, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 5);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -229,7 +243,11 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:log2", &block);
     if (maage_status_failed(result)) return result;
     ids->block_log2 = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_log2, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 6);
+    properties[0].property = ids->property_wood;
+    properties[0].value = ids->wood_values[4];
+    properties[1].property = ids->property_axis;
+    properties[1].value = 0;
+    result = maage_content_register_state(registry, ids, config, &ids->state_log2, block.id, properties, 2, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 6);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -255,11 +273,14 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:chest", &block);
     if (maage_status_failed(result)) return result;
     ids->block_chest = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_chest, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
+    properties[0].property = ids->property_facing;
+    properties[0].value = 0;
+    result = maage_content_register_state(registry, ids, config, &ids->state_chest, block.id, properties, 1, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
     if (maage_status_failed(result)) return result;
     ids->chest_states[0][0] = ids->state_chest;
     for (facing = 1; facing < 4; ++facing) {
-        result = maage_content_register_state(registry, ids, config, &ids->chest_states[0][facing], block.id, facing, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
+        properties[0].value = facing;
+        result = maage_content_register_state(registry, ids, config, &ids->chest_states[0][facing], block.id, properties, 1, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 7);
         if (maage_status_failed(result)) return result;
     }
     memset(&block, 0, sizeof(block));
@@ -286,11 +307,14 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:trapped_chest", &block);
     if (maage_status_failed(result)) return result;
     ids->block_trapped_chest = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_trapped_chest, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
+    properties[0].property = ids->property_facing;
+    properties[0].value = 0;
+    result = maage_content_register_state(registry, ids, config, &ids->state_trapped_chest, block.id, properties, 1, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
     if (maage_status_failed(result)) return result;
     ids->chest_states[1][0] = ids->state_trapped_chest;
     for (facing = 1; facing < 4; ++facing) {
-        result = maage_content_register_state(registry, ids, config, &ids->chest_states[1][facing], block.id, facing, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
+        properties[0].value = facing;
+        result = maage_content_register_state(registry, ids, config, &ids->chest_states[1][facing], block.id, properties, 1, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 8);
         if (maage_status_failed(result)) return result;
     }
     memset(&block, 0, sizeof(block));
@@ -317,7 +341,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:bookshelf", &block);
     if (maage_status_failed(result)) return result;
     ids->block_bookshelf = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_bookshelf, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 9);
+    result = maage_content_register_state(registry, ids, config, &ids->state_bookshelf, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 9);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -343,7 +367,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:fence", &block);
     if (maage_status_failed(result)) return result;
     ids->block_fence = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_fence, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 10);
+    result = maage_content_register_state(registry, ids, config, &ids->state_fence, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 10);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -369,7 +393,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:fence_gate", &block);
     if (maage_status_failed(result)) return result;
     ids->block_fence_gate = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_fence_gate, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 11);
+    result = maage_content_register_state(registry, ids, config, &ids->state_fence_gate, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 11);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -395,7 +419,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:wooden_pressure_plate", &block);
     if (maage_status_failed(result)) return result;
     ids->block_wooden_pressure_plate = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_wooden_pressure_plate, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 12);
+    result = maage_content_register_state(registry, ids, config, &ids->state_wooden_pressure_plate, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 12);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -421,7 +445,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:trapdoor", &block);
     if (maage_status_failed(result)) return result;
     ids->block_trapdoor = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_trapdoor, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 13);
+    result = maage_content_register_state(registry, ids, config, &ids->state_trapdoor, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 13);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -447,7 +471,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:wooden_slab", &block);
     if (maage_status_failed(result)) return result;
     ids->block_wooden_slab = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_wooden_slab, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 14);
+    result = maage_content_register_state(registry, ids, config, &ids->state_wooden_slab, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 14);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -473,7 +497,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:oak_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_oak_stairs = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_oak_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 15);
+    result = maage_content_register_state(registry, ids, config, &ids->state_oak_stairs, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 15);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -499,7 +523,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:spruce_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_spruce_stairs = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_spruce_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 16);
+    result = maage_content_register_state(registry, ids, config, &ids->state_spruce_stairs, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 16);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -525,7 +549,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:birch_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_birch_stairs = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_birch_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 17);
+    result = maage_content_register_state(registry, ids, config, &ids->state_birch_stairs, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 17);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -551,7 +575,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:jungle_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_jungle_stairs = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_jungle_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 18);
+    result = maage_content_register_state(registry, ids, config, &ids->state_jungle_stairs, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 18);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -577,7 +601,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:acacia_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_acacia_stairs = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_acacia_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 19);
+    result = maage_content_register_state(registry, ids, config, &ids->state_acacia_stairs, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 19);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -603,7 +627,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:dark_oak_stairs", &block);
     if (maage_status_failed(result)) return result;
     ids->block_dark_oak_stairs = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_dark_oak_stairs, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 20);
+    result = maage_content_register_state(registry, ids, config, &ids->state_dark_oak_stairs, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 20);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -629,7 +653,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:jukebox", &block);
     if (maage_status_failed(result)) return result;
     ids->block_jukebox = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_jukebox, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 21);
+    result = maage_content_register_state(registry, ids, config, &ids->state_jukebox, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 21);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -655,7 +679,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:noteblock", &block);
     if (maage_status_failed(result)) return result;
     ids->block_noteblock = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_noteblock, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 22);
+    result = maage_content_register_state(registry, ids, config, &ids->state_noteblock, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 22);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -681,7 +705,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:daylight_detector", &block);
     if (maage_status_failed(result)) return result;
     ids->block_daylight_detector = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_daylight_detector, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 23);
+    result = maage_content_register_state(registry, ids, config, &ids->state_daylight_detector, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 23);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -707,7 +731,7 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:brown_mushroom_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_brown_mushroom_block = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_brown_mushroom_block, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 24);
+    result = maage_content_register_state(registry, ids, config, &ids->state_brown_mushroom_block, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 24);
     if (maage_status_failed(result)) return result;
     memset(&block, 0, sizeof(block));
     block.behavior_context = ids;
@@ -733,14 +757,17 @@ maage_status maage_furnace_content_blocks(maage_block_registry *registry, maage_
     result = maage_base_register_block(registry, "minecraft:red_mushroom_block", &block);
     if (maage_status_failed(result)) return result;
     ids->block_red_mushroom_block = block.id;
-    result = maage_content_register_state(registry, ids, config, &ids->state_red_mushroom_block, block.id, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 25);
+    result = maage_content_register_state(registry, ids, config, &ids->state_red_mushroom_block, block.id, NULL, 0, MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 25);
     if (maage_status_failed(result)) return result;
     ids->logs2[0] = ids->state_log2;
-    for (lit = 0; lit < 3; ++lit)
-        for (facing = 0; facing < 2; ++facing) {
-            unsigned int configuration = lit * 4U + facing;
-            if (!configuration) continue;
-            result = maage_content_register_state(registry, ids, config, &ids->logs2[configuration], ids->block_log2, configuration, 0);
+    properties[0].property = ids->property_wood;
+    properties[1].property = ids->property_axis;
+    for (axis = 0; axis < 3; ++axis)
+        for (species = 0; species < 2; ++species) {
+            if (!axis && !species) continue;
+            properties[0].value = ids->wood_values[4 + species];
+            properties[1].value = axis;
+            result = maage_content_register_state(registry, ids, config, &ids->logs2[axis * 4 + species], ids->block_log2, properties, 2, 0);
             if (maage_status_failed(result)) return result;
         }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
@@ -774,7 +801,7 @@ maage_status maage_furnace_content_items(maage_content_context *context, maage_b
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:quartz_ore", "Nether Quartz Ore", ids->block_quartz_ore, ids->state_quartz_ore, 0, NULL, 0, &ids->item_quartz_ore);
     if (maage_status_failed(result)) return result;
-    result = base_block_item(context, "minecraft:log2", "Acacia Log", ids->block_log2, ids->state_log2, 1, maage_base_place_log2, 300, &ids->item_log2);
+    result = base_block_item(context, "minecraft:log2", "Acacia Log", ids->block_log2, ids->state_log2, 1, maage_base_place_log, 300, &ids->item_log2);
     if (maage_status_failed(result)) return result;
     result = base_block_item(context, "minecraft:chest", "Chest", ids->block_chest, ids->state_chest, 0, maage_base_chest_placement, 300, &ids->item_chest);
     if (maage_status_failed(result)) return result;

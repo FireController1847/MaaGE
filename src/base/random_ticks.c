@@ -332,8 +332,7 @@ maage_status maage_random_tick_mushroom(maage_world *world, int x, int y, int z,
         nz = z + (int) maage_random_tick_next(context, 3) - 1;
         result = maage_random_mushroom_site(ids, world, nx, ny, nz, &valid);
         if (maage_status_failed(result)) return result;
-        if (attempt == 4) return valid ? maage_world_set(world, nx, ny, nz, ids->state_air, state->block_id == ids->block_brown_mushroom ? ids->state_brown_mushroom : ids->state_red_mushroom)
-                                       : maage_random_noop();
+        if (attempt == 4) return valid ? maage_world_set(world, nx, ny, nz, ids->state_air, state->id) : maage_random_noop();
         if (valid) {
             x = nx;
             y = ny;

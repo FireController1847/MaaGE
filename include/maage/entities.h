@@ -27,7 +27,7 @@ enum {
 typedef union maage_entity_payload {
     maage_item_stack item;
     struct {
-        maage_item_stack stack; /* Block-item identity/metadata for exact restoration and failed-landing drop. */
+        maage_item_stack stack; /* Block-item stack/variant for exact restoration and failed-landing drop. */
         maage_block_state_id state;
         int source[3];
         unsigned long source_revision; /* Pre-removal revision; transient across save/load. */

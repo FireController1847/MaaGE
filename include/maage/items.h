@@ -84,7 +84,9 @@ typedef struct maage_item_registry maage_item_registry;
 /* Definitions and both names are copied. Finalization makes sparse-paged,
  * 32-bit numeric lookup immutable and O(1), independent of highest ID;
  * strings are used only at registration/UI boundaries. Registration returns
- * the next ID in definition.id; zero is reserved for an empty stack. */
+ * the next ID in definition.id; zero is reserved for an empty stack.
+ * Bind traits before registration. Every item starts with an empty, replaceable
+ * item-domain trait assignment; item tags are optional. */
 maage_status maage_item_registry_create(size_t capacity, maage_item_registry **output);
 maage_status maage_item_registry_destroy(maage_item_registry *registry);
 maage_status maage_item_registry_register(maage_item_registry *registry, const char *external_name, maage_item_definition *definition);
@@ -96,7 +98,9 @@ maage_status maage_item_registry_bind_traits(maage_item_registry *, maage_traits
 const maage_traits_registry *maage_item_registry_traits(const maage_item_registry *);
 maage_status maage_item_registry_bind_blocks(maage_item_registry *, const maage_block_registry *);
 const maage_block_registry *maage_item_registry_blocks(const maage_item_registry *);
-/* Owner-only binding before finalization; a row at variant_count appends. */
+/* Owner-only binding before finalization; a row at variant_count appends.
+ * Rows may move while binding. Retain IDs until finalization. Placeable rows
+ * reference their declared block and registered appearance states. */
 maage_status maage_item_registry_variant_bind(maage_item_registry *, maage_item_id, maage_item_variant_id, const maage_item_variant_definition *);
 const maage_item_variant_definition *maage_item_variant_get(const maage_item_registry *, maage_item_id, maage_item_variant_id);
 maage_status maage_item_variant_resolve(const maage_item_registry *, maage_item_id, maage_property_set_id, maage_item_variant_id *);
@@ -117,7 +121,8 @@ maage_status maage_item_registry_resolve_name(const maage_item_registry *registr
 int maage_item_stack_valid(const maage_item_registry *registry, const maage_item_stack *stack);
 const maage_item_stack *maage_inventory_selected(const maage_inventory *inventory);
 /* Remaining is initialized to input count; PARTIAL retains uninserted items.
- * Existing compatible stacks merge before empty slots. Empty input is NOOP. */
+ * Existing compatible stacks merge before empty slots. Validate all destination
+ * stacks before mutation. Empty input is NOOP. */
 maage_status maage_inventory_add(maage_inventory *inventory, const maage_item_registry *registry, const maage_item_stack *stack, unsigned int *remaining);
 maage_status maage_item_stack_click(maage_item_stack *source, maage_item_stack *cursor, const maage_item_registry *registry, int secondary);
 /* Primary picks up/merges/swaps; secondary picks up half or places one. */

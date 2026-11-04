@@ -33,9 +33,10 @@ int maage_base_furnace_access(const maage_world *world, const maage_crafting_con
 }
 maage_status maage_base_seed_placement(const maage_item_definition *item, const maage_world *world, const maage_world_target *target, maage_block_state_id *placed, int *in_place) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
+    const maage_block_state_definition *state = maage_block_registry_state(maage_world_registry(world), target->state_id);
     (void) placed;
     *in_place = 0;
-    return use_status(target->face == MAAGE_FACE_POSITIVE_Y && target->block_id == ids->block_farmland ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP);
+    return use_status(target->face == MAAGE_FACE_POSITIVE_Y && maage_base_state_tag(ids, state, ids->tag_farmland) ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP);
 }
 maage_status maage_base_hoe_placement(const maage_item_definition *item, const maage_world *world, const maage_world_target *target, maage_block_state_id *placed, int *in_place) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;

@@ -379,6 +379,8 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     maage_status result;
     maage_block_shape collision_shape;
     if (!player || !world || !items || !held || !target || !destination || !placed || (unsigned int) target->face >= MAAGE_FACE_COUNT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    if (!maage_item_stack_valid(items, held)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    *placed = MAAGE_CONTENT_ID_INVALID;
     if (target->x <= -MAAGE_WORLD_LIMIT || target->x >= MAAGE_WORLD_LIMIT || target->z <= -MAAGE_WORLD_LIMIT || target->z >= MAAGE_WORLD_LIMIT || target->y < 0 || target->y >= MAAGE_WORLD_HEIGHT) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     if (maage_world_get(world, target->x, target->y, target->z) != target->state_id) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
@@ -386,6 +388,7 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     if (item->use_placement) {
         result = item->use_placement(item, world, target, placed, &in_place);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        if ((in_place != 0 && in_place != 1) || (in_place && !maage_block_registry_state(maage_world_registry(world), *placed))) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
         if (in_place) {
             *destination = *target;
             return result;
@@ -396,7 +399,7 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     state = maage_block_registry_state(maage_world_registry(world), *placed);
     block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-    if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    if (!block || state->block_id != item->block_id) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
     x = target->x;
     y = target->y;
     z = target->z;
