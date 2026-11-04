@@ -16,7 +16,7 @@ extern "C" {
  * explicitly, not memcpy C layouts (including unsigned long and padding).
  * Local hosting validates the independently composed Server against its Client
  * content identity peer before World startup or publishing any numeric data. */
-#define MAAGE_SESSION_PROTOCOL_VERSION 26U
+#define MAAGE_SESSION_PROTOCOL_VERSION 27U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -61,6 +61,7 @@ typedef struct maage_session_command {
     unsigned long sequence;                /* Nonzero and increasing within the session. */
     double sampled_at, queued_at, sent_at; /* Optional local diagnostic clock; -1 when unavailable. */
     maage_gameplay_intent intent;
+    unsigned long use_snapshot; /* Published pose used to aim use; never a claimed position or block. */
     unsigned int hotbar_slot;
     unsigned int inventory_slot;
     /* OPEN requests the player container only; tables open from authoritative

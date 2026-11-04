@@ -100,9 +100,11 @@ maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *pla
 maage_status maage_gameplay_build_sound(maage_gameplay *game, const maage_sound_registry *sounds, struct maage_sound_event *event, unsigned int kind, maage_sound_material_id material, const double position[3], double intensity, double pitch);
 
 /* One fixed-step owner tick. The caller owns the bounded event array.
+ * Optional use_observer borrows an owner-validated historical pose for use aiming
+ * only; placement collision still checks the current player. NULL uses current aim.
  * (NULL, 0, NULL) disables event generation. Otherwise
  * written is required, and capacity > 0 requires a non-NULL events array.
  * Audio-event overflow returns PARTIAL without undoing gameplay mutations;
  * gameplay failures take precedence over this publication warning. */
-maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maage_world *world, const maage_item_registry *items, const maage_gameplay_intent *intent, struct maage_sound_event *events, size_t capacity, size_t *written, maage_status_trace *trace);
+maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maage_world *world, const maage_item_registry *items, const maage_gameplay_intent *intent, const maage_player *use_observer, struct maage_sound_event *events, size_t capacity, size_t *written, maage_status_trace *trace);
 #endif

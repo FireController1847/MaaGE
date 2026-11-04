@@ -673,11 +673,12 @@ static void maage_gameplay_sprint(maage_gameplay *game, maage_player *player, co
     game->forward_down = forward;
 }
 
-maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maage_world *world, const maage_item_registry *items, const maage_gameplay_intent *intent, maage_sound_event *events, size_t capacity, size_t *written, maage_status_trace *trace) {
+maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maage_world *world, const maage_item_registry *items, const maage_gameplay_intent *intent, const maage_player *use_observer, maage_sound_event *events, size_t capacity, size_t *written, maage_status_trace *trace) {
     maage_player_input movement;
     double previous[3], velocity[3], dx, dy, dz, travel, strength;
     const maage_block_state_definition *surface;
-    int swimming;
+    int swimming, use_has_target;
+    maage_world_target use_target;
     maage_fluid_id fluid;
     const maage_fluid_definition *entered_fluid, *current_fluid;
     maage_gameplay_sound_sink sink;
@@ -836,7 +837,15 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     }
     game->attack_held = intent->attack;
     if (intent->use && !eating && !entity_handled) {
+        use_target = game->target;
+        use_has_target = game->has_target;
+        if (use_observer && !intent->attack) {
+            result = maage_gameplay_target(game, use_observer, world, intent->movement.yaw, intent->pitch);
+            if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return maage_gameplay_sound_result(result, &sink, written, trace);
+        }
         result = maage_gameplay_action_result(maage_gameplay_place(game, player, world, items, intent->movement.yaw, intent->descend, &sink), world, trace);
+        game->target = use_target;
+        game->has_target = use_has_target;
         if (maage_status_failed(result)) return maage_gameplay_sound_result(result, &sink, written, trace);
         if (maage_status_code(result) == MAAGE_STATUS_PARTIAL) outcome = result;
     }

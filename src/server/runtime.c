@@ -74,6 +74,12 @@ struct maage_server_runtime {
         double completed_at;
     } actions[32];
     unsigned int action_cursor;
+    /* Only published owner poses may anchor use, for at most four owner ticks. */
+    struct {
+        unsigned long sequence, tick, life;
+        maage_player player;
+    } use_poses[8];
+    unsigned long use_snapshot;
     maage_session_event pending_status;
     int has_pending_status;
     maage_world_stats stats;
@@ -387,6 +393,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         runtime->pending_attack |= command->intent.attack_pressed;
         runtime->pending_use |= command->intent.use_pressed;
         runtime->sampled = command->intent;
+        runtime->use_snapshot = command->use_snapshot;
         runtime->input_sequence = command->sequence;
         runtime->input_received_at = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
         /* jump_pressed is an edge, unlike held movement.jump/attack/use.
@@ -603,6 +610,10 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.tick = runtime->tick;
     snapshot.paused = runtime->paused;
     snapshot.sequence = ++runtime->publication_sequence;
+    runtime->use_poses[snapshot.sequence % 8].sequence = snapshot.sequence;
+    runtime->use_poses[snapshot.sequence % 8].tick = runtime->tick;
+    runtime->use_poses[snapshot.sequence % 8].life = runtime->game.life;
+    runtime->use_poses[snapshot.sequence % 8].player = runtime->player;
     snapshot.applied_command_sequence = runtime->last_command_sequence;
     snapshot.gameplay_command_sequence = runtime->gameplay_command_sequence;
     snapshot.next_tick_at = runtime->next_tick_at;
@@ -850,6 +861,8 @@ static void server_close_world(maage_server_runtime *runtime, maage_status_trace
 
 static maage_status server_tick(maage_server_runtime *runtime, double scheduled_at, maage_status_trace *trace) {
     maage_gameplay_intent intent = runtime->sampled;
+    const maage_player *use_observer = NULL;
+    size_t pose;
     maage_sound_event sounds[32];
     size_t sound_count = 0, i;
     maage_status result;
@@ -870,7 +883,12 @@ static maage_status server_tick(maage_server_runtime *runtime, double scheduled_
     intent.pitch = runtime->pitch;
     runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
     runtime->gameplay_command_sequence = runtime->last_command_sequence;
-    result = maage_gameplay_tick(&runtime->game, &runtime->player, runtime->world, maage_content_items(runtime->content), &intent, sounds, sizeof(sounds) / sizeof(sounds[0]), &sound_count, trace);
+    if (intent.use && runtime->config.session) {
+        pose = runtime->use_snapshot % 8;
+        if (runtime->use_snapshot && runtime->use_poses[pose].sequence == runtime->use_snapshot && runtime->use_poses[pose].life == runtime->game.life && runtime->tick >= runtime->use_poses[pose].tick && runtime->tick - runtime->use_poses[pose].tick <= 4) use_observer = &runtime->use_poses[pose].player;
+        else intent.use = intent.use_pressed = 0;
+    }
+    result = maage_gameplay_tick(&runtime->game, &runtime->player, runtime->world, maage_content_items(runtime->content), &intent, use_observer, sounds, sizeof(sounds) / sizeof(sounds[0]), &sound_count, trace);
     gameplay_finished = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
     if (runtime->game.blocks_broken != broken) {
         runtime->last_break_tick = runtime->game.ticks;

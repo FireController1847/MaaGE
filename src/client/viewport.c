@@ -636,7 +636,7 @@ static int maage_client_input_unchanged(const maage_session_command *a, const ma
     return a->intent.movement.yaw == b->intent.movement.yaw && a->intent.pitch == b->intent.pitch &&
            a->intent.movement.forward == b->intent.movement.forward && a->intent.movement.strafe == b->intent.movement.strafe &&
            a->intent.movement.jump == b->intent.movement.jump && a->intent.movement.sprint == b->intent.movement.sprint &&
-           a->intent.descend == b->intent.descend && a->intent.attack == b->intent.attack && a->intent.use == b->intent.use;
+           a->intent.descend == b->intent.descend && a->intent.attack == b->intent.attack && a->intent.use == b->intent.use && a->use_snapshot == b->use_snapshot;
 }
 
 static maage_status maage_client_outbox_queue(maage_client_outbox *outbox, const maage_session_command *input) {
@@ -758,7 +758,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     maage_window_state state;
     maage_input_snapshot input;
     maage_server_config server_config;
-    maage_session_snapshot latest, previous, incoming;
+    maage_session_snapshot latest, previous, incoming, action_snapshot;
     maage_session_event event;
     maage_session_command command;
     maage_client_outbox outbox;
@@ -1313,6 +1313,7 @@ choose_world:
         } else {
             jump_latched = attack_latched = use_latched = forward_latched = 0;
         }
+        action_snapshot = latest;
         if (outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY) {
             memset(&command, 0, sizeof(command));
             command.kind = MAAGE_CMD_INPUT;
@@ -1331,6 +1332,7 @@ choose_world:
                 command.intent.use = maage_control_down(controls, controls->use, &input) || use_latched;
                 command.intent.attack_pressed = attack_latched;
                 command.intent.use_pressed = use_latched;
+                if (command.intent.use) command.use_snapshot = action_snapshot.sequence;
             }
             if (!has_last_input || !maage_client_input_unchanged(&command, &last_input)) {
                 operation = maage_client_outbox_queue(&outbox, &command);
@@ -1529,7 +1531,7 @@ choose_world:
                 prediction_mesh_generation = cache.generation;
                 prediction.dirty = 1;
             }
-            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, maage_control_down(controls, controls->attack, &input) || maage_control_pressed(controls, controls->attack, &input), maage_control_pressed(controls, controls->attack, &input), maage_control_down(controls, controls->use, &input) || maage_control_pressed(controls, controls->use, &input), maage_control_pressed(controls, controls->use, &input), maage_control_down(controls, controls->sneak, &input), (unsigned int) selected_hotbar, entity_target, &command);
+            operation = maage_client_prediction_update(&prediction, items, blocks, visual_world, &latest, &action_snapshot, cache.slots, cache.capacity, prediction_eye, yaw, pitch, raw_elapsed, now, outbox.input_sequence, video_options.leaves, video_options.biome_blend, active && action_snapshot.player.motion.life == latest.player.motion.life && outbox.count < MAAGE_CLIENT_OUTBOX_CAPACITY, maage_control_down(controls, controls->attack, &input) || maage_control_pressed(controls, controls->attack, &input), maage_control_pressed(controls, controls->attack, &input), maage_control_down(controls, controls->use, &input) || maage_control_pressed(controls, controls->use, &input), maage_control_pressed(controls, controls->use, &input), maage_control_down(controls, controls->sneak, &input), (unsigned int) selected_hotbar, entity_target, &command);
             if (!maage_status_failed(operation) && command.kind) {
                 command.sampled_at = prediction.diagnostics ? prediction.input_at : -1;
                 delivery = maage_client_outbox_queue(&outbox, &command);

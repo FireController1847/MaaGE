@@ -48,7 +48,10 @@ Regular and trapped chests register persistent 27-slot block entities. Exactly t
 
 ## Creative Inventory Transactions
 
-Session protocol 26 carries typed catalog/player-slot, clone, hotbar, drop, destroy and clear actions. The Server validates Creative mode, health, the accessible personal container's identity and exact revision, registered tab/entry scope, item/variant/damage/count validity and slot/action bounds. Relative operations run in owner FIFO order; stale commands fail explicitly. Generic personal slot commands cannot bypass Creative policy.
+Use input names the published player snapshot used by Client placement prediction. The Server retains eight published owner poses and accepts an aim anchor only within four owner ticks and the same player life. It raycasts that pose against current authoritative terrain, while placement overlap, inventory and mutations use current authority. Expired anchors defer use rather than placing at a different newly sampled target; preview packets remain acknowledgements only.
+
+
+Session protocol 27 carries typed catalog/player-slot, clone, hotbar, drop, destroy and clear actions. The Server validates Creative mode, health, the accessible personal container's identity and exact revision, registered tab/entry scope, item/variant/damage/count validity and slot/action bounds. Relative operations run in owner FIFO order; stale commands fail explicitly. Generic personal slot commands cannot bypass Creative policy.
 
 Catalog selection owns no storage. Shared `maage_inventory_operate` transactions preflight player-slot changes in a copied inventory before commit, including distribution, collection, hotbar swaps and bounded transfers. Cursor and selected-slot ownership remain in the existing inventory/checkpoint. Deletion creates no entities; drops reserve World entity capacity before ownership changes. Creative closure drops its carried stack before normal container teardown, retaining it and retrying when reservation fails. Survival crafting/table/furnace closure and persistent block-entity ownership use their existing paths.
 

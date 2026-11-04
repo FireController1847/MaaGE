@@ -148,7 +148,7 @@ failed:
     }
     return result;
 }
-maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, unsigned long input_sequence, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, int entity_target, maage_session_command *command) {
+maage_status maage_client_prediction_update(maage_client_prediction *prediction, const maage_item_registry *items, const maage_block_registry *blocks, maage_world *visual, const maage_session_snapshot *snapshot, const maage_session_snapshot *use_snapshot, maage_client_chunk_mesh *meshes, size_t capacity, const double eye[3], double yaw, double pitch, double elapsed, double input_time, unsigned long input_sequence, maage_leaves_mode leaves, maage_biome_blend blend, int active, int held, int pressed, int use, int use_pressed, int sneaking, unsigned int hotbar, int entity_target, maage_session_command *command) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(visual));
     maage_world_target target, destination;
     maage_block_state_id placed;
@@ -161,7 +161,7 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     unsigned int i, index, vacant = MAAGE_CLIENT_PREDICTIONS;
     int dx, dz, ready, completed, matching;
     memset(command, 0, sizeof(*command));
-    if (hotbar >= MAAGE_HOTBAR_SLOTS) return maage_prediction_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    if (!use_snapshot || hotbar >= MAAGE_HOTBAR_SLOTS) return maage_prediction_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (prediction->session != snapshot->session_epoch || prediction->world != snapshot->world_epoch) {
         maage_client_prediction_destroy(prediction);
         prediction->diagnostics = maage_log_enabled("maage.client.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
@@ -286,12 +286,17 @@ maage_status maage_client_prediction_update(maage_client_prediction *prediction,
     /* Use still travels as ordinary INPUT. The preview command merely asks
      * the Server to acknowledge the independently determined destination. */
     if (!entity_target && !command->kind && active && use && prediction->use_delay <= 0 && snapshot->player.health && !snapshot->player.crafting.kind && vacant < MAAGE_CLIENT_PREDICTIONS && prediction->next_id < 4294967295UL) {
+        double use_eye[3];
+        unsigned int axis;
+        for (axis = 0; axis < 3; ++axis)
+            use_eye[axis] = use_snapshot->player.player.position[axis];
+        use_eye[1] += MAAGE_PLAYER_EYE_HEIGHT;
         prediction->use_delay = 0.2;
-        result = maage_world_raycast(visual, eye, direction, snapshot->player.reach, &target);
+        result = maage_world_raycast(visual, use_eye, direction, snapshot->player.reach, &target);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             stack = &snapshot->player.inventory.slots[hotbar];
             if ((maage_block_registry_block(maage_world_registry(visual), target.block_id)->use != NULL) && (!sneaking || !stack->count)) result = maage_prediction_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
-            else result = maage_gameplay_placement(&snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
+            else result = maage_gameplay_placement(&use_snapshot->player.player, visual, items, stack, &target, yaw, &destination, &placed);
             if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
                 memset(&prediction->entries[vacant], 0, sizeof(prediction->entries[vacant]));
                 prediction->entries[vacant].active = 1;
