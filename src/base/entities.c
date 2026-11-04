@@ -293,7 +293,6 @@ static void base_mob_definition(maage_entity_type_definition *definition, const 
     definition->height = height;
     definition->eye_height = height * 0.85;
     definition->speed = speed;
-    definition->panic_speed = speed * 2;
     definition->gravity = 0.08;
     definition->fall_speed_limit = 3.9;
     definition->jump_velocity = 0.42;
@@ -353,6 +352,10 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
     static const double widths[] = {0.9, 0.9, 0.9, 0.3, 0.6, 0.6, 0.6, 1.4};
     static const double heights[] = {0.9, 1.3, 1.3, 0.7, 1.8, 1.8, 1.7, 0.9};
     static const double speeds[] = {0.1, 0.08, 0.092, 0.1, 0.092, 0.1, 0.1, 0.16};
+    /* Absolute steering targets in blocks per owner step. Ground fleeing
+     * speeds account for the controller's 0.35 response and 0.91 drag;
+     * navigation multipliers applied to walking targets remain too slow. */
+    static const double panic_speeds[] = {0.246, 0.403, 0.208, 0.309};
     maage_entity_type_definition definition;
     maage_entity_spawn_rule spawn;
     maage_entity_loot loot[4];
@@ -402,12 +405,12 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
     ids->arrow_type = definition.id;
     for (mob = 0; mob < MAAGE_BASE_MOB_COUNT; ++mob) {
         base_mob_definition(&definition, ids, mob, labels[mob], health[mob], widths[mob], heights[mob], speeds[mob]);
+        if (mob < MAAGE_BASE_MOB_ZOMBIE) definition.panic_speed = panic_speeds[mob];
         base_spawn_rule(&spawn, ids, mob < MAAGE_BASE_MOB_ZOMBIE, biomes);
         definition.spawns = &spawn;
         definition.spawn_count = 1;
         count = 0;
         if (mob == MAAGE_BASE_MOB_PIG) {
-            definition.panic_speed = definition.speed * 1.25;
             base_loot(&loot[count], ids->item_porkchop, 1, 3);
             loot[count++].excluded_flags = MAAGE_ENTITY_LOOT_BURNING;
             base_loot(&loot[count], ids->item_cooked_porkchop, 1, 3);
@@ -421,7 +424,6 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
             definition.interact = base_cow_interact;
             spawn.weight = 8;
         } else if (mob == MAAGE_BASE_MOB_SHEEP) {
-            definition.panic_speed = definition.speed * 1.25;
             base_loot(&loot[count], ids->item_wool, 1, 1);
             loot[count++].excluded_flags = MAAGE_ENTITY_LOOT_SHEARED;
             definition.behavior = base_sheep_behavior;
@@ -430,7 +432,6 @@ maage_status maage_base_entities(maage_content_context *context, maage_base_ids 
             base_mob_state_bind(&definition, base_sheep_initialize);
             spawn.weight = 12;
         } else if (mob == MAAGE_BASE_MOB_CHICKEN) {
-            definition.panic_speed = definition.speed * 1.4;
             base_loot(&loot[count++], ids->item_feather, 0, 2);
             base_loot(&loot[count], ids->item_chicken, 1, 1);
             loot[count++].excluded_flags = MAAGE_ENTITY_LOOT_BURNING;
