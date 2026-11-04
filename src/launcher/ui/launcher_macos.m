@@ -65,6 +65,22 @@ static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset) {
     [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 2) xRadius:9 yRadius:9] fill];
 }
 @end
+/* Installation rows retain a distinct accent-colored selection while the editor
+ * has focus. Selection remains fully native for keyboard and accessibility. */
+@interface MaaGELauncherInstallationRow : NSTableRowView
+@end
+@implementation MaaGELauncherInstallationRow
+- (void)drawSelectionInRect:(NSRect)dirtyRect {
+    (void) dirtyRect;
+    NSColor *accent = NSColor.controlAccentColor;
+    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 3, 2) xRadius:7 yRadius:7];
+    [[accent colorWithAlphaComponent:0.24] setFill];
+    [outline fill];
+    [[accent colorWithAlphaComponent:0.85] setStroke];
+    outline.lineWidth = 1.5;
+    [outline stroke];
+}
+@end
 static NSTableView *maage_ui_navigation_table(void) {
     NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 160, 150)];
     table.headerView = nil;
@@ -91,8 +107,11 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, strong) NSButton *status, *repair, *verify, *play;
 @property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus;
 @property(nonatomic, strong) NSTimer *timer;
-@property(nonatomic, strong) NSArray<NSButton *> *installationActions;
-@property(nonatomic) unsigned accountRevision, clientRevision;
+@property(nonatomic, strong) NSTextField *installationName, *installationArguments, *installationHeading, *installationHint;
+@property(nonatomic, strong) NSPopUpButton *installationClient;
+@property(nonatomic, strong) NSButton *newInstallationButton, *saveInstallationButton, *duplicateInstallationButton, *removeInstallationButton, *defaultInstallationButton, *activateInstallationButton, *cancelInstallationButton, *folderInstallationButton;
+@property(nonatomic) unsigned editedInstallationID, accountRevision, clientRevision;
+@property(nonatomic) BOOL hasEditedInstallation, creatingInstallation, updatingInstallationSelection;
 @property(nonatomic) int result;
 @end
 @implementation MaaGELauncherController
@@ -202,8 +221,15 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)selectInstallation:(id)sender {
     (void) sender;
-    maage_launcher_installation_select(self.state, (unsigned) self.installation.indexOfSelectedItem);
-    [self reloadInstallations];
+    NSInteger row = self.installation.indexOfSelectedItem;
+    if (row < 0 || (unsigned) row >= self.state->count) return;
+    if (!maage_status_failed(maage_launcher_installation_select(self.state, (unsigned) row))) {
+        self.creatingInstallation = NO;
+        self.hasEditedInstallation = YES;
+        self.editedInstallationID = self.state->installations[row].id;
+        [self reloadInstallations];
+    }
+    [self refresh:nil];
 }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table {
     return table == self.sidebar ? 3 : table == self.settingsSidebar ? 2
@@ -212,7 +238,8 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (NSTableRowView *)tableView:(NSTableView *)table rowViewForRow:(NSInteger)row {
     (void) row;
-    return table == self.sidebar || table == self.settingsSidebar ? [[MaaGELauncherNavigationRow alloc] init] : nil;
+    if (table == self.sidebar || table == self.settingsSidebar) return [[MaaGELauncherNavigationRow alloc] init];
+    return table == self.installations ? [[MaaGELauncherInstallationRow alloc] init] : nil;
 }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
     (void) column;
@@ -240,14 +267,20 @@ static NSTableView *maage_ui_navigation_table(void) {
         return maage_ui_row(line, 6);
     }
     maage_installation *item = &self.state->installations[row];
-    NSString *suffix = item->id == self.state->default_id ? @" · Default" : @"";
-    NSString *selected = item->id == self.state->selected ? @" · Selected" : @"";
-    NSStackView *line = maage_ui_stack(NO, 4);
-    [line addArrangedSubview:maage_ui_row_label([NSString stringWithFormat:@"%s%@%@", item->name, suffix, selected], 14, YES)];
-    NSTextField *summary = maage_ui_row_label(@(maage_launcher_installation_client(self.state, (unsigned) row)), 12, NO);
+    if ([column.identifier isEqualToString:@"role"]) {
+        NSString *role = item->id == self.state->selected && item->id == self.state->default_id ? @"Active / Default"
+                         : item->id == self.state->selected ? @"Active"
+                         : item->id == self.state->default_id ? @"Default" : @"—";
+        NSTextField *label = maage_ui_row_label(role, 11, YES);
+        label.textColor = NSColor.secondaryLabelColor;
+        return maage_ui_row(label, 6);
+    }
+    NSStackView *line = maage_ui_stack(NO, 3);
+    [line addArrangedSubview:maage_ui_row_label(@(item->name), 13, YES)];
+    NSTextField *summary = maage_ui_row_label(@(maage_launcher_installation_client(self.state, (unsigned) row)), 11, NO);
     summary.textColor = NSColor.secondaryLabelColor;
     [line addArrangedSubview:summary];
-    return maage_ui_row(line, 6);
+    return maage_ui_row(line, 8);
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
     if (notification.object == self.settingsSidebar) {
@@ -260,107 +293,217 @@ static NSTableView *maage_ui_navigation_table(void) {
         if (row < 0 || row >= MAAGE_PAGE_SETTINGS) return;
         [self activatePage:(maage_launcher_page) row];
     }
-    [self refresh:nil];
-}
-- (void)reloadInstallations {
-    [self.installation removeAllItems];
-    for (unsigned i = 0; i < self.state->count; ++i) {
-        [self.installation addItemWithTitle:@(self.state->installations[i].name)];
-        if (self.state->installations[i].id == self.state->selected) [self.installation selectItemAtIndex:i];
+    if (notification.object == self.installations) {
+        if (self.updatingInstallationSelection) return;
+        NSInteger row = self.installations.selectedRow;
+        if (row >= 0 && (unsigned) row < self.state->count) {
+            self.creatingInstallation = NO;
+            self.hasEditedInstallation = YES;
+            self.editedInstallationID = self.state->installations[row].id;
+            [self bindInstallationEditor];
+        } else if (!self.creatingInstallation) [self reloadInstallationRoles];
     }
-    [self.installations reloadData];
     [self refresh:nil];
 }
-- (void)editInstallation:(NSButton *)sender {
-    NSInteger row = self.installations.selectedRow;
-    BOOL creating = sender.tag != 1;
-    if (!creating && row < 0) return;
-    NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = sender.tag == 1 ? @"Edit Installation" : sender.tag == 2 ? @"Duplicate Installation"
-                                                                                 : @"New Installation";
-    alert.informativeText = @"Choose a managed Client build for this configuration. Minecraft 1.7.10 resources are shared.";
-    NSTextField *name = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 360, 24)];
-    name.stringValue = row >= 0 && sender.tag ? @(self.state->installations[row].name) : @"New Installation";
-    if (sender.tag == 2 && row >= 0) name.stringValue = [name.stringValue stringByAppendingString:@" Copy"];
-    name.accessibilityLabel = @"Installation name";
-    /* NSAlert sizes its accessory from its frame. An unframed stack collapses
-     * here even when its arranged controls were constructed with frames. */
-    NSView *editor = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 200)];
-    NSTextField *nameLabel = [NSTextField labelWithString:@"Installation name"];
-    nameLabel.frame = NSMakeRect(0, 180, 420, 16);
-    [editor addSubview:nameLabel];
-    name.frame = NSMakeRect(0, 150, 420, 24);
-    [editor addSubview:name];
-    NSTextField *clientLabel = [NSTextField labelWithString:@"Client build"];
-    clientLabel.frame = NSMakeRect(0, 122, 420, 18);
-    [editor addSubview:clientLabel];
-    NSPopUpButton *client = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 90, 420, 26)];
-    [client addItemWithTitle:@"Client selection required"];
-    client.lastItem.representedObject = @"";
-    const char *selectedClient = row >= 0 && sender.tag ? self.state->installations[row].client : "";
+- (NSInteger)editedInstallationRow {
+    if (!self.hasEditedInstallation) return -1;
+    for (unsigned i = 0; i < self.state->count; ++i)
+        if (self.state->installations[i].id == self.editedInstallationID) return (NSInteger) i;
+    return -1;
+}
+- (NSInteger)activeInstallationRow {
+    for (unsigned i = 0; i < self.state->count; ++i)
+        if (self.state->installations[i].id == self.state->selected) return (NSInteger) i;
+    return self.state->count ? 0 : -1;
+}
+- (void)installationClientChoices:(NSString *)selectedID {
+    [self.installationClient removeAllItems];
+    [self.installationClient addItemWithTitle:@"Client selection required"];
+    self.installationClient.lastItem.representedObject = @"";
+    [self.installationClient selectItemAtIndex:0];
     for (unsigned i = 0; i < self.state->clients->count; ++i) {
         maage_client_build *build = &self.state->clients->builds[i];
         char label[384];
         maage_client_build_label(build, label);
-        [client addItemWithTitle:@(label)];
-        client.lastItem.representedObject = @(build->id);
-        if (!strcmp(build->id, selectedClient)) [client selectItem:client.lastItem];
+        [self.installationClient addItemWithTitle:@(label)];
+        self.installationClient.lastItem.representedObject = @(build->id);
+        if ([selectedID isEqualToString:@(build->id)]) [self.installationClient selectItem:self.installationClient.lastItem];
     }
-    if (*selectedClient && maage_clients_find(self.state->clients, selectedClient) < 0) {
-        [client addItemWithTitle:@"Referenced Client missing (keep reference)"];
-        client.lastItem.representedObject = @(selectedClient);
-        [client selectItem:client.lastItem];
+    if (selectedID.length && maage_clients_find(self.state->clients, selectedID.UTF8String) < 0) {
+        [self.installationClient addItemWithTitle:@"Referenced Client missing (keep reference)"];
+        self.installationClient.lastItem.representedObject = selectedID;
+        [self.installationClient selectItem:self.installationClient.lastItem];
     }
-    client.accessibilityLabel = @"Client build";
-    [editor addSubview:client];
-    alert.accessoryView = editor;
-    NSTextField *argumentsLabel = [NSTextField labelWithString:@"Client CLI arguments"];
-    argumentsLabel.frame = NSMakeRect(0, 62, 420, 18);
-    [editor addSubview:argumentsLabel];
-    NSTextField *arguments = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 32, 420, 24)];
-    arguments.stringValue = row >= 0 && sender.tag ? @(self.state->installations[row].arguments) : @"";
-    arguments.accessibilityLabel = @"Client CLI arguments";
-    [editor addSubview:arguments];
-    NSTextField *hint = [NSTextField labelWithString:@"Separate arguments with spaces; quote values containing spaces."];
-    hint.font = [NSFont systemFontOfSize:11];
-    hint.frame = NSMakeRect(0, 6, 420, 18);
-    [editor addSubview:hint];
-    [alert addButtonWithTitle:@"Save"];
-    [alert addButtonWithTitle:@"Cancel"];
-    [alert.window setInitialFirstResponder:name];
-    while ([alert runModal] == NSAlertFirstButtonReturn) {
-        if (!maage_status_failed(maage_launcher_installation_write(self.state, creating ? -1 : (int) row, name.stringValue.UTF8String, [client.selectedItem.representedObject UTF8String], arguments.stringValue.UTF8String))) {
-            [self reloadInstallations];
-            break;
+}
+- (void)updateInstallationEditor {
+    NSInteger row = [self editedInstallationRow];
+    BOOL editing = !self.creatingInstallation && row >= 0;
+    BOOL enabled = !self.state->client_job;
+    NSString *hint = @"Select a row on the left to edit its configuration.";
+    if (self.creatingInstallation) {
+        self.installationHeading.stringValue = @"Create installation";
+        hint = @"Enter a name and optional Client build, then choose Create.";
+    } else if (editing) {
+        maage_installation *item = &self.state->installations[row];
+        self.installationHeading.stringValue = @"Edit installation";
+        if (item->id == self.state->selected && item->id == self.state->default_id) hint = @"Active for Play and Default. Save changes before selecting another row.";
+        else if (item->id == self.state->selected) hint = @"Active for Play. Save changes before selecting another row.";
+        else if (item->id == self.state->default_id) hint = @"Default installation. Not active for Play.";
+        else hint = @"Selected for editing. Choose Make Active for Play to launch this one.";
+    } else self.installationHeading.stringValue = @"Select an installation";
+    if (![self.installationHint.stringValue isEqualToString:hint]) self.installationHint.stringValue = hint;
+    self.newInstallationButton.enabled = enabled && !self.creatingInstallation;
+    self.installationName.enabled = enabled && (editing || self.creatingInstallation);
+    self.installationClient.enabled = enabled && (editing || self.creatingInstallation);
+    self.installationArguments.enabled = enabled && (editing || self.creatingInstallation);
+    self.saveInstallationButton.enabled = enabled && (editing || self.creatingInstallation);
+    self.saveInstallationButton.title = self.creatingInstallation ? @"Create" : @"Save Changes";
+    self.duplicateInstallationButton.enabled = enabled && editing;
+    self.removeInstallationButton.enabled = enabled && editing && self.state->count > 1;
+    self.defaultInstallationButton.enabled = enabled && editing && self.state->installations[row].id != self.state->default_id;
+    self.activateInstallationButton.enabled = enabled && editing && self.state->installations[row].id != self.state->selected;
+    self.folderInstallationButton.enabled = editing;
+    self.cancelInstallationButton.hidden = !self.creatingInstallation;
+    self.removeInstallationButton.hidden = self.creatingInstallation;
+}
+- (void)bindInstallationEditor {
+    if (self.creatingInstallation) return;
+    NSInteger row = [self editedInstallationRow];
+    if (row >= 0) {
+        maage_installation *item = &self.state->installations[row];
+        self.installationName.stringValue = @(item->name);
+        self.installationArguments.stringValue = @(item->arguments);
+        [self installationClientChoices:@(item->client)];
+    } else {
+        self.installationName.stringValue = @"";
+        self.installationArguments.stringValue = @"";
+        [self installationClientChoices:@""];
+    }
+    [self updateInstallationEditor];
+}
+- (void)reloadInstallationRoles {
+    NSInteger row = self.creatingInstallation ? -1 : [self editedInstallationRow];
+    self.updatingInstallationSelection = YES;
+    [self.installations reloadData];
+    if (row >= 0) [self.installations selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+    else [self.installations deselectAll:nil];
+    self.updatingInstallationSelection = NO;
+    NSInteger active = [self activeInstallationRow];
+    if (active >= 0) [self.installation selectItemAtIndex:active];
+    [self updateInstallationEditor];
+}
+- (void)reloadInstallations {
+    [self.installation removeAllItems];
+    for (unsigned i = 0; i < self.state->count; ++i) [self.installation addItemWithTitle:@(self.state->installations[i].name)];
+    if (!self.creatingInstallation) {
+        NSInteger row = [self editedInstallationRow];
+        if (row < 0) row = [self activeInstallationRow];
+        self.updatingInstallationSelection = YES;
+        [self.installations reloadData];
+        if (row >= 0) {
+            self.hasEditedInstallation = YES;
+            self.editedInstallationID = self.state->installations[row].id;
+            [self.installations selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+            [self.installations scrollRowToVisible:row];
+        } else [self.installations deselectAll:nil];
+        self.updatingInstallationSelection = NO;
+        [self bindInstallationEditor];
+    } else [self.installations reloadData];
+    NSInteger active = [self activeInstallationRow];
+    if (active >= 0) [self.installation selectItemAtIndex:active];
+    [self refresh:nil];
+}
+- (void)newInstallation:(id)sender {
+    (void) sender;
+    if (self.state->client_job) return;
+    self.creatingInstallation = YES;
+    self.updatingInstallationSelection = YES;
+    [self.installations deselectAll:nil];
+    self.updatingInstallationSelection = NO;
+    self.installationName.stringValue = @"New Installation";
+    self.installationArguments.stringValue = @"";
+    [self installationClientChoices:@""];
+    [self updateInstallationEditor];
+    [self.window makeFirstResponder:self.installationName];
+    [self.installationName selectText:nil];
+}
+- (void)cancelInstallation:(id)sender {
+    (void) sender;
+    self.creatingInstallation = NO;
+    [self reloadInstallations];
+}
+- (void)saveInstallation:(id)sender {
+    (void) sender;
+    NSInteger row = [self editedInstallationRow];
+    BOOL creating = self.creatingInstallation;
+    if (self.state->client_job || (!creating && row < 0)) return;
+    NSString *clientID = self.installationClient.selectedItem.representedObject ?: @"";
+    maage_status result = maage_launcher_installation_write(self.state, creating ? -1 : (int) row, self.installationName.stringValue.UTF8String, clientID.UTF8String, self.installationArguments.stringValue.UTF8String);
+    if (!maage_status_failed(result)) {
+        self.creatingInstallation = NO;
+        if (creating && self.state->count) {
+            self.hasEditedInstallation = YES;
+            self.editedInstallationID = self.state->installations[self.state->count - 1].id;
         }
-        alert.informativeText = @(self.state->error);
+        [self reloadInstallations];
     }
+    [self refresh:nil];
+}
+- (void)duplicateInstallation:(id)sender {
+    (void) sender;
+    NSInteger row = [self editedInstallationRow];
+    if (self.state->client_job || self.creatingInstallation || row < 0) return;
+    maage_installation *item = &self.state->installations[row];
+    NSString *copyName = [@(item->name) stringByAppendingString:@" Copy"];
+    NSString *clientID = @(item->client), *arguments = @(item->arguments);
+    maage_status result = maage_launcher_installation_write(self.state, -1, copyName.UTF8String, clientID.UTF8String, arguments.UTF8String);
+    if (!maage_status_failed(result) && self.state->count) {
+        self.hasEditedInstallation = YES;
+        self.editedInstallationID = self.state->installations[self.state->count - 1].id;
+        [self reloadInstallations];
+    }
+    [self refresh:nil];
+}
+- (void)activateInstallation:(id)sender {
+    NSInteger row = [self editedInstallationRow];
+    if (sender == self.installations) {
+        row = self.installations.clickedRow;
+        if (row < 0 || (unsigned) row >= self.state->count) return;
+        if ([self editedInstallationRow] != row) {
+            self.editedInstallationID = self.state->installations[row].id;
+            self.hasEditedInstallation = YES;
+            [self bindInstallationEditor];
+        }
+    }
+    if (self.creatingInstallation || row < 0) return;
+    if (!maage_status_failed(maage_launcher_installation_select(self.state, (unsigned) row))) [self reloadInstallationRoles];
+    [self refresh:nil];
 }
 - (void)removeInstallation:(id)sender {
     (void) sender;
-    NSInteger row = self.installations.selectedRow;
-    if (row < 0) return;
+    NSInteger row = [self editedInstallationRow];
+    if (self.creatingInstallation || row < 0) return;
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"Remove Installation?";
     alert.informativeText = @"This instance will be removed from the Launcher and its gameplay folder archived. Worlds and private files remain recoverable; shared resources are preserved.";
     [alert addButtonWithTitle:@"Remove"];
     [alert addButtonWithTitle:@"Cancel"];
-    if ([alert runModal] == NSAlertFirstButtonReturn) {
-        maage_launcher_installation_remove(self.state, (unsigned) row);
+    if ([alert runModal] == NSAlertFirstButtonReturn && !maage_status_failed(maage_launcher_installation_remove(self.state, (unsigned) row))) {
+        self.hasEditedInstallation = NO;
         [self reloadInstallations];
     }
+    [self refresh:nil];
 }
 - (void)defaultInstallation:(id)sender {
     (void) sender;
-    NSInteger row = self.installations.selectedRow;
-    if (row >= 0) {
-        maage_launcher_installation_default(self.state, (unsigned) row);
-        [self reloadInstallations];
-    }
+    NSInteger row = [self editedInstallationRow];
+    if (self.creatingInstallation || row < 0) return;
+    if (!maage_status_failed(maage_launcher_installation_default(self.state, (unsigned) row))) [self reloadInstallationRoles];
+    [self refresh:nil];
 }
 - (void)openInstallationFolder:(id)sender {
     (void) sender;
-    NSInteger row = self.installations.selectedRow;
+    NSInteger row = [self editedInstallationRow];
     char path[MAAGE_PATH_CAPACITY];
     if (row < 0) return;
     if ((!maage_status_failed(maage_launcher_installation_directory(self.state, (unsigned) row, path))) &&
@@ -418,7 +561,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     if (self.clientRevision != state->client_revision) {
         self.clientRevision = state->client_revision;
         [self.clients reloadData];
-        [self.installations reloadData];
+        [self reloadInstallationRoles];
+        NSString *clientID = self.installationClient.selectedItem.representedObject ?: @"";
+        [self installationClientChoices:clientID];
     }
 #if MAAGE_LAUNCHER_DEVELOPMENT
     if (state->client_confirmation) {
@@ -446,8 +591,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.repair.enabled = !state->accounts.busy;
     self.repair.title = state->accounts.allowed ? @"Repair Assets…" : @"Verify Minecraft Access…";
     self.error.stringValue = @(state->error);
-    for (NSButton *button in self.installationActions)
-        button.enabled = button.tag == 0 || self.installations.selectedRow >= 0;
+    [self updateInstallationEditor];
 }
 - (NSView *)playPage {
     NSView *page = [[NSView alloc] init];
@@ -528,7 +672,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     clientScroll.documentView = self.clients;
     [page addArrangedSubview:clientScroll];
     [clientScroll.widthAnchor constraintEqualToAnchor:page.widthAnchor].active = YES;
-    [clientScroll.heightAnchor constraintEqualToConstant:110].active = YES;
+    [clientScroll.heightAnchor constraintEqualToConstant:82].active = YES;
     NSStackView *clientActions = maage_ui_stack(YES, 8);
 #if MAAGE_LAUNCHER_DEVELOPMENT
     [clientActions addArrangedSubview:[self button:@"Import Local Client…" action:@selector(importClient:)]];
@@ -538,42 +682,112 @@ static NSTableView *maage_ui_navigation_table(void) {
 #endif
     [clientActions addArrangedSubview:[self button:@"Remove Client…" action:@selector(removeClient:)]];
     [page addArrangedSubview:clientActions];
-    [page addArrangedSubview:maage_ui_label(@"MaaGE Installations · shared Minecraft 1.7.10 resources", 15, YES)];
-    self.installations = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 640, 300)];
-    self.installations.headerView = nil;
+
+    NSStackView *workspace = maage_ui_stack(YES, 18);
+    workspace.alignment = NSLayoutAttributeTop;
+    NSStackView *left = maage_ui_stack(NO, 10);
+    NSStackView *listHeading = maage_ui_stack(YES, 10);
+    [listHeading addArrangedSubview:maage_ui_label(@"Installations", 17, YES)];
+    [listHeading addArrangedSubview:[[NSView alloc] init]];
+    self.newInstallationButton = [self button:@"+ New" action:@selector(newInstallation:)];
+    [listHeading addArrangedSubview:self.newInstallationButton];
+    [left addArrangedSubview:listHeading];
+    [listHeading.widthAnchor constraintEqualToAnchor:left.widthAnchor].active = YES;
+    NSTextField *selectionHint = maage_ui_label(@"Select a row to edit · Double-click to activate", 11, NO);
+    selectionHint.textColor = NSColor.secondaryLabelColor;
+    [left addArrangedSubview:selectionHint];
+    [selectionHint.widthAnchor constraintEqualToAnchor:left.widthAnchor].active = YES;
+    self.installations = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 350, 300)];
     self.installations.autoresizingMask = NSViewWidthSizable;
-    self.installations.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
-    NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"installation"];
-    column.width = 640;
-    [self.installations addTableColumn:column];
+    self.installations.columnAutoresizingStyle = NSTableViewFirstColumnOnlyAutoresizingStyle;
+    self.installations.allowsEmptySelection = YES;
+    self.installations.usesAlternatingRowBackgroundColors = YES;
+    self.installations.selectionHighlightStyle = NSTableViewSelectionHighlightStyleRegular;
+    self.installations.rowHeight = 46;
+    self.installations.intercellSpacing = NSMakeSize(0, 3);
     self.installations.delegate = self;
     self.installations.dataSource = self;
-    self.installations.rowHeight = 55;
-    self.installations.accessibilityLabel = @"MaaGE installations";
+    self.installations.target = self;
+    self.installations.doubleAction = @selector(activateInstallation:);
+    self.installations.accessibilityLabel = @"Installations — select a row to edit";
+    NSTableColumn *nameColumn = [[NSTableColumn alloc] initWithIdentifier:@"installation"];
+    nameColumn.title = @"Installation";
+    nameColumn.width = 210;
+    [self.installations addTableColumn:nameColumn];
+    NSTableColumn *roleColumn = [[NSTableColumn alloc] initWithIdentifier:@"role"];
+    roleColumn.title = @"Role";
+    roleColumn.width = 124;
+    [self.installations addTableColumn:roleColumn];
+    NSScrollView *listScroll = [[NSScrollView alloc] init];
+    listScroll.hasVerticalScroller = YES;
+    listScroll.borderType = NSBezelBorder;
+    listScroll.documentView = self.installations;
+    [left addArrangedSubview:listScroll];
+    [listScroll.widthAnchor constraintEqualToAnchor:left.widthAnchor].active = YES;
+    [listScroll.heightAnchor constraintEqualToConstant:364].active = YES;
+    [workspace addArrangedSubview:left];
+
+    NSStackView *editor = maage_ui_stack(NO, 9);
+    self.installationHeading = maage_ui_label(@"Select an installation", 17, YES);
+    [editor addArrangedSubview:self.installationHeading];
+    self.installationHint = maage_ui_label(@"Select a row on the left to edit its configuration.", 12, NO);
+    self.installationHint.textColor = NSColor.secondaryLabelColor;
+    [editor addArrangedSubview:self.installationHint];
+    [self.installationHint.widthAnchor constraintEqualToAnchor:editor.widthAnchor].active = YES;
+    [editor setCustomSpacing:17 afterView:self.installationHint];
+    [editor addArrangedSubview:maage_ui_label(@"Installation name", 12, YES)];
+    self.installationName = [[NSTextField alloc] init];
+    self.installationName.accessibilityLabel = @"Installation name";
+    [editor addArrangedSubview:self.installationName];
+    [editor addArrangedSubview:maage_ui_label(@"Client build", 12, YES)];
+    self.installationClient = [[NSPopUpButton alloc] init];
+    self.installationClient.accessibilityLabel = @"Client build";
+    [editor addArrangedSubview:self.installationClient];
+    [editor addArrangedSubview:maage_ui_label(@"Client CLI arguments", 12, YES)];
+    self.installationArguments = [[NSTextField alloc] init];
+    self.installationArguments.accessibilityLabel = @"Client CLI arguments";
+    [editor addArrangedSubview:self.installationArguments];
+    NSTextField *argumentsHint = maage_ui_label(@"Quote values containing spaces.", 11, NO);
+    argumentsHint.textColor = NSColor.secondaryLabelColor;
+    [editor addArrangedSubview:argumentsHint];
+
+    NSStackView *primaryActions = maage_ui_stack(YES, 7);
+    self.saveInstallationButton = [self button:@"Save Changes" action:@selector(saveInstallation:)];
+    self.duplicateInstallationButton = [self button:@"Duplicate" action:@selector(duplicateInstallation:)];
+    self.removeInstallationButton = [self button:@"Remove" action:@selector(removeInstallation:)];
+    self.cancelInstallationButton = [self button:@"Cancel" action:@selector(cancelInstallation:)];
+    [primaryActions addArrangedSubview:self.saveInstallationButton];
+    [primaryActions addArrangedSubview:self.duplicateInstallationButton];
+    [primaryActions addArrangedSubview:self.removeInstallationButton];
+    [primaryActions addArrangedSubview:self.cancelInstallationButton];
+    [editor addArrangedSubview:primaryActions];
+
+    NSStackView *roleActions = maage_ui_stack(YES, 7);
+    self.defaultInstallationButton = [self button:@"Set as Default" action:@selector(defaultInstallation:)];
+    self.activateInstallationButton = [self button:@"Make Active for Play" action:@selector(activateInstallation:)];
+    [roleActions addArrangedSubview:self.defaultInstallationButton];
+    [roleActions addArrangedSubview:self.activateInstallationButton];
+    [editor addArrangedSubview:roleActions];
+    self.folderInstallationButton = [self button:@"Open installation folder" action:@selector(openInstallationFolder:)];
+    [editor addArrangedSubview:self.folderInstallationButton];
+    [workspace addArrangedSubview:editor];
+    [left.widthAnchor constraintEqualToAnchor:workspace.widthAnchor multiplier:0.44].active = YES;
+    [editor.widthAnchor constraintEqualToAnchor:workspace.widthAnchor multiplier:0.56 constant:-18].active = YES;
+    [self.installationName.widthAnchor constraintEqualToAnchor:editor.widthAnchor].active = YES;
+    [self.installationClient.widthAnchor constraintEqualToAnchor:editor.widthAnchor].active = YES;
+    [self.installationArguments.widthAnchor constraintEqualToAnchor:editor.widthAnchor].active = YES;
+    [page addArrangedSubview:workspace];
+    [workspace.widthAnchor constraintEqualToAnchor:page.widthAnchor].active = YES;
+
     NSScrollView *scroll = [[NSScrollView alloc] init];
     scroll.hasVerticalScroller = YES;
-    scroll.borderType = NSBezelBorder;
-    scroll.documentView = self.installations;
-    [page addArrangedSubview:scroll];
-    [scroll.widthAnchor constraintEqualToAnchor:page.widthAnchor].active = YES;
-    NSStackView *actions = maage_ui_stack(YES, 8);
-    NSMutableArray *buttons = [NSMutableArray array];
-    NSArray *titles = @[ @"New…", @"Edit…", @"Duplicate…", @"Remove…", @"Set as Default" ];
-    for (NSInteger i = 0; i < 5; ++i) {
-        SEL action = i < 3 ? @selector(editInstallation:) : i == 3 ? @selector(removeInstallation:)
-                                                                   : @selector(defaultInstallation:);
-        NSButton *button = [self button:titles[i] action:action];
-        button.tag = i;
-        [actions addArrangedSubview:button];
-        [buttons addObject:button];
-    }
-    [page addArrangedSubview:actions];
-    NSButton *openFolder = [self button:@"Open installation folder" action:@selector(openInstallationFolder:)];
-    openFolder.tag = 5;
-    [buttons addObject:openFolder];
-    [page addArrangedSubview:openFolder];
-    self.installationActions = buttons;
-    return page;
+    scroll.drawsBackground = NO;
+    NSView *document = [[NSView alloc] init];
+    scroll.documentView = document;
+    maage_ui_fill(page, document, 2);
+    document.translatesAutoresizingMaskIntoConstraints = NO;
+    [document.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor].active = YES;
+    return scroll;
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
 - (void)importClient:(id)sender {
