@@ -47,7 +47,7 @@ typedef struct maage_input_snapshot {
     int primary_pressed, primary_down;
     int secondary_pressed, secondary_down;
     double scroll_y;         /* Positive scroll selects the preceding hotbar slot. */
-    double mouse_x, mouse_y; /* Top-left-origin window logical coordinates. */
+    double mouse_x, mouse_y; /* Top-left origin, spanning the reported logical content extent. */
     double mouse_delta_x;
     double mouse_delta_y;
     /* Ordered ASCII text/backspace events, consumed with press edges. */

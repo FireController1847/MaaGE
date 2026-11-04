@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 void maage_client_options_defaults(maage_client_options *options) {
     if (!options) return;
@@ -121,7 +122,7 @@ static void maage_client_options_parse(maage_client_options *options, char *line
         if (!strcmp(value, "true")) options->view_bobbing = 1;
         else if (!strcmp(value, "false")) options->view_bobbing = 0;
     } else if (!strcmp(key, "gui_scale")) {
-        options->gui_scale = maage_client_options_integer(value, 0, 4, 1, &number) ? number : 0;
+        options->gui_scale = maage_client_options_integer(value, 0, INT_MAX, 1, &number) ? number : 0;
     } else if (!strcmp(key, "biome_blend")) {
         if (maage_client_options_integer(value, MAAGE_BIOME_BLEND_OFF, MAAGE_BIOME_BLEND_SMOOTH_9, 1, &number)) options->biome_blend = (maage_biome_blend) number;
     } else if (!strcmp(key, "leaves")) {
@@ -213,7 +214,7 @@ maage_status maage_client_options_save(const maage_instance *instance, const maa
         options->render_distance < 1 || options->render_distance > MAAGE_WORLD_MAX_RADIUS ||
         (options->vsync != 0 && options->vsync != 1) ||
         (options->view_bobbing != 0 && options->view_bobbing != 1) ||
-        options->gui_scale < 0 || options->gui_scale > 4 ||
+        options->gui_scale < 0 ||
         options->biome_blend < MAAGE_BIOME_BLEND_OFF || options->biome_blend > MAAGE_BIOME_BLEND_SMOOTH_9 ||
         options->leaves < MAAGE_LEAVES_FAST || options->leaves > MAAGE_LEAVES_FANCY ||
         options->window_mode < MAAGE_CLIENT_WINDOWED || options->window_mode > MAAGE_CLIENT_FULLSCREEN ||

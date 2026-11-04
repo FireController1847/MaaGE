@@ -23,6 +23,22 @@ static unsigned int maage_win32_users;
 static const WCHAR maage_win32_class[] = L"MaaGEWindow";
 static maage_status maage_win32_capture(maage_window *, int);
 
+static void maage_win32_pointer(maage_window *window, HWND handle, LPARAM position) {
+    RECT client;
+    UINT dpi = maage_win32_dpi(window);
+    int width, height;
+    double x = (double) (short) LOWORD(position), y = (double) (short) HIWORD(position);
+    window->input.mouse_x = x * 96.0 / dpi;
+    window->input.mouse_y = y * 96.0 / dpi;
+    if (!GetClientRect(handle, &client)) return;
+    width = client.right - client.left;
+    height = client.bottom - client.top;
+    /* Match state()'s rounded logical extent, so mapping it back to backing
+     * pixels is exact even when a fractional DPI ratio rounds the window size. */
+    if (width > 0) window->input.mouse_x = x * MulDiv(width, 96, dpi) / width;
+    if (height > 0) window->input.mouse_y = y * MulDiv(height, 96, dpi) / height;
+}
+
 static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, LPARAM lp) {
     maage_window *window;
     RECT *suggested;
@@ -67,8 +83,7 @@ static LRESULT CALLBACK maage_win32_proc(HWND handle, UINT message, WPARAM wp, L
         case WM_MBUTTONUP:
         case WM_XBUTTONDOWN:
         case WM_XBUTTONUP:
-            window->input.mouse_x = (double) (short) LOWORD(lp) * 96.0 / maage_win32_dpi(window);
-            window->input.mouse_y = (double) (short) HIWORD(lp) * 96.0 / maage_win32_dpi(window);
+            maage_win32_pointer(window, handle, lp);
             if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP) maage_window_input_button(window, 0, message == WM_LBUTTONDOWN);
             if (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) maage_window_input_button(window, 1, message == WM_RBUTTONDOWN);
             if (message == WM_MBUTTONDOWN || message == WM_MBUTTONUP) maage_window_input_button(window, 2, message == WM_MBUTTONDOWN);

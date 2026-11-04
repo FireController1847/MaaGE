@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
+#include <float.h>
 
 static void maage_client_ui_cursor(maage_client_ui *ui, int pointer) {
     maage_status result;
@@ -105,6 +107,11 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->width = 320;
     ui->height = 240;
     ui->gui_scale = 1;
+    ui->viewport.scale = ui->viewport.maximum_scale = 1;
+    ui->viewport.width = 320;
+    ui->viewport.height = 240;
+    ui->viewport.projection_width = 320;
+    ui->viewport.projection_height = 240;
     ui->renderer = renderer;
     ui->models = game_resources ? maage_content_models(game_resources->content) : NULL;
     ui->window = window;
@@ -183,12 +190,64 @@ maage_status maage_client_ui_destroy(maage_client_ui *ui) {
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
 
+static int maage_client_ui_insets_valid(const maage_window_insets *insets) {
+    return !insets || (insets->left >= 0 && insets->left <= DBL_MAX && insets->right >= 0 && insets->right <= DBL_MAX && insets->top >= 0 && insets->top <= DBL_MAX && insets->bottom >= 0 && insets->bottom <= DBL_MAX);
+}
+maage_status maage_client_ui_viewport_resolve(int framebuffer_width, int framebuffer_height, int window_width, int window_height, const maage_window_insets *insets, int requested_scale, maage_client_ui_viewport *output) {
+    maage_client_ui_viewport viewport;
+    double x_scale, y_scale, left = 0, top = 0, right, bottom;
+    int maximum, vertical;
+    if (!output || requested_scale < 0 || !maage_client_ui_insets_valid(insets)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_RESOLVE, 0);
+    if (framebuffer_width <= 0 || framebuffer_height <= 0 || window_width <= 0 || window_height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_RESOLVE, 0);
+    maximum = framebuffer_width / 320;
+    vertical = framebuffer_height / 240;
+    if (maximum > vertical) maximum = vertical;
+    if (maximum < 1) maximum = 1;
+    viewport.maximum_scale = maximum;
+    viewport.scale = requested_scale && requested_scale < maximum ? requested_scale : maximum;
+    viewport.width = framebuffer_width / viewport.scale + (framebuffer_width % viewport.scale != 0);
+    viewport.height = framebuffer_height / viewport.scale + (framebuffer_height % viewport.scale != 0);
+    viewport.projection_width = (float) ((double) framebuffer_width / viewport.scale);
+    viewport.projection_height = (float) ((double) framebuffer_height / viewport.scale);
+    x_scale = (double) framebuffer_width / window_width / viewport.scale;
+    y_scale = (double) framebuffer_height / window_height / viewport.scale;
+    viewport.mouse_scale_x = (float) x_scale;
+    viewport.mouse_scale_y = (float) y_scale;
+    right = viewport.width;
+    bottom = viewport.height;
+    /* Safe areas constrain layout after scale selection. Rounding inward keeps
+     * anchors on the GUI grid without pushing controls beneath an obstruction. */
+    if (insets) {
+        left = ceil((insets->left < window_width ? insets->left : window_width) * x_scale);
+        top = ceil((insets->top < window_height ? insets->top : window_height) * y_scale);
+        if (insets->right > 0) right = floor((window_width - (insets->right < window_width ? insets->right : window_width)) * x_scale);
+        if (insets->bottom > 0) bottom = floor((window_height - (insets->bottom < window_height ? insets->bottom : window_height)) * y_scale);
+    }
+    if (left > viewport.width) left = viewport.width;
+    if (top > viewport.height) top = viewport.height;
+    viewport.content.x = (float) left;
+    viewport.content.y = (float) top;
+    viewport.content.width = right > left ? (float) (right - left) : 0;
+    viewport.content.height = bottom > top ? (float) (bottom - top) : 0;
+    *output = viewport;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_RESOLVE, 0);
+}
+static void maage_client_ui_viewport_apply(maage_client_ui *ui, const maage_client_ui_viewport *viewport, const maage_client_ui_input *input) {
+    ui->viewport = *viewport;
+    ui->gui_scale = viewport->scale;
+    ui->width = (float) viewport->width;
+    ui->height = (float) viewport->height;
+    ui->content = viewport->content;
+    ui->mouse_x = input->mouse_x * viewport->mouse_scale_x;
+    ui->mouse_y = input->mouse_y * viewport->mouse_scale_y;
+}
 maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input, int framebuffer_width, int framebuffer_height, int window_width, int window_height, unsigned int *actions) {
     maage_client_ui_screen *screen;
     maage_client_ui_screen_id id;
     unsigned int action = 0;
-    int scale, vertical;
-    float x_scale, y_scale, right, bottom;
+    maage_client_ui_viewport viewport;
+    maage_status result;
+    int requested_scale;
     if (actions) *actions = 0;
     if (!ui || !input || !actions) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE, !ui ? 0 : (!input ? 1 : 6));
     if (!ui->navigation.finalized) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_UPDATE, 0);
@@ -202,30 +261,12 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
     if (ui->inventory_drag_active && (!input->raw || !input->raw->focused || input->raw->focus_lost || ui->mode_pending || ui->mode_changing || framebuffer_width <= 0 || framebuffer_height <= 0)) maage_client_ui_inventory_reset(ui);
     if (framebuffer_width <= 0 || framebuffer_height <= 0 || window_width <= 0 || window_height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     ui->route_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
-    scale = (int) (framebuffer_width - (ui->safe_area.left + ui->safe_area.right) * (double) framebuffer_width / window_width) / 320;
-    vertical = (int) (framebuffer_height - (ui->safe_area.top + ui->safe_area.bottom) * (double) framebuffer_height / window_height) / 240;
-    if (scale > vertical) scale = vertical;
-    if (scale < 1) scale = 1;
-    if (ui->requested_scale && scale > ui->requested_scale) scale = ui->requested_scale;
-    ui->gui_scale = scale;
-    ui->width = (float) ((framebuffer_width + scale - 1) / scale);
-    ui->height = (float) ((framebuffer_height + scale - 1) / scale);
-    x_scale = (float) framebuffer_width / (float) window_width / scale;
-    y_scale = (float) framebuffer_height / (float) window_height / scale;
-    ui->content.x = ui->safe_area.left > 0 ? (float) ui->safe_area.left * x_scale : 0;
-    ui->content.y = ui->safe_area.top > 0 ? (float) ui->safe_area.top * y_scale : 0;
-    right = ui->safe_area.right > 0 ? (float) ui->safe_area.right * x_scale : 0;
-    bottom = ui->safe_area.bottom > 0 ? (float) ui->safe_area.bottom * y_scale : 0;
-    if (ui->content.x > ui->width) ui->content.x = ui->width;
-    if (ui->content.y > ui->height) ui->content.y = ui->height;
-    ui->content.width = ui->width - ui->content.x - right;
-    ui->content.height = ui->height - ui->content.y - bottom;
-    if (ui->content.width < 0) ui->content.width = 0;
-    if (ui->content.height < 0) ui->content.height = 0;
+    result = maage_client_ui_viewport_resolve(framebuffer_width, framebuffer_height, window_width, window_height, &ui->safe_area, ui->requested_scale, &viewport);
+    if (maage_status_failed(result)) return result;
     ui->previous_mouse_x = ui->mouse_x;
     ui->previous_mouse_y = ui->mouse_y;
-    ui->mouse_x = input->mouse_x * (float) framebuffer_width / (float) window_width / scale;
-    ui->mouse_y = input->mouse_y * (float) framebuffer_height / (float) window_height / scale;
+    maage_client_ui_viewport_apply(ui, &viewport, input);
+    requested_scale = ui->requested_scale;
     ui->primary_down = input->primary_down;
     if (ui->primary_down) maage_client_ui_cursor(ui, 0);
     if (maage_client_ui_controls_capture(ui, input)) return ui->route_result;
@@ -247,7 +288,6 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         if (id == MAAGE_CLIENT_UI_INVENTORY || id == MAAGE_CLIENT_UI_CRAFTING_TABLE) return maage_client_ui_back(ui);
         if (!id && !ui->container_command_pending) {
             maage_session_command command;
-            maage_status result;
             memset(&command, 0, sizeof(command));
             command.kind = MAAGE_CMD_CONTAINER_OPEN;
             result = maage_client_ui_queue_command(ui, &command);
@@ -260,6 +300,11 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
         screen = maage_client_ui_screen_get(ui, id);
         if (screen->input) action = screen->input(ui, input, screen->context);
     }
+    if (ui->requested_scale != requested_scale) {
+        result = maage_client_ui_viewport_resolve(framebuffer_width, framebuffer_height, window_width, window_height, &ui->safe_area, ui->requested_scale, &viewport);
+        if (maage_status_failed(result)) return result;
+        maage_client_ui_viewport_apply(ui, &viewport, input);
+    }
     *actions = action;
     return ui->route_result;
 }
@@ -269,7 +314,7 @@ int maage_client_ui_debug_visible(const maage_client_ui *ui) {
 }
 
 maage_status maage_client_ui_set_safe_area(maage_client_ui *ui, const maage_window_insets *insets) {
-    if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
+    if (!ui || !maage_client_ui_insets_valid(insets)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_SET, 0);
     if (insets) ui->safe_area = *insets;
     else
         memset(&ui->safe_area, 0, sizeof(ui->safe_area));
@@ -330,7 +375,7 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     if (ui->render_distance < 1 || ui->render_distance > MAAGE_WORLD_MAX_RADIUS) ui->render_distance = MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT;
     /* Keep an explicitly larger CLI/INI choice representable by this slider. */
     ui->render_distance_max = ui->render_distance > MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX ? ui->render_distance : MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX;
-    ui->requested_scale = options->gui_scale;
+    ui->requested_scale = options->gui_scale >= 0 ? options->gui_scale : 0;
     ui->leaves_mode = options->leaves;
     ui->biome_blend = options->biome_blend;
     if (ui->biome_blend < MAAGE_BIOME_BLEND_OFF || ui->biome_blend > MAAGE_BIOME_BLEND_SMOOTH_9) ui->biome_blend = MAAGE_BIOME_BLEND_SMOOTH_5;
@@ -536,8 +581,8 @@ maage_status maage_client_ui_draw(maage_client_ui *ui, const maage_client_ui_deb
     ui->batch.gaussian_background_indices = 0;
     ui->batch.invert_first_index = ui->batch.invert_index_count = 0;
     ui->draw_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_PRESENT, 0);
-    ui->batch.logical_width = ui->width;
-    ui->batch.logical_height = ui->height;
+    ui->batch.logical_width = ui->viewport.projection_width;
+    ui->batch.logical_height = ui->viewport.projection_height;
     ui->clip.x = ui->clip.y = 0;
     ui->clip.width = ui->width;
     ui->clip.height = ui->height;

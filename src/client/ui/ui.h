@@ -108,7 +108,8 @@ int maage_client_ui_window_mode_changing(const maage_client_ui *ui);
  * Hover, focus, Escape and inventory slot operations remain silent. */
 void maage_client_ui_set_click_callback(maage_client_ui *ui, maage_client_ui_click_callback callback, void *context);
 /* Edge-triggered input; owner controls capture and simulation on modal changes.
- * Integer GUI scale uses framebuffer pixels, with a 320x240 logical minimum. */
+ * Scale uses the full backing framebuffer and a 320x240 logical minimum.
+ * Safe areas constrain layout afterward; drawing and input share exact extents. */
 maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_input *input, int framebuffer_width, int framebuffer_height, int window_width, int window_height, unsigned int *actions);
 /* Build the UI after world preparation; returned CPU data is borrowed until
  * the next draw/destroy and submitted with the world in renderer_draw_frame.

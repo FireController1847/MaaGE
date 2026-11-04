@@ -1,4 +1,5 @@
 #include "splash.h"
+#include "scale.h"
 #include "maage/image.h"
 #include "maage/minecraft_assets.h"
 #include "maage/storage.h"
@@ -11,24 +12,15 @@ static maage_status maage_client_splash_draw(maage_client_splash *splash, const 
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     maage_render_ui_vertex vertices[4];
     maage_render_ui_data batch;
-    int scale, vertical, i;
-    float width, height, left, top, right, bottom, x, y;
-    if (state->framebuffer_width <= 0 || state->framebuffer_height <= 0 || state->width <= 0 || state->height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
-    scale = state->framebuffer_width / 320;
-    vertical = state->framebuffer_height / 240;
-    if (scale > vertical) scale = vertical;
-    if (scale < 1) scale = 1;
-    if (splash->gui_scale && scale > splash->gui_scale) scale = splash->gui_scale;
-    /* Round logical dimensions up and preserve the full 256px image;
-     * small viewports clip it. */
-    width = (float) (state->framebuffer_width / scale + (state->framebuffer_width % scale != 0));
-    height = (float) (state->framebuffer_height / scale + (state->framebuffer_height % scale != 0));
-    left = (float) (state->safe_area.left * state->framebuffer_width / state->width / scale);
-    top = (float) (state->safe_area.top * state->framebuffer_height / state->height / scale);
-    right = (float) (state->safe_area.right * state->framebuffer_width / state->width / scale);
-    bottom = (float) (state->safe_area.bottom * state->framebuffer_height / state->height / scale);
-    x = (float) (int) (left + (width - left - right - 256) * 0.5f);
-    y = (float) (int) (top + (height - top - bottom - 256) * 0.5f);
+    maage_client_ui_viewport viewport;
+    maage_status result;
+    int i;
+    float x, y;
+    result = maage_client_ui_viewport_resolve(state->framebuffer_width, state->framebuffer_height, state->width, state->height, &state->safe_area, splash->gui_scale, &viewport);
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    /* Preserve the full 256px image; small viewports clip it. */
+    x = (float) (int) (viewport.content.x + (viewport.content.width - 256) * 0.5f);
+    y = (float) (int) (viewport.content.y + (viewport.content.height - 256) * 0.5f);
     memset(vertices, 0, sizeof(vertices));
     memset(&batch, 0, sizeof(batch));
     for (i = 0; i < 4; ++i) {
@@ -43,8 +35,8 @@ static maage_status maage_client_splash_draw(maage_client_splash *splash, const 
     batch.indices = indices;
     batch.index_count = 6;
     batch.texture = splash->texture;
-    batch.logical_width = width;
-    batch.logical_height = height;
+    batch.logical_width = viewport.projection_width;
+    batch.logical_height = viewport.projection_height;
     return preparing ? maage_renderer_prepare_ui_frame(splash->renderer, &batch, trace) : maage_renderer_draw_frame(splash->renderer, NULL, 0, identity, &batch, trace);
 }
 

@@ -53,7 +53,7 @@ typedef struct maage_client_options {
     int render_distance;                            /* Chunk radius; the normal slider spans 1..32. */
     int vsync;
     int view_bobbing;
-    int gui_scale; /* 0 auto; 1..4 explicit. */
+    int gui_scale; /* 0 Auto; positive backing-pixel factors (1 Small, 2 Normal, 3 Large). */
     maage_leaves_mode leaves;
     maage_biome_blend biome_blend;
     maage_client_window_choice window_mode;

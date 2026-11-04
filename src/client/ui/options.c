@@ -221,6 +221,13 @@ static int maage_options_adjust(maage_client_ui *ui, maage_client_ui_screen_id s
     if (*value > maximum) *value = maximum;
     return *value != previous;
 }
+static void maage_options_scale(maage_client_ui *ui, int direction) {
+    int maximum = ui->viewport.maximum_scale;
+    if (maximum < 3) maximum = 3;
+    if (maximum < ui->requested_scale) maximum = ui->requested_scale;
+    if (direction < 0) ui->requested_scale = ui->requested_scale ? ui->requested_scale - 1 : maximum;
+    else ui->requested_scale = ui->requested_scale >= maximum ? 0 : ui->requested_scale + 1;
+}
 static void maage_options_action(maage_client_ui *ui, maage_client_ui_screen_id screen, unsigned int id) {
     maage_status result;
     if (!maage_options_enabled(ui, screen, id)) return;
@@ -244,7 +251,7 @@ static void maage_options_action(maage_client_ui *ui, maage_client_ui_screen_id 
         if (id == MAAGE_OPTIONS_VIDEO_DONE) ui->route_result = maage_client_ui_back(ui);
         else if (id == 1U || id == 3U) maage_options_adjust(ui, screen, id, 1);
         else if (id == 5U) ui->view_bobbing = !ui->view_bobbing;
-        else if (id == 6U) ui->requested_scale = (ui->requested_scale + 1) % 5;
+        else if (id == 6U) maage_options_scale(ui, 1);
         else if (id == 14U) ui->biome_blend = (ui->biome_blend + 1) % 5;
         else if (id == 15U) ui->leaves_mode = (ui->leaves_mode + 1) % 3;
         else if (id == 11U) maage_client_ui_request_window_mode(ui, (maage_client_window_choice) ((ui->window_mode + 1) % 3));
@@ -281,7 +288,7 @@ static unsigned int maage_options_input(maage_client_ui *ui, const maage_client_
         chosen = ui->selected;
         if (maage_options_slider_id(screen, chosen)) adjusted = maage_options_adjust(ui, screen, chosen, input->right ? 1 : -1);
         else if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS && chosen == 6U) {
-            ui->requested_scale = (ui->requested_scale + (input->right ? 1 : 4)) % 5;
+            maage_options_scale(ui, input->right ? 1 : -1);
             adjusted = 1;
         } else if (screen == MAAGE_CLIENT_UI_VIDEO_SETTINGS && chosen == 14U) {
             ui->biome_blend = (ui->biome_blend + (input->right ? 1 : 4)) % 5;
@@ -347,7 +354,7 @@ static unsigned int maage_options_input(maage_client_ui *ui, const maage_client_
     return 0;
 }
 static void maage_options_video_label(const maage_client_ui *ui, unsigned int id, char text[96]) {
-    static const char *const scales[5] = {"Auto", "Small", "Normal", "Large", "4x"};
+    static const char *const scales[4] = {"Auto", "Small", "Normal", "Large"};
     static const char *const blends[5] = {"OFF", "Vanilla 3x3", "Smooth 5x5", "Smooth 7x7", "Smooth 9x9"};
     static const char *const leaves[3] = {"Fast", "Smart", "Fancy"};
     static const char *const modes[3] = {"Windowed", "Borderless", "Fullscreen"};
@@ -358,8 +365,10 @@ static void maage_options_video_label(const maage_client_ui *ui, unsigned int id
         else
             sprintf(text, "Max Framerate: %d", (ui->fps_step + 1) * 10);
     } else if (id == 5U) strcpy(text, ui->view_bobbing ? "View Bobbing: ON" : "View Bobbing: OFF");
-    else if (id == 6U) sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
-    else if (id == 12U)
+    else if (id == 6U) {
+        if (ui->requested_scale <= 3) sprintf(text, "GUI Scale: %s", scales[ui->requested_scale]);
+        else sprintf(text, "GUI Scale: %dx", ui->requested_scale);
+    } else if (id == 12U)
         strcpy(text, !ui->vsync_supported ? "VSync: Unavailable" : (ui->vsync ? "VSync: ON" : "VSync: OFF"));
     else if (id == 14U) sprintf(text, "Biome Blend: %s", blends[ui->biome_blend]);
     else if (id == 15U) sprintf(text, "Leaves: %s", leaves[ui->leaves_mode]);

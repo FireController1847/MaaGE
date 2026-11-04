@@ -1,6 +1,7 @@
 #ifndef MAAGE_CLIENT_UI_INTERNAL_H
 #define MAAGE_CLIENT_UI_INTERNAL_H
 #include "ui.h"
+#include "scale.h"
 #include "maage/content.h"
 #include "maage/image.h"
 #include "maage/internal/registry_pages.h"
@@ -95,6 +96,7 @@ struct maage_client_ui {
     maage_render_ui_data batch;
     maage_client_ui_rect clip, content;
     maage_window_insets safe_area;
+    maage_client_ui_viewport viewport;
     float width, height, mouse_x, mouse_y, previous_mouse_x, previous_mouse_y;
     unsigned int selected;
     int selected_keyboard;
