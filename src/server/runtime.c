@@ -189,6 +189,38 @@ static void server_entity_sound(void *context, unsigned long sound_id, const dou
     memcpy(sound.position, position, sizeof(sound.position));
     server_emit_sound(runtime, &sound);
 }
+static void server_block_break(void *context, int x, int y, int z, maage_block_state_id state_id) {
+    maage_server_runtime *runtime = (maage_server_runtime *) context;
+    const maage_block_state_definition *state = maage_block_registry_state(maage_world_registry(runtime->world), state_id);
+    const maage_block_definition *block = state ? maage_block_registry_block(maage_world_registry(runtime->world), state->block_id) : NULL;
+    maage_session_event event;
+    maage_status result;
+    double position[3];
+    if (!block || !runtime->config.session) return;
+    memset(&event, 0, sizeof(event));
+    event.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
+    event.kind = MAAGE_EVENT_BLOCK_BREAK;
+    event.session_epoch = event.world_epoch = 1;
+    event.tick = runtime->tick + 1;
+    event.sequence = ++runtime->event_sequence;
+    event.emitted_at = maage_time_monotonic_seconds();
+    event.block.x = x;
+    event.block.y = y;
+    event.block.z = z;
+    event.broken_state = state_id;
+    position[0] = x + 0.5;
+    position[1] = y + 0.5;
+    position[2] = z + 0.5;
+    (void) maage_gameplay_build_sound(&runtime->game, maage_content_sounds(runtime->content), &event.sound, MAAGE_SOUND_BLOCK_BREAK, block->material, position, 1, 1);
+    event.sound.position[0] = x + 0.5;
+    event.sound.position[1] = y + 0.5;
+    event.sound.position[2] = z + 0.5;
+    event.sound.tick = event.tick;
+    event.sound.sequence = event.sequence;
+    result = maage_local_session_publish_event(runtime->config.session, &event);
+    if (maage_status_code(result) == MAAGE_STATUS_BUFFER_OVERFLOW) ++runtime->dropped_sound_events;
+    else if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_INVALID_STATE) server_capture_failure(runtime, result, NULL);
+}
 static void server_player_motion(const maage_server_runtime *runtime, maage_session_player_motion *motion) {
     memcpy(motion->velocity, runtime->player.velocity, sizeof(motion->velocity));
     motion->walk_distance = runtime->game.walk_distance;
@@ -754,6 +786,7 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     world_config.items = items;
     world_config.entity_types = maage_content_entity_types(runtime->content);
     world_config.entity_policy = runtime->config.entity_policy;
+    world_config.emit_break = server_block_break;
     world_config.emit_sound = server_entity_sound;
     world_config.sound_context = runtime;
     world_config.smelting = maage_content_smelting(runtime->content);

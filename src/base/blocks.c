@@ -854,6 +854,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.use_neighbor_brightness = 1;
     block.random_tick = maage_random_tick_cactus;
     block.survives = maage_support_cactus;
+    block.geometry_id = ids->geometry_cactus;
     block.contact_damage = 1;
     block.contact_shape.maximum[0] = 1;
     block.contact_shape.maximum[1] = 1;

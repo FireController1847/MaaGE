@@ -12,6 +12,7 @@ maage_status maage_client_item_entities_receive(maage_client_item_entities *, ma
 int maage_client_item_entities_target(const maage_client_item_entities *, const maage_session_snapshot *, const double[3], const double[3], double limit, double now);
 /* Borrow the same immutable cached geometry used by dropped item instances. */
 maage_status maage_client_item_entities_mesh(maage_client_item_entities *view, const maage_item_stack *stack, const maage_render_mesh **mesh, maage_status_trace *trace);
+maage_status maage_client_item_entities_break(maage_client_item_entities *, maage_world *, const maage_session_event *, double, maage_status_trace *);
 maage_status maage_client_item_entities_pickup(maage_client_item_entities *view, const maage_session_event *event, double now);
 /* Diagnostic submission marker; does no work without world diagnostics. */
 void maage_client_item_entities_submitted(maage_client_item_entities *view);

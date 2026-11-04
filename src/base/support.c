@@ -113,7 +113,7 @@ maage_status maage_base_support_lost(maage_world *world, int x, int y, int z, co
         result = maage_entities_reserve(entities, drops.count);
         if (maage_status_failed(result)) return result;
     }
-    result = maage_world_set(world, x, y, z, state->id, ids->state_air);
+    result = maage_world_break(world, x, y, z, state->id, ids->state_air);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     for (i = 0; i < drops.count; ++i) {
         random = (random * 1664525UL + 1013904223UL) & 4294967295UL;

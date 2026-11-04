@@ -320,9 +320,8 @@ static maage_status maage_gameplay_break(maage_gameplay *game, maage_player *pla
         result = maage_entities_reserve(entities, drops.count);
         if (maage_status_failed(result)) return result;
     }
-    result = maage_world_set(world, game->target.x, game->target.y, game->target.z, game->target.state_id, ids->state_air);
+    result = maage_world_break(world, game->target.x, game->target.y, game->target.z, game->target.state_id, ids->state_air);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_BREAK, maage_gameplay_block_material(block), game->target.x + 0.5, game->target.y + 0.5, game->target.z + 0.5, 1.0, 1.0);
     for (i = 0; i < drops.count; ++i) {
         position[0] = game->target.x + 0.5;
         position[1] = game->target.y + 0.375;

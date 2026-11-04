@@ -115,6 +115,7 @@ typedef struct maage_world_config {
     int presentation_only; /* Replica: imported states only, no generation/simulation/save. */
     int build_meshes;      /* Initialized to 1; authoritative Server sets 0. */
     int new_world;
+    void (*emit_break)(void *, int, int, int, maage_block_state_id);            /* Successful genuine removal; shares sound_context. */
     void (*emit_sound)(void *, unsigned long, const double[3], double, double); /* Owner-thread occurrence sink. */
     void *sound_context;
     double position[3];
@@ -376,6 +377,8 @@ maage_status maage_world_can_survive(const maage_world *world, int x, int y, int
  * private copy; workers retain their old immutable snapshots. Invalidates
  * lighting/meshes and obsolete jobs without waiting. No filesystem work. */
 maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_block_state_id expected, maage_block_state_id replacement);
+/* Genuine break replacement; callers retain their cause-specific loot policy. */
+maage_status maage_world_break(maage_world *, int, int, int, maage_block_state_id, maage_block_state_id);
 /* Balanced owner-only scopes defer notification callbacks until borrowed live
  * simulation storage is released. Mutations remain visible inside the scope;
  * the outer end drains available cascades and publishes immutable edits.

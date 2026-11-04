@@ -1418,7 +1418,7 @@ choose_world:
                 }
             } else if (event.kind == MAAGE_EVENT_BLOCK_ACTION) {
                 maage_client_prediction_confirm(&prediction, &event);
-            } else if (event.kind == MAAGE_EVENT_SOUND || event.kind == MAAGE_EVENT_PICKUP) {
+            } else if (event.kind == MAAGE_EVENT_SOUND || event.kind == MAAGE_EVENT_PICKUP || event.kind == MAAGE_EVENT_BLOCK_BREAK) {
                 if (sound_epoch != event.session_epoch || sound_world_epoch != event.world_epoch) {
                     last_sound_sequence = 0;
                     sound_epoch = event.session_epoch;
@@ -1427,8 +1427,9 @@ choose_world:
                 if (event.sequence > last_sound_sequence) {
                     last_sound_sequence = event.sequence;
                     if ((latest.tick <= event.tick || latest.tick - event.tick <= MAAGE_CLIENT_SOUND_MAX_AGE_TICKS) && (event.emitted_at < 0 || now - event.emitted_at <= MAAGE_CLIENT_SOUND_MAX_AGE_SECONDS)) {
+                        if (event.kind == MAAGE_EVENT_BLOCK_BREAK) (void) maage_client_item_entities_break(item_entities, visual_world, &event, now, trace);
                         if (event.kind == MAAGE_EVENT_PICKUP) (void) maage_client_item_entities_pickup(item_entities, &event, now);
-                        if (maage_status_code(maage_client_prediction_observe_sound(&prediction, blocks, &event)) == MAAGE_STATUS_SUCCESS) continue;
+                        if (event.kind != MAAGE_EVENT_BLOCK_BREAK && maage_status_code(maage_client_prediction_observe_sound(&prediction, blocks, &event)) == MAAGE_STATUS_SUCCESS) continue;
                         if (audio) (void) maage_client_audio_service_event(audio, &event.sound, trace);
                     }
                 }
@@ -1574,17 +1575,6 @@ choose_world:
                 maage_status_trace_recover(trace, maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_PRESENT, __FILE__, __LINE__);
             } else
                 prediction.failure = 0;
-        }
-        {
-            maage_sound_event completion;
-            /* Publish the complete local mesh/light transaction and its cue in
-             * this frame; audio playback and Server acknowledgment never gate it. */
-            for (;;) {
-                operation = maage_client_prediction_take_break_sound(&prediction, blocks, latest.tick, &completion);
-                if (maage_status_code(operation) == MAAGE_STATUS_NOOP) break;
-                if (maage_status_failed(operation)) goto done;
-                if (audio) (void) maage_client_audio_service_event(audio, &completion, trace);
-            }
         }
         if (mesh_notice != mesh_activity.last_result) {
             mesh_notice = mesh_activity.last_result;

@@ -105,7 +105,7 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
     result = maage_item_generate_drops(blocks, maage_world_item_registry(world), state->id, NULL, &drop_random, &drops);
     if (!maage_status_failed(result)) result = maage_entities_reserve(maage_world_entities(world), drops.count);
     if (maage_status_failed(result)) return result;
-    mutation = maage_world_set(world, x, y, z, state->id, ids->state_air);
+    mutation = maage_world_break(world, x, y, z, state->id, ids->state_air);
     if (maage_status_code(mutation) != MAAGE_STATUS_SUCCESS &&
         (maage_status_code(mutation) == MAAGE_STATUS_INTERRUPTED ||
          !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z)) ||

@@ -98,8 +98,9 @@ static maage_status base_zombie_animate(const void *context, const maage_model_a
 static maage_status base_skeleton_animate(const void *context, const maage_model_animation *animation, size_t part, maage_model_transform *transform) {
     maage_status result = base_zombie_animate(context, animation, part, transform);
     if (part == 4 || part == 5) {
-        transform->rotation[0] = 1.5707963267948966 - animation->pitch;
-        transform->rotation[1] = animation->yaw + (part == 4 ? -0.25 : 0.45);
+        transform->rotation[0] = 1.5707963267948966 - animation->pitch + sin(animation->age * 0.067) * 0.05 * (part == 4 ? 1 : -1);
+        transform->rotation[2] = (part == 4 ? -1 : 1) * (cos(animation->age * 0.09) * 0.05 + 0.05);
+        transform->rotation[1] = animation->yaw + (part == 4 ? -0.1 : 0.5);
     }
     return result;
 }
@@ -217,10 +218,53 @@ static maage_status base_chicken_model(maage_content_context *context, maage_bas
     base_model_box(&builder, -1, -4, -3, 1, 4, 6, 24, 13, 0);
     return base_model_publish(context, "minecraft:chicken", &builder, ids->mob_textures[MAAGE_BASE_MOB_CHICKEN], 32, base_chicken_animate, &ids->mob_models[MAAGE_BASE_MOB_CHICKEN]);
 }
+static maage_status base_skeleton_mirror(void *context, const maage_model_quad *source) {
+    const maage_model_sink *sink = (const maage_model_sink *) context;
+    maage_model_quad quad = *source;
+    unsigned int corner;
+    for (corner = 0; corner < 4; ++corner) {
+        memcpy(quad.positions[corner], source->positions[3 - corner], sizeof(quad.positions[corner]));
+        quad.positions[corner][0] = -quad.positions[corner][0];
+        memcpy(quad.uv[corner], source->uv[3 - corner], sizeof(quad.uv[corner]));
+    }
+    if (quad.face < 2) quad.face ^= 1U;
+    return sink->quad(sink->context, &quad);
+}
+static maage_status base_skeleton_geometry(const void *context, const maage_model_definition *model, size_t part, const maage_model_sink *sink) {
+    maage_model_definition cuboids = *model;
+    maage_model_quad quad;
+    maage_model_sink mirrored;
+    unsigned int side, corner, index;
+    maage_status result;
+    (void) context;
+    if (part < 6) {
+        cuboids.geometry = NULL;
+        mirrored.context = (void *) sink;
+        mirrored.quad = base_skeleton_mirror;
+        return maage_model_emit_part(&cuboids, part, part == 3 || part == 5 ? &mirrored : sink);
+    }
+    for (side = 0; side < 2; ++side) {
+        memset(&quad, 0, sizeof(quad));
+        quad.face = MAAGE_FACE_POSITIVE_X;
+        quad.material = MAAGE_MESH_MATERIAL_CUTOUT;
+        for (corner = 0; corner < 4; ++corner) {
+            index = side ? 3 - corner : corner;
+            quad.positions[corner][1] = index >= 2 ? 5 : -5;
+            quad.positions[corner][2] = index == 1 || index == 2 ? 5 : -5;
+            quad.uv[corner][0] = index == 1 || index == 2 ? 1 : 0;
+            quad.uv[corner][1] = index < 2 ? 1 : 0;
+        }
+        result = sink->quad(sink->context, &quad);
+        if (maage_status_failed(result)) return result;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
 static maage_status base_biped_model(maage_content_context *context, maage_base_ids *ids, unsigned int mob, int skeleton) {
     base_model_builder builder;
     unsigned int i;
     double limb = skeleton ? 2 : 4;
+    maage_texture_id bow;
+    maage_status result;
     memset(&builder, 0, sizeof(builder));
     base_model_part(&builder, "head", "look", 0, 24, 0);
     base_model_box(&builder, -4, 0, -4, 8, 8, 8, 0, 0, 0);
@@ -231,10 +275,23 @@ static maage_status base_biped_model(maage_content_context *context, maage_base_
         base_model_box(&builder, -limb / 2, -12, -limb / 2, limb, 12, limb, 0, 16, 0);
     }
     for (i = 0; i < 2; ++i) {
-        base_model_part(&builder, i ? "right_arm" : "left_arm", "attack", i ? 6 : -6, 22, 0);
+        base_model_part(&builder, i ? "right_arm" : "left_arm", "attack", i ? (skeleton ? 5 : 6) : (skeleton ? -5 : -6), 22, 0);
         base_model_box(&builder, -limb / 2, -10, -limb / 2, limb, 12, limb, 40, 16, 0);
     }
-    return base_model_publish(context, skeleton ? "minecraft:skeleton" : "minecraft:zombie", &builder, ids->mob_textures[mob], skeleton ? 32 : 64, skeleton ? base_skeleton_animate : base_zombie_animate, &ids->mob_models[mob]);
+    if (skeleton) {
+        result = base_model_texture(context, "minecraft/textures/items/bow_standby.png", 16, 16, &bow);
+        if (maage_status_failed(result)) return result;
+        base_model_part(&builder, "bow", "attack", 0, -9, 0);
+        builder.parts[6].parent = 4;
+        builder.parts[6].texture_id = bow;
+    }
+    result = base_model_publish(context, skeleton ? "minecraft:skeleton" : "minecraft:zombie", &builder, ids->mob_textures[mob], skeleton ? 32 : 64, skeleton ? base_skeleton_animate : base_zombie_animate, &ids->mob_models[mob]);
+    if (skeleton && !maage_status_failed(result)) {
+        maage_model_definition model = *maage_model_registry_get(context->models, ids->mob_models[mob]);
+        model.geometry = base_skeleton_geometry;
+        result = maage_model_registry_update(context->models, ids->mob_models[mob], &model);
+    }
+    return result;
 }
 static maage_status base_creeper_model(maage_content_context *context, maage_base_ids *ids) {
     base_model_builder builder;
@@ -276,6 +333,36 @@ static maage_status base_spider_model(maage_content_context *context, maage_base
     }
     return base_model_publish(context, "minecraft:spider", &builder, ids->mob_textures[MAAGE_BASE_MOB_SPIDER], 32, base_spider_animate, &ids->mob_models[MAAGE_BASE_MOB_SPIDER]);
 }
+static maage_status base_arrow_geometry(const void *context, const maage_model_definition *model, size_t part, const maage_model_sink *sink) {
+    static const double corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+    maage_model_quad quad;
+    maage_status result;
+    unsigned int plane, side, corner, index;
+    double x, y;
+    (void) context;
+    (void) model;
+    (void) part;
+    for (plane = 0; plane < 3; ++plane) {
+        for (side = 0; side < 2; ++side) {
+            memset(&quad, 0, sizeof(quad));
+            quad.face = plane == 0 ? MAAGE_FACE_POSITIVE_Z : (plane == 1 ? MAAGE_FACE_POSITIVE_Y : MAAGE_FACE_POSITIVE_X);
+            quad.material = MAAGE_MESH_MATERIAL_CUTOUT;
+            for (corner = 0; corner < 4; ++corner) {
+                index = side ? 3 - corner : corner;
+                x = plane == 2 ? 0 : corners[index][0] * 1.8;
+                y = plane == 1 ? 0 : corners[index][plane == 0 ? 1 : 0] * 1.8;
+                quad.positions[corner][0] = (float) ((x - y) * 0.7071067811865475);
+                quad.positions[corner][1] = (float) ((x + y) * 0.7071067811865475);
+                quad.positions[corner][2] = plane == 0 ? 9.9f : (float) (3.6 + corners[index][1] * 7.2);
+                quad.uv[corner][0] = (float) (plane == 0 ? (corners[index][0] + 1) * 0.5 * 5.0 / 32 : (1 - corners[index][1]) * 0.25);
+                quad.uv[corner][1] = (float) ((plane == 0 ? 5.0 / 32 : 0) + (corners[index][plane == 0 ? 1 : 0] + 1) * 0.5 * 5.0 / 32);
+            }
+            result = sink->quad(sink->context, &quad);
+            if (maage_status_failed(result)) return result;
+        }
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
 maage_status maage_base_entity_models(maage_content_context *context, maage_base_ids *ids) {
     static const char *const paths[] = {"minecraft/textures/entity/pig/pig.png", "minecraft/textures/entity/cow/cow.png", "minecraft/textures/entity/sheep/sheep.png", "minecraft/textures/entity/chicken.png", "minecraft/textures/entity/zombie/zombie.png", "minecraft/textures/entity/skeleton/skeleton.png", "minecraft/textures/entity/creeper/creeper.png", "minecraft/textures/entity/spider/spider.png"};
     unsigned int i;
@@ -298,8 +385,11 @@ maage_status maage_base_entity_models(maage_content_context *context, maage_base
     if (maage_status_failed(result)) return result;
     memset(&arrow, 0, sizeof(arrow));
     base_model_part(&arrow, "shaft", "flight", 0, 0, 0);
-    base_model_box(&arrow, -0.5, -0.5, -6, 1, 1, 12, 0, 0, 0);
-    base_model_part(&arrow, "fletching", "flight", 0, 0, 4);
-    base_model_box(&arrow, -2, -0.15, -2, 4, 0.3, 4, 0, 0, 0);
-    return base_model_publish(context, "minecraft:arrow", &arrow, ids->arrow_texture, 32, NULL, &ids->arrow_model);
+    result = base_model_publish(context, "minecraft:arrow", &arrow, ids->arrow_texture, 32, NULL, &ids->arrow_model);
+    if (!maage_status_failed(result)) {
+        maage_model_definition model = *maage_model_registry_get(context->models, ids->arrow_model);
+        model.geometry = base_arrow_geometry;
+        result = maage_model_registry_update(context->models, ids->arrow_model, &model);
+    }
+    return result;
 }

@@ -924,6 +924,13 @@ static void maage_world_commit_edits(maage_world *world) {
         maage_world_change_membership(world, slot);
     }
 }
+maage_status maage_world_break(maage_world *world, int x, int y, int z, maage_block_state_id state, maage_block_state_id replacement) {
+    maage_status result;
+    if (!world || state == maage_block_registry_bindings(world->config.registry)->state_air) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
+    result = maage_world_set(world, x, y, z, state, replacement);
+    if (maage_status_code(result) == MAAGE_STATUS_SUCCESS && world->config.emit_break) world->config.emit_break(world->config.sound_context, x, y, z, state);
+    return result;
+}
 maage_status maage_world_begin_mutations(maage_world *world) {
     if (!world || world->config.presentation_only || world->stopped || world->failed || world->edit_depth == UINT_MAX) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     ++world->edit_depth;

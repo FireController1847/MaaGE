@@ -1,5 +1,6 @@
 #include "item_entities.h"
 #include "models.h"
+#include "particles.h"
 #include "player_model.h"
 #include "maage/internal/registry_pages.h"
 #include "maage/log.h"
@@ -30,6 +31,8 @@ typedef struct maage_client_entity_pose {
     double body_yaw, head_yaw, pitch, walk_amount, walk_start, walk_distance, stationary, last_head, airborne, charge_start, charge;
 } maage_client_entity_pose;
 struct maage_client_item_entities {
+    maage_client_particles *particles;
+    maage_status particle_failure;
     maage_renderer *renderer;
     maage_render_texture *atlas;
     maage_client_resources resources; /* Borrowed arrays, captured by value across staged publication. */
@@ -87,6 +90,8 @@ maage_status maage_client_item_entities_create(maage_renderer *renderer, maage_r
     view->entity_models = view->entity_model_count ? (maage_client_registered_models *) calloc(view->entity_model_count, sizeof(*view->entity_models)) : NULL;
     if (view->entity_model_count && !view->entity_models) goto failed;
     view->blocks = blocks;
+    result = maage_client_particles_create(renderer, atlas, resources, blocks, &view->particles);
+    if (maage_status_failed(result)) goto failed;
     view->diagnostics = maage_log_enabled("maage.client.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     view->model_count = maage_item_registry_count(items);
     view->ordered = (maage_item_models *) calloc(view->model_count, sizeof(*view->ordered));
@@ -328,11 +333,24 @@ maage_status maage_client_item_entities_clear(maage_client_item_entities *view) 
     free(view->current.entities);
     free(view->current.blocks);
     memset(&view->current, 0, sizeof(view->current));
+    maage_client_particles_clear(view->particles);
     view->pose_time = 0;
     view->prepared_sequence = view->submitted_sequence = 0;
     view->submitted_entity = view->prepared_entity = 0;
     memset(view->pickups, 0, sizeof(view->pickups));
     return item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
+}
+maage_status maage_client_item_entities_break(maage_client_item_entities *view, maage_world *world, const maage_session_event *event, double now, maage_status_trace *trace) {
+    maage_status_trace occurrence;
+    maage_status result;
+    maage_status_trace_init(&occurrence);
+    result = maage_client_particles_break(view->particles, world, event->broken_state, event->block.x, event->block.y, event->block.z, event->sequence, now, &occurrence);
+    if (maage_status_failed(result) && trace) *trace = occurrence;
+    if (maage_status_failed(result) && view->particle_failure != result) {
+        view->particle_failure = result;
+        maage_log_trace_status(MAAGE_LOG_WARNING, "maage.client.particles", result, trace, "Block fragments unavailable; appearance retries on resource reload.");
+    }
+    return result;
 }
 maage_status maage_client_item_entities_pickup(maage_client_item_entities *view, const maage_session_event *event, double now) {
     unsigned int i, n, written = 0;
@@ -552,6 +570,8 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     if (!view || !session || !snapshot || !eye || (additional_count && !additional)) return item_entities_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (additional_count > (size_t) - 1 / sizeof(*draws) - 32) return item_entities_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
     needed = 32 + additional_count;
+    if (maage_client_particles_count(view->particles) > (size_t) - 1 / sizeof(*draws) - needed) return item_entities_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
+    needed += maage_client_particles_count(view->particles);
     for (i = 0; i < view->current.count; ++i) {
         entity = &view->current.entities[i];
         if (!maage_entity_view_valid(entity, view->items, view->types) || (i && view->current.entities[i - 1].id >= entity->id)) return item_entities_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_UPDATE);
@@ -734,6 +754,8 @@ maage_status maage_client_item_entities_update(maage_client_item_entities *view,
     (void) interpolation;
     if (additional_count) memcpy(view->draws + count, additional, additional_count * sizeof(*additional));
     count += additional_count;
+    result = maage_client_particles_draw(view->particles, visual_world, eye, now, snapshot->paused, view->draws, &count);
+    if (maage_status_failed(result)) return result;
     result = maage_renderer_set_instances(view->renderer, view->draws, count);
     if (!maage_status_failed(result) && view->diagnostics && view->current.sequence != view->prepared_sequence) {
         view->prepared_sequence = view->current.sequence;
@@ -762,6 +784,7 @@ maage_status maage_client_item_entities_destroy(maage_client_item_entities *view
     maage_status result, outcome = item_entities_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_DESTROY);
     if (!view) return item_entities_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_DESTROY);
     maage_client_item_entities_clear(view);
+    maage_client_particles_destroy(view->particles);
     if (view->ordered)
         for (i = 0; i < view->model_count; ++i) {
             if (view->ordered[i].variants)

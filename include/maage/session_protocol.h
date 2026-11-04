@@ -16,7 +16,7 @@ extern "C" {
  * explicitly, not memcpy C layouts (including unsigned long and padding).
  * Local hosting validates the independently composed Server against its Client
  * content identity peer before World startup or publishing any numeric data. */
-#define MAAGE_SESSION_PROTOCOL_VERSION 27U
+#define MAAGE_SESSION_PROTOCOL_VERSION 28U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -163,6 +163,7 @@ typedef struct maage_session_entities {
 } maage_session_entities;
 
 typedef enum maage_session_event_kind {
+    MAAGE_EVENT_BLOCK_BREAK = 8,
     MAAGE_EVENT_SOUND = 1,
     MAAGE_EVENT_STATUS = 2,
     MAAGE_EVENT_DISCONNECTED = 4,
@@ -177,6 +178,7 @@ typedef struct maage_session_event {
     unsigned long session_epoch, world_epoch;
     unsigned long tick, sequence;
     double emitted_at;                  /* Local monotonic seconds; remote clocks need translation. */
+    maage_block_state_id broken_state;  /* BLOCK_BREAK retains the removed appearance. */
     maage_sound_event sound;            /* SOUND/PICKUP. */
     maage_session_player_motion motion; /* PLAYER_MOTION, one immutable owner-step observation. */
     unsigned long prediction;

@@ -79,7 +79,7 @@ typedef struct maage_base_ids {
     unsigned long container_player, container_table, container_furnace, container_chest[2];
     unsigned long chest_models[2][2], chest_states[2][4], chest_open_sound, chest_close_sound;
     unsigned long fluid_water, fluid_lava;
-    unsigned long geometry_cube, geometry_cross, geometry_torch, geometry_entity;
+    unsigned long geometry_cube, geometry_cactus, geometry_cross, geometry_torch, geometry_entity;
     unsigned long texture_water_flow, texture_lava_flow, texture_water_overlay;
     unsigned long biome_ids[MAAGE_BASE_BIOME_COUNT];
     unsigned long textures[MAAGE_BASE_TEXTURE_COUNT];

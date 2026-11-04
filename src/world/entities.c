@@ -815,6 +815,16 @@ static void entity_hurt(maage_entity_context *context, maage_entity *entity, con
     entity->payload.living.health = applied >= entity->payload.living.health ? 0 : entity->payload.living.health - applied;
     entity->payload.living.attacker = attacker;
     entity->payload.living.panic_ticks = 100;
+    if (origin && definition->classification == MAAGE_ENTITY_CLASS_PASSIVE) {
+        dx = entity->position[0] - origin[0];
+        dz = entity->position[2] - origin[2];
+        length = sqrt(dx * dx + dz * dz);
+        if (length > 0.0001) {
+            entity->payload.living.goal[0] = entity->position[0] + dx / length * 5;
+            entity->payload.living.goal[1] = entity->position[1];
+            entity->payload.living.goal[2] = entity->position[2] + dz / length * 5;
+        }
+    }
     if (occurrence) {
         entity->payload.living.damage_sequence = (entity->payload.living.damage_sequence + 1UL) & 0xffffffffUL;
         if (!entity->payload.living.damage_sequence) entity->payload.living.damage_sequence = 1;
@@ -959,7 +969,7 @@ static maage_status entity_explode(maage_entity_context *context, const maage_en
         }
         result = maage_entities_reserve(context->entities, drops.count);
         if (maage_status_failed(result)) return result;
-        result = maage_world_set(context->world, x, y, z, state->id, ids->state_air);
+        result = maage_world_break(context->world, x, y, z, state->id, ids->state_air);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             position[0] = x + 0.5;
@@ -998,7 +1008,7 @@ static void entity_steer(maage_entity_context *context, maage_entity *entity, co
             if (!entity->grounded || !entity_body_fits(context->world, trial, definition->width, definition->height, 1)) continue;
             jump = 1;
         }
-        if (!entity_supported(context->world, trial) && !maage_world_fluid_at(context->world, trial)) continue;
+        if (entity->grounded && !entity_supported(context->world, trial) && !maage_world_fluid_at(context->world, trial)) continue;
         score = (direction[0] * dx + direction[1] * dz) / length - fabs(turn) * 0.04;
         if (score <= best) continue;
         best = score;
@@ -1037,10 +1047,13 @@ maage_status maage_entities_behavior_standard(const maage_entity_type_definition
         entity->payload.living.idle_ticks = 0;
         entity->payload.living.pitch = atan2(eye[1] - target[1], sqrt(dx * dx + dz * dz));
     } else if (entity->payload.living.panic_ticks) {
-        angle = atan2(-dx, dz);
-        entity->payload.living.goal[0] = entity->position[0] + sin(angle) * 8;
-        entity->payload.living.goal[1] = entity->position[1];
-        entity->payload.living.goal[2] = entity->position[2] - cos(angle) * 8;
+        double goal_x = entity->payload.living.goal[0] - entity->position[0], goal_z = entity->payload.living.goal[2] - entity->position[2];
+        if (goal_x * goal_x + goal_z * goal_z < 1) {
+            angle = entity->payload.living.yaw + (entity_random_next(&context->entities->behavior_random, 1571) / 1000.0 - 0.785);
+            entity->payload.living.goal[0] = entity->position[0] + sin(angle) * 5;
+            entity->payload.living.goal[1] = entity->position[1];
+            entity->payload.living.goal[2] = entity->position[2] - cos(angle) * 5;
+        }
     } else if ((definition->behaviors & MAAGE_ENTITY_BEHAVIOR_WANDER) && entity_random_next(&context->entities->behavior_random, 40) == 0) {
         angle = entity_random_next(&context->entities->behavior_random, 6284) / 1000.0;
         entity->payload.living.goal[0] = entity->position[0] + sin(angle) * (2 + entity_random_next(&context->entities->behavior_random, 7));
@@ -1063,7 +1076,7 @@ maage_status maage_entities_behavior_standard(const maage_entity_type_definition
             entity_sound(context, definition->attack_sound, entity->position, 1);
         }
     }
-    speed = definition->speed * (entity->payload.living.panic_ticks ? 1.5 : 1);
+    speed = (entity->payload.living.panic_ticks && definition->classification == MAAGE_ENTITY_CLASS_PASSIVE && definition->panic_speed > 0 ? definition->panic_speed : definition->speed);
     if (entity->payload.living.fuse_ticks || ((definition->behaviors & MAAGE_ENTITY_BEHAVIOR_RANGED) && pursuing && visible && distance <= definition->attack_range * 0.8)) speed = 0;
     entity_steer(context, entity, definition, entity->payload.living.goal[0] - entity->position[0], entity->payload.living.goal[2] - entity->position[2], speed);
     entity->payload.living.head_yaw = pursuing ? atan2(dx, -dz) : entity->payload.living.yaw;

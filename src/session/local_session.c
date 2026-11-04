@@ -101,11 +101,12 @@ static int session_container_valid(const maage_crafting_container *container) {
 
 static int session_event_valid(const maage_session_event *event) {
     if (event->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
-        event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_PLAYER_MOTION || event->kind == 3U ||
+        event->kind < MAAGE_EVENT_SOUND || event->kind > MAAGE_EVENT_BLOCK_BREAK || event->kind == 3U ||
         (event->has_trace != 0 && event->has_trace != 1)) return 0;
+    if (event->kind == MAAGE_EVENT_BLOCK_BREAK && (!event->sequence || event->broken_state >= MAAGE_CONTENT_ID_INVALID)) return 0;
     if (event->kind == MAAGE_EVENT_PICKUP && (!event->pickup_count || event->pickup_count > 32)) return 0;
     if (event->kind == MAAGE_EVENT_PLAYER_MOTION && (!event->sequence || !session_motion_valid(&event->motion))) return 0;
-    if (event->kind == MAAGE_EVENT_SOUND || event->kind == MAAGE_EVENT_PICKUP)
+    if (event->kind == MAAGE_EVENT_SOUND || event->kind == MAAGE_EVENT_PICKUP || event->kind == MAAGE_EVENT_BLOCK_BREAK)
         return (event->sound.event_id || event->sound.action) &&
                event->sound.event_id < MAAGE_CONTENT_ID_INVALID && event->sound.material < MAAGE_CONTENT_ID_INVALID &&
                event->sound.action < MAAGE_SOUND_ACTION_COUNT &&

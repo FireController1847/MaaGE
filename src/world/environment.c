@@ -581,7 +581,7 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
     }
     if (level >= fluid->state_count) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
     state = fluid->states[level];
-    result = maage_world_set(world, x, y, z, old, state);
+    result = target->block_id != ids->block_air && !target->fluid_kind ? maage_world_break(world, x, y, z, old, state) : maage_world_set(world, x, y, z, old, state);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     *flowed = 1;
     for (i = 0; i < drops.count; ++i) {

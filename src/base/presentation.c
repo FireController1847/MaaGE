@@ -8,6 +8,28 @@ static maage_status base_entity_geometry(const void *context, const maage_block_
     (void) sink;
     return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MESH, 0);
 }
+/* Cactus faces retain full texture extents; only each side's normal plane
+ * is inset. Collision bounds do not describe its visual silhouette. */
+static maage_status base_cactus_geometry(const void *context, const maage_block_geometry_query *query, const maage_block_geometry_sink *sink) {
+    maage_block_shape bounds;
+    maage_status result;
+    unsigned int face, axis;
+    (void) context;
+    for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
+        for (axis = 0; axis < 3; ++axis) {
+            bounds.minimum[axis] = 0;
+            bounds.maximum[axis] = 1;
+        }
+        axis = face / 2;
+        if (axis != 1) {
+            bounds.minimum[axis] = 1.0 / 16;
+            bounds.maximum[axis] = 15.0 / 16;
+        }
+        result = maage_block_geometry_cuboid(sink, &bounds, query->state->faces, 1U << face, query->block->mesh_material, 0);
+        if (maage_status_failed(result)) return result;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
+}
 maage_status maage_base_geometry(maage_content_context *context, maage_base_ids *ids) {
     maage_block_geometry_definition definition;
     maage_status result;
@@ -22,6 +44,9 @@ maage_status maage_base_geometry(maage_content_context *context, maage_base_ids 
     result = maage_block_geometry_register(context->geometry, "minecraft:torch", &definition, &ids->geometry_torch);
     if (maage_status_failed(result)) return result;
     definition.primitive = MAAGE_BLOCK_GEOMETRY_CUSTOM;
+    definition.emit = base_cactus_geometry;
+    result = maage_block_geometry_register(context->geometry, "minecraft:cactus", &definition, &ids->geometry_cactus);
+    if (maage_status_failed(result)) return result;
     definition.emit = base_entity_geometry;
     return maage_block_geometry_register(context->geometry, "minecraft:block_entity", &definition, &ids->geometry_entity);
 }
