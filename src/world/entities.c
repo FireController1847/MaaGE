@@ -986,9 +986,23 @@ static maage_status entity_explode(maage_entity_context *context, const maage_en
     if (entity->payload.living.idle_ticks == total) entity->type = 0;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
+static int entity_route_supported(const maage_world *world, const double position[3], double width) {
+    double foot[3], edge = width * 0.5 - 0.000001;
+    int x, z;
+    if (entity_supported(world, position)) return 1;
+    memcpy(foot, position, sizeof(foot));
+    for (z = -1; z <= 1; z += 2)
+        for (x = -1; x <= 1; x += 2) {
+            foot[0] = position[0] + x * edge;
+            foot[2] = position[2] + z * edge;
+            if (entity_supported(world, foot)) return 1;
+        }
+    return 0;
+}
 static void entity_steer(maage_entity_context *context, maage_entity *entity, const maage_entity_type_definition *definition, double dx, double dz, double speed) {
     double length = sqrt(dx * dx + dz * dz), best = -1e30, direction[2], trial[3], angle, score;
-    int candidate, jump = 0, best_jump = 0, found = 0;
+    int candidate, level, jump = 0, best_jump = 0, found = 0, traversable;
+    double best_turn = 0;
     if (length < 0.1 || speed <= 0) {
         entity->velocity[0] *= 0.6;
         entity->velocity[2] *= 0.6;
@@ -1003,23 +1017,40 @@ static void entity_steer(maage_entity_context *context, maage_entity *entity, co
         trial[1] = entity->position[1];
         trial[2] = entity->position[2] + direction[1] * (definition->width * 0.5 + 0.6);
         jump = 0;
-        if (!entity_body_fits(context->world, trial, definition->width, definition->height, 1)) {
-            trial[1] += 1;
-            if (!entity->grounded || !entity_body_fits(context->world, trial, definition->width, definition->height, 1)) continue;
-            jump = 1;
-        }
-        if (entity->grounded && !entity_supported(context->world, trial) && !maage_world_fluid_at(context->world, trial)) continue;
+        traversable = 0;
+        /* Probe complete standing positions, including the floor below a
+         * descending route. An empty cell at the old foot height is not a
+         * cliff. Only a supported upper position requests a jump. */
+        if (entity->grounded) {
+            for (level = 0; level < 3; ++level) {
+                trial[1] = entity->position[1] + (level == 1 ? -1 : (level == 2 ? 1 : 0));
+                if (!entity_body_fits(context->world, trial, definition->width, definition->height, 1)) continue;
+                if (!entity_route_supported(context->world, trial, definition->width) && !maage_world_fluid_at(context->world, trial)) continue;
+                jump = level == 2;
+                traversable = 1;
+                break;
+            }
+        } else traversable = entity_body_fits(context->world, trial, definition->width, definition->height, 1);
+        if (!traversable) continue;
         score = (direction[0] * dx + direction[1] * dz) / length - fabs(turn) * 0.04;
         if (score <= best) continue;
         best = score;
         found = 1;
         best_jump = jump;
+        best_turn = turn;
         entity->payload.living.yaw = angle + turn;
     }
     if (!found) {
         entity->velocity[0] *= 0.5;
         entity->velocity[2] *= 0.5;
         return;
+    }
+    if (entity->payload.living.panic_ticks && definition->classification == MAAGE_ENTITY_CLASS_PASSIVE && fabs(best_turn) > 0.7853981633974483) {
+        /* Retain a reachable escape direction instead of repeatedly steering
+         * back toward the same blocked goal for the entire panic interval. */
+        entity->payload.living.goal[0] = entity->position[0] + sin(entity->payload.living.yaw) * 5;
+        entity->payload.living.goal[1] = entity->position[1];
+        entity->payload.living.goal[2] = entity->position[2] - cos(entity->payload.living.yaw) * 5;
     }
     entity->velocity[0] += (sin(entity->payload.living.yaw) * speed - entity->velocity[0]) * 0.35;
     entity->velocity[2] += (-cos(entity->payload.living.yaw) * speed - entity->velocity[2]) * 0.35;
