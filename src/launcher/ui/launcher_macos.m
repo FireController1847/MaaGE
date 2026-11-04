@@ -109,7 +109,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSTextField *installationName, *installationArguments, *installationHeading, *installationHint;
 @property(nonatomic, strong) NSPopUpButton *installationClient;
-@property(nonatomic, strong) NSButton *newInstallationButton, *saveInstallationButton, *duplicateInstallationButton, *removeInstallationButton, *defaultInstallationButton, *activateInstallationButton, *cancelInstallationButton, *folderInstallationButton;
+@property(nonatomic, strong) NSButton *createInstallationButton, *saveInstallationButton, *duplicateInstallationButton, *removeInstallationButton, *defaultInstallationButton, *activateInstallationButton, *cancelInstallationButton, *folderInstallationButton;
 @property(nonatomic) unsigned editedInstallationID, accountRevision, clientRevision;
 @property(nonatomic) BOOL hasEditedInstallation, creatingInstallation, updatingInstallationSelection;
 @property(nonatomic) int result;
@@ -352,7 +352,7 @@ static NSTableView *maage_ui_navigation_table(void) {
         else hint = @"Selected for editing. Choose Make Active for Play to launch this one.";
     } else self.installationHeading.stringValue = @"Select an installation";
     if (![self.installationHint.stringValue isEqualToString:hint]) self.installationHint.stringValue = hint;
-    self.newInstallationButton.enabled = enabled && !self.creatingInstallation;
+    self.createInstallationButton.enabled = enabled && !self.creatingInstallation;
     self.installationName.enabled = enabled && (editing || self.creatingInstallation);
     self.installationClient.enabled = enabled && (editing || self.creatingInstallation);
     self.installationArguments.enabled = enabled && (editing || self.creatingInstallation);
@@ -689,8 +689,8 @@ static NSTableView *maage_ui_navigation_table(void) {
     NSStackView *listHeading = maage_ui_stack(YES, 10);
     [listHeading addArrangedSubview:maage_ui_label(@"Installations", 17, YES)];
     [listHeading addArrangedSubview:[[NSView alloc] init]];
-    self.newInstallationButton = [self button:@"+ New" action:@selector(newInstallation:)];
-    [listHeading addArrangedSubview:self.newInstallationButton];
+    self.createInstallationButton = [self button:@"+ New" action:@selector(newInstallation:)];
+    [listHeading addArrangedSubview:self.createInstallationButton];
     [left addArrangedSubview:listHeading];
     [listHeading.widthAnchor constraintEqualToAnchor:left.widthAnchor].active = YES;
     NSTextField *selectionHint = maage_ui_label(@"Select a row to edit · Double-click to activate", 11, NO);
