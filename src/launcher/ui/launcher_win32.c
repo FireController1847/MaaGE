@@ -42,7 +42,7 @@ typedef struct maage_launcher_win32 {
     maage_launcher_win32_style native;
     HBRUSH background, sidebar;
     unsigned revision, client_revision;
-    int result, updating, creating, previous_row, scroll[5], scrollbar_visible;
+    int result, updating, creating, previous_row, editor_row, scroll[5], scrollbar_visible;
 } maage_launcher_win32;
 static void maage_ui_text(HWND control, const char *text) {
     wchar_t wide[MAAGE_PATH_CAPACITY];
@@ -195,7 +195,10 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
     InvalidateRect(ui->window, NULL, TRUE);
 }
 static int maage_ui_selected(maage_launcher_win32 *ui) {
-    return ListView_GetNextItem(ui->list, -1, LVNI_SELECTED);
+    int row = ListView_GetNextItem(ui->list, -1, LVNI_SELECTED);
+    if (ui->creating) return -1;
+    if (row >= 0 && (unsigned) row < ui->state->count) return row;
+    return ui->editor_row >= 0 && (unsigned) ui->editor_row < ui->state->count ? ui->editor_row : -1;
 }
 static void maage_ui_client_choices(maage_launcher_win32 *ui, int row);
 static void maage_ui_editor_bind(maage_launcher_win32 *ui);
@@ -226,13 +229,16 @@ static void maage_ui_installations_reload(maage_launcher_win32 *ui, int preferre
             SendMessageW(ui->installation, CB_SETCURSEL, i, 0);
         }
     }
+    ui->editor_row = -1;
     if (!ui->creating && ui->state->count) {
         row = preferred >= 0 && (unsigned) preferred < ui->state->count ? preferred : active >= 0 ? active : 0;
+        ui->editor_row = row;
         ListView_SetItemState(ui->list, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
         ListView_EnsureVisible(ui->list, row, FALSE);
     }
     ui->updating = 0;
     if (!ui->creating) maage_ui_editor_bind(ui);
+    InvalidateRect(ui->list, NULL, FALSE);
 }
 static void maage_ui_client_choices(maage_launcher_win32 *ui, int row) {
     unsigned i;
@@ -324,6 +330,83 @@ static void maage_ui_editor_bind(maage_launcher_win32 *ui) {
     }
     maage_ui_client_choices(ui, row);
     maage_ui_editor_status(ui);
+}
+
+/* Win32 can lose the native selection when a ListView is shown after an
+ * initially hidden page. Keep the active/edited row explicit and restore the
+ * native selection whenever the Installations page becomes visible. */
+static void maage_ui_installations_ensure_selection(maage_launcher_win32 *ui) {
+    int row = ui->editor_row, native_row;
+    unsigned i;
+    if (ui->creating || !ui->state->count) return;
+    if (row < 0 || (unsigned) row >= ui->state->count) {
+        row = 0;
+        for (i = 0; i < ui->state->count; ++i)
+            if (ui->state->installations[i].id == ui->state->selected) {
+                row = (int) i;
+                break;
+            }
+    }
+    native_row = ListView_GetNextItem(ui->list, -1, LVNI_SELECTED);
+    if (native_row != row) {
+        ui->updating = 1;
+        ListView_SetItemState(ui->list, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_SetItemState(ui->list, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ui->updating = 0;
+    }
+    if (ui->editor_row != row) {
+        ui->editor_row = row;
+        maage_ui_editor_bind(ui);
+    }
+    ListView_EnsureVisible(ui->list, row, FALSE);
+    InvalidateRect(ui->list, NULL, FALSE);
+}
+
+/* Render a persistently selected row with system highlight colors, including
+ * when focus moves into the editor. The native ListView still owns hit testing,
+ * keyboard navigation, accessibility and high-contrast system colors. */
+static LRESULT maage_ui_installations_draw(maage_launcher_win32 *ui, NMLVCUSTOMDRAW *draw) {
+    RECT rect, cell;
+    LVITEMW item;
+    wchar_t text[160];
+    HDC dc;
+    int row, column, saved, inset;
+    if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT || ui->creating) return CDRF_DODEFAULT;
+    row = (int) draw->nmcd.dwItemSpec;
+    if (row < 0 || row != ui->editor_row || (unsigned) row >= ui->state->count) return CDRF_DODEFAULT;
+    dc = draw->nmcd.hdc;
+    saved = SaveDC(dc);
+    if (!saved) return CDRF_DODEFAULT;
+    rect = draw->nmcd.rc;
+    GetClientRect(ui->list, &cell);
+    rect.left = cell.left;
+    rect.right = cell.right;
+    FillRect(dc, &rect, GetSysColorBrush(COLOR_HIGHLIGHT));
+    SetTextColor(dc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+    SetBkMode(dc, TRANSPARENT);
+    SelectObject(dc, ui->native.font);
+    inset = maage_launcher_win32_scale(&ui->native, 6);
+    for (column = 0; column < 2; ++column) {
+        if (!ListView_GetSubItemRect(ui->list, row, column, LVIR_BOUNDS, &cell)) continue;
+        if (!column) cell.right = cell.left + ListView_GetColumnWidth(ui->list, 0);
+        cell.left += inset;
+        cell.right -= inset;
+        memset(&item, 0, sizeof(item));
+        item.iItem = row;
+        item.iSubItem = column;
+        item.pszText = text;
+        item.cchTextMax = (int) (sizeof(text) / sizeof(text[0]));
+        text[0] = 0;
+        SendMessageW(ui->list, LVM_GETITEMTEXTW, row, (LPARAM) &item);
+        DrawTextW(dc, text, -1, &cell, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+    if (GetFocus() == ui->list && !(SendMessageW(ui->list, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS)) {
+        InflateRect(&rect, -inset / 2, -inset / 2);
+        DrawFocusRect(dc, &rect);
+    }
+    RestoreDC(dc, saved);
+    return CDRF_SKIPDEFAULT;
 }
 
 static void maage_ui_refresh(maage_launcher_win32 *ui) {
@@ -609,6 +692,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         if (id >= 100 && id < 105) {
             ui->state->page = (maage_launcher_page) (id - 100);
             maage_ui_layout(ui);
+            if (ui->state->page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_ensure_selection(ui);
             return 0;
         }
         if (id == MAAGE_UI_ABOUT || id == MAAGE_UI_BACK_SETTINGS) {
@@ -655,19 +739,26 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         return 0;
     }
     case WM_NOTIFY:
-        if (((NMHDR *) lparam)->code == NM_CUSTOMDRAW) return maage_launcher_win32_button(&ui->native, lparam);
+        if (((NMHDR *) lparam)->code == NM_CUSTOMDRAW) {
+            if (((NMHDR *) lparam)->hwndFrom == ui->list) return maage_ui_installations_draw(ui, (NMLVCUSTOMDRAW *) lparam);
+            return maage_launcher_win32_button(&ui->native, lparam);
+        }
         if (((NMHDR *) lparam)->hwndFrom == ui->list && !ui->updating) {
-            int row = maage_ui_selected(ui);
-            if (((NMHDR *) lparam)->code == NM_DBLCLK && row >= 0 && !ui->creating) {
+            if (((NMHDR *) lparam)->code == NM_DBLCLK && ((NMITEMACTIVATE *) lparam)->iItem >= 0 && !ui->creating) {
+                ui->editor_row = ((NMITEMACTIVATE *) lparam)->iItem;
                 maage_ui_installation_action(ui, MAAGE_UI_ACTIVE);
                 return 0;
             }
             if (((NMHDR *) lparam)->code == LVN_ITEMCHANGED) {
-                if (ui->creating && row >= 0) {
+                NMLISTVIEW *change = (NMLISTVIEW *) lparam;
+                if (!(change->uChanged & LVIF_STATE) || !(change->uNewState & LVIS_SELECTED) || change->iItem < 0) return 0;
+                ui->editor_row = change->iItem;
+                if (ui->creating) {
                     ui->creating = 0;
                     maage_ui_layout(ui);
                 }
                 maage_ui_editor_bind(ui);
+                InvalidateRect(ui->list, NULL, FALSE);
                 maage_ui_refresh(ui);
             }
         }
@@ -711,6 +802,7 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
     *action = 0;
     memset(&ui, 0, sizeof(ui));
     ui.state = state;
+    ui.editor_row = -1;
     ui.background = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
     ui.sidebar = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
     memset(&klass, 0, sizeof(klass));
@@ -772,8 +864,12 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
     SendMessageW(ui.installations_label, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
     ui.new_button = maage_ui_button(&ui, 2, L"+ New", 198, 205, 116, MAAGE_UI_NEW);
     ui.list_hint = maage_ui_label(&ui, 2, L"Select to edit; double-click to activate.", 198, 244, 320, 28);
-    ui.list = maage_ui_control(&ui, 2, WC_LISTVIEWW, L"MaaGE installations", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 280, 350, 330, MAAGE_UI_LIST);
-    ListView_SetExtendedListViewStyle(ui.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+    ui.list = maage_ui_control(&ui, 2, WC_LISTVIEWW, L"MaaGE installations", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 280, 350, 330, MAAGE_UI_LIST);
+    SetWindowLongPtrW(ui.list, GWL_EXSTYLE, GetWindowLongPtrW(ui.list, GWL_EXSTYLE) | WS_EX_CLIENTEDGE);
+    SetWindowPos(ui.list, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    ListView_SetBkColor(ui.list, GetSysColor(COLOR_WINDOW));
+    ListView_SetTextBkColor(ui.list, GetSysColor(COLOR_WINDOW));
+    ListView_SetExtendedListViewStyle(ui.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES | LVS_EX_LABELTIP);
     memset(&column, 0, sizeof(column));
     column.mask = LVCF_TEXT | LVCF_WIDTH;
     column.pszText = L"Installation";
@@ -835,6 +931,7 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
     maage_ui_installations_reload(&ui, -1);
     maage_ui_refresh(&ui);
     maage_ui_layout(&ui);
+    if (ui.state->page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_ensure_selection(&ui);
     SetFocus(ui.navigation[0]);
     if (!SetTimer(ui.window, 1, 250, NULL)) {
         outcome = maage_status_from_win32((unsigned long) GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN);
