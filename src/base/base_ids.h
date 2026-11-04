@@ -69,7 +69,7 @@ typedef struct maage_base_ids {
     maage_property_id property_wood, property_axis, property_persistent, property_check_decay, property_stage, property_age, property_crop_age, property_moisture, property_facing, property_lit, property_color, property_sand, property_attachment, property_fluid_level, property_grass_variant, property_plant_variant;
     maage_property_value wood_values[6];
     maage_tag_id tool_tags[6]; /* Private constructor selectors index registered item capabilities. */
-    maage_tag_id tag_wood, tag_log, tag_planks, tag_leaves, tag_soil, tag_sand, tag_farmland, tag_crop, tag_axial, tag_soil_plant, tag_plant_support_tick, tag_mushroom, tag_cactus, tag_wood_drops;
+    maage_tag_id tag_wood, tag_log, tag_planks, tag_leaves, tag_soil, tag_sand, tag_farmland, tag_crop, tag_axial, tag_soil_plant, tag_mushroom, tag_cactus, tag_wood_drops;
     unsigned long mob_types[MAAGE_BASE_MOB_COUNT], mob_models[MAAGE_BASE_MOB_COUNT], mob_textures[MAAGE_BASE_MOB_COUNT];
     unsigned long spawn_eggs[MAAGE_BASE_MOB_COUNT], arrow_type, arrow_model, arrow_texture, sheep_fleece;
     unsigned long item_feather, item_leather, item_bone, item_rotten_flesh, item_string, item_gunpowder, item_egg, item_arrow, item_spider_eye, item_milk_bucket;

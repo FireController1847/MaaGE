@@ -238,7 +238,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   respecting pause. Deduplicate column queues, persist remaining delays/block entities,
   preserve geometry epochs for auxiliary-only edits and merge current auxiliary state
   into light completions. Static sky/block levels remain 0..15; daylight scales sky only.
-- Random ticks belong to active owner phases, separate from scheduled fluids/support.
+- Random ticks belong to active owner phases, separate from scheduled updates and neighbor notifications.
   `maage_world_config_init` defaults speed 3, explicit zero disables; setters validate
   aggregate work. Simulation square defaults to radius 8, independent of rendering/cache.
   Eligibility counts and immutable callbacks avoid sampling scans. Coordinate, behavior
@@ -248,14 +248,16 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Preserve numeric leaf species/persistent/check flags, bounded connected log support,
   unavailable-neighborhood deferral and capacity-preflighted drops; no immediate leaf
   deletion on log removal. Details: [random ticks](docs/world-and-gameplay.md#random-ticks-and-growth).
-- Support callbacks serve placement and persistent deduplicated neighbor checks. Mutations
-  preflight work; owner processing is iterative/bounded and never discards queued cascades.
-  Missing support/light defers; import catches unloaded edits. Ordinary grass blocks
-  never acquire plant support requirements. Preserve each block's distinct rules/drops.
+- Every committed state transition queues geometry-independent owner neighbor notifications.
+  Reserve work before mutation; dispatch iteratively with retained budget progress and persist
+  deferred faces/provider cursors with column snapshots. Content supplies state-aware six-face
+  ALL/ANY survival rules and support-loss outcomes through Traits; placement stays separate.
+  Missing support/light defers without loading. Never initialize support on import or activate
+  floating falling blocks through random sampling. Preserve distinct content rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD15` metadata embeds one checksummed
+  worlds. Canonical UUIDs identify them. `MGWRLD16` metadata embeds one checksummed
   `MGIDMAP3` World dictionary for blocks, states (block identity plus canonical typed properties),
-  items, item variants, biomes and entity types; `MGRGN2` region headers bind its UUID. `MGCHNK10` palettes, stacks and
+  items, item variants, biomes and entity types; `MGRGN2` region headers bind its UUID. `MGCHNK11` palettes, stacks and
   entities carry numeric saved IDs only. Block-entity records bind registered codecs through the owning saved block identity, not runtime handler order. Resolve names once at open, retain both
   numeric translation directions, and atomically publish map extensions before jobs
   can save new IDs. Never reinterpret saved IDs or duplicate dictionaries per chunk.

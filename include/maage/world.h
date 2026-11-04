@@ -109,6 +109,9 @@ typedef struct maage_world_config {
     /* Attempts per eligible 16^3 section per 20 TPS tick. Explicit 0 disables.
      * Initialize with maage_world_config_init for the default of 3. */
     unsigned int random_tick_speed;
+    /* Callback deliveries per owner drain; zero selects 8192. Excess work
+     * remains queued and progresses fairly in subsequent owner ticks. */
+    unsigned int neighbor_update_budget;
     int presentation_only; /* Replica: imported states only, no generation/simulation/save. */
     int build_meshes;      /* Initialized to 1; authoritative Server sets 0. */
     int new_world;
@@ -365,14 +368,21 @@ int maage_world_solid(const maage_world *world, int x, int y, int z);
  * terrain. SUCCESS hits; NOOP misses and retains the requested range as distance. */
 maage_status maage_world_raycast(const maage_world *world, const double origin[3], const double direction[3], double range, maage_world_target *target);
 maage_status maage_world_emit_sound(maage_world *, unsigned long, const double[3], double intensity, double pitch);
-/* Shared placement/survival query. NOOP defers unknown terrain/current light;
- * SUCCESS writes validity. Ordinary solid blocks have no support requirement. */
-maage_status maage_world_check_support(maage_world *world, int x, int y, int z);
+/* Read-only ongoing support evaluation; placement uses the independent
+ * CAN_PLACE contract. NOOP defers unavailable dependencies without loading;
+ * SUCCESS writes validity. Blocks without a rule have no support requirement. */
 maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z, maage_block_state_id state, int *valid);
 /* Owner simulation phase only. Compare expected numeric state, then publish a
  * private copy; workers retain their old immutable snapshots. Invalidates
  * lighting/meshes and obsolete jobs without waiting. No filesystem work. */
 maage_status maage_world_set(maage_world *world, int x, int y, int z, maage_block_state_id expected, maage_block_state_id replacement);
+/* Balanced owner-only scopes defer notification callbacks until borrowed live
+ * simulation storage is released. Mutations remain visible inside the scope;
+ * the outer end drains available cascades and publishes immutable edits.
+ * End is required even after a failed operation. Scopes may nest; finish them
+ * before pumping jobs or persisting World state. */
+maage_status maage_world_begin_mutations(maage_world *world);
+maage_status maage_world_end_mutations(maage_world *world);
 /* Local AABB; unavailable cells are full-cube collision barriers. */
 int maage_world_collision_shape(const maage_world *world, int x, int y, int z, maage_block_shape *shape);
 /* Transfers worker-prepared upload data; it borrows this mesh's vertices.

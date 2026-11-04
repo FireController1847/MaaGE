@@ -88,14 +88,45 @@ struct maage_random_tick_context;
 struct maage_block_state_definition;
 typedef maage_status (*maage_block_random_tick_callback)(struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, struct maage_random_tick_context *context);
 
-typedef maage_status (*maage_block_survival_callback)(const struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
+typedef maage_status (*maage_block_placement_callback)(const struct maage_world *world, int x, int y, int z, const struct maage_block_state_definition *state, int *valid);
+
+enum {
+    MAAGE_SUPPORT_ALL = 1,
+    MAAGE_SUPPORT_ANY = 2
+};
+enum {
+    MAAGE_BLOCK_ORIGIN_MUTATION = 0,
+    MAAGE_BLOCK_ORIGIN_NEIGHBOR,
+    MAAGE_BLOCK_ORIGIN_SUPPORT,
+    MAAGE_BLOCK_ORIGIN_RANDOM_TICK,
+    MAAGE_BLOCK_ORIGIN_SCHEDULED_TICK,
+    MAAGE_BLOCK_ORIGIN_PLAN
+};
+/* State-aware SURVIVES output. The engine samples only faces in the mask and
+ * combines the content predicate with ALL/ANY semantics. Zero faces means no
+ * dependency. Predicate NOOP means unavailable input; it never means false.
+ * Context and predicate borrow immutable content, never call-local storage. */
+typedef struct maage_block_support_rule {
+    unsigned int faces, mode;
+    const void *context;
+    maage_status (*test)(const void *, const struct maage_world *, int, int, int, const struct maage_block_state_definition *, unsigned int, const struct maage_block_state_definition *, int *);
+} maage_block_support_rule;
+/* Receiving face points toward the changed position. before/after describe
+ * that transition; the receiver is supplied separately as its current state.
+ * Notifications are owner-only and may outlive their originating tick. */
+typedef struct maage_block_neighbor_change {
+    int x, y, z;
+    unsigned int face;
+    unsigned long origin;
+    const struct maage_block_state_definition *before, *after;
+} maage_block_neighbor_change;
 
 typedef struct maage_block_definition {
     const void *behavior_context; /* Borrowed immutable module data; outlives registry readers. */
     maage_block_id id;
     int solid;
     int opaque;
-    int falls;                   /* Scheduled unsupported-block motion, independent of plant survival. */
+    int falls;                   /* Eligible payload for the shared falling-entity mechanism. */
     int material_solid;          /* Plant adjacency rule; independent of collision. */
     unsigned int emitted_light;  /* 0..15; resolved during registration. */
     unsigned int light_opacity;  /* 0..15; independent of face occlusion. */
@@ -119,8 +150,8 @@ typedef struct maage_block_definition {
     /* Finalization fills these numeric tag dispatch adapters. Content binds
      * behavior providers and clears construction callbacks before finalization. */
     maage_block_random_tick_callback random_tick;
-    maage_block_survival_callback survives;
-    maage_block_survival_callback can_place; /* Destination validation only; never persistent support. */
+    maage_status (*survives)(const struct maage_world *, int, int, int, const struct maage_block_state_definition *, maage_block_support_rule *);
+    maage_block_placement_callback can_place; /* Destination validation only; never persistent support. */
     maage_status (*scheduled_tick)(struct maage_world *, int, int, int, const struct maage_block_state_definition *);
     /* Content callbacks run on the owner, except import_state (detached worker).
      * Read-only placement/presentation callbacks never mutate World. */
@@ -128,6 +159,8 @@ typedef struct maage_block_definition {
     maage_status (*use)(struct maage_world *, const struct maage_world_target *, struct maage_crafting_container *);
     maage_status (*land)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, double, unsigned long *);
     maage_status (*changed)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, const struct maage_block_state_definition *);
+    maage_status (*neighbor_changed)(struct maage_world *, int, int, int, const struct maage_block_state_definition *, const maage_block_neighbor_change *, int *, size_t *);
+    maage_status (*support_lost)(struct maage_world *, int, int, int, const struct maage_block_state_definition *);
     maage_status (*import_state)(const maage_block_registry *, const struct maage_block_state_definition *, maage_block_state_id *);
     maage_sound_material_id material;
     unsigned int mesh_material, foliage, snow_cover, flow_permeable;
@@ -135,8 +168,6 @@ typedef struct maage_block_definition {
     maage_tag_id tool_wear_class, special_tool_class;
     int has_tool_wear, has_special_tool;
     double special_tool_speed, item_drag;
-    int unsupported_no_drops, unsupported_replaces;
-    maage_block_state_id unsupported_state;
     const struct maage_block_entity_handler *entity;
 
 } maage_block_definition;
@@ -182,6 +213,12 @@ typedef struct maage_block_behavior_call {
     const maage_block_state_definition *state, *before, *after;
     struct maage_random_tick_context *random_tick;
     int *valid;
+    maage_block_support_rule *support;
+    const maage_block_neighbor_change *neighbor;
+    /* Set before returning when dependencies are unavailable, without effects.
+     * Dispatch resumes this provider; completed providers are not replayed. */
+    int *deferred;
+    size_t *continuation;
     const struct maage_item_definition *tool;
     unsigned long *random;
     struct maage_item_drops *drops;

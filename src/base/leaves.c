@@ -21,8 +21,8 @@ maage_status maage_leaves_changed(maage_world *world, int x, int y, int z, const
     else if (maage_base_state_tag(ids, before, ids->tag_leaves)) radius = 1;
     else
         return maage_leaves_noop();
-    /* The mutation already owns an edit batch. Flag-only recursive mutations
-     * never trigger removal propagation, so work is bounded to this cube. */
+    /* The owner drains this transition iteratively. Marking leaf states adds
+     * ordinary transitions without repeating removal propagation. */
     for (dx = -radius; dx <= radius; ++dx)
         for (dz = -radius; dz <= radius; ++dz) {
             nx = x + dx;

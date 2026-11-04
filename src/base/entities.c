@@ -210,7 +210,6 @@ static maage_status base_wool(maage_content_context *context, maage_base_ids *id
     block.special_tool_speed = 5;
     block.material = ids->material_cloth;
     block.item_drag = 0.588;
-    block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.collision_shape.maximum[0] = block.collision_shape.maximum[1] = block.collision_shape.maximum[2] = 1;
     block.selection_shape = block.collision_shape;
     result = maage_base_register_block(context->blocks, "minecraft:wool", &block);

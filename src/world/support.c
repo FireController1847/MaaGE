@@ -1,147 +1,94 @@
 #include "world_internal.h"
-#include "maage/entities.h"
+#include <stdlib.h>
 #include <string.h>
 
-static maage_status maage_support_status(unsigned char code) {
+static maage_status support_result(unsigned char code) {
     return maage_status_make(code, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
 }
-static maage_status maage_support_block(const maage_world *world, int x, int y, int z, const maage_block_state_definition **state, const maage_block_definition **block) {
-    const maage_block_registry *registry = maage_world_registry(world);
-    if (x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT || !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) return maage_support_status(MAAGE_STATUS_NOOP);
-    *state = maage_block_registry_state(registry, maage_world_get(world, x, y, z));
-    *block = *state ? maage_block_registry_block(registry, (*state)->block_id) : NULL;
-    return maage_support_status(*block ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVARIANT_VIOLATION);
+maage_status maage_chunk_reserve_change(maage_chunk *chunk) {
+    maage_block_change *grown;
+    size_t capacity;
+    if (chunk->change_count < chunk->change_capacity) return support_result(MAAGE_STATUS_NOOP);
+    capacity = chunk->change_capacity ? chunk->change_capacity * 2 : 8;
+    if (capacity <= chunk->change_capacity || capacity > (size_t) - 1 / sizeof(*grown)) return support_result(MAAGE_STATUS_ALLOCATION_FAILED);
+    grown = (maage_block_change *) realloc(chunk->changes, capacity * sizeof(*grown));
+    if (!grown) return support_result(MAAGE_STATUS_ALLOCATION_FAILED);
+    chunk->changes = grown;
+    chunk->change_capacity = capacity;
+    return support_result(MAAGE_STATUS_SUCCESS);
 }
-
-maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z, maage_block_state_id state_id, int *valid) {
-    const maage_block_state_definition *state;
-    const maage_block_definition *block;
-    if (!world || !valid) return maage_support_status(MAAGE_STATUS_INVALID_ARGUMENT);
-    *valid = 0;
-    state = maage_block_registry_state(maage_world_registry(world), state_id);
-    block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-    if (!block) return maage_support_status(MAAGE_STATUS_INVALID_ARGUMENT);
-    if (y < 0 || y >= 256) return maage_support_status(MAAGE_STATUS_SUCCESS);
-    if (block->survives) return block->survives(world, x, y, z, state, valid);
-    *valid = 1;
-    return maage_support_status(MAAGE_STATUS_SUCCESS);
-}
-static maage_status maage_support_schedule(maage_world *world, int x, int y, int z, unsigned int delay) {
-    maage_environment_state clock;
-    unsigned long low, high;
-    if (y < 0 || y >= 256) return maage_support_status(MAAGE_STATUS_NOOP);
-    maage_world_environment(world, &clock);
-    low = clock.ticks_low;
-    high = clock.ticks_high;
-    if (delay) {
-        low = (low + delay) & 4294967295UL;
-        if (low < clock.ticks_low) high = (high + 1UL) & 4294967295UL;
-    }
-    return maage_world_schedule_update(world, x, y, z, MAAGE_BLOCK_UPDATE_SUPPORT, low, high);
-}
-maage_status maage_support_changed(maage_world *world, int x, int y, int z, maage_block_state_id replacement) {
-    static const int offsets[7][3] = {{0, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
-    const maage_block_state_definition *state;
-    const maage_block_definition *block;
+static maage_status support_rule(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_block_support_rule *rule) {
+    const maage_block_definition *block = maage_block_registry_block(maage_world_registry(world), state->block_id);
     maage_status result;
-    int nx, ny, nz;
-    unsigned int side;
-    for (side = 0; side < 7; ++side) {
-        nx = x + offsets[side][0];
-        ny = y + offsets[side][1];
-        nz = z + offsets[side][2];
-        if (ny < 0 || ny >= 256) continue;
-        if (!side) {
-            state = maage_block_registry_state(maage_world_registry(world), replacement);
-            block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-            result = maage_support_status(block ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_INVARIANT_VIOLATION);
-        } else
-            result = maage_support_block(world, nx, ny, nz, &state, &block);
-        if (maage_status_failed(result)) return result;
-        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || (!block->survives && !block->falls)) continue;
-        result = maage_support_schedule(world, nx, ny, nz, block->falls ? 2U : 0U);
-        if (maage_status_failed(result)) return result;
-    }
-    return maage_support_status(MAAGE_STATUS_SUCCESS);
-}
-maage_status maage_world_check_support(maage_world *world, int x, int y, int z) {
-    const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
-    const maage_block_state_definition *state;
-    const maage_block_definition *block;
-    maage_item_drops drops;
-    maage_entities *entities = maage_world_entities(world);
-    const maage_item_registry *items = maage_world_item_registry(world);
-    unsigned long random;
-    unsigned int i;
-    double position[3], velocity[3];
-    int valid;
-    maage_status result = maage_support_block(world, x, y, z, &state, &block);
+    memset(rule, 0, sizeof(*rule));
+    rule->mode = MAAGE_SUPPORT_ALL;
+    if (!block->survives) return support_result(MAAGE_STATUS_SUCCESS);
+    result = block->survives(world, x, y, z, state, rule);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (block->falls) {
-        const maage_block_state_definition *under;
-        const maage_block_definition *support;
-        result = maage_support_block(world, x, y - 1, z, &under, &support);
-        if (maage_status_code(result) == MAAGE_STATUS_NOOP) return maage_support_schedule(world, x, y, z, 1);
-        if (maage_status_failed(result)) return result;
-        if (under->block_id != ids->block_air && !under->fluid_kind) return maage_support_status(MAAGE_STATUS_NOOP);
-        return maage_entities_fall(world, x, y, z, state->id);
-    }
-    if (!block->survives) return maage_support_status(MAAGE_STATUS_NOOP);
-    result = maage_world_can_survive(world, x, y, z, state->id, &valid);
-    if (maage_status_code(result) == MAAGE_STATUS_NOOP) return maage_support_schedule(world, x, y, z, 1);
-    if (maage_status_failed(result) || valid) return result;
-    if (block->unsupported_replaces) return maage_world_set(world, x, y, z, state->id, block->unsupported_state);
-    memset(&drops, 0, sizeof(drops));
-    random = maage_entities_random(entities);
-    /* Snow's neighbor callback removes it without harvesting snowballs.
-     * Support loss is environmental even when the triggering player is Creative. */
-    if (!block->unsupported_no_drops) {
-        result = maage_item_generate_drops(maage_world_registry(world), items, state->id, NULL, &random, &drops);
-        if (maage_status_failed(result)) return result;
-        result = maage_entities_reserve(entities, drops.count);
-        if (maage_status_failed(result)) return result;
-    }
-    result = maage_world_set(world, x, y, z, state->id, ids->state_air);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    for (i = 0; i < drops.count; ++i) {
-        random = (random * 1664525UL + 1013904223UL) & 4294967295UL;
-        position[0] = x + 0.15 + (random & 65535UL) / 65535.0 * 0.7;
-        random = (random * 1664525UL + 1013904223UL) & 4294967295UL;
-        position[1] = y + 0.15 + (random & 65535UL) / 65535.0 * 0.7;
-        random = (random * 1664525UL + 1013904223UL) & 4294967295UL;
-        position[2] = z + 0.15 + (random & 65535UL) / 65535.0 * 0.7;
-        velocity[0] = velocity[2] = 0;
-        velocity[1] = 0.2;
-        result = maage_entities_spawn(entities, items, &drops.stacks[i], position, velocity, 10);
-        if (maage_status_failed(result)) return result;
-    }
-    return maage_entities_set_random(entities, random);
+    if ((rule->faces & ~63U) || (rule->faces && !rule->test) || (rule->mode != MAAGE_SUPPORT_ALL && rule->mode != MAAGE_SUPPORT_ANY)) return support_result(MAAGE_STATUS_INVARIANT_VIOLATION);
+    return result;
 }
-maage_status maage_chunk_support_initialize(maage_chunk *chunk, const maage_block_registry *blocks, unsigned long low, unsigned long high) {
-    const maage_block_state_definition *state;
-    const maage_block_definition *block;
-    maage_scheduled_update update;
-    unsigned int cell;
-    int changed = 0;
+static maage_status support_evaluate(const maage_world *world, int x, int y, int z, const maage_block_state_definition *state, const maage_block_support_rule *rule, int *valid) {
+    static const int offsets[MAAGE_FACE_COUNT][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+    const maage_block_state_definition *neighbor;
     maage_status result;
-    update.kind = MAAGE_BLOCK_UPDATE_SUPPORT;
-    update.due_low = low;
-    update.due_high = high;
-    for (cell = 0; cell < 65536UL; ++cell) {
-        if (!chunk->sections[cell / 4096]) {
-            cell += 4095;
+    unsigned int face;
+    int nx, ny, nz, accepted, waiting = 0;
+    *valid = !rule->faces || rule->mode == MAAGE_SUPPORT_ALL;
+    for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
+        if (!(rule->faces & (1U << face))) continue;
+        nx = x + offsets[face][0];
+        ny = y + offsets[face][1];
+        nz = z + offsets[face][2];
+        /* Out-of-world cells use the ordinary World query. Missing horizontal
+         * columns are unknown and never cause a load or a false predicate. */
+        if (ny >= 0 && ny < MAAGE_WORLD_HEIGHT && nx > -MAAGE_WORLD_LIMIT && nx < MAAGE_WORLD_LIMIT && nz > -MAAGE_WORLD_LIMIT && nz < MAAGE_WORLD_LIMIT && !maage_world_chunk_loaded(world, maage_world_chunk_coordinate(nx), maage_world_chunk_coordinate(nz))) {
+            waiting = 1;
             continue;
         }
-        state = maage_block_registry_state(blocks, maage_chunk_get(chunk, cell % 16, cell / 256, (cell / 16) % 16));
-        block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
-        if (!block) return maage_support_status(MAAGE_STATUS_INVARIANT_VIOLATION);
-        if (!block->survives && !block->falls) continue;
-        update.cell = cell;
-        update.due_low = block->falls ? (low + 2UL) & 4294967295UL : low;
-        update.due_high = (high + (update.due_low < low ? 1UL : 0UL)) & 4294967295UL;
-        result = maage_chunk_schedule_update(chunk, &update);
-        if (maage_status_failed(result)) return result;
-        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) changed = 1;
+        neighbor = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, nx, ny, nz));
+        if (!neighbor) return support_result(MAAGE_STATUS_INVARIANT_VIOLATION);
+        accepted = 0;
+        result = rule->test(rule->context, world, x, y, z, state, face, neighbor, &accepted);
+        if (maage_status_failed(result) || maage_status_is_warning(result)) return result;
+        if (maage_status_code(result) == MAAGE_STATUS_NOOP) {
+            waiting = 1;
+            continue;
+        }
+        if ((rule->mode == MAAGE_SUPPORT_ALL && !accepted) || (rule->mode == MAAGE_SUPPORT_ANY && accepted)) {
+            *valid = accepted;
+            return support_result(MAAGE_STATUS_SUCCESS);
+        }
     }
-    return maage_support_status(changed ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP);
+    return support_result(waiting ? MAAGE_STATUS_NOOP : MAAGE_STATUS_SUCCESS);
+}
+maage_status maage_world_can_survive(const maage_world *world, int x, int y, int z, maage_block_state_id state_id, int *valid) {
+    const maage_block_state_definition *state;
+    maage_block_support_rule rule;
+    maage_status result;
+    if (!world || !valid) return support_result(MAAGE_STATUS_INVALID_ARGUMENT);
+    *valid = 0;
+    state = maage_block_registry_state(maage_world_registry(world), state_id);
+    if (!state) return support_result(MAAGE_STATUS_INVALID_ARGUMENT);
+    if (y < 0 || y >= MAAGE_WORLD_HEIGHT) return support_result(MAAGE_STATUS_SUCCESS);
+    result = support_rule(world, x, y, z, state, &rule);
+    return maage_status_code(result) == MAAGE_STATUS_SUCCESS ? support_evaluate(world, x, y, z, state, &rule, valid) : result;
+}
+maage_status maage_world_support_changed(maage_world *world, int x, int y, int z, unsigned int face, int *deferred) {
+    const maage_block_registry *blocks = maage_world_registry(world);
+    const maage_block_state_definition *state = maage_block_registry_state(blocks, maage_world_get(world, x, y, z));
+    const maage_block_definition *block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
+    maage_block_support_rule rule;
+    maage_status result;
+    int valid;
+    if (!block) return support_result(MAAGE_STATUS_INVARIANT_VIOLATION);
+    if (!block->survives) return support_result(MAAGE_STATUS_NOOP);
+    result = support_rule(world, x, y, z, state, &rule);
+    if (!maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_SUCCESS) *deferred = 1;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    if (face < MAAGE_FACE_COUNT && !(rule.faces & (1U << face))) return support_result(MAAGE_STATUS_NOOP);
+    result = support_evaluate(world, x, y, z, state, &rule, &valid);
+    if (!maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_SUCCESS) *deferred = 1;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS || valid) return result;
+    return block->support_lost(world, x, y, z, state);
 }

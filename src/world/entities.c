@@ -249,7 +249,7 @@ int maage_entity_view_valid(const maage_entity_view *view, const maage_item_regi
     return entity.payload.living.health <= definition->health && entity.payload.living.hurt_ticks <= definition->invulnerability_ticks && entity.payload.living.hurt_animation_ticks <= 10 && entity.payload.living.death_ticks <= 20 && entity.payload.living.attack_ticks <= definition->attack_cooldown && entity.payload.living.fuse_ticks <= definition->fuse_ticks && (!entity.payload.living.health || !entity.payload.living.death_ticks);
 }
 
-maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_block_state_id state_id) {
+static maage_status entity_fall(maage_world *world, int x, int y, int z, maage_block_state_id state_id) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
     maage_entities *entities = maage_world_entities(world);
     const maage_item_registry *items = maage_world_item_registry(world);
@@ -282,6 +282,14 @@ maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_
     entities->data[entities->count++] = entity;
     ++entities->next_id;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
+}
+
+maage_status maage_entities_fall(maage_world *world, int x, int y, int z, maage_block_state_id state_id) {
+    maage_status result = maage_world_begin_mutations(world), finished;
+    if (maage_status_failed(result)) return result;
+    result = entity_fall(world, x, y, z, state_id);
+    finished = maage_world_end_mutations(world);
+    return maage_status_failed(result) ? result : (maage_status_failed(finished) || maage_status_is_warning(finished) ? finished : result);
 }
 
 maage_status maage_entities_spawn(maage_entities *entities, const maage_item_registry *items, const maage_item_stack *stack, const double position[3], const double velocity[3], unsigned int delay) {
@@ -414,7 +422,7 @@ static void entity_reindex_living(maage_entities *entities) {
     }
 }
 
-maage_status maage_entities_tick(maage_entities *entities, maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
+static maage_status entity_tick(maage_entities *entities, maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
     size_t i, j, step, bucket;
     int x, y, z, dx, dy, dz;
     unsigned int remaining, examined;
@@ -524,6 +532,16 @@ maage_status maage_entities_tick(maage_entities *entities, maage_world *world, c
     entity_reindex_living(entities);
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_TICK);
 }
+maage_status maage_entities_tick(maage_entities *entities, maage_world *world, const maage_item_registry *items, const maage_player *player, maage_inventory *inventory, int collect, unsigned int *collected, maage_entity_pickup *pickups, size_t capacity, size_t *written) {
+    maage_status result = maage_world_begin_mutations(world), finished;
+    if (maage_status_failed(result)) return result;
+    /* Falling landings can activate more blocks or environmental drops. Drain
+     * those callbacks after the dense entity walk releases its borrowed slots. */
+    result = entity_tick(entities, world, items, player, inventory, collect, collected, pickups, capacity, written);
+    finished = maage_world_end_mutations(world);
+    return maage_status_failed(result) ? result : (maage_status_failed(finished) || maage_status_is_warning(finished) ? finished : result);
+}
+
 size_t maage_entities_count(const maage_entities *entities) {
     return entities ? entities->count : 0;
 }
@@ -563,6 +581,7 @@ static maage_status entity_clone_array(const maage_entity *source, size_t count,
     *output = copy;
     return entity_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SNAPSHOT);
 }
+
 maage_status maage_entities_snapshot(const maage_entities *entities, maage_entity_save *save) {
     maage_status result;
     if (!entities || !save) return entity_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SNAPSHOT);

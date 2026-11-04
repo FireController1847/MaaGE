@@ -490,6 +490,7 @@ maage_status maage_chunk_destroy(maage_chunk *chunk) {
     free(chunk->entities);
     free(chunk->updates);
     free(chunk->update_index);
+    free(chunk->changes);
     if (chunk->sky_payload) maage_sky_payload_release(chunk->sky_payload);
     free(chunk);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);

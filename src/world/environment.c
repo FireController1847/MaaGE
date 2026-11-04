@@ -182,7 +182,7 @@ maage_status maage_chunk_schedule_update(maage_chunk *chunk, const maage_schedul
     maage_scheduled_update *grown;
     size_t capacity, bucket, position, parent;
     int found;
-    if (!chunk || !update || (update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_SUPPORT && update->kind != MAAGE_BLOCK_UPDATE_CONTENT) || update->cell > 65535U || update->due_low > MAAGE_ENVIRONMENT_WORD || update->due_high > MAAGE_ENVIRONMENT_WORD) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SUBMIT, 0);
+    if (!chunk || !update || (update->kind != MAAGE_BLOCK_UPDATE_FLUID && update->kind != MAAGE_BLOCK_UPDATE_CONTENT) || update->cell > 65535U || update->due_low > MAAGE_ENVIRONMENT_WORD || update->due_high > MAAGE_ENVIRONMENT_WORD) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_SUBMIT, 0);
     found = 0;
     if (chunk->update_index_capacity) maage_update_bucket(chunk, update->kind, update->cell, &found);
     if (!found && (!chunk->update_index_capacity || chunk->update_index_used + 1 >= chunk->update_index_capacity / 2)) {
@@ -299,11 +299,18 @@ maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell,
 }
 maage_status maage_chunk_copy_environment(maage_chunk *destination, const maage_chunk *source) {
     size_t i, index_capacity;
-    if (!destination || !source || destination->update_count || destination->entity_count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+    if (!destination || !source || destination->update_count || destination->entity_count || destination->change_count) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
     destination->environment_initialized = source->environment_initialized;
     destination->updates_relative = source->updates_relative;
     destination->generation_stages = source->generation_stages;
     memcpy(destination->generation_features, source->generation_features, sizeof(source->generation_features));
+    if (source->change_count) {
+        if (source->change_count > (size_t) - 1 / sizeof(*destination->changes)) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+        destination->changes = (maage_block_change *) malloc(source->change_count * sizeof(*destination->changes));
+        if (!destination->changes) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
+        memcpy(destination->changes, source->changes, source->change_count * sizeof(*destination->changes));
+        destination->change_count = destination->change_capacity = source->change_count;
+    }
     if (source->update_count) {
         if (source->update_count > (size_t) - 1 / sizeof(*destination->updates)) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_COPY, 0);
         destination->updates = (maage_scheduled_update *) malloc(source->update_count * sizeof(*destination->updates));
@@ -344,9 +351,12 @@ static void maage_chunk_clear_environment(maage_chunk *chunk) {
     free(chunk->entities);
     free(chunk->updates);
     free(chunk->update_index);
+    free(chunk->changes);
     chunk->entities = NULL;
     chunk->updates = NULL;
     chunk->update_index = NULL;
+    chunk->changes = NULL;
+    chunk->change_count = chunk->change_capacity = 0;
     chunk->entity_count = chunk->entity_capacity = 0;
     chunk->update_count = chunk->update_capacity = chunk->fluid_update_count = 0;
     chunk->update_index_capacity = chunk->update_index_used = 0;
@@ -380,6 +390,9 @@ maage_status maage_chunk_replace_environment(maage_chunk *destination, const maa
     destination->update_index = temporary.update_index;
     destination->update_index_capacity = temporary.update_index_capacity;
     destination->update_index_used = temporary.update_index_used;
+    destination->changes = temporary.changes;
+    destination->change_count = temporary.change_count;
+    destination->change_capacity = temporary.change_capacity;
     destination->entities = temporary.entities;
     destination->entity_count = temporary.entity_count;
     destination->entity_capacity = temporary.entity_capacity;
@@ -764,8 +777,7 @@ maage_status maage_environment_tick(maage_environment *environment, maage_world 
         result = maage_world_take_update(world, state->ticks_low, state->ticks_high, &x, &z, &update);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) break;
-        if (update.kind == MAAGE_BLOCK_UPDATE_SUPPORT) result = maage_world_check_support(world, x * 16 + (int) (update.cell % 16), (int) (update.cell / 256), z * 16 + (int) ((update.cell / 16) % 16));
-        else if (update.kind == MAAGE_BLOCK_UPDATE_CONTENT) {
+        if (update.kind == MAAGE_BLOCK_UPDATE_CONTENT) {
             int bx = x * 16 + (int) (update.cell % 16), by = (int) (update.cell / 256), bz = z * 16 + (int) ((update.cell / 16) % 16);
             const maage_block_state_definition *cell = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, bx, by, bz));
             const maage_block_definition *block = cell ? maage_block_registry_block(maage_world_registry(world), cell->block_id) : NULL;

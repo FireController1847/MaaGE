@@ -16,7 +16,7 @@
 #define MAAGE_REGION_HEADER 56L
 #define MAAGE_REGION_RECORD 24L
 #define MAAGE_REGION_FOOTER 4L
-#define MAAGE_REGION_CHUNK_MAX 18000000UL
+#define MAAGE_REGION_CHUNK_MAX 4294967295UL
 #define MAAGE_REGION_MAGIC "MGRGN2\0"
 #define MAAGE_REGION_RECORD_MAGIC "MGR1"
 #define MAAGE_REGION_END "DONE"
@@ -111,7 +111,6 @@ static maage_status region_scan(const maage_region_store *store, maage_region *r
     long end, position;
     unsigned slot;
     unsigned long raw_size, zip_size;
-    unsigned long maximum_zip = (unsigned long) compressBound((uLong) MAAGE_REGION_CHUNK_MAX);
     maage_region_entry *entry;
     if (fseek(region->file, 0L, SEEK_END) || (end = ftell(region->file)) < MAAGE_REGION_HEADER ||
         fseek(region->file, 0L, SEEK_SET) || fread(header, 1, MAAGE_REGION_HEADER, region->file) != MAAGE_REGION_HEADER)
@@ -132,7 +131,7 @@ static maage_status region_scan(const maage_region_store *store, maage_region *r
         zip_size = region_word(header + 12, 4);
         if (memcmp(header, MAAGE_REGION_RECORD_MAGIC, 4) || slot >= MAAGE_REGION_SLOTS ||
             region_word(header + 6, 2) || !raw_size || raw_size > MAAGE_REGION_CHUNK_MAX ||
-            !zip_size || zip_size > maximum_zip)
+            !zip_size || zip_size > (unsigned long) ((size_t) - 1) || raw_size > (unsigned long) ((size_t) - 1))
             return region_status(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_OPERATION_LOAD);
         if (zip_size > (unsigned long) (end - position - MAAGE_REGION_RECORD) ||
             end - position - MAAGE_REGION_RECORD - (long) zip_size < MAAGE_REGION_FOOTER) break;
@@ -398,7 +397,7 @@ maage_status maage_region_store_save(maage_region_store *store, int x, int z, co
     /* Compression can add framing overhead to an incompressible maximal
      * raw chunk. Bound stored size by the format's uint32 length field,
      * not the uncompressed payload ceiling. */
-    if (capacity > 0xffffffffUL) return region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
+    if (capacity < length || capacity > 0xffffffffUL || capacity > (size_t) - 1) return region_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE);
     compressed = (unsigned char *) malloc((size_t) capacity);
     if (!compressed) return region_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_SAVE);
     compressed_size = capacity;

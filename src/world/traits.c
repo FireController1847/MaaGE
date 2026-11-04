@@ -523,6 +523,7 @@ maage_status maage_behavior_register(maage_traits_registry *registry, const char
     size_t i, j;
     if (!registry || !definition || !definition->callback || !definition->event || !definition->domains || (definition->domains & ~(MAAGE_TRAIT_BLOCK | MAAGE_TRAIT_ITEM)) || (definition->event <= MAAGE_BEHAVIOR_IMPORT && definition->domains != MAAGE_TRAIT_BLOCK) || (definition->mode != MAAGE_BEHAVIOR_COMPOSE && definition->mode != MAAGE_BEHAVIOR_EXCLUSIVE) || (definition->after_count && !definition->after)) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Invalid behavior contract or lifecycle domain");
     if (registry->finalized) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
+    if (definition->event == MAAGE_BEHAVIOR_SURVIVES && definition->mode != MAAGE_BEHAVIOR_EXCLUSIVE) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "A survival event supplies one exclusive directional rule");
     for (i = 0; i < definition->after_count; ++i) {
         const maage_behavior_definition *dependency = maage_behavior_get(registry, definition->after[i]);
         if (!dependency || dependency->event != definition->event || dependency->order > definition->order || (dependency->domains & definition->domains) != definition->domains) return trait_fail(registry, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER, name, "Behavior dependency is missing, has incompatible domains or event, or contradicts ordering");
@@ -877,6 +878,21 @@ int maage_traits_has_behavior(const maage_traits_registry *registry, unsigned in
     }
     return 0;
 }
+size_t maage_traits_behavior_count(const maage_traits_registry *registry, unsigned int domain, unsigned long id, unsigned long event) {
+    const trait_subject *subject = trait_subject_get(registry, domain, id);
+    size_t low = 0, high, middle, end;
+    if (!registry || !registry->finalized || !subject) return 0;
+    high = subject->dispatch_count;
+    while (low < high) {
+        middle = low + (high - low) / 2;
+        if (maage_behavior_get(registry, subject->dispatch[middle])->event < event) low = middle + 1;
+        else high = middle;
+    }
+    end = low;
+    while (end < subject->dispatch_count && maage_behavior_get(registry, subject->dispatch[end])->event == event)
+        ++end;
+    return end - low;
+}
 static int trait_block_state_valid(const maage_block_registry *blocks, const maage_block_state_definition *state) {
     const maage_block_state_definition *registered = state ? maage_block_registry_state(blocks, state->id) : NULL;
     return registered && registered->block_id == state->block_id && registered->properties == state->properties;
@@ -889,6 +905,7 @@ static int trait_block_call_valid(const maage_traits_registry *registry, unsigne
     case MAAGE_BEHAVIOR_SCHEDULED_TICK:
         return call->world != NULL;
     case MAAGE_BEHAVIOR_SURVIVES:
+        return call->read_world && call->support;
     case MAAGE_BEHAVIOR_CAN_PLACE:
         return call->read_world && call->valid;
     case MAAGE_BEHAVIOR_DROPS:
@@ -899,6 +916,10 @@ static int trait_block_call_valid(const maage_traits_registry *registry, unsigne
         return call->world && call->random;
     case MAAGE_BEHAVIOR_CHANGED:
         return call->world && trait_block_state_valid(call->blocks, call->before) && trait_block_state_valid(call->blocks, call->after) && (call->state->id == call->before->id || call->state->id == call->after->id);
+    case MAAGE_BEHAVIOR_NEIGHBOR_CHANGED:
+        return call->world && call->neighbor && call->deferred && call->continuation && call->neighbor->face < MAAGE_FACE_COUNT && trait_block_state_valid(call->blocks, call->neighbor->before) && trait_block_state_valid(call->blocks, call->neighbor->after);
+    case MAAGE_BEHAVIOR_SUPPORT_LOST:
+        return call->world != NULL;
     case MAAGE_BEHAVIOR_IMPORT:
         return call->replacement != NULL;
     default:
@@ -912,6 +933,7 @@ maage_status maage_traits_dispatch(const maage_traits_registry *registry, unsign
     size_t low = 0, high, middle, i;
     if (!registry || !registry->finalized || !subject || !call || !event || (event <= MAAGE_BEHAVIOR_IMPORT && domain != MAAGE_TRAIT_BLOCK)) return trait_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
     if (event <= MAAGE_BEHAVIOR_IMPORT && !trait_block_call_valid(registry, id, event, (const maage_block_behavior_call *) call)) return trait_result(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_TICK);
+    if (event == MAAGE_BEHAVIOR_NEIGHBOR_CHANGED && *((maage_block_behavior_call *) call)->continuation && *((maage_block_behavior_call *) call)->continuation > maage_traits_behavior_count(registry, domain, id, event)) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_TICK);
     high = subject->dispatch_count;
     while (low < high) {
         middle = low + (high - low) / 2;
@@ -921,9 +943,15 @@ maage_status maage_traits_dispatch(const maage_traits_registry *registry, unsign
     for (i = low; i < subject->dispatch_count; ++i) {
         behavior = maage_behavior_get(registry, subject->dispatch[i]);
         if (behavior->event != event) break;
+        if (event == MAAGE_BEHAVIOR_NEIGHBOR_CHANGED && i - low < *((maage_block_behavior_call *) call)->continuation) continue;
         if (!(behavior->domains & domain)) return trait_result(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_TICK);
         result = behavior->callback(behavior->context, call);
         if (maage_status_failed(result)) return result;
+        if (event == MAAGE_BEHAVIOR_NEIGHBOR_CHANGED) {
+            maage_block_behavior_call *block_call = (maage_block_behavior_call *) call;
+            if (*block_call->deferred) return result;
+            *block_call->continuation = i - low + 1;
+        }
         if (!maage_status_is_warning(outcome) && maage_status_code(result) != MAAGE_STATUS_NOOP) outcome = result;
     }
     return outcome;

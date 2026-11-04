@@ -113,6 +113,8 @@ maage_status maage_base_traits(maage_content_context *context, maage_base_ids *i
     callbacks.behavior_context = ids;
     callbacks.random_tick = maage_random_tick_farmland;
     callbacks.survives = maage_support_farmland;
+    callbacks.can_place = maage_base_support_place;
+    callbacks.support_lost = maage_base_support_lost;
     callbacks.land = maage_base_farmland_land;
     result = base_behavior_contract(context, "minecraft:farmland", &callbacks, &ids->property_moisture, 1, &ids->tag_farmland);
     if (maage_status_failed(result)) return result;
@@ -124,10 +126,6 @@ maage_status maage_base_traits(maage_content_context *context, maage_base_ids *i
     callbacks.random_tick = NULL;
     callbacks.survives = maage_support_plant;
     result = base_behavior_contract(context, "minecraft:soil_plant", &callbacks, NULL, 0, &ids->tag_soil_plant);
-    if (maage_status_failed(result)) return result;
-    callbacks.random_tick = maage_random_tick_bush;
-    callbacks.survives = NULL;
-    result = base_behavior_contract(context, "minecraft:plant_support_tick", &callbacks, NULL, 0, &ids->tag_plant_support_tick);
     if (maage_status_failed(result)) return result;
     callbacks.random_tick = maage_random_tick_mushroom;
     callbacks.survives = maage_support_mushroom;
@@ -186,8 +184,9 @@ static maage_status base_behavior_invoke(const void *context, void *payload) {
     case MAAGE_BEHAVIOR_SCHEDULED_TICK:
         return block->scheduled_tick(call->world, call->x, call->y, call->z, call->state);
     case MAAGE_BEHAVIOR_SURVIVES:
+        return block->survives(call->read_world, call->x, call->y, call->z, call->state, call->support);
     case MAAGE_BEHAVIOR_CAN_PLACE:
-        result = provider->event == MAAGE_BEHAVIOR_SURVIVES ? block->survives(call->read_world, call->x, call->y, call->z, call->state, &valid) : block->can_place(call->read_world, call->x, call->y, call->z, call->state, &valid);
+        result = block->can_place(call->read_world, call->x, call->y, call->z, call->state, &valid);
         *call->valid = *call->valid && valid;
         return result;
     case MAAGE_BEHAVIOR_DROPS:
@@ -198,6 +197,10 @@ static maage_status base_behavior_invoke(const void *context, void *payload) {
         return block->land(call->world, call->x, call->y, call->z, call->state, call->distance, call->random);
     case MAAGE_BEHAVIOR_CHANGED:
         return block->changed(call->world, call->x, call->y, call->z, call->before, call->after);
+    case MAAGE_BEHAVIOR_NEIGHBOR_CHANGED:
+        return block->neighbor_changed(call->world, call->x, call->y, call->z, call->state, call->neighbor, call->deferred, call->continuation);
+    case MAAGE_BEHAVIOR_SUPPORT_LOST:
+        return block->support_lost(call->world, call->x, call->y, call->z, call->state);
     case MAAGE_BEHAVIOR_IMPORT:
         return block->import_state(call->blocks, call->state, call->replacement);
     default:
@@ -222,6 +225,10 @@ static int base_behavior_present(const maage_block_definition *block, unsigned l
         return block->land != NULL;
     case MAAGE_BEHAVIOR_CHANGED:
         return block->changed != NULL;
+    case MAAGE_BEHAVIOR_NEIGHBOR_CHANGED:
+        return block->neighbor_changed != NULL;
+    case MAAGE_BEHAVIOR_SUPPORT_LOST:
+        return block->support_lost != NULL;
     case MAAGE_BEHAVIOR_IMPORT:
         return block->import_state != NULL;
     default:
@@ -244,7 +251,7 @@ static maage_status base_behavior_register(maage_content_context *context, const
     memset(&behavior, 0, sizeof(behavior));
     behavior.event = event;
     behavior.domains = MAAGE_TRAIT_BLOCK;
-    behavior.mode = event == MAAGE_BEHAVIOR_DROPS || event == MAAGE_BEHAVIOR_USE || event == MAAGE_BEHAVIOR_IMPORT ? MAAGE_BEHAVIOR_EXCLUSIVE : MAAGE_BEHAVIOR_COMPOSE;
+    behavior.mode = event == MAAGE_BEHAVIOR_DROPS || event == MAAGE_BEHAVIOR_USE || event == MAAGE_BEHAVIOR_IMPORT || event == MAAGE_BEHAVIOR_SURVIVES || event == MAAGE_BEHAVIOR_SUPPORT_LOST ? MAAGE_BEHAVIOR_EXCLUSIVE : MAAGE_BEHAVIOR_COMPOSE;
     behavior.context = provider;
     behavior.callback = base_behavior_invoke;
     result = maage_behavior_register(context->traits, identity, &behavior);
@@ -287,7 +294,7 @@ static maage_status base_behavior_tag(maage_content_context *context, const char
     return result;
 }
 static maage_status base_behavior_contract(maage_content_context *context, const char *identity, const maage_block_definition *block, const maage_property_id *required, size_t required_count, maage_tag_id *output) {
-    static const char *const events[] = {"random_tick", "scheduled_tick", "survives", "can_place", "drops", "use", "land", "changed", "import"};
+    static const char *const events[] = {"random_tick", "scheduled_tick", "survives", "can_place", "drops", "use", "land", "changed", "neighbor_changed", "support_lost", "import"};
     maage_behavior_id behaviors[MAAGE_BEHAVIOR_IMPORT];
     maage_tag_definition tag;
     maage_status result;
@@ -318,12 +325,18 @@ maage_status maage_base_traits_bind(maage_content_context *context, const maage_
     maage_status result;
     size_t index, count;
     unsigned long event;
-    static const char *const events[] = {"random_tick", "scheduled_tick", "survives", "can_place", "drops", "use", "land", "changed", "import"};
+    int shared_support;
+    static const char *const events[] = {"random_tick", "scheduled_tick", "survives", "can_place", "drops", "use", "land", "changed", "neighbor_changed", "support_lost", "import"};
     const char *name;
     char identity[320];
     for (index = 0; index < maage_block_registry_block_count(context->blocks); ++index) {
         block = *maage_block_registry_block(context->blocks, (maage_block_id) index);
         if (block.behavior_context != ids) continue;
+        shared_support = block.survives == maage_support_wheat || block.survives == maage_support_farmland || block.survives == maage_support_plant || block.survives == maage_support_mushroom || block.survives == maage_support_cactus;
+        if (block.survives) {
+            block.support_lost = maage_base_support_lost;
+            if (!block.falls && !block.can_place) block.can_place = maage_base_support_place;
+        }
         name = maage_block_registry_block_name(context->blocks, block.id);
         sprintf(identity, "minecraft:block/%s", strchr(name, ':') + 1);
         result = maage_tag_find(context->traits, identity, &tags[0]);
@@ -346,14 +359,13 @@ maage_status maage_base_traits_bind(maage_content_context *context, const maage_
         if (block.id == ids->block_farmland) tags[count++] = ids->tag_farmland;
         if (block.id == ids->block_wheat) tags[count++] = ids->tag_crop;
         if (block.survives == maage_support_plant) tags[count++] = ids->tag_soil_plant;
-        if (block.random_tick == maage_random_tick_bush) tags[count++] = ids->tag_plant_support_tick;
         if (block.random_tick == maage_random_tick_mushroom) tags[count++] = ids->tag_mushroom;
         if (block.random_tick == maage_random_tick_cactus) tags[count++] = ids->tag_cactus;
         if (block.drops == maage_base_drop_species) tags[count++] = ids->tag_wood_drops;
         for (event = MAAGE_BEHAVIOR_RANDOM_TICK; event <= MAAGE_BEHAVIOR_IMPORT; ++event) {
             if (!base_behavior_present(&block, event)) continue;
-            if (event == MAAGE_BEHAVIOR_RANDOM_TICK && (block.random_tick == maage_random_tick_wheat || block.random_tick == maage_random_tick_farmland || block.random_tick == maage_random_tick_bush || block.random_tick == maage_random_tick_mushroom || block.random_tick == maage_random_tick_cactus)) continue;
-            if (event == MAAGE_BEHAVIOR_SURVIVES && (block.survives == maage_support_wheat || block.survives == maage_support_farmland || block.survives == maage_support_plant || block.survives == maage_support_mushroom || block.survives == maage_support_cactus)) continue;
+            if (event == MAAGE_BEHAVIOR_RANDOM_TICK && (block.random_tick == maage_random_tick_wheat || block.random_tick == maage_random_tick_farmland || block.random_tick == maage_random_tick_mushroom || block.random_tick == maage_random_tick_cactus)) continue;
+            if (shared_support && (event == MAAGE_BEHAVIOR_SURVIVES || event == MAAGE_BEHAVIOR_CAN_PLACE || event == MAAGE_BEHAVIOR_SUPPORT_LOST)) continue;
             if (event == MAAGE_BEHAVIOR_LAND && block.land == maage_base_farmland_land) continue;
             if (event == MAAGE_BEHAVIOR_DROPS && block.drops == maage_base_drop_species) continue;
             if ((block.id == ids->block_log || block.id == ids->block_log2 || block.id == ids->block_leaves) && event == MAAGE_BEHAVIOR_CHANGED) continue;
@@ -374,6 +386,8 @@ maage_status maage_base_traits_bind(maage_content_context *context, const maage_
         block.land = NULL;
         block.changed = NULL;
         block.import_state = NULL;
+        block.neighbor_changed = NULL;
+        block.support_lost = NULL;
         result = maage_block_registry_update_block(context->blocks, &block);
         if (maage_status_failed(result)) return result;
     }

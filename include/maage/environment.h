@@ -13,8 +13,7 @@ enum {
 };
 enum {
     MAAGE_BLOCK_UPDATE_FLUID = 1U,
-    MAAGE_BLOCK_UPDATE_SUPPORT = 2U,
-    MAAGE_BLOCK_UPDATE_CONTENT = 3U
+    MAAGE_BLOCK_UPDATE_CONTENT = 2U
 };
 typedef struct maage_environment_state {
     unsigned long ticks_low, ticks_high, day_tick, day_low, day_high;

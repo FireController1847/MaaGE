@@ -85,14 +85,11 @@ maage_status maage_random_tick_farmland(maage_world *world, int x, int y, int z,
     const maage_block_definition *block;
     maage_environment_state environment;
     maage_world_observation observation;
-    int dx, dz, dy, valid, hydrated = 0, unavailable = 0, exposed = 1;
+    int dx, dz, dy, hydrated = 0, unavailable = 0, exposed = 1;
     unsigned int moisture;
     maage_status result;
     (void) context;
     if (maage_base_state_value(maage_world_registry(world), state, ids->property_moisture) > 7) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-    result = maage_world_can_survive(world, x, y, z, state->id, &valid);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (!valid) return maage_world_check_support(world, x, y, z);
     /* Water at soil height or one cell above hydrates the radius-four square.
      * A known water source suffices even if another part is unavailable. */
     for (dz = -4; dz <= 4 && !hydrated; ++dz)
@@ -140,13 +137,10 @@ maage_status maage_random_tick_wheat(maage_world *world, int x, int y, int z, co
     const maage_block_state_definition *neighbor;
     const maage_block_definition *block;
     unsigned char light;
-    int dx, dz, valid, across_x = 0, across_z = 0, diagonal = 0;
+    int dx, dz, across_x = 0, across_z = 0, diagonal = 0;
     double speed = 1, contribution;
     maage_status result;
     if (maage_base_state_value(maage_world_registry(world), state, ids->property_crop_age) > 7) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-    result = maage_world_can_survive(world, x, y, z, state->id, &valid);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (!valid) return maage_world_check_support(world, x, y, z);
     if (maage_base_state_value(maage_world_registry(world), state, ids->property_crop_age) == 7) return maage_random_noop();
     result = maage_world_sample_light(world, x, y + 1, z, &light);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
@@ -189,8 +183,6 @@ maage_status maage_random_tick_sapling(maage_world *world, int x, int y, int z, 
     for (species = 0; species < 3 && ids->wood_values[species] != wood; ++species) {
     }
     if (species > 2) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK, 0);
-    result = maage_world_check_support(world, x, y, z);
-    if (maage_status_failed(result) || maage_status_code(result) == MAAGE_STATUS_NOOP || maage_world_get(world, x, y, z) != state->id) return result;
     result = maage_world_sample_light(world, x, y + 1, z, &light);
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     if (maage_random_light_value(light, context) < 9 || maage_random_tick_next(context, 7)) return maage_random_noop();
@@ -284,12 +276,6 @@ maage_status maage_random_tick_cactus(maage_world *world, int x, int y, int z, c
     result = maage_world_set(world, x, y, z, state->id, growth);
     if (maage_status_failed(result) || !obstructed) return result;
     return maage_random_tick_spawn_drop(world, x, y + 1, z, &drop, context);
-}
-
-maage_status maage_random_tick_bush(maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_random_tick_context *context) {
-    (void) state;
-    (void) context;
-    return maage_world_check_support(world, x, y, z);
 }
 
 static maage_status maage_random_mushroom_site(const maage_base_ids *ids, const maage_world *world, int x, int y, int z, int *valid) {

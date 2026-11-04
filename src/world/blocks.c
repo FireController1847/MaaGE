@@ -530,22 +530,26 @@ static maage_status block_scheduled_tick(struct maage_world *world, int x, int y
     call.z = z;
     return maage_traits_dispatch(call.blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, call.event, &call);
 }
-static maage_status block_survival(const struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid, unsigned long event) {
+static maage_status block_can_place(const struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
     maage_block_behavior_call call;
-    block_behavior_call(&call, maage_world_registry(world), event, state);
+    block_behavior_call(&call, maage_world_registry(world), MAAGE_BEHAVIOR_CAN_PLACE, state);
     call.read_world = world;
     call.x = x;
     call.y = y;
     call.z = z;
     call.valid = valid;
     *valid = 1;
-    return maage_traits_dispatch(call.blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, event, &call);
+    return maage_traits_dispatch(call.blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, call.event, &call);
 }
-static maage_status block_survives(const struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
-    return block_survival(world, x, y, z, state, valid, MAAGE_BEHAVIOR_SURVIVES);
-}
-static maage_status block_can_place(const struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state, int *valid) {
-    return block_survival(world, x, y, z, state, valid, MAAGE_BEHAVIOR_CAN_PLACE);
+static maage_status block_survives(const struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state, maage_block_support_rule *support) {
+    maage_block_behavior_call call;
+    block_behavior_call(&call, maage_world_registry(world), MAAGE_BEHAVIOR_SURVIVES, state);
+    call.read_world = world;
+    call.x = x;
+    call.y = y;
+    call.z = z;
+    call.support = support;
+    return maage_traits_dispatch(call.blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, call.event, &call);
 }
 static maage_status block_drops(const maage_block_registry *blocks, const struct maage_item_registry *items, const maage_block_state_definition *state, const struct maage_item_definition *tool, unsigned long *random, struct maage_item_drops *drops) {
     maage_block_behavior_call call;
@@ -602,6 +606,27 @@ static maage_status block_import(const maage_block_registry *blocks, const maage
     *replacement = state->id;
     return maage_traits_dispatch(blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, call.event, &call);
 }
+static maage_status block_neighbor_changed(struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state, const maage_block_neighbor_change *neighbor, int *deferred, size_t *continuation) {
+    maage_block_behavior_call call;
+    block_behavior_call(&call, maage_world_registry(world), MAAGE_BEHAVIOR_NEIGHBOR_CHANGED, state);
+    call.world = world;
+    call.x = x;
+    call.y = y;
+    call.z = z;
+    call.neighbor = neighbor;
+    call.deferred = deferred;
+    call.continuation = continuation;
+    return maage_traits_dispatch(call.blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, call.event, &call);
+}
+static maage_status block_support_lost(struct maage_world *world, int x, int y, int z, const maage_block_state_definition *state) {
+    maage_block_behavior_call call;
+    block_behavior_call(&call, maage_world_registry(world), MAAGE_BEHAVIOR_SUPPORT_LOST, state);
+    call.world = world;
+    call.x = x;
+    call.y = y;
+    call.z = z;
+    return maage_traits_dispatch(call.blocks->traits, MAAGE_TRAIT_BLOCK, state->block_id, call.event, &call);
+}
 static void block_compile_behaviors(maage_block_registry *registry, maage_block_definition *block) {
 #define BEHAVIOR(field, event, callback) block->field = maage_traits_has_behavior(registry->traits, MAAGE_TRAIT_BLOCK, block->id, event) ? callback : NULL
     BEHAVIOR(random_tick, MAAGE_BEHAVIOR_RANDOM_TICK, block_random_tick);
@@ -612,6 +637,8 @@ static void block_compile_behaviors(maage_block_registry *registry, maage_block_
     BEHAVIOR(use, MAAGE_BEHAVIOR_USE, block_use);
     BEHAVIOR(land, MAAGE_BEHAVIOR_LAND, block_land);
     BEHAVIOR(changed, MAAGE_BEHAVIOR_CHANGED, block_changed);
+    BEHAVIOR(neighbor_changed, MAAGE_BEHAVIOR_NEIGHBOR_CHANGED, block_neighbor_changed);
+    BEHAVIOR(support_lost, MAAGE_BEHAVIOR_SUPPORT_LOST, block_support_lost);
     BEHAVIOR(import_state, MAAGE_BEHAVIOR_IMPORT, block_import);
 #undef BEHAVIOR
 }
@@ -640,7 +667,7 @@ maage_status maage_block_registry_finalize(maage_block_registry *registry) {
     for (i = 0; i < registry->block_count; ++i) {
         block = (maage_block_definition *) maage_block_registry_block(registry, (maage_block_id) i);
         if (maage_traits_constants(registry->traits, MAAGE_TRAIT_BLOCK, block->id) == MAAGE_CONTENT_ID_INVALID) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
-        if (block->random_tick || block->scheduled_tick || block->survives || block->can_place || block->drops || block->use || block->land || block->changed || block->import_state) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        if (block->random_tick || block->scheduled_tick || block->survives || block->can_place || block->drops || block->use || block->land || block->changed || block->neighbor_changed || block->support_lost || block->import_state) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         policy_result = block_tool_contract(registry, block);
         if (maage_status_failed(policy_result)) return policy_result;
         block_compile_behaviors(registry, block);
@@ -648,7 +675,7 @@ maage_status maage_block_registry_finalize(maage_block_registry *registry) {
         if (!geometry) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         if (block->material && !maage_sound_material_get(registry->sounds, block->material)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         block->mesh_shape = geometry->primitive;
-        if (!maage_block_definition_valid(block) || (block->unsupported_replaces && !maage_block_registry_state(registry, block->unsupported_state)) || (block->entity && maage_block_registry_entity(registry, block->entity->id) != block->entity)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+        if (!maage_block_definition_valid(block) || (block->survives && !block->support_lost) || (block->entity && maage_block_registry_entity(registry, block->entity->id) != block->entity)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
     }
     for (bucket = 0; bucket < registry->state_bucket_count; ++bucket) {
         if (!registry->state_buckets[bucket]) continue;

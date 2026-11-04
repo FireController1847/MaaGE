@@ -12,8 +12,6 @@ static void base_block(maage_block_definition *block, const maage_base_ids *ids,
     block->replaceable = !solid;
     block->flow_permeable = 0;
     block->item_drag = 0.588;
-    block->unsupported_no_drops = 0;
-    block->unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block->selection_shape.maximum[0] = block->selection_shape.maximum[1] = block->selection_shape.maximum[2] = 1;
     if (solid) block->collision_shape = block->selection_shape;
 }
@@ -59,7 +57,7 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
     definition = maage_block_registry_block(registry, block);
     if (!definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     state.emitted_light = block == ids->block_furnace ? (lit ? 13U : 0U) : definition->emitted_light;
-    state.random_ticks = definition->random_tick != NULL || block == ids->block_leaves || block == ids->block_lava || block == ids->block_torch || (block == ids->block_water && fluid_level != 0);
+    state.random_ticks = definition->random_tick != NULL;
     if (block == ids->block_torch && attachment >= 1 && attachment <= 4) {
         state.selection_shape.minimum[0] = state.selection_shape.minimum[2] = 0.35;
         state.selection_shape.maximum[0] = state.selection_shape.maximum[2] = 0.65;
@@ -227,6 +225,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.drop_count = 1;
     block.required_tool = MAAGE_TOOL_SHOVEL;
     block.falls = 1;
+    block.survives = maage_support_falling;
     block.material = ids->material_sand;
     block.drops = maage_base_drop_sand;
     result = maage_base_register_block(registry, "minecraft:sand", &block);
@@ -242,6 +241,7 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.drop_count = 1;
     block.required_tool = MAAGE_TOOL_SHOVEL;
     block.falls = 1;
+    block.survives = maage_support_falling;
     block.material = ids->material_gravel;
     block.drops = maage_base_drop_gravel;
     result = maage_base_register_block(registry, "minecraft:gravel", &block);
@@ -572,7 +572,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selectable = 1;
     block.emitted_light = 0;
     block.use_neighbor_brightness = 1;
-    block.random_tick = maage_random_tick_bush;
     block.survives = maage_support_plant;
     block.mesh_shape = MAAGE_BLOCK_MESH_CROSS;
     block.geometry_id = ids->geometry_cross;
@@ -600,7 +599,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selectable = 1;
     block.emitted_light = 0;
     block.use_neighbor_brightness = 1;
-    block.random_tick = maage_random_tick_bush;
     block.survives = maage_support_dead_bush;
     block.mesh_shape = MAAGE_BLOCK_MESH_CROSS;
     block.geometry_id = ids->geometry_cross;
@@ -626,7 +624,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selectable = 1;
     block.emitted_light = 0;
     block.use_neighbor_brightness = 1;
-    block.random_tick = maage_random_tick_bush;
     block.survives = maage_support_plant;
     block.mesh_shape = MAAGE_BLOCK_MESH_CROSS;
     block.geometry_id = ids->geometry_cross;
@@ -650,7 +647,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selectable = 1;
     block.emitted_light = 0;
     block.use_neighbor_brightness = 1;
-    block.random_tick = maage_random_tick_bush;
     block.survives = maage_support_plant;
     block.mesh_shape = MAAGE_BLOCK_MESH_CROSS;
     block.geometry_id = ids->geometry_cross;
@@ -824,7 +820,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.collision_shape.maximum[2] = 0;
     block.material = ids->material_snow;
     block.snow_cover = 1;
-    block.unsupported_no_drops = 1;
     result = maage_base_register_block(registry, "minecraft:snow", &block);
     if (maage_status_failed(result)) return result;
     ids->block_snow = block.id;
@@ -978,8 +973,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 0.9;
     block.selection_shape.maximum[1] = 0.8;
     block.behavior_context = ids;
-    block.unsupported_no_drops = 0;
-    block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.item_drag = 0.588;
     block.flow_permeable = 0;
     block.material = ids->material_foliage;
@@ -1011,13 +1004,10 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.collision_shape.maximum[1] = 15.0 / 16.0;
     block.selection_shape = block.collision_shape;
     block.behavior_context = ids;
-    block.unsupported_no_drops = 0;
     block.item_drag = 0.588;
     block.flow_permeable = 0;
     block.geometry_id = ids->geometry_cube;
     block.material = ids->material_dirt;
-    block.unsupported_replaces = 1;
-    block.unsupported_state = ids->state_dirt;
     block.land = maage_base_farmland_land;
     result = maage_base_register_block(registry, "minecraft:farmland", &block);
     if (maage_status_failed(result)) goto failed;
@@ -1038,8 +1028,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.selection_shape.maximum[0] = block.selection_shape.maximum[2] = 1;
     block.selection_shape.maximum[1] = 0.25;
     block.behavior_context = ids;
-    block.unsupported_no_drops = 0;
-    block.unsupported_state = MAAGE_CONTENT_ID_INVALID;
     block.item_drag = 0.588;
     block.flow_permeable = 0;
     block.material = ids->material_foliage;

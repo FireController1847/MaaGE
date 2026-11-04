@@ -36,6 +36,8 @@ enum {
     MAAGE_BEHAVIOR_USE,
     MAAGE_BEHAVIOR_LAND,
     MAAGE_BEHAVIOR_CHANGED,
+    MAAGE_BEHAVIOR_NEIGHBOR_CHANGED,
+    MAAGE_BEHAVIOR_SUPPORT_LOST,
     MAAGE_BEHAVIOR_IMPORT
 };
 typedef struct maage_property_definition {
@@ -118,6 +120,8 @@ maage_property_set_id maage_traits_constants(const maage_traits_registry *, unsi
 int maage_traits_value(const maage_traits_registry *, unsigned int domain, unsigned long subject, maage_property_set_id state, maage_property_id, maage_property_value *);
 maage_status maage_traits_validate(const maage_traits_registry *, unsigned int domain, unsigned long subject, maage_property_set_id state);
 int maage_traits_has_behavior(const maage_traits_registry *, unsigned int domain, unsigned long subject, unsigned long event);
+/* Finalized, allocation-free provider count for a numeric event chain. */
+size_t maage_traits_behavior_count(const maage_traits_registry *, unsigned int domain, unsigned long subject, unsigned long event);
 /* Built-in events require a block subject and maage_block_behavior_call payload.
  * Custom event payloads follow their registered providers' domain-specific contract. */
 maage_status maage_traits_dispatch(const maage_traits_registry *, unsigned int domain, unsigned long subject, unsigned long event, void *call);

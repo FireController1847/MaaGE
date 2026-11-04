@@ -51,10 +51,21 @@ typedef struct maage_update_index {
     unsigned int kind, cell;
     size_t heap_index; /* index+1, 0 empty, (size_t)-1 tombstone */
 } maage_update_index;
+/* One exact transition, with independent completion bits for CHANGED, self
+ * support and six neighbors. Distinct transitions are never coalesced. A
+ * deferred provider resumes only while its receiving state is unchanged. */
+typedef struct maage_block_change {
+    unsigned int cell, pending;
+    maage_block_state_id before, after;
+    unsigned long origin;
+    size_t continuation[MAAGE_FACE_COUNT];
+    maage_block_state_id receiver[MAAGE_FACE_COUNT];
+} maage_block_change;
+#define MAAGE_BLOCK_CHANGE_PENDING 255U
 struct maage_chunk {
     int x, z;
-    maage_block_state_id air;  /* Implicit empty sections use the registered state. */
-    unsigned char *direct_sky; /* Sky payload present; access only through the numeric helpers. */
+    maage_block_state_id air;       /* Implicit empty sections use the registered state. */
+    unsigned char *direct_sky;      /* Sky payload present; access only through the numeric helpers. */
     maage_sky_payload *sky_payload; /* Shared until lighting explicitly detaches. */
     maage_section *sections[16];
     maage_biome_id biomes[256];
@@ -66,6 +77,8 @@ struct maage_chunk {
     size_t fluid_update_count;
     maage_update_index *update_index;
     size_t update_index_capacity, update_index_used;
+    maage_block_change *changes;
+    size_t change_count, change_capacity;
     maage_block_entity *entities;
     size_t entity_count, entity_capacity;
     int environment_initialized;
@@ -100,9 +113,8 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
 /* Missing destinations recheck on column import, without removal-event queues. */
 struct maage_item_stack;
 maage_status maage_random_tick_spawn_drop(maage_world *world, int x, int y, int z, const struct maage_item_stack *drop, maage_random_tick_context *context);
-maage_status maage_support_changed(maage_world *world, int x, int y, int z, maage_block_state_id replacement);
-maage_status maage_world_check_support(maage_world *world, int x, int y, int z);
-maage_status maage_chunk_support_initialize(maage_chunk *chunk, const maage_block_registry *blocks, unsigned long low, unsigned long high);
+maage_status maage_chunk_reserve_change(maage_chunk *chunk);
+maage_status maage_world_support_changed(maage_world *world, int x, int y, int z, unsigned int face, int *deferred);
 maage_status maage_chunk_block_entity_set(maage_chunk *chunk, unsigned int cell, unsigned long type, unsigned long version, const void *data, size_t length);
 maage_status maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int cell);
 /* Workers mutate only detached columns. Published columns are immutable and

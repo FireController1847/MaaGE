@@ -420,9 +420,8 @@ maage_status maage_gameplay_placement(const maage_player *player, const maage_wo
     old_block = old_state ? maage_block_registry_block(maage_world_registry(world), old_state->block_id) : NULL;
     if (!old_block || !old_block->replaceable || (maage_block_collision_shape(block, state, &collision_shape) && maage_gameplay_player_overlap(player, x, y, z, &collision_shape))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
     destination->block_id = old_state->block_id;
-    result = maage_world_can_survive(world, x, y, z, *placed, &valid);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    if (valid && block->can_place) {
+    valid = 1;
+    if (block->can_place) {
         result = block->can_place(world, x, y, z, state, &valid);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     }
