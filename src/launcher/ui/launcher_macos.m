@@ -738,11 +738,11 @@ static NSTableView *maage_ui_navigation_table(void) {
     list.hasVerticalScroller = YES;
     list.documentView = self.accounts;
     [list.heightAnchor constraintEqualToConstant:130].active = YES;
-    [list.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     [groups addArrangedSubview:list];
+    [list.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     self.accountStatus = maage_ui_label(@"", 13, NO);
-    [self.accountStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     [groups addArrangedSubview:self.accountStatus];
+    [self.accountStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     NSStackView *actions = maage_ui_stack(YES, 8);
     self.signIn = [self button:@"Sign In with Microsoft" action:@selector(addAccount:)];
     self.deviceSignIn = [self button:@"Use Device Code" action:@selector(deviceSignIn:)];
@@ -761,8 +761,8 @@ static NSTableView *maage_ui_navigation_table(void) {
     [groups addArrangedSubview:actions];
     self.authenticationStatus = maage_ui_label(@"", 13, NO);
     self.authenticationStatus.selectable = YES;
-    [self.authenticationStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     [groups addArrangedSubview:self.authenticationStatus];
+    [self.authenticationStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     actions = maage_ui_stack(YES, 8);
     self.deviceCodeButton = [self button:@"Copy Code" action:@selector(copyCode:)];
     self.openDevice = [self button:@"Open Microsoft Sign In" action:@selector(openDevice:)];
