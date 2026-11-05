@@ -107,7 +107,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, strong) NSView *body;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
-@property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *copyCodeButton, *openDevice;
+@property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *deviceCodeButton, *openDevice;
 @property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus;
 @property(nonatomic, strong) NSProgressIndicator *progress;
 @property(nonatomic, strong) NSPopUpButton *appearance;
@@ -653,7 +653,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.signIn.enabled = self.deviceSignIn.enabled = accountAvailable && state->accounts.restored;
     self.signOut.enabled = self.removeAccountButton.enabled = accountAvailable && state->accounts.restored && state->account[0];
     self.cancelAccount.enabled = state->accounts.busy;
-    self.copyCodeButton.enabled = self.openDevice.enabled = *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds();
+    self.deviceCodeButton.enabled = self.openDevice.enabled = *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds();
     self.status.title = @(state->readiness);
     self.resourceStatus.stringValue = @(state->resource_status);
     BOOL resourceAvailable = !state->progress.busy && !state->client_process && state->client_operation != 4 && !state->launch_pending;
@@ -764,9 +764,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     [self.authenticationStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
     [groups addArrangedSubview:self.authenticationStatus];
     actions = maage_ui_stack(YES, 8);
-    self.copyCodeButton = [self button:@"Copy Code" action:@selector(copyCode:)];
+    self.deviceCodeButton = [self button:@"Copy Code" action:@selector(copyCode:)];
     self.openDevice = [self button:@"Open Microsoft Sign In" action:@selector(openDevice:)];
-    [actions addArrangedSubview:self.copyCodeButton];
+    [actions addArrangedSubview:self.deviceCodeButton];
     [actions addArrangedSubview:self.openDevice];
     [groups addArrangedSubview:actions];
     NSScrollView *scroll = [[NSScrollView alloc] init];
