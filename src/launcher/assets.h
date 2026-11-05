@@ -26,18 +26,24 @@ typedef struct maage_setup_progress {
     int objects_ready, client_archive_ready, client_resources_ready, reconstruction_ready;
     double downloaded_bytes, total_bytes, client_downloaded_bytes, client_total_bytes;
     int percent; /* -1 until index totals are known; 100 only when complete. */
-    int cancellation_requested, needs_setup, directories_ready, metadata_ready;
+    int cancellation_requested, needs_setup, directories_ready, metadata_ready, busy, reused_receipt;
     char activity[256], error[512];
     maage_status result;
     maage_status_trace trace;
 } maage_setup_progress;
 typedef struct maage_assets maage_assets;
+typedef enum maage_assets_mode {
+    MAAGE_ASSETS_PREPARE,
+    MAAGE_ASSETS_VERIFY,
+    MAAGE_ASSETS_REPAIR
+} maage_assets_mode;
 #include "access/access.h"
 /* Borrows access, which must outlive this manager. NULL always denies work. */
 maage_status maage_assets_create(maage_access *access, maage_assets **output, maage_status_trace *trace);
 int maage_assets_access_allowed(maage_assets *assets);
-/* Returns zero if a worker is active. Repair forces every object hash check. */
-maage_status maage_assets_start(maage_assets *assets, int repair);
+/* One worker at a time. PREPARE reuses unchanged verified receipts. VERIFY hashes
+ * all resources without acquiring/reconstructing files; REPAIR also fixes defects. */
+maage_status maage_assets_start(maage_assets *assets, maage_assets_mode mode);
 /* Retry preserves whether the failed operation requested a full repair. */
 maage_status maage_assets_retry(maage_assets *assets);
 maage_status maage_assets_snapshot(maage_assets *assets, maage_setup_progress *progress);

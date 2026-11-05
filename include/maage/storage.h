@@ -39,7 +39,8 @@ maage_status maage_storage_clone(const char *source, const char *staging, int (*
 int maage_storage_same_file(const char *left, const char *right);
 /* Removes only empty directories; never removes their contents. */
 maage_status maage_storage_remove_directory(const char *path);
-/* Regular files only. Fingerprints detect size/time changes, not malicious tampering. */
+/* Regular files only. Fingerprints include file identity, size, write/change times.
+ * They detect changes to previously verified files, not malicious tampering. */
 maage_status maage_storage_stat(const char *path, double *size, char fingerprint[128]);
 /* SHA-1 file hashing requires the optional MaaGE::StorageHash target, enabled
  * for Launcher acquisition. Generic Storage has no OpenSSL dependency. */

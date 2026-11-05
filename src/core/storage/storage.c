@@ -9,6 +9,9 @@
 #include <string.h>
 #include <errno.h>
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
@@ -385,6 +388,20 @@ maage_status maage_storage_replace(const char *temporary, const char *destinatio
     return maage_status_from_errno(rename(temporary, destination) ? errno : 0, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_RENAME);
 #endif
 }
+#ifndef _WIN32
+static int maage_storage_identity(char fingerprint[128], const void *value, size_t bytes) {
+    const unsigned char *source = (const unsigned char *) value;
+    size_t length = strlen(fingerprint), i;
+    if (bytes > (126 - length) / 2) return 0;
+    fingerprint[length++] = '-';
+    for (i = 0; i < bytes; ++i) {
+        fingerprint[length++] = "0123456789abcdef"[source[i] >> 4];
+        fingerprint[length++] = "0123456789abcdef"[source[i] & 15];
+    }
+    fingerprint[length] = 0;
+    return 1;
+}
+#endif
 maage_status maage_storage_stat(const char *path, double *size, char fingerprint[128]) {
     if (size) *size = 0;
     if (fingerprint) fingerprint[0] = 0;
@@ -392,16 +409,25 @@ maage_status maage_storage_stat(const char *path, double *size, char fingerprint
                                                                  MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, !path ? 0 : (!size ? 1 : 2));
 #ifdef _WIN32
     {
-        WIN32_FILE_ATTRIBUTE_DATA st;
+        BY_HANDLE_FILE_INFORMATION st;
+        FILE_BASIC_INFO basic;
+        ULARGE_INTEGER changed;
+        HANDLE file;
         wchar_t *wide = maage_storage_wide(path);
         DWORD native;
-        int ok = wide && GetFileAttributesExW(wide, GetFileExInfoStandard, &st);
-        native = ok ? 0 : GetLastError();
+        int ok;
+        if (!wide) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
+        file = CreateFileW(wide, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
         free(wide);
-        if (!ok) return maage_status_from_win32(native ? native : ERROR_NOT_ENOUGH_MEMORY, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY);
+        if (file == INVALID_HANDLE_VALUE) return maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY);
+        ok = GetFileInformationByHandle(file, &st) && GetFileInformationByHandleEx(file, FileBasicInfo, &basic, sizeof(basic));
+        native = ok ? 0 : GetLastError();
+        CloseHandle(file);
+        if (!ok) return maage_status_from_win32(native, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY);
         if (st.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
         *size = (double) st.nFileSizeHigh * 4294967296.0 + st.nFileSizeLow;
-        sprintf(fingerprint, "%.0f-%lu-%lu-%lu-%lu", *size, (unsigned long) st.ftLastWriteTime.dwHighDateTime, (unsigned long) st.ftLastWriteTime.dwLowDateTime, (unsigned long) st.ftCreationTime.dwHighDateTime, (unsigned long) st.ftCreationTime.dwLowDateTime);
+        changed.QuadPart = (ULONGLONG) basic.ChangeTime.QuadPart;
+        sprintf(fingerprint, "%.0f-%08lx%08lx-%08lx%08lx-%08lx-%08lx%08lx", *size, (unsigned long) st.ftLastWriteTime.dwHighDateTime, (unsigned long) st.ftLastWriteTime.dwLowDateTime, (unsigned long) changed.HighPart, (unsigned long) changed.LowPart, (unsigned long) st.dwVolumeSerialNumber, (unsigned long) st.nFileIndexHigh, (unsigned long) st.nFileIndexLow);
     }
 #else
     {
@@ -414,6 +440,7 @@ maage_status maage_storage_stat(const char *path, double *size, char fingerprint
 #else
         sprintf(fingerprint, "%.0f-%.0f-%ld-%.0f-%ld", *size, (double) st.st_mtim.tv_sec, st.st_mtim.tv_nsec, (double) st.st_ctim.tv_sec, st.st_ctim.tv_nsec);
 #endif
+        if (!maage_storage_identity(fingerprint, &st.st_dev, sizeof(st.st_dev)) || !maage_storage_identity(fingerprint, &st.st_ino, sizeof(st.st_ino))) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_STORAGE, MAAGE_OPERATION_QUERY, 0);
     }
 #endif
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);

@@ -18,6 +18,7 @@ typedef struct maage_client_observer {
     maage_status (*record)(void *context, const char *name, const char *archive_name, const char *sha1, double size, const char *fingerprint);
     void *context;
     maage_status_trace *trace;
+    int verify_only;
 } maage_client_observer;
 /* Checks every archive path/type, inventories applicable resources, derives SHA-1
  * from CRC-checked source streams, and preflights index collisions. No writes. */

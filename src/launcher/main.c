@@ -36,7 +36,7 @@ maage_status maage_application_main(int argc, char *const argv[]) {
             result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_VERIFY, 0);
             goto finished;
         }
-        result = maage_assets_start(assets, repair);
+        result = maage_assets_start(assets, repair ? MAAGE_ASSETS_REPAIR : MAAGE_ASSETS_PREPARE);
         if (maage_status_failed(result)) goto finished;
         result = maage_setup_native_run(assets, &action);
         if (maage_status_failed(result) || !action) goto finished;
@@ -65,7 +65,7 @@ maage_status maage_application_main(int argc, char *const argv[]) {
             result = maage_launcher_account_restore(&ui);
             if (maage_status_failed(result)) break;
         } else if (maage_access_allowed(access)) {
-            result = maage_assets_start(assets, 1);
+            result = maage_assets_start(assets, MAAGE_ASSETS_REPAIR);
             if (maage_status_failed(result)) break;
             result = maage_setup_native_run(assets, &action);
             if (maage_status_failed(result) || !action) break;

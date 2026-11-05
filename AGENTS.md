@@ -404,8 +404,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Prefer verified hard links, then verified copies staged outside logical trees. Reject
   traversal, unsafe/aliased paths, links/reparse directories and file/directory conflicts.
   Bound ZIP entries/size/expansion, exclude Java/executables, verify CRC/size/derived hashes.
-  Receipts cannot replace metadata/file fingerprint checks; Full Repair hashes objects and
-  independent copies, and cached JAR/selected resources always require verification.
+  Checksummed completed receipts reuse verified JAR/resource identities only while all
+  file fingerprints and metadata hashes match. Changed/untrusted resources require SHA-1;
+  explicit Verify and Repair hash objects, the JAR and independent reconstructed copies.
   Equal-content/spelling collisions only; log actual acquisition work without auth secrets.
 
 ## Native Rendering and Builds
