@@ -4,6 +4,7 @@
 #include "maage/launcher_version.h"
 #include "maage/log.h"
 #include "maage/time.h"
+#include <math.h>
 #include <string.h>
 
 static NSStackView *maage_ui_stack(BOOL horizontal, CGFloat spacing) {
@@ -104,14 +105,15 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients, *accounts;
-@property(nonatomic, strong) NSView *body;
+@property(nonatomic, strong) NSView *body, *playForm, *playSplash, *splashLogo;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
 @property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *deviceCodeButton, *openDevice;
-@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus;
+@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus, *splashMessage;
 @property(nonatomic, strong) NSProgressIndicator *progress;
 @property(nonatomic, strong) NSPopUpButton *appearance;
 @property(nonatomic) int displayedAppearance;
+@property(nonatomic) BOOL splashAnimating;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSTextField *installationName, *installationArguments, *installationHeading, *installationHint;
 @property(nonatomic, strong) NSPopUpButton *installationClient;
@@ -582,6 +584,29 @@ static NSTableView *maage_ui_navigation_table(void) {
     [self applyAppearance];
     [self refresh:nil];
 }
+- (void)refreshSplash {
+    maage_launcher_ui *state = self.state;
+    BOOL splash = !state->catalog_finished || (state->accounts.busy && !state->accounts.allowed);
+    const char *message = !state->catalog_finished && !state->accounts.busy ? "Loading your installations…" : !state->accounts.restored ? "Restoring saved accounts…" : *state->accounts.device_code ? "Waiting for Microsoft sign-in…" : "Verifying Minecraft Java Edition access…";
+    self.playForm.hidden = splash;
+    self.playSplash.hidden = !splash;
+    if (splash) self.splashMessage.stringValue = @(message);
+    BOOL animate = splash && state->page == MAAGE_PAGE_PLAY && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+    if (animate != self.splashAnimating) {
+        if (animate) {
+            CABasicAnimation *breathing = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+            breathing.fromValue = @(0.99);
+            breathing.toValue = @(1.015);
+            breathing.duration = 6.0;
+            breathing.autoreverses = YES;
+            breathing.repeatCount = HUGE_VALF;
+            breathing.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+            [self.splashLogo.layer addAnimation:breathing forKey:@"breathing"];
+        } else
+            [self.splashLogo.layer removeAnimationForKey:@"breathing"];
+        self.splashAnimating = animate;
+    }
+}
 - (void)refresh:(NSTimer *)timer {
     (void) timer;
     maage_launcher_ui_refresh(self.state);
@@ -638,6 +663,7 @@ static NSTableView *maage_ui_navigation_table(void) {
             maage_launcher_client_cancel_import(state);
     }
 #endif
+    [self refreshSplash];
     self.clientStatus.stringValue = @(state->client_status);
     self.launchStatus.stringValue = @(state->launch_status);
     self.activeSummary.stringValue = @(state->active_summary);
@@ -660,7 +686,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.repair.enabled = self.verifyResources.enabled = self.retryResources.enabled = resourceAvailable;
     self.cancelResources.enabled = state->progress.busy || state->resources_pending;
     self.error.stringValue = @(state->error);
-    self.progress.hidden = !state->progress.busy && !state->accounts.busy;
+    self.progress.hidden = !state->progress.busy && !state->accounts.busy && self.playSplash.hidden;
     self.progress.indeterminate = !state->progress.busy || state->progress.percent < 0;
     if (!self.progress.hidden && self.progress.indeterminate) [self.progress startAnimation:nil];
     else {
@@ -672,6 +698,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (NSView *)playPage {
     NSView *page = [[NSView alloc] init];
     NSStackView *form = maage_ui_stack(NO, 16);
+    self.playForm = form;
     [form addArrangedSubview:maage_ui_label(@"Play", 30, YES)];
     NSTextField *intro = maage_ui_label(@"Choose your installation and jump into MaaGE.", 14, NO);
     intro.textColor = NSColor.secondaryLabelColor;
@@ -718,6 +745,44 @@ static NSTableView *maage_ui_navigation_table(void) {
         [self.clientStatus.widthAnchor constraintEqualToAnchor:form.widthAnchor],
         [self.launchStatus.widthAnchor constraintEqualToAnchor:form.widthAnchor]
     ]];
+    self.playSplash = [[NSView alloc] init];
+    maage_ui_fill(self.playSplash, page, 0);
+    NSStackView *splashContent = maage_ui_stack(NO, 22);
+    splashContent.alignment = NSLayoutAttributeCenterX;
+    self.splashLogo = [[NSView alloc] init];
+    self.splashLogo.wantsLayer = YES;
+    self.splashLogo.layer.cornerRadius = 24;
+    self.splashLogo.layer.backgroundColor = [NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:1].CGColor;
+    [self.splashLogo.widthAnchor constraintEqualToConstant:124].active = YES;
+    [self.splashLogo.heightAnchor constraintEqualToConstant:124].active = YES;
+    NSTextField *letter = maage_ui_row_label(@"M", 74, YES);
+    letter.textColor = NSColor.whiteColor;
+    letter.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.splashLogo addSubview:letter];
+    [NSLayoutConstraint activateConstraints:@[
+        [letter.centerXAnchor constraintEqualToAnchor:self.splashLogo.centerXAnchor],
+        [letter.centerYAnchor constraintEqualToAnchor:self.splashLogo.centerYAnchor]
+    ]];
+    [splashContent addArrangedSubview:self.splashLogo];
+    self.splashMessage = maage_ui_label(@"Loading your installations…", 15, NO);
+    self.splashMessage.textColor = NSColor.secondaryLabelColor;
+    self.splashMessage.alignment = NSTextAlignmentCenter;
+    [splashContent addArrangedSubview:self.splashMessage];
+    [self.splashMessage.widthAnchor constraintLessThanOrEqualToConstant:480].active = YES;
+    NSTextField *hint = maage_ui_label(@"You can explore the Launcher while this runs.", 12, NO);
+    hint.textColor = NSColor.tertiaryLabelColor;
+    hint.alignment = NSTextAlignmentCenter;
+    [splashContent addArrangedSubview:hint];
+    [splashContent setCustomSpacing:8 afterView:self.splashMessage];
+    splashContent.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playSplash addSubview:splashContent];
+    [NSLayoutConstraint activateConstraints:@[
+        [splashContent.centerXAnchor constraintEqualToAnchor:self.playSplash.centerXAnchor],
+        [splashContent.centerYAnchor constraintEqualToAnchor:self.playSplash.centerYAnchor],
+        [splashContent.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.playSplash.leadingAnchor constant:18],
+        [splashContent.trailingAnchor constraintLessThanOrEqualToAnchor:self.playSplash.trailingAnchor constant:-18]
+    ]];
+    self.playSplash.hidden = YES;
     return page;
 }
 - (NSView *)accountsPage {
@@ -1155,11 +1220,13 @@ static NSTableView *maage_ui_navigation_table(void) {
     }
     self.progress = [[NSProgressIndicator alloc] init];
     self.progress.style = NSProgressIndicatorStyleBar;
+    self.progress.controlSize = NSControlSizeMini;
     self.progress.minValue = 0;
     self.progress.maxValue = 100;
     self.progress.accessibilityLabel = @"Background preparation progress";
     [content addArrangedSubview:self.progress];
     [self.progress.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
+    [self.progress.heightAnchor constraintEqualToConstant:6].active = YES;
     self.error = maage_ui_label(@"", 12, NO);
     self.error.textColor = NSColor.systemRedColor;
     [content addArrangedSubview:self.error];
