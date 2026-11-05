@@ -50,10 +50,23 @@ static NSTextField *maage_ui_row_label(NSString *text, CGFloat size, BOOL bold) 
 }
 - (void)drawRect:(NSRect)dirtyRect {
     (void) dirtyRect;
-    [[NSColor colorWithSRGBRed:111.0 / 255.0 green:152.0 / 255.0 blue:94.0 / 255.0 alpha:1] setFill];
+    [NSColor.windowBackgroundColor setFill];
     NSRectFill(self.bounds);
 }
 @end
+static NSImageView *maage_ui_brand_logo(CGFloat size, CGFloat cornerRadius) {
+    NSString *path = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"png"];
+    NSImage *image = path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
+    NSImageView *logo = [NSImageView imageViewWithImage:image ?: NSApp.applicationIconImage];
+    logo.imageScaling = NSImageScaleProportionallyUpOrDown;
+    logo.wantsLayer = YES;
+    logo.layer.backgroundColor = [NSColor colorWithSRGBRed:111.0 / 255.0 green:152.0 / 255.0 blue:94.0 / 255.0 alpha:1].CGColor;
+    logo.layer.cornerRadius = cornerRadius;
+    logo.layer.masksToBounds = YES;
+    [logo.widthAnchor constraintEqualToConstant:size].active = YES;
+    [logo.heightAnchor constraintEqualToConstant:size].active = YES;
+    return logo;
+}
 static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset) {
     NSTableCellView *cell = [[NSTableCellView alloc] init];
     content.translatesAutoresizingMaskIntoConstraints = NO;
@@ -856,19 +869,15 @@ static NSTableView *maage_ui_navigation_table(void) {
     maage_ui_fill(self.playSplash, self.window.contentView, 0);
     NSStackView *splashContent = maage_ui_stack(NO, 22);
     splashContent.alignment = NSLayoutAttributeCenterX;
-    self.splashLogo = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-    self.splashLogo.imageScaling = NSImageScaleProportionallyUpOrDown;
-    self.splashLogo.wantsLayer = YES;
-    [self.splashLogo.widthAnchor constraintEqualToConstant:144].active = YES;
-    [self.splashLogo.heightAnchor constraintEqualToConstant:144].active = YES;
+    self.splashLogo = maage_ui_brand_logo(144, 28);
     [splashContent addArrangedSubview:self.splashLogo];
     self.splashMessage = maage_ui_label(@"Loading your installations…", 15, NO);
-    self.splashMessage.textColor = [NSColor colorWithWhite:1 alpha:0.94];
+    self.splashMessage.textColor = NSColor.labelColor;
     self.splashMessage.alignment = NSTextAlignmentCenter;
     [splashContent addArrangedSubview:self.splashMessage];
     [self.splashMessage.widthAnchor constraintLessThanOrEqualToConstant:480].active = YES;
     self.splashDetail = maage_ui_label(@"Loading installations and saved accounts.", 13, NO);
-    self.splashDetail.textColor = [NSColor colorWithWhite:1 alpha:0.76];
+    self.splashDetail.textColor = NSColor.secondaryLabelColor;
     self.splashDetail.alignment = NSTextAlignmentCenter;
     [splashContent addArrangedSubview:self.splashDetail];
     [self.splashDetail.widthAnchor constraintLessThanOrEqualToConstant:500].active = YES;
@@ -1204,9 +1213,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     NSStackView *groups = maage_ui_stack(NO, 18);
     [groups addArrangedSubview:maage_ui_label(@"About MaaGE", 24, YES)];
     NSStackView *identity = maage_ui_stack(YES, 16);
-    NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-    [icon.widthAnchor constraintEqualToConstant:64].active = YES;
-    [icon.heightAnchor constraintEqualToConstant:64].active = YES;
+    NSImageView *icon = maage_ui_brand_logo(64, 13);
     [identity addArrangedSubview:icon];
     NSStackView *name = maage_ui_stack(NO, 5);
     [name addArrangedSubview:maage_ui_label(@"MaaGE", 28, YES)];
@@ -1286,10 +1293,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.sidebar.delegate = self;
     self.sidebar.accessibilityLabel = @"Launcher navigation";
 
-    NSImageView *mark = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-    mark.imageScaling = NSImageScaleProportionallyUpOrDown;
-    [mark.widthAnchor constraintEqualToConstant:34].active = YES;
-    [mark.heightAnchor constraintEqualToConstant:34].active = YES;
+    NSImageView *mark = maage_ui_brand_logo(34, 8);
     NSStackView *brandText = maage_ui_stack(NO, 2);
     [brandText addArrangedSubview:maage_ui_row_label(@"MaaGE", 16, YES)];
     NSTextField *descriptor = maage_ui_row_label(@"LAUNCHER", 10, YES);
