@@ -136,7 +136,9 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
 @property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *deviceCodeButton, *openDevice;
-@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus, *splashMessage, *splashDetail, *splashDeviceCode;
+@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus, *splashMessage, *splashDetail, *splashDeviceCode, *splashProgressSummary, *splashActivityLog;
+@property(nonatomic, strong) NSMutableArray<NSString *> *splashActivityEntries;
+@property(nonatomic, strong) NSString *lastSplashActivityKey;
 @property(nonatomic, strong) NSStackView *splashActions, *splashDeviceActions;
 @property(nonatomic, strong) NSButton *splashSignIn, *splashDeviceSignIn, *splashCancelAccount, *splashResourceRetry, *splashSkip;
 @property(nonatomic, strong) NSProgressIndicator *progress, *splashProgress;
@@ -705,12 +707,83 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.shell.hidden = splash;
     self.playSplash.hidden = !splash;
     progressActive = splash && (!self.onboardingDecided || state->accounts.busy || (preparing && state->services_ready && (state->resources_pending || state->progress.busy)));
+    maage_setup_progress *progress = &state->progress;
+    double percent = -1, downloaded = (progress->downloaded_bytes + progress->client_downloaded_bytes) / 1048576.0;
+    NSString *phase = @"Preparing resources";
+    NSString *summary = @"Discovering the resources to prepare…";
+    if (preparing && progress->busy) {
+        if (progress->stage == MAAGE_SETUP_DOWNLOADING && progress->total_objects) {
+            percent = (double) progress->verified_objects * 100.0 / progress->total_objects;
+            phase = progress->stage == MAAGE_SETUP_DOWNLOADING ? @"Downloading assets" : @"Checking asset objects";
+            summary = [NSString stringWithFormat:@"%@ · %lu / %lu objects · %.1f MiB downloaded", phase, progress->verified_objects, progress->total_objects, downloaded];
+        } else if (progress->stage == MAAGE_SETUP_CLIENT_ARCHIVE && !progress->client_archive_ready) {
+            phase = @"Preparing client archive";
+            if (progress->client_total_bytes > 0 && progress->client_downloaded_bytes > 0) percent = progress->client_downloaded_bytes * 100.0 / progress->client_total_bytes;
+            summary = [NSString stringWithFormat:@"%@ · %.1f / %.1f MiB transferred", phase, progress->client_downloaded_bytes / 1048576.0, progress->client_total_bytes / 1048576.0];
+        } else if (progress->stage == MAAGE_SETUP_RECONSTRUCTING && progress->total_logical_assets) {
+            percent = (double) progress->reconstructed_files * 100.0 / progress->total_logical_assets;
+            phase = @"Reconstructing resources";
+            summary = [NSString stringWithFormat:@"%@ · %lu / %lu files", phase, progress->reconstructed_files, progress->total_logical_assets];
+        } else if (progress->stage == MAAGE_SETUP_CLIENT_EXTRACT && progress->client_resource_count) {
+            BOOL reconstructingClient = progress->total_logical_assets && progress->reconstructed_files >= progress->total_logical_assets;
+            unsigned long finished = reconstructingClient ? progress->client_resources_processed : progress->client_resources_checked;
+            percent = (double) finished * 100.0 / progress->client_resource_count;
+            phase = reconstructingClient ? @"Reconstructing client resources" : @"Inspecting client resources";
+            summary = [NSString stringWithFormat:@"%@ · %lu / %lu files", phase, finished, progress->client_resource_count];
+        } else {
+            switch (progress->stage) {
+            case MAAGE_SETUP_METADATA:
+                phase = @"Loading resource metadata";
+                break;
+            case MAAGE_SETUP_VERIFYING:
+                phase = progress->objects_ready ? @"Finishing verification" : @"Checking installed asset objects";
+                break;
+            case MAAGE_SETUP_CLIENT_EXTRACT:
+                phase = @"Inspecting client resources";
+                break;
+            default:
+                phase = @"Preparing Minecraft resources";
+                break;
+            }
+            if (progress->percent >= 0) percent = progress->percent;
+            summary = [NSString stringWithFormat:@"%@ · %.1f MiB downloaded", phase, downloaded];
+        }
+    } else if (preparing && progress->stage == MAAGE_SETUP_COMPLETE) {
+        phase = @"Resources ready";
+        summary = @"Resource verification complete";
+        percent = 100;
+    } else if (preparing && progress->stage == MAAGE_SETUP_FAILED) {
+        phase = @"Resource preparation failed";
+        summary = @"Resource preparation needs attention";
+    } else if (preparing && state->resources_pending) {
+        phase = @"Waiting for resource preparation";
+        summary = @"Preparing to check Minecraft resources…";
+    }
+    self.splashProgressSummary.hidden = !splash || !preparing;
+    self.splashProgressSummary.stringValue = summary;
     self.splashProgress.hidden = !progressActive;
-    self.splashProgress.indeterminate = !preparing || state->progress.percent < 0;
+    self.splashProgress.indeterminate = !preparing || percent < 0;
     if (progressActive && self.splashProgress.indeterminate) [self.splashProgress startAnimation:nil];
     else {
         [self.splashProgress stopAnimation:nil];
-        self.splashProgress.doubleValue = preparing && state->progress.percent >= 0 ? state->progress.percent : 0;
+        if (percent >= 0) self.splashProgress.doubleValue = MIN(100.0, MAX(0.0, percent));
+    }
+    self.splashActivityLog.hidden = !splash || !preparing;
+    if (splash && preparing) {
+        /* Only publish bounded, nonsecret UI milestones. No log files, paths, URLs,
+         * OAuth data or arbitrary worker activity strings enter the splash feed. */
+        unsigned long step = progress->total_objects ? (unsigned long) ((double) progress->verified_objects * 20.0 / progress->total_objects) : 0;
+        unsigned long transferred = (unsigned long) (downloaded / 4.0);
+        int phaseStep = percent >= 0 ? (int) (percent / 5.0) : -1;
+        NSString *key = [NSString stringWithFormat:@"%d:%lu:%lu:%d:%d", (int) progress->stage, step, transferred, phaseStep, progress->busy];
+        if (![key isEqualToString:self.lastSplashActivityKey]) {
+            self.lastSplashActivityKey = key;
+            if (!self.splashActivityEntries) self.splashActivityEntries = [NSMutableArray array];
+            NSString *time = [NSDateFormatter localizedStringFromDate:[NSDate date] dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterMediumStyle];
+            [self.splashActivityEntries addObject:[NSString stringWithFormat:@"%@  %@", time, summary]];
+            if (self.splashActivityEntries.count > 5) [self.splashActivityEntries removeObjectAtIndex:0];
+            self.splashActivityLog.stringValue = [self.splashActivityEntries componentsJoinedByString:@"\n"];
+        }
     }
     BOOL animate = splash && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
     if (animate != self.splashAnimating) {
@@ -932,6 +1005,28 @@ static NSTableView *maage_ui_navigation_table(void) {
         [self.splashProgress.trailingAnchor constraintEqualToAnchor:self.playSplash.trailingAnchor constant:-28],
         [self.splashProgress.bottomAnchor constraintEqualToAnchor:self.playSplash.bottomAnchor constant:-16],
         [self.splashProgress.heightAnchor constraintEqualToConstant:6]
+    ]];
+    self.splashProgressSummary = maage_ui_label(@"", 11, NO);
+    self.splashProgressSummary.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+    self.splashProgressSummary.textColor = NSColor.secondaryLabelColor;
+    self.splashProgressSummary.lineBreakMode = NSLineBreakByTruncatingTail;
+    self.splashProgressSummary.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playSplash addSubview:self.splashProgressSummary];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.splashProgressSummary.leadingAnchor constraintEqualToAnchor:self.splashProgress.leadingAnchor],
+        [self.splashProgressSummary.trailingAnchor constraintLessThanOrEqualToAnchor:self.splashProgress.trailingAnchor],
+        [self.splashProgressSummary.bottomAnchor constraintEqualToAnchor:self.splashProgress.topAnchor constant:-10]
+    ]];
+    self.splashActivityLog = maage_ui_label(@"", 10, NO);
+    self.splashActivityLog.font = [NSFont monospacedSystemFontOfSize:10 weight:NSFontWeightRegular];
+    self.splashActivityLog.textColor = NSColor.tertiaryLabelColor;
+    self.splashActivityLog.maximumNumberOfLines = 5;
+    self.splashActivityLog.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playSplash addSubview:self.splashActivityLog];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.splashActivityLog.leadingAnchor constraintEqualToAnchor:self.splashProgress.leadingAnchor],
+        [self.splashActivityLog.widthAnchor constraintLessThanOrEqualToAnchor:self.splashProgress.widthAnchor multiplier:0.75],
+        [self.splashActivityLog.bottomAnchor constraintEqualToAnchor:self.splashProgressSummary.topAnchor constant:-8]
     ]];
     self.playSplash.hidden = YES;
     return page;
