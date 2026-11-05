@@ -392,7 +392,7 @@ maage_status maage_storage_replace(const char *temporary, const char *destinatio
 static int maage_storage_identity(char fingerprint[128], const void *value, size_t bytes) {
     const unsigned char *source = (const unsigned char *) value;
     size_t length = strlen(fingerprint), i;
-    if (bytes > (126 - length) / 2) return 0;
+    if (length > 126 || bytes > (126 - length) / 2) return 0;
     fingerprint[length++] = '-';
     for (i = 0; i < bytes; ++i) {
         fingerprint[length++] = "0123456789abcdef"[source[i] >> 4];

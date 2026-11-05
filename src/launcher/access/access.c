@@ -30,7 +30,7 @@ struct maage_access {
     pthread_mutex_t mutex;
     pthread_t thread;
 #endif
-    int has_thread, cancelled, revoked, operation, loaded;
+    int has_thread, cancelled, revoked, operation, loaded, renewal_paused;
     char selected[33], active[33], root[MAAGE_PATH_CAPACITY];
     maage_access_snapshot view;
     maage_status_trace trace; /* Worker owns until completion publication. */
@@ -138,7 +138,7 @@ static void maage_access_renewal(maage_access *a, char renew[33]) {
     unsigned i;
     double now = maage_time_monotonic_seconds();
     renew[0] = 0;
-    if (a->view.busy || a->revoked || now < 0) return;
+    if (a->view.busy || !a->view.restored || a->revoked || a->renewal_paused || now < 0 || !*a->active) return;
     for (i = 0; i < a->view.count; ++i) {
         maage_access_profile *p = &a->view.profiles[i];
         if (p->session_saved && (!*a->active || !strcmp(a->active, p->uuid)) && now >= a->timing[i].retry && (p->state == MAAGE_ACCESS_EXPIRED || (p->state == MAAGE_ACCESS_VERIFIED && a->timing[i].deadlines - now < 90))) {
@@ -255,6 +255,7 @@ maage_status maage_access_cancel_operation(maage_access *a) {
     maage_access_lock(a);
     changed = !a->cancelled;
     a->cancelled = 1;
+    a->renewal_paused = 1;
     maage_access_unlock(a);
     return maage_status_make(changed ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CANCEL, 0);
 }
@@ -357,14 +358,15 @@ static maage_status maage_access_load(maage_access *a, maage_status_trace *trace
             strcpy(p->uuid, uuid);
             strcpy(p->name, name);
             p->connected = 1;
-            p->state = MAAGE_ACCESS_DETECTED;
+            p->state = MAAGE_ACCESS_VERIFYING;
             strcpy(p->sources, "Microsoft");
             p->last_verified = maage_auth_number(item, "lastVerified");
             if (p->last_verified < 0) p->last_verified = 0;
-            strcpy(p->detail, "Sign in with Microsoft to connect this profile to MaaGE.");
+            strcpy(p->detail, "Restoring the encrypted Microsoft session. Cached profile information does not grant access.");
         }
     }
     ++a->view.revision;
+    a->view.metadata_ready = 1;
     maage_access_unlock(a);
     json_object_put(root);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_LOAD);
@@ -480,7 +482,7 @@ static maage_status maage_access_authenticate(maage_access *a, int operation) {
     maage_profile_session *s = (maage_profile_session *) calloc(1, sizeof(*s));
     maage_auth_observer observer;
     unsigned i;
-    int ok = 0, saved = 0;
+    int ok = 0, saved = 0, keep_lease = 0;
     maage_status child, result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_AUTHENTICATE, 0);
     maage_status_trace trace;
     const char *operation_name = operation == 4 ? "refresh" : operation == 6 ? "device-code sign-in"
@@ -563,22 +565,25 @@ done:
     if (i < a->view.count) {
         if (ok) maage_access_apply(a, i, s);
         else {
-            a->view.profiles[i].state = (maage_status_code(result) == MAAGE_STATUS_IO_ERROR || maage_status_code(result) == MAAGE_STATUS_TIMEOUT) ? MAAGE_ACCESS_EXPIRED : MAAGE_ACCESS_FAILED;
-            a->timing[i].deadlines = 0;
+            keep_lease = operation == 4 && !saved && !a->revoked && a->view.profiles[i].state == MAAGE_ACCESS_VERIFIED && a->timing[i].deadlines > maage_time_monotonic_seconds() &&
+                         (maage_status_code(result) == MAAGE_STATUS_IO_ERROR || maage_status_code(result) == MAAGE_STATUS_TIMEOUT || maage_status_code(result) == MAAGE_STATUS_INTERRUPTED);
+            if (!keep_lease) {
+                a->view.profiles[i].state = (maage_status_code(result) == MAAGE_STATUS_IO_ERROR || maage_status_code(result) == MAAGE_STATUS_TIMEOUT) ? MAAGE_ACCESS_EXPIRED : MAAGE_ACCESS_FAILED;
+                a->timing[i].deadlines = 0;
+            }
             a->view.profiles[i].refreshing = 0;
         }
         strcpy(a->view.profiles[i].detail, detail);
         a->timing[i].retry = maage_time_monotonic_seconds() + (ok ? 60 : 300);
     }
-    strcpy(a->view.status, ok ? "Minecraft Java Edition access successfully verified. Continue to Preparing MaaGE." : detail);
-    a->view.auto_continue = 0;
+    strcpy(a->view.status, ok ? "Minecraft Java Edition access verified." : detail);
     ++a->view.revision;
     maage_access_unlock(a);
     if (saved && !ok && s) {
         s->verified_at = s->verified_until = 0;
         if (maage_status_failed(maage_profile_store_save(a->root, s, &trace))) MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Cannot persist verification lease invalidation after cancellation."));
     }
-    child = maage_access_save(a, &trace);
+    child = saved ? maage_access_save(a, &trace) : maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SAVE, 0);
     if (maage_status_failed(child)) {
         if (!maage_status_failed(result)) result = child;
         MAAGE_LOG_DEBUG_EVENT("maage.launcher.access", maage_log_debug("maage.launcher.access", "Profile registry persistence failed; new access lease revoked."));
@@ -613,10 +618,24 @@ static maage_status maage_access_restore_worker(maage_access *a) {
     unsigned i, restored = 0, leases = 0;
     char uuid[33];
     maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_LOAD, 0), child;
-    if (!a->loaded) {
+    if (a->loaded <= 0) {
+        if (a->loaded < 0) {
+            maage_access_lock(a);
+            a->view.count = 0;
+            a->view.metadata_ready = a->view.restored = 0;
+            if (a->view.capacity) {
+                memset(a->timing, 0, a->view.capacity * sizeof(*a->timing));
+                memset(a->view.profiles, 0, a->view.capacity * sizeof(*a->view.profiles));
+            }
+            maage_access_unlock(a);
+        }
         result = maage_access_load(a, &a->trace);
         if (maage_status_failed(result)) return result;
     }
+    maage_access_lock(a);
+    a->view.metadata_ready = 1;
+    ++a->view.revision;
+    maage_access_unlock(a);
     s = (maage_profile_session *) calloc(1, sizeof(*s));
     if (!s) return MAAGE_STATUS_PROPAGATE(&a->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD, 0), MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD);
     for (i = 0; i < a->view.count && !maage_access_cancelled(a); ++i) {
@@ -632,27 +651,22 @@ static maage_status maage_access_restore_worker(maage_access *a) {
             ++restored;
             if (a->view.profiles[i].state == MAAGE_ACCESS_VERIFIED) ++leases;
             maage_access_unlock(a);
-        } else
+        } else {
             result = child;
+            maage_access_lock(a);
+            a->view.profiles[i].state = maage_status_code(child) == MAAGE_STATUS_NOT_FOUND ? MAAGE_ACCESS_DETECTED : MAAGE_ACCESS_FAILED;
+            strcpy(a->view.profiles[i].detail, "Saved credentials are unavailable. Sign in with Microsoft to reconnect this account.");
+            ++a->view.revision;
+            maage_access_unlock(a);
+        }
         maage_crypto_clear(s, sizeof(*s));
     }
     free(s);
     maage_log_info("maage.launcher.access", "Saved account restoration: %u encrypted sessions restored; %u current leases reused; remaining accounts require refresh/sign-in.", restored, leases);
-    for (i = 0; i < a->view.count && !maage_access_cancelled(a); ++i) {
-        int refresh;
-        maage_access_lock(a);
-        refresh = a->view.profiles[i].session_saved && a->view.profiles[i].state != MAAGE_ACCESS_VERIFIED;
-        strcpy(a->selected, a->view.profiles[i].uuid);
-        maage_access_unlock(a);
-        if (refresh) {
-            child = maage_access_authenticate(a, 4);
-            if (maage_status_failed(child)) result = child;
-        }
-    }
     maage_access_lock(a);
-    a->selected[0] = 0;
-    a->view.auto_continue = maage_access_policy(a);
-    strcpy(a->view.status, a->view.auto_continue ? "A verified Minecraft Java account is ready. Continuing setup..." : "Sign in with your Microsoft account to verify Minecraft Java Edition access.");
+    a->view.restored = !a->cancelled;
+    strcpy(a->view.status, a->cancelled ? "Account restoration cancelled. Choose Refresh / Retry to resume." : leases ? "Saved Minecraft Java verification leases restored."
+                                                                                                                      : "Select an account to refresh its saved session, or sign in with Microsoft.");
     ++a->view.revision;
     maage_access_unlock(a);
     if (maage_access_cancelled(a)) result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_LOAD, 0);
@@ -666,6 +680,7 @@ static void *maage_access_worker(void *context)
 #endif
 {
     maage_access *a = (maage_access *) context;
+    double started = maage_time_monotonic_seconds();
     maage_status result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_JOB, 0), child;
     if (maage_access_cancelled(a)) {
     } else if (a->operation == 1) result = maage_access_restore_worker(a);
@@ -706,7 +721,9 @@ static void *maage_access_worker(void *context)
         maage_storage_release(lock);
     }
     MAAGE_STATUS_PROPAGATE(&a->trace, result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_JOB);
+    if (a->operation == 1 && maage_status_failed(result)) maage_access_status(a, maage_status_code(result) == MAAGE_STATUS_INTERRUPTED ? "Account restoration cancelled. Choose Refresh / Retry to resume." : "Saved accounts could not be restored. Check data-folder permissions and config/minecraft-profiles.json, then choose Refresh / Retry. Existing account files are preserved.");
     if (maage_status_failed(result) && maage_status_code(result) != MAAGE_STATUS_INTERRUPTED) maage_log_trace_status(MAAGE_LOG_WARNING, "maage.launcher.access", result, &a->trace, "Account operation completed without granting new access (operation=%d).", a->operation);
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Account %s: %.3f s; result=0x%08lx.", a->operation == 1 ? "restoration" : "verification/update", maage_time_monotonic_seconds() - started, (unsigned long) result));
     maage_access_lock(a);
     a->view.result = result;
     a->view.trace = a->trace;
@@ -743,7 +760,11 @@ static maage_status maage_access_begin(maage_access *a, int operation, const cha
     maage_status result;
     if (!a) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_START, 0);
     maage_access_lock(a);
-    if (a->view.busy || a->revoked) {
+    if (a->view.busy || a->revoked || (operation != 1 && !a->view.restored)) {
+        if (!a->view.busy && !a->revoked) {
+            strcpy(a->view.status, "Restore saved accounts with Refresh / Retry before signing in or changing accounts.");
+            ++a->view.revision;
+        }
         maage_access_unlock(a);
         return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_START, 0);
     }
@@ -752,8 +773,8 @@ static maage_status maage_access_begin(maage_access *a, int operation, const cha
         return maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_START, 0);
     }
     a->view.busy = 1;
-    a->view.auto_continue = 0;
     a->cancelled = 0;
+    a->renewal_paused = 0;
     maage_status_trace_init(&a->trace);
     a->view.result = maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_START, 0);
     MAAGE_STATUS_TRACE(&a->trace, a->view.result, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_START);

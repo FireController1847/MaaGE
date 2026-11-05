@@ -1,15 +1,16 @@
 #include "launcher.h"
 #include "maage/launcher_version.h"
 #include "maage/log.h"
+#include "maage/time.h"
 #include <gtk/gtk.h>
 #include <string.h>
 typedef struct maage_launcher_gtk {
     maage_launcher_ui *state;
     GtkWidget *window, *stack, *navigation, *account, *installation, *list, *status, *resource, *account_status, *verify, *repair, *error, *clients, *client_status, *play;
-    GtkWidget *actions[6];
+    GtkWidget *actions[7], *auth_actions[7], *verify_resources, *retry_resources, *cancel_resources, *profiles, *authentication, *launch_status, *active_summary, *progress, *appearance;
     GtkCssProvider *css;
     unsigned revision, client_revision;
-    int result, updating;
+    int updating, displayed_appearance;
 } maage_launcher_gtk;
 static GtkWidget *maage_ui_label(GtkWidget *box, const char *text, const char *style) {
     GtkWidget *label = gtk_label_new(text);
@@ -29,23 +30,46 @@ static GtkWidget *maage_ui_button(GtkWidget *box, const char *text, GCallback ca
 static void maage_ui_manage(GtkWidget *widget, gpointer context) {
     maage_launcher_gtk *ui = context;
     (void) widget;
-    if (!ui->state->accounts.busy) {
-        ui->result = 1;
-        gtk_main_quit();
-    }
+    gtk_list_box_select_row(GTK_LIST_BOX(ui->navigation), gtk_list_box_get_row_at_index(GTK_LIST_BOX(ui->navigation), MAAGE_PAGE_ACCOUNTS));
 }
 static void maage_ui_repair(GtkWidget *widget, gpointer context) {
     maage_launcher_gtk *ui = context;
     (void) widget;
-    if (!ui->state->accounts.busy) {
-        ui->result = maage_access_allowed(ui->state->access) ? 2 : 1;
-        gtk_main_quit();
+    maage_launcher_resources(ui->state, MAAGE_ASSETS_REPAIR);
+}
+static void maage_ui_resource_action(GtkWidget *widget, gpointer context) {
+    maage_launcher_gtk *ui = context;
+    int action = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "resource-action"));
+    if (action == 2) maage_launcher_resources_cancel(ui->state);
+    else maage_launcher_resources(ui->state, action == 1 ? ui->state->resource_mode : MAAGE_ASSETS_VERIFY);
+}
+static void maage_ui_auth_action(GtkWidget *widget, gpointer context) {
+    maage_launcher_gtk *ui = context;
+    int action = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "auth-action"));
+    GError *error = NULL;
+    if (action < 2) maage_access_sign_in(ui->state->access, action);
+    else if (action == 2) maage_access_sign_out(ui->state->access, ui->state->account);
+    else if (action == 3) maage_access_disconnect(ui->state->access, ui->state->account);
+    else if (action == 4) maage_access_cancel_operation(ui->state->access);
+    else if (action == 5 && *ui->state->accounts.device_code) gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), ui->state->accounts.device_code, -1);
+    else if (action == 6 && *ui->state->accounts.device_url) {
+        gtk_show_uri_on_window(GTK_WINDOW(ui->window), ui->state->accounts.device_url, GDK_CURRENT_TIME, &error);
+        if (error) g_error_free(error);
     }
+}
+static void maage_ui_profile_selected(GtkListBox *list, GtkListBoxRow *row, gpointer context) {
+    maage_launcher_gtk *ui = context;
+    const char *uuid;
+    (void) list;
+    if (ui->updating || !row) return;
+    uuid = g_object_get_data(G_OBJECT(row), "account-uuid");
+    if (uuid) maage_launcher_account_select(ui->state, uuid);
 }
 static void maage_ui_verify(GtkWidget *widget, gpointer context) {
     maage_launcher_gtk *ui = context;
     (void) widget;
-    if (ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
+    if (!ui->state->accounts.restored) maage_access_restore(ui->state->access);
+    else if (ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
 }
 static void maage_ui_play(GtkWidget *widget, gpointer context) {
     maage_launcher_gtk *ui = context;
@@ -63,7 +87,7 @@ static void maage_ui_project(GtkWidget *widget, gpointer context) {
 }
 static void maage_ui_page(GtkListBox *list, GtkListBoxRow *row, gpointer context) {
     maage_launcher_gtk *ui = context;
-    const char *pages[] = {"play", "news", "installations"};
+    const char *pages[] = {"play", "installations", "accounts"};
     int index;
     (void) list;
     if (!row) return;
@@ -84,6 +108,13 @@ static void maage_ui_about(GtkWidget *widget, gpointer context) {
     ui->state->page = MAAGE_PAGE_ABOUT;
     gtk_list_box_unselect_all(GTK_LIST_BOX(ui->navigation));
     gtk_stack_set_visible_child_name(GTK_STACK(ui->stack), "about");
+}
+static void maage_ui_attention(GtkWidget *widget, gpointer context) {
+    maage_launcher_gtk *ui = context;
+    maage_launcher_page page = maage_launcher_attention_page(ui->state);
+    (void) widget;
+    if (page < MAAGE_PAGE_SETTINGS) gtk_list_box_select_row(GTK_LIST_BOX(ui->navigation), gtk_list_box_get_row_at_index(GTK_LIST_BOX(ui->navigation), page));
+    else maage_ui_settings(NULL, ui);
 }
 static int maage_ui_row(maage_launcher_gtk *ui) {
     GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(ui->list));
@@ -121,7 +152,10 @@ static void maage_ui_installations_reload(maage_launcher_gtk *ui) {
         maage_ui_label(line, maage_launcher_installation_client(ui->state, i), "muted");
         gtk_list_box_insert(GTK_LIST_BOX(ui->list), line, -1);
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ui->installation), item->name);
-        if (item->id == ui->state->selected) gtk_combo_box_set_active(GTK_COMBO_BOX(ui->installation), (int) i);
+        if (item->id == ui->state->selected) {
+            gtk_combo_box_set_active(GTK_COMBO_BOX(ui->installation), (int) i);
+            gtk_list_box_select_row(GTK_LIST_BOX(ui->list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(ui->list), (int) i));
+        }
     }
     gtk_widget_show_all(ui->list);
     ui->updating = 0;
@@ -139,15 +173,7 @@ static void maage_ui_account_changed(GtkComboBox *box, gpointer context) {
     if (ui->updating) return;
     uuid = gtk_combo_box_get_active_id(box);
     if (uuid && !strcmp(uuid, "manage")) maage_ui_manage(NULL, ui);
-    else if (uuid && !strcmp(uuid, "verify")) maage_ui_verify(NULL, ui);
-    else if (uuid && !strcmp(uuid, "add")) {
-        if ((!maage_status_failed(maage_access_sign_in(ui->state->access, 0)))) {
-            ui->result = 1;
-            gtk_main_quit();
-        }
-    } else if (uuid && !strcmp(uuid, "signout")) maage_access_sign_out(ui->state->access, ui->state->account);
-    else if (uuid && !strcmp(uuid, "remove")) maage_access_disconnect(ui->state->access, ui->state->account);
-    else if (uuid) maage_launcher_account_select(ui->state, uuid);
+    else if (uuid && strcmp(uuid, "none")) maage_launcher_account_select(ui->state, uuid);
     ui->revision = 0;
 }
 static void maage_ui_installation_action(GtkButton *button, gpointer context) {
@@ -156,7 +182,12 @@ static void maage_ui_installation_action(GtkButton *button, gpointer context) {
     int row = maage_ui_row(ui);
     GtkWidget *dialog, *entry, *area, *client, *arguments, *editor_error;
     char name[128];
-    if (action && row < 0) return;
+    if (!ui->state->catalog_ready || ui->state->client_job || (action && row < 0)) return;
+    if (action == 5) {
+        maage_launcher_installation_select(ui->state, (unsigned) row);
+        maage_ui_installations_reload(ui);
+        return;
+    }
     if (action == 4) {
         maage_launcher_installation_default(ui->state, (unsigned) row);
         maage_ui_installations_reload(ui);
@@ -240,9 +271,21 @@ static gboolean maage_ui_tick(gpointer context) {
     unsigned i;
     maage_launcher_ui *state = ui->state;
     maage_launcher_ui_refresh(state);
+    if (ui->displayed_appearance != state->appearance) {
+        ui->displayed_appearance = state->appearance;
+        ui->updating = 1;
+        gtk_combo_box_set_active(GTK_COMBO_BOX(ui->appearance), state->appearance);
+        ui->updating = 0;
+        maage_ui_appearance_apply(ui);
+    }
+    gtk_widget_set_sensitive(ui->appearance, state->catalog_ready);
     if (ui->revision != state->accounts.revision || !gtk_combo_box_get_active_id(GTK_COMBO_BOX(ui->account))) {
         int connected = 0;
         ui->updating = 1;
+        GList *children = gtk_container_get_children(GTK_CONTAINER(ui->profiles)), *child;
+        for (child = children; child; child = child->next)
+            gtk_widget_destroy(GTK_WIDGET(child->data));
+        g_list_free(children);
         gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(ui->account));
         for (i = 0; i < state->accounts.count; ++i) {
             maage_access_profile *p = &state->accounts.profiles[i];
@@ -250,17 +293,22 @@ static gboolean maage_ui_tick(gpointer context) {
             if (!p->connected) continue;
             g_snprintf(title, sizeof(title), "%s · %s", p->name, maage_access_state_name(p->state));
             gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), p->uuid, title);
+            {
+                GtkWidget *row = gtk_list_box_row_new(), *line = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+                gtk_container_set_border_width(GTK_CONTAINER(line), 10);
+                maage_ui_label(line, p->name, "section");
+                maage_ui_label(line, maage_access_state_name(p->state), "muted");
+                gtk_container_add(GTK_CONTAINER(row), line);
+                g_object_set_data_full(G_OBJECT(row), "account-uuid", g_strdup(p->uuid), g_free);
+                gtk_list_box_insert(GTK_LIST_BOX(ui->profiles), row, -1);
+                if (!strcmp(state->account, p->uuid)) gtk_list_box_select_row(GTK_LIST_BOX(ui->profiles), GTK_LIST_BOX_ROW(row));
+            }
             ++connected;
         }
         if (!connected) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "none", "No connected Minecraft account");
-        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "add", "Add Microsoft Account…");
-        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "manage", "Manage Microsoft Accounts…");
-        if (state->account[0]) {
-            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "verify", "Refresh / Reverify Account");
-            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "signout", "Sign Out");
-            gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "remove", "Remove Account");
-        }
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(ui->account), "manage", "Manage Accounts…");
         gtk_combo_box_set_active_id(GTK_COMBO_BOX(ui->account), state->account);
+        gtk_widget_show_all(ui->profiles);
         ui->updating = 0;
         ui->revision = state->accounts.revision;
         if (!connected) {
@@ -294,25 +342,43 @@ static gboolean maage_ui_tick(gpointer context) {
     }
 #endif
     gtk_label_set_text(GTK_LABEL(ui->client_status), state->client_status);
+    gtk_label_set_text(GTK_LABEL(ui->launch_status), state->launch_status);
+    gtk_label_set_text(GTK_LABEL(ui->active_summary), state->active_summary);
+    gtk_label_set_text(GTK_LABEL(ui->authentication), state->authentication_status);
     gtk_widget_set_sensitive(ui->play, state->can_play);
-    gtk_button_set_label(GTK_BUTTON(ui->play), state->client_process ? "Client Running" : "▶  Play");
-    gtk_widget_set_sensitive(ui->account, !state->accounts.busy);
-    gtk_widget_set_sensitive(ui->verify, !state->accounts.busy && state->account[0]);
-    gtk_widget_set_sensitive(ui->repair, !state->accounts.busy);
+    gtk_button_set_label(GTK_BUTTON(ui->play), state->client_process ? "Client Running" : state->launch_pending      ? "Checking Resources…"
+                                                                                      : state->client_operation == 4 ? "Starting Client…"
+                                                                                                                     : "Play");
+    gtk_widget_set_sensitive(ui->account, state->accounts.metadata_ready);
+    gtk_widget_set_sensitive(ui->verify, state->services_ready && !state->accounts.busy && (*state->account || !state->accounts.restored));
+    for (i = 0; i < 7; ++i) {
+        int enabled = i < 2 ? state->services_ready && state->accounts.restored && !state->accounts.busy : i < 4 ? state->services_ready && state->accounts.restored && !state->accounts.busy && *state->account
+                                                                                                       : i == 4  ? state->accounts.busy
+                                                                                                                 : *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds();
+        gtk_widget_set_sensitive(ui->auth_actions[i], enabled);
+    }
+    gtk_widget_set_sensitive(ui->repair, !state->progress.busy && !state->client_process && state->client_operation != 4 && !state->launch_pending);
+    gtk_widget_set_sensitive(ui->verify_resources, gtk_widget_get_sensitive(ui->repair));
+    gtk_widget_set_sensitive(ui->retry_resources, gtk_widget_get_sensitive(ui->repair));
+    gtk_widget_set_sensitive(ui->cancel_resources, state->progress.busy || state->resources_pending);
     gtk_button_set_label(GTK_BUTTON(ui->status), state->readiness);
-    gtk_button_set_label(GTK_BUTTON(ui->repair), state->accounts.allowed ? "Repair Assets…" : "Verify Minecraft Access…");
-    gtk_label_set_text(GTK_LABEL(ui->resource), state->progress.stage == MAAGE_SETUP_FAILED ? state->progress.error : state->readiness);
+    gtk_label_set_text(GTK_LABEL(ui->resource), state->resource_status);
     gtk_label_set_text(GTK_LABEL(ui->account_status), state->account_status);
     gtk_label_set_text(GTK_LABEL(ui->error), state->error);
-    for (i = 0; i < 6; ++i)
-        gtk_widget_set_sensitive(ui->actions[i], i == 0 || maage_ui_row(ui) >= 0);
+    if (state->progress.busy || state->accounts.busy) {
+        gtk_widget_show(ui->progress);
+        if (state->progress.busy && state->progress.percent >= 0) gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), state->progress.percent / 100.0);
+        else gtk_progress_bar_pulse(GTK_PROGRESS_BAR(ui->progress));
+    } else gtk_widget_hide(ui->progress);
+    for (i = 0; i < 7; ++i)
+        gtk_widget_set_sensitive(ui->actions[i], state->catalog_ready && !state->client_job && (i == 0 || maage_ui_row(ui) >= 0));
     return G_SOURCE_CONTINUE;
 }
 static gboolean maage_ui_close(GtkWidget *widget, GdkEvent *event, gpointer context) {
     maage_launcher_gtk *ui = context;
     (void) widget;
     (void) event;
-    if (!ui->state->client_job) gtk_main_quit();
+    gtk_main_quit();
     return TRUE;
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
@@ -322,7 +388,7 @@ static void maage_ui_client_import(GtkWidget *widget, gpointer context) {
     int replacing = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "replace")), index = -1;
     const char *id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(ui->clients));
     if (id) index = maage_clients_find(ui->state->clients, id);
-    if (ui->state->client_job || (replacing && index < 0)) return;
+    if (!ui->state->catalog_ready || ui->state->client_job || (replacing && index < 0)) return;
     dialog = gtk_file_chooser_dialog_new(replacing ? "Replace Client Executable" : "Import Local Client Executable", GTK_WINDOW(ui->window), GTK_FILE_CHOOSER_ACTION_OPEN, "Cancel", GTK_RESPONSE_CANCEL, "Inspect", GTK_RESPONSE_ACCEPT, NULL);
     {
         GtkFileFilter *filter = gtk_file_filter_new();
@@ -356,110 +422,119 @@ static void maage_ui_client_remove(GtkWidget *widget, gpointer context) {
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) maage_launcher_client_remove(ui->state, (unsigned) index);
     gtk_widget_destroy(dialog);
 }
-maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
+static gboolean maage_ui_presented(GtkWidget *widget, GdkEvent *event, gpointer context) {
+    maage_launcher_gtk *ui = context;
+    (void) widget;
+    (void) event;
+    maage_launcher_ui_presented(ui->state);
+    return FALSE;
+}
+maage_status maage_launcher_native_run(maage_launcher_ui *state) {
     maage_launcher_gtk ui;
-    GtkWidget *split, *sidebar, *navigation, *right, *header, *page, *center, *button, *scroll, *footer, *appearance, *actions;
-    const char *names[] = {"Play", "News", "Installations"}, *icons[] = {"media-playback-start-symbolic", "text-x-generic-symbolic", "view-list-symbolic"};
+    GtkWidget *split, *sidebar, *right, *header, *page, *form, *button, *scroll, *footer, *actions;
+    const char *names[] = {"Play", "Installations", "Accounts"}, *icons[] = {"media-playback-start-symbolic", "view-list-symbolic", "avatar-default-symbolic"};
+    const char *pages[] = {"play", "installations", "accounts", "settings", "about"};
     guint timer;
     int i;
-    const char *pages[] = {"play", "news", "installations", "settings", "about"};
-    maage_status outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
-    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
-    *action = 0;
+    double started = maage_time_monotonic_seconds();
+    if (!state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     memset(&ui, 0, sizeof(ui));
     ui.state = state;
-    if (!gtk_init_check(NULL, NULL)) {
-        maage_log_error("maage.launcher.ui", "GTK cannot connect to a desktop display.");
-        return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
-    }
+    if (!gtk_init_check(NULL, NULL)) return maage_status_make(MAAGE_STATUS_SYSTEM_NOT_SUPPORTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     gtk_window_set_default_icon_name(MAAGE_LAUNCHER_ICON_NAME);
-    /* Setup requests dark temporarily; main Launcher restores the desktop preference. */
-    gtk_settings_reset_property(gtk_settings_get_default(), "gtk-application-prefer-dark-theme");
     maage_ui_appearance_apply(&ui);
     ui.css = gtk_css_provider_new();
     gtk_css_provider_load_from_data(ui.css,
-                                    ".maage-launcher .heading { font-size: 24px; font-weight: 600; } .maage-launcher .brand { font-size: 32px; font-weight: 600; }"
-                                    ".maage-launcher .muted { opacity: .68; } .maage-launcher .primary { background: #de309e; color: white; min-height: 38px; font-size: 18px; }"
-                                    ".maage-launcher .primary:disabled { background: #873663; color: #ddd; } .maage-launcher .sidebar row { border-radius: 5px; padding: 8px; }"
-                                    ".maage-launcher .section { font-size: 16px; font-weight: 600; } .maage-launcher .about-panel { padding: 20px; border-radius: 8px; }",
+                                    ".maage-launcher .heading { font-size: 26px; font-weight: 600; }"
+                                    ".maage-launcher .muted { opacity: .72; } .maage-launcher .section { font-size: 15px; font-weight: 600; }"
+                                    ".maage-launcher .primary { min-height: 44px; font-size: 20px; font-weight: 600; }"
+                                    ".maage-launcher .sidebar row { padding: 10px 8px; border-radius: 6px; }"
+                                    ".maage-launcher .sidebar { background-color: @theme_unfocused_bg_color; }",
                                     -1, NULL);
     gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(ui.css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     ui.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ui.window), "MaaGE Launcher");
-    gtk_window_set_default_size(GTK_WINDOW(ui.window), 1040, 690);
-    gtk_widget_set_size_request(ui.window, 960, 640);
+    gtk_window_set_default_size(GTK_WINDOW(ui.window), 1060, 740);
+    gtk_widget_set_size_request(ui.window, 900, 660);
     gtk_style_context_add_class(gtk_widget_get_style_context(ui.window), "maage-launcher");
-    split = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    split = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_container_add(GTK_CONTAINER(ui.window), split);
-    sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 20);
-    gtk_container_set_border_width(GTK_CONTAINER(sidebar), 14);
-    gtk_widget_set_size_request(sidebar, 170, -1);
+    sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 22);
+    gtk_container_set_border_width(GTK_CONTAINER(sidebar), 16);
+    gtk_widget_set_size_request(sidebar, 160, -1);
     gtk_style_context_add_class(gtk_widget_get_style_context(sidebar), "sidebar");
-    gtk_paned_pack1(GTK_PANED(split), sidebar, FALSE, FALSE);
-    maage_ui_label(sidebar, "MAAGE", "muted");
-    ui.navigation = navigation = gtk_list_box_new();
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(navigation), GTK_SELECTION_SINGLE);
-    gtk_box_pack_start(GTK_BOX(sidebar), navigation, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(split), sidebar, FALSE, FALSE, 0);
+    maage_ui_label(sidebar, "MaaGE", "heading");
+    ui.navigation = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(ui.navigation), GTK_SELECTION_SINGLE);
+    gtk_box_pack_start(GTK_BOX(sidebar), ui.navigation, FALSE, FALSE, 0);
     for (i = 0; i < 3; ++i) {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
         gtk_box_pack_start(GTK_BOX(row), gtk_image_new_from_icon_name(icons[i], GTK_ICON_SIZE_MENU), FALSE, FALSE, 0);
         maage_ui_label(row, names[i], NULL);
-        gtk_list_box_insert(GTK_LIST_BOX(navigation), row, -1);
+        gtk_list_box_insert(GTK_LIST_BOX(ui.navigation), row, -1);
     }
-    actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_box_pack_end(GTK_BOX(sidebar), actions, FALSE, FALSE, 0);
-    button = gtk_button_new_from_icon_name("preferences-system-symbolic", GTK_ICON_SIZE_MENU);
-    gtk_button_set_label(GTK_BUTTON(button), "Settings");
-    gtk_box_pack_start(GTK_BOX(actions), button, FALSE, FALSE, 0);
-    g_signal_connect(button, "clicked", G_CALLBACK(maage_ui_settings), &ui);
-    button = gtk_button_new_from_icon_name("dialog-information-symbolic", GTK_ICON_SIZE_MENU);
-    gtk_button_set_label(GTK_BUTTON(button), "About MaaGE");
-    gtk_box_pack_start(GTK_BOX(actions), button, FALSE, FALSE, 0);
-    g_signal_connect(button, "clicked", G_CALLBACK(maage_ui_about), &ui);
-    right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    maage_ui_button(actions, "Settings", G_CALLBACK(maage_ui_settings), &ui);
+    maage_ui_button(actions, "About", G_CALLBACK(maage_ui_about), &ui);
+    right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_container_set_border_width(GTK_CONTAINER(right), 26);
-    gtk_paned_pack2(GTK_PANED(split), right, TRUE, FALSE);
+    gtk_box_pack_start(GTK_BOX(split), right, TRUE, TRUE, 0);
+    header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
+    gtk_box_pack_start(GTK_BOX(right), header, FALSE, FALSE, 0);
+    ui.active_summary = maage_ui_label(header, "Starting Launcher…", "muted");
+    gtk_label_set_ellipsize(GTK_LABEL(ui.active_summary), PANGO_ELLIPSIZE_END);
+    gtk_label_set_line_wrap(GTK_LABEL(ui.active_summary), FALSE);
+    gtk_widget_set_hexpand(ui.active_summary, TRUE);
+    ui.account = gtk_combo_box_text_new();
+    gtk_box_pack_end(GTK_BOX(header), ui.account, FALSE, FALSE, 0);
+    atk_object_set_name(gtk_widget_get_accessible(ui.account), "Active Minecraft account");
     ui.stack = gtk_stack_new();
     gtk_stack_set_transition_type(GTK_STACK(ui.stack), GTK_STACK_TRANSITION_TYPE_NONE);
     gtk_box_pack_start(GTK_BOX(right), ui.stack, TRUE, TRUE, 0);
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_stack_add_named(GTK_STACK(ui.stack), page, "play");
-    header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_box_pack_start(GTK_BOX(page), header, FALSE, FALSE, 0);
-    maage_ui_label(header, "Play MaaGE", "heading");
-    button = maage_ui_button(header, "Manage…", G_CALLBACK(maage_ui_manage), &ui);
-    gtk_widget_set_halign(button, GTK_ALIGN_END);
-    ui.account = gtk_combo_box_text_new();
-    gtk_widget_set_hexpand(ui.account, TRUE);
-    gtk_widget_set_halign(ui.account, GTK_ALIGN_END);
-    gtk_box_pack_end(GTK_BOX(header), ui.account, FALSE, FALSE, 0);
-    atk_object_set_name(gtk_widget_get_accessible(ui.account), "Active Minecraft account");
-    center = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
-    gtk_widget_set_valign(center, GTK_ALIGN_CENTER);
-    gtk_widget_set_halign(center, GTK_ALIGN_CENTER);
-    gtk_box_pack_start(GTK_BOX(page), center, TRUE, TRUE, 0);
-    maage_ui_label(center, "MaaGE", "brand");
-    maage_ui_label(center, "Minecraft as a Game Engine", "muted");
+    form = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    gtk_widget_set_valign(form, GTK_ALIGN_CENTER);
+    gtk_box_pack_start(GTK_BOX(page), form, TRUE, TRUE, 0);
+    maage_ui_label(form, "Play", "heading");
+    maage_ui_label(form, "Choose your installation and jump into MaaGE.", "muted");
+    maage_ui_label(form, "Installation", "section");
     ui.installation = gtk_combo_box_text_new();
-    gtk_widget_set_size_request(ui.installation, 260, -1);
-    gtk_box_pack_start(GTK_BOX(center), ui.installation, FALSE, FALSE, 0);
-    atk_object_set_name(gtk_widget_get_accessible(ui.installation), "MaaGE installation");
-    ui.play = button = maage_ui_button(center, "▶  Play", G_CALLBACK(maage_ui_play), &ui);
-    gtk_style_context_add_class(gtk_widget_get_style_context(button), "primary");
-    gtk_widget_set_sensitive(button, FALSE);
-    gtk_widget_set_tooltip_text(button, "Start this installation’s selected Client directly.");
-    ui.client_status = maage_ui_label(center, "", "muted");
-    gtk_label_set_max_width_chars(GTK_LABEL(ui.client_status), 70);
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
-    gtk_stack_add_named(GTK_STACK(ui.stack), page, "news");
-    maage_ui_label(page, "News", "heading");
-    maage_ui_label(page, "No announcements yet", "section");
-    maage_ui_label(page, "News will appear here when a source is configured. For now, follow development on GitHub.", "muted");
-    maage_ui_button(page, "Open MaaGE Project ↗", G_CALLBACK(maage_ui_project), &ui);
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    gtk_box_pack_start(GTK_BOX(form), ui.installation, FALSE, FALSE, 0);
+    atk_object_set_name(gtk_widget_get_accessible(ui.installation), "Installation for Play");
+    ui.client_status = maage_ui_label(form, "Loading Client builds…", "muted");
+    ui.launch_status = maage_ui_label(form, "Starting Launcher services…", NULL);
+    gtk_label_set_max_width_chars(GTK_LABEL(ui.launch_status), 62);
+    ui.play = maage_ui_button(form, "Play", G_CALLBACK(maage_ui_play), &ui);
+    gtk_widget_set_halign(ui.play, GTK_ALIGN_START);
+    gtk_widget_set_size_request(ui.play, 260, -1);
+    gtk_style_context_add_class(gtk_widget_get_style_context(ui.play), "primary");
+    gtk_style_context_add_class(gtk_widget_get_style_context(ui.play), "suggested-action");
+    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(form), actions, FALSE, FALSE, 0);
+    maage_ui_button(actions, "Accounts", G_CALLBACK(maage_ui_manage), &ui);
+    maage_ui_button(actions, "Resources", G_CALLBACK(maage_ui_settings), &ui);
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_stack_add_named(GTK_STACK(ui.stack), page, "installations");
     maage_ui_label(page, "Installations", "heading");
-    maage_ui_label(page, "Installed Clients", NULL);
+    maage_ui_label(page, "Select an installation to manage its name, Client build and launch options.", "muted");
+    scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_box_pack_start(GTK_BOX(page), scroll, TRUE, TRUE, 0);
+    ui.list = gtk_list_box_new();
+    gtk_container_add(GTK_CONTAINER(scroll), ui.list);
+    for (i = 0; i < 6; ++i) {
+        const char *titles[] = {"New…", "Edit…", "Duplicate…", "Remove…", "Set as Default", "Use for Play"};
+        if (i == 0 || i == 4) {
+            actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
+        }
+        ui.actions[i] = maage_ui_button(actions, titles[i], G_CALLBACK(maage_ui_installation_action), &ui);
+        g_object_set_data(G_OBJECT(ui.actions[i]), "action", GINT_TO_POINTER(i));
+    }
+    ui.actions[6] = maage_ui_button(actions, "Open Folder", G_CALLBACK(maage_ui_installation_open), &ui);
+    maage_ui_label(page, "Client builds", "section");
     ui.clients = gtk_combo_box_text_new();
     gtk_box_pack_start(GTK_BOX(page), ui.clients, FALSE, FALSE, 0);
     atk_object_set_name(gtk_widget_get_accessible(ui.clients), "Installed Client builds");
@@ -471,101 +546,100 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
     g_object_set_data(G_OBJECT(button), "replace", GINT_TO_POINTER(1));
 #endif
     maage_ui_button(actions, "Remove Client…", G_CALLBACK(maage_ui_client_remove), &ui);
-    maage_ui_label(page, "MaaGE Installations · shared Minecraft 1.7.10 resources", "muted");
     scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_box_pack_start(GTK_BOX(page), scroll, TRUE, TRUE, 0);
-    ui.list = gtk_list_box_new();
-    gtk_container_add(GTK_CONTAINER(scroll), ui.list);
-    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
-    {
-        const char *titles[] = {"New…", "Edit…", "Duplicate…", "Remove…", "Set as Default"};
-        for (i = 0; i < 5; ++i) {
-            ui.actions[i] = maage_ui_button(actions, titles[i], G_CALLBACK(maage_ui_installation_action), &ui);
-            g_object_set_data(G_OBJECT(ui.actions[i]), "action", GINT_TO_POINTER(i));
+    gtk_stack_add_named(GTK_STACK(ui.stack), scroll, "accounts");
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    gtk_container_add(GTK_CONTAINER(scroll), page);
+    maage_ui_label(page, "Accounts", "heading");
+    maage_ui_label(page, "Only verified Minecraft Java Edition access enables Play.", "muted");
+    ui.profiles = gtk_list_box_new();
+    gtk_box_pack_start(GTK_BOX(page), ui.profiles, FALSE, FALSE, 0);
+    ui.account_status = maage_ui_label(page, "", NULL);
+    gtk_label_set_max_width_chars(GTK_LABEL(ui.account_status), 65);
+    for (i = 0; i < 7; ++i) {
+        const char *titles[] = {"Sign In with Microsoft", "Use Device Code", "Sign Out", "Remove Account", "Cancel Sign In", "Copy Code", "Open Microsoft Sign In"};
+        if (i == 0 || i == 2 || i == 5) {
+            actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
         }
+        ui.auth_actions[i] = maage_ui_button(actions, titles[i], G_CALLBACK(maage_ui_auth_action), &ui);
+        g_object_set_data(G_OBJECT(ui.auth_actions[i]), "auth-action", GINT_TO_POINTER(i));
+        if (i == 1) ui.verify = maage_ui_button(actions, "Refresh / Retry", G_CALLBACK(maage_ui_verify), &ui);
     }
-    ui.actions[5] = maage_ui_button(page, "Open installation folder", G_CALLBACK(maage_ui_installation_open), &ui);
-    gtk_widget_set_halign(ui.actions[5], GTK_ALIGN_START);
+    ui.authentication = maage_ui_label(page, "", NULL);
+    gtk_label_set_selectable(GTK_LABEL(ui.authentication), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(ui.authentication), 65);
     scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_stack_add_named(GTK_STACK(ui.stack), scroll, "settings");
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
     gtk_container_add(GTK_CONTAINER(scroll), page);
     maage_ui_label(page, "Settings", "heading");
-    maage_ui_label(page, "Launcher", "section");
-    maage_ui_label(page, "Startup opens Play after account and resource preparation.", "muted");
-    ui.account_status = maage_ui_label(page, "", "muted");
-    gtk_label_set_max_width_chars(GTK_LABEL(ui.account_status), 70);
-    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
-    maage_ui_button(actions, "Manage Minecraft Accounts…", G_CALLBACK(maage_ui_manage), &ui);
-    ui.verify = maage_ui_button(actions, "Refresh / Reverify Account", G_CALLBACK(maage_ui_verify), &ui);
+    maage_ui_label(page, "Accounts and resources prepare in the background while you use the Launcher.", "muted");
     maage_ui_label(page, "Resources", "section");
     button = maage_ui_label(page, state->resources, "muted");
     gtk_label_set_selectable(GTK_LABEL(button), TRUE);
-    gtk_label_set_max_width_chars(GTK_LABEL(button), 70);
+    gtk_label_set_max_width_chars(GTK_LABEL(button), 65);
     ui.resource = maage_ui_label(page, "", NULL);
-    gtk_label_set_max_width_chars(GTK_LABEL(ui.resource), 70);
-    ui.repair = maage_ui_button(page, "Repair Assets…", G_CALLBACK(maage_ui_repair), &ui);
+    gtk_label_set_max_width_chars(GTK_LABEL(ui.resource), 65);
+    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
+    ui.verify_resources = maage_ui_button(actions, "Verify Resources", G_CALLBACK(maage_ui_resource_action), &ui);
+    ui.repair = maage_ui_button(actions, "Repair Resources", G_CALLBACK(maage_ui_repair), &ui);
+    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
+    ui.retry_resources = maage_ui_button(actions, "Retry", G_CALLBACK(maage_ui_resource_action), &ui);
+    g_object_set_data(G_OBJECT(ui.retry_resources), "resource-action", GINT_TO_POINTER(1));
+    ui.cancel_resources = maage_ui_button(actions, "Cancel", G_CALLBACK(maage_ui_resource_action), &ui);
+    g_object_set_data(G_OBJECT(ui.cancel_resources), "resource-action", GINT_TO_POINTER(2));
+    maage_ui_label(page, "Verify checks file contents. Repair also restores missing or damaged resources.", "muted");
     maage_ui_label(page, "Appearance", "section");
-    appearance = gtk_combo_box_text_new();
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(appearance), "System");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(appearance), "Light");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(appearance), "Dark");
-    gtk_combo_box_set_active(GTK_COMBO_BOX(appearance), state->appearance);
-    gtk_box_pack_start(GTK_BOX(page), appearance, FALSE, FALSE, 0);
-    g_signal_connect(appearance, "changed", G_CALLBACK(maage_ui_appearance), &ui);
-    maage_ui_label(page, "About", "section");
-    maage_ui_label(page, "Build information, project details, and open-source notices.", "muted");
-    maage_ui_button(page, "About MaaGE…", G_CALLBACK(maage_ui_about), &ui);
+    ui.appearance = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ui.appearance), "System");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ui.appearance), "Light");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ui.appearance), "Dark");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ui.appearance), state->appearance);
+    gtk_box_pack_start(GTK_BOX(page), ui.appearance, FALSE, FALSE, 0);
     scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_stack_add_named(GTK_STACK(ui.stack), scroll, "about");
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
-    gtk_container_set_border_width(GTK_CONTAINER(page), 20);
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_container_add(GTK_CONTAINER(scroll), page);
     maage_ui_label(page, "About MaaGE", "heading");
-    center = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_style_context_add_class(gtk_widget_get_style_context(center), "about-panel");
-    gtk_box_pack_start(GTK_BOX(page), center, FALSE, FALSE, 0);
-    maage_ui_label(center, "MaaGE", "brand");
-    maage_ui_label(center, "Minecraft as a Game Engine", "muted");
-    gtk_box_pack_start(GTK_BOX(page), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
-    maage_ui_label(page, "Launcher build", "section");
-    maage_ui_label(page, "Version " MAAGE_LAUNCHER_SEMANTIC_VERSION, NULL);
-    button = maage_ui_label(page, "Git revision " MAAGE_LAUNCHER_GIT_HASH, "muted");
-    gtk_label_set_selectable(GTK_LABEL(button), TRUE);
-    gtk_box_pack_start(GTK_BOX(page), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
-    maage_ui_label(page, "Open source & attribution", "section");
+    maage_ui_label(page, "Minecraft as a Game Engine", "section");
+    maage_ui_label(page, "Launcher " MAAGE_LAUNCHER_SEMANTIC_VERSION, NULL);
+    maage_ui_label(page, "Git revision " MAAGE_LAUNCHER_GIT_HASH, "muted");
     maage_ui_label(page, "MaaGE's original source code is licensed under the Apache License, Version 2.0. Minecraft game resources have separate ownership and licensing.", NULL);
-    maage_ui_label(page, "MaaGE is an independent project and is not affiliated with or endorsed by Mojang Studios or Microsoft.", "muted");
-    actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_box_pack_start(GTK_BOX(page), actions, FALSE, FALSE, 0);
-    maage_ui_button(actions, "View MaaGE on GitHub ↗", G_CALLBACK(maage_ui_project), &ui);
-    maage_ui_button(actions, "Back to Settings", G_CALLBACK(maage_ui_settings), &ui);
+    maage_ui_label(page, "MaaGE is independent and is not affiliated with or endorsed by Mojang Studios or Microsoft.", "muted");
+    maage_ui_button(page, "View MaaGE on GitHub ↗", G_CALLBACK(maage_ui_project), &ui);
+    ui.progress = gtk_progress_bar_new();
+    atk_object_set_name(gtk_widget_get_accessible(ui.progress), "Background preparation progress");
+    gtk_box_pack_start(GTK_BOX(right), ui.progress, FALSE, FALSE, 0);
     ui.error = maage_ui_label(right, "", NULL);
-    gtk_box_pack_start(GTK_BOX(right), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
+    gtk_label_set_max_width_chars(GTK_LABEL(ui.error), 70);
     footer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_box_pack_end(GTK_BOX(right), footer, FALSE, FALSE, 0);
-    maage_ui_label(footer, "Development build · " MAAGE_LAUNCHER_VERSION, "muted");
-    ui.status = maage_ui_button(footer, "", G_CALLBACK(maage_ui_settings), &ui);
+    maage_ui_label(footer, "Launcher " MAAGE_LAUNCHER_VERSION, "muted");
+    ui.status = maage_ui_button(footer, "", G_CALLBACK(maage_ui_attention), &ui);
     gtk_widget_set_hexpand(ui.status, TRUE);
     gtk_widget_set_halign(ui.status, GTK_ALIGN_END);
     gtk_button_set_relief(GTK_BUTTON(ui.status), GTK_RELIEF_NONE);
-    g_signal_connect(navigation, "row-selected", G_CALLBACK(maage_ui_page), &ui);
+    g_signal_connect(ui.navigation, "row-selected", G_CALLBACK(maage_ui_page), &ui);
     g_signal_connect(ui.installation, "changed", G_CALLBACK(maage_ui_installation_changed), &ui);
     g_signal_connect(ui.account, "changed", G_CALLBACK(maage_ui_account_changed), &ui);
+    g_signal_connect(ui.profiles, "row-selected", G_CALLBACK(maage_ui_profile_selected), &ui);
+    g_signal_connect(ui.appearance, "changed", G_CALLBACK(maage_ui_appearance), &ui);
     g_signal_connect(ui.window, "delete-event", G_CALLBACK(maage_ui_close), &ui);
+    g_signal_connect(ui.window, "map-event", G_CALLBACK(maage_ui_presented), &ui);
     maage_ui_installations_reload(&ui);
     maage_ui_tick(&ui);
     gtk_widget_show_all(ui.window);
-    if (state->page < MAAGE_PAGE_SETTINGS) gtk_list_box_select_row(GTK_LIST_BOX(navigation), gtk_list_box_get_row_at_index(GTK_LIST_BOX(navigation), (int) state->page));
+    if (state->page < MAAGE_PAGE_SETTINGS) gtk_list_box_select_row(GTK_LIST_BOX(ui.navigation), gtk_list_box_get_row_at_index(GTK_LIST_BOX(ui.navigation), (int) state->page));
     gtk_stack_set_visible_child_name(GTK_STACK(ui.stack), pages[state->page]);
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "GTK main window creation/show request: %.3f s.", maage_time_monotonic_seconds() - started));
     timer = g_timeout_add(250, maage_ui_tick, &ui);
     gtk_main();
     g_source_remove(timer);
     gtk_widget_destroy(ui.window);
     gtk_style_context_remove_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(ui.css));
     g_object_unref(ui.css);
-    *action = ui.result;
-    return outcome;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_OPEN, 0);
 }

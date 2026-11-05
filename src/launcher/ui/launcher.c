@@ -1,6 +1,9 @@
 #include "launcher.h"
 #include "../clients/launch.h"
 #include "maage/log.h"
+#include "maage/time.h"
+#include "maage/thread.h"
+#include "maage/download.h"
 #include "../access/verify.h"
 #include <json-c/json.h>
 #include <string.h>
@@ -9,6 +12,15 @@
 #include <errno.h>
 
 #define MAAGE_LAUNCHER_PREFERENCES_BYTES (8UL * 1024UL * 1024UL)
+struct maage_launcher_startup {
+    maage_launcher_ui loaded;
+    maage_thread *thread;
+    maage_mutex *mutex;
+    int done, services_ready, cancelled;
+    maage_status result;
+};
+static maage_status maage_launcher_catalog_load(maage_launcher_ui *ui);
+static maage_status maage_launcher_client_start(maage_launcher_ui *ui, int mode, const char *source, const char *instance_id);
 #if MAAGE_LAUNCHER_DEVELOPMENT
 static maage_status maage_launcher_client_finish_replace(maage_launcher_ui *ui);
 #endif
@@ -76,6 +88,7 @@ maage_status maage_launcher_ui_save(maage_launcher_ui *ui) {
     size_t length;
     unsigned i;
     int ok = 0;
+    if (!ui->catalog_ready) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_CONFIG, MAAGE_OPERATION_SAVE, 0);
     if (maage_status_failed(child_result = maage_launcher_path(ui, path, "launcher.json")) || maage_status_failed(child_result = maage_launcher_path(ui, temporary, "launcher.json.tmp")) || maage_status_failed(child_result = maage_launcher_path(ui, lock_path, "launcher.lock"))) goto failed;
     child_result = maage_storage_acquire(lock_path, &lock, &ui->trace);
     if (maage_status_failed(child_result)) goto failed;
@@ -157,7 +170,7 @@ maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index,
         strcpy(ui->error, "Enter a name of 1–95 UTF-8 bytes without control characters.");
         return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
     }
-    if (ui->client_job) {
+    if (!ui->catalog_ready || ui->client_job) {
         strcpy(ui->error, "Wait for the Client operation to finish.");
         return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
     }
@@ -210,7 +223,7 @@ maage_status maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned 
         strcpy(ui->error, "Keep at least one MaaGE instance.");
         return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
     }
-    if (ui->client_job) {
+    if (!ui->catalog_ready || ui->client_job) {
         strcpy(ui->error, "Wait for the Client operation to finish.");
         return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_MUTATE);
     }
@@ -274,8 +287,9 @@ maage_status maage_launcher_account_select(maage_launcher_ui *ui, const char *uu
     if (uuid) strcpy(ui->account, uuid);
     else
         ui->account[0] = 0;
+    ui->account_explicit = ui->account_bound = 1;
     /* A preference write failure does not undo the live account selection. */
-    return maage_launcher_ui_save(ui);
+    return ui->catalog_ready ? maage_launcher_ui_save(ui) : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SELECT, 0);
 }
 maage_status maage_launcher_account_restore(maage_launcher_ui *ui) {
     unsigned i;
@@ -283,16 +297,141 @@ maage_status maage_launcher_account_restore(maage_launcher_ui *ui) {
     if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SELECT, 0);
     result = maage_access_snapshot_get(ui->access, &ui->accounts);
     if (maage_status_failed(result)) return result;
+    if (!ui->catalog_ready || !ui->accounts.metadata_ready) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SELECT, 0);
     if (ui->account[0]) {
         result = maage_access_select(ui->access, ui->account);
-        if (!maage_status_failed(result)) return result;
+        if (!maage_status_failed(result)) {
+            ui->account_bound = 1;
+            return result;
+        }
     }
     ui->account[0] = 0;
     for (i = 0; i < ui->accounts.count; ++i)
         if (ui->accounts.profiles[i].connected && ui->accounts.profiles[i].state == MAAGE_ACCESS_VERIFIED) {
             return maage_launcher_account_select(ui, ui->accounts.profiles[i].uuid);
         }
+    for (i = 0; i < ui->accounts.count; ++i)
+        if (ui->accounts.profiles[i].connected) return maage_launcher_account_select(ui, ui->accounts.profiles[i].uuid);
     return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_AUTH, MAAGE_OPERATION_SELECT, 0);
+}
+static void maage_launcher_startup_worker(void *context) {
+    maage_launcher_startup *startup = (maage_launcher_startup *) context;
+    maage_status result, auth_result;
+    int cancelled, services_ready;
+    double started = maage_time_monotonic_seconds();
+    result = maage_download_initialize();
+    services_ready = !maage_status_failed(result);
+    maage_mutex_lock(startup->mutex);
+    cancelled = startup->cancelled;
+    maage_mutex_unlock(startup->mutex);
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Network service initialization: %.3f s.", maage_time_monotonic_seconds() - started));
+    if (!maage_status_failed(result) && !cancelled) {
+        auth_result = maage_access_restore(startup->loaded.access);
+        if (maage_status_failed(auth_result)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.access", auth_result, "Could not start account restoration; Accounts remains available for retry.");
+    }
+    maage_mutex_lock(startup->mutex);
+    startup->services_ready = services_ready;
+    cancelled = startup->cancelled;
+    maage_mutex_unlock(startup->mutex);
+    started = maage_time_monotonic_seconds();
+    if (!cancelled) result = maage_launcher_catalog_load(&startup->loaded);
+    else result = maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_LOAD, 0);
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Installation/catalog loading: %.3f s; installations=%u; clients=%u; result=0x%08lx.", maage_time_monotonic_seconds() - started, startup->loaded.count, startup->loaded.clients ? startup->loaded.clients->count : 0, (unsigned long) result));
+    maage_mutex_lock(startup->mutex);
+    startup->result = result;
+    startup->done = 1;
+    maage_mutex_unlock(startup->mutex);
+}
+maage_status maage_launcher_ui_presented(maage_launcher_ui *ui) {
+    maage_launcher_startup *startup;
+    maage_status result;
+    if (!ui || ui->presented) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_PRESENT, 0);
+    ui->presented = 1;
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Main window first presentation: %.3f s since Launcher entry.", maage_time_monotonic_seconds() - ui->started_at));
+    startup = (maage_launcher_startup *) calloc(1, sizeof(*startup));
+    result = startup ? maage_mutex_create(&startup->mutex) : maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_CREATE, 0);
+    if (!maage_status_failed(result)) {
+        startup->loaded.access = ui->access;
+        startup->loaded.assets = ui->assets;
+        result = maage_thread_start(maage_launcher_startup_worker, startup, &startup->thread);
+    }
+    if (maage_status_failed(result)) {
+        if (startup) maage_mutex_destroy(startup->mutex);
+        free(startup);
+        ui->catalog_finished = 1;
+        strcpy(ui->error, "Cannot start Launcher services. Close other applications and reopen MaaGE.");
+        return MAAGE_STATUS_PROPAGATE(&ui->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
+    }
+    ui->startup = startup;
+    return result;
+}
+static maage_status maage_launcher_startup_poll(maage_launcher_ui *ui) {
+    maage_launcher_startup *startup = ui->startup;
+    maage_launcher_ui *loaded;
+    maage_status result;
+    int done;
+    if (!startup) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_POLL, 0);
+    maage_mutex_lock(startup->mutex);
+    done = startup->done;
+    ui->services_ready = startup->services_ready;
+    maage_mutex_unlock(startup->mutex);
+    if (!done) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_POLL, 0);
+    result = maage_thread_join(startup->thread);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(&ui->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_WAIT);
+    loaded = &startup->loaded;
+    ui->catalog_finished = 1;
+    ui->catalog_ready = !maage_status_failed(startup->result);
+    result = startup->result;
+    ui->trace = loaded->trace;
+    if (ui->catalog_ready) {
+        maage_clients_dispose(ui->clients);
+        free(ui->clients);
+        ui->clients = loaded->clients;
+        loaded->clients = NULL;
+        ui->clients_valid = loaded->clients_valid;
+        ui->installations = loaded->installations;
+        loaded->installations = NULL;
+        ui->count = loaded->count;
+        ui->capacity = loaded->capacity;
+        ui->selected = loaded->selected;
+        ui->default_id = loaded->default_id;
+        ui->next_id = loaded->next_id;
+        ui->appearance = loaded->appearance;
+        if (!ui->account_explicit) strcpy(ui->account, loaded->account);
+        ui->account_bound = 0;
+        ++ui->client_revision;
+    }
+    if (*loaded->error) strcpy(ui->error, loaded->error);
+    maage_mutex_destroy(startup->mutex);
+    free(startup);
+    ui->startup = NULL;
+    if (ui->catalog_ready && ui->account_explicit) {
+        maage_status saved = maage_launcher_ui_save(ui);
+        if (maage_status_failed(saved)) result = saved;
+    }
+    return result;
+}
+maage_status maage_launcher_resources(maage_launcher_ui *ui, maage_assets_mode mode) {
+    if (!ui || mode < MAAGE_ASSETS_PREPARE || mode > MAAGE_ASSETS_REPAIR) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT, 0);
+    if (ui->progress.busy || ui->client_process || ui->client_operation == 4 || ui->launch_pending) {
+        strcpy(ui->error, "Finish the current resource operation and close the Client before resource maintenance.");
+        return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_SUBMIT, 0);
+    }
+    ui->resource_mode = mode;
+    ui->resources_pending = 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SUBMIT, 0);
+}
+maage_status maage_launcher_resources_cancel(maage_launcher_ui *ui) {
+    if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_CANCEL, 0);
+    ui->resources_pending = 0;
+    ui->launch_pending = 0;
+    return maage_assets_cancel(ui->assets);
+}
+maage_launcher_page maage_launcher_attention_page(const maage_launcher_ui *ui) {
+    if (!ui->catalog_ready || !ui->clients_valid) return MAAGE_PAGE_INSTALLATIONS;
+    if (!*ui->account || !ui->accounts.allowed) return MAAGE_PAGE_ACCOUNTS;
+    if (!ui->can_play && ui->progress.stage == MAAGE_SETUP_COMPLETE && !ui->progress.busy && !ui->resources_pending && !ui->client_job && !ui->client_process) return MAAGE_PAGE_INSTALLATIONS;
+    return MAAGE_PAGE_SETTINGS;
 }
 maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui) {
     unsigned i;
@@ -300,7 +439,7 @@ maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui) {
     maage_status job_result, process_result, result;
     maage_process_state process_state;
     if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_POLL, 0);
-    result = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_POLL, 0);
+    result = maage_launcher_startup_poll(ui);
     if (ui->client_job) {
         job_result = maage_client_job_take(&ui->client_job, &ui->client_candidate, ui->clients, &ui->client_process, ui->error, &completed, &ui->trace);
         if (completed) {
@@ -335,42 +474,126 @@ maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui) {
         }
     }
     ui->can_play = 0;
-    strcpy(ui->client_status, "Select a Client build in Installations.");
-    for (i = 0; i < ui->count; ++i)
-        if (ui->installations[i].id == ui->selected) {
-            const char *client = maage_launcher_installation_client(ui, i);
-            sprintf(ui->client_status, "%.380s", client);
-            selected_build = maage_clients_find(ui->clients, ui->installations[i].client);
-            break;
-        }
-    if (ui->client_job) strcpy(ui->client_status, "Processing Client package locally…");
-    if (!ui->clients_valid) strcpy(ui->client_status, "Client registry unavailable; restore config/client-builds.json.");
-    if (ui->client_process) strcpy(ui->client_status, "Client process active. Live output is written to the instance's logs/client.log.");
-    maage_access_snapshot_get(ui->access, &ui->accounts);
-    maage_assets_snapshot(ui->assets, &ui->progress);
+    strcpy(ui->client_status, "Choose a Client build in Installations.");
+    strcpy(ui->active_summary, "Loading installations");
+    for (i = 0; i < ui->count; ++i) {
+        if (ui->installations[i].id != ui->selected) continue;
+        sprintf(ui->client_status, "%.380s", maage_launcher_installation_client(ui, i));
+        sprintf(ui->active_summary, "%.95s", ui->installations[i].name);
+        selected_build = maage_clients_find(ui->clients, ui->installations[i].client);
+        break;
+    }
+    if (ui->catalog_finished && !ui->catalog_ready) strcpy(ui->active_summary, "Installations unavailable");
+    if (ui->client_job) strcpy(ui->client_status, ui->client_operation == 4 ? "Starting the selected Client…" : "Processing Client package…");
+    else if (ui->catalog_ready && !ui->clients_valid) strcpy(ui->client_status, "Client registry unavailable. Restore config/client-builds.json.");
+    if (ui->client_process) strcpy(ui->client_status, "Client running. You can close the Launcher.");
+    job_result = maage_access_snapshot_get(ui->access, &ui->accounts);
+    if (maage_status_failed(job_result)) {
+        ui->accounts.allowed = 0;
+        return MAAGE_STATUS_PROPAGATE(&ui->trace, job_result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SNAPSHOT);
+    }
     for (i = 0; i < ui->accounts.count; ++i)
         if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) break;
-    if (*ui->account && i == ui->accounts.count) {
-        ui->account[0] = 0;
-        maage_launcher_account_restore(ui);
+    if (!ui->account_bound || !*ui->account || (ui->accounts.metadata_ready && i == ui->accounts.count)) {
+        job_result = maage_launcher_account_restore(ui);
+        if (maage_status_failed(job_result)) result = job_result;
+        maage_access_snapshot_get(ui->access, &ui->accounts);
     }
-    strcpy(ui->account_status, "No connected Minecraft account. Open Manage Minecraft Accounts to add a Microsoft account.");
-    for (i = 0; i < ui->accounts.count; ++i)
-        if (!strcmp(ui->accounts.profiles[i].uuid, ui->account)) {
-            maage_access_profile *profile = &ui->accounts.profiles[i];
-            sprintf(ui->account_status, "%s · %s\n%s", profile->name, maage_access_state_name(profile->state), profile->detail);
-            break;
+    strcpy(ui->account_status, ui->accounts.busy && !ui->accounts.restored ? "Restoring saved accounts…" : "Sign in with Microsoft in Accounts to verify Minecraft Java Edition access.");
+    for (i = 0; i < ui->accounts.count; ++i) {
+        maage_access_profile *profile = &ui->accounts.profiles[i];
+        if (strcmp(profile->uuid, ui->account)) continue;
+        sprintf(ui->account_status, "%s · %s\n%s", profile->name, maage_access_state_name(profile->state), profile->detail);
+        strcat(ui->active_summary, " · ");
+        strcat(ui->active_summary, profile->name);
+        break;
+    }
+    if (i == ui->accounts.count) strcat(ui->active_summary, " · No account selected");
+    sprintf(ui->authentication_status, "%.480s", ui->accounts.status);
+    if (*ui->accounts.device_code) sprintf(ui->authentication_status, "%.480s\n%.210s  ·  %.32s", ui->accounts.status, ui->accounts.device_url, ui->accounts.device_code);
+    maage_assets_snapshot(ui->assets, &ui->progress);
+    if (ui->progress.stage == MAAGE_SETUP_FAILED && maage_status_code(ui->progress.result) == MAAGE_STATUS_ACCESS_DENIED && ui->accounts.allowed) {
+        ui->resources_pending = 1;
+    }
+    if (ui->services_ready && ui->catalog_ready && ui->resources_pending && ui->accounts.allowed && !ui->progress.busy && !ui->client_process && ui->client_operation != 4) {
+        ui->resources_pending = 0;
+        job_result = maage_assets_start(ui->assets, ui->resource_mode);
+        if (maage_status_failed(job_result)) result = job_result;
+        maage_assets_snapshot(ui->assets, &ui->progress);
+    }
+    if (ui->launch_pending) {
+        for (i = 0; i < ui->count; ++i)
+            if (ui->installations[i].id == ui->selected) break;
+        if (!ui->accounts.allowed || strcmp(ui->pending_account, ui->account) || i == ui->count || strcmp(ui->pending_instance, ui->installations[i].uuid) || strcmp(ui->pending_client, ui->installations[i].client)) {
+            ui->launch_pending = 0;
+            strcpy(ui->error, "Play cancelled because the selected account, installation or authorization changed. Review the selection and retry Play.");
+        } else if (!ui->resources_pending && !ui->progress.busy) {
+            ui->launch_pending = 0;
+            if (ui->progress.stage == MAAGE_SETUP_COMPLETE) {
+                job_result = maage_launcher_client_start(ui, 4, ui->pending_client, ui->pending_instance);
+                if (maage_status_failed(job_result)) result = job_result;
+                else {
+                    strcpy(ui->running_client, ui->pending_client);
+                    strcpy(ui->running_instance, ui->pending_instance);
+                }
+            }
         }
-    if (!ui->account[0] || !ui->accounts.allowed) ui->readiness = "No verified Minecraft account";
-    else if (ui->progress.stage == MAAGE_SETUP_COMPLETE) ui->readiness = "Resources ready";
-    else if (ui->progress.stage == MAAGE_SETUP_FAILED) ui->readiness = "Repair required";
-    else if (ui->progress.stage == MAAGE_SETUP_CANCELLED || ui->progress.stage == MAAGE_SETUP_NOT_STARTED) ui->readiness = "Resources missing";
-    else
-        ui->readiness = "Preparing resources";
-    ui->can_play = ui->clients_valid && selected_build >= 0 && ui->clients->builds[selected_build].available && !ui->client_job && !ui->client_process && ui->account[0] && ui->accounts.allowed && ui->progress.stage == MAAGE_SETUP_COMPLETE;
+    }
+    if (ui->resources_pending) strcpy(ui->resource_status, ui->accounts.allowed ? "Resource preparation queued…" : "Waiting for a verified Minecraft Java account. Manage accounts while resources wait.");
+    else if (ui->progress.cancellation_requested && ui->progress.busy) strcpy(ui->resource_status, "Stopping resources safely. Verified files will be kept.");
+    else if (ui->progress.stage == MAAGE_SETUP_FAILED) sprintf(ui->resource_status, "%.510s", ui->progress.error);
+    else if (ui->progress.stage == MAAGE_SETUP_CANCELLED) strcpy(ui->resource_status, "Resource preparation cancelled. Retry to continue.");
+    else if (ui->progress.stage == MAAGE_SETUP_COMPLETE) strcpy(ui->resource_status, ui->progress.reused_receipt ? "Resources ready · verified installation unchanged" : "Resources ready · verification complete");
+    else if (ui->progress.percent >= 0) sprintf(ui->resource_status, "%s · %d%%\n%lu / %lu objects · %lu / %lu indexed files · %.1f MiB downloaded", ui->progress.activity, ui->progress.percent, ui->progress.verified_objects, ui->progress.total_objects, ui->progress.reconstructed_files, ui->progress.total_logical_assets, (ui->progress.downloaded_bytes + ui->progress.client_downloaded_bytes) / 1048576.0);
+    else sprintf(ui->resource_status, "%.255s", *ui->progress.activity ? ui->progress.activity : "Resources have not been checked.");
+    if (!ui->catalog_finished) ui->readiness = "Loading installations";
+    else if (!ui->catalog_ready || !ui->clients_valid) ui->readiness = "Installations unavailable";
+    else if (!ui->services_ready) ui->readiness = "Services unavailable";
+    else if (!*ui->account || !ui->accounts.allowed) ui->readiness = ui->accounts.busy ? "Verifying account" : "Account needs attention";
+    else if (ui->progress.busy || ui->resources_pending) ui->readiness = "Preparing resources";
+    else if (ui->progress.stage != MAAGE_SETUP_COMPLETE) ui->readiness = "Resources need attention";
+    else if (selected_build < 0 || !ui->clients->builds[selected_build].available) ui->readiness = "Choose a Client build";
+    else if (ui->client_process) ui->readiness = "Client running";
+    else if (ui->client_job || ui->launch_pending) ui->readiness = "Client operation in progress";
+    else {
+        ui->readiness = "Ready to play";
+        ui->can_play = 1;
+    }
+    if (ui->can_play && !ui->play_timed) {
+        ui->play_timed = 1;
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Play first available: %.3f s since Launcher entry.", maage_time_monotonic_seconds() - ui->started_at));
+    }
+    if (ui->can_play) strcpy(ui->launch_status, "Ready. Start your selected installation.");
+    else if (!ui->catalog_finished) strcpy(ui->launch_status, "Loading installations in the background. You can explore the Launcher.");
+    else if (!ui->catalog_ready) strcpy(ui->launch_status, "Installations could not be loaded. See the message below and the Launcher log.");
+    else if (!ui->services_ready) strcpy(ui->launch_status, "Launcher services could not start. Reopen MaaGE to retry.");
+    else if (!*ui->account || !ui->accounts.allowed) strcpy(ui->launch_status, ui->accounts.busy ? "Checking Minecraft Java access. Follow sign-in progress in Accounts." : "Open Accounts to sign in or refresh Minecraft Java access.");
+    else if (ui->progress.busy || ui->resources_pending) strcpy(ui->launch_status, "Preparing Minecraft resources. Progress and controls are in Settings.");
+    else if (ui->progress.stage != MAAGE_SETUP_COMPLETE) strcpy(ui->launch_status, "Open Settings to retry, verify or repair Minecraft resources.");
+    else if (selected_build < 0 || !ui->clients->builds[selected_build].available) strcpy(ui->launch_status, "Open Installations and assign an available Client build.");
+    else if (ui->client_process) strcpy(ui->launch_status, "Your Client runs independently. It is safe to close this Launcher.");
+    else strcpy(ui->launch_status, "Wait for the Client operation to finish.");
     return result;
 }
 maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_assets *assets) {
+    maage_status result;
+    if (!ui || !access || !assets) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
+    memset(ui, 0, sizeof(*ui));
+    ui->started_at = maage_time_monotonic_seconds();
+    ui->access = access;
+    ui->assets = assets;
+    ui->resources_pending = 1;
+    ui->progress.percent = -1;
+    ui->readiness = "Starting Launcher";
+    result = maage_storage_data_path(ui->root, sizeof(ui->root));
+    if (!maage_status_failed(result)) result = maage_storage_join(ui->resources, sizeof(ui->resources), ui->root, "minecraft/assets/reconst");
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(&ui->trace, result, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
+    ui->clients = (maage_client_registry *) calloc(1, sizeof(*ui->clients));
+    if (!ui->clients) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
+    return maage_launcher_ui_refresh(ui);
+}
+
+static maage_status maage_launcher_catalog_load(maage_launcher_ui *ui) {
     maage_status child_result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
     char path[MAAGE_PATH_CAPACITY], *data = NULL;
     char selected_uuid[37] = "", default_uuid[37] = "";
@@ -382,9 +605,6 @@ maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access,
     unsigned i, j, id;
     const char *account, *uuid;
     int file_present = 0;
-    memset(ui, 0, sizeof(*ui));
-    ui->access = access;
-    ui->assets = assets;
     if (maage_status_failed(child_result = maage_storage_data_path(ui->root, sizeof(ui->root))) || maage_status_failed(child_result = maage_storage_join(ui->resources, sizeof(ui->resources), ui->root, "minecraft/assets/reconst"))) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
     ui->clients = (maage_client_registry *) calloc(1, sizeof(*ui->clients));
     if (!ui->clients) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE);
@@ -474,9 +694,8 @@ maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access,
         if (ui->installations[i].id == ui->selected) break;
     if (i == ui->count) ui->selected = ui->default_id;
     ui->next_id = ui->count + 1;
+    ui->catalog_ready = 1;
     if (!file_present && maage_status_failed(child_result = maage_launcher_ui_save(ui))) goto failed;
-    maage_launcher_account_restore(ui);
-    maage_launcher_ui_refresh(ui);
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
 failed:
     if (root) json_object_put(root);
@@ -495,6 +714,20 @@ failed:
 maage_status maage_launcher_ui_destroy(maage_launcher_ui *ui) {
     maage_status result, child;
     if (!ui) return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_DESTROY, 0);
+    if (ui->startup) {
+        maage_mutex_lock(ui->startup->mutex);
+        ui->startup->cancelled = 1;
+        maage_mutex_unlock(ui->startup->mutex);
+        result = maage_thread_join(ui->startup->thread);
+        if (maage_status_failed(result)) return result;
+        ui->services_ready = ui->startup->services_ready;
+        maage_clients_dispose(ui->startup->loaded.clients);
+        free(ui->startup->loaded.clients);
+        free(ui->startup->loaded.installations);
+        maage_mutex_destroy(ui->startup->mutex);
+        free(ui->startup);
+        ui->startup = NULL;
+    }
     result = maage_client_job_finish(&ui->client_job);
     /* A failed join retains its worker-owned context and borrowed service inputs. */
     if (maage_status_failed(result)) return result;
@@ -516,19 +749,11 @@ const char *maage_launcher_installation_client(maage_launcher_ui *ui, unsigned i
     if (index >= ui->count || !*ui->installations[index].client) return ui->clients->count ? "Select a Client build in the installation editor" : "No Client installed. A managed Client installation is required";
     build = maage_clients_find(ui->clients, ui->installations[index].client);
     if (build < 0) return "Referenced Client missing; select another build";
-    if (ui->clients->builds[build].available) {
-        char path[MAAGE_PATH_CAPACITY];
-        if (maage_status_failed(maage_clients_path(ui->clients, ui->installations[index].client, path, &ui->trace))) {
-            ui->clients->builds[build].available = 0;
-            strcpy(ui->clients->builds[build].status, "Missing; reimport required");
-            ++ui->client_revision;
-        }
-    }
     maage_client_build_label(&ui->clients->builds[build], label);
     return label;
 }
 static maage_status maage_launcher_client_start(maage_launcher_ui *ui, int mode, const char *source, const char *instance_id) {
-    if (ui->client_job || !ui->clients_valid) {
+    if (!ui->catalog_ready || ui->client_job || ui->launch_pending || !ui->clients_valid) {
         strcpy(ui->error, "Client registry is busy or unavailable.");
         return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT);
     }
@@ -540,9 +765,9 @@ static maage_status maage_launcher_client_start(maage_launcher_ui *ui, int mode,
         return ui->result;
     }
     ui->client_operation = mode;
-    strcpy(ui->error, mode == 1 ? "Inspecting Client package…" : mode == 2 ? "Copying Client package into MaaGE…"
-                                                             : mode == 4   ? "Starting selected Client…"
-                                                                           : "Removing managed Client package…");
+    strcpy(ui->client_status, mode == 1 ? "Inspecting Client package…" : mode == 2 ? "Copying Client package into MaaGE…"
+                                                                     : mode == 4   ? "Starting selected Client…"
+                                                                                   : "Removing managed Client package…");
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SUBMIT, 0);
 }
 static maage_status maage_launcher_installation_reload(maage_launcher_ui *ui, unsigned index) {
@@ -682,9 +907,14 @@ maage_status maage_launcher_client_play(maage_launcher_ui *ui) {
     }
     for (i = 0; i < ui->count; ++i)
         if (ui->installations[i].id == ui->selected) {
-            if (maage_status_failed(child_result = maage_launcher_client_start(ui, 4, ui->installations[i].client, ui->installations[i].uuid))) return MAAGE_STATUS_PROPAGATE(&ui->trace, maage_status_failed(child_result) ? child_result : maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RELOAD, 0), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RELOAD);
-            strcpy(ui->running_client, ui->installations[i].client);
-            strcpy(ui->running_instance, ui->installations[i].uuid);
+            /* Recheck disk readiness asynchronously for every launch. Selection
+             * is captured before that work and must still match at submission. */
+            child_result = maage_launcher_resources(ui, MAAGE_ASSETS_PREPARE);
+            if (maage_status_failed(child_result)) return child_result;
+            strcpy(ui->pending_client, ui->installations[i].client);
+            strcpy(ui->pending_instance, ui->installations[i].uuid);
+            strcpy(ui->pending_account, ui->account);
+            ui->launch_pending = 1;
             ui->can_play = 0;
             return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_RELOAD, 0);
         }

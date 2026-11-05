@@ -10,7 +10,7 @@ This is a source-level view of existing foundations and planned work—not autho
 | Presentation | Metal/Vulkan, modern OpenGL scene path, limited legacy/Software; Title/world/options/Controls/inventory UI, registered Creative tabs/search, configurable input, visual replica/light, GPU streaming, player appearance and audio | Programmer platform validation, Wayland capture, secondary renderer coverage and visual polish |
 | Content and world | Namespace-owned root/submodules, three-stage binding, repeatable Client LOAD, explicit runtime sides, Base content, growable numeric registries, typed property configurations, domain-aware tags and ordered behavior composition, tag/property-aware recipes, registered fluids/geometry/containers/sounds/entity types/models, regional generation, async I/O and region saves | No dynamic module loader, scripting, modpack distribution or remote content negotiation |
 | Gameplay | Movement, mining/placement, typed item/falling/living/projectile entities, initial passive/hostile roster, spawning/combat, drops, directional support and persisted neighbor notifications, independent scheduled/random ticks, saplings/wheat, food use, transactional 2x2/3x3 crafting, persistent furnaces and single/double chest containers | Programmer gameplay/animation/container validation, richer navigation/behavior, full Survival, redstone, enchanting, dimensions and endgame |
-| Launcher/resources | Microsoft access verification, profile-specific skin cache, verified reconstructed assets, UUID instances and exact Client package selection | Remote package deployment and modpack install support |
+| Launcher/resources | Unified native Play/Installations/Accounts/Settings/About window; background catalog, Microsoft access and resource preparation; fingerprint-validated receipts, explicit Verify/Repair, UUID instances and exact Client package selection | Programmer startup/platform/visual validation, remote package deployment and modpack install support |
 
 Incompatible pre-alpha saves or package formats fail explicitly without silent migration or deletion.
 
@@ -27,6 +27,7 @@ Incompatible pre-alpha saves or package formats fail explicitly without silent m
 [Content module composition](content-modules.md) ·
 [World and gameplay](world-and-gameplay.md) ·
 [Client presentation](client-presentation.md) ·
+[Launcher and resources](launcher.md) ·
 [Logging and native crashes](diagnostics.md).
 
 Current source and public headers provide the detailed implementation and API contracts. No compilation, gameplay or visual acceptance is implied by this roadmap.

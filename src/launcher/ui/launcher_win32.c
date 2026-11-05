@@ -8,6 +8,7 @@
 #include "../native/windows/win32_ui.h"
 #include "maage/launcher_version.h"
 #include "maage/log.h"
+#include "maage/time.h"
 #include <string.h>
 #define MAAGE_UI_ACCOUNT 110
 #define MAAGE_UI_INSTALLATION 111
@@ -34,15 +35,29 @@
 #define MAAGE_UI_CLIENT_REPLACE 144
 #define MAAGE_UI_ABOUT 125
 #define MAAGE_UI_BACK_SETTINGS 126
+#define MAAGE_UI_SIGN_IN 160
+#define MAAGE_UI_DEVICE_SIGN_IN 161
+#define MAAGE_UI_SIGN_OUT 162
+#define MAAGE_UI_REMOVE_ACCOUNT 163
+#define MAAGE_UI_CANCEL_ACCOUNT 164
+#define MAAGE_UI_COPY_CODE 165
+#define MAAGE_UI_OPEN_DEVICE 166
+#define MAAGE_UI_PROFILES 167
+#define MAAGE_UI_VERIFY_RESOURCES 170
+#define MAAGE_UI_RETRY_RESOURCES 171
+#define MAAGE_UI_CANCEL_RESOURCES 172
+#define MAAGE_UI_APPEARANCE 173
+#define MAAGE_UI_RESOURCES_PAGE 174
 typedef struct maage_launcher_win32 {
     maage_launcher_ui *state;
     HWND window, navigation[5], account, installation, list, name, arguments, status, resource, account_status, verify, repair, error, clients, client_choice, client_status, play;
     HWND clients_label, clients_import, clients_replace, clients_remove, installations_label, list_hint, new_button, editor_heading, editor_hint, name_label, client_label, arguments_label;
+    HWND active_summary, launch_status, authentication, profiles, sign_in, device_sign_in, sign_out, remove_account, cancel_account, copy_code, open_device, verify_resources, retry_resources, cancel_resources, progress, appearance;
     HWND save_button, duplicate_button, remove_button, default_button, active_button, cancel_button, folder_button;
     maage_launcher_win32_style native;
     HBRUSH background, sidebar;
     unsigned revision, client_revision;
-    int result, updating, creating, previous_row, editor_row, scroll[5], scrollbar_visible;
+    int updating, creating, previous_row, editor_row, scroll[5], scrollbar_visible, displayed_appearance, marquee, progress_value;
 } maage_launcher_win32;
 static void maage_ui_text(HWND control, const char *text) {
     wchar_t wide[MAAGE_PATH_CAPACITY];
@@ -64,13 +79,15 @@ static HWND maage_ui_button(maage_launcher_win32 *ui, int page, const wchar_t *t
 static void maage_ui_installation_place(maage_launcher_win32 *ui, HWND control, int x, int y, int width, int height, int offset, int bottom) {
     int shown_height, visible;
     if (!control) return;
+    y += 52;
     y -= offset;
-    shown_height = control == ui->list ? height : height > 36 ? 36 : height;
-    visible = y >= 78 && y + shown_height <= bottom;
+    shown_height = control == ui->list ? height : height > 36 ? 36
+                                                              : height;
+    visible = y >= 130 && y + shown_height <= bottom;
     if (control == ui->list) {
-        if (y < 78) {
-            height -= 78 - y;
-            y = 78;
+        if (y < 130) {
+            height -= 130 - y;
+            y = 130;
         }
         if (y + height > bottom) height = bottom - y;
         visible = height >= 48;
@@ -82,7 +99,7 @@ static void maage_ui_installation_place(maage_launcher_win32 *ui, HWND control, 
 }
 
 static void maage_ui_installations_layout(maage_launcher_win32 *ui, int width, int height) {
-    int left = 198, full = width - 230, stacked = full < 680, bottom = height - 100;
+    int left = 198, full = width - 230, stacked = full < 680, bottom = height - 120;
     int list_width = stacked ? full : full * 42 / 100;
     int editor_x = stacked ? left : left + list_width + 24;
     int editor_width = stacked ? full : full - list_width - 24;
@@ -99,7 +116,9 @@ static void maage_ui_installations_layout(maage_launcher_win32 *ui, int width, i
     maage_ui_installation_place(ui, ui->installations_label, left, 205, list_width - 120, 32, offset, bottom);
     maage_ui_installation_place(ui, ui->new_button, left + list_width - 116, 205, 116, 32, offset, bottom);
     maage_ui_installation_place(ui, ui->list_hint, left, 244, list_width, 28, offset, bottom);
-    maage_ui_installation_place(ui, ui->list, left, 280, list_width, stacked ? 235 : height > 680 ? height - 400 : 280, list_offset, bottom);
+    maage_ui_installation_place(ui, ui->list, left, 280, list_width, stacked ? 235 : height > 680 ? height - 400
+                                                                                                  : 280,
+                                list_offset, bottom);
     maage_ui_installation_place(ui, ui->editor_heading, editor_x, editor_y, editor_width, 32, offset, bottom);
     maage_ui_installation_place(ui, ui->editor_hint, editor_x, editor_y + 38, editor_width, 42, offset, bottom);
     maage_ui_installation_place(ui, ui->name_label, editor_x, editor_y + 88, editor_width, 24, offset, bottom);
@@ -125,16 +144,16 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
     RECT rect;
     SCROLLINFO scroll;
     unsigned i;
-    int width, height, x, y, w, h, center, page, narrow;
-    int top = 78, bottom, content_bottom = 0, max_scroll, visible_scroll, visible;
+    int width, height, x, y, w, h, page;
+    int top = 124, bottom, content_bottom = 0, max_scroll, visible_scroll, visible;
     if (!ui->native.count) return;
     GetClientRect(ui->window, &rect);
     width = MulDiv(rect.right, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
     height = MulDiv(rect.bottom, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
     page = (int) ui->state->page;
-    narrow = width < 860;
-    bottom = height - 100;
-    if (page == MAAGE_PAGE_INSTALLATIONS) content_bottom = width - 230 < 680 ? 1000 : 635;
+    bottom = height - 120;
+    if (page == MAAGE_PAGE_INSTALLATIONS) content_bottom = width - 230 < 680 ? 1052 : 687;
+    else if (page == MAAGE_PAGE_ACCOUNTS) content_bottom = 610;
     else if (page == MAAGE_PAGE_SETTINGS) content_bottom = 566;
     else if (page == MAAGE_PAGE_ABOUT) content_bottom = 584;
     max_scroll = content_bottom - bottom;
@@ -147,7 +166,6 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
         ShowScrollBar(ui->window, SB_VERT, visible_scroll);
         GetClientRect(ui->window, &rect);
         width = MulDiv(rect.right, 96, ui->native.dpi ? (int) ui->native.dpi : 96);
-        narrow = width < 860;
     }
     memset(&scroll, 0, sizeof(scroll));
     scroll.cbSize = sizeof(scroll);
@@ -157,7 +175,6 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
     scroll.nPage = (UINT) (bottom > top ? bottom - top : 1);
     scroll.nPos = ui->scroll[page];
     SetScrollInfo(ui->window, SB_VERT, &scroll, TRUE);
-    center = 170 + (width - 170) / 2;
     for (i = 0; i < ui->native.count; ++i) {
         maage_launcher_control *c = &ui->native.controls[i];
         x = c->x;
@@ -165,7 +182,7 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
         w = c->width;
         h = c->height;
         visible = c->page < 0 || c->page == page;
-        if (c->page == MAAGE_PAGE_INSTALLATIONS) {
+        if (c->page == MAAGE_PAGE_INSTALLATIONS && c->y != 80) {
             if (page != MAAGE_PAGE_INSTALLATIONS) ShowWindow(c->handle, SW_HIDE);
             continue;
         }
@@ -173,23 +190,18 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
         if (x < 0) x += width;
         if (w < 0) w += width;
         if (h < 0) h += height;
-        if (c->page == MAAGE_PAGE_PLAY && c->y >= 150) {
-            x = center - w / 2;
-            y = height / 2 + c->y - 285;
-        }
-        if (c->page == MAAGE_PAGE_PLAY && narrow && c->handle == ui->account) {
-            x = 198;
-            y = 76;
-            w = width - 335;
-        } else if (c->page == MAAGE_PAGE_PLAY && narrow && c->y == 25 && c->x < 0) y = 76;
-        if (c->page >= MAAGE_PAGE_INSTALLATIONS && c->page == page && c->y != 25) {
+        if (c->page == MAAGE_PAGE_PLAY && c->y >= 150) y += height > 740 ? (height - 740) / 3 : 0;
+        if (c->page >= MAAGE_PAGE_INSTALLATIONS && c->page == page && c->y != 80) {
+            int shown_height = c->handle == ui->appearance ? 32 : h;
             y -= ui->scroll[page];
-            if (y < top || y + (h > 36 ? 36 : h) > bottom) visible = 0;
+            if (y < top || y + shown_height > bottom) visible = 0;
         }
         if (visible) MoveWindow(c->handle, maage_launcher_win32_scale(&ui->native, x), maage_launcher_win32_scale(&ui->native, y), maage_launcher_win32_scale(&ui->native, w), maage_launcher_win32_scale(&ui->native, h), TRUE);
         ShowWindow(c->handle, visible ? SW_SHOW : SW_HIDE);
     }
     if (page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_layout(ui, width, height);
+    ListView_SetColumnWidth(ui->profiles, 0, maage_launcher_win32_scale(&ui->native, (width - 230) * 36 / 100));
+    ListView_SetColumnWidth(ui->profiles, 1, maage_launcher_win32_scale(&ui->native, (width - 230) * 60 / 100));
     for (i = 0; i < 5; ++i)
         SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned) page ? BST_CHECKED : BST_UNCHECKED, 0);
     InvalidateRect(ui->window, NULL, TRUE);
@@ -220,8 +232,9 @@ static void maage_ui_installations_reload(maage_launcher_win32 *ui, int preferre
         SendMessageW(ui->list, LVM_INSERTITEMW, 0, (LPARAM) &item);
         item.iSubItem = 1;
         item.pszText = entry->id == ui->state->selected && entry->id == ui->state->default_id ? L"Active / Default"
-                       : entry->id == ui->state->selected ? L"Active"
-                       : entry->id == ui->state->default_id ? L"Default" : L"";
+                       : entry->id == ui->state->selected                                     ? L"Active"
+                       : entry->id == ui->state->default_id                                   ? L"Default"
+                                                                                              : L"";
         SendMessageW(ui->list, LVM_SETITEMTEXTW, i, (LPARAM) &item);
         SendMessageW(ui->installation, CB_ADDSTRING, 0, (LPARAM) wide);
         if (entry->id == ui->state->selected) {
@@ -231,7 +244,8 @@ static void maage_ui_installations_reload(maage_launcher_win32 *ui, int preferre
     }
     ui->editor_row = -1;
     if (!ui->creating && ui->state->count) {
-        row = preferred >= 0 && (unsigned) preferred < ui->state->count ? preferred : active >= 0 ? active : 0;
+        row = preferred >= 0 && (unsigned) preferred < ui->state->count ? preferred : active >= 0 ? active
+                                                                                                  : 0;
         ui->editor_row = row;
         ListView_SetItemState(ui->list, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
         ListView_EnsureVisible(ui->list, row, FALSE);
@@ -266,7 +280,7 @@ static void maage_ui_enabled(HWND control, int enabled) {
 static void maage_ui_editor_status(maage_launcher_win32 *ui) {
     int row = maage_ui_selected(ui);
     int editing = !ui->creating && row >= 0 && (unsigned) row < ui->state->count;
-    int busy = ui->state->client_job != NULL;
+    int busy = !ui->state->catalog_ready || ui->state->client_job != NULL;
     const char *hint = "Select a row on the left to edit its configuration.";
     if (ui->creating) {
         maage_ui_text(ui->editor_heading, "Create installation");
@@ -294,7 +308,6 @@ static void maage_ui_editor_status(maage_launcher_win32 *ui) {
     maage_ui_enabled(ui->cancel_button, ui->creating);
 }
 
-
 /* A role change must not erase edits currently staged in the detail pane. */
 static void maage_ui_installations_roles(maage_launcher_win32 *ui) {
     unsigned i;
@@ -307,8 +320,9 @@ static void maage_ui_installations_roles(maage_launcher_win32 *ui) {
         item.iItem = (int) i;
         item.iSubItem = 1;
         item.pszText = entry->id == ui->state->selected && entry->id == ui->state->default_id ? L"Active / Default"
-                       : entry->id == ui->state->selected ? L"Active"
-                       : entry->id == ui->state->default_id ? L"Default" : L"";
+                       : entry->id == ui->state->selected                                     ? L"Active"
+                       : entry->id == ui->state->default_id                                   ? L"Default"
+                                                                                              : L"";
         SendMessageW(ui->list, LVM_SETITEMTEXTW, i, (LPARAM) &item);
         if (entry->id == ui->state->selected) active = (int) i;
     }
@@ -409,16 +423,67 @@ static LRESULT maage_ui_installations_draw(maage_launcher_win32 *ui, NMLVCUSTOMD
     return CDRF_SKIPDEFAULT;
 }
 
+static void maage_ui_appearance(maage_launcher_win32 *ui) {
+    HBRUSH background, sidebar;
+    maage_status result = maage_launcher_win32_appearance(&ui->native, ui->state->appearance);
+    if (maage_status_failed(result)) {
+        maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", result, "Could not update Launcher appearance.");
+        return;
+    }
+    background = CreateSolidBrush(maage_launcher_win32_color(&ui->native, 0));
+    sidebar = CreateSolidBrush(maage_launcher_win32_color(&ui->native, 1));
+    if (!background || !sidebar) {
+        DeleteObject(background);
+        DeleteObject(sidebar);
+        strcpy(ui->state->error, "Could not allocate Launcher appearance colors.");
+        return;
+    }
+    DeleteObject(ui->background);
+    DeleteObject(ui->sidebar);
+    ui->background = background;
+    ui->sidebar = sidebar;
+    ui->displayed_appearance = ui->state->appearance;
+}
+static void maage_ui_copy_code(maage_launcher_win32 *ui) {
+    wchar_t code[33];
+    HGLOBAL storage;
+    void *bytes;
+    size_t length;
+    if (!*ui->state->accounts.device_code || !MultiByteToWideChar(CP_UTF8, 0, ui->state->accounts.device_code, -1, code, 33)) return;
+    length = (wcslen(code) + 1) * sizeof(wchar_t);
+    storage = GlobalAlloc(GMEM_MOVEABLE, length);
+    if (!storage) return;
+    bytes = GlobalLock(storage);
+    if (!bytes) {
+        GlobalFree(storage);
+        return;
+    }
+    memcpy(bytes, code, length);
+    GlobalUnlock(storage);
+    if (OpenClipboard(ui->window)) {
+        if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, storage)) storage = NULL;
+        CloseClipboard();
+    }
+    if (storage) GlobalFree(storage);
+}
+
 static void maage_ui_refresh(maage_launcher_win32 *ui) {
     maage_launcher_ui *state = ui->state;
     unsigned i;
     int selected = -1, added = 0;
     maage_launcher_ui_refresh(state);
+    if (ui->displayed_appearance != state->appearance) {
+        maage_ui_appearance(ui);
+        SendMessageW(ui->appearance, CB_SETCURSEL, state->appearance, 0);
+    }
+    maage_ui_enabled(ui->appearance, state->catalog_ready);
     if (ui->revision != state->accounts.revision || SendMessageW(ui->account, CB_GETCOUNT, 0, 0) == 0) {
         wchar_t wide[256];
         char title[256];
+        LVITEMW item;
         ui->updating = 1;
         SendMessageW(ui->account, CB_RESETCONTENT, 0, 0);
+        ListView_DeleteAllItems(ui->profiles);
         for (i = 0; i < state->accounts.count; ++i) {
             maage_access_profile *p = &state->accounts.profiles[i];
             if (!p->connected) continue;
@@ -427,22 +492,23 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
             SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) wide);
             SendMessageW(ui->account, CB_SETITEMDATA, added, i);
             if (!strcmp(p->uuid, state->account)) selected = added;
+            memset(&item, 0, sizeof(item));
+            item.mask = LVIF_TEXT | LVIF_PARAM;
+            item.iItem = added;
+            item.pszText = wide;
+            item.lParam = (LPARAM) i;
+            SendMessageW(ui->profiles, LVM_INSERTITEMW, 0, (LPARAM) &item);
+            MultiByteToWideChar(CP_UTF8, 0, maage_access_state_name(p->state), -1, wide, 256);
+            item.iSubItem = 1;
+            item.pszText = wide;
+            SendMessageW(ui->profiles, LVM_SETITEMTEXTW, added, (LPARAM) &item);
+            if (!strcmp(p->uuid, state->account)) ListView_SetItemState(ui->profiles, added, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
             ++added;
         }
         if (!added) SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"No connected Minecraft account");
         {
             LRESULT row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"Manage Microsoft Accounts...");
             SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -2);
-            row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"Add Microsoft Account...");
-            SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -4);
-            if (state->account[0]) {
-                row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"Refresh / Reverify Account");
-                SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -3);
-                row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"Sign Out");
-                SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -5);
-                row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"Remove Account");
-                SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -6);
-            }
         }
         SendMessageW(ui->account, CB_SETCURSEL, selected < 0 ? 0 : selected, 0);
         ui->revision = state->accounts.revision;
@@ -475,16 +541,48 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
     }
 #endif
     maage_ui_text(ui->client_status, state->client_status);
-    EnableWindow(ui->play, state->can_play);
-    maage_ui_text(ui->play, state->client_process ? "Client Running" : "Play");
-    EnableWindow(ui->account, !state->accounts.busy);
-    EnableWindow(ui->verify, !state->accounts.busy && state->account[0]);
-    EnableWindow(ui->repair, !state->accounts.busy);
+    maage_ui_text(ui->launch_status, state->launch_status);
+    maage_ui_text(ui->active_summary, state->active_summary);
+    maage_ui_text(ui->authentication, state->authentication_status);
+    maage_ui_enabled(ui->play, state->can_play);
+    maage_ui_text(ui->play, state->client_process ? "Client Running" : state->launch_pending      ? "Checking Resources…"
+                                                                   : state->client_operation == 4 ? "Starting Client…"
+                                                                                                  : "Play");
+    maage_ui_enabled(ui->account, state->accounts.metadata_ready);
+    maage_ui_enabled(ui->verify, state->services_ready && !state->accounts.busy && (*state->account || !state->accounts.restored));
+    maage_ui_enabled(ui->sign_in, state->services_ready && state->accounts.restored && !state->accounts.busy);
+    maage_ui_enabled(ui->device_sign_in, state->services_ready && state->accounts.restored && !state->accounts.busy);
+    maage_ui_enabled(ui->sign_out, state->services_ready && state->accounts.restored && !state->accounts.busy && *state->account);
+    maage_ui_enabled(ui->remove_account, state->services_ready && state->accounts.restored && !state->accounts.busy && *state->account);
+    maage_ui_enabled(ui->cancel_account, state->accounts.busy);
+    maage_ui_enabled(ui->copy_code, *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds());
+    maage_ui_enabled(ui->open_device, IsWindowEnabled(ui->copy_code));
+    maage_ui_enabled(ui->repair, !state->progress.busy && !state->client_process && state->client_operation != 4 && !state->launch_pending);
+    maage_ui_enabled(ui->verify_resources, IsWindowEnabled(ui->repair));
+    maage_ui_enabled(ui->retry_resources, IsWindowEnabled(ui->repair));
+    maage_ui_enabled(ui->cancel_resources, state->progress.busy || state->resources_pending);
     maage_ui_text(ui->status, state->readiness);
-    maage_ui_text(ui->resource, state->progress.stage == MAAGE_SETUP_FAILED ? state->progress.error : state->readiness);
+    maage_ui_text(ui->resource, state->resource_status);
     maage_ui_text(ui->account_status, state->account_status);
     maage_ui_text(ui->error, state->error);
-    maage_ui_text(ui->repair, state->accounts.allowed ? "Repair Assets..." : "Verify Minecraft Access...");
+    if (state->progress.busy || state->accounts.busy) {
+        int marquee = !state->progress.busy || state->progress.percent < 0;
+        if (ui->marquee != marquee) {
+            LONG_PTR style = GetWindowLongPtrW(ui->progress, GWL_STYLE);
+            ui->marquee = marquee;
+            SetWindowLongPtrW(ui->progress, GWL_STYLE, marquee ? style | PBS_MARQUEE : style & ~PBS_MARQUEE);
+            SendMessageW(ui->progress, PBM_SETMARQUEE, marquee, 30);
+        }
+        if (!marquee && ui->progress_value != state->progress.percent) {
+            ui->progress_value = state->progress.percent;
+            SendMessageW(ui->progress, PBM_SETPOS, state->progress.percent, 0);
+        }
+        ShowWindow(ui->progress, SW_SHOW);
+    } else {
+        if (ui->marquee) SendMessageW(ui->progress, PBM_SETMARQUEE, FALSE, 0);
+        ui->marquee = 0;
+        ShowWindow(ui->progress, SW_HIDE);
+    }
     maage_ui_editor_status(ui);
 }
 static void maage_ui_open_installation(maage_launcher_win32 *ui) {
@@ -504,6 +602,7 @@ static void maage_ui_installation_action(maage_launcher_win32 *ui, int id) {
     const char *client = "";
     LRESULT selected;
     maage_status result;
+    if (!ui->state->catalog_ready || ui->state->client_job) return;
     if (id == MAAGE_UI_NEW) {
         ui->previous_row = row;
         ui->creating = 1;
@@ -581,7 +680,7 @@ static void maage_ui_client_import(maage_launcher_win32 *ui, int replacing) {
     wchar_t wide[MAAGE_PATH_CAPACITY];
     char path[MAAGE_PATH_CAPACITY];
     LRESULT row = SendMessageW(ui->clients, CB_GETCURSEL, 0, 0);
-    if (ui->state->client_job || (replacing && row < 0)) return;
+    if (!ui->state->catalog_ready || ui->state->client_job || (replacing && row < 0)) return;
     memset(&picker, 0, sizeof(picker));
     wide[0] = 0;
     picker.lStructSize = sizeof(picker);
@@ -610,8 +709,8 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     if (!ui) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
     case WM_GETMINMAXINFO:
-        ((MINMAXINFO *) lparam)->ptMinTrackSize.x = maage_launcher_win32_scale(&ui->native, 760);
-        ((MINMAXINFO *) lparam)->ptMinTrackSize.y = maage_launcher_win32_scale(&ui->native, 570);
+        ((MINMAXINFO *) lparam)->ptMinTrackSize.x = maage_launcher_win32_scale(&ui->native, 820);
+        ((MINMAXINFO *) lparam)->ptMinTrackSize.y = maage_launcher_win32_scale(&ui->native, 650);
         return 0;
     case WM_DPICHANGED: {
         maage_status result = maage_launcher_win32_dpi_changed(&ui->native, wparam, lparam);
@@ -619,6 +718,10 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         maage_ui_layout(ui);
         return 0;
     }
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+        if (ui->native.window) maage_ui_appearance(ui);
+        break;
     case WM_SIZE:
         maage_ui_layout(ui);
         return 0;
@@ -633,15 +736,30 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         position = ui->scroll[page];
         amount = (int) info.nPage;
         switch (LOWORD(wparam)) {
-        case SB_LINEUP: position -= 28; break;
-        case SB_LINEDOWN: position += 28; break;
-        case SB_PAGEUP: position -= amount; break;
-        case SB_PAGEDOWN: position += amount; break;
+        case SB_LINEUP:
+            position -= 28;
+            break;
+        case SB_LINEDOWN:
+            position += 28;
+            break;
+        case SB_PAGEUP:
+            position -= amount;
+            break;
+        case SB_PAGEDOWN:
+            position += amount;
+            break;
         case SB_THUMBPOSITION:
-        case SB_THUMBTRACK: position = info.nTrackPos; break;
-        case SB_TOP: position = 0; break;
-        case SB_BOTTOM: position = info.nMax; break;
-        default: return 0;
+        case SB_THUMBTRACK:
+            position = info.nTrackPos;
+            break;
+        case SB_TOP:
+            position = 0;
+            break;
+        case SB_BOTTOM:
+            position = info.nMax;
+            break;
+        default:
+            return 0;
         }
         if (position < 0) position = 0;
         if (position > info.nMax - (int) info.nPage + 1) position = info.nMax - (int) info.nPage + 1;
@@ -700,8 +818,8 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             maage_ui_layout(ui);
             return 0;
         }
-        if (id == MAAGE_UI_STATUS) {
-            ui->state->page = MAAGE_PAGE_SETTINGS;
+        if (id == MAAGE_UI_STATUS || id == MAAGE_UI_RESOURCES_PAGE) {
+            ui->state->page = id == MAAGE_UI_STATUS ? maage_launcher_attention_page(ui->state) : MAAGE_PAGE_SETTINGS;
             maage_ui_layout(ui);
             return 0;
         }
@@ -709,17 +827,10 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             LRESULT row = SendMessageW(ui->account, CB_GETCURSEL, 0, 0), index;
             index = SendMessageW(ui->account, CB_GETITEMDATA, row, 0);
             if (index >= 0 && (unsigned) index < ui->state->accounts.count) maage_launcher_account_select(ui->state, ui->state->accounts.profiles[index].uuid);
-            else if (index == -2 && !ui->state->accounts.busy) {
-                ui->result = 1;
-                DestroyWindow(window);
-                return 0;
-            } else if (index == -3 && ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
-            else if (index == -4 && (!maage_status_failed(maage_access_sign_in(ui->state->access, 0)))) {
-                ui->result = 1;
-                DestroyWindow(window);
-                return 0;
-            } else if (index == -5 && ui->state->account[0]) maage_access_sign_out(ui->state->access, ui->state->account);
-            else if (index == -6 && ui->state->account[0]) maage_access_disconnect(ui->state->access, ui->state->account);
+            else if (index == -2) {
+                ui->state->page = MAAGE_PAGE_ACCOUNTS;
+                maage_ui_layout(ui);
+            }
             ui->revision = 0;
         }
         if (id == MAAGE_UI_INSTALLATION && event == CBN_SELCHANGE && !ui->updating) {
@@ -728,17 +839,53 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         }
         if ((id >= MAAGE_UI_NEW && id <= MAAGE_UI_DEFAULT) || id == MAAGE_UI_CANCEL_NEW || id == MAAGE_UI_ACTIVE) maage_ui_installation_action(ui, id);
         if (id == MAAGE_UI_OPEN_FOLDER) maage_ui_open_installation(ui);
-        if (id == MAAGE_UI_VERIFY && ui->state->account[0]) maage_access_verify_local(ui->state->access, ui->state->account);
+        if (id == MAAGE_UI_VERIFY) {
+            if (!ui->state->accounts.restored) maage_access_restore(ui->state->access);
+            else if (*ui->state->account) maage_access_verify_local(ui->state->access, ui->state->account);
+        }
+        if (id == MAAGE_UI_SIGN_IN || id == MAAGE_UI_DEVICE_SIGN_IN) maage_access_sign_in(ui->state->access, id == MAAGE_UI_DEVICE_SIGN_IN);
+        if (id == MAAGE_UI_SIGN_OUT) maage_access_sign_out(ui->state->access, ui->state->account);
+        if (id == MAAGE_UI_REMOVE_ACCOUNT) maage_access_disconnect(ui->state->access, ui->state->account);
+        if (id == MAAGE_UI_CANCEL_ACCOUNT) maage_access_cancel_operation(ui->state->access);
+        if (id == MAAGE_UI_COPY_CODE) maage_ui_copy_code(ui);
+        if (id == MAAGE_UI_OPEN_DEVICE && *ui->state->accounts.device_url) {
+            wchar_t url[256];
+            if (MultiByteToWideChar(CP_UTF8, 0, ui->state->accounts.device_url, -1, url, 256)) ShellExecuteW(window, L"open", url, NULL, NULL, SW_SHOWNORMAL);
+        }
+        if (id == MAAGE_UI_APPEARANCE && event == CBN_SELCHANGE) {
+            int previous = ui->state->appearance;
+            ui->state->appearance = (int) SendMessageW(ui->appearance, CB_GETCURSEL, 0, 0);
+            if (maage_status_failed(maage_launcher_ui_save(ui->state))) {
+                ui->state->appearance = previous;
+                SendMessageW(ui->appearance, CB_SETCURSEL, previous, 0);
+            }
+            maage_ui_appearance(ui);
+        }
+        if (id == MAAGE_UI_REPAIR) maage_launcher_resources(ui->state, MAAGE_ASSETS_REPAIR);
+        if (id == MAAGE_UI_VERIFY_RESOURCES) maage_launcher_resources(ui->state, MAAGE_ASSETS_VERIFY);
+        if (id == MAAGE_UI_RETRY_RESOURCES) maage_launcher_resources(ui->state, ui->state->resource_mode);
+        if (id == MAAGE_UI_CANCEL_RESOURCES) maage_launcher_resources_cancel(ui->state);
         if (id == MAAGE_UI_PROJECT && (INT_PTR) ShellExecuteW(window, L"open", L"https://github.com/FireController1847/MaaGE", NULL, NULL, SW_SHOWNORMAL) <= 32) strcpy(ui->state->error, "Windows could not open the project link in your browser.");
-        if ((id == MAAGE_UI_MANAGE || id == MAAGE_UI_REPAIR) && !ui->state->accounts.busy) {
-            ui->result = id == MAAGE_UI_REPAIR && maage_access_allowed(ui->state->access) ? 2 : 1;
-            DestroyWindow(window);
-            return 0;
+        if (id == MAAGE_UI_MANAGE) {
+            ui->state->page = MAAGE_PAGE_ACCOUNTS;
+            maage_ui_layout(ui);
         }
         maage_ui_refresh(ui);
         return 0;
     }
     case WM_NOTIFY:
+        if (((NMHDR *) lparam)->hwndFrom == ui->profiles && ((NMHDR *) lparam)->code == LVN_ITEMCHANGED && !ui->updating) {
+            NMLISTVIEW *change = (NMLISTVIEW *) lparam;
+            LVITEMW item;
+            if ((change->uChanged & LVIF_STATE) && (change->uNewState & LVIS_SELECTED) && change->iItem >= 0) {
+                memset(&item, 0, sizeof(item));
+                item.mask = LVIF_PARAM;
+                item.iItem = change->iItem;
+                if (SendMessageW(ui->profiles, LVM_GETITEMW, 0, (LPARAM) &item) && (unsigned) item.lParam < ui->state->accounts.count) maage_launcher_account_select(ui->state, ui->state->accounts.profiles[item.lParam].uuid);
+                maage_ui_refresh(ui);
+            }
+            return 0;
+        }
         if (((NMHDR *) lparam)->code == NM_CUSTOMDRAW) {
             if (((NMHDR *) lparam)->hwndFrom == ui->list) return maage_ui_installations_draw(ui, (NMLVCUSTOMDRAW *) lparam);
             return maage_launcher_win32_button(&ui->native, lparam);
@@ -768,7 +915,10 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_DRAWITEM:
         return maage_launcher_win32_combo_draw(&ui->native, lparam);
     case WM_CTLCOLORSTATIC:
-        SetTextColor((HDC) wparam, GetSysColor(COLOR_WINDOWTEXT));
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+        SetTextColor((HDC) wparam, maage_launcher_win32_text_color(&ui->native));
+        SetBkColor((HDC) wparam, maage_launcher_win32_color(&ui->native, 0));
         SetBkMode((HDC) wparam, TRANSPARENT);
         return (LRESULT) ui->background;
     case WM_ERASEBKGND: {
@@ -780,7 +930,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         return 1;
     }
     case WM_CLOSE:
-        if (!ui->state->client_job) DestroyWindow(window);
+        DestroyWindow(window);
         return 0;
     case WM_DESTROY:
         KillTimer(window, 1);
@@ -789,20 +939,21 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
-maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
+maage_status maage_launcher_native_run(maage_launcher_ui *state) {
     maage_launcher_win32 ui;
     WNDCLASSW klass;
     MSG message;
     int received, i;
+    double started = maage_time_monotonic_seconds();
     HWND control;
     LVCOLUMNW column;
-    const wchar_t *names[] = {L"\x25b6  Play", L"\x2261  News", L"\x25a4  Installations", L"\x2699\xfe0e  Settings", L"\x24d8  About"};
+    const wchar_t *names[] = {L"Play", L"Installations", L"Accounts", L"Settings", L"About"};
     maage_status cleanup, outcome = maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
-    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
-    *action = 0;
+    if (!state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     memset(&ui, 0, sizeof(ui));
     ui.state = state;
     ui.editor_row = -1;
+    ui.progress_value = -1;
     ui.background = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
     ui.sidebar = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
     memset(&klass, 0, sizeof(klass));
@@ -826,50 +977,50 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
         DestroyWindow(ui.window);
         goto cleanup;
     }
-    maage_ui_label(&ui, -1, L"MAAGE", 20, 24, 130, 24);
+    maage_ui_appearance(&ui);
+    maage_ui_label(&ui, -1, L"MaaGE", 20, 24, 130, 24);
     for (i = 0; i < 5; ++i)
-        ui.navigation[i] = maage_ui_control(&ui, -1, L"BUTTON", names[i], WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE, 14, i >= 3 ? -104 + (i - 3) * 46 : 72 + i * 44, 142, 34, 100 + i);
+        ui.navigation[i] = maage_ui_control(&ui, -1, L"BUTTON", names[i], WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE, 14, i >= 3 ? -104 + (i - 3) * 46 : 100 + i * 46, 142, 34, 100 + i);
     {
-        const wchar_t *headings[] = {L"Play MaaGE", L"News", L"Installations", L"Settings", L"About MaaGE"};
+        const wchar_t *headings[] = {L"Play", L"Installations", L"Accounts", L"Settings", L"About MaaGE"};
         for (i = 0; i < 5; ++i) {
-            control = maage_ui_label(&ui, i, headings[i], 198, 25, 330, 38);
+            control = maage_ui_label(&ui, i, headings[i], 198, 80, 330, 38);
             SendMessageW(control, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
         }
     }
-    ui.account = maage_ui_control(&ui, 0, L"COMBOBOX", L"Active Minecraft account", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, -420, 25, 278, 240, MAAGE_UI_ACCOUNT);
-    maage_ui_button(&ui, 0, L"Manage...", -132, 25, 105, MAAGE_UI_MANAGE);
-    control = maage_ui_label(&ui, 0, L"MaaGE", 0, 176, 300, 42);
-    SendMessageW(control, WM_SETFONT, (WPARAM) ui.native.brand, TRUE);
-    SetWindowLongPtrW(control, GWL_STYLE, GetWindowLongPtrW(control, GWL_STYLE) | SS_CENTER);
-    control = maage_ui_label(&ui, 0, L"Minecraft as a Game Engine", 0, 229, 320, 26);
-    SetWindowLongPtrW(control, GWL_STYLE, GetWindowLongPtrW(control, GWL_STYLE) | SS_CENTER);
-    ui.installation = maage_ui_control(&ui, 0, L"COMBOBOX", L"MaaGE installation", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 0, 279, 280, 230, MAAGE_UI_INSTALLATION);
-    ui.play = control = maage_ui_control(&ui, 0, L"BUTTON", L"Play", WS_TABSTOP | BS_PUSHBUTTON, 0, 327, 280, 48, 150);
+    ui.active_summary = maage_ui_label(&ui, -1, L"Starting Launcher…", 198, 24, -540, 28);
+    SetWindowLongPtrW(ui.active_summary, GWL_STYLE, GetWindowLongPtrW(ui.active_summary, GWL_STYLE) | SS_ENDELLIPSIS);
+    ui.account = maage_ui_control(&ui, -1, L"COMBOBOX", L"Active Minecraft account", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, -310, 18, 280, 260, MAAGE_UI_ACCOUNT);
+    maage_ui_label(&ui, MAAGE_PAGE_PLAY, L"Choose your installation and jump into MaaGE.", 198, 130, -230, 28);
+    maage_ui_label(&ui, MAAGE_PAGE_PLAY, L"Installation", 198, 176, -230, 24);
+    ui.installation = maage_ui_control(&ui, MAAGE_PAGE_PLAY, L"COMBOBOX", L"Installation for Play", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 198, 208, -230, 230, MAAGE_UI_INSTALLATION);
+    ui.client_status = maage_ui_label(&ui, MAAGE_PAGE_PLAY, L"Loading Client builds…", 198, 254, -230, 52);
+    ui.launch_status = maage_ui_label(&ui, MAAGE_PAGE_PLAY, L"Starting Launcher services…", 198, 316, -230, 60);
+    ui.play = maage_ui_control(&ui, MAAGE_PAGE_PLAY, L"BUTTON", L"Play", WS_TABSTOP | BS_PUSHBUTTON, 198, 394, 280, 48, 150);
     ui.native.primary = ui.play;
-    EnableWindow(control, FALSE);
-    ui.client_status = control = maage_ui_label(&ui, 0, L"", 0, 390, 540, 64);
-    SetWindowLongPtrW(control, GWL_STYLE, GetWindowLongPtrW(control, GWL_STYLE) | SS_CENTER);
-    maage_ui_label(&ui, 1, L"No announcements yet\nNews will appear here when a source is configured. For now, follow development on GitHub.", 198, 100, -230, 72);
-    maage_ui_button(&ui, 1, L"Open MaaGE Project", 198, 188, 200, MAAGE_UI_PROJECT);
-    ui.clients_label = maage_ui_label(&ui, 2, L"Installed Clients", 198, 78, -230, 26);
-    ui.clients = maage_ui_control(&ui, 2, L"COMBOBOX", L"Installed Client builds", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 198, 110, -230, 240, MAAGE_UI_CLIENTS);
+    SendMessageW(ui.play, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
+    maage_ui_enabled(ui.play, FALSE);
+    maage_ui_button(&ui, MAAGE_PAGE_PLAY, L"Accounts", 198, 466, 150, MAAGE_UI_MANAGE);
+    maage_ui_button(&ui, MAAGE_PAGE_PLAY, L"Resources", 360, 466, 150, MAAGE_UI_RESOURCES_PAGE);
+    ui.clients_label = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Installed Clients", 198, 78, -230, 26);
+    ui.clients = maage_ui_control(&ui, MAAGE_PAGE_INSTALLATIONS, L"COMBOBOX", L"Installed Client builds", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 198, 110, -230, 240, MAAGE_UI_CLIENTS);
 #if MAAGE_LAUNCHER_DEVELOPMENT
-    ui.clients_import = maage_ui_button(&ui, 2, L"Import Local Client...", 198, 150, 200, MAAGE_UI_CLIENT_IMPORT);
-    ui.clients_replace = maage_ui_button(&ui, 2, L"Replace Client...", 410, 150, 170, MAAGE_UI_CLIENT_REPLACE);
-    ui.clients_remove = maage_ui_button(&ui, 2, L"Remove Client...", 592, 150, 170, MAAGE_UI_CLIENT_REMOVE);
+    ui.clients_import = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Import Local Client...", 198, 150, 200, MAAGE_UI_CLIENT_IMPORT);
+    ui.clients_replace = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Replace Client...", 410, 150, 170, MAAGE_UI_CLIENT_REPLACE);
+    ui.clients_remove = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Remove Client...", 592, 150, 170, MAAGE_UI_CLIENT_REMOVE);
 #else
-    ui.clients_remove = maage_ui_button(&ui, 2, L"Remove Client...", 198, 150, 170, MAAGE_UI_CLIENT_REMOVE);
+    ui.clients_remove = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Remove Client...", 198, 150, 170, MAAGE_UI_CLIENT_REMOVE);
 #endif
-    ui.installations_label = maage_ui_label(&ui, 2, L"Installations", 198, 205, 250, 32);
+    ui.installations_label = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Installations", 198, 205, 250, 32);
     SendMessageW(ui.installations_label, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
-    ui.new_button = maage_ui_button(&ui, 2, L"+ New", 198, 205, 116, MAAGE_UI_NEW);
-    ui.list_hint = maage_ui_label(&ui, 2, L"Select to edit; double-click to activate.", 198, 244, 320, 28);
-    ui.list = maage_ui_control(&ui, 2, WC_LISTVIEWW, L"MaaGE installations", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 280, 350, 330, MAAGE_UI_LIST);
+    ui.new_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"+ New", 198, 205, 116, MAAGE_UI_NEW);
+    ui.list_hint = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Select to edit; double-click to activate.", 198, 244, 320, 28);
+    ui.list = maage_ui_control(&ui, MAAGE_PAGE_INSTALLATIONS, WC_LISTVIEWW, L"MaaGE installations", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 280, 350, 330, MAAGE_UI_LIST);
     SetWindowLongPtrW(ui.list, GWL_EXSTYLE, GetWindowLongPtrW(ui.list, GWL_EXSTYLE) | WS_EX_CLIENTEDGE);
     SetWindowPos(ui.list, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     ListView_SetBkColor(ui.list, GetSysColor(COLOR_WINDOW));
     ListView_SetTextBkColor(ui.list, GetSysColor(COLOR_WINDOW));
-    ListView_SetExtendedListViewStyle(ui.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES | LVS_EX_LABELTIP);
+    ListView_SetExtendedListViewStyle(ui.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
     memset(&column, 0, sizeof(column));
     column.mask = LVCF_TEXT | LVCF_WIDTH;
     column.pszText = L"Installation";
@@ -878,66 +1029,97 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
     column.pszText = L"Role";
     column.cx = maage_launcher_win32_scale(&ui.native, 120);
     SendMessageW(ui.list, LVM_INSERTCOLUMNW, 1, (LPARAM) &column);
-    ui.editor_heading = maage_ui_label(&ui, 2, L"Edit installation", 540, 206, 470, 32);
+    ui.editor_heading = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Edit installation", 540, 206, 470, 32);
     SendMessageW(ui.editor_heading, WM_SETFONT, (WPARAM) ui.native.heading, TRUE);
-    ui.editor_hint = maage_ui_label(&ui, 2, L"", 540, 244, 470, 42);
-    ui.name_label = maage_ui_label(&ui, 2, L"Installation name", 540, 294, 400, 24);
-    ui.name = maage_ui_control(&ui, 2, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 540, 318, 470, 32, MAAGE_UI_NAME);
+    ui.editor_hint = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"", 540, 244, 470, 42);
+    ui.name_label = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Installation name", 540, 294, 400, 24);
+    ui.name = maage_ui_control(&ui, MAAGE_PAGE_INSTALLATIONS, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 540, 318, 470, 32, MAAGE_UI_NAME);
     SendMessageW(ui.name, EM_SETLIMITTEXT, 95, 0);
-    ui.client_label = maage_ui_label(&ui, 2, L"Client build", 540, 364, 400, 24);
-    ui.client_choice = maage_ui_control(&ui, 2, L"COMBOBOX", L"Client build", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 540, 390, 470, 220, MAAGE_UI_CLIENT_CHOICE);
-    ui.arguments_label = maage_ui_label(&ui, 2, L"Client CLI arguments (quote values containing spaces)", 540, 438, 470, 24);
-    ui.arguments = maage_ui_control(&ui, 2, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 540, 464, 470, 32, MAAGE_UI_ARGUMENTS);
+    ui.client_label = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Client build", 540, 364, 400, 24);
+    ui.client_choice = maage_ui_control(&ui, MAAGE_PAGE_INSTALLATIONS, L"COMBOBOX", L"Client build", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 540, 390, 470, 220, MAAGE_UI_CLIENT_CHOICE);
+    ui.arguments_label = maage_ui_label(&ui, MAAGE_PAGE_INSTALLATIONS, L"Client CLI arguments (quote values containing spaces)", 540, 438, 470, 24);
+    ui.arguments = maage_ui_control(&ui, MAAGE_PAGE_INSTALLATIONS, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 540, 464, 470, 32, MAAGE_UI_ARGUMENTS);
     SendMessageW(ui.arguments, EM_SETLIMITTEXT, MAAGE_INSTANCE_ARGUMENTS_CAPACITY - 1, 0);
-    ui.save_button = maage_ui_button(&ui, 2, L"Save Changes", 540, 517, 140, MAAGE_UI_EDIT);
-    ui.duplicate_button = maage_ui_button(&ui, 2, L"Duplicate", 690, 517, 140, MAAGE_UI_DUPLICATE);
-    ui.remove_button = maage_ui_button(&ui, 2, L"Remove", 840, 517, 140, MAAGE_UI_REMOVE);
-    ui.cancel_button = maage_ui_button(&ui, 2, L"Cancel", 840, 517, 140, MAAGE_UI_CANCEL_NEW);
-    ui.default_button = maage_ui_button(&ui, 2, L"Set as Default", 540, 559, 220, MAAGE_UI_DEFAULT);
-    ui.active_button = maage_ui_button(&ui, 2, L"Make Active for Play", 770, 559, 220, MAAGE_UI_ACTIVE);
-    ui.folder_button = maage_ui_button(&ui, 2, L"Open installation folder", 540, 602, 245, MAAGE_UI_OPEN_FOLDER);
-    maage_ui_label(&ui, 3, L"Launcher", 198, 80, 250, 26);
-    maage_ui_label(&ui, 3, L"Startup opens Play after account and resource preparation.", 198, 110, -230, 26);
-    maage_ui_button(&ui, 3, L"Manage Minecraft Accounts...", 198, 146, 245, MAAGE_UI_MANAGE);
-    ui.verify = maage_ui_button(&ui, 3, L"Refresh / Reverify Account", 455, 146, 200, MAAGE_UI_VERIFY);
-    ui.account_status = maage_ui_label(&ui, 3, L"", 198, 188, -230, 55);
-    maage_ui_label(&ui, 3, L"Resources", 198, 256, 250, 26);
-    control = maage_ui_control(&ui, 3, L"EDIT", L"Minecraft resource location", ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, 198, 288, -230, 30, 0);
+    ui.save_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Save Changes", 540, 517, 140, MAAGE_UI_EDIT);
+    ui.duplicate_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Duplicate", 690, 517, 140, MAAGE_UI_DUPLICATE);
+    ui.remove_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Remove", 840, 517, 140, MAAGE_UI_REMOVE);
+    ui.cancel_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Cancel", 840, 517, 140, MAAGE_UI_CANCEL_NEW);
+    ui.default_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Set as Default", 540, 559, 220, MAAGE_UI_DEFAULT);
+    ui.active_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Make Active for Play", 770, 559, 220, MAAGE_UI_ACTIVE);
+    ui.folder_button = maage_ui_button(&ui, MAAGE_PAGE_INSTALLATIONS, L"Open installation folder", 540, 602, 245, MAAGE_UI_OPEN_FOLDER);
+    maage_ui_label(&ui, MAAGE_PAGE_ACCOUNTS, L"Only verified Minecraft Java Edition access enables Play.", 198, 130, -230, 30);
+    ui.profiles = maage_ui_control(&ui, MAAGE_PAGE_ACCOUNTS, WC_LISTVIEWW, L"Minecraft accounts", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 198, 172, -230, 116, MAAGE_UI_PROFILES);
+    ListView_SetExtendedListViewStyle(ui.profiles, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+    memset(&column, 0, sizeof(column));
+    column.mask = LVCF_TEXT | LVCF_WIDTH;
+    column.pszText = L"Profile";
+    column.cx = maage_launcher_win32_scale(&ui.native, 240);
+    SendMessageW(ui.profiles, LVM_INSERTCOLUMNW, 0, (LPARAM) &column);
+    column.pszText = L"Verification";
+    column.cx = maage_launcher_win32_scale(&ui.native, 360);
+    SendMessageW(ui.profiles, LVM_INSERTCOLUMNW, 1, (LPARAM) &column);
+    ui.account_status = maage_ui_label(&ui, MAAGE_PAGE_ACCOUNTS, L"", 198, 304, -230, 64);
+    ui.sign_in = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Sign In with Microsoft", 198, 382, 205, MAAGE_UI_SIGN_IN);
+    ui.device_sign_in = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Use Device Code", 413, 382, 170, MAAGE_UI_DEVICE_SIGN_IN);
+    ui.verify = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Refresh / Retry", 593, 382, 170, MAAGE_UI_VERIFY);
+    ui.sign_out = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Sign Out", 198, 426, 130, MAAGE_UI_SIGN_OUT);
+    ui.remove_account = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Remove Account", 338, 426, 170, MAAGE_UI_REMOVE_ACCOUNT);
+    ui.cancel_account = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Cancel Sign In", 518, 426, 170, MAAGE_UI_CANCEL_ACCOUNT);
+    ui.authentication = maage_ui_label(&ui, MAAGE_PAGE_ACCOUNTS, L"", 198, 474, -230, 88);
+    ui.copy_code = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Copy Code", 198, 574, 140, MAAGE_UI_COPY_CODE);
+    ui.open_device = maage_ui_button(&ui, MAAGE_PAGE_ACCOUNTS, L"Open Microsoft Sign In", 350, 574, 235, MAAGE_UI_OPEN_DEVICE);
+    maage_ui_label(&ui, MAAGE_PAGE_SETTINGS, L"Accounts and resources prepare in the background while you use the Launcher.", 198, 130, -230, 46);
+    maage_ui_label(&ui, MAAGE_PAGE_SETTINGS, L"Resources", 198, 190, -230, 26);
+    control = maage_ui_control(&ui, MAAGE_PAGE_SETTINGS, L"EDIT", L"Minecraft resource location", ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, 198, 226, -230, 30, 0);
     maage_ui_text(control, state->resources);
-    ui.resource = maage_ui_label(&ui, 3, L"", 198, 330, -230, 55);
-    ui.repair = maage_ui_button(&ui, 3, L"Repair Assets...", 198, 390, 245, MAAGE_UI_REPAIR);
-    maage_ui_label(&ui, 3, L"About", 198, 454, 250, 26);
-    maage_ui_label(&ui, 3, L"Version, project information, and license notices.", 198, 484, -230, 30);
-    maage_ui_button(&ui, 3, L"About MaaGE...", 198, 526, 200, MAAGE_UI_ABOUT);
-    control = maage_ui_label(&ui, 4, L"MaaGE", 198, 92, 400, 44);
+    ui.resource = maage_ui_label(&ui, MAAGE_PAGE_SETTINGS, L"", 198, 270, -230, 88);
+    ui.verify_resources = maage_ui_button(&ui, MAAGE_PAGE_SETTINGS, L"Verify Resources", 198, 370, 190, MAAGE_UI_VERIFY_RESOURCES);
+    ui.repair = maage_ui_button(&ui, MAAGE_PAGE_SETTINGS, L"Repair Resources", 400, 370, 190, MAAGE_UI_REPAIR);
+    ui.retry_resources = maage_ui_button(&ui, MAAGE_PAGE_SETTINGS, L"Retry", 198, 414, 120, MAAGE_UI_RETRY_RESOURCES);
+    ui.cancel_resources = maage_ui_button(&ui, MAAGE_PAGE_SETTINGS, L"Cancel", 330, 414, 120, MAAGE_UI_CANCEL_RESOURCES);
+    maage_ui_label(&ui, MAAGE_PAGE_SETTINGS, L"Verify checks contents. Repair also restores missing or damaged files.", 198, 460, -230, 38);
+    maage_ui_label(&ui, MAAGE_PAGE_SETTINGS, L"Appearance", 198, 510, 210, 24);
+    ui.appearance = maage_ui_control(&ui, MAAGE_PAGE_SETTINGS, L"COMBOBOX", L"Launcher appearance", WS_TABSTOP | CBS_DROPDOWNLIST, 420, 506, 230, 150, MAAGE_UI_APPEARANCE);
+    SendMessageW(ui.appearance, CB_ADDSTRING, 0, (LPARAM) L"System");
+    SendMessageW(ui.appearance, CB_ADDSTRING, 0, (LPARAM) L"Light");
+    SendMessageW(ui.appearance, CB_ADDSTRING, 0, (LPARAM) L"Dark");
+    SendMessageW(ui.appearance, CB_SETCURSEL, state->appearance, 0);
+    control = maage_ui_label(&ui, 4, L"MaaGE", 198, 130, 400, 44);
     SendMessageW(control, WM_SETFONT, (WPARAM) ui.native.brand, TRUE);
-    maage_ui_label(&ui, 4, L"Minecraft as a Game Engine", 198, 145, -230, 30);
-    maage_ui_label(&ui, 4, L"Launcher build", 198, 209, 420, 28);
-    maage_ui_label(&ui, 4, L"Version " MAAGE_LAUNCHER_SEMANTIC_VERSION, 198, 245, -230, 27);
-    maage_ui_label(&ui, 4, L"Git revision " MAAGE_LAUNCHER_GIT_HASH, 198, 278, -230, 27);
-    maage_ui_label(&ui, 4, L"Open source and attribution", 198, 348, 440, 28);
-    maage_ui_label(&ui, 4, L"MaaGE's original source code is licensed under the Apache License, Version 2.0.\nMinecraft game resources have separate ownership and licensing.", 198, 382, -230, 62);
-    maage_ui_label(&ui, 4, L"MaaGE is an independent project and is not affiliated with or endorsed by Mojang Studios or Microsoft.", 198, 460, -230, 55);
-    maage_ui_button(&ui, 4, L"View MaaGE on GitHub", 198, 544, 216, MAAGE_UI_PROJECT);
-    maage_ui_button(&ui, 4, L"Back to Settings", 430, 544, 182, MAAGE_UI_BACK_SETTINGS);
-    maage_ui_label(&ui, -1, L"Development build - " MAAGE_LAUNCHER_VERSION, 198, -42, 410, 26);
+    maage_ui_label(&ui, 4, L"Minecraft as a Game Engine", 198, 180, -230, 30);
+    maage_ui_label(&ui, 4, L"Launcher build", 198, 235, 420, 28);
+    maage_ui_label(&ui, 4, L"Version " MAAGE_LAUNCHER_SEMANTIC_VERSION, 198, 270, -230, 27);
+    maage_ui_label(&ui, 4, L"Git revision " MAAGE_LAUNCHER_GIT_HASH, 198, 306, -230, 27);
+    maage_ui_label(&ui, 4, L"Open source and attribution", 198, 362, 440, 28);
+    maage_ui_label(&ui, 4, L"MaaGE's original source code is licensed under the Apache License, Version 2.0.\nMinecraft game resources have separate ownership and licensing.", 198, 400, -230, 62);
+    maage_ui_label(&ui, 4, L"MaaGE is an independent project and is not affiliated with or endorsed by Mojang Studios or Microsoft.", 198, 478, -230, 55);
+    maage_ui_button(&ui, 4, L"View MaaGE on GitHub", 198, 552, 216, MAAGE_UI_PROJECT);
+    maage_ui_button(&ui, 4, L"Back to Settings", 430, 552, 182, MAAGE_UI_BACK_SETTINGS);
+    maage_ui_label(&ui, -1, L"Launcher " MAAGE_LAUNCHER_VERSION, 198, -42, -548, 26);
     ui.status = maage_ui_button(&ui, -1, L"", -360, -48, 330, MAAGE_UI_STATUS);
-    ui.error = maage_ui_label(&ui, -1, L"", 198, -87, -230, 36);
+    ui.error = maage_ui_label(&ui, -1, L"", 198, -90, -230, 38);
+    ui.progress = maage_ui_control(&ui, -1, PROGRESS_CLASSW, L"Background preparation progress", 0, 198, -112, -230, 8, 0);
+    SendMessageW(ui.progress, PBM_SETRANGE32, 0, 100);
     if (maage_status_failed(ui.native.result)) {
         outcome = ui.native.result;
         DestroyWindow(ui.window);
         goto cleanup;
     }
+    maage_ui_appearance(&ui);
     maage_ui_installations_reload(&ui, -1);
-    maage_ui_refresh(&ui);
     maage_ui_layout(&ui);
+    maage_ui_refresh(&ui);
     if (ui.state->page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_ensure_selection(&ui);
     SetFocus(ui.navigation[0]);
     if (!SetTimer(ui.window, 1, 250, NULL)) {
         outcome = maage_status_from_win32((unsigned long) GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN);
         DestroyWindow(ui.window);
-    } else
+    } else {
         ShowWindow(ui.window, SW_SHOW);
+        UpdateWindow(ui.window);
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Win32 main window creation/presentation: %.3f s.", maage_time_monotonic_seconds() - started));
+        maage_launcher_ui_presented(state);
+    }
     while ((received = GetMessageW(&message, NULL, 0, 0)) > 0)
         if (!IsDialogMessageW(ui.window, &message)) {
             TranslateMessage(&message);
@@ -953,6 +1135,5 @@ cleanup:
     DeleteObject(ui.background);
     DeleteObject(ui.sidebar);
     UnregisterClassW(klass.lpszClassName, klass.hInstance);
-    *action = ui.result;
     return outcome;
 }

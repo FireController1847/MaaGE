@@ -2,6 +2,8 @@
 
 Core Log flushes live records. Client logs are instance-local `logs/client.log`, including captured stdout/stderr; Launcher logs use application-root `logs/launcher.log`. Dedicated Server output defaults to stdout/stderr unless file logging is selected. Normal close retains the plain log and produces a timestamped GZip archive; startup preserves otherwise unarchived output.
 
+`maage.launcher.startup` emits DEBUG timings for Core application/log initialization, minimal Launcher initialization, native window construction/presentation, network service initialization, account restoration/verification, catalog loading, resource readiness/full verification and first Play availability. These are monotonic phase durations. Window presentation records the native show/map boundary; it is not a compositor or display-latency measurement. No startup measurements are implied by the presence of this instrumentation.
+
 ## Native Fault Records
 
 `maage_log_init` installs supported native crash hooks and a separate append handle. The emergency writer bypasses the usual log mutex, streams, formatters, heap allocation and filters. It writes a bounded FATAL/Core/Stop record with OS/architecture, executable image base, process, signal/exception, fault address and available PC/SP/FP/ARM64 LR context. macOS can record image UUID and Windows a thread ID. Consult the matching binary/symbols and OS crash report for full symbolication, accounting for ASLR.

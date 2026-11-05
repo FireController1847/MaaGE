@@ -50,7 +50,7 @@ static void maage_launcher_win32_combo_text(HWND combo, UINT item, wchar_t text[
 
 LRESULT maage_launcher_win32_combo_measure(maage_launcher_win32_style *ui, LPARAM item) {
     MEASUREITEMSTRUCT *measure = (MEASUREITEMSTRUCT *) item;
-    if (measure->CtlType != ODT_COMBOBOX || !ui->dark) return FALSE;
+    if (measure->CtlType != ODT_COMBOBOX) return FALSE;
     measure->itemHeight = (UINT) maage_launcher_win32_scale(ui, 28);
     return TRUE;
 }
@@ -61,16 +61,18 @@ LRESULT maage_launcher_win32_combo_draw(maage_launcher_win32_style *ui, LPARAM i
     RECT rect;
     int saved, selected, disabled;
     COLORREF fill;
-    if (draw->CtlType != ODT_COMBOBOX || !ui->dark) return FALSE;
+    if (draw->CtlType != ODT_COMBOBOX) return FALSE;
     saved = SaveDC(draw->hDC);
     if (!saved) return FALSE;
     selected = (draw->itemState & ODS_SELECTED) && !(draw->itemState & ODS_COMBOBOXEDIT);
     disabled = (draw->itemState & ODS_DISABLED) != 0;
     fill = selected ? RGB(151, 57, 116) : (draw->itemState & ODS_COMBOBOXEDIT) ? RGB(52, 52, 52)
                                                                                : RGB(41, 41, 41);
+    if (!ui->dark) fill = GetSysColor(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW);
     SetDCBrushColor(draw->hDC, fill);
     FillRect(draw->hDC, &draw->rcItem, (HBRUSH) GetStockObject(DC_BRUSH));
-    SetTextColor(draw->hDC, disabled ? RGB(138, 138, 138) : RGB(245, 245, 245));
+    SetTextColor(draw->hDC, ui->dark ? (disabled ? RGB(138, 138, 138) : RGB(245, 245, 245)) : GetSysColor(disabled ? COLOR_GRAYTEXT : selected ? COLOR_HIGHLIGHTTEXT
+                                                                                                                                               : COLOR_WINDOWTEXT));
     SetBkMode(draw->hDC, TRANSPARENT);
     SelectObject(draw->hDC, ui->font);
     maage_launcher_win32_combo_text(draw->hwndItem, draw->itemID, text);
@@ -137,6 +139,10 @@ static void maage_launcher_win32_combo_paint(maage_launcher_win32_style *ui, HWN
 static LRESULT CALLBACK maage_launcher_win32_combo_proc(HWND combo, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
     maage_launcher_win32_style *ui = (maage_launcher_win32_style *) reference;
     LRESULT result;
+    if (!ui->dark) {
+        if (message == WM_NCDESTROY) RemoveWindowSubclass(combo, maage_launcher_win32_combo_proc, id);
+        return DefSubclassProc(combo, message, wparam, lparam);
+    }
     switch (message) {
     case WM_PAINT: {
         PAINTSTRUCT paint;
@@ -178,88 +184,6 @@ static LRESULT CALLBACK maage_launcher_win32_combo_proc(HWND combo, UINT message
     }
     result = DefSubclassProc(combo, message, wparam, lparam);
     if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_ENABLE || message == WM_KEYDOWN || message == WM_LBUTTONUP || message == CB_SETCURSEL || message == CB_SHOWDROPDOWN) InvalidateRect(combo, NULL, FALSE);
-    return result;
-}
-
-static void maage_launcher_win32_progress_paint(HWND progress, HDC dc, const maage_launcher_control *control) {
-    RECT rect, fill;
-    PBRANGE range;
-    int width, chunk, x, saved = SaveDC(dc);
-    double fraction;
-    if (!saved) return;
-    GetClientRect(progress, &rect);
-    DrawThemeParentBackground(progress, dc, &rect);
-    SelectObject(dc, GetStockObject(DC_BRUSH));
-    SelectObject(dc, GetStockObject(NULL_PEN));
-    SetDCBrushColor(dc, RGB(61, 61, 61));
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, rect.bottom, rect.bottom);
-    width = rect.right - rect.left;
-    fill = rect;
-    if (control->marquee) {
-        chunk = width / 4;
-        x = MulDiv(width + chunk, (int) control->marquee_phase, 90) - chunk;
-        fill.left = x > 0 ? x : 0;
-        fill.right = x + chunk < width ? x + chunk : width;
-    } else {
-        SendMessageW(progress, PBM_GETRANGE, FALSE, (LPARAM) &range);
-        fraction = range.iHigh > range.iLow ? ((double) SendMessageW(progress, PBM_GETPOS, 0, 0) - range.iLow) / ((double) range.iHigh - range.iLow) : 0.0;
-        if (fraction < 0.0) fraction = 0.0;
-        if (fraction > 1.0) fraction = 1.0;
-        fill.right = fill.left + (int) (width * fraction + 0.5);
-    }
-    if (fill.right > fill.left) {
-        SetDCBrushColor(dc, RGB(222, 48, 158));
-        RoundRect(dc, fill.left, fill.top, fill.right, fill.bottom, rect.bottom, rect.bottom);
-    }
-    RestoreDC(dc, saved);
-}
-
-static LRESULT CALLBACK maage_launcher_win32_progress_proc(HWND progress, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
-    maage_launcher_control *control = (maage_launcher_control *) reference;
-    LRESULT result;
-    switch (message) {
-    case WM_PAINT: {
-        PAINTSTRUCT paint;
-        HDC dc = BeginPaint(progress, &paint);
-        maage_launcher_win32_progress_paint(progress, dc, control);
-        EndPaint(progress, &paint);
-        return 0;
-    }
-    case WM_PRINTCLIENT:
-        maage_launcher_win32_progress_paint(progress, (HDC) wparam, control);
-        return 0;
-    case WM_ERASEBKGND:
-        return 1;
-    case PBM_SETMARQUEE:
-        if (!!wparam != control->marquee) {
-            control->marquee = !!wparam;
-            control->marquee_phase = 0;
-            if (control->marquee) {
-                if (!SetTimer(progress, 1, lparam > 0 ? (UINT) lparam : 30, NULL)) {
-                    maage_status failure = maage_status_from_win32(GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_CREATE);
-                    maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", failure, "Progress animation is unavailable.");
-                    return FALSE;
-                }
-            } else
-                KillTimer(progress, 1);
-            InvalidateRect(progress, NULL, FALSE);
-        }
-        return TRUE;
-    case WM_TIMER:
-        if (wparam == 1 && control->marquee) {
-            control->marquee_phase = (control->marquee_phase + 1) % 90;
-            InvalidateRect(progress, NULL, FALSE);
-            return 0;
-        }
-        break;
-    case WM_NCDESTROY:
-        KillTimer(progress, 1);
-        control->marquee = 0;
-        RemoveWindowSubclass(progress, maage_launcher_win32_progress_proc, id);
-        break;
-    }
-    result = DefSubclassProc(progress, message, wparam, lparam);
-    if (message == PBM_SETPOS || message == PBM_SETRANGE || message == PBM_SETRANGE32) InvalidateRect(progress, NULL, FALSE);
     return result;
 }
 
@@ -330,6 +254,33 @@ maage_status maage_launcher_win32_style_init(maage_launcher_win32_style *ui, HWN
     return ui->result;
 }
 
+maage_status maage_launcher_win32_appearance(maage_launcher_win32_style *ui, int appearance) {
+    HIGHCONTRASTW contrast;
+    DWORD light = 1, size = sizeof(light);
+    BOOL immersive;
+    unsigned i;
+    wchar_t kind[24];
+    if (!ui || appearance < 0 || appearance > 2) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_SET, 0);
+    memset(&contrast, 0, sizeof(contrast));
+    contrast.cbSize = sizeof(contrast);
+    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0)) ui->high_contrast = (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+    if (!appearance) RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &light, &size);
+    ui->dark = !ui->high_contrast && (appearance == 2 || (!appearance && !light));
+    immersive = ui->dark;
+    DwmSetWindowAttribute(ui->window, DWMWA_USE_IMMERSIVE_DARK_MODE, &immersive, sizeof(immersive));
+    for (i = 0; i < ui->count; ++i) {
+        GetClassNameW(ui->controls[i].handle, kind, 24);
+        if (!lstrcmpiW(kind, WC_LISTVIEWW)) {
+            ListView_SetBkColor(ui->controls[i].handle, maage_launcher_win32_color(ui, 0));
+            ListView_SetTextBkColor(ui->controls[i].handle, maage_launcher_win32_color(ui, 0));
+            ListView_SetTextColor(ui->controls[i].handle, maage_launcher_win32_text_color(ui));
+        }
+        InvalidateRect(ui->controls[i].handle, NULL, TRUE);
+    }
+    InvalidateRect(ui->window, NULL, TRUE);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
+
 maage_status maage_launcher_win32_style_destroy(maage_launcher_win32_style *ui) {
     int failed = 0;
     if (ui->font && !DeleteObject(ui->font)) failed = 1;
@@ -344,7 +295,7 @@ maage_status maage_launcher_win32_style_destroy(maage_launcher_win32_style *ui) 
 
 HWND maage_launcher_win32_control(maage_launcher_win32_style *ui, int page, const wchar_t *kind, const wchar_t *text, DWORD style, int x, int y, int width, int height, int id) {
     maage_launcher_control *control;
-    int combo = ui->dark && !lstrcmpiW(kind, L"COMBOBOX") && (style & 3) == CBS_DROPDOWNLIST;
+    int combo = !lstrcmpiW(kind, L"COMBOBOX") && (style & 3) == CBS_DROPDOWNLIST;
     if (maage_status_failed(ui->result)) return NULL;
     if (ui->count == sizeof(ui->controls) / sizeof(ui->controls[0])) {
         ui->result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_CREATE, 0);
@@ -373,21 +324,7 @@ HWND maage_launcher_win32_control(maage_launcher_win32_style *ui, int page, cons
         maage_launcher_win32_combo_height(control->handle, ui->dpi);
         if (!SetWindowSubclass(control->handle, maage_launcher_win32_combo_proc, 1, (DWORD_PTR) ui)) ui->result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
     }
-    if (ui->dark && !lstrcmpiW(kind, PROGRESS_CLASSW)) {
-        SetWindowTheme(control->handle, L"", L"");
-        SendMessageW(control->handle, PBM_SETBARCOLOR, 0, RGB(222, 48, 158));
-        SendMessageW(control->handle, PBM_SETBKCOLOR, 0, RGB(61, 61, 61));
-        if (!SetWindowSubclass(control->handle, maage_launcher_win32_progress_proc, 1, (DWORD_PTR) control)) ui->result = maage_status_make(MAAGE_STATUS_ERROR, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_INITIALIZE, 0);
-    }
     return control->handle;
-}
-
-void maage_launcher_win32_layout(maage_launcher_win32_style *ui) {
-    unsigned i;
-    for (i = 0; i < ui->count; ++i) {
-        maage_launcher_control *c = &ui->controls[i];
-        SetWindowPos(c->handle, NULL, maage_launcher_win32_scale(ui, c->x), maage_launcher_win32_scale(ui, c->y), maage_launcher_win32_scale(ui, c->width), maage_launcher_win32_scale(ui, c->height), SWP_NOZORDER | SWP_NOACTIVATE);
-    }
 }
 
 maage_status maage_launcher_win32_dpi_changed(maage_launcher_win32_style *ui, WPARAM dpi, LPARAM bounds) {
@@ -405,7 +342,7 @@ LRESULT maage_launcher_win32_button(maage_launcher_win32_style *ui, LPARAM notif
     HWND button = draw->hdr.hwndFrom;
     RECT rect;
     COLORREF fill, border, foreground;
-    int primary, disabled, pressed, hot, saved, radius;
+    int primary, disabled, pressed, hot, saved, radius, checked;
     UINT flags = DT_CENTER | DT_VCENTER | DT_SINGLELINE;
     if (draw->hdr.code != NM_CUSTOMDRAW || ui->high_contrast || (!ui->dark && button != ui->primary)) return CDRF_DODEFAULT;
     GetClassNameW(button, kind, 16);
@@ -414,6 +351,7 @@ LRESULT maage_launcher_win32_button(maage_launcher_win32_style *ui, LPARAM notif
     disabled = !IsWindowEnabled(button);
     pressed = (draw->uItemState & CDIS_SELECTED) != 0;
     hot = (draw->uItemState & CDIS_HOT) != 0;
+    checked = SendMessageW(button, BM_GETCHECK, 0, 0) == BST_CHECKED;
     fill = primary ? (pressed ? RGB(121, 42, 92) : hot ? RGB(174, 66, 135)
                                                        : RGB(151, 57, 116))
                    : (pressed ? RGB(43, 43, 43) : hot ? RGB(67, 67, 67)
@@ -421,6 +359,10 @@ LRESULT maage_launcher_win32_button(maage_launcher_win32_style *ui, LPARAM notif
     if (disabled) fill = ui->dark ? RGB(38, 38, 38) : GetSysColor(COLOR_BTNFACE);
     border = disabled ? (ui->dark ? RGB(59, 59, 59) : GetSysColor(COLOR_3DSHADOW)) : hot || (GetWindowLongPtrW(button, GWL_STYLE) & BS_TYPEMASK) == BS_DEFPUSHBUTTON ? RGB(222, 74, 165)
                                                                                                                                                                      : RGB(87, 87, 87);
+    if (checked && !disabled) {
+        fill = RGB(78, 52, 69);
+        border = RGB(222, 74, 165);
+    }
     foreground = disabled ? (ui->dark ? RGB(138, 138, 138) : GetSysColor(COLOR_GRAYTEXT)) : RGB(245, 245, 245);
     saved = SaveDC(draw->hdc);
     if (!saved) return CDRF_DODEFAULT;
@@ -435,7 +377,7 @@ LRESULT maage_launcher_win32_button(maage_launcher_win32_style *ui, LPARAM notif
     RoundRect(draw->hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
     SetTextColor(draw->hdc, foreground);
     SetBkMode(draw->hdc, TRANSPARENT);
-    SelectObject(draw->hdc, ui->font);
+    SelectObject(draw->hdc, (HFONT) SendMessageW(button, WM_GETFONT, 0, 0));
     GetWindowTextW(button, text, 256);
     if (SendMessageW(button, WM_QUERYUISTATE, 0, 0) & UISF_HIDEACCEL) flags |= DT_HIDEPREFIX;
     DrawTextW(draw->hdc, text, -1, &rect, flags);

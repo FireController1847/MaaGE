@@ -40,12 +40,9 @@ typedef enum maage_assets_mode {
 #include "access/access.h"
 /* Borrows access, which must outlive this manager. NULL always denies work. */
 maage_status maage_assets_create(maage_access *access, maage_assets **output, maage_status_trace *trace);
-int maage_assets_access_allowed(maage_assets *assets);
 /* One worker at a time. PREPARE reuses unchanged verified receipts. VERIFY hashes
  * all resources without acquiring/reconstructing files; REPAIR also fixes defects. */
 maage_status maage_assets_start(maage_assets *assets, maage_assets_mode mode);
-/* Retry preserves whether the failed operation requested a full repair. */
-maage_status maage_assets_retry(maage_assets *assets);
 maage_status maage_assets_snapshot(maage_assets *assets, maage_setup_progress *progress);
 maage_status maage_assets_cancel(maage_assets *assets);
 maage_status maage_assets_destroy(maage_assets *assets);

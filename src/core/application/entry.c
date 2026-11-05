@@ -3,6 +3,9 @@
 #endif
 #include "maage/application.h"
 #include "maage/log.h"
+#ifdef MAAGE_APPLICATION_STARTUP_TIMING
+#include "maage/time.h"
+#endif
 #include "cmakecfg.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,6 +132,9 @@ static int maage_application_run(int argc, char *const argv[]) {
     maage_log_config config;
     maage_status outcome, finished;
     char *path;
+#ifdef MAAGE_APPLICATION_STARTUP_TIMING
+    double started = maage_time_monotonic_seconds();
+#endif
 #ifdef MAAGE_APPLICATION_METADATA_QUERY
     int result;
     extern int maage_application_query(int argc, char *const argv[], int *result);
@@ -164,6 +170,9 @@ static int maage_application_run(int argc, char *const argv[]) {
     if (!path) maage_log_error("maage.core.application", "Cannot resolve or create the per-user MaaGE logs directory.");
 #endif
     free(path);
+#ifdef MAAGE_APPLICATION_STARTUP_TIMING
+    MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Core application/log initialization: %.3f s.", maage_time_monotonic_seconds() - started));
+#endif
     outcome = maage_application_main(argc, argv);
     finished = maage_log_shutdown();
     if (maage_status_is_success(outcome) && maage_status_failed(finished)) outcome = finished;

@@ -358,11 +358,16 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   no renderer; only explicit `--renderer-demo` does. Preserve native focus/accessibility/
   high contrast and DPI behavior; Windows uses shared private 96-DPI/font/painting helpers,
   PerMonitorV2 and Common Controls v6, updating only changed timer state. No webview/toolkit
-  framework. Keep Play/account selection, News empty until real, Installations and Settings.
+  framework. One immediately presented window provides Play, Installations, Accounts,
+  Settings and About. Defer catalog/package I/O, account restoration/renewal and resource
+  preparation to owned workers after presentation; native controls consume copied snapshots.
+  Keep account/resource progress, cancellation, retry, Verify and Repair in that window.
 - Launcher preferences are nonsecret `config/launcher.json`; instance manifests own Client
   association, optional CLI and folder mappings. Parse shell-free CLI directly; reserve
   Launcher-managed instance/data-directory/appearance arguments. Play rechecks selected
   verified account/access/resources and launches only the exact assigned available build.
+  Recheck resources asynchronously for Play and reject changed account/instance/build
+  selections before dispatch; maintenance never overlaps a local launch/running Client.
 - Authentication is Launcher-worker-owned Microsoft consumer OAuth code + S256 PKCE with
   device fallback, approved public client `ff5d912a-45ca-409e-a364-9d1bf9512f61`, registered
   `http://localhost`. Worker loopback binds only 127.0.0.1 at an ephemeral port; exchange

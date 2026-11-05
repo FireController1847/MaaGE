@@ -21,7 +21,7 @@ typedef struct maage_access_profile {
 typedef struct maage_access_snapshot {
     maage_access_profile *profiles;
     unsigned count, capacity, revision;
-    int busy, allowed, auto_continue;
+    int busy, allowed, metadata_ready, restored;
     char status[512], device_url[256], device_code[33];
     double device_deadline;
     maage_status result;
@@ -51,6 +51,4 @@ maage_status maage_access_cancel_operation(maage_access *access);
 maage_status maage_access_cancel(maage_access *access);
 maage_status maage_access_destroy(maage_access *access);
 const char *maage_access_state_name(maage_access_state state);
-/* Main thread: 1 continue, 0 cancel, -1 unavailable. */
-maage_status maage_access_native_run(maage_access *access, int manage_accounts, int *action);
 #endif

@@ -8,8 +8,8 @@
 #define MAAGE_PROJECT_URL "https://github.com/FireController1847/MaaGE"
 typedef enum maage_launcher_page {
     MAAGE_PAGE_PLAY,
-    MAAGE_PAGE_NEWS,
     MAAGE_PAGE_INSTALLATIONS,
+    MAAGE_PAGE_ACCOUNTS,
     MAAGE_PAGE_SETTINGS,
     MAAGE_PAGE_ABOUT
 } maage_launcher_page;
@@ -18,6 +18,7 @@ typedef struct maage_installation {
     char uuid[37], name[96], client[65];
     char arguments[MAAGE_INSTANCE_ARGUMENTS_CAPACITY];
 } maage_installation;
+typedef struct maage_launcher_startup maage_launcher_startup;
 typedef struct maage_launcher_ui {
     maage_access *access;
     maage_assets *assets;
@@ -27,6 +28,7 @@ typedef struct maage_launcher_ui {
     int appearance; /* 0 system, 1 light, 2 dark */
     char account[33], root[MAAGE_PATH_CAPACITY], resources[MAAGE_PATH_CAPACITY];
     char error[256], account_status[512];
+    char resource_status[768], launch_status[512], active_summary[256], authentication_status[768];
     maage_status result;
     maage_status_trace trace;
     maage_access_snapshot accounts;
@@ -36,6 +38,11 @@ typedef struct maage_launcher_ui {
     maage_client_job *client_job;
     maage_process *client_process;
     int can_play;
+    maage_launcher_startup *startup;
+    int catalog_ready, catalog_finished, services_ready, account_bound, account_explicit, resources_pending, play_timed, presented, launch_pending;
+    char pending_client[65], pending_instance[37], pending_account[33];
+    maage_assets_mode resource_mode;
+    double started_at;
     char running_client[65], running_instance[37];
     maage_client_candidate client_candidate;
     char replacing_client[65];
@@ -44,7 +51,10 @@ typedef struct maage_launcher_ui {
     char client_status[512];
 } maage_launcher_ui;
 maage_status maage_launcher_ui_init(maage_launcher_ui *ui, maage_access *access, maage_assets *assets);
+/* Native adapters call after first presentation. Only this schedules startup I/O. */
+maage_status maage_launcher_ui_presented(maage_launcher_ui *ui);
 maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui);
+maage_launcher_page maage_launcher_attention_page(const maage_launcher_ui *ui);
 maage_status maage_launcher_ui_save(maage_launcher_ui *ui);
 maage_status maage_launcher_installation_write(maage_launcher_ui *ui, int index, const char *name, const char *client, const char *arguments);
 maage_status maage_launcher_installation_remove(maage_launcher_ui *ui, unsigned index);
@@ -64,7 +74,9 @@ maage_status maage_launcher_client_cancel_import(maage_launcher_ui *ui);
 #endif
 maage_status maage_launcher_account_select(maage_launcher_ui *ui, const char *uuid);
 maage_status maage_launcher_account_restore(maage_launcher_ui *ui);
-/* Main-thread native shell: 0 close, 1 manage accounts, 2 repair assets, -1 error.
- * Services outlive the shell. Returning to it preserves navigation in ui. */
-maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action);
+/* Queues one resource operation, waiting for actual account authorization. */
+maage_status maage_launcher_resources(maage_launcher_ui *ui, maage_assets_mode mode);
+maage_status maage_launcher_resources_cancel(maage_launcher_ui *ui);
+/* Main-thread native shell. Closing cancels services; the caller joins them. */
+maage_status maage_launcher_native_run(maage_launcher_ui *state);
 #endif

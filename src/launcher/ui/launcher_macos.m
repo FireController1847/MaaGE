@@ -1,6 +1,9 @@
 #import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
 #include "launcher.h"
 #include "maage/launcher_version.h"
+#include "maage/log.h"
+#include "maage/time.h"
 #include <string.h>
 
 static NSStackView *maage_ui_stack(BOOL horizontal, CGFloat spacing) {
@@ -100,30 +103,27 @@ static NSTableView *maage_ui_navigation_table(void) {
 @interface MaaGELauncherController : NSObject <NSWindowDelegate, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
-@property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients;
+@property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients, *accounts;
 @property(nonatomic, strong) NSView *body;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
-@property(nonatomic, strong) NSButton *status, *repair, *verify, *play;
-@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus;
+@property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *copyCode, *openDevice;
+@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus;
+@property(nonatomic, strong) NSProgressIndicator *progress;
+@property(nonatomic, strong) NSPopUpButton *appearance;
+@property(nonatomic) int displayedAppearance;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSTextField *installationName, *installationArguments, *installationHeading, *installationHint;
 @property(nonatomic, strong) NSPopUpButton *installationClient;
 @property(nonatomic, strong) NSButton *createInstallationButton, *saveInstallationButton, *duplicateInstallationButton, *removeInstallationButton, *defaultInstallationButton, *activateInstallationButton, *cancelInstallationButton, *folderInstallationButton;
 @property(nonatomic) unsigned editedInstallationID, accountRevision, clientRevision;
 @property(nonatomic) BOOL hasEditedInstallation, creatingInstallation, updatingInstallationSelection;
-@property(nonatomic) int result;
 @end
 @implementation MaaGELauncherController
 - (NSButton *)button:(NSString *)title action:(SEL)action {
     return [NSButton buttonWithTitle:title target:self action:action];
 }
-- (void)finish:(int)result {
-    if (self.state->client_job) {
-        NSBeep();
-        return;
-    }
-    self.result = result;
+- (void)finish {
     [self.timer invalidate];
     self.timer = nil;
     [self.window orderOut:nil];
@@ -132,25 +132,27 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)quit:(id)sender {
     (void) sender;
-    [self finish:0];
+    [self finish];
 }
 - (BOOL)windowShouldClose:(NSWindow *)window {
     (void) window;
-    [self finish:0];
+    [self finish];
     return NO;
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)application {
     (void) application;
-    [self finish:0];
+    [self finish];
     return NSTerminateCancel;
 }
 - (void)manage:(id)sender {
     (void) sender;
-    if (!self.state->accounts.busy) [self finish:1];
+    [self activatePage:MAAGE_PAGE_ACCOUNTS];
 }
 - (void)addAccount:(id)sender {
     (void) sender;
-    if (!self.state->client_job && (!maage_status_failed(maage_access_sign_in(self.state->access, 0)))) [self finish:1];
+    [self activatePage:MAAGE_PAGE_ACCOUNTS];
+    maage_access_sign_in(self.state->access, 0);
+    [self refresh:nil];
 }
 - (void)signOutAccount:(id)sender {
     (void) sender;
@@ -164,13 +166,52 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)repairAssets:(id)sender {
     (void) sender;
-    if (maage_access_allowed(self.state->access)) [self finish:2];
-    else
-        [self manage:nil];
+    maage_launcher_resources(self.state, MAAGE_ASSETS_REPAIR);
+    [self refresh:nil];
+}
+- (void)verifyResources:(id)sender {
+    (void) sender;
+    maage_launcher_resources(self.state, MAAGE_ASSETS_VERIFY);
+    [self refresh:nil];
+}
+- (void)retryResources:(id)sender {
+    (void) sender;
+    maage_launcher_resources(self.state, self.state->resource_mode);
+    [self refresh:nil];
+}
+- (void)cancelResources:(id)sender {
+    (void) sender;
+    maage_launcher_resources_cancel(self.state);
+    [self refresh:nil];
+}
+- (void)deviceSignIn:(id)sender {
+    (void) sender;
+    maage_access_sign_in(self.state->access, 1);
+    [self refresh:nil];
+}
+- (void)cancelAccount:(id)sender {
+    (void) sender;
+    maage_access_cancel_operation(self.state->access);
+    [self refresh:nil];
+}
+- (void)copyCode:(id)sender {
+    (void) sender;
+    if (!*self.state->accounts.device_code) return;
+    [NSPasteboard.generalPasteboard clearContents];
+    [NSPasteboard.generalPasteboard setString:@(self.state->accounts.device_code) forType:NSPasteboardTypeString];
+}
+- (void)openDevice:(id)sender {
+    (void) sender;
+    if (*self.state->accounts.device_url) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@(self.state->accounts.device_url)]];
+}
+- (void)showInstallations:(id)sender {
+    (void) sender;
+    [self activatePage:MAAGE_PAGE_INSTALLATIONS];
 }
 - (void)verifyAccount:(id)sender {
     (void) sender;
-    if (self.state->account[0]) maage_access_verify_local(self.state->access, self.state->account);
+    if (!self.state->accounts.restored) maage_access_restore(self.state->access);
+    else if (self.state->account[0]) maage_access_verify_local(self.state->access, self.state->account);
     [self refresh:nil];
 }
 - (void)playClient:(id)sender {
@@ -199,6 +240,10 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) sender;
     [self activatePage:MAAGE_PAGE_SETTINGS];
 }
+- (void)showReadiness:(id)sender {
+    (void) sender;
+    [self activatePage:maage_launcher_attention_page(self.state)];
+}
 - (void)showAbout:(id)sender {
     (void) sender;
     [self activatePage:MAAGE_PAGE_ABOUT];
@@ -207,15 +252,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) sender;
     NSString *uuid = self.account.selectedItem.representedObject;
     if (uuid) maage_launcher_account_select(self.state, uuid.UTF8String);
-    else if (self.account.selectedItem.tag == 1) {
-        [self manage:nil];
-        return;
-    } else if (self.account.selectedItem.tag == 2) [self verifyAccount:nil];
-    else if (self.account.selectedItem.tag == 3) {
-        [self addAccount:nil];
-        return;
-    } else if (self.account.selectedItem.tag == 4) [self signOutAccount:nil];
-    else if (self.account.selectedItem.tag == 5) [self removeAccount:nil];
+    else if (self.account.selectedItem.tag == 1) [self manage:nil];
     self.accountRevision = 0;
     [self refresh:nil];
 }
@@ -233,6 +270,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)table {
     return table == self.sidebar ? 3 : table == self.settingsSidebar ? 2
+                                   : table == self.accounts          ? self.state->accounts.count
                                    : table == self.clients           ? self.state->clients->count
                                                                      : self.state->count;
 }
@@ -245,8 +283,8 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) column;
     if (table == self.sidebar || table == self.settingsSidebar) {
         if (table == self.settingsSidebar) row += MAAGE_PAGE_SETTINGS;
-        NSArray *names = @[ @"Play", @"News", @"Installations", @"Settings", @"About" ];
-        NSArray *symbols = @[ @"play", @"newspaper", @"square.stack", @"gearshape", @"info.circle" ];
+        NSArray *names = @[ @"Play", @"Installations", @"Accounts", @"Settings", @"About" ];
+        NSArray *symbols = @[ @"play.fill", @"square.stack", @"person.crop.circle", @"gearshape", @"info.circle" ];
         NSStackView *line = maage_ui_stack(YES, 11);
         if (@available(macOS 11.0, *)) {
             NSImageView *icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbols[row] accessibilityDescription:names[row]]];
@@ -255,6 +293,15 @@ static NSTableView *maage_ui_navigation_table(void) {
             [line addArrangedSubview:icon];
         }
         [line addArrangedSubview:maage_ui_row_label(names[row], 13, NO)];
+        return maage_ui_row(line, 10);
+    }
+    if (table == self.accounts) {
+        maage_access_profile *profile = &self.state->accounts.profiles[row];
+        NSStackView *line = maage_ui_stack(NO, 4);
+        [line addArrangedSubview:maage_ui_row_label(@(profile->name), 14, YES)];
+        NSTextField *detail = maage_ui_row_label(@(maage_access_state_name(profile->state)), 12, NO);
+        detail.textColor = NSColor.secondaryLabelColor;
+        [line addArrangedSubview:detail];
         return maage_ui_row(line, 10);
     }
     if (table == self.clients) {
@@ -269,8 +316,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     maage_installation *item = &self.state->installations[row];
     if ([column.identifier isEqualToString:@"role"]) {
         NSString *role = item->id == self.state->selected && item->id == self.state->default_id ? @"Active / Default"
-                         : item->id == self.state->selected ? @"Active"
-                         : item->id == self.state->default_id ? @"Default" : @"—";
+                         : item->id == self.state->selected                                     ? @"Active"
+                         : item->id == self.state->default_id                                   ? @"Default"
+                                                                                                : @"—";
         NSTextField *label = maage_ui_row_label(role, 11, YES);
         label.textColor = NSColor.secondaryLabelColor;
         return maage_ui_row(label, 6);
@@ -283,6 +331,14 @@ static NSTableView *maage_ui_navigation_table(void) {
     return maage_ui_row(line, 8);
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
+    if (notification.object == self.accounts) {
+        NSInteger row = self.accounts.selectedRow;
+        if (row >= 0 && (unsigned) row < self.state->accounts.count && strcmp(self.state->account, self.state->accounts.profiles[row].uuid)) {
+            maage_launcher_account_select(self.state, self.state->accounts.profiles[row].uuid);
+            [self refresh:nil];
+        }
+        return;
+    }
     if (notification.object == self.settingsSidebar) {
         NSInteger row = self.settingsSidebar.selectedRow;
         if (row >= 0) [self activatePage:(maage_launcher_page) (MAAGE_PAGE_SETTINGS + row)];
@@ -338,7 +394,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)updateInstallationEditor {
     NSInteger row = [self editedInstallationRow];
     BOOL editing = !self.creatingInstallation && row >= 0;
-    BOOL enabled = !self.state->client_job;
+    BOOL enabled = self.state->catalog_ready && !self.state->client_job;
     NSString *hint = @"Select a row on the left to edit its configuration.";
     if (self.creatingInstallation) {
         self.installationHeading.stringValue = @"Create installation";
@@ -394,7 +450,8 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)reloadInstallations {
     [self.installation removeAllItems];
-    for (unsigned i = 0; i < self.state->count; ++i) [self.installation addItemWithTitle:@(self.state->installations[i].name)];
+    for (unsigned i = 0; i < self.state->count; ++i)
+        [self.installation addItemWithTitle:@(self.state->installations[i].name)];
     if (!self.creatingInstallation) {
         NSInteger row = [self editedInstallationRow];
         if (row < 0) row = [self activeInstallationRow];
@@ -415,7 +472,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)newInstallation:(id)sender {
     (void) sender;
-    if (self.state->client_job) return;
+    if (!self.state->catalog_ready || self.state->client_job) return;
     self.creatingInstallation = YES;
     self.updatingInstallationSelection = YES;
     [self.installations deselectAll:nil];
@@ -529,6 +586,12 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) timer;
     maage_launcher_ui_refresh(self.state);
     maage_launcher_ui *state = self.state;
+    if (self.displayedAppearance != state->appearance) {
+        self.displayedAppearance = state->appearance;
+        [self.appearance selectItemAtIndex:state->appearance];
+        [self applyAppearance];
+    }
+    self.appearance.enabled = state->catalog_ready;
     if (self.accountRevision != state->accounts.revision || !self.account.numberOfItems) {
         [self.account removeAllItems];
         for (unsigned i = 0; i < state->accounts.count; ++i) {
@@ -541,27 +604,23 @@ static NSTableView *maage_ui_navigation_table(void) {
         if (!self.account.numberOfItems) [self.account addItemWithTitle:@"No connected Minecraft account"];
         NSMenuItem *chosen = self.account.selectedItem;
         [self.account.menu addItem:NSMenuItem.separatorItem];
-        [self.account addItemWithTitle:@"Add Microsoft Account…"];
-        self.account.lastItem.tag = 3;
-        [self.account addItemWithTitle:@"Manage Microsoft Accounts…"];
+        [self.account addItemWithTitle:@"Manage Accounts…"];
         self.account.lastItem.tag = 1;
-        [self.account addItemWithTitle:@"Refresh / Reverify Account"];
-        self.account.lastItem.tag = 2;
-        self.account.lastItem.enabled = !state->accounts.busy && state->account[0];
-        [self.account addItemWithTitle:@"Sign Out"];
-        self.account.lastItem.tag = 4;
-        self.account.lastItem.enabled = !state->accounts.busy && state->account[0];
-        [self.account addItemWithTitle:@"Remove Account"];
-        self.account.lastItem.tag = 5;
-        self.account.lastItem.enabled = !state->accounts.busy && state->account[0];
         [self.account selectItem:chosen];
         self.account.autoenablesItems = NO;
         self.accountRevision = state->accounts.revision;
+        [self.accounts reloadData];
+        for (unsigned i = 0; i < state->accounts.count; ++i)
+            if (!strcmp(state->account, state->accounts.profiles[i].uuid)) {
+                [self.accounts selectRowIndexes:[NSIndexSet indexSetWithIndex:i] byExtendingSelection:NO];
+                break;
+            }
     }
     if (self.clientRevision != state->client_revision) {
         self.clientRevision = state->client_revision;
         [self.clients reloadData];
-        [self reloadInstallationRoles];
+        if (self.installation.numberOfItems != state->count) [self reloadInstallations];
+        else [self reloadInstallationRoles];
         NSString *clientID = self.installationClient.selectedItem.representedObject ?: @"";
         [self installationClientChoices:clientID];
     }
@@ -580,77 +639,145 @@ static NSTableView *maage_ui_navigation_table(void) {
     }
 #endif
     self.clientStatus.stringValue = @(state->client_status);
+    self.launchStatus.stringValue = @(state->launch_status);
+    self.activeSummary.stringValue = @(state->active_summary);
     self.play.enabled = state->can_play;
-    self.play.title = state->client_process ? @"Client Running" : @"▶  Play";
-    self.account.enabled = !state->accounts.busy;
+    self.play.title = state->client_process ? @"Client Running" : state->launch_pending      ? @"Checking Resources…"
+                                                              : state->client_operation == 4 ? @"Starting Client…"
+                                                                                             : @"Play";
+    self.account.enabled = state->accounts.metadata_ready;
     self.accountStatus.stringValue = @(state->account_status);
-    self.verify.enabled = !state->accounts.busy && state->account[0];
+    self.authenticationStatus.stringValue = @(state->authentication_status);
+    BOOL accountAvailable = state->services_ready && !state->accounts.busy;
+    self.verify.enabled = accountAvailable && (state->account[0] || !state->accounts.restored);
+    self.signIn.enabled = self.deviceSignIn.enabled = accountAvailable && state->accounts.restored;
+    self.signOut.enabled = self.removeAccountButton.enabled = accountAvailable && state->accounts.restored && state->account[0];
+    self.cancelAccount.enabled = state->accounts.busy;
+    self.copyCode.enabled = self.openDevice.enabled = *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds();
     self.status.title = @(state->readiness);
-    self.status.toolTip = @"Open resource and account settings";
-    self.resourceStatus.stringValue = state->progress.stage == MAAGE_SETUP_FAILED ? @(state->progress.error) : @(state->readiness);
-    self.repair.enabled = !state->accounts.busy;
-    self.repair.title = state->accounts.allowed ? @"Repair Assets…" : @"Verify Minecraft Access…";
+    self.resourceStatus.stringValue = @(state->resource_status);
+    BOOL resourceAvailable = !state->progress.busy && !state->client_process && state->client_operation != 4 && !state->launch_pending;
+    self.repair.enabled = self.verifyResources.enabled = self.retryResources.enabled = resourceAvailable;
+    self.cancelResources.enabled = state->progress.busy || state->resources_pending;
     self.error.stringValue = @(state->error);
+    self.progress.hidden = !state->progress.busy && !state->accounts.busy;
+    self.progress.indeterminate = !state->progress.busy || state->progress.percent < 0;
+    if (!self.progress.hidden && self.progress.indeterminate) [self.progress startAnimation:nil];
+    else {
+        [self.progress stopAnimation:nil];
+        self.progress.doubleValue = state->progress.percent >= 0 ? state->progress.percent : 0;
+    }
     [self updateInstallationEditor];
 }
 - (NSView *)playPage {
     NSView *page = [[NSView alloc] init];
-    NSStackView *header = maage_ui_stack(YES, 12);
-    header.translatesAutoresizingMaskIntoConstraints = NO;
-    [page addSubview:header];
-    [header addArrangedSubview:maage_ui_label(@"Play MaaGE", 24, YES)];
-    NSView *space = [[NSView alloc] init];
-    [header addArrangedSubview:space];
-    self.account = [[NSPopUpButton alloc] init];
-    self.account.target = self;
-    self.account.action = @selector(selectAccount:);
-    self.account.accessibilityLabel = @"Active Minecraft account";
-    [self.account.widthAnchor constraintLessThanOrEqualToConstant:270].active = YES;
-    [header addArrangedSubview:self.account];
-    [NSLayoutConstraint activateConstraints:@[ [header.leadingAnchor constraintEqualToAnchor:page.leadingAnchor], [header.trailingAnchor constraintEqualToAnchor:page.trailingAnchor], [header.topAnchor constraintEqualToAnchor:page.topAnchor] ]];
-    NSStackView *center = maage_ui_stack(NO, 14);
-    center.alignment = NSLayoutAttributeCenterX;
-    NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-    [icon.widthAnchor constraintEqualToConstant:48].active = YES;
-    [icon.heightAnchor constraintEqualToConstant:48].active = YES;
-    [center addArrangedSubview:icon];
-    [center addArrangedSubview:maage_ui_label(@"MaaGE", 32, YES)];
-    NSTextField *subtitle = maage_ui_label(@"Minecraft as a Game Engine", 14, NO);
-    subtitle.textColor = NSColor.secondaryLabelColor;
-    [center addArrangedSubview:subtitle];
+    NSStackView *form = maage_ui_stack(NO, 16);
+    [form addArrangedSubview:maage_ui_label(@"Play", 30, YES)];
+    NSTextField *intro = maage_ui_label(@"Choose your installation and jump into MaaGE.", 14, NO);
+    intro.textColor = NSColor.secondaryLabelColor;
+    [form addArrangedSubview:intro];
+    [form setCustomSpacing:30 afterView:intro];
+    [form addArrangedSubview:maage_ui_label(@"Installation", 12, YES)];
     self.installation = [[NSPopUpButton alloc] init];
     self.installation.target = self;
     self.installation.action = @selector(selectInstallation:);
-    self.installation.accessibilityLabel = @"MaaGE installation";
-    [self.installation.widthAnchor constraintEqualToConstant:260].active = YES;
-    [center addArrangedSubview:self.installation];
-    NSButton *play = [self button:@"▶  Play" action:@selector(playClient:)];
-    self.play = play;
-    play.bezelStyle = NSBezelStyleRounded;
-    play.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    play.bezelColor = [NSColor colorWithSRGBRed:.87 green:.19 blue:.62 alpha:1];
-    play.enabled = NO;
-    play.toolTip = @"Start the Client selected by this installation as an independent process.";
-    [play.widthAnchor constraintEqualToConstant:260].active = YES;
-    [play.heightAnchor constraintEqualToConstant:44].active = YES;
-    [center addArrangedSubview:play];
-    self.clientStatus = maage_ui_label(@"", 12, NO);
+    self.installation.accessibilityLabel = @"Installation for Play";
+    [form addArrangedSubview:self.installation];
+    self.clientStatus = maage_ui_label(@"Loading Client builds…", 12, NO);
     self.clientStatus.textColor = NSColor.secondaryLabelColor;
-    [self.clientStatus.widthAnchor constraintLessThanOrEqualToConstant:560].active = YES;
-    [center addArrangedSubview:self.clientStatus];
-    center.translatesAutoresizingMaskIntoConstraints = NO;
-    [page addSubview:center];
-    [NSLayoutConstraint activateConstraints:@[ [center.centerXAnchor constraintEqualToAnchor:page.centerXAnchor], [center.centerYAnchor constraintEqualToAnchor:page.centerYAnchor constant:15], [center.topAnchor constraintGreaterThanOrEqualToAnchor:header.bottomAnchor constant:24], [center.bottomAnchor constraintLessThanOrEqualToAnchor:page.bottomAnchor constant:-12] ]];
+    [form addArrangedSubview:self.clientStatus];
+    self.launchStatus = maage_ui_label(@"Starting Launcher services…", 13, NO);
+    [form addArrangedSubview:self.launchStatus];
+    self.play = [self button:@"Play" action:@selector(playClient:)];
+    self.play.bezelStyle = NSBezelStyleRounded;
+    self.play.font = [NSFont systemFontOfSize:20 weight:NSFontWeightSemibold];
+    self.play.bezelColor = [NSColor colorWithSRGBRed:.87 green:.19 blue:.62 alpha:1];
+    self.play.enabled = NO;
+    self.play.keyEquivalent = @"\r";
+    [self.play.widthAnchor constraintEqualToConstant:260].active = YES;
+    [self.play.heightAnchor constraintEqualToConstant:48].active = YES;
+    [form addArrangedSubview:self.play];
+    NSStackView *shortcuts = maage_ui_stack(YES, 8);
+    [shortcuts addArrangedSubview:[self button:@"Installations" action:@selector(showInstallations:)]];
+    [shortcuts addArrangedSubview:[self button:@"Accounts" action:@selector(manage:)]];
+    [shortcuts addArrangedSubview:[self button:@"Resources" action:@selector(showSettings:)]];
+    [form addArrangedSubview:shortcuts];
+    form.translatesAutoresizingMaskIntoConstraints = NO;
+    [page addSubview:form];
+    [NSLayoutConstraint activateConstraints:@[
+        [form.leadingAnchor constraintEqualToAnchor:page.leadingAnchor
+                                           constant:12],
+        [form.trailingAnchor constraintEqualToAnchor:page.trailingAnchor
+                                            constant:-12],
+        [form.centerYAnchor constraintEqualToAnchor:page.centerYAnchor],
+        [form.topAnchor constraintGreaterThanOrEqualToAnchor:page.topAnchor
+                                                    constant:12],
+        [form.bottomAnchor constraintLessThanOrEqualToAnchor:page.bottomAnchor
+                                                    constant:-12],
+        [self.installation.widthAnchor constraintEqualToAnchor:form.widthAnchor],
+        [self.clientStatus.widthAnchor constraintEqualToAnchor:form.widthAnchor],
+        [self.launchStatus.widthAnchor constraintEqualToAnchor:form.widthAnchor]
+    ]];
     return page;
 }
-- (NSView *)newsPage {
-    NSStackView *page = maage_ui_stack(NO, 14);
-    [page addArrangedSubview:maage_ui_label(@"News", 24, YES)];
-    [page addArrangedSubview:maage_ui_label(@"No announcements yet", 17, YES)];
-    [page addArrangedSubview:maage_ui_label(@"News will appear here when a source is configured. For now, follow development on GitHub.", 13, NO)];
-    [page addArrangedSubview:[self button:@"Open MaaGE Project ↗" action:@selector(openProject:)]];
-    [page addArrangedSubview:[[NSView alloc] init]];
-    return page;
+- (NSView *)accountsPage {
+    NSStackView *groups = maage_ui_stack(NO, 14);
+    [groups addArrangedSubview:maage_ui_label(@"Accounts", 24, YES)];
+    [groups addArrangedSubview:maage_ui_label(@"Select a Minecraft profile. Only verified Java Edition access enables Play.", 13, NO)];
+    self.accounts = [[NSTableView alloc] init];
+    self.accounts.headerView = nil;
+    self.accounts.rowHeight = 54;
+    self.accounts.delegate = self;
+    self.accounts.dataSource = self;
+    self.accounts.accessibilityLabel = @"Minecraft accounts";
+    NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"profile"];
+    column.width = 560;
+    [self.accounts addTableColumn:column];
+    self.accounts.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
+    NSScrollView *list = [[NSScrollView alloc] init];
+    list.hasVerticalScroller = YES;
+    list.documentView = self.accounts;
+    [list.heightAnchor constraintEqualToConstant:130].active = YES;
+    [list.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
+    [groups addArrangedSubview:list];
+    self.accountStatus = maage_ui_label(@"", 13, NO);
+    [self.accountStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
+    [groups addArrangedSubview:self.accountStatus];
+    NSStackView *actions = maage_ui_stack(YES, 8);
+    self.signIn = [self button:@"Sign In with Microsoft" action:@selector(addAccount:)];
+    self.deviceSignIn = [self button:@"Use Device Code" action:@selector(deviceSignIn:)];
+    self.verify = [self button:@"Refresh / Retry" action:@selector(verifyAccount:)];
+    [actions addArrangedSubview:self.signIn];
+    [actions addArrangedSubview:self.deviceSignIn];
+    [actions addArrangedSubview:self.verify];
+    [groups addArrangedSubview:actions];
+    actions = maage_ui_stack(YES, 8);
+    self.signOut = [self button:@"Sign Out" action:@selector(signOutAccount:)];
+    self.removeAccountButton = [self button:@"Remove Account" action:@selector(removeAccount:)];
+    self.cancelAccount = [self button:@"Cancel Sign In" action:@selector(cancelAccount:)];
+    [actions addArrangedSubview:self.signOut];
+    [actions addArrangedSubview:self.removeAccountButton];
+    [actions addArrangedSubview:self.cancelAccount];
+    [groups addArrangedSubview:actions];
+    self.authenticationStatus = maage_ui_label(@"", 13, NO);
+    self.authenticationStatus.selectable = YES;
+    [self.authenticationStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
+    [groups addArrangedSubview:self.authenticationStatus];
+    actions = maage_ui_stack(YES, 8);
+    self.copyCode = [self button:@"Copy Code" action:@selector(copyCode:)];
+    self.openDevice = [self button:@"Open Microsoft Sign In" action:@selector(openDevice:)];
+    [actions addArrangedSubview:self.copyCode];
+    [actions addArrangedSubview:self.openDevice];
+    [groups addArrangedSubview:actions];
+    NSScrollView *scroll = [[NSScrollView alloc] init];
+    scroll.hasVerticalScroller = YES;
+    scroll.drawsBackground = NO;
+    NSView *document = [[NSView alloc] init];
+    scroll.documentView = document;
+    maage_ui_fill(groups, document, 2);
+    document.translatesAutoresizingMaskIntoConstraints = NO;
+    [document.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor].active = YES;
+    return scroll;
 }
 - (NSView *)installationsPage {
     NSStackView *page = maage_ui_stack(NO, 14);
@@ -822,15 +949,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (NSView *)settingsPage {
     NSStackView *groups = maage_ui_stack(NO, 12);
     [groups addArrangedSubview:maage_ui_label(@"Settings", 24, YES)];
-    [groups addArrangedSubview:maage_ui_label(@"Launcher", 15, YES)];
-    [groups addArrangedSubview:maage_ui_label(@"Startup opens Play after account and resource preparation.", 13, NO)];
-    self.accountStatus = maage_ui_label(@"", 12, NO);
-    [groups addArrangedSubview:self.accountStatus];
-    NSStackView *accounts = maage_ui_stack(YES, 8);
-    [accounts addArrangedSubview:[self button:@"Manage Minecraft Accounts…" action:@selector(manage:)]];
-    self.verify = [self button:@"Refresh / Reverify Account" action:@selector(verifyAccount:)];
-    [accounts addArrangedSubview:self.verify];
-    [groups addArrangedSubview:accounts];
+    [groups addArrangedSubview:maage_ui_label(@"Accounts and resources prepare in the background while you use the Launcher.", 13, NO)];
     [groups addArrangedSubview:maage_ui_label(@"Resources", 15, YES)];
     NSTextField *path = maage_ui_label(@(self.state->resources), 12, NO);
     path.selectable = YES;
@@ -838,10 +957,23 @@ static NSTableView *maage_ui_navigation_table(void) {
     [groups addArrangedSubview:path];
     self.resourceStatus = maage_ui_label(@"", 13, NO);
     [groups addArrangedSubview:self.resourceStatus];
-    self.repair = [self button:@"Repair Assets…" action:@selector(repairAssets:)];
-    [groups addArrangedSubview:self.repair];
+    [self.resourceStatus.widthAnchor constraintEqualToAnchor:groups.widthAnchor].active = YES;
+    NSStackView *maintenance = maage_ui_stack(YES, 8);
+    self.verifyResources = [self button:@"Verify Resources" action:@selector(verifyResources:)];
+    self.repair = [self button:@"Repair Resources" action:@selector(repairAssets:)];
+    [maintenance addArrangedSubview:self.verifyResources];
+    [maintenance addArrangedSubview:self.repair];
+    [groups addArrangedSubview:maintenance];
+    maintenance = maage_ui_stack(YES, 8);
+    self.retryResources = [self button:@"Retry" action:@selector(retryResources:)];
+    self.cancelResources = [self button:@"Cancel" action:@selector(cancelResources:)];
+    [maintenance addArrangedSubview:self.retryResources];
+    [maintenance addArrangedSubview:self.cancelResources];
+    [groups addArrangedSubview:maintenance];
+    [groups addArrangedSubview:maage_ui_label(@"Verify checks file contents. Repair also restores missing or damaged resources.", 12, NO)];
     [groups addArrangedSubview:maage_ui_label(@"Appearance", 15, YES)];
     NSPopUpButton *appearance = [[NSPopUpButton alloc] init];
+    self.appearance = appearance;
     [appearance addItemsWithTitles:@[ @"System", @"Light", @"Dark" ]];
     [appearance selectItemAtIndex:self.state->appearance];
     appearance.target = self;
@@ -914,7 +1046,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)show {
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 670) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher";
-    self.window.minSize = NSMakeSize(940, 640);
+    self.window.minSize = NSMakeSize(860, 680);
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;
     [self applyAppearance];
@@ -1000,14 +1132,34 @@ static NSTableView *maage_ui_navigation_table(void) {
     maage_ui_fill(nav, sidebar, 18);
     NSStackView *content = maage_ui_stack(NO, 14);
     maage_ui_fill(content, right, 26);
+    NSStackView *context = maage_ui_stack(YES, 14);
+    self.activeSummary = maage_ui_row_label(@"Starting Launcher…", 12, YES);
+    [context addArrangedSubview:self.activeSummary];
+    [self.activeSummary setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [context addArrangedSubview:[[NSView alloc] init]];
+    self.account = [[NSPopUpButton alloc] init];
+    self.account.target = self;
+    self.account.action = @selector(selectAccount:);
+    self.account.accessibilityLabel = @"Active Minecraft account";
+    [self.account.widthAnchor constraintLessThanOrEqualToConstant:270].active = YES;
+    [context addArrangedSubview:self.account];
+    [content addArrangedSubview:context];
+    [context.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     self.body = [[NSView alloc] init];
     [content addArrangedSubview:self.body];
     [self.body.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
-    self.pages = @[ [self playPage], [self newsPage], [self installationsPage], [self settingsPage], [self aboutPage] ];
+    self.pages = @[ [self playPage], [self installationsPage], [self accountsPage], [self settingsPage], [self aboutPage] ];
     for (NSView *page in self.pages) {
         maage_ui_fill(page, self.body, 0);
         page.hidden = YES;
     }
+    self.progress = [[NSProgressIndicator alloc] init];
+    self.progress.style = NSProgressIndicatorStyleBar;
+    self.progress.minValue = 0;
+    self.progress.maxValue = 100;
+    self.progress.accessibilityLabel = @"Background preparation progress";
+    [content addArrangedSubview:self.progress];
+    [self.progress.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     self.error = maage_ui_label(@"", 12, NO);
     self.error.textColor = NSColor.systemRedColor;
     [content addArrangedSubview:self.error];
@@ -1020,7 +1172,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     version.textColor = NSColor.secondaryLabelColor;
     [footer addArrangedSubview:version];
     [footer addArrangedSubview:[[NSView alloc] init]];
-    self.status = [self button:@"" action:@selector(showSettings:)];
+    self.status = [self button:@"" action:@selector(showReadiness:)];
     self.status.bordered = NO;
     self.status.font = [NSFont systemFontOfSize:11];
     [footer addArrangedSubview:self.status];
@@ -1034,11 +1186,12 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.timer = [NSTimer scheduledTimerWithTimeInterval:.25 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
     [self.window center];
     [self.window makeKeyAndOrderFront:nil];
+    [self.window displayIfNeeded];
+    maage_launcher_ui_presented(self.state);
 }
 @end
-maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
-    if (!action) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
-    *action = 0;
+maage_status maage_launcher_native_run(maage_launcher_ui *state) {
+    if (!state) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -1071,14 +1224,15 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state, int *action) {
         [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
         [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
         NSApp.mainMenu = menu;
+        double windowStarted = maage_time_monotonic_seconds();
         [controller show];
+        MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "AppKit main window creation/presentation: %.3f s.", maage_time_monotonic_seconds() - windowStarted));
         [NSApp activateIgnoringOtherApps:YES];
         [NSApp run];
         NSApp.delegate = previous;
         NSApp.mainMenu = nil;
         controller.window.delegate = nil;
         [controller.window close];
-        *action = controller.result;
         return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN, 0);
     }
 }
