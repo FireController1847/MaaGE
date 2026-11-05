@@ -122,11 +122,13 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
 @property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *deviceCodeButton, *openDevice;
-@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus, *splashMessage;
+@property(nonatomic, strong) NSTextField *resourceStatus, *accountStatus, *error, *clientStatus, *launchStatus, *activeSummary, *authenticationStatus, *splashMessage, *splashDetail, *splashDeviceCode;
+@property(nonatomic, strong) NSStackView *splashActions, *splashDeviceActions;
+@property(nonatomic, strong) NSButton *splashSignIn, *splashDeviceSignIn, *splashCancelAccount, *splashResourceRetry, *splashSkip;
 @property(nonatomic, strong) NSProgressIndicator *progress, *splashProgress;
 @property(nonatomic, strong) NSPopUpButton *appearance;
 @property(nonatomic) int displayedAppearance;
-@property(nonatomic) BOOL splashAnimating, splashDismissed;
+@property(nonatomic) BOOL splashAnimating, splashDismissed, onboardingDecided, onboardingRequired;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSTextField *installationName, *installationArguments, *installationHeading, *installationHint;
 @property(nonatomic, strong) NSPopUpButton *installationClient;
@@ -207,6 +209,24 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)cancelAccount:(id)sender {
     (void) sender;
     maage_access_cancel_operation(self.state->access);
+    [self refresh:nil];
+}
+- (void)onboardSignIn:(id)sender {
+    (void) sender;
+    if (maage_status_failed(maage_access_sign_in(self.state->access, 0))) strcpy(self.state->error, "Cannot start Microsoft sign-in. Please retry.");
+    [self refresh:nil];
+}
+- (void)onboardDeviceSignIn:(id)sender {
+    [self deviceSignIn:sender];
+}
+- (void)onboardSkip:(id)sender {
+    (void) sender;
+    self.splashDismissed = YES;
+    [self refresh:nil];
+}
+- (void)onboardRetryResources:(id)sender {
+    (void) sender;
+    maage_launcher_resources(self.state, MAAGE_ASSETS_PREPARE);
     [self refresh:nil];
 }
 - (void)copyCode:(id)sender {
@@ -599,16 +619,85 @@ static NSTableView *maage_ui_navigation_table(void) {
 }
 - (void)refreshSplash {
     maage_launcher_ui *state = self.state;
-    BOOL splash = !self.splashDismissed && (!state->catalog_finished || state->accounts.busy);
-    const char *message = !state->catalog_finished && !state->accounts.busy ? "Loading your installations…" : !state->accounts.restored ? "Restoring saved accounts…" : *state->accounts.device_code ? "Waiting for Microsoft sign-in…" : "Verifying Minecraft Java Edition access…";
+    BOOL preparing, accountStep, splash, progressActive, hasDeviceCode;
+    NSString *message = @"Preparing the Launcher…", *detail = @"Loading installations and saved accounts.";
+    if (!self.onboardingDecided && state->catalog_finished && state->accounts.restored) {
+        self.onboardingDecided = YES;
+        self.onboardingRequired = state->accounts.count == 0;
+    }
+    preparing = self.onboardingRequired && state->accounts.allowed;
+    accountStep = self.onboardingRequired && !state->accounts.allowed;
+    if (preparing && state->progress.stage == MAAGE_SETUP_COMPLETE && !state->progress.busy && !state->resources_pending) self.splashDismissed = YES;
+    splash = !self.splashDismissed && (!state->catalog_finished || state->accounts.busy || (self.onboardingRequired && (accountStep || state->resources_pending || state->progress.stage != MAAGE_SETUP_COMPLETE || state->progress.busy)));
     if (!splash) self.splashDismissed = YES;
+    if (splash && self.onboardingDecided && accountStep) {
+        if (state->accounts.busy) {
+            message = *state->accounts.device_code ? @"Waiting for Microsoft sign-in…" : @"Verifying Minecraft Java Edition access…";
+            detail = @"Your account is checked securely in the background.";
+        } else if (!state->services_ready) {
+            message = @"Account services unavailable";
+            detail = @"Network services did not initialize. Reopen MaaGE or continue to Launcher settings.";
+        } else if (maage_status_failed(state->accounts.result)) {
+            message = @"Sign-in was not completed";
+            detail = @"Try Microsoft sign-in again, or use a device code.";
+        } else {
+            message = @"Connect your Minecraft account";
+            detail = @"Sign in with Microsoft to verify Minecraft Java Edition access.";
+        }
+    } else if (splash && preparing) {
+        message = @"Preparing Minecraft resources…";
+        detail = @"Downloading and checking the files needed to play.";
+        if (!state->services_ready) {
+            message = @"Resource services unavailable";
+            detail = @"Network services did not initialize. Reopen MaaGE or continue to Launcher settings.";
+        } else if (state->progress.stage == MAAGE_SETUP_FAILED || state->progress.stage == MAAGE_SETUP_CANCELLED) {
+            message = @"Resource preparation needs attention";
+            detail = @"Retry preparation or open the Launcher to review the details.";
+        } else if (state->resources_pending && !state->progress.busy) {
+            detail = @"Waiting for background resource preparation to begin.";
+        } else if (state->progress.busy) {
+            switch (state->progress.stage) {
+            case MAAGE_SETUP_DOWNLOADING:
+            case MAAGE_SETUP_CLIENT_ARCHIVE:
+                detail = @"Downloading verified Minecraft resources.";
+                break;
+            case MAAGE_SETUP_CLIENT_EXTRACT:
+            case MAAGE_SETUP_RECONSTRUCTING:
+                detail = @"Preparing Minecraft textures, sounds, and other files.";
+                break;
+            case MAAGE_SETUP_VERIFYING:
+                detail = @"Checking file integrity.";
+                break;
+            default:
+                detail = @"Inspecting and preparing Minecraft resources.";
+                break;
+            }
+        }
+    } else if (splash && state->accounts.busy) {
+        message = @"Restoring saved accounts…";
+        detail = @"Checking your existing Minecraft account information.";
+    }
+    hasDeviceCode = splash && accountStep && state->accounts.busy && *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds();
+    self.splashMessage.stringValue = message;
+    self.splashDetail.stringValue = detail;
+    self.splashActions.hidden = !splash || !accountStep || state->accounts.busy;
+    self.splashSignIn.enabled = self.splashDeviceSignIn.enabled = state->services_ready && state->accounts.restored;
+    self.splashCancelAccount.hidden = !splash || !accountStep || !state->accounts.busy;
+    self.splashDeviceActions.hidden = !hasDeviceCode;
+    if (hasDeviceCode) self.splashDeviceCode.stringValue = @(state->accounts.device_code);
+    self.splashResourceRetry.hidden = !splash || !preparing || state->progress.busy || state->resources_pending || (state->progress.stage != MAAGE_SETUP_FAILED && state->progress.stage != MAAGE_SETUP_CANCELLED);
+    self.splashResourceRetry.enabled = state->services_ready;
+    self.splashSkip.hidden = !splash || !self.onboardingRequired;
     self.shell.hidden = splash;
     self.playSplash.hidden = !splash;
-    if (splash) {
-        self.splashMessage.stringValue = @(message);
-        [self.splashProgress startAnimation:nil];
-    } else
+    progressActive = splash && (!self.onboardingDecided || state->accounts.busy || (preparing && state->services_ready && (state->resources_pending || state->progress.busy)));
+    self.splashProgress.hidden = !progressActive;
+    self.splashProgress.indeterminate = !preparing || state->progress.percent < 0;
+    if (progressActive && self.splashProgress.indeterminate) [self.splashProgress startAnimation:nil];
+    else {
         [self.splashProgress stopAnimation:nil];
+        self.splashProgress.doubleValue = preparing && state->progress.percent >= 0 ? state->progress.percent : 0;
+    }
     BOOL animate = splash && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
     if (animate != self.splashAnimating) {
         if (animate) {
@@ -786,6 +875,40 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.splashMessage.alignment = NSTextAlignmentCenter;
     [splashContent addArrangedSubview:self.splashMessage];
     [self.splashMessage.widthAnchor constraintLessThanOrEqualToConstant:480].active = YES;
+    self.splashDetail = maage_ui_label(@"Loading installations and saved accounts.", 13, NO);
+    self.splashDetail.textColor = NSColor.tertiaryLabelColor;
+    self.splashDetail.alignment = NSTextAlignmentCenter;
+    [splashContent addArrangedSubview:self.splashDetail];
+    [self.splashDetail.widthAnchor constraintLessThanOrEqualToConstant:500].active = YES;
+    [splashContent setCustomSpacing:8 afterView:self.splashMessage];
+    self.splashActions = maage_ui_stack(YES, 12);
+    self.splashSignIn = [self button:@"Sign In with Microsoft" action:@selector(onboardSignIn:)];
+    self.splashSignIn.bezelColor = [NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:1];
+    self.splashDeviceSignIn = [self button:@"Use Device Code" action:@selector(onboardDeviceSignIn:)];
+    [self.splashActions addArrangedSubview:self.splashSignIn];
+    [self.splashActions addArrangedSubview:self.splashDeviceSignIn];
+    [splashContent addArrangedSubview:self.splashActions];
+    self.splashCancelAccount = [self button:@"Cancel Sign In" action:@selector(cancelAccount:)];
+    [splashContent addArrangedSubview:self.splashCancelAccount];
+    self.splashDeviceActions = maage_ui_stack(NO, 10);
+    self.splashDeviceActions.alignment = NSLayoutAttributeCenterX;
+    NSTextField *deviceHint = maage_ui_label(@"Enter this code at the Microsoft sign-in page:", 12, NO);
+    deviceHint.textColor = NSColor.secondaryLabelColor;
+    [self.splashDeviceActions addArrangedSubview:deviceHint];
+    self.splashDeviceCode = maage_ui_label(@"", 18, YES);
+    self.splashDeviceCode.selectable = YES;
+    [self.splashDeviceActions addArrangedSubview:self.splashDeviceCode];
+    NSStackView *deviceButtons = maage_ui_stack(YES, 10);
+    [deviceButtons addArrangedSubview:[self button:@"Copy Code" action:@selector(copyCode:)]];
+    [deviceButtons addArrangedSubview:[self button:@"Open Microsoft Sign In" action:@selector(openDevice:)]];
+    [self.splashDeviceActions addArrangedSubview:deviceButtons];
+    [splashContent addArrangedSubview:self.splashDeviceActions];
+    self.splashResourceRetry = [self button:@"Retry Resource Preparation" action:@selector(onboardRetryResources:)];
+    [splashContent addArrangedSubview:self.splashResourceRetry];
+    self.splashSkip = [self button:@"Continue to Launcher" action:@selector(onboardSkip:)];
+    self.splashSkip.bordered = NO;
+    self.splashSkip.font = [NSFont systemFontOfSize:12];
+    [splashContent addArrangedSubview:self.splashSkip];
     splashContent.translatesAutoresizingMaskIntoConstraints = NO;
     [self.playSplash addSubview:splashContent];
     [NSLayoutConstraint activateConstraints:@[
@@ -798,7 +921,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.splashProgress.style = NSProgressIndicatorStyleBar;
     self.splashProgress.controlSize = NSControlSizeMini;
     self.splashProgress.indeterminate = YES;
-    self.splashProgress.accessibilityLabel = @"Account verification in progress";
+    self.splashProgress.minValue = 0;
+    self.splashProgress.maxValue = 100;
+    self.splashProgress.accessibilityLabel = @"Onboarding and resource preparation progress";
     self.splashProgress.translatesAutoresizingMaskIntoConstraints = NO;
     [self.playSplash addSubview:self.splashProgress];
     [NSLayoutConstraint activateConstraints:@[
