@@ -50,7 +50,7 @@ static NSTextField *maage_ui_row_label(NSString *text, CGFloat size, BOOL bold) 
 }
 - (void)drawRect:(NSRect)dirtyRect {
     (void) dirtyRect;
-    [NSColor.windowBackgroundColor setFill];
+    [[NSColor colorWithSRGBRed:111.0 / 255.0 green:152.0 / 255.0 blue:94.0 / 255.0 alpha:1] setFill];
     NSRectFill(self.bounds);
 }
 @end
@@ -118,7 +118,8 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients, *accounts;
-@property(nonatomic, strong) NSView *shell, *body, *playSplash, *splashLogo;
+@property(nonatomic, strong) NSView *shell, *body, *playSplash;
+@property(nonatomic, strong) NSImageView *splashLogo;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
 @property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *deviceCodeButton, *openDevice;
@@ -855,35 +856,26 @@ static NSTableView *maage_ui_navigation_table(void) {
     maage_ui_fill(self.playSplash, self.window.contentView, 0);
     NSStackView *splashContent = maage_ui_stack(NO, 22);
     splashContent.alignment = NSLayoutAttributeCenterX;
-    self.splashLogo = [[NSView alloc] init];
+    self.splashLogo = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
+    self.splashLogo.imageScaling = NSImageScaleProportionallyUpOrDown;
     self.splashLogo.wantsLayer = YES;
-    self.splashLogo.layer.cornerRadius = 24;
-    self.splashLogo.layer.backgroundColor = [NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:1].CGColor;
-    [self.splashLogo.widthAnchor constraintEqualToConstant:124].active = YES;
-    [self.splashLogo.heightAnchor constraintEqualToConstant:124].active = YES;
-    NSTextField *letter = maage_ui_row_label(@"M", 74, YES);
-    letter.textColor = NSColor.whiteColor;
-    letter.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.splashLogo addSubview:letter];
-    [NSLayoutConstraint activateConstraints:@[
-        [letter.centerXAnchor constraintEqualToAnchor:self.splashLogo.centerXAnchor],
-        [letter.centerYAnchor constraintEqualToAnchor:self.splashLogo.centerYAnchor]
-    ]];
+    [self.splashLogo.widthAnchor constraintEqualToConstant:144].active = YES;
+    [self.splashLogo.heightAnchor constraintEqualToConstant:144].active = YES;
     [splashContent addArrangedSubview:self.splashLogo];
     self.splashMessage = maage_ui_label(@"Loading your installations…", 15, NO);
-    self.splashMessage.textColor = NSColor.secondaryLabelColor;
+    self.splashMessage.textColor = [NSColor colorWithWhite:1 alpha:0.94];
     self.splashMessage.alignment = NSTextAlignmentCenter;
     [splashContent addArrangedSubview:self.splashMessage];
     [self.splashMessage.widthAnchor constraintLessThanOrEqualToConstant:480].active = YES;
     self.splashDetail = maage_ui_label(@"Loading installations and saved accounts.", 13, NO);
-    self.splashDetail.textColor = NSColor.tertiaryLabelColor;
+    self.splashDetail.textColor = [NSColor colorWithWhite:1 alpha:0.76];
     self.splashDetail.alignment = NSTextAlignmentCenter;
     [splashContent addArrangedSubview:self.splashDetail];
     [self.splashDetail.widthAnchor constraintLessThanOrEqualToConstant:500].active = YES;
     [splashContent setCustomSpacing:8 afterView:self.splashMessage];
     self.splashActions = maage_ui_stack(YES, 12);
     self.splashSignIn = [self button:@"Sign In with Microsoft" action:@selector(onboardSignIn:)];
-    self.splashSignIn.bezelColor = [NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:1];
+    self.splashSignIn.bezelColor = [NSColor colorWithSRGBRed:0.18 green:0.36 blue:0.20 alpha:1];
     self.splashDeviceSignIn = [self button:@"Use Device Code" action:@selector(onboardDeviceSignIn:)];
     [self.splashActions addArrangedSubview:self.splashSignIn];
     [self.splashActions addArrangedSubview:self.splashDeviceSignIn];
@@ -1294,20 +1286,10 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.sidebar.delegate = self;
     self.sidebar.accessibilityLabel = @"Launcher navigation";
 
-    NSView *mark = [[NSView alloc] init];
-    mark.wantsLayer = YES;
-    mark.layer.backgroundColor = [NSColor colorWithSRGBRed:0.86 green:0.19 blue:0.61 alpha:1].CGColor;
-    mark.layer.cornerRadius = 9;
+    NSImageView *mark = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
+    mark.imageScaling = NSImageScaleProportionallyUpOrDown;
     [mark.widthAnchor constraintEqualToConstant:34].active = YES;
     [mark.heightAnchor constraintEqualToConstant:34].active = YES;
-    NSTextField *monogram = maage_ui_row_label(@"M", 17, YES);
-    monogram.textColor = NSColor.whiteColor;
-    monogram.translatesAutoresizingMaskIntoConstraints = NO;
-    [mark addSubview:monogram];
-    [NSLayoutConstraint activateConstraints:@[
-        [monogram.centerXAnchor constraintEqualToAnchor:mark.centerXAnchor],
-        [monogram.centerYAnchor constraintEqualToAnchor:mark.centerYAnchor]
-    ]];
     NSStackView *brandText = maage_ui_stack(NO, 2);
     [brandText addArrangedSubview:maage_ui_row_label(@"MaaGE", 16, YES)];
     NSTextField *descriptor = maage_ui_row_label(@"LAUNCHER", 10, YES);
