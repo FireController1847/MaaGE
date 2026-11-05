@@ -81,8 +81,8 @@ static void maage_ui_project(GtkWidget *widget, gpointer context) {
     GError *error = NULL;
     (void) widget;
     if (!gtk_show_uri_on_window(GTK_WINDOW(ui->window), MAAGE_PROJECT_URL, GDK_CURRENT_TIME, &error)) {
-        g_strlcpy(ui->state->error, error->message, sizeof(ui->state->error));
-        g_error_free(error);
+        g_strlcpy(ui->state->error, error ? error->message : "Cannot open the MaaGE project page.", sizeof(ui->state->error));
+        if (error) g_error_free(error);
     }
 }
 static void maage_ui_page(GtkListBox *list, GtkListBoxRow *row, gpointer context) {
@@ -350,9 +350,9 @@ static gboolean maage_ui_tick(gpointer context) {
                                                                                       : state->client_operation == 4 ? "Starting Client…"
                                                                                                                      : "Play");
     gtk_widget_set_sensitive(ui->account, state->accounts.metadata_ready);
-    gtk_widget_set_sensitive(ui->verify, state->services_ready && !state->accounts.busy && (*state->account || !state->accounts.restored));
+    gtk_widget_set_sensitive(ui->verify, !state->accounts.busy && (*state->account || !state->accounts.restored));
     for (i = 0; i < 7; ++i) {
-        int enabled = i < 2 ? state->services_ready && state->accounts.restored && !state->accounts.busy : i < 4 ? state->services_ready && state->accounts.restored && !state->accounts.busy && *state->account
+        int enabled = i < 2 ? state->accounts.restored && !state->accounts.busy : i < 4 ? state->accounts.restored && !state->accounts.busy && *state->account
                                                                                                        : i == 4  ? state->accounts.busy
                                                                                                                  : *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds();
         gtk_widget_set_sensitive(ui->auth_actions[i], enabled);
@@ -611,6 +611,7 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state) {
     maage_ui_label(page, "MaaGE is independent and is not affiliated with or endorsed by Mojang Studios or Microsoft.", "muted");
     maage_ui_button(page, "View MaaGE on GitHub ↗", G_CALLBACK(maage_ui_project), &ui);
     ui.progress = gtk_progress_bar_new();
+    gtk_widget_set_no_show_all(ui.progress, TRUE);
     atk_object_set_name(gtk_widget_get_accessible(ui.progress), "Background preparation progress");
     gtk_box_pack_start(GTK_BOX(right), ui.progress, FALSE, FALSE, 0);
     ui.error = maage_ui_label(right, "", NULL);

@@ -648,7 +648,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.account.enabled = state->accounts.metadata_ready;
     self.accountStatus.stringValue = @(state->account_status);
     self.authenticationStatus.stringValue = @(state->authentication_status);
-    BOOL accountAvailable = state->services_ready && !state->accounts.busy;
+    BOOL accountAvailable = !state->accounts.busy;
     self.verify.enabled = accountAvailable && (state->account[0] || !state->accounts.restored);
     self.signIn.enabled = self.deviceSignIn.enabled = accountAvailable && state->accounts.restored;
     self.signOut.enabled = self.removeAccountButton.enabled = accountAvailable && state->accounts.restored && state->account[0];

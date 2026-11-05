@@ -325,7 +325,8 @@ static void maage_launcher_startup_worker(void *context) {
     cancelled = startup->cancelled;
     maage_mutex_unlock(startup->mutex);
     MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Network service initialization: %.3f s.", maage_time_monotonic_seconds() - started));
-    if (!maage_status_failed(result) && !cancelled) {
+    if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.startup", result, "Network initialization failed; local account restoration will still run.");
+    if (!cancelled) {
         auth_result = maage_access_restore(startup->loaded.access);
         if (maage_status_failed(auth_result)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.access", auth_result, "Could not start account restoration; Accounts remains available for retry.");
     }
@@ -512,7 +513,7 @@ maage_status maage_launcher_ui_refresh(maage_launcher_ui *ui) {
     sprintf(ui->authentication_status, "%.480s", ui->accounts.status);
     if (*ui->accounts.device_code) sprintf(ui->authentication_status, "%.480s\n%.210s  ·  %.32s", ui->accounts.status, ui->accounts.device_url, ui->accounts.device_code);
     maage_assets_snapshot(ui->assets, &ui->progress);
-    if (ui->progress.stage == MAAGE_SETUP_FAILED && maage_status_code(ui->progress.result) == MAAGE_STATUS_ACCESS_DENIED && ui->accounts.allowed) {
+    if (ui->progress.stage == MAAGE_SETUP_FAILED && maage_status_code(ui->progress.result) == MAAGE_STATUS_ACCESS_DENIED && maage_status_context(ui->progress.result) == MAAGE_CONTEXT_AUTH && ui->accounts.allowed) {
         ui->resources_pending = 1;
     }
     if (ui->services_ready && ui->catalog_ready && ui->resources_pending && ui->accounts.allowed && !ui->progress.busy && !ui->client_process && ui->client_operation != 4) {

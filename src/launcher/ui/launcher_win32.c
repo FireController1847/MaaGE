@@ -505,7 +505,10 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
             if (!strcmp(p->uuid, state->account)) ListView_SetItemState(ui->profiles, added, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
             ++added;
         }
-        if (!added) SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"No connected Minecraft account");
+        if (!added) {
+            LRESULT row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"No connected Minecraft account");
+            SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -1);
+        }
         {
             LRESULT row = SendMessageW(ui->account, CB_ADDSTRING, 0, (LPARAM) L"Manage Microsoft Accounts...");
             SendMessageW(ui->account, CB_SETITEMDATA, row, (LPARAM) -2);
@@ -549,11 +552,11 @@ static void maage_ui_refresh(maage_launcher_win32 *ui) {
                                                                    : state->client_operation == 4 ? "Starting Client…"
                                                                                                   : "Play");
     maage_ui_enabled(ui->account, state->accounts.metadata_ready);
-    maage_ui_enabled(ui->verify, state->services_ready && !state->accounts.busy && (*state->account || !state->accounts.restored));
-    maage_ui_enabled(ui->sign_in, state->services_ready && state->accounts.restored && !state->accounts.busy);
-    maage_ui_enabled(ui->device_sign_in, state->services_ready && state->accounts.restored && !state->accounts.busy);
-    maage_ui_enabled(ui->sign_out, state->services_ready && state->accounts.restored && !state->accounts.busy && *state->account);
-    maage_ui_enabled(ui->remove_account, state->services_ready && state->accounts.restored && !state->accounts.busy && *state->account);
+    maage_ui_enabled(ui->verify, !state->accounts.busy && (*state->account || !state->accounts.restored));
+    maage_ui_enabled(ui->sign_in, state->accounts.restored && !state->accounts.busy);
+    maage_ui_enabled(ui->device_sign_in, state->accounts.restored && !state->accounts.busy);
+    maage_ui_enabled(ui->sign_out, state->accounts.restored && !state->accounts.busy && *state->account);
+    maage_ui_enabled(ui->remove_account, state->accounts.restored && !state->accounts.busy && *state->account);
     maage_ui_enabled(ui->cancel_account, state->accounts.busy);
     maage_ui_enabled(ui->copy_code, *state->accounts.device_code && state->accounts.device_deadline > maage_time_monotonic_seconds());
     maage_ui_enabled(ui->open_device, IsWindowEnabled(ui->copy_code));
