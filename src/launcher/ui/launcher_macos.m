@@ -1097,7 +1097,6 @@ static NSTableView *maage_ui_navigation_table(void) {
     for (NSUInteger i = 1; i < cards.arrangedSubviews.count; ++i)
         [cards.arrangedSubviews[i].widthAnchor constraintEqualToAnchor:cards.arrangedSubviews[0].widthAnchor].active = YES;
     [hero addArrangedSubview:cards];
-    [cards.widthAnchor constraintEqualToAnchor:self.playHome.widthAnchor multiplier:0.93].active = YES;
     [hero setCustomSpacing:20 afterView:cards];
 
     NSButton *configuration = [self button:@"Launcher Configuration" action:@selector(showSettings:)];
@@ -1113,6 +1112,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     hero.translatesAutoresizingMaskIntoConstraints = NO;
     [self.playHome addSubview:hero];
     [NSLayoutConstraint activateConstraints:@[
+        [cards.widthAnchor constraintEqualToAnchor:self.playHome.widthAnchor multiplier:0.93],
         [hero.centerXAnchor constraintEqualToAnchor:self.playHome.centerXAnchor],
         [hero.centerYAnchor constraintEqualToAnchor:self.playHome.centerYAnchor constant:-8],
         [hero.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.playHome.leadingAnchor constant:22],
