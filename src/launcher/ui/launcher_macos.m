@@ -124,7 +124,7 @@ static NSImageView *maage_ui_home_symbol(NSString *name, CGFloat size, NSColor *
     [icon.heightAnchor constraintEqualToConstant:size].active = YES;
     return icon;
 }
-static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL action, NSTextField **display) {
+static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL action, NSTextField * __strong *display) {
     NSView *card = [[NSView alloc] init];
     card.wantsLayer = YES;
     card.layer.cornerRadius = 15;
