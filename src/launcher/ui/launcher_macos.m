@@ -131,7 +131,8 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
     for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
         self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1040, 520, 110, scale, originX, originY);
-    self.configuration.frame = maage_ui_home_rect(1045, 1204, 469, 48, scale, originX, originY);
+    /* Keep text and symbol together even at the narrowest permitted window. */
+    self.configuration.frame = maage_ui_home_rect(880, 1204, 800, 56, scale, originX, originY);
     if (fabs(self.configuration.font.pointSize - 38 * scale) > 0.1 || !self.configuration.image) {
         self.configuration.font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
         NSShadow *captionShadow = [[NSShadow alloc] init];
@@ -179,14 +180,13 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 @interface MaaGELauncherHomeActionButton : NSButton
 @property(nonatomic, strong) NSTrackingArea *homeTracking;
 @property(nonatomic) BOOL homeHovered, homePressed;
-@property(nonatomic) CGFloat homeHoverScale, homeRestOpacity;
+@property(nonatomic) CGFloat homeRestOpacity;
 - (void)refreshHomeInteraction;
 @end
 @implementation MaaGELauncherHomeActionButton
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.wantsLayer = YES;
-        _homeHoverScale = 1.025;
         _homeRestOpacity = 0.94;
     }
     return self;
@@ -198,10 +198,10 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     [self addTrackingArea:self.homeTracking];
 }
 - (void)refreshHomeInteraction {
-    CGFloat scale = !self.enabled ? 1 : self.homePressed ? 0.975 : self.homeHovered ? self.homeHoverScale : 1;
-    CGFloat opacity = !self.enabled ? 0.86 : self.homePressed ? 0.89 : self.homeHovered ? 1 : self.homeRestOpacity;
-    maage_ui_home_animate_layer(self.layer, @"transform", [NSValue valueWithCATransform3D:CATransform3DMakeScale(scale, scale, 1)], self.homePressed ? 0.10 : 0.17);
-    maage_ui_home_animate_layer(self.layer, @"opacity", @(opacity), 0.17);
+    /* AppKit owns a control's backing-layer geometry. Transforming that layer
+     * scales around AppKit's layout origin and makes small arrows jump diagonally. */
+    CGFloat opacity = !self.enabled ? 0.86 : self.homePressed ? 0.85 : self.homeHovered ? 1 : self.homeRestOpacity;
+    maage_ui_home_animate_layer(self.layer, @"opacity", @(opacity), self.homePressed ? 0.10 : 0.17);
     [self setNeedsDisplay:YES];
 }
 - (void)mouseEntered:(NSEvent *)event {
@@ -304,12 +304,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     [self addTrackingArea:self.homeTracking];
 }
 - (void)refreshHomeHover {
-    CGFloat scale = self.homeHovered ? 1.012 : 1;
     NSColor *surface = [NSColor colorWithWhite:1 alpha:self.homeHovered ? 0.9 : 0.79];
     NSColor *tile = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:self.homeHovered ? 0.26 : 0.13];
     maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) surface.CGColor, 0.18);
     maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.35 : 0.23), 0.18);
-    maage_ui_home_animate_layer(self.layer, @"transform", [NSValue valueWithCATransform3D:CATransform3DMakeScale(scale, scale, 1)], 0.18);
     maage_ui_home_animate_layer(self.symbolTile.layer, @"backgroundColor", (__bridge id) tile.CGColor, 0.18);
 }
 - (void)mouseEntered:(NSEvent *)event {
@@ -323,6 +321,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     if (!self.homeHovered) return;
     self.homeHovered = NO;
     [self refreshHomeHover];
+}
+- (void)resetCursorRects {
+    [super resetCursorRects];
+    [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
 }
 - (void)layout {
     [super layout];
@@ -378,7 +380,6 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
         manage.title = @"";
         manage.target = target;
         manage.action = action;
-        manage.homeHoverScale = 1.10;
         manage.homeRestOpacity = 0.94;
         card.manage = manage;
         card.manage.bordered = NO;
@@ -402,6 +403,7 @@ static void maage_ui_home_set_value(NSTextField *label, NSString *value) {
     if ([label.stringValue isEqualToString:value]) return;
     label.stringValue = value;
     [label.superview setNeedsLayout:YES];
+    [label.superview setNeedsDisplay:YES];
 }
 static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset) {
     NSTableCellView *cell = [[NSTableCellView alloc] init];
@@ -1220,18 +1222,30 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.homeReadiness.hidden = self.homeReadinessSymbol.hidden = NO;
     if (@available(macOS 11.0, *)) self.homeReadinessSymbol.image = [NSImage imageWithSystemSymbolName:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill" accessibilityDescription:nil];
     self.homeReadinessSymbol.contentTintColor = state->can_play ? [NSColor colorWithSRGBRed:0.48 green:0.81 blue:0.35 alpha:1] : [NSColor colorWithWhite:1 alpha:0.78];
-    NSString *installationLabel = @"Loading installation…", *versionLabel = @"No Client build";
+    /* These are the saved values used by Play, not the editor's draft choices. */
+    NSString *installationLabel = state->catalog_ready ? @"Choose Installation" : @"Loading installation…";
+    NSString *versionLabel = state->clients_valid ? @"Select Client build" : @"Client registry unavailable";
+    NSString *versionDetail = versionLabel;
     for (unsigned i = 0; i < state->count; ++i) {
-        if (state->installations[i].id != state->selected) continue;
-        installationLabel = @(state->installations[i].name);
-        if (*state->installations[i].client) {
-            int index = maage_clients_find(state->clients, state->installations[i].client);
-            versionLabel = index >= 0 ? @(state->clients->builds[index].version) : @"Client unavailable";
+        maage_installation *installation = &state->installations[i];
+        if (installation->id != state->selected) continue;
+        installationLabel = @(installation->name);
+        if (*installation->client && state->clients) {
+            int index = maage_clients_find(state->clients, installation->client);
+            if (index >= 0) {
+                maage_client_build *build = &state->clients->builds[index];
+                char label[384];
+                maage_client_build_label(build, label);
+                versionLabel = [NSString stringWithFormat:@"%s · %s", build->version, build->build_type];
+                versionDetail = @(label);
+            } else versionLabel = versionDetail = @"Referenced Client build unavailable";
         }
         break;
     }
     maage_ui_home_set_value(self.homeInstallation, installationLabel);
     maage_ui_home_set_value(self.homeVersion, versionLabel);
+    self.homeInstallation.toolTip = installationLabel;
+    self.homeVersion.toolTip = versionDetail;
     NSString *accountLabel = @"No account selected";
     for (unsigned i = 0; i < state->accounts.count; ++i)
         if (!strcmp(state->account, state->accounts.profiles[i].uuid)) {
@@ -1239,6 +1253,7 @@ static NSTableView *maage_ui_navigation_table(void) {
             break;
         }
     maage_ui_home_set_value(self.homeAccount, accountLabel);
+    self.homeAccount.toolTip = accountLabel;
     self.account.enabled = state->accounts.metadata_ready;
     self.accountStatus.stringValue = @(state->account_status);
     self.authenticationStatus.stringValue = @(state->authentication_status);
@@ -1333,7 +1348,6 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.play.enabled = NO;
     self.play.keyEquivalent = @"\r";
     self.play.accessibilityLabel = @"Play MaaGE";
-    play.homeHoverScale = 1.018;
     play.homeRestOpacity = 1;
     home.playButton = self.play;
     [home addSubview:self.play];
@@ -1359,7 +1373,6 @@ static NSTableView *maage_ui_navigation_table(void) {
     configuration.title = @"Launcher Configuration";
     configuration.target = self;
     configuration.action = @selector(showSettings:);
-    configuration.homeHoverScale = 1.035;
     configuration.homeRestOpacity = 0.92;
     home.configuration = configuration;
     home.configuration.bordered = NO;
@@ -1802,7 +1815,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)show {
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 670) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher";
-    self.window.minSize = NSMakeSize(860, 680);
+    self.window.minSize = NSMakeSize(700, 500);
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;
     [self applyAppearance];
