@@ -67,6 +67,106 @@ static NSImageView *maage_ui_brand_logo(CGFloat size, CGFloat cornerRadius) {
     [logo.heightAnchor constraintEqualToConstant:size].active = YES;
     return logo;
 }
+/* Native Play artwork deliberately uses no panorama or web content. */
+@interface MaaGELauncherHomeView : NSView
+@end
+@implementation MaaGELauncherHomeView
+- (BOOL)isOpaque {
+    return YES;
+}
+- (void)drawRect:(NSRect)dirtyRect {
+    (void) dirtyRect;
+    NSColor *top = [NSColor colorWithSRGBRed:0.31 green:0.42 blue:0.51 alpha:1];
+    NSColor *bottom = [NSColor colorWithSRGBRed:0.11 green:0.19 blue:0.23 alpha:1];
+    [[[NSGradient alloc] initWithStartingColor:bottom endingColor:top] drawInRect:self.bounds angle:90];
+}
+@end
+@interface MaaGELauncherPlayButton : NSButton
+@end
+@implementation MaaGELauncherPlayButton
+- (void)drawRect:(NSRect)dirtyRect {
+    (void) dirtyRect;
+    NSRect rect = NSInsetRect(self.bounds, 3, 5);
+    NSBezierPath *shape = [NSBezierPath bezierPathWithRoundedRect:rect xRadius:NSHeight(rect) / 2 yRadius:NSHeight(rect) / 2];
+    [NSGraphicsContext saveGraphicsState];
+    NSShadow *shadow = [[NSShadow alloc] init];
+    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.3];
+    shadow.shadowBlurRadius = 11;
+    shadow.shadowOffset = NSMakeSize(0, -4);
+    [shadow set];
+    NSColor *upper = self.enabled ? [NSColor colorWithSRGBRed:0.42 green:0.66 blue:0.32 alpha:1] : [NSColor colorWithSRGBRed:0.45 green:0.52 blue:0.46 alpha:1];
+    NSColor *lower = self.enabled ? [NSColor colorWithSRGBRed:0.19 green:0.42 blue:0.24 alpha:1] : [NSColor colorWithSRGBRed:0.31 green:0.39 blue:0.33 alpha:1];
+    [[[NSGradient alloc] initWithStartingColor:lower endingColor:upper] drawInBezierPath:shape angle:90];
+    [NSGraphicsContext restoreGraphicsState];
+    [[NSColor colorWithWhite:1 alpha:self.enabled ? 0.78 : 0.38] setStroke];
+    shape.lineWidth = 1.5;
+    [shape stroke];
+    NSDictionary *attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:25 weight:NSFontWeightSemibold], NSForegroundColorAttributeName: [NSColor colorWithWhite:1 alpha:self.enabled ? 1 : 0.72] };
+    NSSize size = [self.title sizeWithAttributes:attributes];
+    CGFloat startX = NSMidX(rect) - (size.width + 39) / 2;
+    CGFloat centerY = NSMidY(rect);
+    NSBezierPath *arrow = [NSBezierPath bezierPath];
+    [arrow moveToPoint:NSMakePoint(startX, centerY - 13)];
+    [arrow lineToPoint:NSMakePoint(startX + 22, centerY)];
+    [arrow lineToPoint:NSMakePoint(startX, centerY + 13)];
+    [arrow closePath];
+    [[NSColor colorWithWhite:1 alpha:self.enabled ? 1 : 0.72] setFill];
+    [arrow fill];
+    [self.title drawAtPoint:NSMakePoint(startX + 39, centerY - size.height / 2) withAttributes:attributes];
+}
+@end
+static NSImageView *maage_ui_home_symbol(NSString *name, CGFloat size, NSColor *color) {
+    NSImageView *icon = [[NSImageView alloc] init];
+    if (@available(macOS 11.0, *)) icon.image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
+    icon.imageScaling = NSImageScaleProportionallyUpOrDown;
+    icon.contentTintColor = color;
+    [icon.widthAnchor constraintEqualToConstant:size].active = YES;
+    [icon.heightAnchor constraintEqualToConstant:size].active = YES;
+    return icon;
+}
+static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL action, NSTextField **display) {
+    NSView *card = [[NSView alloc] init];
+    card.wantsLayer = YES;
+    card.layer.cornerRadius = 15;
+    card.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0.83].CGColor;
+    card.layer.borderColor = [NSColor colorWithWhite:1 alpha:0.55].CGColor;
+    card.layer.borderWidth = 1;
+    NSColor *ink = [NSColor colorWithSRGBRed:0.17 green:0.23 blue:0.24 alpha:1];
+    NSColor *green = [NSColor colorWithSRGBRed:0.19 green:0.34 blue:0.19 alpha:1];
+    NSStackView *row = maage_ui_stack(YES, 9);
+    [row addArrangedSubview:maage_ui_home_symbol(symbol, 24, green)];
+    NSTextField *value = maage_ui_row_label(title, 13, YES);
+    value.textColor = ink;
+    [value setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [row addArrangedSubview:value];
+    *display = value;
+    NSView *space = [[NSView alloc] init];
+    [space setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [row addArrangedSubview:space];
+    [row addArrangedSubview:maage_ui_home_symbol(@"chevron.down", 11, ink)];
+    NSView *divider = [[NSView alloc] init];
+    divider.wantsLayer = YES;
+    divider.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.13].CGColor;
+    [divider.widthAnchor constraintEqualToConstant:1].active = YES;
+    [divider.heightAnchor constraintEqualToConstant:28].active = YES;
+    [row addArrangedSubview:divider];
+    if (action) {
+        NSButton *manage = [NSButton buttonWithTitle:@"›" target:target action:action];
+        manage.bordered = NO;
+        manage.font = [NSFont systemFontOfSize:23 weight:NSFontWeightRegular];
+        manage.contentTintColor = ink;
+        manage.toolTip = @"Manage…";
+        manage.accessibilityLabel = @"Open management page";
+        [manage.widthAnchor constraintEqualToConstant:20].active = YES;
+        [row addArrangedSubview:manage];
+    } else {
+        [row addArrangedSubview:maage_ui_home_symbol(@"chevron.right", 12, ink)];
+        card.toolTip = @"Playspace selection and management are coming later.";
+    }
+    maage_ui_fill(row, card, 12);
+    [card.heightAnchor constraintEqualToConstant:66].active = YES;
+    return card;
+}
 static NSTableCellView *maage_ui_row(NSView *content, CGFloat inset) {
     NSTableCellView *cell = [[NSTableCellView alloc] init];
     content.translatesAutoresizingMaskIntoConstraints = NO;
@@ -131,8 +231,9 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients, *accounts;
-@property(nonatomic, strong) NSView *shell, *body, *playSplash;
-@property(nonatomic, strong) NSImageView *splashLogo;
+@property(nonatomic, strong) NSView *shell, *body, *playSplash, *playHome;
+@property(nonatomic, strong) NSImageView *splashLogo, *homeReadinessSymbol;
+@property(nonatomic, strong) NSTextField *homeReadiness, *homeInstallation, *homeVersion, *homeAccount, *homePlayspace;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
 @property(nonatomic, strong) NSButton *status, *repair, *verify, *play, *verifyResources, *retryResources, *cancelResources, *signIn, *deviceSignIn, *signOut, *removeAccountButton, *cancelAccount, *deviceCodeButton, *openDevice;
@@ -274,6 +375,12 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) sender;
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@MAAGE_PROJECT_URL]];
 }
+- (void)setHomeWindowAppearance:(BOOL)home {
+    if (self.window.titlebarAppearsTransparent == home) return;
+    self.window.titleVisibility = home ? NSWindowTitleHidden : NSWindowTitleVisible;
+    self.window.titlebarAppearsTransparent = home;
+    self.window.backgroundColor = home ? [NSColor colorWithSRGBRed:0.31 green:0.42 blue:0.51 alpha:1] : NSColor.windowBackgroundColor;
+}
 - (void)activatePage:(maage_launcher_page)page {
     self.state->page = page;
     if (page >= MAAGE_PAGE_SETTINGS) {
@@ -286,6 +393,12 @@ static NSTableView *maage_ui_navigation_table(void) {
     }
     for (NSUInteger i = 0; i < self.pages.count; ++i)
         self.pages[i].hidden = i != (NSUInteger) page;
+    BOOL home = page == MAAGE_PAGE_PLAY;
+    BOOL splash = self.playSplash && !self.playSplash.hidden;
+    self.shell.hidden = home || splash;
+    self.playHome.hidden = !home || splash;
+    BOOL showingHome = home && !splash;
+    [self setHomeWindowAppearance:showingHome];
 }
 - (void)showSettings:(id)sender {
     (void) sender;
@@ -704,8 +817,11 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.splashResourceRetry.hidden = !splash || !preparing || state->progress.busy || state->resources_pending || (state->progress.stage != MAAGE_SETUP_FAILED && state->progress.stage != MAAGE_SETUP_CANCELLED);
     self.splashResourceRetry.enabled = state->services_ready;
     self.splashSkip.hidden = !splash || !self.onboardingRequired;
-    self.shell.hidden = splash;
+    self.shell.hidden = splash || state->page == MAAGE_PAGE_PLAY;
+    self.playHome.hidden = splash || state->page != MAAGE_PAGE_PLAY;
     self.playSplash.hidden = !splash;
+    BOOL showingHome = !splash && state->page == MAAGE_PAGE_PLAY;
+    [self setHomeWindowAppearance:showingHome];
     progressActive = splash && (!self.onboardingDecided || state->accounts.busy || (preparing && state->services_ready && (state->resources_pending || state->progress.busy)));
     maage_setup_progress *progress = &state->progress;
     double percent = -1, downloaded = (progress->downloaded_bytes + progress->client_downloaded_bytes) / 1048576.0;
@@ -862,9 +978,27 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.launchStatus.stringValue = @(state->launch_status);
     self.activeSummary.stringValue = @(state->active_summary);
     self.play.enabled = state->can_play;
-    self.play.title = state->client_process ? @"Client Running" : state->launch_pending      ? @"Checking Resources…"
-                                                              : state->client_operation == 4 ? @"Starting Client…"
-                                                                                             : @"Play";
+    self.play.title = state->client_process ? @"Client Running" : state->launch_pending ? @"Checking Resources…" : state->client_operation == 4 ? @"Starting Client…" : @"Play MaaGE";
+    self.homeReadiness.stringValue = state->can_play ? @"Ready to Play" : @(state->readiness ? state->readiness : "Initializing…");
+    if (@available(macOS 11.0, *)) self.homeReadinessSymbol.image = [NSImage imageWithSystemSymbolName:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill" accessibilityDescription:nil];
+    self.homeReadinessSymbol.contentTintColor = state->can_play ? [NSColor colorWithSRGBRed:0.48 green:0.81 blue:0.35 alpha:1] : [NSColor colorWithWhite:1 alpha:0.78];
+    self.homeInstallation.stringValue = @"Loading installation…";
+    self.homeVersion.stringValue = @"No Client build";
+    for (unsigned i = 0; i < state->count; ++i) {
+        if (state->installations[i].id != state->selected) continue;
+        self.homeInstallation.stringValue = @(state->installations[i].name);
+        if (*state->installations[i].client) {
+            int index = maage_clients_find(state->clients, state->installations[i].client);
+            self.homeVersion.stringValue = index >= 0 ? @(state->clients->builds[index].version) : @"Client unavailable";
+        }
+        break;
+    }
+    self.homeAccount.stringValue = @"No account selected";
+    for (unsigned i = 0; i < state->accounts.count; ++i)
+        if (!strcmp(state->account, state->accounts.profiles[i].uuid)) {
+            self.homeAccount.stringValue = @(state->accounts.profiles[i].name);
+            break;
+        }
     self.account.enabled = state->accounts.metadata_ready;
     self.accountStatus.stringValue = @(state->account_status);
     self.authenticationStatus.stringValue = @(state->authentication_status);
@@ -890,54 +1024,124 @@ static NSTableView *maage_ui_navigation_table(void) {
     [self updateInstallationEditor];
 }
 - (NSView *)playPage {
+    /* The original model selectors remain available on management pages. The
+     * new Play cards present values only; their selection menus come later. */
     NSView *page = [[NSView alloc] init];
-    NSStackView *form = maage_ui_stack(NO, 16);
-    [form addArrangedSubview:maage_ui_label(@"Play", 30, YES)];
-    NSTextField *intro = maage_ui_label(@"Choose your installation and jump into MaaGE.", 14, NO);
-    intro.textColor = NSColor.secondaryLabelColor;
-    [form addArrangedSubview:intro];
-    [form setCustomSpacing:30 afterView:intro];
-    [form addArrangedSubview:maage_ui_label(@"Installation", 12, YES)];
+    NSStackView *references = maage_ui_stack(NO, 6);
     self.installation = [[NSPopUpButton alloc] init];
     self.installation.target = self;
     self.installation.action = @selector(selectInstallation:);
     self.installation.accessibilityLabel = @"Installation for Play";
-    [form addArrangedSubview:self.installation];
     self.clientStatus = maage_ui_label(@"Loading Client builds…", 12, NO);
-    self.clientStatus.textColor = NSColor.secondaryLabelColor;
-    [form addArrangedSubview:self.clientStatus];
-    self.launchStatus = maage_ui_label(@"Starting Launcher services…", 13, NO);
-    [form addArrangedSubview:self.launchStatus];
-    self.play = [self button:@"Play" action:@selector(playClient:)];
-    self.play.bezelStyle = NSBezelStyleRounded;
-    self.play.font = [NSFont systemFontOfSize:20 weight:NSFontWeightSemibold];
-    self.play.bezelColor = [NSColor colorWithSRGBRed:.87 green:.19 blue:.62 alpha:1];
+    self.launchStatus = maage_ui_label(@"Starting Launcher services…", 12, NO);
+    [references addArrangedSubview:self.installation];
+    [references addArrangedSubview:self.clientStatus];
+    [references addArrangedSubview:self.launchStatus];
+    maage_ui_fill(references, page, 0);
+
+    self.playHome = [[MaaGELauncherHomeView alloc] init];
+    maage_ui_fill(self.playHome, self.window.contentView, 0);
+    NSStackView *hero = maage_ui_stack(NO, 13);
+    hero.alignment = NSLayoutAttributeCenterX;
+
+    NSString *logoPath = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"png"];
+    NSImage *artwork = logoPath ? [[NSImage alloc] initWithContentsOfFile:logoPath] : nil;
+    NSImageView *logo = [NSImageView imageViewWithImage:artwork ?: NSApp.applicationIconImage];
+    logo.imageScaling = NSImageScaleProportionallyUpOrDown;
+    [logo.widthAnchor constraintEqualToConstant:108].active = YES;
+    [logo.heightAnchor constraintEqualToConstant:108].active = YES;
+    [hero addArrangedSubview:logo];
+
+    NSTextField *name = maage_ui_row_label(@"MaaGE", 51, YES);
+    name.textColor = NSColor.whiteColor;
+    name.font = [NSFont systemFontOfSize:51 weight:NSFontWeightBold];
+    NSShadow *titleShadow = [[NSShadow alloc] init];
+    titleShadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.32];
+    titleShadow.shadowBlurRadius = 8;
+    titleShadow.shadowOffset = NSMakeSize(0, -3);
+    name.shadow = titleShadow;
+    [hero addArrangedSubview:name];
+    NSTextField *subtitle = maage_ui_row_label(@"MINECRAFT AS A GAME ENGINE", 15, YES);
+    subtitle.textColor = [NSColor colorWithWhite:1 alpha:0.88];
+    subtitle.font = [NSFont systemFontOfSize:15 weight:NSFontWeightMedium];
+    [hero addArrangedSubview:subtitle];
+    [hero setCustomSpacing:27 afterView:subtitle];
+
+    MaaGELauncherPlayButton *play = [[MaaGELauncherPlayButton alloc] init];
+    self.play = play;
+    self.play.title = @"Play MaaGE";
+    self.play.target = self;
+    self.play.action = @selector(playClient:);
+    self.play.bordered = NO;
     self.play.enabled = NO;
     self.play.keyEquivalent = @"\r";
-    [self.play.widthAnchor constraintEqualToConstant:260].active = YES;
-    [self.play.heightAnchor constraintEqualToConstant:48].active = YES;
-    [form addArrangedSubview:self.play];
-    NSStackView *shortcuts = maage_ui_stack(YES, 8);
-    [shortcuts addArrangedSubview:[self button:@"Installations" action:@selector(showInstallations:)]];
-    [shortcuts addArrangedSubview:[self button:@"Accounts" action:@selector(manage:)]];
-    [shortcuts addArrangedSubview:[self button:@"Resources" action:@selector(showSettings:)]];
-    [form addArrangedSubview:shortcuts];
-    form.translatesAutoresizingMaskIntoConstraints = NO;
-    [page addSubview:form];
+    self.play.accessibilityLabel = @"Play MaaGE";
+    [self.play.widthAnchor constraintEqualToConstant:414].active = YES;
+    [self.play.heightAnchor constraintEqualToConstant:78].active = YES;
+    [hero addArrangedSubview:self.play];
+
+    NSStackView *readiness = maage_ui_stack(YES, 10);
+    self.homeReadinessSymbol = maage_ui_home_symbol(@"clock.fill", 21, NSColor.whiteColor);
+    [readiness addArrangedSubview:self.homeReadinessSymbol];
+    self.homeReadiness = maage_ui_row_label(@"Initializing…", 17, YES);
+    self.homeReadiness.textColor = NSColor.whiteColor;
+    [readiness addArrangedSubview:self.homeReadiness];
+    [hero addArrangedSubview:readiness];
+    [hero setCustomSpacing:35 afterView:readiness];
+
+    NSStackView *cards = maage_ui_stack(YES, 13);
+    [cards addArrangedSubview:maage_ui_home_card(@"cube", @"Loading installation…", self, @selector(showInstallations:), &_homeInstallation)];
+    [cards addArrangedSubview:maage_ui_home_card(@"arrow.triangle.2.circlepath", @"No Client build", self, @selector(showInstallations:), &_homeVersion)];
+    [cards addArrangedSubview:maage_ui_home_card(@"person.2", @"No account selected", self, @selector(manage:), &_homeAccount)];
+    [cards addArrangedSubview:maage_ui_home_card(@"hammer", @"Default Playspace", nil, NULL, &_homePlayspace)];
+    for (NSUInteger i = 1; i < cards.arrangedSubviews.count; ++i)
+        [cards.arrangedSubviews[i].widthAnchor constraintEqualToAnchor:cards.arrangedSubviews[0].widthAnchor].active = YES;
+    [hero addArrangedSubview:cards];
+    [cards.widthAnchor constraintEqualToAnchor:self.playHome.widthAnchor multiplier:0.93].active = YES;
+    [hero setCustomSpacing:20 afterView:cards];
+
+    NSButton *configuration = [self button:@"Launcher Configuration" action:@selector(showSettings:)];
+    configuration.bordered = NO;
+    configuration.font = [NSFont systemFontOfSize:15 weight:NSFontWeightSemibold];
+    configuration.attributedTitle = [[NSAttributedString alloc] initWithString:@"Launcher Configuration" attributes:@{ NSFontAttributeName: configuration.font, NSForegroundColorAttributeName: NSColor.whiteColor }];
+    if (@available(macOS 11.0, *)) {
+        configuration.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Settings"];
+        configuration.imagePosition = NSImageLeft;
+        configuration.contentTintColor = NSColor.whiteColor;
+    }
+    [hero addArrangedSubview:configuration];
+    hero.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playHome addSubview:hero];
     [NSLayoutConstraint activateConstraints:@[
-        [form.leadingAnchor constraintEqualToAnchor:page.leadingAnchor
-                                           constant:12],
-        [form.trailingAnchor constraintEqualToAnchor:page.trailingAnchor
-                                            constant:-12],
-        [form.centerYAnchor constraintEqualToAnchor:page.centerYAnchor],
-        [form.topAnchor constraintGreaterThanOrEqualToAnchor:page.topAnchor
-                                                    constant:12],
-        [form.bottomAnchor constraintLessThanOrEqualToAnchor:page.bottomAnchor
-                                                    constant:-12],
-        [self.installation.widthAnchor constraintEqualToAnchor:form.widthAnchor],
-        [self.clientStatus.widthAnchor constraintEqualToAnchor:form.widthAnchor],
-        [self.launchStatus.widthAnchor constraintEqualToAnchor:form.widthAnchor]
+        [hero.centerXAnchor constraintEqualToAnchor:self.playHome.centerXAnchor],
+        [hero.centerYAnchor constraintEqualToAnchor:self.playHome.centerYAnchor constant:-8],
+        [hero.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.playHome.leadingAnchor constant:22],
+        [hero.trailingAnchor constraintLessThanOrEqualToAnchor:self.playHome.trailingAnchor constant:-22],
+        [hero.topAnchor constraintGreaterThanOrEqualToAnchor:self.playHome.topAnchor constant:16],
+        [hero.bottomAnchor constraintLessThanOrEqualToAnchor:self.playHome.bottomAnchor constant:-60]
     ]];
+
+    NSTextField *disclaimer = maage_ui_row_label(@"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", 10, NO);
+    disclaimer.textColor = [NSColor colorWithWhite:1 alpha:0.58];
+    disclaimer.alignment = NSTextAlignmentCenter;
+    disclaimer.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playHome addSubview:disclaimer];
+    [NSLayoutConstraint activateConstraints:@[
+        [disclaimer.centerXAnchor constraintEqualToAnchor:self.playHome.centerXAnchor],
+        [disclaimer.bottomAnchor constraintEqualToAnchor:self.playHome.bottomAnchor constant:-17],
+        [disclaimer.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.playHome.leadingAnchor constant:15],
+        [disclaimer.trailingAnchor constraintLessThanOrEqualToAnchor:self.playHome.trailingAnchor constant:-15]
+    ]];
+    NSTextField *version = maage_ui_row_label(@"MaaGE", 10, NO);
+    version.textColor = [NSColor colorWithWhite:1 alpha:0.55];
+    version.toolTip = @"Launcher " MAAGE_LAUNCHER_VERSION;
+    version.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.playHome addSubview:version];
+    [NSLayoutConstraint activateConstraints:@[
+        [version.leadingAnchor constraintEqualToAnchor:self.playHome.leadingAnchor constant:18],
+        [version.bottomAnchor constraintEqualToAnchor:self.playHome.bottomAnchor constant:-17]
+    ]];
+    self.playHome.hidden = YES;
     self.playSplash = [[MaaGELauncherSplashView alloc] init];
     maage_ui_fill(self.playSplash, self.window.contentView, 0);
     NSStackView *splashContent = maage_ui_stack(NO, 22);
