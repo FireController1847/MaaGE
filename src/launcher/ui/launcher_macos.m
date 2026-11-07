@@ -54,6 +54,15 @@ static NSTextField *maage_ui_row_label(NSString *text, CGFloat size, BOOL bold) 
     NSRectFill(self.bounds);
 }
 @end
+/* Scrolled settings content must start at the TOP even when its preferred
+ * height exceeds the clip view. AppKit's default NSView origin is bottom-left. */
+@interface MaaGELauncherTopDocumentView : NSView
+@end
+@implementation MaaGELauncherTopDocumentView
+- (BOOL)isFlipped {
+    return YES;
+}
+@end
 static NSImageView *maage_ui_brand_logo(CGFloat size, CGFloat cornerRadius) {
     NSString *path = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"png"];
     NSImage *image = path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
@@ -67,9 +76,9 @@ static NSImageView *maage_ui_brand_logo(CGFloat size, CGFloat cornerRadius) {
     [logo.heightAnchor constraintEqualToConstant:size].active = YES;
     return logo;
 }
-/* Splash follows the bundled macOS app icon, not the cross-platform PNG.
- * The ICNS contains its own background and shape; do not add another mask. */
-static NSImageView *maage_ui_splash_logo(CGFloat size) {
+/* Native Launcher chrome follows the bundled macOS app icon, not the
+ * cross-platform PNG. ICNS owns its background and silhouette. */
+static NSImageView *maage_ui_macos_app_icon(CGFloat size) {
     NSString *path = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"icns"];
     NSImage *image = path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
     NSImageView *logo = [NSImageView imageViewWithImage:image ?: NSApp.applicationIconImage];
@@ -1686,7 +1695,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     maage_ui_fill(self.playSplash, self.window.contentView, 0);
     NSStackView *splashContent = maage_ui_stack(NO, 22);
     splashContent.alignment = NSLayoutAttributeCenterX;
-    self.splashLogo = maage_ui_splash_logo(144);
+    self.splashLogo = maage_ui_macos_app_icon(144);
     [splashContent addArrangedSubview:self.splashLogo];
     self.splashMessage = maage_ui_label(@"Loading your installations…", 15, NO);
     self.splashMessage.textColor = NSColor.labelColor;
@@ -1964,11 +1973,12 @@ static NSTableView *maage_ui_navigation_table(void) {
     NSScrollView *scroll = [[NSScrollView alloc] init];
     scroll.hasVerticalScroller = YES;
     scroll.drawsBackground = NO;
-    NSView *document = [[NSView alloc] init];
+    MaaGELauncherTopDocumentView *document = [[MaaGELauncherTopDocumentView alloc] init];
     scroll.documentView = document;
     maage_ui_fill(page, document, 2);
     document.translatesAutoresizingMaskIntoConstraints = NO;
     [document.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor].active = YES;
+    [document.heightAnchor constraintGreaterThanOrEqualToAnchor:scroll.contentView.heightAnchor].active = YES;
     return scroll;
 }
 #if MAAGE_LAUNCHER_DEVELOPMENT
@@ -2052,7 +2062,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     NSStackView *groups = maage_ui_stack(NO, 18);
     [groups addArrangedSubview:maage_ui_label(@"About MaaGE", 24, YES)];
     NSStackView *identity = maage_ui_stack(YES, 16);
-    NSImageView *icon = maage_ui_brand_logo(64, 13);
+    NSImageView *icon = maage_ui_macos_app_icon(64);
     [identity addArrangedSubview:icon];
     NSStackView *name = maage_ui_stack(NO, 5);
     [name addArrangedSubview:maage_ui_label(@"MaaGE", 28, YES)];
@@ -2132,7 +2142,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.sidebar.delegate = self;
     self.sidebar.accessibilityLabel = @"Launcher navigation";
 
-    NSImageView *mark = maage_ui_brand_logo(34, 8);
+    NSImageView *mark = maage_ui_macos_app_icon(34);
     NSStackView *brandText = maage_ui_stack(NO, 2);
     [brandText addArrangedSubview:maage_ui_row_label(@"MaaGE", 16, YES)];
     NSTextField *descriptor = maage_ui_row_label(@"LAUNCHER", 10, YES);
