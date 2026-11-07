@@ -303,7 +303,8 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     self.layer.cornerRadius = NSHeight(self.bounds) / 2;
     self.layer.masksToBounds = NO;
     self.layer.shadowColor = NSColor.blackColor.CGColor;
-    self.layer.shadowOffset = NSMakeSize(0, -9 * scale);
+    /* Core Animation's positive Y offset places this layer shadow below the button. */
+    self.layer.shadowOffset = NSMakeSize(0, 11 * scale);
     [self refreshHomeInteraction];
 }
 - (void)refreshHomeInteraction {
@@ -360,13 +361,9 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @end
 @implementation MaaGELauncherHomeCardButton
 - (void)refreshHomeInteraction {
-    CGFloat opacity = self.homePressed ? 0.33 : self.homeHovered ? (self.manageSegment ? 0.25 : 0.18) : 0;
-    NSColor *fill = [NSColor colorWithSRGBRed:0.35 green:0.62 blue:0.38 alpha:opacity];
+    CGFloat opacity = self.homePressed ? 0.40 : self.homeHovered ? (self.manageSegment ? 0.32 : 0.29) : 0;
+    NSColor *fill = [NSColor colorWithWhite:1 alpha:opacity];
     maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
-    if (self.symbolTile) {
-        NSColor *tile = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:self.homeHovered ? 0.38 : 0.13];
-        maage_ui_home_animate_layer(self.symbolTile.layer, @"backgroundColor", (__bridge id) tile.CGColor, 0.18);
-    }
 }
 @end
 @interface MaaGELauncherHomeCard : NSView
@@ -385,10 +382,7 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     [self addTrackingArea:self.homeTracking];
 }
 - (void)refreshHomeHover {
-    NSColor *border = self.homeHovered ? [NSColor colorWithSRGBRed:0.54 green:0.80 blue:0.51 alpha:0.70] : [NSColor colorWithWhite:1 alpha:0.68];
-    maage_ui_home_animate_layer(self.layer, @"borderColor", (__bridge id) border.CGColor, 0.18);
-    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.44 : 0.23), 0.18);
-    maage_ui_home_animate_layer(self.layer, @"shadowRadius", @(self.homeHovered ? 21 : 15), 0.18);
+    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.35 : 0.23), 0.18);
 }
 - (void)setVerified:(BOOL)verified {
     if (_verified == verified) return;
