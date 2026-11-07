@@ -139,9 +139,9 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
     for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
-        self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1160, 520, 110, scale, originX, originY);
+        self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1100, 520, 110, scale, originX, originY);
     /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
-    NSRect configurationRow = maage_ui_home_rect(0, 1310, 2560, 56, scale, originX, originY);
+    NSRect configurationRow = maage_ui_home_rect(0, 1250, 2560, 56, scale, originX, originY);
     CGFloat configurationWidth = maage_ui_home_configuration_width(scale);
     self.configuration.frame = NSMakeRect(NSMidX(self.bounds) - configurationWidth / 2, NSMinY(configurationRow), configurationWidth, NSHeight(configurationRow));
     NSFont *footerFont = [NSFont systemFontOfSize:26 * scale];
