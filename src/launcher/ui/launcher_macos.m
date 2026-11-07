@@ -356,18 +356,18 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 }
 /* Each side of a selection card has its own native hit area and hover surface. */
 @interface MaaGELauncherHomeCardButton : MaaGELauncherHomeActionButton
-@property(nonatomic, weak) NSView *symbolTile;
-@property(nonatomic) BOOL manageSegment;
+@property(nonatomic, weak) NSView *hoverBackground;
 @end
 @implementation MaaGELauncherHomeCardButton
 - (void)refreshHomeInteraction {
-    CGFloat opacity = self.homePressed ? 0.40 : self.homeHovered ? (self.manageSegment ? 0.32 : 0.29) : 0;
-    NSColor *fill = [NSColor colorWithWhite:1 alpha:opacity];
-    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
+    /* Animate the surface BEHIND the content, not the transparent hit target
+     * above the icon, text and chevron. Hover is fully opaque white. */
+    NSColor *fill = self.homePressed ? [NSColor colorWithWhite:0.95 alpha:1] : self.homeHovered ? NSColor.whiteColor : [NSColor colorWithWhite:1 alpha:0];
+    maage_ui_home_animate_layer(self.hoverBackground.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
 }
 @end
 @interface MaaGELauncherHomeCard : NSView
-@property(nonatomic, strong) NSView *symbolTile, *divider;
+@property(nonatomic, strong) NSView *symbolTile, *divider, *hoverSurface, *dropdownHighlight, *manageHighlight;
 @property(nonatomic, strong) NSImageView *symbol, *downSymbol, *verifiedIcon;
 @property(nonatomic, strong) NSTextField *value;
 @property(nonatomic, strong) MaaGELauncherHomeCardButton *dropdown, *manage;
@@ -413,6 +413,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     self.layer.cornerRadius = 28 * scale;
     self.layer.shadowRadius = 15 * scale;
     self.layer.shadowOffset = NSMakeSize(0, -6 * scale);
+    /* Clip the independent hover surfaces to the SAME corner radius as
+     * the outer card. Keep the outer layer unclipped for its drop shadow. */
+    self.hoverSurface.frame = self.bounds;
+    self.hoverSurface.layer.cornerRadius = self.layer.cornerRadius;
     self.symbolTile.frame = NSMakeRect(14 * scale, 18 * scale, 74 * scale, 74 * scale);
     self.symbolTile.layer.cornerRadius = 37 * scale;
     self.symbol.frame = NSMakeRect(28 * scale, 32 * scale, 46 * scale, 46 * scale);
@@ -433,10 +437,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     CGFloat dividerX = round((NSWidth(self.bounds) - 74 * scale) * backing) / backing;
     CGFloat thickness = MAX(2.0 / backing, round(1.5 * scale * backing) / backing);
     self.divider.frame = NSMakeRect(dividerX, 0, thickness, NSHeight(self.bounds));
-    self.dropdown.frame = NSMakeRect(0, 0, dividerX, NSHeight(self.bounds));
-    self.manage.frame = NSMakeRect(dividerX + thickness, 0, NSWidth(self.bounds) - dividerX - thickness, NSHeight(self.bounds));
-    self.dropdown.layer.cornerRadius = 26 * scale;
-    self.manage.layer.cornerRadius = 20 * scale;
+    self.dropdownHighlight.frame = NSMakeRect(0, 0, dividerX, NSHeight(self.bounds));
+    self.manageHighlight.frame = NSMakeRect(dividerX + thickness, 0, NSWidth(self.bounds) - dividerX - thickness, NSHeight(self.bounds));
+    self.dropdown.frame = self.dropdownHighlight.frame;
+    self.manage.frame = self.manageHighlight.frame;
 }
 @end
 static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL manageAction, NSInteger selection, BOOL account, NSTextField * __strong *display) {
@@ -448,6 +452,20 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.layer.shadowColor = NSColor.blackColor.CGColor;
     card.layer.shadowOpacity = 0.23;
     card.layer.masksToBounds = NO;
+    /* First child: a clipped, transparent hover surface behind every icon
+     * and caption. Separate child layers maintain independent button states. */
+    card.hoverSurface = [[NSView alloc] init];
+    card.hoverSurface.wantsLayer = YES;
+    card.hoverSurface.layer.masksToBounds = YES;
+    [card addSubview:card.hoverSurface];
+    card.dropdownHighlight = [[NSView alloc] init];
+    card.dropdownHighlight.wantsLayer = YES;
+    card.dropdownHighlight.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0].CGColor;
+    [card.hoverSurface addSubview:card.dropdownHighlight];
+    card.manageHighlight = [[NSView alloc] init];
+    card.manageHighlight.wantsLayer = YES;
+    card.manageHighlight.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0].CGColor;
+    [card.hoverSurface addSubview:card.manageHighlight];
     NSColor *ink = [NSColor colorWithSRGBRed:0.19 green:0.25 blue:0.21 alpha:1];
     card.symbolTile = [[NSView alloc] init];
     card.symbolTile.wantsLayer = YES;
@@ -474,7 +492,7 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.dropdown.target = target;
     card.dropdown.action = @selector(showHomeDropdown:);
     card.dropdown.tag = selection;
-    card.dropdown.symbolTile = card.symbolTile;
+    card.dropdown.hoverBackground = card.dropdownHighlight;
     NSString *selectionName = selection == 0 ? @"installation" : selection == 1 ? @"Client build" : selection == 2 ? @"account" : @"Playspace";
     card.dropdown.accessibilityLabel = [@"Choose " stringByAppendingString:selectionName];
     card.dropdown.toolTip = [@"Choose " stringByAppendingString:selectionName];
@@ -482,7 +500,7 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.manage = [[MaaGELauncherHomeCardButton alloc] init];
     card.manage.title = @"";
     card.manage.bordered = NO;
-    card.manage.manageSegment = YES;
+    card.manage.hoverBackground = card.manageHighlight;
     card.manage.target = target;
     card.manage.action = manageAction;
     if (@available(macOS 11.0, *)) card.manage.image = [NSImage imageWithSystemSymbolName:@"chevron.right" accessibilityDescription:@"Manage"];
@@ -498,6 +516,8 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     [card addSubview:card.divider];
     /* The card owns explicit responsive frames, not an Auto Layout subgraph. */
     for (NSView *part in card.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
+    card.dropdownHighlight.translatesAutoresizingMaskIntoConstraints = NO;
+    card.manageHighlight.translatesAutoresizingMaskIntoConstraints = NO;
     return card;
 }
 static void maage_ui_home_set_value(NSTextField *label, NSString *value) {
