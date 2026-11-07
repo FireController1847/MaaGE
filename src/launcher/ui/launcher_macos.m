@@ -296,24 +296,31 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 @interface MaaGELauncherPlayButton : MaaGELauncherHomeActionButton
 @end
 @implementation MaaGELauncherPlayButton
-- (void)drawRect:(NSRect)dirtyRect {
-    (void) dirtyRect;
+- (void)layout {
+    [super layout];
     CGFloat scale = NSHeight(self.bounds) / 154.0;
-    NSRect rect = NSInsetRect(self.bounds, 6 * scale, 9 * scale);
-    NSBezierPath *shape = [NSBezierPath bezierPathWithRoundedRect:rect xRadius:NSHeight(rect) / 2 yRadius:NSHeight(rect) / 2];
-    [NSGraphicsContext saveGraphicsState];
-    NSShadow *shadow = [[NSShadow alloc] init];
-    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:self.enabled && self.homeHovered ? 0.48 : 0.38];
-    shadow.shadowBlurRadius = (self.enabled && self.homeHovered ? 25 : 19) * scale;
-    shadow.shadowOffset = NSMakeSize(0, -(self.enabled && self.homeHovered ? 11 : 9) * scale);
-    [shadow set];
+    if (scale <= 0) return;
+    self.layer.cornerRadius = NSHeight(self.bounds) / 2;
+    self.layer.masksToBounds = NO;
+    self.layer.shadowColor = NSColor.blackColor.CGColor;
+    self.layer.shadowOffset = NSMakeSize(0, -9 * scale);
+    [self refreshHomeInteraction];
+}
+- (void)refreshHomeInteraction {
+    [super refreshHomeInteraction];
+    CGFloat scale = MAX(0.01, NSHeight(self.bounds) / 154.0);
     NSColor *fill = !self.enabled ? [NSColor colorWithSRGBRed:0.38 green:0.48 blue:0.39 alpha:1]
                     : self.homePressed ? [NSColor colorWithSRGBRed:0.34 green:0.52 blue:0.27 alpha:1]
                     : self.homeHovered ? [NSColor colorWithSRGBRed:0.45 green:0.70 blue:0.35 alpha:1]
                                        : [NSColor colorWithSRGBRed:103.0 / 255.0 green:161.0 / 255.0 blue:77.0 / 255.0 alpha:1];
-    [fill setFill];
-    [shape fill];
-    [NSGraphicsContext restoreGraphicsState];
+    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.19);
+    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(!self.enabled ? 0.22 : self.homeHovered ? 0.51 : 0.36), 0.19);
+    maage_ui_home_animate_layer(self.layer, @"shadowRadius", @((self.enabled && self.homeHovered ? 17 : 12) * scale), 0.19);
+}
+- (void)drawRect:(NSRect)dirtyRect {
+    (void) dirtyRect;
+    CGFloat scale = NSHeight(self.bounds) / 154.0;
+    NSRect rect = NSInsetRect(self.bounds, 6 * scale, 9 * scale);
     NSFont *font = [NSFont systemFontOfSize:60 * scale weight:NSFontWeightSemibold];
     NSShadow *textShadow = [[NSShadow alloc] init];
     textShadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.32];
@@ -321,7 +328,7 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     textShadow.shadowOffset = NSMakeSize(0, -4 * scale);
     NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: [NSColor colorWithWhite:1 alpha:self.enabled ? 1 : 0.7], NSShadowAttributeName: textShadow };
     NSSize titleSize = [self.title sizeWithAttributes:attributes];
-    CGFloat arrowWidth = 60 * scale, gap = 20 * scale, centerY = NSMidY(rect);
+    CGFloat arrowWidth = 60 * scale, gap = 34 * scale, centerY = NSMidY(rect);
     CGFloat x = NSMidX(rect) - (arrowWidth + gap + titleSize.width) / 2;
     NSBezierPath *arrow = [NSBezierPath bezierPath];
     [arrow moveToPoint:NSMakePoint(x, centerY - 29 * scale)];
@@ -353,12 +360,12 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @end
 @implementation MaaGELauncherHomeCardButton
 - (void)refreshHomeInteraction {
-    CGFloat opacity = self.homePressed ? 0.23 : self.homeHovered ? (self.manageSegment ? 0.19 : 0.13) : 0;
-    NSColor *fill = [NSColor colorWithWhite:1 alpha:opacity];
-    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.16);
+    CGFloat opacity = self.homePressed ? 0.33 : self.homeHovered ? (self.manageSegment ? 0.25 : 0.18) : 0;
+    NSColor *fill = [NSColor colorWithSRGBRed:0.35 green:0.62 blue:0.38 alpha:opacity];
+    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
     if (self.symbolTile) {
-        NSColor *tile = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:self.homeHovered ? 0.28 : 0.13];
-        maage_ui_home_animate_layer(self.symbolTile.layer, @"backgroundColor", (__bridge id) tile.CGColor, 0.16);
+        NSColor *tile = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:self.homeHovered ? 0.38 : 0.13];
+        maage_ui_home_animate_layer(self.symbolTile.layer, @"backgroundColor", (__bridge id) tile.CGColor, 0.18);
     }
 }
 @end
@@ -378,7 +385,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     [self addTrackingArea:self.homeTracking];
 }
 - (void)refreshHomeHover {
-    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.35 : 0.23), 0.18);
+    NSColor *border = self.homeHovered ? [NSColor colorWithSRGBRed:0.54 green:0.80 blue:0.51 alpha:0.70] : [NSColor colorWithWhite:1 alpha:0.68];
+    maage_ui_home_animate_layer(self.layer, @"borderColor", (__bridge id) border.CGColor, 0.18);
+    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.44 : 0.23), 0.18);
+    maage_ui_home_animate_layer(self.layer, @"shadowRadius", @(self.homeHovered ? 21 : 15), 0.18);
 }
 - (void)setVerified:(BOOL)verified {
     if (_verified == verified) return;
