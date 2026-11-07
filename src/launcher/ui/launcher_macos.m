@@ -67,6 +67,18 @@ static NSImageView *maage_ui_brand_logo(CGFloat size, CGFloat cornerRadius) {
     [logo.heightAnchor constraintEqualToConstant:size].active = YES;
     return logo;
 }
+/* Splash follows the bundled macOS app icon, not the cross-platform PNG.
+ * The ICNS contains its own background and shape; do not add another mask. */
+static NSImageView *maage_ui_splash_logo(CGFloat size) {
+    NSString *path = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"icns"];
+    NSImage *image = path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
+    NSImageView *logo = [NSImageView imageViewWithImage:image ?: NSApp.applicationIconImage];
+    logo.imageScaling = NSImageScaleProportionallyUpOrDown;
+    logo.wantsLayer = YES;
+    [logo.widthAnchor constraintEqualToConstant:size].active = YES;
+    [logo.heightAnchor constraintEqualToConstant:size].active = YES;
+    return logo;
+}
 /* Native launch home sized from the InDesign composition (2560 x 1440).
  * The design scales uniformly with window size; no background image or web view. */
 static NSRect maage_ui_home_rect(CGFloat x, CGFloat y, CGFloat width, CGFloat height, CGFloat scale, CGFloat originX, CGFloat originY) {
@@ -135,7 +147,10 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     CGFloat statusWidth = MIN([self.readinessLabel.stringValue sizeWithAttributes:@{ NSFontAttributeName: statusFont }].width + 16 * scale, 1050 * scale);
     CGFloat statusLeft = NSMidX(self.bounds) - (iconSize + gap + statusWidth) / 2;
     self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(statusLeft + iconSize + gap, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
-    CGFloat readinessCapCenter = NSMinY(self.readinessLabel.frame) + self.readinessLabel.baselineOffsetFromBottom + statusFont.capHeight / 2;
+    /* Align the symbol to the text's actual cap-height center. The text
+     * field baseline offset varies with its cell and is not reliable here. */
+    CGFloat textBaseline = NSMinY(self.readinessLabel.frame) - statusFont.descender + (statusFont.leading + 3) / 2;
+    CGFloat readinessCapCenter = textBaseline + statusFont.capHeight / 2;
     self.readinessIcon.frame = NSMakeRect(statusLeft, readinessCapCenter - iconSize / 2, iconSize, iconSize);
 
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
@@ -360,9 +375,9 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @end
 @implementation MaaGELauncherHomeCardButton
 - (void)refreshHomeInteraction {
-    /* Animate the surface BEHIND the content, not the transparent hit target
-     * above the icon, text and chevron. Hover is fully opaque white. */
-    NSColor *fill = self.homePressed ? [NSColor colorWithWhite:0.95 alpha:1] : self.homeHovered ? NSColor.whiteColor : [NSColor colorWithWhite:1 alpha:0];
+    /* Animate white opacity only, behind the icon, text and chevron.
+     * The pressed/hovered segments retain the card's white color. */
+    NSColor *fill = [NSColor colorWithWhite:1 alpha:self.homePressed ? 0.72 : self.homeHovered ? 0.80 : 0];
     maage_ui_home_animate_layer(self.hoverBackground.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
 }
 @end
@@ -1442,7 +1457,11 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.play.toolTip = state->can_play ? @"Launch MaaGE" : @(state->readiness ? state->readiness : "Launcher is preparing.");
     maage_ui_home_set_value(self.homeReadiness, state->can_play ? @"Ready to Play" : @(state->readiness ? state->readiness : "Initializing…"));
     self.homeReadiness.hidden = self.homeReadinessSymbol.hidden = NO;
-    if (@available(macOS 11.0, *)) self.homeReadinessSymbol.image = [NSImage imageWithSystemSymbolName:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill" accessibilityDescription:nil];
+    if (@available(macOS 11.0, *)) {
+        NSImage *symbol = [NSImage imageWithSystemSymbolName:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill" accessibilityDescription:nil];
+        NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithFont:self.homeReadiness.font];
+        self.homeReadinessSymbol.image = [symbol imageWithSymbolConfiguration:configuration] ?: symbol;
+    }
     self.homeReadinessSymbol.contentTintColor = state->can_play ? [NSColor colorWithSRGBRed:0.48 green:0.81 blue:0.35 alpha:1] : [NSColor colorWithWhite:1 alpha:0.78];
     /* These are the saved values used by Play, not the editor's draft choices. */
     NSString *installationLabel = state->catalog_ready ? @"Choose Installation" : @"Loading installation…";
@@ -1622,7 +1641,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     maage_ui_fill(self.playSplash, self.window.contentView, 0);
     NSStackView *splashContent = maage_ui_stack(NO, 22);
     splashContent.alignment = NSLayoutAttributeCenterX;
-    self.splashLogo = maage_ui_brand_logo(144, 28);
+    self.splashLogo = maage_ui_splash_logo(144);
     [splashContent addArrangedSubview:self.splashLogo];
     self.splashMessage = maage_ui_label(@"Loading your installations…", 15, NO);
     self.splashMessage.textColor = NSColor.labelColor;
