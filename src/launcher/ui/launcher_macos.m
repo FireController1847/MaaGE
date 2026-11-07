@@ -134,14 +134,15 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     CGFloat iconSize = 35 * scale, gap = 15 * scale;
     CGFloat statusWidth = MIN([self.readinessLabel.stringValue sizeWithAttributes:@{ NSFontAttributeName: statusFont }].width + 16 * scale, 1050 * scale);
     CGFloat statusLeft = NSMidX(self.bounds) - (iconSize + gap + statusWidth) / 2;
-    self.readinessIcon.frame = NSMakeRect(statusLeft, NSMidY(statusBox) - iconSize / 2, iconSize, iconSize);
     self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(statusLeft + iconSize + gap, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
+    CGFloat readinessCapCenter = NSMinY(self.readinessLabel.frame) + self.readinessLabel.baselineOffsetFromBottom + statusFont.capHeight / 2;
+    self.readinessIcon.frame = NSMakeRect(statusLeft, readinessCapCenter - iconSize / 2, iconSize, iconSize);
 
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
     for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
-        self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1100, 520, 110, scale, originX, originY);
+        self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1080, 520, 110, scale, originX, originY);
     /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
-    NSRect configurationRow = maage_ui_home_rect(0, 1250, 2560, 56, scale, originX, originY);
+    NSRect configurationRow = maage_ui_home_rect(0, 1230, 2560, 56, scale, originX, originY);
     CGFloat configurationWidth = maage_ui_home_configuration_width(scale);
     self.configuration.frame = NSMakeRect(NSMidX(self.bounds) - configurationWidth / 2, NSMinY(configurationRow), configurationWidth, NSHeight(configurationRow));
     NSFont *footerFont = [NSFont systemFontOfSize:26 * scale];
@@ -277,8 +278,9 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     CGFloat iconWidth = 38 * scale, spacing = 17 * scale;
     CGFloat labelWidth = maage_ui_home_configuration_caption_width(font, scale);
     CGFloat start = (NSWidth(self.bounds) - iconWidth - spacing - labelWidth) / 2;
-    self.homeGear.frame = NSMakeRect(start, (NSHeight(self.bounds) - iconWidth) / 2, iconWidth, iconWidth);
     self.homeCaption.frame = maage_ui_home_centered_text_rect(NSMakeRect(start + iconWidth + spacing, 0, labelWidth, NSHeight(self.bounds)), font);
+    CGFloat captionCapCenter = NSMinY(self.homeCaption.frame) + self.homeCaption.baselineOffsetFromBottom + font.capHeight / 2;
+    self.homeGear.frame = NSMakeRect(start, captionCapCenter - iconWidth / 2, iconWidth, iconWidth);
     if (fabs(self.homeCaption.shadow.shadowBlurRadius - 8 * scale) > 0.1) {
         NSShadow *shadow = self.homeCaption.shadow;
         shadow.shadowBlurRadius = 8 * scale;
@@ -344,13 +346,29 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     symbol.contentTintColor = color;
     return symbol;
 }
+/* Each side of a selection card has its own native hit area and hover surface. */
+@interface MaaGELauncherHomeCardButton : MaaGELauncherHomeActionButton
+@property(nonatomic, weak) NSView *symbolTile;
+@property(nonatomic) BOOL manageSegment;
+@end
+@implementation MaaGELauncherHomeCardButton
+- (void)refreshHomeInteraction {
+    CGFloat opacity = self.homePressed ? 0.23 : self.homeHovered ? (self.manageSegment ? 0.19 : 0.13) : 0;
+    NSColor *fill = [NSColor colorWithWhite:1 alpha:opacity];
+    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.16);
+    if (self.symbolTile) {
+        NSColor *tile = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:self.homeHovered ? 0.28 : 0.13];
+        maage_ui_home_animate_layer(self.symbolTile.layer, @"backgroundColor", (__bridge id) tile.CGColor, 0.16);
+    }
+}
+@end
 @interface MaaGELauncherHomeCard : NSView
 @property(nonatomic, strong) NSView *symbolTile, *divider;
-@property(nonatomic, strong) NSImageView *symbol, *downSymbol, *rightSymbol;
+@property(nonatomic, strong) NSImageView *symbol, *downSymbol, *verifiedIcon;
 @property(nonatomic, strong) NSTextField *value;
-@property(nonatomic, strong) NSButton *manage;
+@property(nonatomic, strong) MaaGELauncherHomeCardButton *dropdown, *manage;
 @property(nonatomic, strong) NSTrackingArea *homeTracking;
-@property(nonatomic) BOOL homeHovered;
+@property(nonatomic) BOOL homeHovered, verified;
 @end
 @implementation MaaGELauncherHomeCard
 - (void)updateTrackingAreas {
@@ -360,11 +378,13 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     [self addTrackingArea:self.homeTracking];
 }
 - (void)refreshHomeHover {
-    NSColor *surface = [NSColor colorWithWhite:1 alpha:self.homeHovered ? 0.9 : 0.79];
-    NSColor *tile = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:self.homeHovered ? 0.26 : 0.13];
-    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) surface.CGColor, 0.18);
     maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.35 : 0.23), 0.18);
-    maage_ui_home_animate_layer(self.symbolTile.layer, @"backgroundColor", (__bridge id) tile.CGColor, 0.18);
+}
+- (void)setVerified:(BOOL)verified {
+    if (_verified == verified) return;
+    _verified = verified;
+    self.verifiedIcon.hidden = !verified;
+    [self setNeedsLayout:YES];
 }
 - (void)mouseEntered:(NSEvent *)event {
     (void) event;
@@ -393,18 +413,29 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     self.symbolTile.layer.cornerRadius = 37 * scale;
     self.symbol.frame = NSMakeRect(28 * scale, 32 * scale, 46 * scale, 46 * scale);
     CGFloat fontSize = 28 * scale, available = (NSWidth(self.bounds) / scale - 250) * scale;
+    CGFloat labelWidth = available - (self.verified ? 33 * scale : 0);
     NSFont *font = [NSFont systemFontOfSize:fontSize weight:NSFontWeightMedium];
     CGFloat needed = [self.value.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width;
-    if (needed > available && needed > 0) font = [NSFont systemFontOfSize:fontSize * available / needed weight:NSFontWeightMedium];
+    if (needed > labelWidth && needed > 0) font = [NSFont systemFontOfSize:fontSize * labelWidth / needed weight:NSFontWeightMedium];
     if (fabs(self.value.font.pointSize - font.pointSize) > 0.1) self.value.font = font;
-    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(105 * scale, 0, available, NSHeight(self.bounds)), font);
+    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(105 * scale, 0, labelWidth, NSHeight(self.bounds)), font);
+    if (self.verifiedIcon) {
+        CGFloat used = MIN(labelWidth, [self.value.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width);
+        self.verifiedIcon.frame = NSMakeRect(NSMinX(self.value.frame) + used + 8 * scale, (NSHeight(self.bounds) - 25 * scale) / 2, 25 * scale, 25 * scale);
+    }
     self.downSymbol.frame = NSMakeRect(NSWidth(self.bounds) - 119 * scale, 43 * scale, 23 * scale, 24 * scale);
-    self.divider.frame = NSMakeRect(NSWidth(self.bounds) - 74 * scale, 0, 1 * scale, NSHeight(self.bounds));
-    self.rightSymbol.frame = NSMakeRect(NSWidth(self.bounds) - 50 * scale, 40 * scale, 26 * scale, 30 * scale);
-    self.manage.frame = NSMakeRect(NSWidth(self.bounds) - 73 * scale, 0, 73 * scale, NSHeight(self.bounds));
+    CGFloat backing = self.window.backingScaleFactor;
+    if (backing < 1) backing = 2;
+    CGFloat dividerX = round((NSWidth(self.bounds) - 74 * scale) * backing) / backing;
+    CGFloat thickness = MAX(2.0 / backing, round(1.5 * scale * backing) / backing);
+    self.divider.frame = NSMakeRect(dividerX, 0, thickness, NSHeight(self.bounds));
+    self.dropdown.frame = NSMakeRect(0, 0, dividerX, NSHeight(self.bounds));
+    self.manage.frame = NSMakeRect(dividerX + thickness, 0, NSWidth(self.bounds) - dividerX - thickness, NSHeight(self.bounds));
+    self.dropdown.layer.cornerRadius = 26 * scale;
+    self.manage.layer.cornerRadius = 20 * scale;
 }
 @end
-static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL action, NSTextField * __strong *display) {
+static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL manageAction, NSInteger selection, BOOL account, NSTextField * __strong *display) {
     MaaGELauncherHomeCard *card = [[MaaGELauncherHomeCard alloc] init];
     card.wantsLayer = YES;
     card.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0.79].CGColor;
@@ -425,32 +456,42 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.value.alignment = NSTextAlignmentLeft;
     [card addSubview:card.value];
     *display = card.value;
+    if (account) {
+        card.verifiedIcon = maage_ui_home_symbol(@"checkmark.circle.fill", [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1]);
+        card.verifiedIcon.hidden = YES;
+        card.verifiedIcon.accessibilityLabel = @"Verified Minecraft account";
+        [card addSubview:card.verifiedIcon];
+    }
     card.downSymbol = maage_ui_home_symbol(@"chevron.down", ink);
     [card addSubview:card.downSymbol];
+    card.dropdown = [[MaaGELauncherHomeCardButton alloc] init];
+    card.dropdown.title = @"";
+    card.dropdown.bordered = NO;
+    card.dropdown.target = target;
+    card.dropdown.action = @selector(showHomeDropdown:);
+    card.dropdown.tag = selection;
+    card.dropdown.symbolTile = card.symbolTile;
+    NSString *selectionName = selection == 0 ? @"installation" : selection == 1 ? @"Client build" : selection == 2 ? @"account" : @"Playspace";
+    card.dropdown.accessibilityLabel = [@"Choose " stringByAppendingString:selectionName];
+    card.dropdown.toolTip = [@"Choose " stringByAppendingString:selectionName];
+    [card addSubview:card.dropdown];
+    card.manage = [[MaaGELauncherHomeCardButton alloc] init];
+    card.manage.title = @"";
+    card.manage.bordered = NO;
+    card.manage.manageSegment = YES;
+    card.manage.target = target;
+    card.manage.action = manageAction;
+    if (@available(macOS 11.0, *)) card.manage.image = [NSImage imageWithSystemSymbolName:@"chevron.right" accessibilityDescription:@"Manage"];
+    card.manage.imagePosition = NSImageOnly;
+    card.manage.contentTintColor = ink;
+    card.manage.toolTip = account ? @"Manage accounts" : selection == 1 ? @"Manage Client builds" : selection == 3 ? @"Manage Playspaces (coming later)" : @"Manage installations";
+    card.manage.accessibilityLabel = @"Manage selection";
+    [card addSubview:card.manage];
+    /* Keep the physical-pixel-aligned divider above both hover surfaces. */
     card.divider = [[NSView alloc] init];
     card.divider.wantsLayer = YES;
-    card.divider.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.13].CGColor;
+    card.divider.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.23].CGColor;
     [card addSubview:card.divider];
-    if (action) {
-        MaaGELauncherHomeActionButton *manage = [[MaaGELauncherHomeActionButton alloc] init];
-        manage.title = @"";
-        manage.target = target;
-        manage.action = action;
-        manage.homeRestOpacity = 0.94;
-        card.manage = manage;
-        card.manage.bordered = NO;
-        if (@available(macOS 11.0, *)) card.manage.image = [NSImage imageWithSystemSymbolName:@"chevron.right" accessibilityDescription:@"Manage"];
-        card.manage.imagePosition = NSImageOnly;
-        card.manage.contentTintColor = ink;
-        card.manage.toolTip = @"Manage…";
-        card.manage.accessibilityLabel = @"Open management page";
-        [card addSubview:card.manage];
-        [manage refreshHomeInteraction];
-    } else {
-        card.rightSymbol = maage_ui_home_symbol(@"chevron.right", ink);
-        [card addSubview:card.rightSymbol];
-        card.toolTip = @"Playspace selection is coming later.";
-    }
     /* The card owns explicit responsive frames, not an Auto Layout subgraph. */
     for (NSView *part in card.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
     return card;
@@ -705,6 +746,107 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)showAbout:(id)sender {
     (void) sender;
     [self activatePage:MAAGE_PAGE_ABOUT];
+}
+/* The left side opens a native selection menu; the right side navigates to
+ * the existing management screen. Playspaces remain an explicit placeholder. */
+- (void)showHomeDropdown:(id)sender {
+    NSButton *button = (NSButton *) sender;
+    maage_launcher_ui *state = self.state;
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Choose"];
+    menu.autoenablesItems = NO;
+    NSInteger selection = button.tag;
+    if (selection == 0) {
+        for (unsigned i = 0; i < state->count; ++i) {
+            maage_installation *installation = &state->installations[i];
+            NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@(installation->name) action:@selector(selectHomeInstallation:) keyEquivalent:@""];
+            item.target = self;
+            item.tag = (NSInteger) i;
+            item.state = installation->id == state->selected ? NSControlStateValueOn : NSControlStateValueOff;
+            item.enabled = state->catalog_ready && !state->client_job;
+            [menu addItem:item];
+        }
+    } else if (selection == 1) {
+        for (unsigned i = 0; state->clients && i < state->clients->count; ++i) {
+            maage_client_build *build = &state->clients->builds[i];
+            char label[384];
+            maage_client_build_label(build, label);
+            NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@(label) action:@selector(selectHomeClient:) keyEquivalent:@""];
+            item.target = self;
+            item.representedObject = @(build->id);
+            item.enabled = state->catalog_ready && state->clients_valid && !state->client_job && !state->launch_pending;
+            for (unsigned j = 0; j < state->count; ++j)
+                if (state->installations[j].id == state->selected && !strcmp(state->installations[j].client, build->id)) item.state = NSControlStateValueOn;
+            [menu addItem:item];
+        }
+    } else if (selection == 2) {
+        for (unsigned i = 0; i < state->accounts.count; ++i) {
+            maage_access_profile *profile = &state->accounts.profiles[i];
+            if (!profile->connected) continue;
+            NSString *title = [NSString stringWithFormat:@"%s%@", profile->name, profile->state == MAAGE_ACCESS_VERIFIED ? @" ✓" : @""];
+            NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:@selector(selectHomeAccount:) keyEquivalent:@""];
+            item.target = self;
+            item.representedObject = @(profile->uuid);
+            item.state = !strcmp(profile->uuid, state->account) ? NSControlStateValueOn : NSControlStateValueOff;
+            item.enabled = state->accounts.metadata_ready && !state->accounts.busy;
+            [menu addItem:item];
+        }
+    } else {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"Default Playspace" action:nil keyEquivalent:@""];
+        item.state = NSControlStateValueOn;
+        item.enabled = NO;
+        [menu addItem:item];
+    }
+    if (!menu.numberOfItems) {
+        NSMenuItem *empty = [[NSMenuItem alloc] initWithTitle:@"No selections available" action:nil keyEquivalent:@""];
+        empty.enabled = NO;
+        [menu addItem:empty];
+    }
+    [menu addItem:NSMenuItem.separatorItem];
+    NSString *manageTitle = selection == 0 ? @"Manage Installations…" : selection == 1 ? @"Manage Client Builds…" : selection == 2 ? @"Manage Accounts…" : @"Manage Playspaces (Coming Soon)";
+    SEL manageAction = selection == 2 ? @selector(manage:) : selection == 3 ? @selector(showPlayspacePlaceholder:) : @selector(showInstallations:);
+    NSMenuItem *manage = [[NSMenuItem alloc] initWithTitle:manageTitle action:manageAction keyEquivalent:@""];
+    manage.target = self;
+    manage.enabled = selection != 3;
+    [menu addItem:manage];
+    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, NSHeight(button.bounds)) inView:button];
+}
+- (void)selectHomeInstallation:(NSMenuItem *)sender {
+    unsigned index = (unsigned) sender.tag;
+    if (index >= self.state->count || self.state->client_job) return;
+    if (!maage_status_failed(maage_launcher_installation_select(self.state, index))) {
+        self.creatingInstallation = NO;
+        self.hasEditedInstallation = YES;
+        self.editedInstallationID = self.state->installations[index].id;
+        [self reloadInstallations];
+    }
+    [self refresh:nil];
+}
+- (void)selectHomeClient:(NSMenuItem *)sender {
+    if (!self.state->catalog_ready || !self.state->clients_valid || self.state->client_job || self.state->launch_pending) return;
+    NSString *client = sender.representedObject;
+    if (!client.length || maage_clients_find(self.state->clients, client.UTF8String) < 0) return;
+    for (unsigned i = 0; i < self.state->count; ++i) {
+        maage_installation *installation = &self.state->installations[i];
+        if (installation->id != self.state->selected) continue;
+        if (strcmp(installation->client, client.UTF8String) && !maage_status_failed(maage_launcher_installation_write(self.state, (int) i, installation->name, client.UTF8String, installation->arguments))) [self reloadInstallations];
+        break;
+    }
+    [self refresh:nil];
+}
+- (void)selectHomeAccount:(NSMenuItem *)sender {
+    NSString *uuid = sender.representedObject;
+    if (!uuid.length || self.state->accounts.busy || !self.state->accounts.metadata_ready) return;
+    if (!maage_status_failed(maage_launcher_account_select(self.state, uuid.UTF8String))) self.accountRevision = 0;
+    [self refresh:nil];
+}
+- (void)showPlayspacePlaceholder:(id)sender {
+    /* This can be invoked by the management arrow or by a popup menu item. */
+    NSView *anchor = [sender isKindOfClass:[NSView class]] ? (NSView *) sender : ((MaaGELauncherHomeCard *) self.homePlayspace.superview).manage;
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Playspaces"];
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"Playspace management is coming later." action:nil keyEquivalent:@""];
+    item.enabled = NO;
+    [menu addItem:item];
+    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, NSHeight(anchor.bounds)) inView:anchor];
 }
 - (void)selectAccount:(id)sender {
     (void) sender;
@@ -1303,13 +1445,17 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.homeInstallation.toolTip = installationLabel;
     self.homeVersion.toolTip = versionDetail;
     NSString *accountLabel = @"No account selected";
+    BOOL accountVerified = NO;
     for (unsigned i = 0; i < state->accounts.count; ++i)
         if (!strcmp(state->account, state->accounts.profiles[i].uuid)) {
             accountLabel = @(state->accounts.profiles[i].name);
+            accountVerified = state->accounts.profiles[i].state == MAAGE_ACCESS_VERIFIED;
             break;
         }
     maage_ui_home_set_value(self.homeAccount, accountLabel);
-    self.homeAccount.toolTip = accountLabel;
+    MaaGELauncherHomeCard *accountCard = (MaaGELauncherHomeCard *) self.homeAccount.superview;
+    accountCard.verified = accountVerified;
+    self.homeAccount.toolTip = accountVerified ? [accountLabel stringByAppendingString:@" · Verified"] : accountLabel;
     self.account.enabled = state->accounts.metadata_ready;
     self.accountStatus.stringValue = @(state->account_status);
     self.authenticationStatus.stringValue = @(state->authentication_status);
@@ -1335,8 +1481,8 @@ static NSTableView *maage_ui_navigation_table(void) {
     [self updateInstallationEditor];
 }
 - (NSView *)playPage {
-    /* Keep selectors for existing pages; the four visible cards are read-only
-     * until installation, version, account and Playspace menus are implemented. */
+    /* The native selection cards reuse saved installations, Client builds and
+     * accounts. Playspace configuration is not implemented yet. */
     NSView *page = [[NSView alloc] init];
     NSStackView *references = maage_ui_stack(NO, 6);
     self.installation = [[NSPopUpButton alloc] init];
@@ -1418,10 +1564,10 @@ static NSTableView *maage_ui_navigation_table(void) {
     [home addSubview:self.homeReadiness];
 
     home.cards = @[
-        maage_ui_home_card(@"cube", @"Loading installation…", self, @selector(showInstallations:), &_homeInstallation),
-        maage_ui_home_card(@"arrow.triangle.2.circlepath", @"No Client build", self, @selector(showInstallations:), &_homeVersion),
-        maage_ui_home_card(@"person.2", @"No account selected", self, @selector(manage:), &_homeAccount),
-        maage_ui_home_card(@"wrench.and.screwdriver", @"Default Playspace", nil, NULL, &_homePlayspace)
+        maage_ui_home_card(@"cube", @"Loading installation…", self, @selector(showInstallations:), 0, NO, &_homeInstallation),
+        maage_ui_home_card(@"arrow.triangle.2.circlepath", @"No Client build", self, @selector(showInstallations:), 1, NO, &_homeVersion),
+        maage_ui_home_card(@"person.2", @"No account selected", self, @selector(manage:), 2, YES, &_homeAccount),
+        maage_ui_home_card(@"wrench.and.screwdriver", @"Default Playspace", self, @selector(showPlayspacePlaceholder:), 3, NO, &_homePlayspace)
     ];
     for (NSView *card in home.cards) [home addSubview:card];
 
