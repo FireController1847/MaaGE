@@ -102,10 +102,10 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     CGFloat scale = MIN((width - 40.0) / 2210.0, (height - 34.0) / 1440.0);
     CGFloat originX = (width - 2560.0 * scale) / 2, originY = (height - 1440.0 * scale) / 2;
 
-    self.brand.frame = maage_ui_home_rect(1054, 68, 451, 451, scale, originX, originY);
+    self.brand.frame = maage_ui_home_rect(1054, 0, 451, 451, scale, originX, originY);
     NSFont *headingFont = [NSFont systemFontOfSize:110 * scale weight:NSFontWeightBold];
     if (fabs(self.heading.font.pointSize - headingFont.pointSize) > 0.1) self.heading.font = headingFont;
-    self.heading.frame = maage_ui_home_centered_text_rect(maage_ui_home_rect(930, 456, 700, 170, scale, originX, originY), headingFont);
+    self.heading.frame = maage_ui_home_centered_text_rect(maage_ui_home_rect(930, 426, 700, 170, scale, originX, originY), headingFont);
     NSFont *taglineFont = [NSFont systemFontOfSize:45 * scale weight:NSFontWeightRegular];
     if (fabs(self.tagline.font.pointSize - taglineFont.pointSize) > 0.1) {
         self.tagline.font = taglineFont;
@@ -114,14 +114,14 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
         shadow.shadowOffset = NSMakeSize(0, -8 * scale);
         self.tagline.shadow = shadow;
     }
-    self.tagline.frame = maage_ui_home_centered_text_rect(maage_ui_home_rect(868, 645, 824, 59, scale, originX, originY), taglineFont);
-    self.taglineLeftRule.frame = maage_ui_home_rect(868, 673, 60, 2, scale, originX, originY);
-    self.taglineRightRule.frame = maage_ui_home_rect(1626, 673, 66, 2, scale, originX, originY);
+    self.tagline.frame = maage_ui_home_centered_text_rect(maage_ui_home_rect(868, 615, 824, 59, scale, originX, originY), taglineFont);
+    self.taglineLeftRule.frame = maage_ui_home_rect(868, 643, 60, 2, scale, originX, originY);
+    self.taglineRightRule.frame = maage_ui_home_rect(1626, 643, 66, 2, scale, originX, originY);
 
-    self.playButton.frame = maage_ui_home_rect(915, 748, 730, 154, scale, originX, originY);
+    self.playButton.frame = maage_ui_home_rect(915, 708, 730, 154, scale, originX, originY);
     NSFont *statusFont = [NSFont systemFontOfSize:31 * scale weight:NSFontWeightMedium];
     if (fabs(self.readinessLabel.font.pointSize - statusFont.pointSize) > 0.1) self.readinessLabel.font = statusFont;
-    NSRect statusBox = maage_ui_home_rect(0, 925, 2560, 49, scale, originX, originY);
+    NSRect statusBox = maage_ui_home_rect(0, 885, 2560, 49, scale, originX, originY);
     CGFloat iconSize = 35 * scale, gap = 15 * scale;
     CGFloat statusWidth = MIN([self.readinessLabel.stringValue sizeWithAttributes:@{ NSFontAttributeName: statusFont }].width + 16 * scale, 1050 * scale);
     CGFloat statusLeft = NSMidX(self.bounds) - (iconSize + gap + statusWidth) / 2;
@@ -131,17 +131,8 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
     for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
         self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1040, 520, 110, scale, originX, originY);
-    /* Keep text and symbol together even at the narrowest permitted window. */
+    /* Configuration owns a single centered icon-and-text group. */
     self.configuration.frame = maage_ui_home_rect(880, 1204, 800, 56, scale, originX, originY);
-    if (fabs(self.configuration.font.pointSize - 38 * scale) > 0.1 || !self.configuration.image) {
-        self.configuration.font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
-        NSShadow *captionShadow = [[NSShadow alloc] init];
-        captionShadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.46];
-        captionShadow.shadowBlurRadius = 8 * scale;
-        captionShadow.shadowOffset = NSMakeSize(0, -3 * scale);
-        self.configuration.attributedTitle = [[NSAttributedString alloc] initWithString:@"Launcher Configuration" attributes:@{ NSFontAttributeName: self.configuration.font, NSForegroundColorAttributeName: NSColor.whiteColor, NSShadowAttributeName: captionShadow }];
-        if (@available(macOS 11.0, *)) self.configuration.image = [[NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Settings"] imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:38 * scale weight:NSFontWeightRegular]];
-    }
     NSFont *footerFont = [NSFont systemFontOfSize:26 * scale];
     NSFont *versionFont = [NSFont systemFontOfSize:25 * scale];
     if (fabs(self.notice.font.pointSize - footerFont.pointSize) > 0.1) self.notice.font = footerFont;
@@ -233,6 +224,60 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 - (void)resetCursorRects {
     [super resetCursorRects];
     if (self.enabled) [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
+}
+@end
+/* NSButton places an image at its leading edge and centers its title within
+ * the entire button. Center the gear and caption as one group instead. */
+@interface MaaGELauncherConfigurationButton : MaaGELauncherHomeActionButton
+@property(nonatomic, strong) NSImageView *homeGear;
+@property(nonatomic, strong) NSTextField *homeCaption;
+@end
+@implementation MaaGELauncherConfigurationButton
+- (instancetype)initWithFrame:(NSRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.title = @"";
+        self.bordered = NO;
+        self.accessibilityLabel = @"Launcher Configuration";
+        _homeGear = [[NSImageView alloc] init];
+        if (@available(macOS 11.0, *)) _homeGear.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Settings"];
+        _homeGear.contentTintColor = NSColor.whiteColor;
+        _homeGear.imageScaling = NSImageScaleProportionallyUpOrDown;
+        [self addSubview:_homeGear];
+        _homeCaption = maage_ui_row_label(@"Launcher Configuration", 18, YES);
+        _homeCaption.textColor = NSColor.whiteColor;
+        _homeCaption.alignment = NSTextAlignmentLeft;
+        NSShadow *shadow = [[NSShadow alloc] init];
+        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.46];
+        shadow.shadowBlurRadius = 8;
+        shadow.shadowOffset = NSMakeSize(0, -3);
+        _homeCaption.shadow = shadow;
+        [self addSubview:_homeCaption];
+        _homeGear.translatesAutoresizingMaskIntoConstraints = NO;
+        _homeCaption.translatesAutoresizingMaskIntoConstraints = NO;
+    }
+    return self;
+}
+- (void)layout {
+    [super layout];
+    CGFloat scale = NSHeight(self.bounds) / 56.0;
+    if (scale <= 0) return;
+    NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
+    if (fabs(self.homeCaption.font.pointSize - font.pointSize) > 0.1) self.homeCaption.font = font;
+    CGFloat iconWidth = 38 * scale, spacing = 17 * scale;
+    CGFloat labelWidth = ceil([self.homeCaption.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width);
+    CGFloat start = (NSWidth(self.bounds) - iconWidth - spacing - labelWidth) / 2;
+    self.homeGear.frame = NSMakeRect(start, (NSHeight(self.bounds) - iconWidth) / 2, iconWidth, iconWidth);
+    self.homeCaption.frame = maage_ui_home_centered_text_rect(NSMakeRect(start + iconWidth + spacing, 0, labelWidth + 3 * scale, NSHeight(self.bounds)), font);
+    if (fabs(self.homeCaption.shadow.shadowBlurRadius - 8 * scale) > 0.1) {
+        NSShadow *shadow = self.homeCaption.shadow;
+        shadow.shadowBlurRadius = 8 * scale;
+        shadow.shadowOffset = NSMakeSize(0, -3 * scale);
+        self.homeCaption.shadow = shadow;
+    }
+}
+- (NSView *)hitTest:(NSPoint)point {
+    NSView *hit = [super hitTest:point];
+    return hit == self.homeGear || hit == self.homeCaption ? self : hit;
 }
 @end
 @interface MaaGELauncherPlayButton : MaaGELauncherHomeActionButton
@@ -1369,19 +1414,13 @@ static NSTableView *maage_ui_navigation_table(void) {
     ];
     for (NSView *card in home.cards) [home addSubview:card];
 
-    MaaGELauncherHomeActionButton *configuration = [[MaaGELauncherHomeActionButton alloc] init];
-    configuration.title = @"Launcher Configuration";
+    MaaGELauncherConfigurationButton *configuration = [[MaaGELauncherConfigurationButton alloc] init];
     configuration.target = self;
     configuration.action = @selector(showSettings:);
     configuration.homeRestOpacity = 0.92;
+    configuration.toolTip = @"Launcher settings and About";
     home.configuration = configuration;
-    home.configuration.bordered = NO;
-    home.configuration.font = [NSFont systemFontOfSize:15 weight:NSFontWeightMedium];
-    home.configuration.attributedTitle = [[NSAttributedString alloc] initWithString:@"Launcher Configuration" attributes:@{ NSFontAttributeName: home.configuration.font, NSForegroundColorAttributeName: NSColor.whiteColor }];
-    home.configuration.imagePosition = NSImageLeft;
-    home.configuration.contentTintColor = NSColor.whiteColor;
-    home.configuration.toolTip = @"Launcher settings and About";
-    [home addSubview:home.configuration];
+    [home addSubview:configuration];
     [configuration refreshHomeInteraction];
 
     home.notice = maage_ui_row_label(@"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", 10, NO);
