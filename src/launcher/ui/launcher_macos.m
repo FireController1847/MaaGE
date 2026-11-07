@@ -1459,7 +1459,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.homeReadiness.hidden = self.homeReadinessSymbol.hidden = NO;
     if (@available(macOS 11.0, *)) {
         NSImage *symbol = [NSImage imageWithSystemSymbolName:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill" accessibilityDescription:nil];
-        NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithFont:self.homeReadiness.font];
+        NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithPointSize:self.homeReadiness.font.pointSize weight:NSFontWeightMedium];
         self.homeReadinessSymbol.image = [symbol imageWithSymbolConfiguration:configuration] ?: symbol;
     }
     self.homeReadinessSymbol.contentTintColor = state->can_play ? [NSColor colorWithSRGBRed:0.48 green:0.81 blue:0.35 alpha:1] : [NSColor colorWithWhite:1 alpha:0.78];
