@@ -90,6 +90,27 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
 }
 /* Place the SF Symbol into the text run itself, so both glyphs use one real
  * typographic baseline regardless of NSTextField's internal cell geometry. */
+/* Account verification belongs to the same line as the account name, after
+ * the name rather than in an independently positioned image view. */
+static NSAttributedString *maage_ui_home_verified_name(NSString *name, NSFont *font, CGFloat scale) {
+    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: NSColor.blackColor };
+    NSMutableAttributedString *label = [[NSMutableAttributedString alloc] initWithString:name attributes:attributes];
+    if (@available(macOS 11.0, *)) {
+        NSImage *symbol = [NSImage imageWithSystemSymbolName:@"checkmark.circle.fill" accessibilityDescription:@"Verified Minecraft account"];
+        if (symbol) {
+            CGFloat size = 24 * scale;
+            NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightMedium];
+            if (@available(macOS 12.0, *)) configuration = [configuration configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:[NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1]]];
+            symbol = [symbol imageWithSymbolConfiguration:configuration] ?: symbol;
+            NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+            attachment.image = symbol;
+            attachment.bounds = NSMakeRect(0, (font.capHeight - size) / 2, size, size);
+            [label appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attributes]];
+            [label appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+        }
+    }
+    return label;
+}
 static NSAttributedString *maage_ui_home_inline(NSString *text, NSString *symbolName, NSFont *font, NSColor *textColor, NSColor *symbolColor, CGFloat symbolSize, NSShadow *shadow) {
     NSMutableDictionary *attributes = [@{ NSFontAttributeName: font, NSForegroundColorAttributeName: textColor } mutableCopy];
     if (shadow) attributes[NSShadowAttributeName] = shadow;
@@ -307,10 +328,17 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     }
     return self;
 }
+- (void)refreshHomeInteraction {
+    [super refreshHomeInteraction];
+    CGFloat opacity = !self.enabled ? 0 : self.homePressed ? 0.16 : self.homeHovered ? 0.11 : 0;
+    NSColor *background = [NSColor colorWithWhite:1 alpha:opacity];
+    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) background.CGColor, 0.19);
+}
 - (void)layout {
     [super layout];
     CGFloat scale = NSHeight(self.bounds) / 56.0;
     if (scale <= 0) return;
+    self.layer.cornerRadius = NSHeight(self.bounds) / 2;
     NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
     if (fabs(self.captionFontSize - font.pointSize) > 0.1) {
         self.captionFontSize = font.pointSize;
@@ -403,11 +431,13 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @end
 @interface MaaGELauncherHomeCard : NSView
 @property(nonatomic, strong) NSView *symbolTile, *divider, *hoverSurface, *dropdownHighlight, *manageHighlight;
-@property(nonatomic, strong) NSImageView *symbol, *downSymbol, *verifiedIcon;
+@property(nonatomic, strong) NSImageView *symbol, *downSymbol;
 @property(nonatomic, strong) NSTextField *value;
 @property(nonatomic, strong) MaaGELauncherHomeCardButton *dropdown, *manage;
 @property(nonatomic, strong) NSTrackingArea *homeTracking;
-@property(nonatomic) BOOL homeHovered, verified;
+@property(nonatomic, copy) NSString *accountName;
+@property(nonatomic) BOOL homeHovered, verified, accountLabelDirty;
+- (void)setAccountName:(NSString *)name verified:(BOOL)verified;
 @end
 @implementation MaaGELauncherHomeCard
 - (void)updateTrackingAreas {
@@ -419,10 +449,11 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 - (void)refreshHomeHover {
     maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.35 : 0.23), 0.18);
 }
-- (void)setVerified:(BOOL)verified {
-    if (_verified == verified) return;
+- (void)setAccountName:(NSString *)name verified:(BOOL)verified {
+    if ([_accountName isEqualToString:name] && _verified == verified) return;
+    _accountName = [name copy];
     _verified = verified;
-    self.verifiedIcon.hidden = !verified;
+    self.accountLabelDirty = YES;
     [self setNeedsLayout:YES];
 }
 - (void)mouseEntered:(NSEvent *)event {
@@ -456,16 +487,19 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     self.symbolTile.layer.cornerRadius = 37 * scale;
     self.symbol.frame = NSMakeRect(28 * scale, 32 * scale, 46 * scale, 46 * scale);
     CGFloat fontSize = 28 * scale, available = (NSWidth(self.bounds) / scale - 250) * scale;
-    CGFloat labelWidth = available - (self.verified ? 33 * scale : 0);
+    CGFloat nameWidth = MAX(1, available - (self.verified ? 34 * scale : 0));
+    NSString *value = self.accountName ?: self.value.stringValue;
     NSFont *font = [NSFont systemFontOfSize:fontSize weight:NSFontWeightMedium];
-    CGFloat needed = [self.value.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width;
-    if (needed > labelWidth && needed > 0) font = [NSFont systemFontOfSize:fontSize * labelWidth / needed weight:NSFontWeightMedium];
-    if (fabs(self.value.font.pointSize - font.pointSize) > 0.1) self.value.font = font;
-    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(105 * scale, 0, labelWidth, NSHeight(self.bounds)), font);
-    if (self.verifiedIcon) {
-        CGFloat used = MIN(labelWidth, [self.value.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width);
-        self.verifiedIcon.frame = NSMakeRect(NSMinX(self.value.frame) + used + 8 * scale, (NSHeight(self.bounds) - 25 * scale) / 2, 25 * scale, 25 * scale);
+    CGFloat needed = [value sizeWithAttributes:@{ NSFontAttributeName: font }].width;
+    if (needed > nameWidth && needed > 0) font = [NSFont systemFontOfSize:fontSize * nameWidth / needed weight:NSFontWeightMedium];
+    BOOL fontChanged = fabs(self.value.font.pointSize - font.pointSize) > 0.1;
+    if (fontChanged) self.value.font = font;
+    if (self.accountName && (self.accountLabelDirty || fontChanged)) {
+        if (self.verified) self.value.attributedStringValue = maage_ui_home_verified_name(self.accountName, font, scale);
+        else self.value.stringValue = self.accountName;
+        self.accountLabelDirty = NO;
     }
+    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(105 * scale, 0, available, NSHeight(self.bounds)), font);
     self.downSymbol.frame = NSMakeRect(NSWidth(self.bounds) - 119 * scale, 43 * scale, 23 * scale, 24 * scale);
     CGFloat backing = self.window.backingScaleFactor;
     if (backing < 1) backing = 2;
@@ -514,10 +548,8 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     [card addSubview:card.value];
     *display = card.value;
     if (account) {
-        card.verifiedIcon = maage_ui_home_symbol(@"checkmark.circle.fill", [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1]);
-        card.verifiedIcon.hidden = YES;
-        card.verifiedIcon.accessibilityLabel = @"Verified Minecraft account";
-        [card addSubview:card.verifiedIcon];
+        card.accountName = title;
+        card.accountLabelDirty = YES;
     }
     card.downSymbol = maage_ui_home_symbol(@"chevron.down", ink);
     [card addSubview:card.downSymbol];
@@ -1510,9 +1542,8 @@ static NSTableView *maage_ui_navigation_table(void) {
             accountVerified = state->accounts.profiles[i].state == MAAGE_ACCESS_VERIFIED;
             break;
         }
-    maage_ui_home_set_value(self.homeAccount, accountLabel);
     MaaGELauncherHomeCard *accountCard = (MaaGELauncherHomeCard *) self.homeAccount.superview;
-    accountCard.verified = accountVerified;
+    [accountCard setAccountName:accountLabel verified:accountVerified];
     self.homeAccount.toolTip = accountVerified ? [accountLabel stringByAppendingString:@" · Verified"] : accountLabel;
     self.account.enabled = state->accounts.metadata_ready;
     self.accountStatus.stringValue = @(state->account_status);
