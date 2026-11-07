@@ -88,6 +88,30 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     CGFloat textHeight = ceil(font.ascender - font.descender + font.leading + 3);
     return NSMakeRect(NSMinX(box), NSMidY(box) - textHeight / 2, NSWidth(box), textHeight);
 }
+/* Place the SF Symbol into the text run itself, so both glyphs use one real
+ * typographic baseline regardless of NSTextField's internal cell geometry. */
+static NSAttributedString *maage_ui_home_inline(NSString *text, NSString *symbolName, NSFont *font, NSColor *textColor, NSColor *symbolColor, CGFloat symbolSize, NSShadow *shadow) {
+    NSMutableDictionary *attributes = [@{ NSFontAttributeName: font, NSForegroundColorAttributeName: textColor } mutableCopy];
+    if (shadow) attributes[NSShadowAttributeName] = shadow;
+    NSMutableAttributedString *line = [[NSMutableAttributedString alloc] init];
+    if (@available(macOS 11.0, *)) {
+        NSImage *symbol = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+        if (symbol) {
+            NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithPointSize:symbolSize weight:NSFontWeightMedium];
+            if (@available(macOS 12.0, *)) {
+                configuration = [configuration configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:symbolColor]];
+            }
+            symbol = [symbol imageWithSymbolConfiguration:configuration] ?: symbol;
+            NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+            attachment.image = symbol;
+            attachment.bounds = NSMakeRect(0, (font.capHeight - symbolSize) / 2, symbolSize, symbolSize);
+            [line appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+            [line appendAttributedString:[[NSAttributedString alloc] initWithString:@"  " attributes:@{ NSFontAttributeName: font }]];
+        }
+    }
+    [line appendAttributedString:[[NSAttributedString alloc] initWithString:text attributes:attributes]];
+    return line;
+}
 /* Use the same intrinsic text measurement for the button's hit area and its
  * caption. Text-field cells need extra horizontal space beyond glyph bounds. */
 static CGFloat maage_ui_home_configuration_caption_width(NSFont *font, CGFloat scale) {
@@ -102,11 +126,23 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 @property(nonatomic, strong) NSView *taglineLeftRule, *taglineRightRule;
 @property(nonatomic, strong) NSTextField *heading, *tagline, *notice, *version;
 @property(nonatomic, strong) NSButton *playButton, *configuration;
-@property(nonatomic, strong) NSImageView *readinessIcon;
 @property(nonatomic, strong) NSTextField *readinessLabel;
+@property(nonatomic, copy) NSString *readinessText, *readinessSymbol;
+@property(nonatomic, strong) NSColor *readinessTint;
+@property(nonatomic) CGFloat readinessFontSize;
 @property(nonatomic, strong) NSArray<NSView *> *cards;
+- (void)updateReadiness:(NSString *)text symbol:(NSString *)symbol tint:(NSColor *)tint;
 @end
 @implementation MaaGELauncherHomeView
+- (void)updateReadiness:(NSString *)text symbol:(NSString *)symbol tint:(NSColor *)tint {
+    if ([self.readinessText isEqualToString:text] && [self.readinessSymbol isEqualToString:symbol] && [self.readinessTint isEqual:tint]) return;
+    self.readinessText = text;
+    self.readinessSymbol = symbol;
+    self.readinessTint = tint;
+    NSFont *font = self.readinessFontSize > 0 ? [NSFont systemFontOfSize:self.readinessFontSize weight:NSFontWeightMedium] : self.readinessLabel.font;
+    self.readinessLabel.attributedStringValue = maage_ui_home_inline(text, symbol, font, NSColor.whiteColor, tint, font.pointSize, self.readinessLabel.shadow);
+    [self setNeedsLayout:YES];
+}
 - (BOOL)isOpaque {
     return YES;
 }
@@ -141,17 +177,15 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 
     self.playButton.frame = maage_ui_home_rect(915, 708, 730, 154, scale, originX, originY);
     NSFont *statusFont = [NSFont systemFontOfSize:31 * scale weight:NSFontWeightMedium];
-    if (fabs(self.readinessLabel.font.pointSize - statusFont.pointSize) > 0.1) self.readinessLabel.font = statusFont;
+    if (fabs(self.readinessFontSize - statusFont.pointSize) > 0.1) {
+        self.readinessFontSize = statusFont.pointSize;
+        NSString *status = self.readinessText ?: @"Initializing…";
+        self.readinessLabel.font = statusFont;
+        self.readinessLabel.attributedStringValue = maage_ui_home_inline(status, self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
+    }
     NSRect statusBox = maage_ui_home_rect(0, 885, 2560, 49, scale, originX, originY);
-    CGFloat iconSize = 35 * scale, gap = 15 * scale;
-    CGFloat statusWidth = MIN([self.readinessLabel.stringValue sizeWithAttributes:@{ NSFontAttributeName: statusFont }].width + 16 * scale, 1050 * scale);
-    CGFloat statusLeft = NSMidX(self.bounds) - (iconSize + gap + statusWidth) / 2;
-    self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(statusLeft + iconSize + gap, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
-    /* Align the symbol to the text's actual cap-height center. The text
-     * field baseline offset varies with its cell and is not reliable here. */
-    CGFloat textBaseline = NSMinY(self.readinessLabel.frame) - statusFont.descender + (statusFont.leading + 3) / 2;
-    CGFloat readinessCapCenter = textBaseline + statusFont.capHeight / 2;
-    self.readinessIcon.frame = NSMakeRect(statusLeft, readinessCapCenter - iconSize / 2, iconSize, iconSize);
+    CGFloat statusWidth = MIN(self.readinessLabel.attributedStringValue.size.width + 20 * scale, 1100 * scale);
+    self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(NSMidX(self.bounds) - statusWidth / 2, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
 
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
     for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
@@ -253,11 +287,11 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     if (self.enabled) [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
 }
 @end
-/* NSButton places an image at its leading edge and centers its title within
- * the entire button. Center the gear and caption as one group instead. */
+/* Keep the gear and caption in the SAME attributed line, sharing one native
+ * text baseline and one hitbox. No independently laid-out NSImageView. */
 @interface MaaGELauncherConfigurationButton : MaaGELauncherHomeActionButton
-@property(nonatomic, strong) NSImageView *homeGear;
 @property(nonatomic, strong) NSTextField *homeCaption;
+@property(nonatomic) CGFloat captionFontSize;
 @end
 @implementation MaaGELauncherConfigurationButton
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -265,21 +299,10 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
         self.title = @"";
         self.bordered = NO;
         self.accessibilityLabel = @"Launcher Configuration";
-        _homeGear = [[NSImageView alloc] init];
-        if (@available(macOS 11.0, *)) _homeGear.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Settings"];
-        _homeGear.contentTintColor = NSColor.whiteColor;
-        _homeGear.imageScaling = NSImageScaleProportionallyUpOrDown;
-        [self addSubview:_homeGear];
         _homeCaption = maage_ui_row_label(@"Launcher Configuration", 18, YES);
         _homeCaption.textColor = NSColor.whiteColor;
-        _homeCaption.alignment = NSTextAlignmentLeft;
-        NSShadow *shadow = [[NSShadow alloc] init];
-        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.46];
-        shadow.shadowBlurRadius = 8;
-        shadow.shadowOffset = NSMakeSize(0, -3);
-        _homeCaption.shadow = shadow;
+        _homeCaption.alignment = NSTextAlignmentCenter;
         [self addSubview:_homeCaption];
-        _homeGear.translatesAutoresizingMaskIntoConstraints = NO;
         _homeCaption.translatesAutoresizingMaskIntoConstraints = NO;
     }
     return self;
@@ -289,23 +312,20 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     CGFloat scale = NSHeight(self.bounds) / 56.0;
     if (scale <= 0) return;
     NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
-    if (fabs(self.homeCaption.font.pointSize - font.pointSize) > 0.1) self.homeCaption.font = font;
-    CGFloat iconWidth = 38 * scale, spacing = 17 * scale;
-    CGFloat labelWidth = maage_ui_home_configuration_caption_width(font, scale);
-    CGFloat start = (NSWidth(self.bounds) - iconWidth - spacing - labelWidth) / 2;
-    self.homeCaption.frame = maage_ui_home_centered_text_rect(NSMakeRect(start + iconWidth + spacing, 0, labelWidth, NSHeight(self.bounds)), font);
-    CGFloat captionCapCenter = NSMinY(self.homeCaption.frame) + self.homeCaption.baselineOffsetFromBottom + font.capHeight / 2;
-    self.homeGear.frame = NSMakeRect(start, captionCapCenter - iconWidth / 2, iconWidth, iconWidth);
-    if (fabs(self.homeCaption.shadow.shadowBlurRadius - 8 * scale) > 0.1) {
-        NSShadow *shadow = self.homeCaption.shadow;
+    if (fabs(self.captionFontSize - font.pointSize) > 0.1) {
+        self.captionFontSize = font.pointSize;
+        self.homeCaption.font = font;
+        NSShadow *shadow = [[NSShadow alloc] init];
+        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.46];
         shadow.shadowBlurRadius = 8 * scale;
         shadow.shadowOffset = NSMakeSize(0, -3 * scale);
-        self.homeCaption.shadow = shadow;
+        self.homeCaption.attributedStringValue = maage_ui_home_inline(@"Launcher Configuration", @"gearshape", font, NSColor.whiteColor, NSColor.whiteColor, 38 * scale, shadow);
     }
+    self.homeCaption.frame = maage_ui_home_centered_text_rect(NSInsetRect(self.bounds, 14 * scale, 0), font);
 }
 - (NSView *)hitTest:(NSPoint)point {
     NSView *hit = [super hitTest:point];
-    return hit == self.homeGear || hit == self.homeCaption ? self : hit;
+    return hit == self.homeCaption ? self : hit;
 }
 @end
 @interface MaaGELauncherPlayButton : MaaGELauncherHomeActionButton
@@ -606,7 +626,7 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients, *accounts;
 @property(nonatomic, strong) NSView *shell, *body, *playSplash, *playHome;
-@property(nonatomic, strong) NSImageView *splashLogo, *homeReadinessSymbol;
+@property(nonatomic, strong) NSImageView *splashLogo;
 @property(nonatomic, strong) NSTextField *homeReadiness, *homeInstallation, *homeVersion, *homeAccount, *homePlayspace;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
 @property(nonatomic, strong) NSPopUpButton *account, *installation;
@@ -1455,14 +1475,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.play.enabled = state->can_play;
     self.play.title = @"Play MaaGE";
     self.play.toolTip = state->can_play ? @"Launch MaaGE" : @(state->readiness ? state->readiness : "Launcher is preparing.");
-    maage_ui_home_set_value(self.homeReadiness, state->can_play ? @"Ready to Play" : @(state->readiness ? state->readiness : "Initializing…"));
-    self.homeReadiness.hidden = self.homeReadinessSymbol.hidden = NO;
-    if (@available(macOS 11.0, *)) {
-        NSImage *symbol = [NSImage imageWithSystemSymbolName:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill" accessibilityDescription:nil];
-        NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithPointSize:self.homeReadiness.font.pointSize weight:NSFontWeightMedium];
-        self.homeReadinessSymbol.image = [symbol imageWithSymbolConfiguration:configuration] ?: symbol;
-    }
-    self.homeReadinessSymbol.contentTintColor = state->can_play ? [NSColor colorWithSRGBRed:0.48 green:0.81 blue:0.35 alpha:1] : [NSColor colorWithWhite:1 alpha:0.78];
+    [(MaaGELauncherHomeView *) self.playHome updateReadiness:state->can_play ? @"Ready to Play" : @(state->readiness ? state->readiness : "Initializing…")
+                                                    symbol:state->can_play ? @"checkmark.circle.fill" : state->client_process ? @"pause.circle.fill" : @"clock.fill"
+                                                      tint:state->can_play ? [NSColor colorWithSRGBRed:0.48 green:0.81 blue:0.35 alpha:1] : [NSColor colorWithWhite:1 alpha:0.78]];
     /* These are the saved values used by Play, not the editor's draft choices. */
     NSString *installationLabel = state->catalog_ready ? @"Choose Installation" : @"Loading installation…";
     NSString *versionLabel = state->clients_valid ? @"Select Client build" : @"Client registry unavailable";
@@ -1597,14 +1612,13 @@ static NSTableView *maage_ui_navigation_table(void) {
     home.playButton = self.play;
     [home addSubview:self.play];
 
-    self.homeReadinessSymbol = maage_ui_home_symbol(@"clock.fill", NSColor.whiteColor);
     self.homeReadiness = maage_ui_row_label(@"Initializing…", 13, YES);
     self.homeReadiness.textColor = NSColor.whiteColor;
+    self.homeReadiness.alignment = NSTextAlignmentCenter;
     self.homeReadiness.shadow = detailShadow;
-    home.readinessIcon = self.homeReadinessSymbol;
     home.readinessLabel = self.homeReadiness;
-    [home addSubview:self.homeReadinessSymbol];
     [home addSubview:self.homeReadiness];
+    [home updateReadiness:@"Initializing…" symbol:@"clock.fill" tint:NSColor.whiteColor];
 
     home.cards = @[
         maage_ui_home_card(@"cube", @"Loading installation…", self, @selector(showInstallations:), 0, NO, &_homeInstallation),
