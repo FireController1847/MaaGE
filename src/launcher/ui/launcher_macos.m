@@ -76,6 +76,15 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     CGFloat textHeight = ceil(font.ascender - font.descender + font.leading + 3);
     return NSMakeRect(NSMinX(box), NSMidY(box) - textHeight / 2, NSWidth(box), textHeight);
 }
+/* Use the same intrinsic text measurement for the button's hit area and its
+ * caption. Text-field cells need extra horizontal space beyond glyph bounds. */
+static CGFloat maage_ui_home_configuration_caption_width(NSFont *font, CGFloat scale) {
+    return ceil([@"Launcher Configuration" sizeWithAttributes:@{ NSFontAttributeName: font }].width) + 24 * scale;
+}
+static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
+    NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
+    return 38 * scale + 17 * scale + maage_ui_home_configuration_caption_width(font, scale) + 36 * scale;
+}
 @interface MaaGELauncherHomeView : NSView
 @property(nonatomic, strong) NSImageView *brand;
 @property(nonatomic, strong) NSView *taglineLeftRule, *taglineRightRule;
@@ -131,8 +140,10 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
     for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
         self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1040, 520, 110, scale, originX, originY);
-    /* Configuration owns a single centered icon-and-text group. */
-    self.configuration.frame = maage_ui_home_rect(880, 1204, 800, 56, scale, originX, originY);
+    /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
+    NSRect configurationRow = maage_ui_home_rect(0, 1204, 2560, 56, scale, originX, originY);
+    CGFloat configurationWidth = maage_ui_home_configuration_width(scale);
+    self.configuration.frame = NSMakeRect(NSMidX(self.bounds) - configurationWidth / 2, NSMinY(configurationRow), configurationWidth, NSHeight(configurationRow));
     NSFont *footerFont = [NSFont systemFontOfSize:26 * scale];
     NSFont *versionFont = [NSFont systemFontOfSize:25 * scale];
     if (fabs(self.notice.font.pointSize - footerFont.pointSize) > 0.1) self.notice.font = footerFont;
@@ -264,10 +275,10 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
     if (fabs(self.homeCaption.font.pointSize - font.pointSize) > 0.1) self.homeCaption.font = font;
     CGFloat iconWidth = 38 * scale, spacing = 17 * scale;
-    CGFloat labelWidth = ceil([self.homeCaption.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width);
+    CGFloat labelWidth = maage_ui_home_configuration_caption_width(font, scale);
     CGFloat start = (NSWidth(self.bounds) - iconWidth - spacing - labelWidth) / 2;
     self.homeGear.frame = NSMakeRect(start, (NSHeight(self.bounds) - iconWidth) / 2, iconWidth, iconWidth);
-    self.homeCaption.frame = maage_ui_home_centered_text_rect(NSMakeRect(start + iconWidth + spacing, 0, labelWidth + 3 * scale, NSHeight(self.bounds)), font);
+    self.homeCaption.frame = maage_ui_home_centered_text_rect(NSMakeRect(start + iconWidth + spacing, 0, labelWidth, NSHeight(self.bounds)), font);
     if (fabs(self.homeCaption.shadow.shadowBlurRadius - 8 * scale) > 0.1) {
         NSShadow *shadow = self.homeCaption.shadow;
         shadow.shadowBlurRadius = 8 * scale;
