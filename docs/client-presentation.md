@@ -14,6 +14,8 @@ The Client owns UI, controls, camera, sound and visuals, consuming copied Server
 
 Pause/Options pause gameplay and music, not streaming. Inventory/table release capture without pausing. World operations and Save/Quit are asynchronous; Quit hides the window before teardown. Loading reports actual work.
 
+Music uses registered content playlists and one active native music voice. A session/world epoch or playlist change stops the previous voice and releases its decoder before applying the new playlist's initial delay. Native World resets also stop the music bus, and admitting a new music stream first retires any remaining voice on that bus. DEBUG audio-scene logs identify track starts/stops and their world epochs; tracks decode only while selected.
+
 Auto GUI scale selects the largest integer backing-pixel factor preserving 320×240 logical units (minimum 1). Small/Normal/Large request 1/2/3; larger supported factors are available. Temporary clamping preserves the saved choice. Safe-area margins apply after scale selection. Drawing retains exact framebuffer/factor extents while layout rounds up; native top-origin pointer coordinates use the inverse transform, including Retina/fractional DPI. All screens, HUD and splash share it. Text input/font remain ASCII.
 
 Growable action bindings use USB HID usages or one-based mouse buttons. Remapping waits for a new edge; Escape unassigns, focus loss cancels, duplicate bindings remain independent. System Escape/F3/F11 and GUI modifiers are separate. `config/options.ini`: `[controls]` values `key:<usage>`, `mouse:<button>` or `none`; `[mouse]` sensitivity 0–100 (50 default), invert; `[video]` render distance defaults to 8 (normally 1–32, larger valid saved values supported). CLI overrides startup preferences.

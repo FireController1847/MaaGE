@@ -1002,6 +1002,7 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     memset(&runtime->game.food, 0, sizeof(runtime->game.food));
     memset(&runtime->sampled, 0, sizeof(runtime->sampled));
     memset(runtime->predictions, 0, sizeof(runtime->predictions));
+    runtime->last_prediction = 0;
     memset(runtime->actions, 0, sizeof(runtime->actions));
     memset(runtime->use_poses, 0, sizeof(runtime->use_poses));
     runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;

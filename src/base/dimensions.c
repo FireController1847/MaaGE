@@ -3,7 +3,6 @@
 #include "maage/creative.h"
 #include <math.h>
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 /* Built-in content policy; the World/Server never interpret these values. */
@@ -525,6 +524,53 @@ static maage_status dimension_portal_geometry(const void *context, const maage_b
     }
     return sink->quad(sink->context, &quad);
 }
+typedef struct dimension_frame_emitter {
+    const maage_block_geometry_sink *sink;
+    unsigned int facing;
+    int eye;
+} dimension_frame_emitter;
+static maage_status dimension_frame_quad(void *context, const maage_block_geometry_quad *source) {
+    dimension_frame_emitter *emitter = (dimension_frame_emitter *) context;
+    maage_block_geometry_quad quad = *source;
+    unsigned int corner, turn;
+    float u;
+    for (corner = 0; corner < 4; ++corner) {
+        if (quad.face == MAAGE_FACE_POSITIVE_Y)
+            for (turn = 0; turn < emitter->facing; ++turn) {
+                u = quad.uv[corner][0];
+                quad.uv[corner][0] = 1 - quad.uv[corner][1];
+                quad.uv[corner][1] = u;
+            }
+        if (emitter->eye) {
+            quad.uv[corner][0] = 0.25f + quad.uv[corner][0] * 0.5f;
+            quad.uv[corner][1] = quad.face == MAAGE_FACE_POSITIVE_Y ? 0.25f + quad.uv[corner][1] * 0.5f : quad.uv[corner][1] * 3 / 16;
+        } else if (quad.face / 2 != 1) quad.uv[corner][1] = 3.0f / 16 + quad.uv[corner][1] * 13 / 16;
+    }
+    return emitter->sink->quad(emitter->sink->context, &quad);
+}
+static maage_status dimension_frame_geometry(const void *context, const maage_block_geometry_query *query, const maage_block_geometry_sink *sink) {
+    const maage_base_ids *ids = (const maage_base_ids *) context;
+    dimension_frame_emitter emitter;
+    maage_block_geometry_sink mapped;
+    maage_block_shape bounds;
+    maage_status result;
+    emitter.sink = sink;
+    emitter.facing = (unsigned int) maage_base_state_value(query->blocks, query->state, ids->property_facing);
+    emitter.eye = 0;
+    mapped.context = &emitter;
+    mapped.quad = dimension_frame_quad;
+    memset(&bounds, 0, sizeof(bounds));
+    bounds.maximum[0] = bounds.maximum[2] = 1;
+    bounds.maximum[1] = 13.0 / 16;
+    result = maage_block_geometry_cuboid(&mapped, &bounds, query->state->faces, 63, query->block->mesh_material, 1);
+    if (maage_status_failed(result) || !maage_base_state_value(query->blocks, query->state, ids->property_eye)) return result;
+    bounds.minimum[0] = bounds.minimum[2] = 4.0 / 16;
+    bounds.minimum[1] = bounds.maximum[1];
+    bounds.maximum[0] = bounds.maximum[2] = 12.0 / 16;
+    bounds.maximum[1] = 1;
+    emitter.eye = 1;
+    return maage_block_geometry_cuboid(&mapped, &bounds, query->geometry->appearances, 63U & ~(1U << MAAGE_FACE_NEGATIVE_Y), query->block->mesh_material, 0);
+}
 static maage_status dimension_contact(const void *context, maage_world *world, const double position[3], int creative, maage_dimension_travel *travel) {
     const maage_base_ids *ids = (const maage_base_ids *) context;
     const maage_dimension_definition *source = maage_world_dimension(world);
@@ -664,8 +710,10 @@ static maage_status dimension_register_block(maage_content_context *context, maa
         block.collision_shape.maximum[1] = 0.875;
     }
     if (index == DIM_FRAME) {
+        block.geometry_id = ids->frame_geometry;
         block.opaque = 0;
         block.collision_shape.maximum[1] = 0.8125;
+        block.selection_shape.maximum[1] = 0.8125;
     }
     result = maage_base_register_block(context->blocks, name, &block);
     if (maage_status_failed(result)) return result;
@@ -685,17 +733,18 @@ static maage_status dimension_register_block(maage_content_context *context, maa
     return result;
 }
 maage_status maage_base_dimensions(maage_content_context *context, maage_base_ids *ids) {
-    static const char *const paths[9] = {"end_stone", "soul_sand", "glowstone", "portal", "end_portal_frame_top", "end_portal_frame_eye", "end_portal_frame_side", "obsidian", "end_sky"};
+    static const char *const paths[9] = {"minecraft/textures/blocks/end_stone.png", "minecraft/textures/blocks/soul_sand.png", "minecraft/textures/blocks/glowstone.png", "minecraft/textures/blocks/portal.png", "minecraft/textures/blocks/endframe_top.png", "minecraft/textures/blocks/endframe_eye.png", "minecraft/textures/blocks/endframe_side.png", "minecraft/textures/blocks/obsidian.png", "minecraft/textures/entity/end_portal.png"};
     maage_texture_definition texture;
     maage_block_geometry_definition geometry;
+    maage_block_face_definition appearances[MAAGE_FACE_COUNT];
+    maage_block_state_definition state;
     maage_biome_definition biome;
     maage_dimension_definition dimension;
     maage_property_definition property;
     maage_property_assignment properties[2];
     maage_item_definition item;
     maage_status result;
-    unsigned int i, eye, facing;
-    char path[128];
+    unsigned int i, eye, facing, face, channel;
     memset(&geometry, 0, sizeof(geometry));
     geometry.primitive = MAAGE_BLOCK_GEOMETRY_CUSTOM;
     geometry.emit = dimension_portal_geometry;
@@ -709,11 +758,22 @@ maage_status maage_base_dimensions(maage_content_context *context, maage_base_id
             texture.frame_edge = 16;
             texture.frame_ticks = 1;
         }
-        sprintf(path, "minecraft/textures/blocks/%s.png", paths[i]);
-        result = maage_presentation_source_register(context->presentation, path, &texture.source);
+        result = maage_presentation_source_register(context->presentation, paths[i], &texture.source);
         if (!maage_status_failed(result)) result = maage_presentation_texture_register(context->presentation, &texture, &ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS + i]);
         if (maage_status_failed(result)) return result;
     }
+    memset(appearances, 0, sizeof(appearances));
+    for (face = 0; face < MAAGE_FACE_COUNT; ++face) {
+        appearances[face].texture_id = ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS + 5];
+        for (channel = 0; channel < 4; ++channel)
+            appearances[face].tint[channel] = 1;
+        appearances[face].uv[2] = appearances[face].uv[3] = 1;
+    }
+    geometry.emit = dimension_frame_geometry;
+    geometry.appearances = appearances;
+    geometry.appearance_count = MAAGE_FACE_COUNT;
+    result = maage_block_geometry_register(context->geometry, "minecraft:end_portal_frame", &geometry, &ids->frame_geometry);
+    if (maage_status_failed(result)) return result;
     result = dimension_register_block(context, ids, DIM_END_STONE, "minecraft:end_stone", "End Stone", MAAGE_BASE_TEXTURE_DIMENSIONS, 1, 3);
     if (!maage_status_failed(result)) result = dimension_register_block(context, ids, DIM_SOUL_SAND, "minecraft:soul_sand", "Soul Sand", MAAGE_BASE_TEXTURE_DIMENSIONS + 1, 1, 0.5);
     if (!maage_status_failed(result)) result = dimension_register_block(context, ids, DIM_GLOWSTONE, "minecraft:glowstone", "Glowstone", MAAGE_BASE_TEXTURE_DIMENSIONS + 2, 1, 0.3);
@@ -743,7 +803,13 @@ maage_status maage_base_dimensions(maage_content_context *context, maage_base_id
             properties[0].value = eye;
             properties[1].property = ids->property_facing;
             properties[1].value = facing;
-            result = maage_content_register_state(context->blocks, ids, context->config, &ids->frame_states[eye][facing], ids->dimension_blocks[DIM_FRAME], properties, 2, MAAGE_BASE_TEXTURE_DIMENSIONS + 4 + eye);
+            result = maage_content_register_state(context->blocks, ids, context->config, &ids->frame_states[eye][facing], ids->dimension_blocks[DIM_FRAME], properties, 2, MAAGE_BASE_TEXTURE_DIMENSIONS + 6);
+            if (maage_status_failed(result)) return result;
+            state = *maage_block_registry_state(context->blocks, ids->frame_states[eye][facing]);
+            state.faces[MAAGE_FACE_POSITIVE_Y].texture_id = ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS + 4];
+            state.faces[MAAGE_FACE_NEGATIVE_Y].texture_id = ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS];
+            if (eye) state.selection_shape.maximum[0] = state.selection_shape.maximum[1] = state.selection_shape.maximum[2] = 1;
+            result = maage_block_registry_update_state(context->blocks, &state);
             if (maage_status_failed(result)) return result;
         }
     ids->dimension_states[DIM_FRAME] = ids->frame_states[0][0];

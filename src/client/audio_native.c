@@ -357,14 +357,14 @@ static maage_status mn_stop_voices(void *handle, maage_status_trace *trace) {
     return result;
 }
 static maage_status mn_reset_world(void *handle, maage_status_trace *trace) {
-    static const maage_audio_bus buses[4] = {
-        MAAGE_AUDIO_BLOCKS, MAAGE_AUDIO_PLAYER, MAAGE_AUDIO_AMBIENT, MAAGE_AUDIO_WEATHER};
+    static const maage_audio_bus buses[5] = {
+        MAAGE_AUDIO_BLOCKS, MAAGE_AUDIO_PLAYER, MAAGE_AUDIO_AMBIENT, MAAGE_AUDIO_WEATHER, MAAGE_AUDIO_MUSIC};
     maage_native_engine *engine = (maage_native_engine *) handle;
     maage_status result, first = mn_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_STOP);
     size_t i, j;
     (void) trace;
     if (!engine) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_STOP);
-    for (i = 0; i < 4U; ++i) {
+    for (i = 0; i < 5U; ++i) {
         result = maage_audio_stop_category(engine->audio, buses[i]);
         if (maage_status_failed(result)) {
             if (!maage_status_failed(first)) first = result;
@@ -579,9 +579,20 @@ static maage_status mn_scene_music_play(void *context, void *audio, void *pcm, d
     static const double zero[3] = {0.0, 0.0, 0.0};
     maage_native_scene_sound *sound = (maage_native_scene_sound *) pcm;
     maage_native_scene *scene = (maage_native_scene *) context;
+    maage_status result;
+    size_t i;
     (void) audio;
     if (voice) *voice = 0;
     if (!scene || !sound || !sound->stream || !voice) return mn_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_SUBMIT);
+    /* Client music is exclusive, including any voice whose scene token was
+     * retired during a World reset. Stop it before admitting another stream. */
+    result = maage_audio_stop_category(scene->engine->audio, MAAGE_AUDIO_MUSIC);
+    if (maage_status_failed(result)) return result;
+    for (i = 0; i < scene->engine->voice_count; ++i)
+        if (scene->engine->voices[i].playback.category == MAAGE_AUDIO_MUSIC) {
+            scene->engine->voices[i].active = 0;
+            scene->engine->voices[i].native_id = 0;
+        }
     return mn_play(scene->engine, NULL, sound->stream->ring, MAAGE_AUDIO_MUSIC, 0, zero, (float) gain, 1.0f, 16.0f, 0, (unsigned long *) voice, NULL);
 }
 static maage_status mn_scene_music_release(void *context, void *pcm) {

@@ -100,7 +100,7 @@ typedef struct maage_base_ids {
     unsigned long fluid_water, fluid_lava;
     unsigned long dimension_overworld, dimension_nether, dimension_end, biome_hell, biome_sky;
     unsigned long dimension_blocks[6], dimension_states[6], dimension_items[6];
-    unsigned long portal_states[2], frame_states[2][4], portal_geometry, property_eye;
+    unsigned long portal_states[2], frame_states[2][4], portal_geometry, frame_geometry, property_eye;
     unsigned long item_flint_steel, item_ender_eye;
     unsigned long geometry_cube, geometry_cactus, geometry_cross, geometry_torch, geometry_entity;
     unsigned long texture_water_flow, texture_lava_flow, texture_water_overlay;

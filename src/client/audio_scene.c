@@ -61,6 +61,7 @@ static maage_status sc_stop_music(maage_client_audio_scene *scene) {
     if (scene->music_voice) {
         result = scene->ports.voice_stop(scene->context, scene->audio, scene->music_voice);
         if (maage_status_failed(result)) return result;
+        MAAGE_LOG_DEBUG_EVENT("maage.client.audio_scene", maage_log_debug("maage.client.audio_scene", "Stopped music resource=%lu, voice=%lu.", (unsigned long) scene->music_resource, (unsigned long) scene->music_voice));
         scene->music_voice = 0;
     }
     if (scene->music_pcm) {
@@ -158,6 +159,7 @@ static void sc_music_update(maage_client_audio_scene *scene, double now, maage_s
     scene->music_bytes = bytes;
     scene->music_resource = selected;
     scene->next_music = 0;
+    MAAGE_LOG_DEBUG_EVENT("maage.client.audio_scene", maage_log_debug("maage.client.audio_scene", "Started music %s; playlist=%lu, voice=%lu, world epoch=%lu.", maage_sound_resource_get(scene->definitions, selected)->path, (unsigned long) scene->music_mode, (unsigned long) voice, scene->world_epoch));
 }
 static maage_status sc_ambient_play(void *context, maage_sound_id id, unsigned int action, maage_sound_material_id material, const double position[3], double gain, double pitch, maage_status_trace *trace) {
     maage_client_audio_scene *scene = (maage_client_audio_scene *) context;
@@ -201,7 +203,7 @@ maage_status maage_client_audio_scene_create(const maage_sound_registry *definit
     scene->resource_count = maage_sound_resource_count(definitions);
     scene->ambient_count = maage_sound_ambient_count(definitions);
     events = maage_sound_count(definitions);
-    if (scene->resource_count >= (size_t) -1 / sizeof(*scene->sounds) || scene->ambient_count > (size_t) -1 / sizeof(*scene->ambient) || events == (size_t) -1) {
+    if (scene->resource_count >= (size_t) - 1 / sizeof(*scene->sounds) || scene->ambient_count > (size_t) - 1 / sizeof(*scene->ambient) || events == (size_t) - 1) {
         free(scene);
         return sc_result(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_CREATE);
     }
@@ -279,14 +281,14 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, co
         scene->next_music = now + (music ? music->initial_delay : 0);
         scene->clock_ready = 1;
     }
-    if (scene->music_mode != selected && scene->music_voice) {
+    world_changed = scene->has_world != query.has_world || (snapshot && (scene->session_epoch != snapshot->session_epoch || scene->world_epoch != snapshot->world_epoch));
+    if (world_changed || scene->music_mode != selected) {
         result = sc_stop_music(scene);
         if (maage_status_failed(result)) return result;
-        scene->next_music = now + (music ? sc_delay(scene, 0, music->minimum_delay * 0.5) : 0);
+        scene->next_music = now + (music ? music->initial_delay : 0);
     }
     scene->music_mode = selected;
     scene->last_now = now;
-    world_changed = scene->has_world != query.has_world || (snapshot && (scene->session_epoch != snapshot->session_epoch || scene->world_epoch != snapshot->world_epoch));
     if (world_changed) {
         for (i = 0; i < scene->ambient_count; ++i) {
             ambient = maage_sound_ambient_at(scene->definitions, i);
