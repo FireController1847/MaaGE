@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,6 +77,12 @@ void maage_client_ui_font_draw(maage_client_ui *ui, const char *text, float x, f
     unsigned int character, width;
     float u, v;
     if (!text) return;
+    /* Centered text can begin on half a logical pixel. Snap to backing
+     * pixels so nearest sampling cannot land on adjacent glyph texels. */
+    if (ui->gui_scale > 0) {
+        x = (float) (floor((double) x * ui->gui_scale + 0.5) / ui->gui_scale);
+        y = (float) (floor((double) y * ui->gui_scale + 0.5) / ui->gui_scale);
+    }
     rectangle.y = y;
     rectangle.height = 8;
     for (i = 0; text[i]; ++i) {
