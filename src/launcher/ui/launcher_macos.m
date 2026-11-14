@@ -322,7 +322,7 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
         self.readinessLabel.font = statusFont;
         self.readinessLabel.attributedStringValue = maage_ui_home_inline(status, self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
     }
-    NSRect statusBox = maage_ui_home_rect(0, 885, 2560, 49, scale, originX, originY);
+    NSRect statusBox = maage_ui_home_rect(0, 908, 2560, 49, scale, originX, originY);
     CGFloat statusWidth = MIN(width - 40, MAX(1100 * scale, ceil(self.readinessLabel.attributedStringValue.size.width) + 16));
     self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(NSMidX(self.bounds) - statusWidth / 2, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
 
