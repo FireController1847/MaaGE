@@ -1,33 +1,29 @@
 # MaaGE Development Roadmap
 
-This is a source-level view of existing foundations and planned work—not authorization for development or proof of runtime/visual correctness. [AGENTS.md](../AGENTS.md) remains the project policy authority.
+Source-level status, not development authorization or runtime verification. [AGENTS.md](../AGENTS.md) owns project policy.
 
 ## Existing Foundations
 
 | Area | Present in source | Principal gaps |
 | --- | --- | --- |
-| Applications | Native Core/World/Session, independent Launcher, Client and headless Server; one integrated/dedicated authoritative runtime | Remote networking, Server administration GUI and hosting workflow |
-| Presentation | Metal/Vulkan, modern OpenGL scene path, limited legacy/Software; Title/world/options/Controls/inventory UI, registered Creative tabs/search, configurable input, visual replica/light, GPU streaming, player appearance and audio | Programmer platform validation, Wayland capture, secondary renderer coverage and visual polish |
-| Content and world | Namespace-owned root/submodules, three-stage binding, repeatable Client LOAD, explicit runtime sides, Base content, growable numeric registries, typed property configurations, domain-aware tags and ordered behavior composition, tag/property-aware recipes, registered fluids/geometry/containers/sounds/entity types/models, regional generation with rivers, beaches and biome decoration, async I/O and region saves | No dynamic module loader, scripting, modpack distribution or remote content negotiation |
-| Gameplay | Movement, mining/placement, typed item/falling/living/projectile entities, initial passive/hostile roster, spawning/combat, drops, directional support and persisted neighbor notifications, independent scheduled/random ticks, saplings/wheat, food use, transactional 2x2/3x3 crafting, persistent furnaces and single/double chest containers | Programmer gameplay/animation/container validation, richer navigation/behavior, full Survival, redstone, enchanting, dimensions and endgame |
-| Launcher/resources | Unified native Play/Installations/Accounts/Settings/About window; background catalog, Microsoft access and resource preparation; fingerprint-validated receipts, explicit Verify/Repair, UUID instances and exact Client package selection | Programmer startup/platform/visual validation, remote package deployment and modpack install support |
+| Applications | Native Core/World/Session, independent Launcher/Client/Server, shared authoritative runtime | Remote networking, administration/hosting |
+| Presentation | Metal/Vulkan, modern GL, limited legacy/Software, native input, game UI, Creative, replica/light, GPU streaming, player appearance/audio | Platform validation, Wayland capture, secondary backends, fidelity |
+| Content/world | Static root/submodules, phased binding, repeatable LOAD, numeric registries, typed properties/tags/providers, recipes, fluids/models/entities, regional terrain and async region saves | Dynamic loader, scripting, distribution, remote negotiation |
+| Gameplay | Movement/mining/placement, passive/hostile mobs, spawning/combat, drops, support updates, scheduled/random ticks, saplings/wheat, food, crafting/furnaces/chests | Validation, richer AI, full Survival, redstone, enchanting, dimensions/endgame |
+| Launcher | Native navigation, async catalog/access/resources, verification receipts, UUID instances, exact Client packages | Platform/startup validation, remote packages, modpacks |
 
-Incompatible pre-alpha saves or package formats fail explicitly without silent migration or deletion.
+Incompatible development formats fail explicitly without migration/deletion.
 
 ## Remaining Milestones
 
-- **Client completion:** Finish intended UI navigation/settings, honest loading/cancellation, accessibility and resource-failure handling.
-- **Visual/game-feel fidelity:** Refine light/AO, water/foliage, sky/weather, effects, animation and player interaction on the primary renderers.
-- **Survival progression:** Add wider equipment/food systems, richer mob AI/navigation, breeding/riding, XP entities and enchanting.
-- **Advanced gameplay:** Build redstone, richer block entities, structures, dimensions/portals and persistent endgame systems.
-- **Networking and extensibility:** Extend the same authoritative Server with a versioned remote Session protocol, multiplayer replication/reconciliation and later modpack/module delivery.
+- **Client:** Complete UI/settings, accessibility, loading/cancellation and resource-failure handling.
+- **Fidelity:** Refine lighting, foliage/water, sky/weather, effects, animation and interaction on primary renderers.
+- **Survival:** Equipment, food, AI/navigation, breeding/riding, XP entities and enchanting.
+- **Advanced gameplay:** Redstone, structures, block entities, dimensions/portals and endgame.
+- **Networking/extensibility:** Versioned remote Session protocol, multiplayer replication/reconciliation, module and modpack delivery.
 
 ## Technical References
 
-[Content module composition](content-modules.md) ·
-[World and gameplay](world-and-gameplay.md) ·
-[Client presentation](client-presentation.md) ·
-[Launcher and resources](launcher.md) ·
-[Logging and native crashes](diagnostics.md).
+[Content modules](content-modules.md) · [World/gameplay](world-and-gameplay.md) · [Client presentation](client-presentation.md) · [Launcher](launcher.md) · [Diagnostics](diagnostics.md).
 
-Current source and public headers provide the detailed implementation and API contracts. No compilation, gameplay or visual acceptance is implied by this roadmap.
+Current source/public headers own detailed implementation contracts; programmer verification remains necessary.
