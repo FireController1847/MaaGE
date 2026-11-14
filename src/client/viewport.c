@@ -823,8 +823,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     unsigned int drop_slot = 0;
     int valid_snapshot = 0, connected = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0, loading_terrain = 0;
-    unsigned char terrain_cells[9];
-    unsigned int terrain_ready, terrain_index;
+    unsigned char terrain_cells[MAAGE_CLIENT_ARRIVAL_EDGE * MAAGE_CLIENT_ARRIVAL_EDGE];
+    unsigned int terrain_ready, terrain_index, terrain_edge;
+    int terrain_radius;
     int was_modal = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps, logged_vsync, paused_command = -1;
@@ -1020,7 +1021,7 @@ choose_world:
     jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = drop_latched = 0;
     pacing.deadline = 0;
     pacing.fps = 0;
-    maage_client_frontend_loading_progress(frontend, "Loading world...", NULL);
+    maage_client_frontend_loading_progress(frontend, "Loading world...", NULL, 0);
     operation = maage_client_frontend_loading(frontend, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_local_session_create(256U, 256U, 512U, &session);
@@ -1117,7 +1118,9 @@ choose_world:
     /* Keep the loading root visible while the Client receives, lights and
      * uploads the nearby terrain. Streaming uses the ordinary frame loop. */
     memset(terrain_cells, 0, sizeof(terrain_cells));
-    maage_client_frontend_loading_progress(frontend, "Loading terrain...", terrain_cells);
+    terrain_radius = options.radius < MAAGE_CLIENT_ARRIVAL_RADIUS ? options.radius : MAAGE_CLIENT_ARRIVAL_RADIUS;
+    terrain_edge = (unsigned int) (terrain_radius * 2 + 1);
+    maage_client_frontend_loading_progress(frontend, "Loading terrain...", terrain_cells, terrain_edge);
     operation = maage_client_ui_set_snapshot(ui, &latest);
     if (maage_status_failed(operation)) goto done;
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
@@ -1710,9 +1713,15 @@ choose_world:
             maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
         }
         draw_count = resident_count = first_count = 0;
+        terrain_radius = options.radius < MAAGE_CLIENT_ARRIVAL_RADIUS ? options.radius : MAAGE_CLIENT_ARRIVAL_RADIUS;
+        terrain_edge = (unsigned int) (terrain_radius * 2 + 1);
         if (loading_terrain) {
-            for (terrain_index = 0; terrain_index < 9; ++terrain_index)
-                terrain_cells[terrain_index] = maage_world_chunk_loaded(visual_world, cx + (int) (terrain_index % 3) - 1, cz + (int) (terrain_index / 3) - 1) ? 1 : 0;
+            for (terrain_index = 0; terrain_index < terrain_edge * terrain_edge; ++terrain_index) {
+                int x = cx + (int) (terrain_index % terrain_edge) - terrain_radius;
+                int z = cz + (int) (terrain_index / terrain_edge) - terrain_radius;
+                if (abs(x) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1 || abs(z) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1) terrain_cells[terrain_index] = MAAGE_CLIENT_ARRIVAL_OUTSIDE;
+                else terrain_cells[terrain_index] = maage_world_chunk_loaded(visual_world, x, z) ? 1 : 0;
+            }
         }
         memset(&mesh_stats, 0, sizeof(mesh_stats));
         for (slot_index = 0; slot_index < cache.capacity; ++slot_index) {
@@ -1726,9 +1735,9 @@ choose_world:
                  * authoritative lifetime boundary for cached replicas. */
                 if (abs(cache.slots[slot_index].x - cx) > options.radius || abs(cache.slots[slot_index].z - cz) > options.radius) continue;
                 if (!maage_world_chunk_loaded(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
-                if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= 1 && abs(cache.slots[slot_index].z - cz) <= 1) {
-                    terrain_index = (unsigned int) ((cache.slots[slot_index].z - cz + 1) * 3 + cache.slots[slot_index].x - cx + 1);
-                    terrain_cells[terrain_index] = cache.slots[slot_index].presented ? 3 : 2;
+                if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= terrain_radius && abs(cache.slots[slot_index].z - cz) <= terrain_radius) {
+                    terrain_index = (unsigned int) (cache.slots[slot_index].z - cz + terrain_radius) * terrain_edge + (unsigned int) (cache.slots[slot_index].x - cx + terrain_radius);
+                    if (terrain_cells[terrain_index] != MAAGE_CLIENT_ARRIVAL_OUTSIDE) terrain_cells[terrain_index] = cache.slots[slot_index].presented ? 3 : 2;
                 }
                 if (!cache.slots[slot_index].presented) {
                     if (!maage_world_mesh_current(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision) || !maage_world_mesh_can_present(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
@@ -1739,7 +1748,7 @@ choose_world:
                     maage_client_chunk_mesh *chunk = &cache.slots[slot_index];
                     maage_render_mesh *mesh = chunk->filtered ? chunk->prediction : chunk->mesh;
                     float fog_blend = 0.0f;
-                    int arrival = loading_terrain && abs(chunk->x - cx) <= 1 && abs(chunk->z - cz) <= 1;
+                    int arrival = loading_terrain && abs(chunk->x - cx) <= terrain_radius && abs(chunk->z - cz) <= terrain_radius;
                     if (!video_options.chunk_fade_ms || arrival) chunk->fade_started_at = 0.0;
                     else if (!chunk->presented) fog_blend = 1.0f;
                     else if (chunk->fade_started_at != 0.0) {
@@ -1783,9 +1792,9 @@ choose_world:
          * chunk map is measured from this epoch's own replica/GPU cache. */
         if (loading_terrain) {
             terrain_ready = 0;
-            for (terrain_index = 0; terrain_index < 9; ++terrain_index)
-                if (terrain_cells[terrain_index] == 3) ++terrain_ready;
-            if (terrain_ready == 9) loading_terrain = 0;
+            for (terrain_index = 0; terrain_index < terrain_edge * terrain_edge; ++terrain_index)
+                if (terrain_cells[terrain_index] == 3 || terrain_cells[terrain_index] == MAAGE_CLIENT_ARRIVAL_OUTSIDE) ++terrain_ready;
+            if (terrain_ready == terrain_edge * terrain_edge) loading_terrain = 0;
         }
         if (!latest.player.health) {
             loading_terrain = 0;
@@ -1795,7 +1804,7 @@ choose_world:
                 if (maage_status_failed(operation)) goto done;
             }
         } else if (!latest.credits && (latest.travelling || loading_terrain)) {
-            maage_client_frontend_loading_progress(frontend, "Loading terrain...", latest.travelling ? NULL : terrain_cells);
+            maage_client_frontend_loading_progress(frontend, "Loading terrain...", latest.travelling ? NULL : terrain_cells, terrain_edge);
             if (!maage_client_ui_modal(ui)) {
                 operation = maage_client_ui_open(ui, MAAGE_CLIENT_UI_LOADING);
                 if (maage_status_failed(operation)) goto done;
@@ -1836,7 +1845,7 @@ choose_world:
                     if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS) {
                         cache.slots[slot_index].presented = 1;
                         if (video_options.chunk_fade_ms) {
-                            if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= 1 && abs(cache.slots[slot_index].z - cz) <= 1) cache.slots[slot_index].fade_started_at = 0.0;
+                            if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= terrain_radius && abs(cache.slots[slot_index].z - cz) <= terrain_radius) cache.slots[slot_index].fade_started_at = 0.0;
                             else cache.slots[slot_index].fade_started_at = loading_terrain || latest.travelling || latest.credits ? -1.0 : frame_end;
                         }
                         if (prediction.diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "phase=first_visible_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f gpu_ready_to_submit_ms=%.3f", cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision, cache.slots[slot_index].revision, (frame_end - cache.slots[slot_index].initialized_at) * 1000, (frame_end - cache.slots[slot_index].uploaded_at) * 1000));

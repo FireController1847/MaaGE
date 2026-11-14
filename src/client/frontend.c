@@ -451,8 +451,8 @@ maage_status maage_client_frontend_destroy(maage_client_frontend *f) {
     return result;
 }
 
-void maage_client_frontend_loading_progress(maage_client_frontend *f, const char *label, const unsigned char *cells) {
-    if (f) maage_client_ui_front_loading(f->view, label, cells);
+void maage_client_frontend_loading_progress(maage_client_frontend *f, const char *label, const unsigned char *cells, unsigned int edge) {
+    if (f) maage_client_ui_front_loading(f->view, label, cells, edge);
 }
 maage_status maage_client_frontend_loading(maage_client_frontend *f, maage_status_trace *trace) {
     maage_window_state state;

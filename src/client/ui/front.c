@@ -81,7 +81,7 @@ static void front_lifecycle_draw(maage_client_ui_frontend *f, int saving) {
     maage_client_ui *ui = f->ui;
     maage_client_ui_rect full, bar, cell;
     float w = ui->content.width, h = ui->content.height, edge, top, width;
-    unsigned int i, ready = 0;
+    unsigned int i, ready = 0, total = 0, side = f->loading_edge;
     char percent[16];
     static const float colors[4][3] = {{0.20f, 0.20f, 0.20f}, {0.43f, 0.54f, 0.32f}, {0.96f, 0.83f, 0.56f}, {1.0f, 1.0f, 1.0f}};
     full.x = full.y = 0;
@@ -98,34 +98,40 @@ static void front_lifecycle_draw(maage_client_ui_frontend *f, int saving) {
         front_center(f, "Saving world...", h / 2 - 4, 1, 1, 1);
         return;
     }
-    if (!f->loading_has_cells) {
+    if (!side) {
         front_center(f, f->loading_label[0] ? f->loading_label : "Loading world...", h / 2 - 4, 1, 1, 1);
         return;
     }
-    /* Fixed nearby terrain, not the entire configurable render distance. */
-    edge = h < 140 ? 9.0f : 14.0f;
-    top = h / 2 - edge * 1.5f;
+    /* Fit the bounded arrival map between its label and progress bar. */
+    edge = 14.0f;
+    if (edge * side > h - 64.0f) edge = (float) (int) ((h - 64.0f) / side);
+    if (edge * side > w - 12.0f) edge = (float) (int) ((w - 12.0f) / side);
+    if (edge < 2.0f) edge = 2.0f;
+    top = h / 2 - edge * side * 0.5f;
     front_center(f, f->loading_label[0] ? f->loading_label : "Loading terrain...", top - 20, 1, 1, 1);
-    cell = front_rect(f, w / 2 - edge * 1.5f - 2, top - 2, edge * 3 + 4, edge * 3 + 4);
+    cell = front_rect(f, w / 2 - edge * side * 0.5f - 2, top - 2, edge * side + 4, edge * side + 4);
     maage_client_ui_panel(ui, cell, 0, 0, 0, 0.9f);
-    for (i = 0; i < 9; ++i) {
-        unsigned int stage = f->loading_cells[i] <= 3 ? f->loading_cells[i] : 0;
+    for (i = 0; i < side * side; ++i) {
+        unsigned int stage = f->loading_cells[i];
+        if (stage == MAAGE_CLIENT_ARRIVAL_OUTSIDE) continue;
+        if (stage > 3) stage = 0;
+        ++total;
         if (stage == 3) ++ready;
-        cell = front_rect(f, w / 2 - edge * 1.5f + (float) (i % 3) * edge, top + (float) (i / 3) * edge, edge - 1, edge - 1);
+        cell = front_rect(f, w / 2 - edge * side * 0.5f + (float) (i % side) * edge, top + (float) (i / side) * edge, edge - 1, edge - 1);
         maage_client_ui_panel(ui, cell, colors[stage][0], colors[stage][1], colors[stage][2], 1);
     }
     width = w < 200 ? w - 20 : 180;
-    bar = front_rect(f, w / 2 - width / 2, top + edge * 3 + 12, width, 5);
+    bar = front_rect(f, w / 2 - width / 2, top + edge * side + 12, width, 5);
     maage_client_ui_panel(ui, bar, 0.72f, 0.72f, 0.72f, 1);
     bar.x += 1;
     bar.y += 1;
     bar.width -= 2;
     bar.height -= 2;
     maage_client_ui_panel(ui, bar, 0.08f, 0.08f, 0.08f, 1);
-    bar.width *= (float) ready / 9;
+    bar.width *= total ? (float) ready / total : 1.0f;
     maage_client_ui_panel(ui, bar, 1, 1, 1, 1);
-    sprintf(percent, "%u%%", ready * 100U / 9U);
-    front_center(f, percent, top + edge * 3 + 23, 1, 1, 1);
+    sprintf(percent, "%u%%", total ? ready * 100U / total : 100U);
+    front_center(f, percent, top + edge * side + 23, 1, 1, 1);
 }
 static void front_draw(maage_client_ui *ui, void *context) {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *) context;
@@ -424,13 +430,13 @@ void maage_client_ui_front_begin(maage_client_ui_frontend *f) {
     f->focus_keyboard = 0;
     f->message[0] = 0;
 }
-void maage_client_ui_front_loading(maage_client_ui_frontend *f, const char *label, const unsigned char *cells) {
+void maage_client_ui_front_loading(maage_client_ui_frontend *f, const char *label, const unsigned char *cells, unsigned int edge) {
     if (!f) return;
     if (!label) label = "";
     strncpy(f->loading_label, label, sizeof(f->loading_label) - 1);
     f->loading_label[sizeof(f->loading_label) - 1] = 0;
-    f->loading_has_cells = cells != NULL;
-    if (cells) memcpy(f->loading_cells, cells, sizeof(f->loading_cells));
+    f->loading_edge = cells && edge <= MAAGE_CLIENT_ARRIVAL_EDGE ? edge : 0;
+    if (f->loading_edge) memcpy(f->loading_cells, cells, edge * edge);
 }
 void maage_client_ui_front_busy(maage_client_ui_frontend *f, int busy) {
     if (f) f->busy = busy;
