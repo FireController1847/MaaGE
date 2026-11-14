@@ -54,10 +54,10 @@ elseif(MAAGE_PLATFORM_WINDOWS)
     enable_language(RC)
     target_sources(maage_launcher_access PRIVATE native/windows/auth_win32.c)
     target_link_libraries(maage_launcher_access PRIVATE bcrypt ws2_32 shell32)
-    target_sources(maage_launcher PRIVATE native/windows/win32_ui.c ui/launcher_win32.c native/windows/launcher.rc)
+    target_sources(maage_launcher PRIVATE native/windows/win32_ui.c native/windows/win32_paint.c ui/launcher_win32.c native/windows/launcher.rc)
     target_include_directories(maage_launcher PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/native/windows"
         "${MAAGE_LAUNCHER_ICON_DIRECTORY}")
-    target_link_libraries(maage_launcher PRIVATE comctl32 comdlg32 uxtheme dwmapi shell32 ole32)
+    target_link_libraries(maage_launcher PRIVATE comctl32 comdlg32 uxtheme dwmapi shell32 ole32 windowscodecs uuid msimg32)
     if(MSVC)
         target_sources(maage_launcher PRIVATE native/windows/launcher.manifest)
         set_source_files_properties(native/windows/launcher.rc PROPERTIES
