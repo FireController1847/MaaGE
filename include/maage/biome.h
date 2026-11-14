@@ -8,6 +8,7 @@ typedef unsigned long maage_biome_id;
 typedef struct maage_biome_definition {
     maage_biome_id id;
     const char *display_name;
+    /* Height 1..240, variation 0..120, temperature 0..2, rainfall 0..1. */
     double base_height, variation, temperature, rainfall;
     maage_block_state_id surface, filler;
     int aquatic; /* Discrete geographic trait used by dry-land spawn selection. */

@@ -669,6 +669,7 @@ maage_status maage_base_dimensions(maage_content_context *context, maage_base_id
     if (maage_status_failed(result)) return result;
     ids->item_ender_eye = item.id;
     memset(&biome, 0, sizeof(biome));
+    biome.base_height = 32;
     biome.temperature = 2;
     biome.display_name = "Hell";
     biome.surface = biome.filler = ids->state_netherrack;
@@ -678,6 +679,7 @@ maage_status maage_base_dimensions(maage_content_context *context, maage_base_id
     if (maage_status_failed(result)) return result;
     ids->biome_hell = biome.id;
     biome.display_name = "The End";
+    biome.base_height = 64;
     biome.temperature = 0.5;
     biome.surface = biome.filler = ids->dimension_states[DIM_END_STONE];
     result = maage_biome_registry_register(context->biomes, "minecraft:sky", &biome);
