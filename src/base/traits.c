@@ -54,7 +54,8 @@ maage_status maage_base_traits(maage_content_context *context, maage_base_ids *i
     PROPERTY(property_sand, "sand_type", MAAGE_PROPERTY_INTEGER, 0, 1);
     PROPERTY(property_attachment, "attachment", MAAGE_PROPERTY_INTEGER, 1, 5);
     PROPERTY(property_fluid_level, "fluid_level", MAAGE_PROPERTY_INTEGER, 0, 15);
-    PROPERTY(property_grass_variant, "grass_variant", MAAGE_PROPERTY_INTEGER, 0, 6);
+    PROPERTY(property_grass_variant, "grass_variant", MAAGE_PROPERTY_INTEGER, 0, MAAGE_BASE_BIOME_COUNT);
+    PROPERTY(property_upper, "upper", MAAGE_PROPERTY_BOOLEAN, 0, 1);
     PROPERTY(property_plant_variant, "plant_variant", MAAGE_PROPERTY_INTEGER, 0, 2);
 #undef PROPERTY
     for (i = 0; i < 6; ++i) {

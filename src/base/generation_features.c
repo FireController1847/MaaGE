@@ -62,8 +62,9 @@ int maage_generation_write(maage_generation_context *context, int x, int y, int 
     return maage_status_code(context->failure) == MAAGE_STATUS_NOOP ? 0 : 1;
 }
 int maage_generation_features_valid(const maage_base_ids *ids, const maage_block_registry *blocks) {
-    maage_block_state_id required[25];
+    maage_block_state_id required[26];
     size_t index;
+    unsigned int flora, state, count;
     required[0] = ids->state_coal_ore;
     required[1] = ids->state_iron_ore;
     required[2] = ids->state_gold_ore;
@@ -89,8 +90,14 @@ int maage_generation_features_valid(const maage_base_ids *ids, const maage_block
     required[22] = ids->state_cactus;
     required[23] = ids->state_cobblestone;
     required[24] = ids->state_mossy_cobblestone;
+    required[25] = ids->state_clay;
     for (index = 0; index < sizeof(required) / sizeof(required[0]); ++index)
         if (!maage_block_registry_state(blocks, required[index])) return 0;
+    for (flora = 0; flora < MAAGE_BASE_FLORA_COUNT; ++flora) {
+        count = flora >= MAAGE_BASE_DOUBLE_GRASS && flora <= MAAGE_BASE_PEONY ? 2U : (flora == MAAGE_BASE_REEDS ? 16U : (flora == MAAGE_BASE_PUMPKIN ? 4U : 1U));
+        for (state = 0; state < count; ++state)
+            if (!maage_block_registry_state(blocks, ids->flora_states[flora][state])) return 0;
+    }
     return 1;
 }
 

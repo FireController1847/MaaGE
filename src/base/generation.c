@@ -245,6 +245,39 @@ static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, 
     return continental < -0.10 ? ids->biome_ocean : biome;
 }
 
+/* Drainage has its own seeded cells, independent of climate and chunk order.
+ * Opposite cell classes form a connected contour; smoothly warped coordinates
+ * give channels bends without sampling or modifying neighboring columns. */
+static double maage_generation_river_distance(maage_world_seed seed, int x, int z) {
+    double px, pz, sx, sz, dx, dz, distance, best[2], sites[2][2], separation;
+    unsigned long random;
+    int gx, gz, ix, iz, group;
+    px = x + 30 * maage_generation_fractal(seed, x / 120.0, z / 120.0, 1700UL, 2);
+    pz = z + 30 * maage_generation_fractal(seed, x / 120.0, z / 120.0, 1800UL, 2);
+    gx = (int) floor(px / 192.0);
+    gz = (int) floor(pz / 192.0);
+    best[0] = best[1] = 1e20;
+    for (iz = -1; iz <= 1; ++iz)
+        for (ix = -1; ix <= 1; ++ix) {
+            random = maage_generation_hash(seed, gx + ix, gz + iz, 1900UL);
+            group = (int) (random & 1UL);
+            sx = (gx + ix + 0.5) * 192 + (((random >> 1) & 255UL) / 255.0 - 0.5) * 80;
+            sz = (gz + iz + 0.5) * 192 + (((random >> 9) & 255UL) / 255.0 - 0.5) * 80;
+            dx = px - sx;
+            dz = pz - sz;
+            distance = dx * dx + dz * dz;
+            if (distance >= best[group]) continue;
+            best[group] = distance;
+            sites[group][0] = sx;
+            sites[group][1] = sz;
+        }
+    if (best[0] == 1e20 || best[1] == 1e20) return 192;
+    dx = sites[0][0] - sites[1][0];
+    dz = sites[0][1] - sites[1][1];
+    separation = sqrt(dx * dx + dz * dz);
+    return separation > 0 ? fabs(best[0] - best[1]) / (2 * separation) : 192;
+}
+
 typedef struct maage_generation_column {
     maage_biome_id biome;
     int height;
@@ -257,11 +290,12 @@ static int maage_generation_grid(int coordinate) {
     return quotient;
 }
 
-static int maage_generation_column_at(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, maage_generation_column *column, maage_generation_environment *environment, maage_generation_region_cache *regions) {
+static int maage_generation_column_at(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_column *column, maage_generation_environment *environment, maage_generation_region_cache *regions) {
     const maage_biome_definition *definition;
     maage_biome_id biome;
     double heights[4], variations[4];
-    double fx, fz, base, variation, terrain, detail;
+    double fx, fz, base, variation, terrain, detail, distance, width, bank, target;
+    static const int shores[4][2] = {{-12, 0}, {12, 0}, {0, -12}, {0, 12}};
     int gx, gz, corner, cx, cz;
     gx = maage_generation_grid(x);
     gz = maage_generation_grid(z);
@@ -286,14 +320,33 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     variation = maage_generation_lerp(maage_generation_lerp(variations[0], variations[1], fx), maage_generation_lerp(variations[2], variations[3], fx), fz);
     terrain = maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 4);
     detail = maage_generation_fractal(seed, x / 24.0, z / 24.0, 600UL, 2);
-    column->height = (int) floor(base + terrain * variation * 2.5 + detail * 1.5);
+    column->height = (int) floor(base + policy->sea_level - MAAGE_GENERATION_DEFAULT_SEA_Y + terrain * variation * 2.5 + detail * 1.5);
+    if (column->biome != ids->biome_ocean) {
+        distance = maage_generation_river_distance(seed, x, z);
+        width = 4 + 2 * maage_generation_noise(seed, x / 64.0, z / 64.0, 2000UL);
+        bank = (distance - width) / 18;
+        bank = bank <= 0 ? 1 : (bank < 1 ? 1 - maage_generation_fade(bank) : 0);
+        target = policy->sea_level - 4 + maage_generation_noise(seed, x / 40.0, z / 40.0, 2100UL);
+        if (column->height > target) column->height = (int) floor(maage_generation_lerp(column->height, target, bank));
+        if (distance <= width && column->height < policy->sea_level) column->biome = column->biome == ids->biome_taiga ? ids->biome_frozen_river : ids->biome_river;
+        else {
+            for (corner = 0; corner < 4; ++corner) {
+                cx = x + shores[corner][0];
+                cz = z + shores[corner][1];
+                if (maage_generation_fractal(seed, cx / 1100.0, cz / 1100.0, 100UL, 3) >= -0.10) continue;
+                if (column->biome == ids->biome_hills) column->biome = ids->biome_stone_beach;
+                else if (column->height <= policy->sea_level + 4) column->biome = column->biome == ids->biome_taiga ? ids->biome_cold_beach : ids->biome_beach;
+                break;
+            }
+        }
+    }
     if (column->height < 3) column->height = 3;
     if (column->height > MAAGE_WORLD_HEIGHT - 4) column->height = MAAGE_WORLD_HEIGHT - 4;
     return 1;
 }
-int maage_generation_surface(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, int x, int z, int *height, maage_biome_id *biome, maage_generation_region_cache *regions) {
+int maage_generation_surface(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, int *height, maage_biome_id *biome, maage_generation_region_cache *regions) {
     maage_generation_column column;
-    if (!height || !biome || !maage_generation_column_at(ids, seed, biomes, x, z, &column, NULL, regions)) return 0;
+    if (!height || !biome || !maage_generation_policy_valid(policy) || !maage_generation_column_at(ids, seed, biomes, policy, x, z, &column, NULL, regions)) return 0;
     *height = column.height;
     *biome = column.biome;
     return 1;
@@ -338,7 +391,7 @@ int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed,
     maage_generation_environment environment;
     const maage_biome_definition *definition;
     unsigned int i;
-    if (!sample || !maage_generation_policy_valid(policy) || !maage_generation_column_at(ids, seed, biomes, x, z, &column, &environment, regions)) return 0;
+    if (!sample || !maage_generation_policy_valid(policy) || !maage_generation_column_at(ids, seed, biomes, policy, x, z, &column, &environment, regions)) return 0;
     definition = maage_biome_registry_get(biomes, column.biome);
     if (!definition || definition->generation_data_size != sizeof(maage_base_biome_decoration) || !definition->generation_data) return 0;
     memset(sample, 0, sizeof(*sample));
@@ -350,10 +403,39 @@ int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed,
     sample->filler = definition->filler;
     /* A small coherent offset in equivalent elevation varies the snowline
      * without a separate snow/ice/vegetation random decision. */
+    sample->plants = maage_generation_noise(seed, x / 160.0, z / 160.0, 2300UL);
     sample->lapse_offset = 4 * maage_generation_fractal(seed, x / 16.0, z / 16.0, 1400UL, 1);
     if (environment.ocean > 0 && !maage_generation_influence(ids, sample, biomes, ids->biome_ocean, ids->biome_ocean, environment.ocean)) return 0;
     for (i = 0; i < 9; ++i)
         if (environment.weights[i] > 0 && !maage_generation_influence(ids, sample, biomes, environment.regions[i].supported_biome, environment.regions[i].supported_climate, environment.weights[i])) return 0;
+    /* Shore/river overlays retain their categorical ecology, while ordinary
+     * inland boundaries keep the existing blended climate and species mix. */
+    if (column.biome == ids->biome_river || column.biome == ids->biome_frozen_river || column.biome == ids->biome_beach || column.biome == ids->biome_cold_beach || column.biome == ids->biome_stone_beach) {
+        sample->decoration = *(const maage_base_biome_decoration *) definition->generation_data;
+        sample->temperature = definition->temperature;
+        sample->rainfall = definition->rainfall;
+    }
+    /* Surface patches have a stable regional owner and a complete numeric
+     * profile before features/spawn queries run. No worker-neighbor reads. */
+    if (sample->height < policy->sea_level && column.biome != ids->biome_stone_beach) {
+        unsigned long patch;
+        int gx, gz, ix, iz, px, pz, dx, dz, radius;
+        gx = maage_generation_region(x, 12);
+        gz = maage_generation_region(z, 12);
+        if (sample->surface != ids->state_sand && column.biome != ids->biome_ocean) sample->surface = ids->state_dirt;
+        for (iz = -1; iz <= 1; ++iz)
+            for (ix = -1; ix <= 1; ++ix) {
+                patch = maage_generation_hash(seed, gx + ix, gz + iz, 2200UL);
+                px = (gx + ix) * 12 + 2 + (int) ((patch >> 3) % 8UL);
+                pz = (gz + iz) * 12 + 2 + (int) ((patch >> 7) % 8UL);
+                dx = x - px;
+                dz = z - pz;
+                radius = 2 + (int) ((patch >> 11) % 4UL);
+                if (dx * dx + dz * dz > radius * radius) continue;
+                sample->surface = (patch % 5UL) < 2 ? ids->state_sand : ((patch % 5UL) < 4 ? ids->state_gravel : ids->state_clay);
+                sample->filler = sample->surface;
+            }
+    }
     return 1;
 }
 
@@ -496,7 +578,6 @@ maage_status maage_base_generate(maage_chunk *chunk, maage_world_seed seed, cons
                 else if (y == 0 || (y < 5 && ((random >> (y * 3)) & 7UL) >= (unsigned long) y)) state = ids->state_bedrock;
                 else if (y == column->height) {
                     state = column->surface;
-                    if (column->height < policy->sea_level - 1 && filler->block_id != ids->block_sand) state = ids->state_gravel;
                 } else if (y >= column->height - depth) state = column->filler;
                 else if (filler->block_id == ids->block_sand && y >= column->height - depth - 2) state = ids->state_sandstone;
                 else
@@ -535,7 +616,7 @@ maage_status maage_base_spawn(maage_world_seed seed, const maage_block_registry 
             for (;;) {
                 x = side < 2 ? offset : (side == 2 ? -radius : radius);
                 z = side < 2 ? (side == 0 ? -radius : radius) : offset;
-                if (maage_generation_column_at(ids, seed, biomes, x, z, &column, NULL, &regions)) {
+                if (maage_generation_column_at(ids, seed, biomes, policy, x, z, &column, NULL, &regions)) {
                     if (column.height > best_height) {
                         best_height = column.height;
                         best_x = x;

@@ -12,7 +12,24 @@ typedef struct maage_base_biome_decoration {
 } maage_base_biome_decoration;
 
 #define MAAGE_BASE_ITEM_TEXTURE_COUNT 64U
-#define MAAGE_BASE_BIOME_COUNT 6
+#define MAAGE_BASE_BIOME_COUNT 11
+enum {
+    MAAGE_BASE_FERN,
+    MAAGE_BASE_AZURE_BLUET,
+    MAAGE_BASE_OXEYE_DAISY,
+    MAAGE_BASE_RED_TULIP,
+    MAAGE_BASE_ORANGE_TULIP,
+    MAAGE_BASE_WHITE_TULIP,
+    MAAGE_BASE_PINK_TULIP,
+    MAAGE_BASE_REEDS,
+    MAAGE_BASE_DOUBLE_GRASS,
+    MAAGE_BASE_LARGE_FERN,
+    MAAGE_BASE_LILAC,
+    MAAGE_BASE_ROSE_BUSH,
+    MAAGE_BASE_PEONY,
+    MAAGE_BASE_PUMPKIN,
+    MAAGE_BASE_FLORA_COUNT
+};
 enum {
     MAAGE_BASE_MOB_PIG,
     MAAGE_BASE_MOB_COW,
@@ -57,7 +74,8 @@ enum {
 #define MAAGE_BASE_TEXTURE_FARMLAND (MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 9)
 #define MAAGE_BASE_TEXTURE_WHEAT (MAAGE_BASE_TEXTURE_FARMLAND + 2)
 #define MAAGE_BASE_TEXTURE_ITEMS (MAAGE_BASE_TEXTURE_WHEAT + 8)
-#define MAAGE_BASE_TEXTURE_COUNT (MAAGE_BASE_TEXTURE_ITEMS + MAAGE_BASE_ITEM_TEXTURE_COUNT)
+#define MAAGE_BASE_TEXTURE_FLORA (MAAGE_BASE_TEXTURE_ITEMS + MAAGE_BASE_ITEM_TEXTURE_COUNT)
+#define MAAGE_BASE_TEXTURE_COUNT (MAAGE_BASE_TEXTURE_FLORA + 21)
 
 /* Registration-assigned references, owned by each registry set. Readers borrow
  * this table through const accessors; publication/finalization ends mutation.
@@ -66,7 +84,7 @@ typedef struct maage_base_ids {
     const maage_traits_registry *traits;
     const maage_block_registry *blocks;
     const maage_item_registry *items;
-    maage_property_id property_wood, property_axis, property_persistent, property_check_decay, property_stage, property_age, property_crop_age, property_moisture, property_facing, property_lit, property_color, property_sand, property_attachment, property_fluid_level, property_grass_variant, property_plant_variant;
+    maage_property_id property_wood, property_axis, property_persistent, property_check_decay, property_stage, property_age, property_crop_age, property_moisture, property_facing, property_lit, property_color, property_sand, property_attachment, property_fluid_level, property_grass_variant, property_plant_variant, property_upper;
     maage_property_value wood_values[6];
     maage_tag_id tool_tags[6]; /* Private constructor selectors index registered item capabilities. */
     maage_tag_id tag_wood, tag_log, tag_planks, tag_leaves, tag_soil, tag_sand, tag_farmland, tag_crop, tag_axial, tag_soil_plant, tag_mushroom, tag_cactus, tag_wood_drops;
@@ -278,6 +296,10 @@ typedef struct maage_base_ids {
     unsigned long biome_hills;
     unsigned long biome_forest;
     unsigned long biome_taiga;
+    unsigned long biome_river, biome_frozen_river, biome_beach, biome_cold_beach, biome_stone_beach;
+    maage_block_id flora_blocks[MAAGE_BASE_FLORA_COUNT];
+    maage_block_state_id flora_states[MAAGE_BASE_FLORA_COUNT][16];
+    maage_item_id flora_items[MAAGE_BASE_FLORA_COUNT];
     unsigned long state_gold_block;
     unsigned long state_iron_block;
     unsigned long state_diamond_block;
@@ -287,7 +309,7 @@ typedef struct maage_base_ids {
     unsigned long state_coal_block;
     unsigned long state_snow_block;
     unsigned long leaves[16], saplings[16], planks[6], torches[6], logs[12], logs2[12];
-    unsigned long water[16], lava[16], cactus[16], biome_grass[6], tools[5][4];
+    unsigned long water[16], lava[16], cactus[16], biome_grass[MAAGE_BASE_BIOME_COUNT], tools[5][4];
 } maage_base_ids;
 
 /* Composition-local immutable Base references; generation and registered behavior

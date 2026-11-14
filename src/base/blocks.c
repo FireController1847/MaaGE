@@ -18,7 +18,7 @@ static void base_block(maage_block_definition *block, const maage_base_ids *ids,
 maage_status maage_content_register_state(maage_block_registry *registry, const maage_base_ids *ids, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, const maage_property_assignment *properties, size_t property_count, int texture) {
     maage_block_state_definition state;
     const maage_block_definition *definition;
-    int face, channel, selected, species, log_axis;
+    int face, channel, selected, species, log_axis, flora;
     maage_property_value wood, axis, lit, facing, attachment, fluid_level, moisture, sand, plant;
     maage_status result;
     if (!registry || !ids || !output || (property_count && !properties) || texture < 0 || texture >= MAAGE_BASE_TEXTURE_COUNT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
@@ -54,6 +54,8 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
     if (block == ids->block_farmland) state.geometry_key = moisture != 0;
     if (block == ids->block_furnace && lit) state.presentation_effect = 1;
 
+    flora = maage_base_flora_index(ids, block);
+    if (flora == MAAGE_BASE_REEDS) state.geometry_grouped = 1;
     definition = maage_block_registry_block(registry, block);
     if (!definition) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     state.emitted_light = block == ids->block_furnace ? (lit ? 13U : 0U) : definition->emitted_light;
@@ -118,6 +120,13 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
                 state.faces[face].overlay_tint_mode = MAAGE_BLOCK_TINT_GRASS;
             }
         }
+        if (flora == MAAGE_BASE_PUMPKIN) {
+            static const unsigned int fronts[4] = {MAAGE_FACE_NEGATIVE_Z, MAAGE_FACE_POSITIVE_X, MAAGE_FACE_POSITIVE_Z, MAAGE_FACE_NEGATIVE_X};
+            selected = MAAGE_BASE_TEXTURE_FLORA + 18;
+            if (face / 2 == 1) ++selected;
+            else if (facing < 4 && (unsigned int) face == fronts[facing]) selected += 2;
+        }
+        if (flora == MAAGE_BASE_FERN || flora == MAAGE_BASE_DOUBLE_GRASS || flora == MAAGE_BASE_LARGE_FERN) state.faces[face].tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
         if (block == ids->block_tall_grass && plant) state.faces[face].tint_mode = MAAGE_BLOCK_TINT_GRASS_LOCAL;
         if (block == ids->block_leaves) {
             unsigned long color = species == 1 ? 6396257UL : 8431445UL;

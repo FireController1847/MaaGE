@@ -14,6 +14,8 @@ maage_status maage_base_textures(maage_content_context *context, maage_base_ids 
     maage_status result;
     maage_presentation_bindings bindings;
     maage_texture_definition flow;
+    result = maage_base_flora_textures(context, ids);
+    if (maage_status_failed(result)) return result;
     result = maage_presentation_source_register(context->presentation, "minecraft/textures/blocks/stone.png", &ids->sources[0]);
     if (maage_status_failed(result)) return result;
     result = maage_presentation_source_register(context->presentation, "minecraft/textures/blocks/dirt.png", &ids->sources[1]);

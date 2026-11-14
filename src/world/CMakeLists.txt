@@ -15,7 +15,7 @@ add_library(maage_base STATIC
     ../base/models.c ../base/chests.c ../base/entities.c ../base/entity_models.c
     ../base/interaction.c ../base/placement.c ../base/drops.c ../base/support.c
     ../base/random_ticks.c ../base/leaves.c ../base/presentation.c ../base/textures.c
-    ../base/generation_content.c ../base/generation.c ../base/generation_features.c ../base/generation_surface.c)
+    ../base/flora.c ../base/generation_content.c ../base/generation.c ../base/generation_features.c ../base/generation_surface.c)
 add_library(MaaGE::Base ALIAS maage_base)
 maage_configure_portable_target(maage_base)
 target_include_directories(maage_base PUBLIC "${PROJECT_SOURCE_DIR}/include")
