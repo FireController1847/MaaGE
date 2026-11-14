@@ -2909,7 +2909,9 @@ done:
     }
     free(staged->buckets);
     free(staged);
-    return result;
+    /* The plan has committed. A notification's NOOP is not an admission
+     * deferral; callers must consume the successful action exactly once. */
+    return maage_status_code(result) == MAAGE_STATUS_NOOP ? maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0) : result;
 }
 
 static maage_world_slot *maage_world_entity_slot(const maage_world *world, int x, int y, int z) {
