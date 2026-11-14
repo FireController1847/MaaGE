@@ -359,6 +359,7 @@ maage_status maage_world_flush(maage_world *world, maage_status_trace *trace);
  * SUCCESS consumes World even if an earlier completed flush reported data errors. */
 maage_status maage_world_destroy(maage_world *world);
 const maage_block_registry *maage_world_registry(const maage_world *world);
+const maage_generation_policy *maage_world_generation_policy(const maage_world *world); /* Borrowed immutable generation settings. */
 const struct maage_item_registry *maage_world_item_registry(const maage_world *world);
 void maage_world_spawn(const maage_world *world, double feet[3]);
 /* Missing/loading columns return air for visual queries but are solid barriers

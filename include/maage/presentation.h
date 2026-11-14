@@ -13,7 +13,9 @@ size_t maage_presentation_credit_count(const maage_presentation_registry *);
 const maage_credit_definition *maage_presentation_credit(const maage_presentation_registry *, size_t);
 typedef struct maage_portal_presentation {
     unsigned long id;
-    float color[3];
+    float color[3]; /* Untextured transition fallback. */
+    int has_overlay_texture;
+    maage_texture_id overlay_texture; /* Optional registered screen texture. */
     float particle_color[3];
     unsigned int particle, particle_frames; /* Contiguous particle-sheet animation frames. */
     int smoke;

@@ -26,7 +26,7 @@ static const maage_client_environment_resource maage_client_environment_resource
 struct maage_client_environment {
     maage_renderer *renderer;
     const maage_presentation_registry *presentation;
-    unsigned long portal_epoch, portal_profile;
+    unsigned long portal_session, portal_epoch, portal_profile;
     double portal_time, portal_strength;
     maage_render_texture *texture;
     maage_render_ui_vertex sky_vertices[12], weather_vertices[MAAGE_ENVIRONMENT_QUADS * 4];
@@ -46,7 +46,8 @@ struct maage_client_environment {
     double particle_time;
     float water_brightness;
     int atlas_height, *fluid_overlays;
-    size_t fluid_count;
+    size_t fluid_count, portal_count;
+    struct { int y, frames, pingpong; unsigned int ticks; } *portal_overlays;
 };
 static void maage_client_environment_quad(maage_render_ui_data *batch, float x, float y, float width, float height, float u, float v, float uv_width, float uv_height, float alpha) {
     static const unsigned int order[6] = {0, 1, 2, 0, 2, 3};
@@ -76,17 +77,18 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
     const maage_fluid_registry *fluids;
     const maage_fluid_definition *fluid;
     const maage_texture_definition *overlay;
+    const maage_portal_presentation *portal;
     const char *name;
     char path[MAAGE_PATH_CAPACITY];
-    size_t fluid_index;
-    int overlay_y, source_x, source_y, tile_width, tile_height, x;
+    size_t fluid_index, portal_index;
+    int overlay_y, source_x, source_y, tile_width, tile_height, x, frame, frames, stride_y;
     maage_status status;
     maage_status uploaded, result;
     maage_status_trace source_trace, recovered_trace;
     int i, y, ok = 0;
     if (output) *output = NULL;
     if (!output || !renderer || !resources || !resources->content) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, !renderer ? 0 : 2);
-    if (!resources->image.pixels || !resources->uv || !resources->source_results || resources->image.width < 16 || resources->image.height < 16 || (size_t) resources->image.width > (size_t) - 1 / 4 || resources->image.stride < (size_t) resources->image.width * 4 || (size_t) resources->image.height > (size_t) - 1 / resources->image.stride) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
+    if (!resources->image.pixels || !resources->uv || !resources->texture_animation || !resources->source_results || resources->image.width < 16 || resources->image.height < 16 || (size_t) resources->image.width > (size_t) - 1 / 4 || resources->image.stride < (size_t) resources->image.width * 4 || (size_t) resources->image.height > (size_t) - 1 / resources->image.stride) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0), MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
     result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_INITIALIZE, 0);
     view = (maage_client_environment *) calloc(1, sizeof(*view));
     if (!view) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_INITIALIZE);
@@ -106,6 +108,25 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
     if (!view->fluid_overlays) goto done;
     atlas.width = 256;
     atlas.height = view->atlas_height = 256 + (int) view->fluid_count * 16;
+    view->portal_count = maage_presentation_portal_count(presentation);
+    if (view->portal_count >= (size_t) - 1 / sizeof(*view->portal_overlays)) goto done;
+    view->portal_overlays = calloc(view->portal_count + 1, sizeof(*view->portal_overlays));
+    if (!view->portal_overlays) goto done;
+    for (portal_index = 1; portal_index <= view->portal_count; ++portal_index) {
+        portal = maage_presentation_portal(presentation, (unsigned long) portal_index);
+        if (!portal->has_overlay_texture) continue;
+        overlay = maage_presentation_texture(presentation, portal->overlay_texture);
+        if (!overlay || overlay->source >= resources->source_count || maage_status_failed(resources->source_results[overlay->source])) continue;
+        frames = (int) fabs(resources->texture_animation[portal->overlay_texture][1]);
+        if (frames < 1) frames = 1;
+        if (frames > (INT_MAX - atlas.height) / 16) goto done;
+        view->portal_overlays[portal_index].y = atlas.height;
+        view->portal_overlays[portal_index].frames = frames;
+        view->portal_overlays[portal_index].ticks = overlay->frame_ticks ? overlay->frame_ticks : 1;
+        view->portal_overlays[portal_index].pingpong = overlay->pingpong;
+        atlas.height += frames * 16;
+    }
+    view->atlas_height = atlas.height;
     atlas.stride = 1024;
     if ((size_t) atlas.height > (size_t) - 1 / atlas.stride) {
         result = maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
@@ -170,6 +191,24 @@ maage_status maage_client_environment_create(maage_renderer *renderer, const cha
         view->fluid_overlays[fluid_index] = overlay_y;
         overlay_y += 16;
     }
+    for (portal_index = 1; portal_index <= view->portal_count; ++portal_index) {
+        if (!view->portal_overlays[portal_index].frames) continue;
+        portal = maage_presentation_portal(presentation, (unsigned long) portal_index);
+        source_x = (int) (resources->uv[portal->overlay_texture][0] * resources->image.width + 0.5);
+        source_y = (int) (resources->uv[portal->overlay_texture][1] * resources->image.height + 0.5);
+        tile_width = (int) ((resources->uv[portal->overlay_texture][2] - resources->uv[portal->overlay_texture][0]) * resources->image.width + 0.5);
+        tile_height = (int) ((resources->uv[portal->overlay_texture][3] - resources->uv[portal->overlay_texture][1]) * resources->image.height + 0.5);
+        stride_y = (int) (resources->texture_animation[portal->overlay_texture][0] * resources->image.height + 0.5);
+        frames = view->portal_overlays[portal_index].frames;
+        if (source_x < 0 || source_y < 0 || tile_width < 1 || tile_height < 1 || tile_width > resources->image.width - source_x || tile_height > resources->image.height - source_y || (frames > 1 && (stride_y < tile_height || frames - 1 > (resources->image.height - source_y - tile_height) / stride_y))) {
+            result = maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_RESOURCE, MAAGE_OPERATION_ATLAS, 0);
+            goto done;
+        }
+        for (frame = 0; frame < frames; ++frame)
+            for (y = 0; y < 16; ++y)
+                for (x = 0; x < 16; ++x)
+                    memcpy(atlas.pixels + (size_t) (view->portal_overlays[portal_index].y + frame * 16 + y) * atlas.stride + (size_t) x * 4, resources->image.pixels + ((size_t) source_y + (size_t) frame * stride_y + (size_t) y * tile_height / 16) * resources->image.stride + ((size_t) source_x + (size_t) x * tile_width / 16) * 4, 4);
+    }
     memset(atlas.pixels + 255 * atlas.stride + 127 * 4, 255, 4);
     pixels.width = atlas.width;
     pixels.height = atlas.height;
@@ -210,6 +249,7 @@ maage_status maage_client_environment_destroy(maage_client_environment *view) {
     }
     maage_render_texture_destroy(view->texture);
     free(view->fluid_overlays);
+    free(view->portal_overlays);
     free(view);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_DESTROY, 0);
 }
@@ -353,7 +393,7 @@ static void maage_client_environment_particles(maage_client_environment *view, c
     double direction[3], projected[3], distance, size, fade, offset;
     float u, v;
     unsigned int i, axis, pair, index, frame;
-    int x, y, z;
+    int x, y, z, px, py, pz, near, cell_index;
     size_t first;
     if (!view->available[5]) return;
     if (view->particle_session != snapshot->session_epoch || view->particle_world != snapshot->world_epoch || snapshot->environment.ticks_high < view->particle_tick_high || (snapshot->environment.ticks_high == view->particle_tick_high && snapshot->environment.ticks_low < view->particle_tick_low)) {
@@ -369,20 +409,36 @@ static void maage_client_environment_particles(maage_client_environment *view, c
     if (!snapshot->paused && (view->particle_tick_low != snapshot->environment.ticks_low || view->particle_tick_high != snapshot->environment.ticks_high)) {
         view->particle_tick_low = snapshot->environment.ticks_low;
         view->particle_tick_high = snapshot->environment.ticks_high;
-        for (i = 0; i < 1000U; ++i) {
-            x = (int) floor(snapshot->player.player.position[0]) + (int) maage_client_particle_random(view, 16);
-            x -= (int) maage_client_particle_random(view, 16);
-            y = (int) floor(snapshot->player.player.position[1]) + (int) maage_client_particle_random(view, 16);
-            y -= (int) maage_client_particle_random(view, 16);
-            z = (int) floor(snapshot->player.player.position[2]) + (int) maage_client_particle_random(view, 16);
-            z -= (int) maage_client_particle_random(view, 16);
+        px = (int) floor(snapshot->player.player.position[0]);
+        py = (int) floor(snapshot->player.player.position[1]);
+        pz = (int) floor(snapshot->player.player.position[2]);
+        /* Nearby portal cells get a staggered, uniform emission cadence, not
+         * repeated random hits concentrated in two or three surface cells. */
+        for (i = 0; i < 1000U + 17U * 17U * 9U; ++i) {
+            if (i < 1000U) {
+                x = px + (int) maage_client_particle_random(view, 16);
+                x -= (int) maage_client_particle_random(view, 16);
+                y = py + (int) maage_client_particle_random(view, 16);
+                y -= (int) maage_client_particle_random(view, 16);
+                z = pz + (int) maage_client_particle_random(view, 16);
+                z -= (int) maage_client_particle_random(view, 16);
+                near = 0;
+            } else {
+                cell_index = (int) (i - 1000U);
+                if ((snapshot->environment.ticks_low + (unsigned long) cell_index) % 4) continue;
+                x = px + cell_index % 17 - 8;
+                z = pz + (cell_index / 17) % 17 - 8;
+                y = py + cell_index / (17 * 17) - 4;
+                near = 1;
+            }
             if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
             state = maage_block_registry_state(blocks, maage_world_get(visual, x, y, z));
             block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
             portal = block ? maage_presentation_portal(view->presentation, block->portal_presentation) : NULL;
-            if (!state || (state->presentation_effect != 1 && !portal)) continue;
+            if (!state || (near ? !portal : (state->presentation_effect != 1 && !portal))) continue;
+            if (!near && portal && abs(x - px) <= 8 && abs(z - pz) <= 8 && abs(y - py) <= 4) continue;
             offset = maage_client_particle_random(view, 65536UL) / 65536.0 * 0.6 - 0.3;
-            for (pair = 0; pair < 2; ++pair) {
+            for (pair = 0; pair < (portal ? 1U : 2U); ++pair) {
                 index = view->particle_cursor++ % MAAGE_ENVIRONMENT_PARTICLES;
                 view->particles[index].portal = portal ? portal->id : 0;
                 view->particles[index].x = x;
@@ -411,7 +467,8 @@ static void maage_client_environment_particles(maage_client_environment *view, c
                     view->particles[index].smoke = portal->smoke;
                     if (portal->smoke) {
                         view->particles[index].position[1] = y + 0.8;
-                        view->particles[index].velocity[0] = view->particles[index].velocity[2] = 0;
+                        view->particles[index].velocity[0] *= 0.18;
+                        view->particles[index].velocity[2] *= 0.18;
                         view->particles[index].velocity[1] = 0.35;
                     }
                     view->particles[index].lifetime = 0.8 + maage_client_particle_random(view, 65536UL) / 65536.0;
@@ -471,26 +528,46 @@ static void maage_client_environment_particles(maage_client_environment *view, c
 static void maage_client_environment_portal(maage_client_environment *view, const maage_session_snapshot *snapshot, float width, float height) {
     const maage_portal_presentation *profile;
     double now = maage_time_monotonic_seconds(), dt = now - view->portal_time, target;
-    unsigned int strip, corner, channel;
+    unsigned int corner, channel;
     size_t first;
-    float alpha;
+    int frame, frames, y;
+    unsigned int ticks;
+    float alpha, inset, u, v, edge;
     if (dt < 0 || dt > 0.25) dt = 0;
     view->portal_time = now;
-    if (view->portal_epoch && view->portal_epoch != snapshot->world_epoch && snapshot->portal_presentation) {
+    if (view->portal_session != snapshot->session_epoch) {
+        view->portal_session = snapshot->session_epoch;
+        view->portal_epoch = snapshot->world_epoch;
+        view->portal_profile = 0;
+        view->portal_strength = 0;
+    }
+    if (view->portal_epoch != snapshot->world_epoch && snapshot->portal_presentation) {
         view->portal_strength = 1;
         view->portal_profile = snapshot->portal_presentation;
     }
     view->portal_epoch = snapshot->world_epoch;
-    target = snapshot->travelling ? 1 : snapshot->portal_progress;
+    target = snapshot->portal_presentation ? (snapshot->travelling ? 1 : snapshot->portal_progress) : 0;
     if (target > 0) view->portal_profile = snapshot->portal_presentation;
     if (!snapshot->paused) view->portal_strength += (target - view->portal_strength) * (1 - exp(-dt * 7));
     profile = maage_presentation_portal(view->presentation, view->portal_profile);
-    if (!profile || view->portal_strength < 0.002 || snapshot->credits) return;
+    if (snapshot->credits) { view->portal_strength = 0; return; }
+    if (!profile || view->portal_strength < 0.002) return;
     view->weather.after_foreground = 1;
-    for (strip = 0; strip < 16; ++strip) {
-        first = view->weather.vertex_count;
-        alpha = (float) (view->portal_strength * (0.30 + 0.10 * sin(now * 5 + strip * 0.8)));
-        maage_client_environment_quad(&view->weather, 0, height * strip / 16, width, height / 16 + 1, 127.5f / 256, 255.5f / view->atlas_height, 0, 0, alpha);
+    alpha = (float) (view->portal_strength * view->portal_strength * 0.65);
+    first = view->weather.vertex_count;
+    frames = view->portal_overlays[profile->id].frames;
+    if (frames) {
+        ticks = view->portal_overlays[profile->id].ticks;
+        frame = (int) fmod(now * 20 / ticks, view->portal_overlays[profile->id].pingpong && frames > 1 ? 2.0 * frames - 2 : frames);
+        if (frame >= frames) frame = 2 * frames - 2 - frame;
+        y = view->portal_overlays[profile->id].y + frame * 16;
+        inset = (float) (2.5 * (1 - view->portal_strength));
+        u = (0.5f + inset) / 256;
+        v = (y + 0.5f + inset) / view->atlas_height;
+        edge = 15 - 2 * inset;
+        maage_client_environment_quad(&view->weather, 0, 0, width, height, u, v, edge / 256, edge / view->atlas_height, alpha);
+    } else {
+        maage_client_environment_quad(&view->weather, 0, 0, width, height, 127.5f / 256, 255.5f / view->atlas_height, 0, 0, alpha);
         for (corner = 0; corner < 4; ++corner)
             for (channel = 0; channel < 3; ++channel)
                 view->weather_vertices[first + corner].color[channel] = profile->color[channel];

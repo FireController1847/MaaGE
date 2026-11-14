@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <math.h>
 
 #define CREDIT_RESOURCE_BYTES 1048576L
 static maage_status credit_result(unsigned char code) {
@@ -33,7 +34,7 @@ static maage_status credit_line(maage_client_ui *ui, const char *text, size_t le
 static maage_status credit_text(maage_client_ui *ui, const char *text) {
     const maage_skin_reference *player = maage_client_storage_player();
     const char *name = player && player->name[0] ? player->name : "Player";
-    char line[80];
+    char line[80], measure[80];
     size_t length = 0, i, take;
     int centered = 0, at_start = 1;
     maage_status result;
@@ -53,7 +54,7 @@ static maage_status credit_text(maage_client_ui *ui, const char *text) {
         }
         if (!strncmp(text, "PLAYERNAME", 10)) {
             take = strlen(name);
-            if (length + take > 44) {
+            if (length + take >= sizeof(line) - 1) {
                 result = credit_line(ui, line, length, centered);
                 if (maage_status_failed(result)) return result;
                 length = 0;
@@ -67,7 +68,9 @@ static maage_status credit_text(maage_client_ui *ui, const char *text) {
             ++text;
             continue;
         }
-        if (*text == '\n' || length >= 44) {
+        memcpy(measure, line, length);
+        measure[length] = 0;
+        if (*text == '\n' || length >= sizeof(line) - 1 || maage_client_ui_text_width(ui, measure) >= 274) {
             take = length;
             if (*text != '\n') {
                 for (i = length; i > 0; --i)
@@ -78,7 +81,7 @@ static maage_status credit_text(maage_client_ui *ui, const char *text) {
             }
             result = credit_line(ui, line, take, centered);
             if (maage_status_failed(result)) return result;
-            i = take < length ? take + 1 : take;
+            i = take < length && line[take] == ' ' ? take + 1 : take;
             memmove(line, line + i, length - i);
             length -= i;
             if (*text == '\n') {
@@ -128,7 +131,7 @@ static unsigned int credit_input(maage_client_ui *ui, const maage_client_ui_inpu
     maage_session_command command;
     double now = maage_time_monotonic_seconds();
     (void) context;
-    if (!ui->credit_done && (input->escape || now - ui->credit_started > (double) ui->credit_count * 1.2 + ui->content.height / 10.0 + 4)) {
+    if (!ui->credit_done && (input->escape || now - ui->credit_started > ((double) ui->credit_count * 12 + ui->content.height + 120) / 10.0)) {
         memset(&command, 0, sizeof(command));
         command.kind = MAAGE_CMD_CREDITS_DONE;
         ui->route_result = maage_client_ui_queue_command(ui, &command);
@@ -137,24 +140,43 @@ static unsigned int credit_input(maage_client_ui *ui, const maage_client_ui_inpu
     return 0;
 }
 static void credit_draw(maage_client_ui *ui, void *context) {
-    maage_client_ui_rect old = ui->clip, full;
+    maage_client_ui_rect old = ui->clip, full, logo, fade;
     double scroll = (ui->notice_now - ui->credit_started) * 10;
-    float y, center = ui->content.x + ui->content.width * 0.5f;
-    size_t i, first = scroll > ui->content.height ? (size_t) ((scroll - ui->content.height) / 12) : 0;
+    float y, center = ui->content.x + ui->content.width * 0.5f, u, shade;
+    size_t i, first;
     (void) context;
+    if (scroll < 0) scroll = 0;
     full.x = full.y = 0;
     full.width = ui->width;
     full.height = ui->height;
     ui->clip = full;
-    maage_client_ui_panel(ui, full, 0.015f, 0.012f, 0.02f, 1);
+    maage_client_ui_menu_background_scroll(ui, (float) fmod(scroll * 0.5, 32));
+    /* Keep the repeating dirt subdued behind the roll. */
+    shade = scroll < 50 ? (float) (scroll / 50) : 1;
+    maage_client_ui_panel(ui, full, 0, 0, 0, 0.45f + (1 - shade) * 0.35f);
     ui->clip = ui->content;
+    logo.x = center - 137;
+    logo.y = ui->content.y + ui->content.height + 20 - (float) scroll;
+    logo.width = 155;
+    logo.height = 44;
+    if (ui->resources.title_available[0]) {
+        u = 512.0f / ui->resources.atlas_edge;
+        maage_client_ui_rectangle(ui, logo, u, 0, u + 155.0f / ui->resources.atlas_edge, 44.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+        logo.x += 155;
+        maage_client_ui_rectangle(ui, logo, u, 45.0f / ui->resources.atlas_edge, u + 155.0f / ui->resources.atlas_edge, 89.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
+    }
+    first = scroll > ui->content.height + 120 ? (size_t) ((scroll - ui->content.height - 120) / 12) : 0;
     for (i = first; i < ui->credit_count; ++i) {
-        y = ui->content.y + ui->content.height + (float) ((double) i * 12 - scroll);
+        y = ui->content.y + ui->content.height + 120 + (float) ((double) i * 12 - scroll);
         if (y > ui->content.y + ui->content.height) break;
         if (y < ui->content.y - 12) continue;
-        maage_client_ui_text_shadow(ui, ui->credit_lines[i].text, ui->credit_lines[i].centered ? center : center - 132, y, ui->credit_lines[i].centered ? MAAGE_CLIENT_UI_CENTER : MAAGE_CLIENT_UI_LEFT, 0.9f, 0.95f, 0.9f);
+        maage_client_ui_text_shadow(ui, ui->credit_lines[i].text, ui->credit_lines[i].centered ? center : center - 137, y, ui->credit_lines[i].centered ? MAAGE_CLIENT_UI_CENTER : MAAGE_CLIENT_UI_LEFT, 1, 1, 1);
     }
-    maage_client_ui_text_shadow(ui, ui->credit_done ? "Returning..." : "Escape to skip", center, ui->content.y + ui->content.height - 12, MAAGE_CLIENT_UI_CENTER, 0.6f, 0.6f, 0.6f);
+    fade = ui->content;
+    fade.height = 32;
+    maage_client_ui_gradient(ui, fade, 0xff000000UL, 0x00000000UL);
+    fade.y = ui->content.y + ui->content.height - fade.height;
+    maage_client_ui_gradient(ui, fade, 0x00000000UL, 0xff000000UL);
     ui->clip = old;
 }
 maage_status maage_client_ui_credits_observe(maage_client_ui *ui) {

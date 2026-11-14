@@ -14,6 +14,7 @@ typedef struct maage_dimension_travel {
     unsigned long kind;
     unsigned int delay;
     unsigned int cooldown;
+    int arrival_radius; /* Minimum destination streaming radius in chunks; zero uses normal view. */
     unsigned long presentation;
     int credits;  /* Request the per-player, per-session-World credits milestone on arrival. */
     int at_spawn; /* Resolve the destination's spawn before streaming. */

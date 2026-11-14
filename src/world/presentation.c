@@ -78,6 +78,7 @@ maage_status maage_presentation_portal_register(maage_presentation_registry *reg
     maage_status result;
     unsigned int channel;
     if (!registry || registry->finalized || !definition || definition->particle >= 256 || !definition->particle_frames || definition->particle_frames > 256 - definition->particle || (definition->smoke != 0 && definition->smoke != 1) || registry->portal_count >= MAAGE_CONTENT_ID_INVALID - 1UL || registry->portal_count >= (size_t) - 1 / sizeof(*grown)) return presentation_status(MAAGE_STATUS_INVALID_ARGUMENT);
+    if ((definition->has_overlay_texture != 0 && definition->has_overlay_texture != 1) || (definition->has_overlay_texture && definition->overlay_texture >= registry->texture_count)) return presentation_status(MAAGE_STATUS_INVALID_ARGUMENT);
     for (channel = 0; channel < 3; ++channel)
         if (!(definition->color[channel] >= 0 && definition->color[channel] <= 1 && definition->particle_color[channel] >= 0 && definition->particle_color[channel] <= 1)) return presentation_status(MAAGE_STATUS_INVALID_ARGUMENT);
     result = content_policy_register(registry->policy, CONTENT_PORTAL, name, (unsigned long) registry->portal_count + 1);

@@ -110,7 +110,7 @@ void maage_client_ui_rectangle(maage_client_ui *ui, maage_client_ui_rect rectang
 /* Draw the original tiled options dirt across the complete framebuffer,
  * including macOS borderless/notch margins. Only subsequent interactive
  * elements use ui->content for safe-area positioning. */
-void maage_client_ui_menu_background(maage_client_ui *ui) {
+void maage_client_ui_menu_background_scroll(maage_client_ui *ui, float offset) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(ui->blocks);
     const maage_block_state_definition *dirt;
     maage_client_ui_rect previous, full, tile;
@@ -138,7 +138,7 @@ void maage_client_ui_menu_background(maage_client_ui *ui) {
     }
     if (available) {
         tile.width = tile.height = 32.0f;
-        for (y = 0.0f; y < full.height; y += 32.0f)
+        for (y = -offset; y < full.height; y += 32.0f)
             for (x = 0.0f; x < full.width; x += 32.0f) {
                 tile.x = x;
                 tile.y = y;
@@ -146,6 +146,10 @@ void maage_client_ui_menu_background(maage_client_ui *ui) {
             }
     }
     ui->clip = previous;
+}
+
+void maage_client_ui_menu_background(maage_client_ui *ui) {
+    maage_client_ui_menu_background_scroll(ui, 0);
 }
 
 void maage_client_ui_panel(maage_client_ui *ui, maage_client_ui_rect rectangle, float red, float green, float blue, float alpha) {

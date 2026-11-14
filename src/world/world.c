@@ -3042,6 +3042,9 @@ maage_status maage_world_take_update(maage_world *world, unsigned long now_low, 
 const maage_block_registry *maage_world_registry(const maage_world *world) {
     return world ? world->config.registry : NULL;
 }
+const maage_generation_policy *maage_world_generation_policy(const maage_world *world) {
+    return world ? &world->config.generation_policy : NULL;
+}
 const maage_item_registry *maage_world_item_registry(const maage_world *world) {
     return world ? world->config.items : NULL;
 }

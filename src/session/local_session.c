@@ -43,7 +43,7 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size) {
 }
 
 static int session_command_valid(const maage_session_command *command) {
-    if (!command->world_epoch || !command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CONTAINER_PAGE) return 0;
+    if (!command->world_epoch || !command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CREDITS_DONE) return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
@@ -75,6 +75,7 @@ static int session_command_valid(const maage_session_command *command) {
     case MAAGE_CMD_INPUT:
     case MAAGE_CMD_RESPAWN:
     case MAAGE_CMD_DISCONNECT:
+    case MAAGE_CMD_CREDITS_DONE:
         return 1;
     default:
         return 0;

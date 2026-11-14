@@ -134,6 +134,7 @@ float maage_client_ui_text_width(const maage_client_ui *ui, const char *text);
 /* Tiled options background over the entire drawable,
  * restoring the previous clipping region before returning. */
 void maage_client_ui_menu_background(maage_client_ui *ui);
+void maage_client_ui_menu_background_scroll(maage_client_ui *ui, float offset);
 void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangle, unsigned long top, unsigned long bottom);
 void maage_client_ui_slider(maage_client_ui *ui, maage_client_ui_rect rectangle, const char *label, float value, int highlighted);
 /* Shared cursor feedback for standard and custom-drawn controls. */

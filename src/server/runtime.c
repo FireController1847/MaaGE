@@ -973,7 +973,7 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     const maage_dimension_definition *definition;
     maage_world_record record;
     const maage_portal_presentation *effect;
-    int seen = 1;
+    int seen = 1, arrival_radius;
     maage_status result;
     if (!runtime->travelling || runtime->paused) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     definition = maage_dimension_get(maage_content_dimensions(runtime->content), runtime->travel.destination);
@@ -987,15 +987,31 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     result = server_dimension_world(runtime, definition->id, 0, runtime->travel.position, trace);
     if (maage_status_failed(result)) return result;
     destination = runtime->dimension_worlds[definition->id - 1];
-    result = maage_world_set_render_distance(destination, runtime->config.render_distance, 0);
+    arrival_radius = runtime->travel.arrival_radius > runtime->config.render_distance ? runtime->travel.arrival_radius : runtime->config.render_distance;
+    result = maage_world_set_render_distance(destination, arrival_radius, 0);
     if (maage_status_failed(result)) return result;
     result = maage_world_stream(destination, runtime->travel.position[0], runtime->travel.position[2], runtime->yaw, trace);
     if (maage_status_failed(result)) return result;
     if (!maage_world_chunk_loaded(destination, maage_world_chunk_coordinate((int) floor(runtime->travel.position[0])), maage_world_chunk_coordinate((int) floor(runtime->travel.position[2])))) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     if (!runtime->travel.at_spawn && definition->arrive) {
         result = definition->arrive(definition->context, destination, &runtime->travel);
+        if (maage_status_code(result) == MAAGE_STATUS_NOT_FOUND) {
+            result = maage_world_set_render_distance(destination, runtime->config.render_distance, 0);
+            if (maage_status_failed(result)) return result;
+            runtime->travelling = runtime->spawn_resolved = 0;
+            runtime->portal_ticks = 0;
+            runtime->portal_progress = 0;
+            runtime->portal_require_exit = 1;
+            runtime->publication_dirty = 1;
+            maage_log_warning("maage.server.dimension", "No safe arrival site in %s; travel cancelled.", definition->name);
+            result = server_status(MAAGE_STATUS_WARNING, MAAGE_OPERATION_QUERY);
+            server_status_event(runtime, result, NULL);
+            return result;
+        }
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
     }
+    result = maage_world_set_render_distance(destination, runtime->config.render_distance, 0);
+    if (maage_status_failed(result)) return result;
     result = server_close_container(runtime);
     if (maage_status_failed(result)) return result;
     if (runtime->world_epoch == ULONG_MAX) return server_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
@@ -1029,6 +1045,7 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     runtime->portal_require_exit = 1;
     runtime->portal_ticks = 0;
     runtime->portal_progress = 0;
+    runtime->portal_presentation = runtime->travel.presentation;
     runtime->travelling = runtime->spawn_resolved = 0;
     ++runtime->world_epoch;
     effect = maage_presentation_portal(maage_content_presentation(runtime->content), runtime->travel.presentation);
@@ -1060,7 +1077,7 @@ static maage_status server_dimension_contact(maage_server_runtime *runtime) {
         return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_QUERY);
     }
     if (runtime->travel.destination != travel.destination || runtime->travel.kind != travel.kind) runtime->portal_ticks = 0;
-    if (!travel.delay || travel.cooldown > 12000 || !maage_dimension_get(maage_content_dimensions(runtime->content), travel.destination) || (travel.credits != 0 && travel.credits != 1)) return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+    if (!travel.delay || travel.cooldown > 12000 || travel.arrival_radius < 0 || travel.arrival_radius > MAAGE_WORLD_MAX_RADIUS || !maage_dimension_get(maage_content_dimensions(runtime->content), travel.destination) || (travel.credits != 0 && travel.credits != 1)) return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
     effect = maage_presentation_portal(maage_content_presentation(runtime->content), travel.presentation);
     if (travel.presentation && !effect) return server_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
     if (!runtime->portal_ticks && effect && effect->enter) server_entity_sound(runtime, effect->enter, runtime->player.position, 0.7, 1);

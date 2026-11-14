@@ -125,6 +125,7 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     maage_sound_bindings bindings;
     maage_sound_music_definition music;
     maage_portal_presentation portal;
+    maage_texture_definition portal_texture;
     base_sound_family portal_family;
     maage_sound_resource_id game[18], menu[4], extra, nether[4], end, credits;
     maage_status result;
@@ -246,17 +247,17 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     memset(&portal, 0, sizeof(portal));
     result = base_sound_family_register(context, "minecraft:portal.hum", "portal/portal", 0, 1, &portal_family);
     if (maage_status_failed(result)) goto done;
-    result = base_sound_event(context, "minecraft:portal.hum", &portal_family, MAAGE_SOUND_BUS_AMBIENT, 1, 1, 1, &portal.ambient);
+    result = base_sound_event(context, "minecraft:portal.hum", &portal_family, MAAGE_SOUND_BUS_AMBIENT, 1, 0.24f, 1, &portal.ambient);
     free(portal_family.resources);
     if (maage_status_failed(result)) goto done;
     result = base_sound_family_register(context, "minecraft:portal.enter", "portal/trigger", 0, 1, &portal_family);
     if (maage_status_failed(result)) goto done;
-    result = base_sound_event(context, "minecraft:portal.enter", &portal_family, MAAGE_SOUND_BUS_PLAYERS, 0, 1, 1, &portal.enter);
+    result = base_sound_event(context, "minecraft:portal.enter", &portal_family, MAAGE_SOUND_BUS_PLAYERS, 0, 0.28f, 1, &portal.enter);
     free(portal_family.resources);
     if (maage_status_failed(result)) goto done;
     result = base_sound_family_register(context, "minecraft:portal.travel", "portal/travel", 0, 1, &portal_family);
     if (maage_status_failed(result)) goto done;
-    result = base_sound_event(context, "minecraft:portal.travel", &portal_family, MAAGE_SOUND_BUS_PLAYERS, 0, 1, 1, &portal.travel);
+    result = base_sound_event(context, "minecraft:portal.travel", &portal_family, MAAGE_SOUND_BUS_PLAYERS, 0, 0.24f, 1, &portal.travel);
     free(portal_family.resources);
     if (maage_status_failed(result)) goto done;
     portal.color[0] = 0.75f;
@@ -265,6 +266,16 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     memcpy(portal.particle_color, portal.color, sizeof(portal.color));
     portal.particle = 0;
     portal.particle_frames = 8;
+    memset(&portal_texture, 0, sizeof(portal_texture));
+    portal_texture.fallback = MAAGE_CONTENT_ID_INVALID;
+    portal_texture.frame_edge = 16;
+    portal_texture.frame_ticks = 1;
+    result = maage_presentation_source_register(context->presentation, "minecraft/textures/blocks/portal.png", &portal_texture.source);
+    if (maage_status_failed(result)) goto done;
+    result = maage_presentation_texture_register(context->presentation, &portal_texture, &ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS + 3]);
+    if (maage_status_failed(result)) goto done;
+    portal.has_overlay_texture = 1;
+    portal.overlay_texture = ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS + 3];
     result = maage_presentation_portal_register(context->presentation, "minecraft:nether_portal", &portal);
     if (maage_status_failed(result)) goto done;
     ids->nether_presentation = portal.id;
@@ -273,9 +284,18 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     portal.color[2] = 0.65f;
     portal.particle_color[0] = portal.particle_color[1] = portal.particle_color[2] = 0.3f;
     portal.smoke = 1;
+    portal.has_overlay_texture = 0;
+    portal.overlay_texture = 0;
     result = maage_presentation_portal_register(context->presentation, "minecraft:end_portal", &portal);
     if (maage_status_failed(result)) goto done;
     ids->end_presentation = portal.id;
+    /* The original asset set predates the dedicated activation sound. Use a
+     * distinct, non-positional dragon growl for the world-wide occurrence. */
+    result = base_sound_family_register(context, "minecraft:end_portal.open", "mob/enderdragon/growl", 1, 4, &portal_family);
+    if (maage_status_failed(result)) goto done;
+    result = base_sound_event(context, "minecraft:end_portal.open", &portal_family, MAAGE_SOUND_BUS_BLOCKS, 0, 0.35f, 0.8f, &ids->end_portal_open_sound);
+    free(portal_family.resources);
+    if (maage_status_failed(result)) goto done;
     result = base_sound_material(context, "minecraft:default", &bindings, &families.step_stone, &families.dig_stone, &families.dig_stone, 1, 1, &ids->material_default);
     if (maage_status_failed(result)) goto done;
     result = base_sound_material(context, "minecraft:stone", &bindings, &families.step_stone, &families.dig_stone, &families.dig_stone, 1, 1, &ids->material_stone);

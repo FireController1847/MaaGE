@@ -453,6 +453,8 @@ static maage_status dimension_eye_use(const maage_item_definition *item, maage_w
     maage_block_plan plan;
     maage_property_value facing, eye;
     int cx, cz, dx, dz, expected, complete, restore;
+    double position[3];
+    maage_status result;
     if (!state || state->block_id != ids->dimension_blocks[DIM_FRAME]) return dimension_result(MAAGE_STATUS_NOOP);
     facing = maage_base_state_value(maage_world_registry(world), state, ids->property_facing);
     eye = maage_base_state_value(maage_world_registry(world), state, ids->property_eye);
@@ -496,7 +498,14 @@ static maage_status dimension_eye_use(const maage_item_definition *item, maage_w
             plan.edge = 5;
             plan.height = 1;
             plan.cells = cells;
-            return maage_world_apply_plan(world, &plan);
+            result = maage_world_apply_plan(world, &plan);
+            if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+                position[0] = cx + 0.5;
+                position[1] = target->y + 0.75;
+                position[2] = cz + 0.5;
+                (void) maage_world_emit_sound(world, ids->end_portal_open_sound, position, 1, 1);
+            }
+            return result;
         }
     return eye ? dimension_result(MAAGE_STATUS_NOOP) : maage_world_set(world, target->x, target->y, target->z, target->state_id, filled);
 }
@@ -608,6 +617,7 @@ static maage_status dimension_contact(const void *context, maage_world *world, c
         if (source->id == ids->dimension_end) return dimension_result(MAAGE_STATUS_NOOP);
         travel->destination = source->id == ids->dimension_nether ? ids->dimension_overworld : ids->dimension_nether;
         travel->kind = TRAVEL_NETHER;
+        travel->arrival_radius = 10; /* Lookup radius plus frame and plan margins. */
         travel->delay = creative ? 1 : 80;
         travel->cooldown = 300;
         travel->presentation = ids->nether_presentation;
@@ -622,13 +632,116 @@ static maage_status dimension_contact(const void *context, maage_world *world, c
     if (travel->position[2] > MAAGE_WORLD_LIMIT - 256) travel->position[2] = MAAGE_WORLD_LIMIT - 256;
     return dimension_result(MAAGE_STATUS_SUCCESS);
 }
+/* A five-by-five platform and its dry perimeter must fit in loaded terrain.
+ * Surface candidates use the topmost cell, never a cave below the heightmap. */
+static const maage_block_definition *dimension_site_block(const maage_world *world, int x, int y, int z, const maage_block_state_definition **state) {
+    const maage_block_registry *blocks = maage_world_registry(world);
+    *state = maage_block_registry_state(blocks, maage_world_get(world, x, y, z));
+    return *state ? maage_block_registry_block(blocks, (*state)->block_id) : NULL;
+}
+static int dimension_site_floor(const maage_base_ids *ids, const maage_world *world, int x, int y, int z) {
+    const maage_block_state_definition *state;
+    const maage_block_definition *block = dimension_site_block(world, x, y, z, &state);
+    maage_block_shape shape;
+    return block && block->solid && !block->contact_damage && !block->entity && !block->foliage && state->block_id != ids->block_bedrock && !state->fluid_kind && maage_block_collision_shape(block, state, &shape) && shape.minimum[0] <= 0 && shape.minimum[2] <= 0 && shape.maximum[0] >= 1 && shape.maximum[1] >= 1 && shape.maximum[2] >= 1;
+}
+static int dimension_site_clear(const maage_base_ids *ids, const maage_world *world, int x, int y, int z, int carve, int water) {
+    const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    int dx, dy, dz, edge;
+    if (y < 1 || y > MAAGE_WORLD_HEIGHT - 5) return 0;
+    for (dz = -3; dz <= 3; ++dz)
+        for (dx = -3; dx <= 3; ++dx) {
+            edge = abs(dx) == 3 || abs(dz) == 3;
+            if (!dimension_loaded(world, x + dx, z + dz)) return 0;
+            for (dy = 0; dy < 5; ++dy) {
+                block = dimension_site_block(world, x + dx, y + dy, z + dz, &state);
+                if (!block) return 0;
+                if (dy == 0 && water && state->fluid_kind == ids->fluid_water) continue;
+                if (state->fluid_kind || block->contact_damage) return 0;
+                if (edge) continue;
+                if (block->entity || state->block_id == ids->block_bedrock || block->portal_presentation) return 0;
+                if (dy && !carve && state->id != ids->state_air && !block->replaceable) return 0;
+            }
+            if (carve && y + 5 < MAAGE_WORLD_HEIGHT) {
+                block = dimension_site_block(world, x + dx, y + 5, z + dz, &state);
+                if (!block || state->fluid_kind || block->contact_damage) return 0;
+            }
+        }
+    return 1;
+}
+static int dimension_surface_site(const maage_base_ids *ids, const maage_world *world, int x, int z, int sea, int water_only, int *floor_y) {
+    maage_world_observation observation;
+    const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    int y, water, dx, dz;
+    if (!maage_world_observe(world, x, sea, z, &observation)) return 0;
+    y = observation.precipitation_height - 1;
+    if (y < 1 || y > MAAGE_WORLD_HEIGHT - 5) return 0;
+    block = dimension_site_block(world, x, y, z, &state);
+    if (!block) return 0;
+    water = y == sea && state->fluid_kind == ids->fluid_water;
+    if (water_only && !water) return 0;
+    if (!water) {
+        if (y < sea || !dimension_site_floor(ids, world, x, y, z)) return 0;
+        for (dz = -1; dz <= 1; ++dz)
+            for (dx = -1; dx <= 1; ++dx)
+                if (!dimension_site_floor(ids, world, x + dx, y, z + dz)) return 0;
+    }
+    if (!dimension_site_clear(ids, world, x, y, z, 0, water)) return 0;
+    *floor_y = y;
+    return 1;
+}
+static void dimension_ring_offset(int radius, int index, int *dx, int *dz) {
+    if (!radius) { *dx = *dz = 0; return; }
+    if (index < radius * 2) { *dx = -radius + index; *dz = -radius; }
+    else if (index < radius * 4) { *dx = radius; *dz = -radius + index - radius * 2; }
+    else if (index < radius * 6) { *dx = radius - (index - radius * 4); *dz = radius; }
+    else { *dx = -radius; *dz = radius - (index - radius * 6); }
+}
+static int dimension_find_surface(const maage_base_ids *ids, const maage_world *world, int x, int z, int sea, int water_only, int *out_x, int *out_y, int *out_z) {
+    int radius, index, dx, dz;
+    for (radius = 0; radius <= 112; ++radius)
+        for (index = 0; index < (radius ? radius * 8 : 1); ++index) {
+            dimension_ring_offset(radius, index, &dx, &dz);
+            if (dimension_surface_site(ids, world, x + dx, z + dz, sea, water_only, out_y)) {
+                *out_x = x + dx;
+                *out_z = z + dz;
+                return 1;
+            }
+        }
+    return 0;
+}
+static int dimension_find_cavity(const maage_base_ids *ids, const maage_world *world, int x, int y, int z, int nether, int carve, int *out_x, int *out_y, int *out_z) {
+    int radius, index, dx, dz, offset, direction, height, top = nether ? 118 : MAAGE_WORLD_HEIGHT - 6;
+    for (radius = 0; radius <= 32; ++radius)
+        for (index = 0; index < (radius ? radius * 8 : 1); ++index) {
+            dimension_ring_offset(radius, index, &dx, &dz);
+            for (offset = 0; offset <= top; ++offset)
+                for (direction = 1; direction >= -1; direction -= 2) {
+                    if (!offset && direction < 0) continue;
+                    height = y + offset * direction;
+                    if (height < 5 || height > top || !dimension_site_floor(ids, world, x + dx, height, z + dz)) continue;
+                    if (!carve && maage_world_get(world, x + dx, height + 1, z + dz) != ids->state_air) continue;
+                    if (!dimension_site_clear(ids, world, x + dx, height, z + dz, carve, 0)) continue;
+                    *out_x = x + dx;
+                    *out_y = height;
+                    *out_z = z + dz;
+                    return 1;
+                }
+        }
+    return 0;
+}
 static maage_status dimension_arrive(const void *context, maage_world *world, maage_dimension_travel *travel) {
     const maage_base_ids *ids = (const maage_base_ids *) context;
     maage_block_state_id cells[5 * 5 * 5];
     maage_block_plan plan;
     maage_block_position portal;
     maage_status result;
-    int x, y, z, i, j, k, height, nether = maage_world_dimension(world)->id == ids->dimension_nether;
+    const maage_generation_policy *policy = maage_world_generation_policy(world);
+    const maage_block_state_definition *surface;
+    maage_world_observation observation;
+    int x, y, z, i, j, k, origin_x, origin_z, origin_y, found, ocean, nether = maage_world_dimension(world)->id == ids->dimension_nether;
     if (travel->kind == TRAVEL_NETHER) {
         result = maage_world_find_states(world, ids->portal_states, 2, travel->position, 128, &portal);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
@@ -640,27 +753,43 @@ static maage_status dimension_arrive(const void *context, maage_world *world, ma
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             while (portal.y > 1 && (maage_world_get(world, portal.x, portal.y - 1, portal.z) == ids->portal_states[0] || maage_world_get(world, portal.x, portal.y - 1, portal.z) == ids->portal_states[1]))
                 --portal.y;
-            travel->position[0] = portal.x + 0.5;
-            travel->position[1] = portal.y;
-            travel->position[2] = portal.z + 0.5;
-            return result;
+            /* Reuse a valid frame only if at least one side has dry,
+             * two-block headroom and a solid standing surface. */
+            k = maage_world_get(world, portal.x, portal.y, portal.z) == ids->portal_states[1];
+            for (i = -1; i <= 1; i += 2) {
+                x = portal.x + (k ? i : 0);
+                z = portal.z + (k ? 0 : i);
+                if (!dimension_loaded(world, x, z)) return dimension_result(MAAGE_STATUS_NOOP);
+                if (dimension_site_floor(ids, world, x, portal.y - 1, z) && maage_world_get(world, x, portal.y, z) == ids->state_air && maage_world_get(world, x, portal.y + 1, z) == ids->state_air) {
+                    travel->position[0] = portal.x + 0.5;
+                    travel->position[1] = portal.y;
+                    travel->position[2] = portal.z + 0.5;
+                    return result;
+                }
+            }
+            result = dimension_result(MAAGE_STATUS_NOT_FOUND);
         }
         if (maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return result;
     }
     x = (int) floor(travel->position[0]);
     z = (int) floor(travel->position[2]);
     y = travel->kind == TRAVEL_END ? 49 : (int) floor(travel->position[1]) - 1;
-    /* Prefer a solid floor and clear three-high arrival, then fall back to a
-     * protected five-wide platform. Never expose the player to missing terrain. */
     if (travel->kind == TRAVEL_NETHER) {
-        for (height = nether ? 118 : 250; height >= 35; --height) {
-            const maage_block_state_definition *state = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, height, z));
-            const maage_block_definition *block = state ? maage_block_registry_block(maage_world_registry(world), state->block_id) : NULL;
-            if (block && block->solid && !block->contact_damage && maage_world_get(world, x, height + 1, z) == ids->state_air && maage_world_get(world, x, height + 2, z) == ids->state_air && maage_world_get(world, x, height + 3, z) == ids->state_air) {
-                y = height;
-                break;
-            }
+        origin_x = x;
+        origin_y = y;
+        origin_z = z;
+        found = 0;
+        ocean = 0;
+        if (!nether) {
+            surface = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, policy->sea_level, z));
+            ocean = surface && surface->fluid_kind == ids->fluid_water;
+            if (maage_world_observe(world, x, policy->sea_level, z, &observation) && observation.biome_id == ids->biome_ocean) ocean = 1;
+            if (ocean) found = dimension_find_surface(ids, world, origin_x, origin_z, policy->sea_level, 1, &x, &y, &z);
+            if (!found) found = dimension_find_surface(ids, world, origin_x, origin_z, policy->sea_level, 0, &x, &y, &z);
         }
+        if (!found && !ocean) found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, nether, 0, &x, &y, &z);
+        if (!found && !ocean) found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, nether, 1, &x, &y, &z);
+        if (!found) return dimension_result(MAAGE_STATUS_NOT_FOUND);
     }
     for (k = -2; k <= 2; ++k)
         for (i = -2; i <= 2; ++i)
@@ -748,7 +877,7 @@ static maage_status dimension_register_block(maage_content_context *context, maa
     return result;
 }
 maage_status maage_base_dimensions(maage_content_context *context, maage_base_ids *ids) {
-    static const char *const paths[9] = {"minecraft/textures/blocks/end_stone.png", "minecraft/textures/blocks/soul_sand.png", "minecraft/textures/blocks/glowstone.png", "minecraft/textures/blocks/portal.png", "minecraft/textures/blocks/endframe_top.png", "minecraft/textures/blocks/endframe_eye.png", "minecraft/textures/blocks/endframe_side.png", "minecraft/textures/blocks/obsidian.png", "minecraft/textures/entity/end_portal.png"};
+    static const char *const paths[9] = {"minecraft/textures/blocks/end_stone.png", "minecraft/textures/blocks/soul_sand.png", "minecraft/textures/blocks/glowstone.png", NULL, "minecraft/textures/blocks/endframe_top.png", "minecraft/textures/blocks/endframe_eye.png", "minecraft/textures/blocks/endframe_side.png", "minecraft/textures/blocks/obsidian.png", "minecraft/textures/entity/end_portal.png"};
     maage_texture_definition texture;
     maage_block_geometry_definition geometry;
     maage_block_face_definition appearances[MAAGE_FACE_COUNT];
@@ -767,12 +896,9 @@ maage_status maage_base_dimensions(maage_content_context *context, maage_base_id
     result = maage_block_geometry_register(context->geometry, "minecraft:portal", &geometry, &ids->portal_geometry);
     if (maage_status_failed(result)) return result;
     for (i = 0; i < 9; ++i) {
+        if (!paths[i]) continue; /* Portal texture is shared with the screen effect. */
         memset(&texture, 0, sizeof(texture));
         texture.fallback = MAAGE_CONTENT_ID_INVALID;
-        if (i == 3) {
-            texture.frame_edge = 16;
-            texture.frame_ticks = 1;
-        }
         result = maage_presentation_source_register(context->presentation, paths[i], &texture.source);
         if (!maage_status_failed(result)) result = maage_presentation_texture_register(context->presentation, &texture, &ids->textures[MAAGE_BASE_TEXTURE_DIMENSIONS + i]);
         if (maage_status_failed(result)) return result;
