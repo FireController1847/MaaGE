@@ -41,6 +41,41 @@ static NSTextField *maage_ui_row_label(NSString *text, CGFloat size, BOOL bold) 
     [label setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationVertical];
     return label;
 }
+/* A hidden constrained view still participates in AppKit layout. Keep only
+ * the selected page attached, and size it by frame rather than constraints
+ * crossing the host boundary. Child constraints remain local to that page. */
+@interface MaaGELauncherPageHost : NSView
+@property(nonatomic, strong) NSView *displayedPage;
+- (void)showPage:(NSView *)page;
+@end
+@implementation MaaGELauncherPageHost
+- (void)showPage:(NSView *)page {
+    if (self.displayedPage == page) return;
+    [self.displayedPage removeFromSuperview];
+    self.displayedPage = page;
+    if (!page) return;
+    page.translatesAutoresizingMaskIntoConstraints = NO;
+    page.autoresizingMask = NSViewNotSizable;
+    page.frame = self.bounds;
+    [self addSubview:page];
+    [page setNeedsLayout:YES];
+    [self setNeedsLayout:YES];
+}
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
+    if (self.displayedPage && !NSEqualRects(self.displayedPage.frame, self.bounds)) {
+        self.displayedPage.frame = self.bounds;
+        [self.displayedPage setNeedsLayout:YES];
+    }
+}
+- (void)layout {
+    [super layout];
+    if (self.displayedPage && !NSEqualRects(self.displayedPage.frame, self.bounds)) {
+        self.displayedPage.frame = self.bounds;
+        [self.displayedPage setNeedsLayout:YES];
+    }
+}
+@end
 /* Cover the native Launcher completely during initial preparation. */
 @interface MaaGELauncherSplashView : NSView
 @end
@@ -164,8 +199,8 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 - (void)updateReadiness:(NSString *)text symbol:(NSString *)symbol tint:(NSColor *)tint;
 @end
 @implementation MaaGELauncherHomeView
-- (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
-    [super resizeSubviewsWithOldSize:oldSize];
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
     [self setNeedsLayout:YES];
     self.needsDisplay = YES;
 }
@@ -259,7 +294,7 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
         self.readinessLabel.attributedStringValue = maage_ui_home_inline(status, self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
     }
     NSRect statusBox = maage_ui_home_rect(0, 885, 2560, 49, scale, originX, originY);
-    CGFloat statusWidth = MIN(self.readinessLabel.attributedStringValue.size.width + 20 * scale, 1100 * scale);
+    CGFloat statusWidth = MIN(width - 40, MAX(1100 * scale, self.readinessLabel.attributedStringValue.size.width + 16));
     self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(NSMidX(self.bounds) - statusWidth / 2, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
 
     /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
@@ -478,11 +513,12 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @property(nonatomic, strong) NSTrackingArea *homeTracking;
 @property(nonatomic, copy) NSString *accountName;
 @property(nonatomic) BOOL homeHovered, verified, accountLabelDirty;
+@property(nonatomic) CGFloat accountLabelScale;
 - (void)setAccountName:(NSString *)name verified:(BOOL)verified;
 @end
 @implementation MaaGELauncherHomeCard
-- (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
-    [super resizeSubviewsWithOldSize:oldSize];
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
     [self setNeedsLayout:YES];
 }
 - (void)updateTrackingAreas {
@@ -532,17 +568,18 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     self.symbolTile.layer.cornerRadius = 37 * scale;
     self.symbol.frame = NSMakeRect(28 * scale, 32 * scale, 46 * scale, 46 * scale);
     CGFloat fontSize = 28 * scale, available = (NSWidth(self.bounds) / scale - 250) * scale;
-    CGFloat nameWidth = MAX(1, available - (self.verified ? 34 * scale : 0));
+    CGFloat nameWidth = MAX(1, available - 8 - (self.verified ? 34 * scale : 0));
     NSString *value = self.accountName ?: self.value.stringValue;
     NSFont *font = [NSFont systemFontOfSize:fontSize weight:NSFontWeightMedium];
     CGFloat needed = [value sizeWithAttributes:@{ NSFontAttributeName: font }].width;
     if (needed > nameWidth && needed > 0) font = [NSFont systemFontOfSize:fontSize * nameWidth / needed weight:NSFontWeightMedium];
     BOOL fontChanged = fabs(self.value.font.pointSize - font.pointSize) > 0.1;
     if (fontChanged) self.value.font = font;
-    if (self.accountName && (self.accountLabelDirty || fontChanged)) {
+    if (self.accountName && (self.accountLabelDirty || fontChanged || fabs(self.accountLabelScale - scale) > 0.001)) {
         if (self.verified) self.value.attributedStringValue = maage_ui_home_verified_name(self.accountName, font, scale);
         else self.value.stringValue = self.accountName;
         self.accountLabelDirty = NO;
+        self.accountLabelScale = scale;
     }
     self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(105 * scale, 0, available, NSHeight(self.bounds)), font);
     self.downSymbol.frame = NSMakeRect(NSWidth(self.bounds) - 119 * scale, 43 * scale, 23 * scale, 24 * scale);
@@ -702,7 +739,8 @@ static NSTableView *maage_ui_navigation_table(void) {
 @property(nonatomic, assign) maage_launcher_ui *state;
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSTableView *sidebar, *settingsSidebar, *installations, *clients, *accounts;
-@property(nonatomic, strong) NSView *shell, *body, *playSplash, *playHome;
+@property(nonatomic, strong) MaaGELauncherPageHost *rootHost, *body;
+@property(nonatomic, strong) NSView *shell, *playSplash, *playHome;
 @property(nonatomic, strong) NSImageView *splashLogo;
 @property(nonatomic, strong) NSTextField *homeReadiness, *homeInstallation, *homeVersion, *homeAccount, *homePlayspace;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
@@ -743,8 +781,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) notification;
     /* The home lays out its children manually; its outer constraints alone
      * do not express the width-dependent row count. */
+    [self.rootHost setNeedsLayout:YES];
     [self.playHome setNeedsLayout:YES];
-    if (!self.playHome.hidden) [self.window.contentView layoutSubtreeIfNeeded];
+    [self.rootHost layoutSubtreeIfNeeded];
 }
 - (BOOL)windowShouldClose:(NSWindow *)window {
     (void) window;
@@ -859,6 +898,16 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.window.titlebarAppearsTransparent = home;
     self.window.backgroundColor = home ? [NSColor colorWithSRGBRed:0.31 green:0.42 blue:0.51 alpha:1] : NSColor.windowBackgroundColor;
 }
+- (void)presentPageWithSplash:(BOOL)splash {
+    BOOL home = self.state->page == MAAGE_PAGE_PLAY;
+    self.shell.hidden = home || splash;
+    self.playHome.hidden = !home || splash;
+    self.playSplash.hidden = !splash;
+    NSView *page = !home && !splash && (NSUInteger) self.state->page < self.pages.count ? self.pages[self.state->page] : nil;
+    [self.body showPage:page];
+    [self.rootHost showPage:splash ? self.playSplash : home ? self.playHome : self.shell];
+    [self setHomeWindowAppearance:home && !splash];
+}
 - (void)activatePage:(maage_launcher_page)page {
     self.state->page = page;
     if (page >= MAAGE_PAGE_SETTINGS) {
@@ -869,15 +918,7 @@ static NSTableView *maage_ui_navigation_table(void) {
         [self.settingsSidebar deselectAll:nil];
         if (self.sidebar.selectedRow != (NSInteger) page) [self.sidebar selectRowIndexes:[NSIndexSet indexSetWithIndex:page] byExtendingSelection:NO];
     }
-    for (NSUInteger i = 0; i < self.pages.count; ++i)
-        self.pages[i].hidden = i != (NSUInteger) page;
-    BOOL home = page == MAAGE_PAGE_PLAY;
-    BOOL splash = self.playSplash && !self.playSplash.hidden;
-    self.shell.hidden = home || splash;
-    self.playHome.hidden = !home || splash;
-    if (!self.playHome.hidden) [self.playHome setNeedsLayout:YES];
-    BOOL showingHome = home && !splash;
-    [self setHomeWindowAppearance:showingHome];
+    [self presentPageWithSplash:self.playSplash && !self.playSplash.hidden];
 }
 - (void)showSettings:(id)sender {
     (void) sender;
@@ -1397,13 +1438,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.splashResourceRetry.hidden = !splash || !preparing || state->progress.busy || state->resources_pending || (state->progress.stage != MAAGE_SETUP_FAILED && state->progress.stage != MAAGE_SETUP_CANCELLED);
     self.splashResourceRetry.enabled = state->services_ready;
     self.splashSkip.hidden = !splash || !self.onboardingRequired;
-    self.shell.hidden = splash || state->page == MAAGE_PAGE_PLAY;
-    BOOL homeWasHidden = self.playHome.hidden;
-    self.playHome.hidden = splash || state->page != MAAGE_PAGE_PLAY;
-    if (homeWasHidden && !self.playHome.hidden) [self.playHome setNeedsLayout:YES];
-    self.playSplash.hidden = !splash;
-    BOOL showingHome = !splash && state->page == MAAGE_PAGE_PLAY;
-    [self setHomeWindowAppearance:showingHome];
+    [self presentPageWithSplash:splash];
     progressActive = splash && (!self.onboardingDecided || state->accounts.busy || (preparing && state->services_ready && (state->resources_pending || state->progress.busy)));
     maage_setup_progress *progress = &state->progress;
     double percent = -1, downloaded = (progress->downloaded_bytes + progress->client_downloaded_bytes) / 1048576.0;
@@ -1642,7 +1677,6 @@ static NSTableView *maage_ui_navigation_table(void) {
 
     MaaGELauncherHomeView *home = [[MaaGELauncherHomeView alloc] init];
     self.playHome = home;
-    maage_ui_fill(home, self.window.contentView, 0);
     NSString *logoPath = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"png"];
     NSImage *artwork = logoPath ? [[NSImage alloc] initWithContentsOfFile:logoPath] : nil;
     home.brand = [NSImageView imageViewWithImage:artwork ?: NSApp.applicationIconImage];
@@ -1738,7 +1772,6 @@ static NSTableView *maage_ui_navigation_table(void) {
     for (NSView *part in home.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
     home.hidden = YES;
     self.playSplash = [[MaaGELauncherSplashView alloc] init];
-    maage_ui_fill(self.playSplash, self.window.contentView, 0);
     NSStackView *splashContent = maage_ui_stack(NO, 22);
     splashContent.alignment = NSLayoutAttributeCenterX;
     self.splashLogo = maage_ui_macos_app_icon(144);
@@ -2155,6 +2188,9 @@ static NSTableView *maage_ui_navigation_table(void) {
 - (void)show {
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, MAAGE_LAUNCHER_WINDOW_WIDTH, MAAGE_LAUNCHER_WINDOW_HEIGHT) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher";
+    self.rootHost = [[MaaGELauncherPageHost alloc] initWithFrame:self.window.contentView.bounds];
+    self.window.contentView = self.rootHost;
+    self.rootHost.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     self.window.contentMinSize = NSMakeSize(MAAGE_LAUNCHER_WINDOW_MIN_WIDTH, MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT);
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;
@@ -2162,7 +2198,6 @@ static NSTableView *maage_ui_navigation_table(void) {
     /* Replace the stark split-view divider with an integrated, fixed-width sidebar. */
     NSView *shell = [[NSView alloc] init];
     self.shell = shell;
-    maage_ui_fill(shell, self.window.contentView, 0);
     NSView *sidebar = [[NSView alloc] init];
     NSView *right = [[NSView alloc] init];
     sidebar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -2242,14 +2277,10 @@ static NSTableView *maage_ui_navigation_table(void) {
     [context addArrangedSubview:self.account];
     [content addArrangedSubview:context];
     [context.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
-    self.body = [[NSView alloc] init];
+    self.body = [[MaaGELauncherPageHost alloc] init];
     [content addArrangedSubview:self.body];
     [self.body.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     self.pages = @[ [self playPage], [self installationsPage], [self accountsPage], [self settingsPage], [self aboutPage] ];
-    for (NSView *page in self.pages) {
-        maage_ui_fill(page, self.body, 0);
-        page.hidden = YES;
-    }
     self.progress = [[NSProgressIndicator alloc] init];
     self.progress.style = NSProgressIndicatorStyleBar;
     self.progress.controlSize = NSControlSizeMini;
