@@ -63,11 +63,13 @@ typedef struct maage_item_definition {
     size_t sprite_layer_count;
     const char *display_name;
     maage_status (*use_placement)(const struct maage_item_definition *, const struct maage_world *, const struct maage_world_target *, maage_block_state_id *, int *);
-    /* Authoritative item action, before placement. SUCCESS consumes one use;
-     * NOOP declines, failures retain stack ownership. Preview never invokes it. */
-    maage_status (*use)(const struct maage_item_definition *, struct maage_world *, const struct maage_world_target *);
+    /* Authoritative item action, before placement. consume_use starts at one;
+     * SUCCESS may set it to zero for an interaction that reuses existing content.
+     * Otherwise one use is charged according to use_durability. Only zero/one
+     * are valid; NOOP/failures retain the stack. Preview never invokes it. */
+    maage_status (*use)(const struct maage_item_definition *, struct maage_world *, const struct maage_world_target *, int *consume_use);
     int placement_air_only;
-    int use_durability;      /* Successful use damages rather than consumes the stack. */
+    int use_durability;      /* A charged use damages rather than consumes the stack. */
     unsigned int break_wear; /* 0 none, 1 ordinary hardness, 2 matching block class. */
     int fuel_container;
     maage_item_placement placement; /* NULL uses the selected variant's placement_state_id. */

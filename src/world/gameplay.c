@@ -433,6 +433,7 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     maage_world_target destination;
     maage_block_state_id placed;
     maage_status result;
+    int consume_use = 1;
     if (game->use_delay) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_MUTATE, 0);
     /* Failed use also arms the held-input repeat timer. */
     game->use_delay = 4;
@@ -443,8 +444,9 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     if (target_block && target_block->use && (!sneaking || !held->count)) return target_block->use(world, &game->target, &game->crafting);
     item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
     if (item && item->use) {
-        result = item->use(item, world, &game->target);
+        result = item->use(item, world, &game->target, &consume_use);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        if (consume_use != 0 && consume_use != 1) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_MUTATE, 0);
     } else {
         result = maage_gameplay_placement(player, world, items, held, &game->target, yaw, &destination, &placed);
         if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
@@ -456,7 +458,7 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
         maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE, maage_gameplay_state_material(world, placed), destination.x + 0.5, destination.y + 0.5, destination.z + 0.5, 1.0, 1.0);
         ++game->blocks_placed;
     }
-    if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
+    if (consume_use && game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         if (item->use_durability) {
             if (held->damage == item->durability) {
                 memset(held, 0, sizeof(*held));

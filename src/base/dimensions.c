@@ -371,13 +371,14 @@ static maage_status dimension_nether_frame(const maage_base_ids *ids, const maag
     plan->height = *height;
     return dimension_result(MAAGE_STATUS_SUCCESS);
 }
-static maage_status dimension_ignite(const maage_item_definition *item, maage_world *world, const maage_world_target *target) {
+static maage_status dimension_ignite(const maage_item_definition *item, maage_world *world, const maage_world_target *target, int *consume_use) {
     static const int offsets[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
     maage_block_state_id cells[21 * 21 * 21];
     maage_block_plan plan;
     maage_status result;
     int x, y, z, axis, width, height, i, j;
+    (void) consume_use;
     if (maage_world_dimension(world)->id == ids->dimension_end || target->face >= 6) return dimension_result(MAAGE_STATUS_NOOP);
     x = target->x + offsets[target->face][0];
     y = target->y + offsets[target->face][1];
@@ -445,23 +446,25 @@ static maage_status dimension_end_neighbor(maage_world *world, int x, int y, int
     }
     return maage_world_set(world, x, y, z, state->id, ids->state_air);
 }
-static maage_status dimension_eye_use(const maage_item_definition *item, maage_world *world, const maage_world_target *target) {
+static maage_status dimension_eye_use(const maage_item_definition *item, maage_world *world, const maage_world_target *target, int *consume_use) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
     const maage_block_state_definition *state = maage_block_registry_state(maage_world_registry(world), target->state_id);
     maage_block_state_id cells[25], filled;
     maage_block_plan plan;
     maage_property_value facing, eye;
-    int cx, cz, dx, dz, expected, complete;
+    int cx, cz, dx, dz, expected, complete, restore;
     if (!state || state->block_id != ids->dimension_blocks[DIM_FRAME]) return dimension_result(MAAGE_STATUS_NOOP);
     facing = maage_base_state_value(maage_world_registry(world), state, ids->property_facing);
     eye = maage_base_state_value(maage_world_registry(world), state, ids->property_eye);
-    if (eye || facing > 3) return dimension_result(MAAGE_STATUS_NOOP);
+    if (facing > 3) return dimension_result(MAAGE_STATUS_NOOP);
+    *consume_use = !eye;
     for (dz = -6; dz <= 6; dz += 12)
         for (dx = -6; dx <= 6; dx += 12)
             if (!dimension_loaded(world, target->x + dx, target->z + dz)) return dimension_result(MAAGE_STATUS_NOOP);
     filled = ids->frame_states[1][facing];
-    /* The clicked frame can lie at any of the twelve ring positions. Preflight
-     * the full ring and last eye in one detached plan when it completes. */
+    /* The clicked frame can lie at any ring position. A filled frame can
+     * restore a complete ring's missing surface without inserting another Eye.
+     * The last new Eye and all nine surface cells still commit in one plan. */
     for (cz = target->z - 2; cz <= target->z + 2; ++cz)
         for (cx = target->x - 2; cx <= target->x + 2; ++cx) {
             if (!dimension_ring_frame(target->x - cx, target->z - cz)) continue;
@@ -479,9 +482,13 @@ static maage_status dimension_eye_use(const maage_item_definition *item, maage_w
                     } else if (maage_world_get(world, cx + dx, target->y, cz + dz) != ids->frame_states[1][expected]) complete = 0;
                 }
             if (!complete) continue;
+            restore = !eye;
             for (dz = -2; dz <= 2; ++dz)
-                for (dx = -2; dx <= 2; ++dx)
+                for (dx = -2; dx <= 2; ++dx) {
                     cells[(dz + 2) * 5 + dx + 2] = abs(dx) <= 1 && abs(dz) <= 1 ? ids->dimension_states[DIM_END_PORTAL] : MAAGE_CONTENT_ID_INVALID;
+                    if (abs(dx) <= 1 && abs(dz) <= 1 && maage_world_get(world, cx + dx, target->y, cz + dz) != ids->dimension_states[DIM_END_PORTAL]) restore = 1;
+                }
+            if (!restore) return dimension_result(MAAGE_STATUS_NOOP);
             cells[(target->z - cz + 2) * 5 + target->x - cx + 2] = filled;
             plan.x = cx - 2;
             plan.y = target->y;
@@ -491,7 +498,7 @@ static maage_status dimension_eye_use(const maage_item_definition *item, maage_w
             plan.cells = cells;
             return maage_world_apply_plan(world, &plan);
         }
-    return maage_world_set(world, target->x, target->y, target->z, target->state_id, filled);
+    return eye ? dimension_result(MAAGE_STATUS_NOOP) : maage_world_set(world, target->x, target->y, target->z, target->state_id, filled);
 }
 static maage_status dimension_frame_placement(const maage_item_definition *item, maage_item_variant_id variant, maage_block_face face, double yaw, maage_block_state_id *state) {
     const maage_base_ids *ids = (const maage_base_ids *) item->behavior_context;
@@ -712,6 +719,9 @@ static maage_status dimension_register_block(maage_content_context *context, maa
     if (index == DIM_FRAME) {
         block.geometry_id = ids->frame_geometry;
         block.opaque = 0;
+        /* Recessed body/eye faces must sample exposed neighbor light rather
+         * than the fully light-blocking cell occupied by the frame itself. */
+        block.use_neighbor_brightness = 1;
         block.collision_shape.maximum[1] = 0.8125;
         block.selection_shape.maximum[1] = 0.8125;
     }

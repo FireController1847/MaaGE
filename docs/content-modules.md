@@ -24,6 +24,8 @@ Providers specify domains, event, immutable context, callback, explicit order an
 
 Items use contiguous local variants (zero default), immutable configurations and copied appearance/placement rows. Stack count/damage are separate. Placeable variants and placement callbacks reference registered states of the declared block. Target-transforming use has its own contract. Recipes match identity or item-domain tag with optional property constraints; output projections compile unique numeric property-tuple mappings at finalization. Missing/ambiguous outputs fail, enabling external variants without changing recipes.
 
+Authoritative item `use` receives a `consume_use` output initialized to one. On SUCCESS it can leave one to charge the ordinary item/durability use or set zero for a reusable interaction; NOOP and failures never charge the stack. The owner validates the zero/one contract, while Creative retains its normal no-cost behavior. Base Eyes consume a use when filling a frame, but can restore a complete filled ring's surface without inserting another Eye.
+
 Traits finalize before blocks/items. Membership costs `S * ceil(T / 8)` bytes for S subjects and T tags, independent of cells/stacks; direct bit lookup, sparse provider chains and immutable configurations allocate nothing at runtime. Temporary domain closures/workspace are released, partial compiled tables cleared on failure. Peer validation compares logical contracts and dispatch identity, not callback addresses.
 
 ### Minecraft Contracts
