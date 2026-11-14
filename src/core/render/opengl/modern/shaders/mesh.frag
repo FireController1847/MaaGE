@@ -12,7 +12,7 @@ out vec4 maage_result;
 
 void main() {
     if (maage_material == float(MAAGE_MESH_MATERIAL_STARFIELD)) {
-        maage_result = maage_shader_fog(maage_shader_starfield(maage_world_position, maage_fog_position, maage.parameters.x), maage_fog_position, maage_material, maage.fog, maage.fog_distance);
+        maage_result = maage_shader_fog(maage_shader_starfield(maage_world_position, maage_fog_position, maage.matrix, maage.parameters.x), maage_fog_position, maage_material, maage.fog, maage.fog_distance);
         return;
     }
     vec4 texel = texture(maage_source, maage_shader_tile_uv(maage_uv, maage_tile, maage_world_position, maage_rotation_face));

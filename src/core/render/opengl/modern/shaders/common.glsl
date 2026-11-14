@@ -1,6 +1,7 @@
 #define MAAGE_SHADER_VEC2 vec2
 #define MAAGE_SHADER_VEC3 vec3
 #define MAAGE_SHADER_VEC4 vec4
+#define MAAGE_SHADER_MAT4 mat4
 #define MAAGE_SHADER_MOD mod
 #define MAAGE_SHADER_SATURATE(value) clamp(value, 0.0, 1.0)
 #define MAAGE_VERTEX_VEC1 float

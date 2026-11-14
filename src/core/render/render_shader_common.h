@@ -63,15 +63,28 @@ MAAGE_SHADER_VEC3 maage_shader_lighting(MAAGE_SHADER_VEC2 level, float daylight)
 bool maage_shader_cutout(float material, float alpha) {
     return material == float(MAAGE_MESH_MATERIAL_CUTOUT) && alpha < MAAGE_RENDER_CUTOUT_ALPHA;
 }
-/* Independent layered star volume. Cell hashes select sparse glints; changing
- * projected eye direction offsets each depth layer differently. No shared
- * texture repetition, lighting tint or per-block renderer objects are needed. */
-MAAGE_SHADER_VEC4 maage_shader_starfield(MAAGE_SHADER_VEC3 world, MAAGE_SHADER_VEC3 projected, float tick) {
+/* Recover the world-space eye ray from clip X, Y and W. The three
+ * projection rows include camera orientation, aspect, FOV and view bobbing;
+ * their translation cancels for a direction. Intersect successive virtual
+ * horizontal planes behind the portal, rather than sliding a flat pattern
+ * with screen position. Bound the slope at grazing angles to avoid aliasing. */
+MAAGE_SHADER_VEC4 maage_shader_starfield(MAAGE_SHADER_VEC3 world, MAAGE_SHADER_VEC3 projected, MAAGE_SHADER_MAT4 matrix, float tick) {
     MAAGE_SHADER_VEC3 color = MAAGE_SHADER_VEC3(0.003, 0.008, 0.012);
-    MAAGE_SHADER_VEC2 eye = projected.xy / max(abs(projected.z), 0.01);
+    MAAGE_SHADER_VEC3 row_x = MAAGE_SHADER_VEC3(matrix[0].x, matrix[1].x, matrix[2].x);
+    MAAGE_SHADER_VEC3 row_y = MAAGE_SHADER_VEC3(matrix[0].y, matrix[1].y, matrix[2].y);
+    MAAGE_SHADER_VEC3 row_w = MAAGE_SHADER_VEC3(matrix[0].w, matrix[1].w, matrix[2].w);
+    MAAGE_SHADER_VEC3 cofactor_x = cross(row_y, row_w);
+    float determinant = dot(row_x, cofactor_x);
+    MAAGE_SHADER_VEC2 slope = MAAGE_SHADER_VEC2(0.0);
+    if (abs(determinant) > 0.000001) {
+        MAAGE_SHADER_VEC3 ray = (cofactor_x * projected.x + cross(row_w, row_x) * projected.y + cross(row_x, row_y) * projected.z) / determinant;
+        slope = ray.xz / max(abs(ray.y), max(length(ray) * 0.15, 0.0001));
+    }
     for (int layer = 0; layer < 8; ++layer) {
         float depth = float(layer + 1);
-        MAAGE_SHADER_VEC2 p = world.xz * (5.0 + depth * 2.7) + eye * (depth * 0.7) + MAAGE_SHADER_VEC2(sin(tick * 0.0017223644 + depth), cos(tick * 0.0017223644 + depth)) * 0.6;
+        float plane_distance = 0.35 * depth * depth;
+        float density = 3.5 + depth * 0.8;
+        MAAGE_SHADER_VEC2 p = (world.xz + slope * plane_distance) * density + MAAGE_SHADER_VEC2(sin(tick * 0.0017223644 + depth), cos(tick * 0.0017223644 + depth)) * 0.6;
         MAAGE_SHADER_VEC2 cell = floor(p);
         float hash = sin(dot(cell, MAAGE_SHADER_VEC2(127.1 + depth, 311.7 - depth))) * 43758.5453;
         hash -= floor(hash);

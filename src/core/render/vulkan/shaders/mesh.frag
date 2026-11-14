@@ -16,7 +16,7 @@ layout(location = 0) out vec4 maage_result;
 void main()
 {
     if (maage_fragment_material == float(MAAGE_MESH_MATERIAL_STARFIELD)) {
-        maage_result = maage_shader_fog(maage_shader_starfield(maage_world_position, maage_fog_position, maage.parameters.x), maage_fog_position, maage_fragment_material, maage.fog, maage.fog_distance);
+        maage_result = maage_shader_fog(maage_shader_starfield(maage_world_position, maage_fog_position, maage.matrix, maage.parameters.x), maage_fog_position, maage_fragment_material, maage.fog, maage.fog_distance);
         return;
     }
     vec4 texel = texture(maage_atlas, maage_shader_tile_uv(maage_fragment_uv, maage_tile, maage_world_position, maage_rotation_face));
