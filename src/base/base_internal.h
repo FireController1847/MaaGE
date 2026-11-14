@@ -107,10 +107,13 @@ typedef struct maage_generation_region_seed {
 typedef struct maage_generation_region_cache {
     maage_generation_region_seed entries[MAAGE_GENERATION_REGION_CACHE_CAPACITY];
 } maage_generation_region_cache;
+/* The current terrain cover has one surface and at most four filler cells. */
+#define MAAGE_GENERATION_SOIL_LAYERS 5
 typedef struct maage_generation_sample {
     int height;
     maage_biome_id biome;
     maage_block_state_id surface, filler;
+    maage_block_state_id soil[MAAGE_GENERATION_SOIL_LAYERS]; /* Effective cover, top first; filler retains the base foundation material. */
     double temperature, rainfall, lapse_offset, plants;
     maage_base_biome_decoration decoration;
 } maage_generation_sample;

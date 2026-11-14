@@ -2,6 +2,7 @@
 #include "maage/jobs.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MAAGE_GENERATION_DEFAULT_SEA_Y 63
@@ -280,7 +281,7 @@ static double maage_generation_river_distance(maage_world_seed seed, int x, int 
 
 typedef struct maage_generation_column {
     maage_biome_id biome;
-    int height, river;
+    int height;
 } maage_generation_column;
 
 static int maage_generation_grid(int coordinate) {
@@ -321,13 +322,11 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     terrain = maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 4);
     detail = maage_generation_fractal(seed, x / 24.0, z / 24.0, 600UL, 2);
     column->height = (int) floor(base + policy->sea_level - MAAGE_GENERATION_DEFAULT_SEA_Y + terrain * variation * 2.5 + detail * 1.5);
-    column->river = 0;
     if (column->biome != ids->biome_ocean) {
         distance = maage_generation_river_distance(seed, x, z);
         width = 4 + 2 * maage_generation_noise(seed, x / 64.0, z / 64.0, 2000UL);
         bank = (distance - width) / 18;
         bank = bank <= 0 ? 1 : (bank < 1 ? 1 - maage_generation_fade(bank) : 0);
-        column->river = bank > 0;
         target = policy->sea_level - 4 + maage_generation_noise(seed, x / 40.0, z / 40.0, 2100UL);
         if (column->height > target) column->height = (int) floor(maage_generation_lerp(column->height, target, bank));
         if (distance <= width && column->height < policy->sea_level) column->biome = column->biome == ids->biome_taiga ? ids->biome_frozen_river : ids->biome_river;
@@ -388,6 +387,62 @@ static int maage_generation_influence(const maage_base_ids *ids, maage_generatio
     sample->decoration.lakes += decoration->lakes * weight;
     return 1;
 }
+static int maage_generation_soil_depth(maage_world_seed seed, int x, int z) {
+    return 3 + (int) ((maage_generation_hash(seed, x, z, 700UL) >> 5) & 1UL);
+}
+/* Evaluate the few nearby sediment owners against this column's soil layers.
+ * Only submerged anchors participate. Each pass changes eligible material
+ * inside its own vertical interval, so a patch never replaces a whole bank
+ * profile or creates a sandstone foundation below a thin sand deposit. */
+static int maage_generation_sediment(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions) {
+    static const unsigned int attempts[3] = {3, 1, 1};
+    static const unsigned long radii[3] = {5, 2, 4};
+    static const int reach[3] = {2, 1, 2};
+    maage_block_state_id materials[3];
+    const maage_block_state_definition *state;
+    maage_generation_column anchor;
+    unsigned long random;
+    unsigned int pass, attempt;
+    int gx, gz, ix, iz, cx, cz, dx, dz, radius, depth, layer, y, eligible = 0;
+    depth = maage_generation_soil_depth(seed, x, z);
+    for (layer = 0; layer < MAAGE_GENERATION_SOIL_LAYERS; ++layer) {
+        sample->soil[layer] = layer ? sample->filler : sample->surface;
+        if (layer > depth) continue;
+        state = maage_block_registry_state(ids->blocks, sample->soil[layer]);
+        if (!state) return 0;
+        if (state->block_id == ids->block_dirt || state->block_id == ids->block_grass || state->block_id == ids->block_clay) eligible = 1;
+    }
+    if (!eligible || sample->height - depth > policy->sea_level + 2) return 1;
+    materials[0] = ids->state_sand;
+    materials[1] = ids->state_clay;
+    materials[2] = ids->state_gravel;
+    gx = maage_generation_region(x, 16);
+    gz = maage_generation_region(z, 16);
+    for (pass = 0; pass < 3; ++pass)
+        for (iz = -1; iz <= 1; ++iz)
+            for (ix = -1; ix <= 1; ++ix)
+                for (attempt = 0; attempt < attempts[pass]; ++attempt) {
+                    random = maage_generation_hash(seed, gx + ix, gz + iz, 24000UL + pass * 16UL + attempt);
+                    cx = (gx + ix) * 16 + (int) (random & 15UL);
+                    cz = (gz + iz) * 16 + (int) ((random >> 4) & 15UL);
+                    radius = 2 + (int) ((random >> 8) % radii[pass]);
+                    dx = x - cx;
+                    dz = z - cz;
+                    if (dx * dx + dz * dz > radius * radius) continue;
+                    if (!maage_generation_column_at(ids, seed, biomes, policy, cx, cz, &anchor, NULL, regions)) return 0;
+                    if (anchor.height >= policy->sea_level) continue;
+                    for (layer = 0; layer <= depth; ++layer) {
+                        y = sample->height - layer;
+                        if (abs(y - anchor.height - 1) > reach[pass]) continue;
+                        state = maage_block_registry_state(ids->blocks, sample->soil[layer]);
+                        if (!state) return 0;
+                        if (state->block_id != ids->block_dirt && (pass == 1 ? state->block_id != ids->block_clay : state->block_id != ids->block_grass)) continue;
+                        sample->soil[layer] = materials[pass];
+                    }
+                }
+    sample->surface = sample->soil[0];
+    return 1;
+}
 int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions) {
     maage_generation_column column;
     maage_generation_environment environment;
@@ -417,33 +472,14 @@ int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed,
         sample->temperature = definition->temperature;
         sample->rainfall = definition->rainfall;
     }
-    /* Surface patches have a stable regional owner and a complete numeric
-     * profile before features/spawn queries run. No worker-neighbor reads. */
-    if (sample->height < policy->sea_level && column.biome != ids->biome_stone_beach) {
-        unsigned long patch;
-        int gx, gz, ix, iz, px, pz, dx, dz, radius;
-        gx = maage_generation_region(x, 12);
-        gz = maage_generation_region(z, 12);
-        if (column.river) sample->surface = sample->filler = ids->state_gravel;
-        else if (sample->surface != ids->state_sand && column.biome != ids->biome_ocean) sample->surface = ids->state_dirt;
-        for (iz = -1; iz <= 1; ++iz)
-            for (ix = -1; ix <= 1; ++ix) {
-                patch = maage_generation_hash(seed, gx + ix, gz + iz, 2200UL);
-                px = (gx + ix) * 12 + 2 + (int) ((patch >> 3) % 8UL);
-                pz = (gz + iz) * 12 + 2 + (int) ((patch >> 7) % 8UL);
-                dx = x - px;
-                dz = z - pz;
-                radius = 2 + (int) ((patch >> 11) % 4UL);
-                if (dx * dx + dz * dz > radius * radius) continue;
-                sample->surface = (patch % 5UL) < 2 ? ids->state_sand : ((patch % 5UL) < 4 ? ids->state_gravel : ids->state_clay);
-                sample->filler = sample->surface;
-            }
+    /* Shallow submerged land uses its soil; only sufficiently deep ground
+     * exposes gravel over stone. Shallow coasts retain their own sand/rock. */
+    if (sample->height < policy->sea_level - 1 && column.biome != ids->biome_stone_beach) sample->surface = sample->filler;
+    if (sample->height < policy->sea_level - 7 - maage_generation_soil_depth(seed, x, z) && column.biome != ids->biome_stone_beach) {
+        sample->surface = ids->state_gravel;
+        sample->filler = ids->state_stone;
     }
-    /* Banks include the shallow margin and the first dry elevation steps,
-     * independently of whether the categorical biome is River or inland.
-     * Apply last so underwater material patches cannot erase the sand rim. */
-    if (column.river && sample->height >= policy->sea_level - 1 && sample->height <= policy->sea_level + 2) sample->surface = sample->filler = ids->state_sand;
-    return 1;
+    return maage_generation_sediment(ids, seed, biomes, policy, x, z, sample, regions);
 }
 
 int maage_generation_cold(const maage_generation_sample *sample, int y) {
@@ -579,13 +615,13 @@ maage_status maage_base_generate(maage_chunk *chunk, maage_world_seed seed, cons
             if (!maage_block_registry_state(blocks, column->surface) || !filler) return maage_generation_outcome(&context, MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_OPERATION_TERRAIN);
             top = column->height > policy->sea_level ? column->height : policy->sea_level;
             random = maage_generation_hash(seed, wx, wz, 700UL);
-            depth = 3 + (int) ((random >> 5) & 1UL);
+            depth = maage_generation_soil_depth(seed, wx, wz);
             for (y = 0; y <= top; ++y) {
                 if (y > column->height) state = ids->state_water;
                 else if (y == 0 || (y < 5 && ((random >> (y * 3)) & 7UL) >= (unsigned long) y)) state = ids->state_bedrock;
                 else if (y == column->height) {
                     state = column->surface;
-                } else if (y >= column->height - depth) state = column->filler;
+                } else if (y >= column->height - depth) state = column->soil[column->height - y];
                 else if (filler->block_id == ids->block_sand && y >= column->height - depth - 2) state = ids->state_sandstone;
                 else
                     state = ids->state_stone;

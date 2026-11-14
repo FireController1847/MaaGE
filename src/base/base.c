@@ -155,7 +155,6 @@ static maage_status maage_base_bind_internal(maage_content_context *context) {
         if (biome.id == ids->biome_river || biome.id == ids->biome_frozen_river) biome.surface = ids->state_dirt;
         if (biome.id == ids->biome_stone_beach) biome.surface = biome.filler = ids->state_stone;
         if (biome.id == ids->biome_desert || biome.id == ids->biome_beach || biome.id == ids->biome_cold_beach) biome.surface = biome.filler = ids->state_sand;
-        if (biome.id == ids->biome_ocean) biome.surface = ids->state_gravel;
         result = maage_biome_registry_update(context->biomes, &biome);
         if (maage_status_failed(result)) return result;
     }
