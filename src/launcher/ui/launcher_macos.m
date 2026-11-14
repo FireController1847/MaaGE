@@ -89,7 +89,7 @@ static NSImageView *maage_ui_macos_app_icon(CGFloat size) {
     return logo;
 }
 /* Native launch home sized from the InDesign composition (2560 x 1440).
- * The design scales uniformly with window size; no background image or web view. */
+ * Compact windows reserve a separate two-row card area; no background image or web view. */
 static NSRect maage_ui_home_rect(CGFloat x, CGFloat y, CGFloat width, CGFloat height, CGFloat scale, CGFloat originX, CGFloat originY) {
     return NSMakeRect(originX + x * scale, originY + (1440.0 - y - height) * scale, width * scale, height * scale);
 }
@@ -186,8 +186,48 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     [super layout];
     CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
     if (width <= 40 || height <= 34) return;
+    BOOL compact = width < 900;
     CGFloat scale = MIN((width - 40.0) / 2210.0, (height - 34.0) / 1440.0);
+    CGFloat controlsScale = compact ? MIN(0.52, MAX(0.38, height / 1300.0)) : scale;
     CGFloat originX = (width - 2560.0 * scale) / 2, originY = (height - 1440.0 * scale) / 2;
+
+    /* Reserve the footer before positioning the compact grid so its second
+     * row and configuration action never compete with the version/notice. */
+    NSFont *footerFont = [NSFont systemFontOfSize:26 * controlsScale];
+    NSFont *versionFont = [NSFont systemFontOfSize:25 * controlsScale];
+    if (fabs(self.notice.font.pointSize - footerFont.pointSize) > 0.1) self.notice.font = footerFont;
+    if (fabs(self.version.font.pointSize - versionFont.pointSize) > 0.1) self.version.font = versionFont;
+    CGFloat footerWidth = MIN(width - 28, 2200 * controlsScale);
+    CGFloat noticeHeight = MAX(15, ceil(footerFont.ascender - footerFont.descender + footerFont.leading + 4));
+    CGFloat versionHeight = MAX(15, ceil(versionFont.ascender - versionFont.descender + versionFont.leading + 4));
+    self.notice.frame = NSMakeRect((width - footerWidth) / 2, 11, footerWidth, noticeHeight);
+    self.version.frame = NSMakeRect((width - footerWidth) / 2, NSMaxY(self.notice.frame) + 10 * controlsScale, footerWidth, versionHeight);
+
+    NSRect configurationRow;
+    if (compact) {
+        CGFloat gap = 35 * controlsScale, cardHeight = 110 * controlsScale;
+        CGFloat cardWidth = MIN(640 * controlsScale, (width - 40 - gap) / 2);
+        CGFloat gridLeft = (width - 2 * cardWidth - gap) / 2;
+        CGFloat configurationBottom = NSMaxY(self.version.frame) + 24 * controlsScale;
+        configurationRow = NSMakeRect(0, configurationBottom, width, 56 * controlsScale);
+        CGFloat gridBottom = NSMaxY(configurationRow) + 40 * controlsScale;
+        CGFloat gridTop = gridBottom + 2 * cardHeight + gap;
+        for (NSUInteger i = 0; i < MIN(self.cards.count, (NSUInteger) 4); ++i)
+            self.cards[i].frame = NSMakeRect(gridLeft + (i % 2) * (cardWidth + gap), gridBottom + (1 - (NSInteger) (i / 2)) * (cardHeight + gap), cardWidth, cardHeight);
+
+        /* Only the brand/Play group scales into the space above the grid.
+         * Keep the same reference positions and center the group there. */
+        CGFloat heroBottom = gridTop + 40 * controlsScale, heroTop = height - 17;
+        CGFloat heroHeight = MAX(1, heroTop - heroBottom);
+        scale = MIN(MIN((width - 40.0) / 1100.0, (height - 34.0) / 1440.0), heroHeight / 960.0);
+        originX = (width - 2560.0 * scale) / 2;
+        originY = heroBottom + (heroHeight - 960.0 * scale) / 2 - 480.0 * scale;
+    } else {
+        NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
+        for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
+            self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1080, 520, 110, scale, originX, originY);
+        configurationRow = maage_ui_home_rect(0, 1230, 2560, 56, scale, originX, originY);
+    }
 
     self.brand.frame = maage_ui_home_rect(1054, 0, 451, 451, scale, originX, originY);
     NSFont *headingFont = [NSFont systemFontOfSize:110 * scale weight:NSFontWeightBold];
@@ -217,22 +257,9 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     CGFloat statusWidth = MIN(self.readinessLabel.attributedStringValue.size.width + 20 * scale, 1100 * scale);
     self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(NSMidX(self.bounds) - statusWidth / 2, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
 
-    NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
-    for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
-        self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1080, 520, 110, scale, originX, originY);
     /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
-    NSRect configurationRow = maage_ui_home_rect(0, 1230, 2560, 56, scale, originX, originY);
-    CGFloat configurationWidth = maage_ui_home_configuration_width(scale);
+    CGFloat configurationWidth = maage_ui_home_configuration_width(controlsScale);
     self.configuration.frame = NSMakeRect(NSMidX(self.bounds) - configurationWidth / 2, NSMinY(configurationRow), configurationWidth, NSHeight(configurationRow));
-    NSFont *footerFont = [NSFont systemFontOfSize:26 * scale];
-    NSFont *versionFont = [NSFont systemFontOfSize:25 * scale];
-    if (fabs(self.notice.font.pointSize - footerFont.pointSize) > 0.1) self.notice.font = footerFont;
-    if (fabs(self.version.font.pointSize - versionFont.pointSize) > 0.1) self.version.font = versionFont;
-    CGFloat footerWidth = MIN(width - 28, 2200 * scale);
-    CGFloat noticeHeight = MAX(15, ceil(footerFont.ascender - footerFont.descender + footerFont.leading + 4));
-    CGFloat versionHeight = MAX(15, ceil(versionFont.ascender - versionFont.descender + versionFont.leading + 4));
-    self.notice.frame = NSMakeRect((width - footerWidth) / 2, 11, footerWidth, noticeHeight);
-    self.version.frame = NSMakeRect((width - footerWidth) / 2, NSMaxY(self.notice.frame) + 10 * scale, footerWidth, versionHeight);
     self.playButton.needsDisplay = YES;
 }
 @end
@@ -1688,7 +1715,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     home.version.shadow = detailShadow;
     home.version.toolTip = @"Launcher " MAAGE_LAUNCHER_VERSION;
     [home addSubview:home.version];
-    /* The home owns the reference-coordinate layout at every window size. */
+    /* The home owns the reference and compact-grid layouts at every window size. */
     for (NSView *part in home.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
     home.hidden = YES;
     self.playSplash = [[MaaGELauncherSplashView alloc] init];
