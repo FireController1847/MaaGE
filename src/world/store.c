@@ -1463,7 +1463,7 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
         MAAGE_STORE_STEP(maage_storage_join(view->regions_dir, sizeof(view->regions_dir), view->directory, "regions"), "Dimension region path is too long.");
         MAAGE_STORE_STEP(maage_storage_directories(view->regions_dir), "Could not prepare dimension region storage.");
         view->initial_regions_empty = 1;
-        if (maage_status_code(maage_folder_link_list(view->regions_dir, maage_store_region_present, &view->initial_regions_empty)) != MAAGE_STATUS_SUCCESS) view->initial_regions_empty = 0;
+        if (maage_status_failed(maage_folder_link_list(view->regions_dir, maage_store_region_present, &view->initial_regions_empty))) view->initial_regions_empty = 0;
         MAAGE_STORE_STEP(maage_region_store_create(view->regions_dir, store->map_id, &view->regions), "Could not initialize dimension regions.");
     }
     length = strlen(chosen);

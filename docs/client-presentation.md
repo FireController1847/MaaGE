@@ -11,7 +11,7 @@ The Client owns UI, controls, camera, sound and visuals, consuming copied Server
 | 0–3 | Gameplay (HUD/F3), Pause, Options, Inventory |
 | 4–9 | Title, Worlds, Create World, Delete confirmation, Rename, Loading |
 | 10–13 | Video, Sound, Crafting Table, Controls |
-| 14 | Credits |
+| 14–15 | Credits, Saving world |
 
 Pause/Options pause gameplay and music, not streaming. Inventory/table and window focus loss release capture without pausing; focus return restores gameplay capture when no modal is open. World operations and Save/Quit are asynchronous; confirmed rename/delete wait for background save and lease release, keeping the selected UUID. Save/Quit displays a responsive Saving world screen until teardown completes, then opens Title. Window close/Quit hides immediately before teardown. Loading and dimension entry reuse the title panorama with darkening, display actual received/prepared/submitted states for the player's 3x3 nearby columns and show progress from submitted columns. Bootstrap/destination preparation is indeterminate. The normal frame loop continues streaming and GPU publication behind the non-pausing screen; no artificial delay or full render-distance barrier.
 
