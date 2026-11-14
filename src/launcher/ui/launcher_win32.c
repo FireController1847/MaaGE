@@ -173,7 +173,7 @@ static void maage_ui_caption(maage_launcher_win32 *ui) {
 }
 
 static void maage_ui_home_layout(maage_launcher_win32 *ui, int width, int height) {
-    int columns = width >= 900 ? 4 : 2, rows = 4 / columns;
+    int columns = width >= MAAGE_LAUNCHER_HOME_GRID_WIDTH ? 4 : 2, rows = 4 / columns;
     double scale = height / 740.0, margin, gap, card_width, card_height, card_top, config_y, total, top, x, y;
     double center = width * 0.5, usable, brand_scale, logo, heading, tagline, play, status;
     unsigned i;
@@ -182,7 +182,7 @@ static void maage_ui_home_layout(maage_launcher_win32 *ui, int width, int height
     margin = 28 * scale;
     gap = 14 * scale;
     card_width = (width - 2 * margin - (columns - 1) * gap) / columns;
-    if (card_width > 300 * scale) card_width = 300 * scale;
+    if (card_width > (columns == 2 ? 350 : 300 * scale)) card_width = columns == 2 ? 350 : 300 * scale;
     card_height = 52 * scale;
     config_y = height - 111 * scale;
     card_top = config_y - 20 * scale - rows * card_height - (rows - 1) * gap;
@@ -1006,6 +1006,14 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
         if (x < 0) x += width;
         if (w < 0) w += width;
         if (h < 0) h += height;
+        /* Both account-action rows must fit the shared compact content width,
+         * even after the native vertical scrollbar reduces the client area. */
+        if (c->page == MAAGE_PAGE_ACCOUNTS && width < 800 && (c->y == 382 || c->y == 426)) {
+            int available = width - 230, first = (available - 20) * 36 / 100, second = (available - 20 - first) / 2;
+            int index = c->handle == ui->sign_in || c->handle == ui->sign_out ? 0 : c->handle == ui->device_sign_in || c->handle == ui->remove_account ? 1 : 2;
+            x = index == 0 ? 198 : index == 1 ? 198 + first + 10 : 198 + first + second + 20;
+            w = index == 0 ? first : index == 1 ? second : available - first - second - 20;
+        }
         if (c->page >= MAAGE_PAGE_INSTALLATIONS && c->page == page && c->y != 80) {
             int shown_height = c->handle == ui->appearance ? 32 : h;
             y -= ui->scroll[page];
@@ -1816,10 +1824,21 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     }
     if (!ui) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
-    case WM_GETMINMAXINFO:
-        ((MINMAXINFO *) lparam)->ptMinTrackSize.x = maage_launcher_win32_scale(&ui->native, 820);
-        ((MINMAXINFO *) lparam)->ptMinTrackSize.y = maage_launcher_win32_scale(&ui->native, 650);
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO *info = (MINMAXINFO *) lparam;
+        UINT dpi = GetDpiForWindow(window);
+        RECT bounds;
+        if (!dpi) dpi = ui->native.dpi ? ui->native.dpi : 96;
+        SetRect(&bounds, 0, 0, MulDiv(MAAGE_LAUNCHER_WINDOW_MIN_WIDTH, dpi, 96), MulDiv(MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT, dpi, 96));
+        if (AdjustWindowRectExForDpi(&bounds, (DWORD) GetWindowLongPtrW(window, GWL_STYLE), FALSE, (DWORD) GetWindowLongPtrW(window, GWL_EXSTYLE), dpi)) {
+            info->ptMinTrackSize.x = bounds.right - bounds.left;
+            info->ptMinTrackSize.y = bounds.bottom - bounds.top;
+        } else {
+            info->ptMinTrackSize.x = MulDiv(MAAGE_LAUNCHER_WINDOW_MIN_WIDTH, dpi, 96) + 2 * GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + 2 * GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            info->ptMinTrackSize.y = MulDiv(MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT, dpi, 96) + 2 * GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + 2 * GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) + GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+        }
         return 0;
+    }
     case WM_DPICHANGED: {
         maage_status result;
         maage_ui_transition_cancel(ui);
@@ -2175,12 +2194,12 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state) {
     klass.hCursor = LoadCursor(NULL, IDC_ARROW);
     klass.lpszClassName = L"MaaGELauncher";
     RegisterClassW(&klass);
-    ui.window = CreateWindowExW(WS_EX_CONTROLPARENT, klass.lpszClassName, L"MaaGE Launcher", WS_CLIPCHILDREN | WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1080, 780, NULL, NULL, klass.hInstance, &ui);
+    ui.window = CreateWindowExW(WS_EX_CONTROLPARENT, klass.lpszClassName, L"MaaGE Launcher", WS_CLIPCHILDREN | WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, MAAGE_LAUNCHER_WINDOW_WIDTH, MAAGE_LAUNCHER_WINDOW_HEIGHT, NULL, NULL, klass.hInstance, &ui);
     if (!ui.window) {
         outcome = maage_status_from_win32((unsigned long) GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN);
         goto cleanup;
     }
-    outcome = maage_launcher_win32_style_init(&ui.native, ui.window, 1080, 740, 0);
+    outcome = maage_launcher_win32_style_init(&ui.native, ui.window, MAAGE_LAUNCHER_WINDOW_WIDTH, MAAGE_LAUNCHER_WINDOW_HEIGHT, 0);
     if (maage_status_failed(outcome)) {
         DestroyWindow(ui.window);
         goto cleanup;

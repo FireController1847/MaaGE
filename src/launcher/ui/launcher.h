@@ -6,6 +6,12 @@
 #include "../clients/registry.h"
 #include "../clients/job.h"
 #define MAAGE_PROJECT_URL "https://github.com/FireController1847/MaaGE"
+/* AppKit points and Win32 96-DPI logical client pixels, excluding window chrome. */
+#define MAAGE_LAUNCHER_WINDOW_WIDTH 1000
+#define MAAGE_LAUNCHER_WINDOW_HEIGHT 670
+#define MAAGE_LAUNCHER_WINDOW_MIN_WIDTH 700
+#define MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT 500
+#define MAAGE_LAUNCHER_HOME_GRID_WIDTH 900
 typedef enum maage_launcher_page {
     MAAGE_PAGE_PLAY,
     MAAGE_PAGE_INSTALLATIONS,

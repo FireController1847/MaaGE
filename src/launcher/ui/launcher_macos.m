@@ -164,6 +164,11 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 - (void)updateReadiness:(NSString *)text symbol:(NSString *)symbol tint:(NSColor *)tint;
 @end
 @implementation MaaGELauncherHomeView
+- (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
+    [super resizeSubviewsWithOldSize:oldSize];
+    [self setNeedsLayout:YES];
+    self.needsDisplay = YES;
+}
 - (void)updateReadiness:(NSString *)text symbol:(NSString *)symbol tint:(NSColor *)tint {
     if ([self.readinessText isEqualToString:text] && [self.readinessSymbol isEqualToString:symbol] && [self.readinessTint isEqual:tint]) return;
     self.readinessText = text;
@@ -186,9 +191,9 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     [super layout];
     CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
     if (width <= 40 || height <= 34) return;
-    BOOL compact = width < 900;
+    BOOL compact = width < MAAGE_LAUNCHER_HOME_GRID_WIDTH;
     CGFloat scale = MIN((width - 40.0) / 2210.0, (height - 34.0) / 1440.0);
-    CGFloat controlsScale = compact ? MIN(0.52, MAX(0.38, height / 1300.0)) : scale;
+    CGFloat controlsScale = compact ? MIN(0.52, MAX(0.42, height / 1300.0)) : scale;
     CGFloat originX = (width - 2560.0 * scale) / 2, originY = (height - 1440.0 * scale) / 2;
 
     /* Reserve the footer before positioning the compact grid so its second
@@ -206,7 +211,7 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     NSRect configurationRow;
     if (compact) {
         CGFloat gap = 35 * controlsScale, cardHeight = 110 * controlsScale;
-        CGFloat cardWidth = MIN(640 * controlsScale, (width - 40 - gap) / 2);
+        CGFloat cardWidth = MIN(350, (width - 40 - gap) / 2);
         CGFloat gridLeft = (width - 2 * cardWidth - gap) / 2;
         CGFloat configurationBottom = NSMaxY(self.version.frame) + 24 * controlsScale;
         configurationRow = NSMakeRect(0, configurationBottom, width, 56 * controlsScale);
@@ -476,6 +481,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 - (void)setAccountName:(NSString *)name verified:(BOOL)verified;
 @end
 @implementation MaaGELauncherHomeCard
+- (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
+    [super resizeSubviewsWithOldSize:oldSize];
+    [self setNeedsLayout:YES];
+}
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];
     if (self.homeTracking) [self removeTrackingArea:self.homeTracking];
@@ -730,6 +739,13 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) sender;
     [self finish];
 }
+- (void)windowDidResize:(NSNotification *)notification {
+    (void) notification;
+    /* The home lays out its children manually; its outer constraints alone
+     * do not express the width-dependent row count. */
+    [self.playHome setNeedsLayout:YES];
+    if (!self.playHome.hidden) [self.window.contentView layoutSubtreeIfNeeded];
+}
 - (BOOL)windowShouldClose:(NSWindow *)window {
     (void) window;
     [self finish];
@@ -859,6 +875,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     BOOL splash = self.playSplash && !self.playSplash.hidden;
     self.shell.hidden = home || splash;
     self.playHome.hidden = !home || splash;
+    if (!self.playHome.hidden) [self.playHome setNeedsLayout:YES];
     BOOL showingHome = home && !splash;
     [self setHomeWindowAppearance:showingHome];
 }
@@ -1381,7 +1398,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.splashResourceRetry.enabled = state->services_ready;
     self.splashSkip.hidden = !splash || !self.onboardingRequired;
     self.shell.hidden = splash || state->page == MAAGE_PAGE_PLAY;
+    BOOL homeWasHidden = self.playHome.hidden;
     self.playHome.hidden = splash || state->page != MAAGE_PAGE_PLAY;
+    if (homeWasHidden && !self.playHome.hidden) [self.playHome setNeedsLayout:YES];
     self.playSplash.hidden = !splash;
     BOOL showingHome = !splash && state->page == MAAGE_PAGE_PLAY;
     [self setHomeWindowAppearance:showingHome];
@@ -2134,9 +2153,9 @@ static NSTableView *maage_ui_navigation_table(void) {
     return scroll;
 }
 - (void)show {
-    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 670) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
+    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, MAAGE_LAUNCHER_WINDOW_WIDTH, MAAGE_LAUNCHER_WINDOW_HEIGHT) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher";
-    self.window.minSize = NSMakeSize(700, 500);
+    self.window.contentMinSize = NSMakeSize(MAAGE_LAUNCHER_WINDOW_MIN_WIDTH, MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT);
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;
     [self applyAppearance];
