@@ -14,7 +14,8 @@ void maage_client_ui_front_destroy(maage_client_ui_frontend *front);
 void maage_client_ui_front_begin(maage_client_ui_frontend *front);
 /* Row-major arrival-column states: 0 absent, 1 received, 2 GPU prepared,
  * 3 submitted, 4 outside the world (excluded from progress).
- * Edge is at most MAAGE_CLIENT_ARRIVAL_EDGE; NULL shows an indeterminate phase. */
+ * Borrowed on the UI owner until the next update or explicit NULL clear.
+ * NULL shows an indeterminate phase; caller validates edge squared fits size_t. */
 void maage_client_ui_front_loading(maage_client_ui_frontend *front, const char *label, const unsigned char *cells, unsigned int edge);
 void maage_client_ui_front_busy(maage_client_ui_frontend *front, int busy);
 void maage_client_ui_front_complete(maage_client_ui_frontend *front, const maage_world_summary *entries, size_t count, unsigned int operation);

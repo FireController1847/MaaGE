@@ -18,6 +18,7 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
 /* SUCCESS selects a world; NOOP closes Client. No Server exists in this loop. */
 maage_status maage_client_frontend_run(maage_client_frontend *front, maage_window_system *system, maage_client_audio_service *audio, maage_client_world_choice *choice, maage_status_trace *trace);
 maage_status maage_client_frontend_loading(maage_client_frontend *front, maage_status_trace *trace);
+/* Borrow cells on the UI owner until the next update or NULL clear. */
 void maage_client_frontend_loading_progress(maage_client_frontend *front, const char *label, const unsigned char *cells, unsigned int edge);
 /* Transfer ownership of an integrated session and its presentation replica
  * to a background cleanup job. The saving screen remains responsive while its

@@ -10,7 +10,7 @@ struct maage_client_ui_frontend {
     int focus_keyboard;
     int busy, quit, play, mode, more;
     char name[128], seed[64], message[256], loading_label[64];
-    unsigned char loading_cells[MAAGE_CLIENT_ARRIVAL_EDGE * MAAGE_CLIENT_ARRIVAL_EDGE];
+    const unsigned char *loading_cells;
     unsigned int loading_edge;
     double last_click;
     float scroll, scroll_grab;

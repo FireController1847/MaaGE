@@ -53,6 +53,26 @@
 #define MAAGE_CLIENT_MESH_VERIFY_INTERVAL 0.025
 #define MAAGE_CLIENT_MESH_VERIFY_BUDGET 96U
 
+/* Round sqrt(13%) of the full square's edge to the nearest odd edge,
+ * preserving the central column and at least one surrounding ring. */
+static maage_status maage_client_arrival_map(int render_distance, unsigned char **cells, size_t *capacity, int *radius, unsigned int *edge) {
+    size_t count, side;
+    unsigned char *grown;
+    *radius = (int) (sqrt(0.13) * (render_distance + 0.5));
+    if (*radius < 1) *radius = 1;
+    if (*radius > render_distance) *radius = render_distance;
+    *edge = (unsigned int) (*radius * 2 + 1);
+    side = *edge;
+    if (side > (size_t) - 1 / side) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+    count = side * side;
+    if (count > *capacity) {
+        grown = (unsigned char *) realloc(*cells, count);
+        if (!grown) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_CREATE, 0);
+        *cells = grown;
+        *capacity = count;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CREATE, 0);
+}
 typedef struct maage_client_world_options {
     const char *id, *name;
     maage_world_seed seed;
@@ -823,9 +843,10 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     unsigned int drop_slot = 0;
     int valid_snapshot = 0, connected = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0, loading_terrain = 0;
-    unsigned char terrain_cells[MAAGE_CLIENT_ARRIVAL_EDGE * MAAGE_CLIENT_ARRIVAL_EDGE];
-    unsigned int terrain_ready, terrain_index, terrain_edge;
-    int terrain_radius;
+    unsigned char *terrain_cells = NULL;
+    size_t terrain_ready, terrain_index, terrain_count = 0, terrain_capacity = 0;
+    unsigned int terrain_edge = 0;
+    int terrain_radius = 0;
     int was_modal = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps, logged_vsync, paused_command = -1;
@@ -1117,9 +1138,10 @@ choose_world:
     if (maage_status_failed(operation)) goto done;
     /* Keep the loading root visible while the Client receives, lights and
      * uploads the nearby terrain. Streaming uses the ordinary frame loop. */
-    memset(terrain_cells, 0, sizeof(terrain_cells));
-    terrain_radius = options.radius < MAAGE_CLIENT_ARRIVAL_RADIUS ? options.radius : MAAGE_CLIENT_ARRIVAL_RADIUS;
-    terrain_edge = (unsigned int) (terrain_radius * 2 + 1);
+    operation = maage_client_arrival_map(options.radius, &terrain_cells, &terrain_capacity, &terrain_radius, &terrain_edge);
+    if (maage_status_failed(operation)) goto done;
+    terrain_count = (size_t) terrain_edge * terrain_edge;
+    memset(terrain_cells, 0, terrain_count);
     maage_client_frontend_loading_progress(frontend, "Loading terrain...", terrain_cells, terrain_edge);
     operation = maage_client_ui_set_snapshot(ui, &latest);
     if (maage_status_failed(operation)) goto done;
@@ -1713,10 +1735,14 @@ choose_world:
             maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
         }
         draw_count = resident_count = first_count = 0;
-        terrain_radius = options.radius < MAAGE_CLIENT_ARRIVAL_RADIUS ? options.radius : MAAGE_CLIENT_ARRIVAL_RADIUS;
-        terrain_edge = (unsigned int) (terrain_radius * 2 + 1);
         if (loading_terrain) {
-            for (terrain_index = 0; terrain_index < terrain_edge * terrain_edge; ++terrain_index) {
+            /* A changed render distance may grow the borrowed UI buffer.
+             * Clear before reallocating, then publish the new map below. */
+            maage_client_frontend_loading_progress(frontend, "Loading terrain...", NULL, 0);
+            operation = maage_client_arrival_map(options.radius, &terrain_cells, &terrain_capacity, &terrain_radius, &terrain_edge);
+            if (maage_status_failed(operation)) goto done;
+            terrain_count = (size_t) terrain_edge * terrain_edge;
+            for (terrain_index = 0; terrain_index < terrain_count; ++terrain_index) {
                 int x = cx + (int) (terrain_index % terrain_edge) - terrain_radius;
                 int z = cz + (int) (terrain_index / terrain_edge) - terrain_radius;
                 if (abs(x) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1 || abs(z) > MAAGE_WORLD_LIMIT / MAAGE_CHUNK_EDGE - 1) terrain_cells[terrain_index] = MAAGE_CLIENT_ARRIVAL_OUTSIDE;
@@ -1736,7 +1762,7 @@ choose_world:
                 if (abs(cache.slots[slot_index].x - cx) > options.radius || abs(cache.slots[slot_index].z - cz) > options.radius) continue;
                 if (!maage_world_chunk_loaded(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
                 if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= terrain_radius && abs(cache.slots[slot_index].z - cz) <= terrain_radius) {
-                    terrain_index = (unsigned int) (cache.slots[slot_index].z - cz + terrain_radius) * terrain_edge + (unsigned int) (cache.slots[slot_index].x - cx + terrain_radius);
+                    terrain_index = (size_t) (cache.slots[slot_index].z - cz + terrain_radius) * terrain_edge + (size_t) (cache.slots[slot_index].x - cx + terrain_radius);
                     if (terrain_cells[terrain_index] != MAAGE_CLIENT_ARRIVAL_OUTSIDE) terrain_cells[terrain_index] = cache.slots[slot_index].presented ? 3 : 2;
                 }
                 if (!cache.slots[slot_index].presented) {
@@ -1792,9 +1818,9 @@ choose_world:
          * chunk map is measured from this epoch's own replica/GPU cache. */
         if (loading_terrain) {
             terrain_ready = 0;
-            for (terrain_index = 0; terrain_index < terrain_edge * terrain_edge; ++terrain_index)
+            for (terrain_index = 0; terrain_index < terrain_count; ++terrain_index)
                 if (terrain_cells[terrain_index] == 3 || terrain_cells[terrain_index] == MAAGE_CLIENT_ARRIVAL_OUTSIDE) ++terrain_ready;
-            if (terrain_ready == terrain_edge * terrain_edge) loading_terrain = 0;
+            if (terrain_ready == terrain_count) loading_terrain = 0;
         }
         if (!latest.player.health) {
             loading_terrain = 0;
@@ -1912,6 +1938,10 @@ choose_world:
     }
     goto done;
 return_to_title:
+    maage_client_frontend_loading_progress(frontend, NULL, NULL, 0);
+    free(terrain_cells);
+    terrain_cells = NULL;
+    terrain_capacity = 0;
     operation = maage_client_audio_service_reset_world(audio, trace);
     if (maage_status_failed(operation)) goto done;
     result = maage_window_capture_mouse(window, 0);
@@ -1951,6 +1981,8 @@ window_failed:
     outcome = MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE);
     failure_message = "Native window/input cannot continue.";
 done:
+    maage_client_frontend_loading_progress(frontend, NULL, NULL, 0);
+    free(terrain_cells);
     /* Capture the failing occurrence before saving options overwrites operation.
      * An explicitly retained Server/window/clock failure remains authoritative. */
     if (splash.close_requested) ok = 1;
