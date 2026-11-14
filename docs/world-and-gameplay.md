@@ -20,7 +20,7 @@ Worlds live at `instances/<uuid>/worlds/<uuid>/`. Current formats: `MGWRLD18` me
 
 Async region writes use immutable snapshots; dirty clears only for the saved revision. After successful flush, metadata checkpoints player/inventory, weather, separate RNG streams, rotating simulation cursor and active/dormant entities (including health/orientation, variants, damage/death, goals, retained effects and flat versioned module state). No pointers or open temporary GUI results. Old development formats fail without migration/deletion. See `world_store.h`, `src/world/{store,region_store}.c`.
 
-Explicit catalog deletion acquires the selection and World locks, validates the entire `dimensions/<saved-id>/regions` directory layout, then removes its regular files and directories. It does not require readable metadata, so a partially removed or corrupt selected World remains deletable. Links and unexpected directories are rejected before removing World files; later filesystem failures retain remaining files and report that deletion is incomplete.
+Explicit catalog deletion acquires the selection and World locks, then recursively removes the selected UUID folder after a no-link preflight. It does not depend on metadata or directory layout, so obsolete, partially removed and corrupt Worlds remain deletable. Links, special files and inaccessible entries fail before removing World files; later filesystem failures preserve remaining files. Failure to clear a matching last-world selection after the folder is gone is reported separately as a warning.
 
 ## Random Ticks and Growth
 

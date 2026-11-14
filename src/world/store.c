@@ -2201,53 +2201,39 @@ maage_status maage_world_store_rename(const char *instance_root, const char *id,
 
 typedef struct maage_store_remove {
     const char *path;
-    unsigned int level;
-    int mutate;
+    int root, mutate;
     maage_status result;
 } maage_store_remove;
-enum {
-    MAAGE_REMOVE_WORLD,
-    MAAGE_REMOVE_DIMENSIONS,
-    MAAGE_REMOVE_DIMENSION,
-    MAAGE_REMOVE_REGIONS
-};
-static int maage_store_dimension_component(const char *name) {
-    unsigned long value = 0, digit;
-    if (*name < '1' || *name > '9') return 0;
-    for (; *name; ++name) {
-        if (*name < '0' || *name > '9') return 0;
-        digit = (unsigned long) (*name - '0');
-        if (value > (MAAGE_CONTENT_ID_INVALID - 1UL - digit) / 10UL) return 0;
-        value = value * 10UL + digit;
-    }
-    return 1;
-}
 static int maage_store_remove_entry(const char *name, maage_folder_link_kind kind, void *context) {
     maage_store_remove *remove = (maage_store_remove *) context, child;
-    char path[MAAGE_PATH_CAPACITY];
-    unsigned int level;
-    if (remove->level == MAAGE_REMOVE_WORLD && kind == MAAGE_FOLDER_LINK_FILE && !strcmp(name, ".world.lock")) return 1;
-    remove->result = maage_storage_join(path, sizeof(path), remove->path, name);
-    if (maage_status_failed(remove->result)) return 0;
-    if (kind == MAAGE_FOLDER_LINK_FILE) {
-        if (remove->mutate) remove->result = maage_storage_remove(path);
-    } else if (kind == MAAGE_FOLDER_LINK_DIRECTORY) {
-        level = MAAGE_REMOVE_REGIONS + 1;
-        if (remove->level == MAAGE_REMOVE_WORLD && !strcmp(name, "dimensions")) level = MAAGE_REMOVE_DIMENSIONS;
-        else if (remove->level == MAAGE_REMOVE_DIMENSIONS && maage_store_dimension_component(name)) level = MAAGE_REMOVE_DIMENSION;
-        else if (remove->level == MAAGE_REMOVE_DIMENSION && !strcmp(name, "regions")) level = MAAGE_REMOVE_REGIONS;
-        if (level > MAAGE_REMOVE_REGIONS) {
-            remove->result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
-            return 0;
+    char *path;
+    if (remove->root && kind == MAAGE_FOLDER_LINK_FILE && !strcmp(name, ".world.lock")) return 1;
+    /* Explicit deletion owns the UUID directory, not a particular save
+     * format. Traverse ordinary directories only; never follow links. */
+    if (kind != MAAGE_FOLDER_LINK_FILE && kind != MAAGE_FOLDER_LINK_DIRECTORY) {
+        remove->result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+        return 0;
+    }
+    path = (char *) malloc(MAAGE_PATH_CAPACITY);
+    if (!path) {
+        remove->result = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+        return 0;
+    }
+    remove->result = maage_storage_join(path, MAAGE_PATH_CAPACITY, remove->path, name);
+    if (!maage_status_failed(remove->result)) {
+        if (kind == MAAGE_FOLDER_LINK_FILE) {
+            if (remove->mutate) remove->result = maage_storage_remove(path);
+        } else {
+            child.path = path;
+            child.root = 0;
+            child.mutate = remove->mutate;
+            child.result = 0;
+            remove->result = maage_folder_link_list(path, maage_store_remove_entry, &child);
+            if (maage_status_failed(child.result)) remove->result = child.result;
+            if (!maage_status_failed(remove->result) && remove->mutate) remove->result = maage_storage_remove_directory(path);
         }
-        child.path = path;
-        child.level = level;
-        child.mutate = remove->mutate;
-        child.result = 0;
-        remove->result = maage_folder_link_list(path, maage_store_remove_entry, &child);
-        if (maage_status_failed(child.result)) remove->result = child.result;
-        if (!maage_status_failed(remove->result) && remove->mutate) remove->result = maage_storage_remove_directory(path);
-    } else remove->result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+    }
+    free(path);
     return !maage_status_failed(remove->result);
 }
 maage_status maage_world_store_delete(const char *instance_root, const char *id, char error[256], maage_status_trace *trace) {
@@ -2255,6 +2241,7 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
     maage_storage_lock *selection = NULL, *lock = NULL;
     maage_store_remove remove;
     maage_status result, closed;
+    int kind = 0, removed = 0;
     if (!id || !maage_storage_uuid_valid(id) || !maage_folder_link_managed_path(instance_root, 0)) return maage_store_fail(error, "Invalid world deletion arguments.", MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REMOVE, trace);
     if (error) error[0] = 0;
     result = maage_storage_join(path, sizeof(path), instance_root, "instance.json");
@@ -2264,19 +2251,23 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
     if (!maage_status_failed(result) && !maage_folder_link_managed_path(directory, 0)) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
     if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), worlds, ".selection.lock");
     if (!maage_status_failed(result)) result = maage_storage_acquire(path, &selection, trace);
-    if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), directory, ".world.lock");
-    if (!maage_status_failed(result)) result = maage_storage_acquire(path, &lock, trace);
     if (!maage_status_failed(result)) {
+        kind = maage_storage_status(directory);
+        if (kind != 0 && kind != 2) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+    }
+    if (!maage_status_failed(result) && kind == 2) result = maage_storage_join(path, sizeof(path), directory, ".world.lock");
+    if (!maage_status_failed(result) && kind == 2 && maage_storage_status(path) != 0 && maage_storage_status(path) != 1) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+    if (!maage_status_failed(result) && kind == 2) result = maage_storage_acquire(path, &lock, trace);
+    if (!maage_status_failed(result) && kind == 2) {
         remove.path = directory;
-        remove.level = MAAGE_REMOVE_WORLD;
+        remove.root = 1;
         remove.mutate = 0;
         remove.result = 0;
-        /* Validate the complete current layout before removing metadata or
-         * regions. Traversal stays within the selected World and never follows
-         * links; unreadable metadata does not prevent an explicit deletion. */
+        /* Preflight the whole tree without interpreting metadata, names or
+         * directory layout. Reject unsafe entries before removing any data. */
         result = maage_folder_link_list(directory, maage_store_remove_entry, &remove);
         if (maage_status_failed(remove.result)) result = remove.result;
-        if (maage_status_failed(result)) maage_store_error(error, "World deletion preflight failed; no world files were removed. The layout must contain only regular files and dimension region directories, without links.");
+        if (maage_status_failed(result)) maage_store_error(error, "World deletion preflight failed; no world files were removed. Check for inaccessible entries, links or special files.");
         else {
             remove.mutate = 1;
             remove.result = 0;
@@ -2287,20 +2278,24 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
     }
     closed = maage_storage_release(lock);
     if (!maage_status_failed(result)) result = closed;
-    if (!maage_status_failed(result)) result = maage_storage_remove(path);
-    if (!maage_status_failed(result)) result = maage_storage_remove_directory(directory);
+    if (!maage_status_failed(result) && kind == 2) result = maage_storage_remove(path);
+    if (!maage_status_failed(result) && kind == 2) result = maage_storage_remove_directory(directory);
     if (!maage_status_failed(result)) {
         unsigned char *selected = NULL;
         size_t length = 0;
+        removed = 1;
         result = maage_storage_join(path, sizeof(path), instance_root, "config/last-world");
         if (!maage_status_failed(result) && maage_storage_status(path) == 1) {
-            result = maage_store_read(path, 37, &selected, &length, error, trace);
+            result = maage_store_read(path, 37, &selected, &length, NULL, trace);
             if (!maage_status_failed(result) && (length == 36 || (length == 37 && selected[36] == '\n')) && !memcmp(selected, id, 36)) result = maage_storage_remove(path);
             free(selected);
         }
     }
     closed = maage_storage_release(selection);
     if (!maage_status_failed(result)) result = closed;
-    if (maage_status_failed(result) && error && !error[0]) maage_store_error(error, "World deletion failed while locking or removing the selected world.");
+    if (removed && maage_status_failed(result)) {
+        maage_store_error(error, "World folder was removed, but selection cleanup failed.");
+        result = maage_status_make(MAAGE_STATUS_WARNING, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
+    } else if (maage_status_failed(result) && error && !error[0]) maage_store_error(error, "World deletion failed while locking or removing the selected world.");
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE);
 }

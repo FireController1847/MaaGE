@@ -32,10 +32,10 @@ typedef struct maage_world_summary {
 } maage_world_summary;
 maage_status maage_world_store_list(const char *instance_root, const maage_content *content, maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace);
 maage_status maage_world_store_rename(const char *instance_root, const char *id, const char *name, const maage_content *content, char error[256], maage_status_trace *trace);
-/* Explicit deletion needs no readable metadata. Preflight the current
- * dimensions/<saved-id>/regions layout under both locks before removing files;
- * linked entries and unexpected directories fail without deleting world data.
- * An I/O failure after preflight can leave a partially removed World. */
+/* Explicit UUID-folder deletion needs no readable metadata or known layout.
+ * Preflight ordinary files/directories under both locks; never follow links.
+ * An I/O failure after preflight can leave a partially removed World.
+ * Failure to clean the last-world selection after deletion is a warning. */
 maage_status maage_world_store_delete(const char *instance_root, const char *id, char error[256], maage_status_trace *trace);
 /* Owner-only per-player milestone in the session metadata. UUID is 32 lowercase
  * hexadecimal digits; NULL selects the stable offline local player. Marking
