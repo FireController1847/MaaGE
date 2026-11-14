@@ -9,8 +9,8 @@
 #define MAAGE_GENERATION_DEFAULT_SPAWN_RADIUS 4096
 #define MAAGE_GENERATION_DEFAULT_SPAWN_STEP 16
 #define MAAGE_GENERATION_WORD_MASK 4294967295UL
-#define MAAGE_GENERATION_REGION_SCALE 128
-#define MAAGE_GENERATION_REGION_RADIUS 256.0
+#define MAAGE_GENERATION_REGION_SCALE 256
+#define MAAGE_GENERATION_REGION_RADIUS 384.0
 #define MAAGE_GENERATION_REGION_SAMPLES 25
 
 /* Original approximation of classic gradient-noise terrain. All randomness
@@ -184,47 +184,52 @@ static maage_generation_region_seed maage_generation_region_at(const maage_base_
 }
 typedef struct maage_generation_environment {
     maage_generation_region_seed regions[MAAGE_GENERATION_REGION_SAMPLES];
-    double weights[MAAGE_GENERATION_REGION_SAMPLES], ocean, flow;
-    maage_biome_id land_biome;
+    double weights[MAAGE_GENERATION_REGION_SAMPLES], ocean, coast, flow;
 } maage_generation_environment;
 static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, maage_world_seed seed, int x, int z, maage_generation_environment *sample, maage_generation_region_cache *cache) {
-    double region_x = x, region_z = z, dx, dz, radius, weight, scores[MAAGE_BASE_BIOME_COUNT], total = 0;
+    double region_x = x, region_z = z, dx, dz, distance, radius, weight, nearest = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, ocean_distance = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, land_distance = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, total = 0;
     int gx, gz, ix, iz, i = 0;
-    unsigned int slot, selected = 0, land = MAAGE_BASE_BIOME_COUNT;
+    maage_biome_id selected = MAAGE_CONTENT_ID_INVALID;
     memset(sample, 0, sizeof(*sample));
-    memset(scores, 0, sizeof(scores));
     region_x += 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 2) + 3 * maage_generation_noise(seed, x / 8.0, z / 8.0, 1200UL);
     region_z += 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 800UL, 2) + 3 * maage_generation_noise(seed, x / 8.0, z / 8.0, 1300UL);
     gx = (int) floor(region_x / MAAGE_GENERATION_REGION_SCALE);
     gz = (int) floor(region_z / MAAGE_GENERATION_REGION_SCALE);
-    /* Ocean and land participate in the same world-space neighborhood.
-     * The compact radial kernel and its first two derivatives vanish at the
-     * support boundary; changing the 5x5 window cannot clip an influence. */
+    /* Categorical identity belongs to the nearest supported regional site;
+     * broad influence weights blend relief and climate, not region ownership.
+     * This avoids creating small categorical pockets from competing sums.
+     * The compact radial kernel vanishes smoothly before the window edge. */
     for (iz = -2; iz <= 2; ++iz)
         for (ix = -2; ix <= 2; ++ix, ++i) {
             sample->regions[i] = maage_generation_region_at(ids, seed, gx + ix, gz + iz, cache);
             dx = region_x - sample->regions[i].site_x;
             dz = region_z - sample->regions[i].site_z;
-            radius = (dx * dx + dz * dz) / (MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS);
+            distance = dx * dx + dz * dz;
+            if (distance < nearest) {
+                nearest = distance;
+                selected = sample->regions[i].supported_biome;
+            }
+            if (sample->regions[i].supported_biome == ids->biome_ocean) {
+                if (distance < ocean_distance) ocean_distance = distance;
+            } else if (distance < land_distance) {
+                land_distance = distance;
+            }
+            radius = distance / (MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS);
             if (radius >= 1) continue;
             weight = 1 - radius;
             sample->weights[i] = weight * weight * weight;
-            slot = base_biome_slot(ids, sample->regions[i].supported_biome);
-            if (slot >= MAAGE_BASE_BIOME_COUNT) return MAAGE_CONTENT_ID_INVALID;
-            scores[slot] += sample->weights[i];
             total += sample->weights[i];
         }
-    if (total <= 0) return MAAGE_CONTENT_ID_INVALID;
-    for (slot = 0; slot < MAAGE_BASE_BIOME_COUNT; ++slot) {
-        if (scores[slot] > scores[selected]) selected = slot;
-        if (ids->biome_ids[slot] != ids->biome_ocean && scores[slot] > 0 && (land == MAAGE_BASE_BIOME_COUNT || scores[slot] > scores[land])) land = slot;
-    }
-    sample->land_biome = land < MAAGE_BASE_BIOME_COUNT ? ids->biome_ids[land] : MAAGE_CONTENT_ID_INVALID;
+    if (total <= 0 || selected == MAAGE_CONTENT_ID_INVALID) return MAAGE_CONTENT_ID_INVALID;
+    /* A continuous signed shore coordinate, positive inland. Clip distant
+     * sites rather than enabling/disabling a coast when a query window moves.
+     * Shores occupy only a narrow land-side band, independent of elevation. */
+    sample->coast = (ocean_distance - land_distance) / (2 * MAAGE_GENERATION_REGION_SCALE);
     for (i = 0; i < MAAGE_GENERATION_REGION_SAMPLES; ++i) {
         sample->weights[i] /= total;
         if (sample->regions[i].supported_biome == ids->biome_ocean) sample->ocean += sample->weights[i];
     }
-    return ids->biome_ids[selected];
+    return selected;
 }
 
 /* Drainage has its own seeded cells, independent of climate and chunk order.
@@ -269,7 +274,7 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     maage_generation_sample_entry *cached = maage_generation_sample_entry_at(regions, x, z);
     const maage_biome_definition *definition, *climate;
     maage_biome_id biome;
-    double base = 0, variation = 0, temperature = 0, terrain, detail, elevation, uncarved, distance, width, depth, pool, cross, bank, target, span;
+    double base = 0, variation = 0, temperature = 0, land = 0, terrain, detail, elevation, uncarved, coast, distance, width, depth, pool, cross, bank, target, span;
     int i, ocean;
     if (!environment && cached && cached->valid && cached->x == x && cached->z == z) {
         column->height = cached->sample.height;
@@ -283,22 +288,35 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
         definition = maage_biome_registry_get(biomes, sample->regions[i].supported_biome);
         climate = maage_biome_registry_get(biomes, sample->regions[i].supported_climate);
         if (!definition || !climate) return 0;
-        base += definition->base_height * sample->weights[i];
-        variation += definition->variation * sample->weights[i];
+        if (sample->regions[i].supported_biome != ids->biome_ocean) {
+            base += definition->base_height * sample->weights[i];
+            variation += definition->variation * sample->weights[i];
+            land += sample->weights[i];
+        }
         temperature += (definition->temperature < climate->temperature ? definition->temperature : climate->temperature) * sample->weights[i];
     }
     terrain = maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 4);
     detail = maage_generation_fractal(seed, x / 24.0, z / 24.0, 600UL, 2);
-    /* Blend registered heights directly across the broad neighborhood, with
-     * coastal relief damping. Avoid nested fades that compress a mountain's
-     * entire descent into a narrow band around an ocean noise threshold. */
-    elevation = base + policy->sea_level - MAAGE_GENERATION_DEFAULT_SEA_Y + terrain * variation * (2.5 - sample->ocean) + detail * 1.5;
+    /* One world-space coastal ramp aligns the actual sea-level crossing
+     * with the categorical shore. Terrain noise fades into that crossing;
+     * it cannot cut holes through an elevation-selected beach band. */
+    ocean = biome == ids->biome_ocean;
+    if (ocean) {
+        definition = maage_biome_registry_get(biomes, ids->biome_ocean);
+        if (!definition) return 0;
+        elevation = definition->base_height + policy->sea_level - MAAGE_GENERATION_DEFAULT_SEA_Y + terrain * definition->variation * 2.5 + detail * 1.5;
+        if (elevation > policy->sea_level - 3) elevation = policy->sea_level - 3;
+    } else {
+        if (land <= 0) return 0;
+        elevation = base / land + policy->sea_level - MAAGE_GENERATION_DEFAULT_SEA_Y + terrain * variation / land * 2.5 + detail * 1.5;
+        if (elevation < policy->sea_level + 2) elevation = policy->sea_level + 2;
+    }
+    coast = fabs(sample->coast) / 128;
+    coast = coast < 1 ? maage_generation_fade(coast) : 1;
+    elevation = maage_generation_lerp(policy->sea_level, elevation, coast);
     uncarved = elevation;
-    ocean = elevation < policy->sea_level && sample->ocean >= 0.35;
-    if (ocean) biome = ids->biome_ocean;
-    else if (biome == ids->biome_ocean && sample->land_biome != MAAGE_CONTENT_ID_INVALID) biome = sample->land_biome;
     column->biome = biome;
-    if (!ocean && sample->ocean > 0 && elevation >= policy->sea_level - 2 && elevation <= policy->sea_level + 4) {
+    if (!ocean && sample->coast >= 0 && sample->coast < 12) {
         if (biome == ids->biome_hills) column->biome = ids->biome_stone_beach;
         else column->biome = temperature < 0.15 ? ids->biome_cold_beach : ids->biome_beach;
     }

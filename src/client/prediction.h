@@ -12,6 +12,7 @@ typedef struct maage_client_chunk_mesh {
     maage_render_mesh *mesh, *prediction, *prepared;
     maage_world_mesh *source;
     size_t vertices, indices;
+    float minimum[3], maximum[3]; /* Immutable source bounds; prediction views only remove faces. */
     double initialized_at, uploaded_at;
 } maage_client_chunk_mesh;
 typedef struct maage_client_prediction {

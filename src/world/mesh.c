@@ -19,8 +19,23 @@ struct maage_world_mesh {
     maage_mesh_owner *owners;
     unsigned char *face_flags; /* Material category and quad winding per face. */
     int chunk_x, chunk_z;
+    float bounds[6];
     size_t vertex_bytes, index_bytes, retained_bytes;
 };
+
+/* Compute immutable presentation bounds on the producing worker, before
+ * upload data is released. Prediction patches use the same representation. */
+static void maage_mesh_bounds_update(maage_world_mesh *mesh) {
+    size_t vertex;
+    unsigned int axis;
+    for (axis = 0; axis < 3; ++axis)
+        mesh->bounds[axis] = mesh->bounds[axis + 3] = mesh->data.vertex_count ? mesh->data.vertices[0].position[axis] : 0;
+    for (vertex = 1; vertex < mesh->data.vertex_count; ++vertex)
+        for (axis = 0; axis < 3; ++axis) {
+            if (mesh->data.vertices[vertex].position[axis] < mesh->bounds[axis]) mesh->bounds[axis] = mesh->data.vertices[vertex].position[axis];
+            if (mesh->data.vertices[vertex].position[axis] > mesh->bounds[axis + 3]) mesh->bounds[axis + 3] = mesh->data.vertices[vertex].position[axis];
+        }
+}
 
 /* Each generated face has four private vertices; all four quad windings
  * produced by the regular and reverse-face paths fit into two bits. */
@@ -565,7 +580,7 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
     float colors[4][4][3], fluid_heights[4], fluid_flow[2], neutral[4][3] = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}, material;
     int x, y, z, section, nx, ny, nz, log_axis;
     unsigned int face, axis, face_limit, model, tint_mode, corner, tint, component;
-    int crossed, boundary, snowed, colors_ready, overlay, smooth, reverse;
+    int crossed, boundary, snowed, colors_ready, overlay, smooth, reverse, mergeable;
     size_t face_count = 0;
     for (section = cell ? cell->y / 16 : 0; section < (cell ? cell->y / 16 + 1 : 16); ++section) {
         if (token && maage_job_cancelled(token)) {
@@ -737,7 +752,12 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                             if (state->fluid_kind) maage_mesh_fluid_lighting(registry, chunk, neighbors, x, y, z, face, state->emitted_light, &illumination);
                             else maage_mesh_lighting(registry, chunk, neighbors, x, y, z, crossed ? MAAGE_FACE_POSITIVE_Y : face, boundary || (model == MAAGE_BLOCK_MESH_CUBE && current->use_neighbor_brightness && face == MAAGE_FACE_POSITIVE_Y), smooth, state->emitted_light, &illumination);
                             maage_mesh_face(vertices, indices, face_count, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, uv, &face_shape, model, state->geometry_variant, log_axis, material, tint_mode ? colors[tint_mode] : neutral, tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, animation, state->fluid_kind ? fluid_heights : NULL, flow, &illumination);
-                            if (!overlay && !reverse && !state->fluid_kind && model == MAAGE_BLOCK_MESH_CUBE && material == MAAGE_MESH_MATERIAL_OPAQUE && log_axis < 0 && uv[2] > uv[0] && uv[3] > uv[1] && face_shape.minimum[0] == 0 && face_shape.minimum[1] == 0 && face_shape.minimum[2] == 0 && face_shape.maximum[0] == 1 && face_shape.maximum[1] == 1 && face_shape.maximum[2] == 1) {
+                            mergeable = !state->fluid_kind && material == MAAGE_MESH_MATERIAL_OPAQUE;
+                            /* Flat still-fluid tops share one repeated tile and
+                             * can use the same section-local rectangles. Keep
+                             * sloped/flowing surfaces on the original path. */
+                            if (state->fluid_kind && material == MAAGE_MESH_MATERIAL_TRANSLUCENT && face == MAAGE_FACE_POSITIVE_Y && !flow && fluid_flow[0] == 0 && fluid_flow[1] == 0 && fluid_heights[0] == fluid_heights[1] && fluid_heights[0] == fluid_heights[2] && fluid_heights[0] == fluid_heights[3]) mergeable = 1;
+                            if (!overlay && !reverse && mergeable && model == MAAGE_BLOCK_MESH_CUBE && log_axis < 0 && uv[2] > uv[0] && uv[3] > uv[1] && face_shape.minimum[0] == 0 && face_shape.minimum[1] == 0 && face_shape.minimum[2] == 0 && face_shape.maximum[0] == 1 && face_shape.maximum[1] == 1 && face_shape.maximum[2] == 1) {
                                 maage_mesh_vertex *quad = vertices + face_count * 4;
                                 for (corner = 1; corner < 4; ++corner)
                                     if (memcmp(quad[0].color, quad[corner].color, sizeof(quad[0].color)) || memcmp(quad[0].light, quad[corner].light, sizeof(quad[0].light))) break;
@@ -767,7 +787,8 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
 
 /* Greedy rectangles remain inside a physical section. Only constant corner
  * shading and identical atlas/material/animation tuples merge. Other geometry
- * uses the original path, including transparent sorting and arbitrary shapes. */
+ * uses the original path. Flat still-fluid tops retain transparent sorting,
+ * repeated atlas animation and exact plane height; slopes remain unmerged. */
 static unsigned int maage_mesh_direction(const maage_world_mesh *mesh, size_t face) {
     const maage_mesh_vertex *vertices = mesh->vertices + face * 4;
     unsigned int axis, corner, cell = mesh->owners[face].minimum;
@@ -784,7 +805,8 @@ static unsigned int maage_mesh_direction(const maage_world_mesh *mesh, size_t fa
 }
 static int maage_mesh_same_surface(const maage_world_mesh *mesh, size_t first, size_t second) {
     const maage_mesh_vertex *a = mesh->vertices + first * 4, *b = mesh->vertices + second * 4;
-    unsigned int corner;
+    unsigned int corner, axis = maage_mesh_direction(mesh, first) / 2;
+    if (a[0].position[axis] != b[0].position[axis]) return 0;
     for (corner = 0; corner < 4; ++corner)
         if (memcmp(a[corner].uv, b[corner].uv, sizeof(a[corner]) - offsetof(maage_mesh_vertex, uv))) return 0;
     return 1;
@@ -1000,6 +1022,7 @@ maage_status maage_world_mesh_create_chunk_job(const maage_block_registry *block
     mesh->data.indices = mesh->indices;
     mesh->data.vertex_count = faces * 4;
     mesh->data.index_count = faces * 6;
+    maage_mesh_bounds_update(mesh);
     if (faces) {
         maage_status result = maage_mesh_prepare(&mesh->data, &mesh->prepared);
         if (maage_status_failed(result)) {
@@ -1040,6 +1063,9 @@ maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh
 
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh) {
     return mesh ? &mesh->data : NULL;
+}
+const float *maage_world_mesh_bounds(const maage_world_mesh *mesh) {
+    return mesh ? mesh->bounds : NULL;
 }
 const unsigned char *maage_world_mesh_face_flags(const maage_world_mesh *mesh) {
     return mesh ? mesh->face_flags : NULL;
@@ -1224,6 +1250,7 @@ maage_status maage_world_mesh_patch(const maage_world *world, const maage_block_
     mesh->data.indices = mesh->indices;
     mesh->data.vertex_count = written * 4;
     mesh->data.index_count = written * 6;
+    maage_mesh_bounds_update(mesh);
     *output = mesh;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MESH, 0);
 }

@@ -311,13 +311,32 @@ static int maage_client_mesh_cache_retire(maage_client_mesh_cache *cache, maage_
     }
     return 1;
 }
+/* Test conservative source bounds against the four side planes and far
+ * plane. Omitting the near plane also keeps this independent of backend depth
+ * conventions; neither clipping nor culling changes residency or reveal order. */
+static int maage_client_mesh_visible(const maage_client_chunk_mesh *mesh, const float matrix[16]) {
+    double distance, coefficient;
+    int plane, axis, row, sign;
+    for (plane = 0; plane < 5; ++plane) {
+        row = plane < 4 ? plane / 2 : 2;
+        sign = plane < 4 && !(plane & 1) ? 1 : -1;
+        distance = (double) matrix[15] + sign * (double) matrix[12 + row];
+        for (axis = 0; axis < 3; ++axis) {
+            coefficient = (double) matrix[axis * 4 + 3] + sign * (double) matrix[axis * 4 + row];
+            distance += coefficient * (coefficient >= 0 ? mesh->maximum[axis] + 0.5 : mesh->minimum[axis] - 0.5);
+        }
+        if (distance < 0) return 0;
+    }
+    return 1;
+}
 /* Periodically compare each loaded, requested column with the Client's
  * owned GPU mesh. A valid empty mesh still occupies a used cache slot, so
  * there is no false repair loop for legitimately invisible geometry.
  * The replica World owns retry/backoff and decides which job, if any,
  * needs resubmission. No disk or GPU calls happen in this audit. */
 static maage_status maage_client_verify_meshes(maage_world *visual, const maage_client_mesh_cache *cache, maage_client_mesh_verifier *verifier, int cx, int cz, int radius, double now) {
-    size_t span, total, index, i;
+    size_t span, total, index, i, start, offset, budget;
+    unsigned long revisions[MAAGE_CLIENT_MESH_VERIFY_BUDGET];
     unsigned examined;
     int x, z;
     unsigned long revision;
@@ -334,19 +353,28 @@ static maage_status maage_client_verify_meshes(maage_world *visual, const maage_
     verifier->next_at = now + MAAGE_CLIENT_MESH_VERIFY_INTERVAL;
     span = (size_t) radius * 2U + 1U;
     total = span * span; /* bounded by the validated World render distance */
-    for (examined = 0; examined < MAAGE_CLIENT_MESH_VERIFY_BUDGET; ++examined) {
+    budget = total < MAAGE_CLIENT_MESH_VERIFY_BUDGET ? total : MAAGE_CLIENT_MESH_VERIFY_BUDGET;
+    start = verifier->cursor;
+    memset(revisions, 0, sizeof(revisions));
+    /* Gather this audit batch with one cache pass instead of scanning the
+     * entire GPU cache separately for every requested coordinate. */
+    for (i = 0; i < cache->capacity; ++i) {
+        if (!cache->slots[i].used) continue;
+        x = cache->slots[i].x - cx + radius;
+        z = cache->slots[i].z - cz + radius;
+        if (x < 0 || z < 0 || x >= (int) span || z >= (int) span) continue;
+        index = (size_t) z * span + (size_t) x;
+        offset = index >= start ? index - start : total - start + index;
+        if (offset < budget) revisions[offset] = cache->slots[i].visual_revision;
+    }
+    for (examined = 0; examined < budget; ++examined) {
         index = verifier->cursor++;
         if (verifier->cursor >= total) verifier->cursor = 0;
         x = cx + (int) (index % span) - radius;
         z = cz + (int) (index / span) - radius;
         if (!maage_world_chunk_loaded(visual, x, z)) continue;
         if (cache->uploading.mesh && cache->uploading.x == x && cache->uploading.z == z) continue;
-        revision = 0;
-        for (i = 0; i < cache->capacity; ++i)
-            if (cache->slots[i].used && cache->slots[i].x == x && cache->slots[i].z == z) {
-                revision = cache->slots[i].visual_revision;
-                break;
-            }
+        revision = revisions[examined];
         result = maage_world_reconcile_mesh(visual, x, z, revision);
         if (maage_status_failed(result)) return result;
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS)
@@ -412,6 +440,8 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
     int filtered;
     double begin, current, budget_ms = maage_client_mesh_budget(options, debug, activity);
     size_t i, selected, vacant;
+    float minimum[3], maximum[3];
+    const float *bounds;
     unsigned processed = 0;
     activity->status.uploaded_this_frame = 0;
     activity->status.frame_upload_ms = 0;
@@ -460,6 +490,9 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
         }
         /* Finished uploads no longer require the complete CPU vertex/index
          * arrays. Future local predictions reconstruct only filtered indices. */
+        bounds = maage_world_mesh_bounds(update->mesh);
+        memcpy(minimum, bounds, sizeof(minimum));
+        memcpy(maximum, bounds + 3, sizeof(maximum));
         maage_world_mesh_release_upload_data(update->mesh);
         selected = vacant = cache->capacity;
         for (i = 0; i < cache->capacity; ++i) {
@@ -498,6 +531,8 @@ static maage_status maage_client_stream_meshes(maage_world *visual, maage_render
         cache->slots[selected].visual_revision = update->revision;
         cache->slots[selected].revision = update->state_revision;
         cache->slots[selected].presentation_generation = update->presentation_generation;
+        memcpy(cache->slots[selected].minimum, minimum, sizeof(minimum));
+        memcpy(cache->slots[selected].maximum, maximum, sizeof(maximum));
         cache->slots[selected].vertices = geometry->vertex_count;
         cache->slots[selected].indices = geometry->index_count;
         cache->slots[selected].initialized_at = update->initialized_at;
@@ -1641,6 +1676,17 @@ choose_world:
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;
         }
+        if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
+            operation = maage_world_sample_camera(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &collision);
+            if (maage_status_failed(operation)) goto done;
+            camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch, latest.player.sneaking, camera_effects.eye_drop, (double) state.framebuffer_width / state.framebuffer_height, effective_fov, &collision, blocks, camera_eye, &camera_yaw, &camera_pitch);
+            if (camera_mode != MAAGE_CAMERA_FIRST) {
+                if (eye_fluid) effective_fov /= eye_fluid->fov_scale;
+                camera_fluid = maage_fluid_get(maage_content_fluids(content), maage_world_fluid_at(visual_world, camera_eye));
+                if (camera_fluid) effective_fov *= camera_fluid->fov_scale;
+            }
+            maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
+        }
         draw_count = resident_count = first_count = 0;
         memset(&mesh_stats, 0, sizeof(mesh_stats));
         for (slot_index = 0; slot_index < cache.capacity; ++slot_index) {
@@ -1659,6 +1705,7 @@ choose_world:
                     cache.slots[slot_index].first_frame = 1;
                     ++first_count;
                 }
+                if (state.framebuffer_width > 0 && state.framebuffer_height > 0 && cache.slots[slot_index].vertices && !maage_client_mesh_visible(&cache.slots[slot_index], matrix)) continue;
                 if (cache.slots[slot_index].filtered || cache.slots[slot_index].mesh) {
                     if (cache.slots[slot_index].filtered) {
                         if (cache.slots[slot_index].prediction) cache.draws[draw_count++] = cache.slots[slot_index].prediction;
@@ -1690,15 +1737,7 @@ choose_world:
         if (state.framebuffer_width > 0 && state.framebuffer_height > 0) {
             rendered = maage_client_first_person_update(&first_person, renderer, atlas, items, blocks, &visual_snapshot, &camera_effects, render_yaw, render_pitch, raw_elapsed, (double) state.framebuffer_width / state.framebuffer_height, swing_progress, &food_animation, camera_mode == MAAGE_CAMERA_FIRST && !maage_client_ui_modal(ui), trace);
             if (maage_status_failed(rendered)) goto done;
-            operation = maage_world_sample_camera(visual_world, (int) floor(eye[0]), (int) floor(eye[1]), (int) floor(eye[2]), &collision);
-            if (maage_status_failed(operation)) goto done;
-            camera_distance = maage_client_camera_position(camera_mode, eye, render_yaw, render_pitch, latest.player.sneaking, camera_effects.eye_drop, (double) state.framebuffer_width / state.framebuffer_height, effective_fov, &collision, blocks, camera_eye, &camera_yaw, &camera_pitch);
-            if (camera_mode != MAAGE_CAMERA_FIRST) {
-                if (eye_fluid) effective_fov /= eye_fluid->fov_scale;
-                camera_fluid = maage_fluid_get(maage_content_fluids(content), maage_world_fluid_at(visual_world, camera_eye));
-                if (camera_fluid) effective_fov *= camera_fluid->fov_scale;
-            }
-            maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
+
             rendered = maage_client_player_view_update(&player_view, renderer, atlas, &resources, items, item_entities, &previous, &visual_snapshot, alpha, eye, render_yaw, render_pitch, raw_elapsed, swing_progress, &food_animation, camera_mode != MAAGE_CAMERA_FIRST, camera_distance, trace);
             if (maage_status_failed(rendered)) goto done;
             if (maage_status_is_warning(rendered)) maage_client_ui_notify(ui, rendered, now);

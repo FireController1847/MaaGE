@@ -392,6 +392,9 @@ int maage_world_collision_shape(const maage_world *world, int x, int y, int z, m
  * Destroy/cancel the upload before destroying its source mesh. */
 maage_mesh_preparation *maage_world_mesh_take_preparation(maage_world_mesh *mesh);
 const maage_mesh_data *maage_world_mesh_data(const maage_world_mesh *mesh);
+/* Borrowed min-X/Y/Z then max-X/Y/Z, retained through upload-data release.
+ * Bounds are immutable until mesh destruction; an empty mesh has zero bounds. */
+const float *maage_world_mesh_bounds(const maage_world_mesh *mesh);
 /* Two-bit material category plus quad winding in one byte per source face.
  * Available for full chunk meshes, not temporary patch meshes. */
 const unsigned char *maage_world_mesh_face_flags(const maage_world_mesh *mesh);
