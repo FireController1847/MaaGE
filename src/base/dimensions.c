@@ -644,6 +644,7 @@ maage_status maage_base_dimensions(maage_content_context *context, maage_base_id
     if (maage_status_failed(result)) return result;
     memset(&item, 0, sizeof(item));
     item.behavior_context = ids;
+    item.mining_speed = 1;
     item.max_stack = 1;
     item.durability = 64;
     item.use_durability = 1;
