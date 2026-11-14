@@ -96,17 +96,14 @@ maage_status maage_base_flora_textures(maage_content_context *, maage_base_ids *
 maage_status maage_base_flora(maage_content_context *, maage_base_ids *);
 maage_status maage_base_flora_creative(maage_content_context *, const maage_base_ids *);
 int maage_base_flora_index(const maage_base_ids *, maage_block_id);
-#define MAAGE_GENERATION_REGION_CACHE_CAPACITY 64
+#define MAAGE_GENERATION_REGION_CACHE_EDGE 8
+#define MAAGE_GENERATION_REGION_CACHE_CAPACITY (MAAGE_GENERATION_REGION_CACHE_EDGE * MAAGE_GENERATION_REGION_CACHE_EDGE)
+#define MAAGE_GENERATION_SAMPLE_CACHE_EDGE 16
 typedef struct maage_generation_region_seed {
     int x, z, valid, supported;
     maage_biome_id biome, climate, supported_biome, supported_climate;
     double site_x, site_z;
 } maage_generation_region_seed;
-/* Zero-initialize for one seed/job. Eviction changes cost only; each entry is
- * reproducible from coordinates, with no neighboring chunk dependency. */
-typedef struct maage_generation_region_cache {
-    maage_generation_region_seed entries[MAAGE_GENERATION_REGION_CACHE_CAPACITY];
-} maage_generation_region_cache;
 /* The current terrain cover has one surface and at most four filler cells. */
 #define MAAGE_GENERATION_SOIL_LAYERS 5
 typedef struct maage_generation_sample {
@@ -117,6 +114,16 @@ typedef struct maage_generation_sample {
     double temperature, rainfall, lapse_offset, plants;
     maage_base_biome_decoration decoration;
 } maage_generation_sample;
+typedef struct maage_generation_sample_entry {
+    int x, z, valid, complete;
+    maage_generation_sample sample;
+} maage_generation_sample_entry;
+/* Zero-initialize for one seed/policy/registry/job. Eviction changes cost only;
+ * full profiles and geometry-only entries reproduce uncached queries exactly. */
+typedef struct maage_generation_region_cache {
+    maage_generation_region_seed entries[MAAGE_GENERATION_REGION_CACHE_CAPACITY];
+    maage_generation_sample_entry samples[MAAGE_GENERATION_SAMPLE_CACHE_EDGE * MAAGE_GENERATION_SAMPLE_CACHE_EDGE];
+} maage_generation_region_cache;
 typedef struct maage_generation_context {
     const maage_base_ids *ids;
     maage_chunk *chunk;
@@ -143,7 +150,7 @@ typedef enum maage_generation_write_rule {
 } maage_generation_write_rule;
 int maage_generation_surface(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, int *height, maage_biome_id *biome, maage_generation_region_cache *regions);
 /* Same river/coast-aware region and height function as surface().
- * Ecology uses compact influences near those region boundaries. Optional cache
+ * Terrain and ecology share compact regional influences. Optional cache
  * belongs to this seed/job; cache misses and halo/spawn queries are equivalent. */
 int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions);
 int maage_generation_cold(const maage_generation_sample *sample, int y);
