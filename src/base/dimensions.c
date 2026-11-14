@@ -163,7 +163,7 @@ static maage_status dimension_nether_glowstone(const maage_base_ids *ids, maage_
     for (cz = maage_chunk_z(chunk) - 1; cz <= maage_chunk_z(chunk) + 1; ++cz)
         for (cx = maage_chunk_x(chunk) - 1; cx <= maage_chunk_x(chunk) + 1; ++cx) {
             if (maage_job_cancelled(token)) return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, MAAGE_DETAIL_CANCELLED);
-            for (attempt = 0; attempt < 10; ++attempt) {
+            for (attempt = 0; attempt < 2; ++attempt) {
                 random = maage_generation_feature_hash(seed, cx, cz, 72100UL + (unsigned long) attempt);
                 root_x = cx * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
                 y = 40 + (int) (maage_generation_feature_next(&random) % 80UL);
@@ -619,8 +619,9 @@ static maage_status dimension_contact(const void *context, maage_world *world, c
         travel->kind = TRAVEL_NETHER;
         travel->arrival_radius = 10; /* Lookup radius plus frame and plan margins. */
         travel->delay = creative ? 1 : 80;
-        travel->cooldown = 300;
+        /* Arrival requires exiting the portal before another trip. */
         travel->presentation = ids->nether_presentation;
+        travel->survival_screen_effect = 1;
         travel->position[0] *= source->id == ids->dimension_nether ? 8 : 0.125;
         travel->position[2] *= source->id == ids->dimension_nether ? 8 : 0.125;
         if (travel->position[1] > 118) travel->position[1] = 118;

@@ -541,8 +541,8 @@ static void maage_client_environment_portal(maage_client_environment *view, cons
         view->portal_profile = 0;
         view->portal_strength = 0;
     }
-    if (view->portal_epoch != snapshot->world_epoch && snapshot->portal_presentation) {
-        view->portal_strength = 1;
+    if (view->portal_epoch != snapshot->world_epoch) {
+        view->portal_strength = snapshot->portal_presentation ? 1 : 0;
         view->portal_profile = snapshot->portal_presentation;
     }
     view->portal_epoch = snapshot->world_epoch;
@@ -550,7 +550,7 @@ static void maage_client_environment_portal(maage_client_environment *view, cons
     if (target > 0) view->portal_profile = snapshot->portal_presentation;
     if (!snapshot->paused) view->portal_strength += (target - view->portal_strength) * (1 - exp(-dt * 7));
     profile = maage_presentation_portal(view->presentation, view->portal_profile);
-    if (snapshot->credits) { view->portal_strength = 0; return; }
+    if (snapshot->credits || (snapshot->player.game_mode == MAAGE_GAME_MODE_CREATIVE && !snapshot->portal_presentation)) { view->portal_strength = 0; return; }
     if (!profile || view->portal_strength < 0.002) return;
     view->weather.after_foreground = 1;
     alpha = (float) (view->portal_strength * view->portal_strength * 0.65);

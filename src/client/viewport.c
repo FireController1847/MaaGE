@@ -823,7 +823,7 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     unsigned int drop_slot = 0;
     int valid_snapshot = 0, connected = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
     int initial_capture = 1, active = 0, was_active = 0;
-    int was_modal = 0, was_focused = 0, changing_mode = 0, was_changing_mode = 0;
+    int was_modal = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps, logged_vsync, paused_command = -1;
     int selected_hotbar = 0, queued_hotbar = -1, view_sent = 0, disconnected = 0, cx = 0, cz = 0;
@@ -1009,7 +1009,7 @@ choose_world:
     outbox.diagnostics = maage_log_enabled("maage.client.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     world_epoch = last_sound_sequence = last_seen_tick = sound_epoch = sound_world_epoch = 0;
-    active = was_active = was_modal = was_focused = was_changing_mode = 0;
+    active = was_active = was_modal = was_changing_mode = 0;
     paused_command = -1;
     view_sent = disconnected = 0;
     initial_capture = 1;
@@ -1214,13 +1214,14 @@ choose_world:
             options.radius = video_options.render_distance;
             view_sent = 0;
         }
-        if (!changing_mode && !was_changing_mode && ((was_focused && (!input.focused || input.focus_lost)) || (was_active && !input.captured))) {
-            if (!maage_client_ui_modal(ui)) (void) maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
-        }
         was_changing_mode = changing_mode;
-        was_focused = input.focused;
         if (ui_actions & MAAGE_CLIENT_UI_EXIT) goto return_to_title;
-        if (maage_client_ui_modal(ui)) {
+        if (!input.focused || input.focus_lost) {
+            /* Focus loss releases gameplay input, never opens a modal. */
+            initial_capture = !maage_client_ui_modal(ui);
+            if (input.captured) result = maage_window_capture_mouse(window, 0);
+            input.captured = 0;
+        } else if (maage_client_ui_modal(ui)) {
             initial_capture = 0;
             if (input.captured) result = maage_window_capture_mouse(window, 0);
             input.captured = 0;
@@ -1411,6 +1412,7 @@ choose_world:
                 player_view.initialized = 0;
                 world_epoch = incoming.world_epoch;
                 view_sent = 0;
+                paused_command = -1;
                 sound_epoch = sound_world_epoch = last_sound_sequence = 0;
                 operation = maage_client_audio_service_reset_world(audio, trace);
                 if (maage_status_failed(operation)) goto done;

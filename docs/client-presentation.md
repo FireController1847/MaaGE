@@ -13,7 +13,7 @@ The Client owns UI, controls, camera, sound and visuals, consuming copied Server
 | 10–13 | Video, Sound, Crafting Table, Controls |
 | 14 | Credits |
 
-Pause/Options pause gameplay and music, not streaming. Inventory/table release capture without pausing. World operations and Save/Quit are asynchronous; Quit hides the window before teardown. Loading reports actual work.
+Pause/Options pause gameplay and music, not streaming. Inventory/table and window focus loss release capture without pausing; focus return restores gameplay capture when no modal is open. World operations and Save/Quit are asynchronous; Quit hides the window before teardown. Loading reports actual work.
 
 Music uses registered content playlists and one active native music voice. A session/world epoch or playlist change stops the previous voice and releases its decoder before applying the new playlist's initial delay. Native World resets also stop the music bus, and admitting a new music stream first retires any remaining voice on that bus. DEBUG audio-scene logs identify track starts/stops and their world epochs; tracks decode only while selected.
 
@@ -25,7 +25,7 @@ Growable action bindings use USB HID usages or one-based mouse buttons. Remappin
 
 Credits scroll at ten logical pixels per second with the original logo, subdued scrolling dirt background and edge fades; Escape and natural completion use the same validated session command. Entries come from the immutable content presentation registry in append order, including reconstructed end-poem/original-credit text followed by MaaGE and additional package credits. Text loads once during UI creation, wraps before drawing and substitutes the selected display name; missing optional resources log and leave remaining entries available. The existing ASCII font limits text coverage. The owner freezes gameplay while credits are active, but streaming and the registered credits music remain available; UI completion waits for authoritative acknowledgement.
 
-Portal presentation uses an optional numeric screen texture (animated Nether portal) or a color fade, with per-epoch transition smoothing. Nearby portal particles emit on a staggered per-cell cadence; ambient, enter and travel sound gains are content-owned. End portal starfield fragments reconstruct the world-space view ray and sample eight virtual depth planes behind the surface, with bounded grazing-angle projection and continuous coordinates across blocks. Metal, Vulkan and modern OpenGL share the shader without new vertex or uniform storage.
+Portal presentation uses an optional numeric screen texture (animated Nether portal) or a color fade, with per-epoch transition smoothing; Nether screen effects are Survival-only. Nearby portal particles emit on a staggered per-cell cadence; ambient, enter and travel sound gains are content-owned. End portal starfield fragments reconstruct the world-space view ray and sample eight virtual depth planes behind the surface, with bounded grazing-angle projection and continuous coordinates across blocks. Metal, Vulkan and modern OpenGL share the shader without new vertex or uniform storage.
 
 ## Creative Inventory
 
