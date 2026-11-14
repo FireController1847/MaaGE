@@ -32,11 +32,11 @@ try {
     $cache = Join-Path $root 'cmake/windows-msvc-x64/CMakeCache.txt'
     if (-not (Test-Path -LiteralPath $cache -PathType Leaf)) {
         Write-Host "Configuring MaaGE ($preset)..."
-        Invoke-CMake @('--preset', $preset)
+        Invoke-CMake -Arguments @('--preset', $preset)
     }
 
     Write-Host "Building MaaGE Launcher and Client ($Configuration)..."
-    Invoke-CMake @('--build', '--preset', $buildPreset, '--target', 'maage_launcher', 'maage_client_manifest')
+    Invoke-CMake -Arguments @('--build', '--preset', $buildPreset, '--target', 'maage_launcher', 'maage_client_manifest')
 
     if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
         throw "Launcher was not found at the expected location: $launcherPath"
