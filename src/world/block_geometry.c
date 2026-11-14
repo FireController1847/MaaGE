@@ -72,7 +72,7 @@ maage_status maage_block_geometry_register(maage_block_geometry_registry *regist
     if (!registry || registry->finalized || !id || !definition || !geometry_name_valid(name) || definition->primitive > MAAGE_BLOCK_GEOMETRY_CUSTOM || (definition->primitive == MAAGE_BLOCK_GEOMETRY_CUSTOM ? !definition->emit : definition->emit != NULL) || (definition->appearance_count && !definition->appearances)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     if (definition->appearance_count > (size_t) - 1 / sizeof(*appearances)) return geometry_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     for (index = 0; index < definition->appearance_count; ++index)
-        if (!maage_block_face_definition_valid(&definition->appearances[index])) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+        if (!maage_block_face_definition_valid(&definition->appearances[index]) || definition->appearances[index].texture_rotation) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
     definition_copy = *definition;
     if (registry->bucket_count && registry->buckets[geometry_bucket(registry, name)]) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_REGISTER);
     if (registry->count >= MAAGE_CONTENT_ID_INVALID - 1UL) return geometry_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
@@ -139,7 +139,7 @@ maage_status maage_block_geometry_update_appearance(maage_block_geometry_registr
         policy_result = content_policy_update(registry->policy, CONTENT_GEOMETRY, maage_block_geometry_name(registry, id));
         if (maage_status_failed(policy_result)) return policy_result;
     }
-    if (!registry || !appearance || !id || id > registry->count || !maage_block_face_definition_valid(appearance)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
+    if (!registry || !appearance || !id || id > registry->count || !maage_block_face_definition_valid(appearance) || appearance->texture_rotation) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
     if (registry->finalized) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_UPDATE);
     definition = &registry->definitions[id - 1];
     if (index >= definition->appearance_count) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_UPDATE);
@@ -156,7 +156,7 @@ maage_status maage_block_geometry_finalize(maage_block_geometry_registry *regist
     if (!registry || registry->finalized) return geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     for (geometry = 0; geometry < registry->count; ++geometry)
         for (appearance = 0; appearance < registry->definitions[geometry].appearance_count; ++appearance)
-            if (!maage_block_face_definition_valid(&registry->definitions[geometry].appearances[appearance])) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
+            if (!maage_block_face_definition_valid(&registry->definitions[geometry].appearances[appearance]) || registry->definitions[geometry].appearances[appearance].texture_rotation) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
     registry->finalized = 1;
     return geometry_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_FINALIZE);
 }
@@ -185,7 +185,7 @@ maage_status maage_block_geometry_resolve(const maage_block_geometry_registry *r
 }
 maage_status maage_block_geometry_quad_validate(const maage_block_geometry_quad *quad) {
     unsigned int corner, axis;
-    if (!quad || quad->face >= MAAGE_FACE_COUNT || (quad->cull != 0 && quad->cull != 1) || (quad->double_sided != 0 && quad->double_sided != 1) || (quad->material != MAAGE_BLOCK_GEOMETRY_INHERIT_MATERIAL && quad->material > MAAGE_MESH_MATERIAL_MULTIPLY)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
+    if (!quad || (quad->appearance && quad->appearance->texture_rotation) || quad->face >= MAAGE_FACE_COUNT || (quad->cull != 0 && quad->cull != 1) || (quad->double_sided != 0 && quad->double_sided != 1) || (quad->material != MAAGE_BLOCK_GEOMETRY_INHERIT_MATERIAL && quad->material > MAAGE_MESH_MATERIAL_MULTIPLY)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
     for (corner = 0; corner < 4; ++corner) {
         for (axis = 0; axis < 3; ++axis)
             if (!(quad->positions[corner][axis] >= 0 && quad->positions[corner][axis] <= 1)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
@@ -258,7 +258,7 @@ maage_status content_geometry_view(const maage_block_geometry_registry *source, 
         ++view->count;
         for (j = 0; j < count; ++j) {
             result = config->appearance_resolver(config->context, &source->definitions[i].appearances[j], &faces[j]);
-            if (!maage_status_failed(result) && (!maage_block_face_definition_valid(&faces[j]) || faces[j].texture_id != source->definitions[i].appearances[j].texture_id || faces[j].overlay_texture != source->definitions[i].appearances[j].overlay_texture || faces[j].snow_texture != source->definitions[i].appearances[j].snow_texture || faces[j].flow_texture != source->definitions[i].appearances[j].flow_texture || faces[j].has_flow_texture != source->definitions[i].appearances[j].has_flow_texture)) result = geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_RESOLVE);
+            if (!maage_status_failed(result) && (!maage_block_face_definition_valid(&faces[j]) || faces[j].texture_rotation || faces[j].texture_id != source->definitions[i].appearances[j].texture_id || faces[j].overlay_texture != source->definitions[i].appearances[j].overlay_texture || faces[j].snow_texture != source->definitions[i].appearances[j].snow_texture || faces[j].flow_texture != source->definitions[i].appearances[j].flow_texture || faces[j].has_flow_texture != source->definitions[i].appearances[j].has_flow_texture)) result = geometry_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_RESOLVE);
             if (maage_status_failed(result)) {
                 maage_block_geometry_destroy(view);
                 return result;

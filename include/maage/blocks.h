@@ -47,6 +47,13 @@ enum {
     MAAGE_BLOCK_TINT_GRASS_LOCAL = 3
 };
 
+/* Texture rotation is presentation-only, opt-in per ordinary full cube face.
+ * Directional, layered, inset and fluid faces retain their authored orientation. */
+typedef enum maage_block_texture_rotation {
+    MAAGE_BLOCK_TEXTURE_ROTATION_FIXED = 0,
+    MAAGE_BLOCK_TEXTURE_ROTATION_RANDOM_90 = 1
+} maage_block_texture_rotation;
+
 typedef struct maage_block_face_definition {
     maage_texture_id texture_id;
     maage_texture_id overlay_texture, snow_texture;
@@ -63,6 +70,7 @@ typedef struct maage_block_face_definition {
     float flow_uv[4], flow_animation[3];
     int has_flow_texture;
     maage_texture_id flow_texture;
+    unsigned int texture_rotation; /* maage_block_texture_rotation */
 } maage_block_face_definition;
 
 /* Local voxel coordinates; selection and collision may differ. Empty shapes

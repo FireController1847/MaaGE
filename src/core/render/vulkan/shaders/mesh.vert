@@ -18,6 +18,8 @@ layout(set = 1, binding = 0, std430) readonly buffer maage_surface_table {
     vec4 entries[];
 };
 layout(location = 5) flat out vec4 maage_tile;
+layout(location = 6) out vec3 maage_world_position;
+layout(location = 7) flat out uint maage_rotation_face;
 
 void main()
 {
@@ -34,5 +36,7 @@ void main()
     else maage_fragment_uv.y += animation_offset;
     maage_fragment_color = color;
     maage_fragment_light = light;
-    maage_fragment_material = parameters.w;
+    maage_fragment_material = maage_shader_surface_material(parameters.w);
+    maage_rotation_face = maage_shader_surface_rotation(parameters.w);
+    maage_world_position = position;
 }

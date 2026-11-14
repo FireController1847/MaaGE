@@ -436,7 +436,7 @@ int maage_render_gpu_layout_supported(void) {
            offsetof(maage_render_gpu_mesh_vertex, light) == 24 &&
            offsetof(maage_render_gpu_mesh_vertex, surface) == 28 &&
            sizeof(maage_mesh_surface) == 32 &&
-           offsetof(maage_mesh_surface, material) == 12 &&
+           offsetof(maage_mesh_surface, material_rotation) == 12 &&
            offsetof(maage_mesh_surface, tile) == 16 &&
            sizeof(maage_render_ui_vertex) == MAAGE_RENDER_UI_VERTEX_BYTES &&
            sizeof(maage_render_ui_gpu_vertex) == MAAGE_RENDER_UI_GPU_VERTEX_BYTES &&

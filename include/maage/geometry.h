@@ -18,6 +18,9 @@ typedef struct maage_mesh_vertex {
      * inside this tile; zero spans preserve ordinary absolute atlas UVs.
      * Repeated triangles require identical bounds and animation at each corner. */
     float tile[4];
+    /* Zero is fixed; 1..6 identify -X,+X,-Y,+Y,-Z,+Z world cube faces.
+     * Nonzero requires repeated tile UVs and untransformed world positions. */
+    unsigned int rotation_face;
 } maage_mesh_vertex;
 typedef struct maage_mesh_data {
     const maage_mesh_vertex *vertices;

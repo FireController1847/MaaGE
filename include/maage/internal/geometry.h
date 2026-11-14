@@ -17,7 +17,8 @@ typedef struct maage_geometry {
 } maage_geometry;
 
 typedef struct maage_mesh_surface {
-    float animation[3], material;
+    /* Exact float encoding: material + MAAGE_MESH_MATERIAL_COUNT * rotation_face. */
+    float animation[3], material_rotation;
     float tile[4];
 } maage_mesh_surface;
 

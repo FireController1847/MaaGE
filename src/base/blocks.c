@@ -137,6 +137,9 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
                     state.faces[face].tint[channel] = (float) ((color >> ((2 - channel) * 8)) & 255UL) / 255;
         }
         if (block == ids->block_log) state.texture_axis = axis == 1 ? 1 : (axis == 2 ? 3 : 2);
+        /* Natural, nondirectional textures vary per world cell; grass sides
+         * retain their upright overlay and authored edge. */
+        if (block != ids->block_air && (block == ids->block_stone || block == ids->block_dirt || block == ids->block_bedrock || block == ids->block_sand || block == ids->block_gravel || block == ids->block_cobblestone || block == ids->block_snow_block || block == ids->block_clay || block == ids->block_netherrack || block == ids->block_gold_ore || block == ids->block_iron_ore || block == ids->block_coal_ore || block == ids->block_lapis_ore || block == ids->block_diamond_ore || block == ids->block_redstone_ore || block == ids->block_emerald_ore || block == ids->block_quartz_ore || (block == ids->block_grass && face / 2 == 1))) state.faces[face].texture_rotation = MAAGE_BLOCK_TEXTURE_ROTATION_RANDOM_90;
         state.faces[face].texture_id = ids->textures[selected];
         if (state.fluid_kind) {
             state.faces[face].has_flow_texture = 1;

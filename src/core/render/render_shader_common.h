@@ -13,8 +13,38 @@ float maage_shader_animation(MAAGE_SHADER_VEC3 animation, float tick) {
     return frame * animation.x;
 }
 
-MAAGE_SHADER_VEC2 maage_shader_tile_uv(MAAGE_SHADER_VEC2 uv, MAAGE_SHADER_VEC4 tile) {
-    if (tile.z > tile.x && tile.w > tile.y) return tile.xy + (uv - floor(uv)) * (tile.zw - tile.xy);
+/* The surface table retains its two vec4 layout. Decode the exact packed
+ * integer once per vertex; the fragment receives a flat face selector. */
+float maage_shader_surface_material(float packed_surface) {
+    return float(uint(packed_surface) % uint(MAAGE_MESH_MATERIAL_COUNT));
+}
+uint maage_shader_surface_rotation(float packed_surface) {
+    return uint(packed_surface) / uint(MAAGE_MESH_MATERIAL_COUNT);
+}
+
+MAAGE_SHADER_VEC2 maage_shader_tile_uv(MAAGE_SHADER_VEC2 uv, MAAGE_SHADER_VEC4 tile, MAAGE_SHADER_VEC3 world_position, uint rotation_face) {
+    if (tile.z > tile.x && tile.w > tile.y) {
+        MAAGE_SHADER_VEC2 local_uv = uv - floor(uv);
+        if (rotation_face != 0u) {
+            /* Recover the owning cell, including at negative coordinates and
+             * on positive faces lying exactly on the next cell's boundary. */
+            uint face = rotation_face - 1u;
+            uint axis = face / 2u;
+            world_position[axis] += (face & 1u) != 0u ? -0.5 : 0.5;
+            MAAGE_SHADER_VEC3 cell = floor(world_position);
+            uint hash = uint(int(cell.x)) * 0x9e3779b1u ^ uint(int(cell.y)) * 0x85ebca77u ^ uint(int(cell.z)) * 0xc2b2ae3du;
+            hash ^= hash >> 16u;
+            hash *= 0x7feb352du;
+            hash ^= hash >> 15u;
+            hash *= 0x846ca68bu;
+            hash ^= hash >> 16u;
+            uint rotation = hash & 3u;
+            if (rotation == 1u) local_uv = MAAGE_SHADER_VEC2(1.0 - local_uv.y, local_uv.x);
+            else if (rotation == 2u) local_uv = MAAGE_SHADER_VEC2(1.0) - local_uv;
+            else if (rotation == 3u) local_uv = MAAGE_SHADER_VEC2(local_uv.y, 1.0 - local_uv.x);
+        }
+        return tile.xy + local_uv * (tile.zw - tile.xy);
+    }
     return uv;
 }
 

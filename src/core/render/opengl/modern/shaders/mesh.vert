@@ -14,6 +14,8 @@ out vec3 maage_fog_position;
 
 uniform samplerBuffer maage_surfaces;
 flat out vec4 maage_tile;
+out vec3 maage_world_position;
+flat out uint maage_rotation_face;
 
 void main() {
     gl_Position = maage.matrix * vec4(position, 1.0);
@@ -28,5 +30,7 @@ void main() {
     else maage_uv.y += animation_offset;
     maage_color = color;
     maage_light = light;
-    maage_material = parameters.w;
+    maage_material = maage_shader_surface_material(parameters.w);
+    maage_rotation_face = maage_shader_surface_rotation(parameters.w);
+    maage_world_position = position;
 }

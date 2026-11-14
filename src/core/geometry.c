@@ -18,6 +18,7 @@ static maage_status maage_geometry_validate(const maage_mesh_data *data) {
         float material = first->material;
         for (corner = 1; corner < 3; ++corner) {
             const maage_mesh_vertex *vertex = &data->vertices[data->indices[index + corner]];
+            if (first->rotation_face != vertex->rotation_face) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
             for (axis = 0; axis < 4; ++axis)
                 if (first->tile[axis] != vertex->tile[axis]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
             if (first->tile[2] > first->tile[0])
@@ -33,6 +34,8 @@ static maage_status maage_geometry_validate(const maage_mesh_data *data) {
     for (index = 0; index < data->vertex_count; ++index) {
         const float *animation = data->vertices[index].animation;
         const float *tile = data->vertices[index].tile;
+        unsigned int rotation_face = data->vertices[index].rotation_face;
+        if (rotation_face > MAAGE_MESH_ROTATION_FACE_COUNT || (rotation_face && !(tile[2] > tile[0] && tile[3] > tile[1]))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
         for (axis = 0; axis < 4; ++axis)
             if (!(tile[axis] >= 0 && tile[axis] <= 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
         if (tile[2] < tile[0] || tile[3] < tile[1] || (tile[2] > tile[0]) != (tile[3] > tile[1])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
@@ -109,7 +112,7 @@ static maage_status maage_geometry_surfaces(maage_mesh_preparation *prepared, co
     for (index = 0; index < data->vertex_count; ++index) {
         memset(&surface, 0, sizeof(surface));
         memcpy(surface.animation, data->vertices[index].animation, sizeof(surface.animation));
-        surface.material = data->vertices[index].material;
+        surface.material_rotation = data->vertices[index].material + (float) (MAAGE_MESH_MATERIAL_COUNT * data->vertices[index].rotation_face);
         memcpy(surface.tile, data->vertices[index].tile, sizeof(surface.tile));
         if (prepared->surface_count == capacity) {
             size_t next = capacity ? capacity * 2 : 16;
