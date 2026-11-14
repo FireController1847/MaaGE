@@ -126,7 +126,7 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     maage_sound_music_definition music;
     maage_portal_presentation portal;
     base_sound_family portal_family;
-    maage_sound_resource_id game[18], menu[4], extra, nether[4], end;
+    maage_sound_resource_id game[18], menu[4], extra, nether[4], end, credits;
     maage_status result;
     memset(&families, 0, sizeof(families));
     memset(&bindings, 0, sizeof(bindings));
@@ -363,7 +363,7 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     if (maage_status_failed(result)) goto done;
     result = base_music_resource(context, "minecraft:music.end", "minecraft/sounds/music/game/end/end.ogg", &end);
     if (maage_status_failed(result)) goto done;
-    result = base_music_resource(context, "minecraft:music.credits", "minecraft/sounds/music/game/end/credits.ogg", &extra);
+    result = base_music_resource(context, "minecraft:music.credits", "minecraft/sounds/music/game/end/credits.ogg", &credits);
     if (maage_status_failed(result)) goto done;
     result = base_music_resource(context, "minecraft:music.boss", "minecraft/sounds/music/game/end/boss.ogg", &extra);
     if (maage_status_failed(result)) goto done;
@@ -413,9 +413,7 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     result = maage_sound_music_register(context->sounds, "minecraft:end", &music);
     if (maage_status_failed(result)) goto done;
     data->end_music = music.id;
-    result = base_music_resource(context, "minecraft:music.credits", "minecraft/sounds/music/game/end/credits.ogg", &extra);
-    if (maage_status_failed(result)) goto done;
-    music.resources = &extra;
+    music.resources = &credits;
     music.minimum_delay = music.maximum_delay = 0;
     music.initial_delay = 0;
     result = maage_sound_music_register(context->sounds, "minecraft:credits", &music);
