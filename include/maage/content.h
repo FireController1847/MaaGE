@@ -15,6 +15,7 @@
 #include "maage/entity_types.h"
 #include "maage/models.h"
 #include "maage/traits.h"
+#include "maage/dimensions.h"
 
 typedef struct maage_content maage_content;
 typedef struct maage_content_module maage_content_module;
@@ -39,6 +40,7 @@ typedef struct maage_content_failure {
     maage_execution_context execution;
 } maage_content_failure;
 typedef struct maage_content_context {
+    maage_dimension_registry *dimensions;
     maage_traits_registry *traits;
     maage_presentation_registry *presentation;
     maage_block_registry *blocks;
@@ -121,6 +123,7 @@ maage_status maage_content_view_create(const maage_content *content, const maage
 const maage_block_registry *maage_content_view_blocks(const maage_content_view *view);
 const maage_biome_registry *maage_content_view_biomes(const maage_content_view *view);
 maage_status maage_content_view_destroy(maage_content_view *view);
+const maage_dimension_registry *maage_content_dimensions(const maage_content *content);
 const maage_traits_registry *maage_content_traits(const maage_content *content);
 const maage_presentation_registry *maage_content_presentation(const maage_content *content);
 const maage_block_registry *maage_content_blocks(const maage_content *content);

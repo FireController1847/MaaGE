@@ -26,6 +26,7 @@ maage_status maage_base_fluids_register(maage_content_context *context, maage_ba
     maage_status result;
     if (!context || !ids) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     memset(&water, 0, sizeof(water));
+    water.evaporates = 1;
     water.flow_levels = 8;
     water.tick_delay = 5;
     water.level_step = water.falling_spread_level = 1;
@@ -52,6 +53,8 @@ maage_status maage_base_fluids_register(maage_content_context *context, maage_ba
     memset(&lava, 0, sizeof(lava));
     lava.flow_levels = 8;
     lava.tick_delay = 30;
+    lava.hot_tick_delay = 10;
+    lava.hot_level_step = 1;
     lava.level_step = 2;
     lava.falling_spread_level = 1;
     lava.routing_depth = 4;

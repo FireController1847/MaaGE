@@ -278,8 +278,6 @@ typedef struct maage_registry_bindings {
     maage_block_id block_air;
     maage_block_state_id state_air, state_boundary, state_ui_background;
     const void *generation_context;
-    maage_status (*generate)(struct maage_chunk *chunk, struct maage_world_seed seed, const maage_block_registry *blocks, const struct maage_biome_registry *biomes, const struct maage_generation_policy *policy, const struct maage_job_token *token, maage_status_trace *trace);
-    maage_status (*spawn)(struct maage_world_seed seed, const maage_block_registry *blocks, const struct maage_biome_registry *biomes, const struct maage_generation_policy *policy, double feet[3]);
 } maage_registry_bindings;
 maage_status maage_block_registry_bind(maage_block_registry *registry, const maage_registry_bindings *bindings);
 const maage_registry_bindings *maage_block_registry_bindings(const maage_block_registry *registry);

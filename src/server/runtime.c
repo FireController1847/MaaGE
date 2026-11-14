@@ -35,7 +35,13 @@ struct maage_server_runtime {
     maage_status_trace trace;
     maage_content *owned_content;
     const maage_content *content;
-    maage_world_store *store;
+    maage_world_store *store, *session_store;
+    maage_world **dimension_worlds;
+    size_t dimension_count;
+    unsigned long world_epoch;
+    maage_dimension_travel travel;
+    int travelling, spawn_resolved;
+    unsigned int portal_ticks, portal_cooldown;
     maage_world *world;
     maage_world_record record;
     maage_gameplay game;
@@ -132,7 +138,8 @@ static void server_status_event(maage_server_runtime *runtime, maage_status resu
     memset(event, 0, sizeof(*event));
     event->protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     event->kind = MAAGE_EVENT_STATUS;
-    event->session_epoch = event->world_epoch = 1UL;
+    event->session_epoch = 1UL;
+    event->world_epoch = runtime->world_epoch;
     event->tick = runtime->tick;
     event->sequence = ++runtime->event_sequence;
     event->status = result;
@@ -161,7 +168,8 @@ static void server_emit_effect(maage_server_runtime *runtime, const maage_sound_
     event.kind = pickup_count ? MAAGE_EVENT_PICKUP : MAAGE_EVENT_SOUND;
     event.pickup_count = (unsigned int) pickup_count;
     if (pickup_count) memcpy(event.pickups, pickups, pickup_count * sizeof(*pickups));
-    event.session_epoch = event.world_epoch = 1UL;
+    event.session_epoch = 1UL;
+    event.world_epoch = runtime->world_epoch;
     event.tick = sound->tick;
     event.sequence = ++runtime->event_sequence;
     event.sound = *sound;
@@ -181,6 +189,7 @@ static void server_emit_sound(maage_server_runtime *runtime, const maage_sound_e
 static void server_entity_sound(void *context, unsigned long sound_id, const double position[3], double intensity, double pitch) {
     maage_server_runtime *runtime = (maage_server_runtime *) context;
     maage_sound_event sound;
+    if (runtime->travelling) return;
     memset(&sound, 0, sizeof(sound));
     sound.event_id = sound_id;
     sound.tick = runtime->tick + 1;
@@ -196,11 +205,12 @@ static void server_block_break(void *context, int x, int y, int z, maage_block_s
     maage_session_event event;
     maage_status result;
     double position[3];
-    if (!block || !runtime->config.session) return;
+    if (!block || !runtime->config.session || runtime->travelling) return;
     memset(&event, 0, sizeof(event));
     event.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     event.kind = MAAGE_EVENT_BLOCK_BREAK;
-    event.session_epoch = event.world_epoch = 1;
+    event.session_epoch = 1;
+    event.world_epoch = runtime->world_epoch;
     event.tick = runtime->tick + 1;
     event.sequence = ++runtime->event_sequence;
     event.emitted_at = maage_time_monotonic_seconds();
@@ -236,7 +246,8 @@ static maage_status server_emit_motion(maage_server_runtime *runtime, maage_stat
     memset(&event, 0, sizeof(event));
     event.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
     event.kind = MAAGE_EVENT_PLAYER_MOTION;
-    event.session_epoch = event.world_epoch = 1;
+    event.session_epoch = 1;
+    event.world_epoch = runtime->world_epoch;
     event.tick = runtime->tick;
     event.sequence = ++runtime->event_sequence;
     server_player_motion(runtime, &event.motion);
@@ -351,7 +362,8 @@ static void server_predictions(maage_server_runtime *runtime) {
         if (!event->sequence) {
             event->protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
             event->kind = MAAGE_EVENT_BLOCK_ACTION;
-            event->session_epoch = event->world_epoch = 1;
+            event->session_epoch = 1;
+            event->world_epoch = runtime->world_epoch;
             event->sequence = ++runtime->event_sequence;
             event->emitted_at = maage_time_monotonic_seconds();
         }
@@ -399,6 +411,8 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
     /* Reject missing, stale or replayed command identities. */
     if (!command->sequence || command->sequence <= runtime->last_command_sequence) return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
     runtime->last_command_sequence = command->sequence;
+    if (command->world_epoch != runtime->world_epoch && command->kind != MAAGE_CMD_DISCONNECT) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    if (runtime->travelling && command->kind != MAAGE_CMD_DISCONNECT && command->kind != MAAGE_CMD_PAUSE && command->kind != MAAGE_CMD_VIEW) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     if (command->kind != MAAGE_CMD_INPUT && command->kind != MAAGE_CMD_VIEW && command->kind != MAAGE_CMD_HOTBAR) runtime->publication_dirty = 1;
     switch (command->kind) {
     case MAAGE_CMD_INPUT:
@@ -487,6 +501,13 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         result = server_close_container(runtime);
         if (maage_status_failed(result)) break;
         result = maage_gameplay_respawn(&runtime->game, &runtime->player, runtime->world);
+        if (!maage_status_failed(result) && maage_world_dimension(runtime->world)->respawn && maage_world_dimension(runtime->world)->respawn != maage_world_dimension(runtime->world)->id) {
+            memset(&runtime->travel, 0, sizeof(runtime->travel));
+            runtime->travel.destination = maage_world_dimension(runtime->world)->respawn;
+            runtime->travel.at_spawn = 1;
+            runtime->travelling = 1;
+            runtime->publication_dirty = 1;
+        }
         runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
         break;
     case MAAGE_CMD_PAUSE:
@@ -619,7 +640,7 @@ static void server_publish_entities(maage_server_runtime *runtime, unsigned long
         }
         view.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
         view.session_epoch = 1;
-        view.world_epoch = 1;
+        view.world_epoch = runtime->world_epoch;
         view.tick = tick;
         view.sequence = ++runtime->entity_sequence;
         view.offered_at = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
@@ -638,7 +659,10 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     if (!runtime->config.session || !runtime->world || !runtime->game_ready) return;
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
-    snapshot.session_epoch = snapshot.world_epoch = 1UL;
+    snapshot.session_epoch = 1UL;
+    snapshot.world_epoch = runtime->world_epoch;
+    snapshot.dimension = maage_world_dimension(runtime->world)->id;
+    snapshot.travelling = runtime->travelling;
     snapshot.tick = runtime->tick;
     snapshot.paused = runtime->paused;
     snapshot.sequence = ++runtime->publication_sequence;
@@ -700,7 +724,14 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.observation.light = 0;
     snapshot.observation.light_available = 0;
     if (runtime->last_stats_time == 0.0 || now - runtime->last_stats_time >= 0.25) {
+        size_t dimension;
+        maage_world_stats retained;
         maage_world_get_stats(runtime->world, &runtime->stats);
+        for (dimension = 0; dimension < runtime->dimension_count; ++dimension) {
+            if (!runtime->dimension_worlds[dimension] || runtime->dimension_worlds[dimension] == runtime->world) continue;
+            maage_world_get_stats(runtime->dimension_worlds[dimension], &retained);
+            if (retained.resident_storage_bytes <= (size_t) - 1 - runtime->stats.resident_storage_bytes) runtime->stats.resident_storage_bytes += retained.resident_storage_bytes;
+        }
         runtime->last_stats_time = now;
     }
     snapshot.world_stats = runtime->stats;
@@ -735,7 +766,7 @@ static void server_offer_columns(maage_server_runtime *runtime) {
         outgoing.x = update->x;
         outgoing.z = update->z;
         outgoing.revision = update->revision;
-        outgoing.world_epoch = 1UL;
+        outgoing.world_epoch = runtime->world_epoch;
         outgoing.offered_at = runtime->diagnostics ? maage_time_monotonic_seconds() : -1;
         outgoing.column = update;
         accepted = *update; /* Copy identity before queue ownership can reach the Client. */
@@ -753,8 +784,50 @@ static void server_offer_columns(maage_server_runtime *runtime) {
     }
 }
 
-static maage_status server_open_world(maage_server_runtime *runtime, maage_status_trace *trace) {
+static maage_status server_dimension_world(maage_server_runtime *runtime, maage_dimension_id dimension, int initial, const double *position, maage_status_trace *trace) {
     maage_world_config world_config;
+    maage_world_record record;
+    maage_world_store *store;
+    maage_world *world = NULL;
+    const maage_item_registry *items = maage_content_items(runtime->content);
+    maage_status result;
+    if (!dimension || dimension > runtime->dimension_count) return server_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_OPEN);
+    if (runtime->dimension_worlds[dimension - 1]) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_OPEN);
+    result = maage_world_store_dimension(runtime->session_store, dimension, &store, &record);
+    if (maage_status_failed(result)) return result;
+    result = maage_world_config_init(&world_config);
+    if (maage_status_failed(result)) return result;
+    world_config.dimension = maage_dimension_get(maage_content_dimensions(runtime->content), dimension);
+    world_config.execution = *maage_content_execution(runtime->content);
+    world_config.registry = maage_content_blocks(runtime->content);
+    world_config.items = items;
+    world_config.entity_types = maage_content_entity_types(runtime->content);
+    world_config.entity_policy = runtime->config.entity_policy;
+    world_config.emit_break = server_block_break;
+    world_config.emit_sound = server_entity_sound;
+    world_config.sound_context = runtime;
+    world_config.smelting = maage_content_smelting(runtime->content);
+    world_config.fuels = maage_content_fuels(runtime->content);
+    world_config.biomes = maage_content_biomes(runtime->content);
+    world_config.seed = record.seed;
+    world_config.build_meshes = 0;
+    world_config.store = store;
+    world_config.worker_count = runtime->config.world_workers;
+    world_config.render_distance = runtime->config.render_distance;
+    world_config.new_world = initial && record.new_world;
+    memcpy(world_config.position, position ? position : record.position, sizeof(world_config.position));
+    world_config.generation_policy = record.generation_policy;
+    world_config.initial_environment = &record.environment;
+    world_config.initial_random_ticks = &record.random_ticks;
+    result = maage_world_create(&world_config, &world, trace);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_CREATE);
+    runtime->dimension_worlds[dimension - 1] = world;
+    result = maage_entities_restore(maage_world_entities(world), items, &record.entities);
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_LOAD);
+    return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_CREATE);
+}
+
+static maage_status server_open_world(maage_server_runtime *runtime, maage_status_trace *trace) {
     maage_content_config content_config;
     const maage_item_registry *items;
     maage_status result;
@@ -774,39 +847,22 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     items = maage_content_items(runtime->content);
     memset(&runtime->record, 0, sizeof(runtime->record));
     error[0] = 0;
-    result = maage_world_store_open(runtime->config.instance_root, runtime->config.world_id, runtime->config.create_world, runtime->config.world_name, runtime->config.has_seed ? &runtime->config.seed : NULL, runtime->config.generation_policy, runtime->content, &runtime->store, &runtime->record, error, trace);
+    result = maage_world_store_open(runtime->config.instance_root, runtime->config.world_id, runtime->config.create_world, runtime->config.world_name, runtime->config.has_seed ? &runtime->config.seed : NULL, runtime->config.generation_policy, runtime->content, &runtime->session_store, &runtime->record, error, trace);
     if (maage_status_failed(result)) {
         maage_log_trace_status(MAAGE_LOG_ERROR, "maage.server.world", result, trace, "%s", error);
         return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_OPEN);
     }
-    result = maage_world_config_init(&world_config);
+    runtime->dimension_count = maage_dimension_count(maage_content_dimensions(runtime->content));
+    if (runtime->dimension_count > (size_t) - 1 / sizeof(*runtime->dimension_worlds)) return server_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_CREATE);
+    runtime->dimension_worlds = (maage_world **) calloc(runtime->dimension_count, sizeof(*runtime->dimension_worlds));
+    if (!runtime->dimension_worlds) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
+    result = server_dimension_world(runtime, runtime->record.dimension, 1, NULL, trace);
     if (maage_status_failed(result)) return result;
-    world_config.execution = *maage_content_execution(runtime->content);
-    world_config.registry = maage_content_blocks(runtime->content);
-    world_config.items = items;
-    world_config.entity_types = maage_content_entity_types(runtime->content);
-    world_config.entity_policy = runtime->config.entity_policy;
-    world_config.emit_break = server_block_break;
-    world_config.emit_sound = server_entity_sound;
-    world_config.sound_context = runtime;
-    world_config.smelting = maage_content_smelting(runtime->content);
-    world_config.fuels = maage_content_fuels(runtime->content);
-    world_config.biomes = maage_content_biomes(runtime->content);
-    world_config.seed = runtime->record.seed;
+    runtime->world = runtime->dimension_worlds[runtime->record.dimension - 1];
+    result = maage_world_store_dimension(runtime->session_store, runtime->record.dimension, &runtime->store, &runtime->record);
+    if (maage_status_failed(result)) return result;
+    runtime->world_epoch = 1;
     runtime->effect_random = (runtime->record.seed.low ^ runtime->record.seed.high ^ runtime->record.environment.ticks_low ^ 0x9e3779b9UL) & 0xffffffffUL;
-    world_config.build_meshes = 0;
-    world_config.store = runtime->store;
-    world_config.worker_count = runtime->config.world_workers;
-    world_config.render_distance = runtime->config.render_distance;
-    world_config.new_world = runtime->record.new_world;
-    memcpy(world_config.position, runtime->record.position, sizeof(world_config.position));
-    world_config.generation_policy = runtime->record.generation_policy;
-    world_config.initial_environment = &runtime->record.environment;
-    world_config.initial_random_ticks = &runtime->record.random_ticks;
-    result = maage_world_create(&world_config, &runtime->world, trace);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_CREATE);
-    result = maage_entities_restore(maage_world_entities(runtime->world), items, &runtime->record.entities);
-    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_LOAD);
     result = maage_player_spawn(&runtime->player, runtime->world);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_INITIALIZE);
     runtime->player_ready = 1;
@@ -834,6 +890,7 @@ static void server_close_world(maage_server_runtime *runtime, maage_status_trace
     maage_environment_state environment;
     maage_status_trace cleanup_trace;
     char error[256];
+    size_t dimension;
     if (runtime->world && runtime->game_ready && runtime->player_ready) {
         result = server_close_container(runtime);
         if (maage_status_failed(result)) {
@@ -843,13 +900,19 @@ static void server_close_world(maage_server_runtime *runtime, maage_status_trace
             server_status_event(runtime, result, NULL);
         }
     }
-    if (runtime->world) {
+    for (dimension = 0; dimension < runtime->dimension_count; ++dimension) {
+        maage_world_store *view;
+        maage_world_record record;
+        maage_world *world = runtime->dimension_worlds ? runtime->dimension_worlds[dimension] : NULL;
+        if (!world) continue;
         maage_status_trace_init(&cleanup_trace);
-        result = maage_world_flush(runtime->world, &cleanup_trace);
+        result = maage_world_flush(world, &cleanup_trace);
+        if (!maage_status_failed(result)) result = maage_world_store_dimension(runtime->session_store, (maage_dimension_id) dimension + 1, &view, &record);
+        if (!maage_status_failed(result)) result = maage_world_store_checkpoint(view, world, &cleanup_trace);
         if (maage_status_failed(result)) {
             server_capture_failure(runtime, result, &cleanup_trace);
             server_status_event(runtime, result, &cleanup_trace);
-            runtime->player_ready = 0; /* preserve previous metadata */
+            runtime->player_ready = 0;
         }
     }
     if (runtime->store && runtime->world && runtime->player_ready && runtime->game_ready) {
@@ -862,26 +925,28 @@ static void server_close_world(maage_server_runtime *runtime, maage_status_trace
             server_status_event(runtime, result, &cleanup_trace);
         }
     }
-    if (runtime->world) {
-        result = maage_world_destroy(runtime->world);
+    for (dimension = 0; dimension < runtime->dimension_count; ++dimension) {
+        if (!runtime->dimension_worlds || !runtime->dimension_worlds[dimension]) continue;
+        result = maage_world_destroy(runtime->dimension_worlds[dimension]);
         if (maage_status_failed(result)) {
-            /* Workers may still borrow registries and the store. Retain all
-             * borrowed objects and report the fatal lifecycle failure. */
             server_capture_failure(runtime, result, NULL);
             server_status_event(runtime, result, &runtime->trace);
-            return;
+            return; /* Borrowed storage/content remain alive after failed joins. */
         }
-        runtime->world = NULL;
+        runtime->dimension_worlds[dimension] = NULL;
     }
+    runtime->world = NULL;
+    free(runtime->dimension_worlds);
+    runtime->dimension_worlds = NULL;
     if (runtime->game_ready) {
         result = maage_gameplay_destroy(&runtime->game);
         server_capture_failure(runtime, result, NULL);
         runtime->game_ready = 0;
     }
-    if (runtime->store) {
-        result = maage_world_store_close(runtime->store);
+    if (runtime->session_store) {
+        result = maage_world_store_close(runtime->session_store);
         server_capture_failure(runtime, result, NULL);
-        runtime->store = NULL;
+        runtime->store = runtime->session_store = NULL;
     }
     if (runtime->owned_content) {
         result = maage_content_destroy(runtime->owned_content);
@@ -890,6 +955,91 @@ static void server_close_world(maage_server_runtime *runtime, maage_status_trace
     }
     runtime->content = NULL;
     (void) trace;
+}
+
+static maage_status server_dimension_service(maage_server_runtime *runtime, maage_status_trace *trace) {
+    maage_world *destination;
+    const maage_dimension_definition *definition;
+    maage_world_record record;
+    maage_status result;
+    if (!runtime->travelling || runtime->paused) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    definition = maage_dimension_get(maage_content_dimensions(runtime->content), runtime->travel.destination);
+    if (!definition) return server_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
+    if (runtime->travel.at_spawn && !runtime->spawn_resolved) {
+        result = definition->spawn(definition->context, runtime->record.seed, maage_content_blocks(runtime->content), maage_content_biomes(runtime->content), &runtime->record.generation_policy, runtime->travel.position);
+        if (maage_status_failed(result)) return result;
+        runtime->spawn_resolved = 1;
+    }
+    if (!server_finite(runtime->travel.position[0]) || !server_finite(runtime->travel.position[1]) || !server_finite(runtime->travel.position[2]) || fabs(runtime->travel.position[0]) >= MAAGE_WORLD_LIMIT - 16 || fabs(runtime->travel.position[2]) >= MAAGE_WORLD_LIMIT - 16 || runtime->travel.position[1] < 0 || runtime->travel.position[1] >= MAAGE_WORLD_HEIGHT) return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+    result = server_dimension_world(runtime, definition->id, 0, runtime->travel.position, trace);
+    if (maage_status_failed(result)) return result;
+    destination = runtime->dimension_worlds[definition->id - 1];
+    result = maage_world_set_render_distance(destination, runtime->config.render_distance, 0);
+    if (maage_status_failed(result)) return result;
+    result = maage_world_stream(destination, runtime->travel.position[0], runtime->travel.position[2], runtime->yaw, trace);
+    if (maage_status_failed(result)) return result;
+    if (!maage_world_chunk_loaded(destination, maage_world_chunk_coordinate((int) floor(runtime->travel.position[0])), maage_world_chunk_coordinate((int) floor(runtime->travel.position[2])))) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    if (!runtime->travel.at_spawn && definition->arrive) {
+        result = definition->arrive(definition->context, destination, &runtime->travel);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    }
+    result = server_close_container(runtime);
+    if (maage_status_failed(result)) return result;
+    if (runtime->world_epoch == ULONG_MAX) return server_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
+    result = maage_world_store_dimension(runtime->session_store, definition->id, &runtime->store, &record);
+    if (maage_status_failed(result)) return result;
+    runtime->world = destination;
+    memcpy(runtime->player.position, runtime->travel.position, sizeof(runtime->player.position));
+    memset(runtime->player.velocity, 0, sizeof(runtime->player.velocity));
+    runtime->player.grounded = 0;
+    runtime->player.sprinting = runtime->player.collided_horizontally = 0;
+    runtime->game.attack_held = runtime->game.use_held = 0;
+    runtime->game.sprint_ticks = runtime->game.sprint_window = 0;
+    runtime->game.audio_initialized = 0;
+    runtime->game.fall_distance = 0;
+    runtime->game.has_target = runtime->game.breaking_active = 0;
+    runtime->game.break_progress = 0;
+    memset(&runtime->game.food, 0, sizeof(runtime->game.food));
+    memset(&runtime->sampled, 0, sizeof(runtime->sampled));
+    memset(runtime->predictions, 0, sizeof(runtime->predictions));
+    memset(runtime->actions, 0, sizeof(runtime->actions));
+    memset(runtime->use_poses, 0, sizeof(runtime->use_poses));
+    runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
+    runtime->has_deferred_command = 0;
+    runtime->portal_cooldown = 300;
+    runtime->portal_ticks = 0;
+    runtime->travelling = runtime->spawn_resolved = 0;
+    ++runtime->world_epoch;
+    runtime->has_pending_status = 0;
+    runtime->publication_dirty = 1;
+    runtime->last_stats_time = 0;
+    maage_log_info("maage.server.dimension", "Entered %s; world epoch=%lu.", definition->name, runtime->world_epoch);
+    return maage_world_reset_transfer(destination);
+}
+static maage_status server_dimension_contact(maage_server_runtime *runtime) {
+    const maage_dimension_definition *definition = maage_world_dimension(runtime->world);
+    maage_dimension_travel travel;
+    maage_status result;
+    if (!runtime->game.health || runtime->game.crafting.kind || !definition->contact) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_QUERY);
+    memset(&travel, 0, sizeof(travel));
+    result = definition->contact(definition->context, runtime->world, runtime->player.position, runtime->game.mode == MAAGE_GAME_MODE_CREATIVE, &travel);
+    if (maage_status_failed(result)) return result;
+    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
+        runtime->portal_ticks = 0;
+        if (runtime->portal_cooldown) --runtime->portal_cooldown;
+        return result;
+    }
+    if (runtime->portal_cooldown) {
+        runtime->portal_cooldown = 300;
+        return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_QUERY);
+    }
+    if (runtime->travel.destination != travel.destination || runtime->travel.kind != travel.kind) runtime->portal_ticks = 0;
+    runtime->travel = travel;
+    if (++runtime->portal_ticks >= travel.delay) {
+        runtime->travelling = 1;
+        runtime->publication_dirty = 1;
+    }
+    return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
 }
 
 static maage_status server_tick(maage_server_runtime *runtime, double scheduled_at, maage_status_trace *trace) {
@@ -972,6 +1122,8 @@ static maage_status server_tick(maage_server_runtime *runtime, double scheduled_
     result = maage_world_tick(runtime->world);
     if (runtime->diagnostics && intent.attack) MAAGE_LOG_VERBOSE_EVENT("maage.server.latency", maage_log_verbose("maage.server.latency", "gameplay_tick=%lu post_gameplay_ms=%.3f world_tick_ms=%.3f", runtime->game.ticks, (world_began - gameplay_finished) * 1000, (maage_time_monotonic_seconds() - world_began) * 1000));
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_TICK);
+    result = server_dimension_contact(runtime);
+    if (maage_status_failed(result)) return result;
     ++runtime->tick;
     result = server_emit_motion(runtime, trace);
     if (maage_status_failed(result)) return result;
@@ -1034,12 +1186,12 @@ static void server_thread_entry(void *context) {
             maage_mutex_unlock(runtime->mutex);
             ready_logged = 1;
         }
-        if (runtime->paused || !spawn_ready) {
+        if (runtime->paused || runtime->travelling || !spawn_ready) {
             /* Do not run delayed gameplay when resuming from pause/loading. */
             deadline = now + MAAGE_SERVER_STEP_SECONDS;
         } else {
             caught_up = 0;
-            while (now >= deadline && caught_up < MAAGE_SERVER_MAX_CATCHUP && !runtime->paused && !server_stop_requested(runtime)) {
+            while (now >= deadline && caught_up < MAAGE_SERVER_MAX_CATCHUP && !runtime->paused && !runtime->travelling && !server_stop_requested(runtime)) {
                 /* Sample bounded commands for every ordered step, not merely
                  * once per render-independent scheduler wake. */
                 result = server_take_commands(runtime);
@@ -1096,6 +1248,11 @@ static void server_thread_entry(void *context) {
             }
             next_stream = maage_time_monotonic_seconds() + MAAGE_SERVER_WAIT_MS / 1000.0;
         }
+        result = server_dimension_service(runtime, &trace);
+        if (maage_status_failed(result)) {
+            server_capture_failure(runtime, result, &trace);
+            break;
+        }
         server_service_container(runtime);
         server_predictions(runtime);
         runtime->next_tick_at = deadline;
@@ -1142,7 +1299,8 @@ shutdown:
         memset(&disconnected, 0, sizeof(disconnected));
         disconnected.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
         disconnected.kind = MAAGE_EVENT_DISCONNECTED;
-        disconnected.session_epoch = disconnected.world_epoch = 1UL;
+        disconnected.session_epoch = 1UL;
+        disconnected.world_epoch = runtime->world_epoch;
         disconnected.tick = runtime->tick;
         disconnected.sequence = ++runtime->event_sequence;
         disconnected.status = runtime->result;
@@ -1183,6 +1341,7 @@ maage_status maage_server_runtime_create(const maage_server_config *config, maag
     if (!runtime) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     runtime->diagnostics = maage_log_enabled("maage.server.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
     runtime->config = *config;
+    runtime->world_epoch = 1;
     if (config->entity_policy) {
         runtime->entity_policy = *config->entity_policy;
         runtime->config.entity_policy = &runtime->entity_policy;
@@ -1289,7 +1448,7 @@ maage_status maage_server_runtime_destroy(maage_server_runtime *runtime) {
         result = maage_server_runtime_join(runtime, NULL);
         if (!runtime->joined) return result;
     }
-    if (runtime->world) return server_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_DESTROY); /* borrowed workers/resources intentionally retained */
+    if (runtime->world || runtime->dimension_worlds) return server_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_DESTROY); /* borrowed workers/resources intentionally retained */
     result = maage_condition_destroy(runtime->wake);
     if (maage_status_failed(result)) return result;
     result = maage_mutex_destroy(runtime->mutex);

@@ -43,7 +43,7 @@ static int session_capacity_valid(unsigned int capacity, size_t element_size) {
 }
 
 static int session_command_valid(const maage_session_command *command) {
-    if (!command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CONTAINER_PAGE) return 0;
+    if (!command->world_epoch || !command->sequence || command->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION || command->kind < MAAGE_CMD_INPUT || command->kind > MAAGE_CMD_CONTAINER_PAGE) return 0;
     switch (command->kind) {
     case MAAGE_CMD_HOTBAR:
         return command->hotbar_slot < MAAGE_HOTBAR_SLOTS;
@@ -217,7 +217,7 @@ maage_status maage_local_session_wait_commands(maage_local_session *session, uns
 maage_status maage_local_session_publish_snapshot(maage_local_session *session, const maage_session_snapshot *snapshot) {
     maage_status result;
     if (!session) return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
-    if (!snapshot || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+    if (!snapshot || !snapshot->dimension || !snapshot->session_epoch || !snapshot->world_epoch || (snapshot->travelling != 0 && snapshot->travelling != 1) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         !session_motion_valid(&snapshot->player.motion) || !session_container_valid(&snapshot->player.crafting) || snapshot->player.air < -19 || snapshot->player.air > 300 ||
         (snapshot->player.food.remaining && (!snapshot->player.food.stack.item_id || !snapshot->player.food.stack.count || snapshot->player.food.slot >= MAAGE_HOTBAR_SLOTS || snapshot->player.food.remaining > snapshot->player.food.duration || snapshot->player.food.started_tick > snapshot->tick)) ||
         snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick || snapshot->player.last_break_tick > snapshot->tick ||

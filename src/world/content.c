@@ -371,6 +371,7 @@ static maage_status content_validate_registrations(const maage_content *content,
     for (j = 0; j < maage_property_count(context->traits); ++j)
         actual[CONTENT_PROPERTY_VALUE] += maage_property_value_count(context->traits, (maage_property_id) j);
     actual[CONTENT_TAG] = maage_tag_count(context->traits);
+    actual[CONTENT_DIMENSION] = maage_dimension_count(context->dimensions);
     actual[CONTENT_BEHAVIOR] = maage_behavior_count(context->traits);
     for (i = 0; i < content->policy.count; ++i)
         if (content->policy.identities[i].domain <= CONTENT_BEHAVIOR) ++claimed[content->policy.identities[i].domain];
@@ -507,7 +508,8 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     context->lifecycle = content;
     result = content_modules_order(content, config);
     if (maage_status_failed(result)) goto failed;
-    result = maage_traits_registry_create(&context->traits);
+    result = maage_dimension_registry_create(&context->dimensions);
+    if (!maage_status_failed(result)) result = maage_traits_registry_create(&context->traits);
     if (!maage_status_failed(result)) result = maage_presentation_create(&context->presentation);
     if (!maage_status_failed(result)) result = maage_biome_registry_init(context->biomes);
     if (!maage_status_failed(result)) result = maage_block_registry_create(0, 0, &context->blocks);
@@ -530,6 +532,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     if (!maage_status_failed(result)) result = maage_block_registry_bind_containers(context->blocks, context->containers);
     if (!maage_status_failed(result)) result = maage_block_registry_bind_sounds(context->blocks, context->sounds);
     if (maage_status_failed(result)) goto failed;
+    content_dimensions_policy(context->dimensions, &content->policy);
     content_traits_policy(context->traits, &content->policy);
     content_blocks_policy(context->blocks, &content->policy);
     content_items_policy(context->items, &content->policy);
@@ -613,6 +616,10 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     result = maage_block_registry_finalize(context->blocks);
     if (maage_status_failed(result)) goto failed;
     config->failure->dependency_name = "maage_biome_registry_finalize";
+    config->failure->dependency_name = "maage_dimension_finalize";
+    result = maage_dimension_finalize(context->dimensions);
+    if (maage_status_failed(result)) goto failed;
+    config->failure->dependency_name = "maage_biome_registry_finalize";
     result = maage_biome_registry_finalize(context->biomes);
     if (maage_status_failed(result)) goto failed;
     config->failure->dependency_name = "maage_recipe_registry_finalize";
@@ -672,6 +679,7 @@ failed:
 const maage_entity_type_registry *maage_content_entity_types(const maage_content *content) {
     return content ? content->context.entity_types : NULL;
 }
+const maage_dimension_registry *maage_content_dimensions(const maage_content *content) { return content ? content->context.dimensions : NULL; }
 const maage_model_registry *maage_content_models(const maage_content *content) {
     return content ? content->context.models : NULL;
 }
@@ -697,6 +705,7 @@ maage_status maage_content_destroy(maage_content *content) {
     content_owner *node, *next;
     if (!content) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_entity_type_destroy(content->context.entity_types);
+    maage_dimension_registry_destroy(content->context.dimensions);
     maage_model_registry_destroy(content->context.models);
     maage_creative_destroy(content->context.creative);
     maage_presentation_destroy(content->context.presentation);

@@ -25,7 +25,7 @@ static void maage_light_enqueue(maage_column_light *work, int x, int y, int z) {
 }
 static unsigned char maage_light_sample(const maage_column_light *work, int x, int y, int z) {
     const maage_chunk *chunk = work->chunk;
-    if (y >= 256) return 240;
+    if (y >= 256) return chunk->skylight ? 240 : 0;
     if (y < 0) return 0;
     if (x < 0) chunk = work->neighbors[0];
     else if (x >= 16) chunk = work->neighbors[1];
@@ -55,7 +55,7 @@ maage_status maage_light_provisional_cell(maage_chunk *chunk, const maage_chunk 
     const maage_block_state_definition *state;
     const maage_block_definition *block = NULL;
     const maage_chunk *sample;
-    unsigned int sky = 15, emission, opacity, value, side;
+    unsigned int sky = chunk->skylight ? 15 : 0, emission, opacity, value, side;
     unsigned char adjacent;
     int height, nx, ny, nz;
     /* Without a numerical cache all consumers already use the heightmap seed.
@@ -138,7 +138,7 @@ maage_status maage_light_column_job(maage_chunk *chunk, const maage_chunk *neigh
     for (z = 0; z < 16; ++z)
         for (x = 0; x < 16; ++x)
             if (shafts[z * 16 + x]) {
-                sky = 15;
+                sky = chunk->skylight ? 15 : 0;
                 for (y = 255; y >= 0; --y) {
                     state = maage_block_registry_state(blocks, maage_chunk_get(chunk, x, y, z));
                     block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;

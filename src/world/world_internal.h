@@ -63,7 +63,7 @@ typedef struct maage_block_change {
 } maage_block_change;
 #define MAAGE_BLOCK_CHANGE_PENDING 255U
 struct maage_chunk {
-    int x, z;
+    int x, z, skylight;
     maage_block_state_id air;       /* Implicit empty sections use the registered state. */
     unsigned char *direct_sky;      /* Sky payload present; access only through the numeric helpers. */
     maage_sky_payload *sky_payload; /* Shared until lighting explicitly detaches. */
@@ -119,8 +119,6 @@ maage_status maage_chunk_block_entity_remove(maage_chunk *chunk, unsigned int ce
 /* Workers mutate only detached columns. Published columns are immutable and
  * pinned by the owner until every snapshot job has returned its completion.
  * Generation is original and has no vanilla seed-parity requirement. */
-maage_status maage_generate_chunk_job(maage_chunk *chunk, maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, const maage_job_token *token, maage_status_trace *trace);
-maage_status maage_generation_spawn(maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, double feet[3]);
 /* Feature stages replay bounded regional owners in coordinate order and
  * clip writes to the private output column; no neighbor storage is borrowed. */
 /* All inputs are pinned immutable snapshots. Client retains copied CPU/GPU

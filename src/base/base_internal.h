@@ -45,6 +45,8 @@ maage_status maage_base_entity_creative(maage_content_context *, const maage_bas
 maage_status maage_base_bind(maage_content_context *, maage_base_ids *);
 maage_status maage_base_recipes(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_smelting(maage_content_context *, const maage_base_ids *);
+maage_status maage_base_dimensions(maage_content_context *, maage_base_ids *);
+maage_status maage_base_dimension_creative(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_generate(maage_chunk *, maage_world_seed, const maage_block_registry *, const maage_biome_registry *, const maage_generation_policy *, const maage_job_token *, maage_status_trace *);
 maage_status maage_base_spawn(maage_world_seed, const maage_block_registry *, const maage_biome_registry *, const maage_generation_policy *, double[3]);
 maage_status base_item_register(maage_content_context *, const char *, maage_item_definition *, unsigned long, maage_item_id *);

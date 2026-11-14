@@ -296,6 +296,7 @@ maage_status maage_client_ui_queue_command(maage_client_ui *ui, const maage_sess
     if (command->kind == MAAGE_CMD_CONTAINER_CLOSE) ui->container_close_requested = 1;
     next = *command;
     next.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
+    next.world_epoch = ui->snapshot.world_epoch;
     /* The controller assigns one global sequence across UI and gameplay input. */
     next.sequence = 0;
     ui->commands[(ui->command_read + ui->command_count) % ui->command_capacity] = next;

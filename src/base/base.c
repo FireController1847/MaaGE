@@ -21,8 +21,6 @@ maage_status maage_base_bind(maage_content_context *context, maage_base_ids *ids
     bindings.state_boundary = ids->state_bedrock;
     bindings.state_ui_background = ids->state_dirt;
     bindings.generation_context = ids;
-    bindings.generate = maage_base_generate;
-    bindings.spawn = maage_base_spawn;
     return maage_block_registry_bind(context->blocks, &bindings);
 }
 maage_status base_item_register(maage_content_context *context, const char *name, maage_item_definition *item, unsigned long fuel_ticks, maage_item_id *id) {
@@ -131,7 +129,9 @@ static maage_status maage_base_define(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_chest_models(context, ids);
     if (!maage_status_failed(result)) result = maage_base_entity_models(context, ids);
     if (!maage_status_failed(result)) result = maage_base_entities(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_dimensions(context, ids);
     if (!maage_status_failed(result)) result = maage_base_creative(context, ids);
+    if (!maage_status_failed(result)) result = maage_base_dimension_creative(context, ids);
     if (!maage_status_failed(result)) result = maage_base_flora_creative(context, ids);
     if (!maage_status_failed(result)) result = maage_base_entity_creative(context, ids);
     return result;

@@ -89,8 +89,10 @@ typedef enum maage_world_cache_policy {
 const maage_execution_context *maage_world_execution(const maage_world *world);
 /* Owner simulation square; does not load or request terrain. */
 int maage_world_simulation_contains(const maage_world *world, double x, double z);
+struct maage_dimension_definition;
 typedef struct maage_world_config {
-    maage_execution_context execution; /* Required: Client replica or authoritative Server owner. */
+    const struct maage_dimension_definition *dimension; /* Finalized content; borrowed through jobs. */
+    maage_execution_context execution;                  /* Required: Client replica or authoritative Server owner. */
     const maage_block_registry *registry;
     const struct maage_item_registry *items; /* finalized; borrowed for block drops */
     const struct maage_smelting_registry *smelting;
@@ -135,6 +137,10 @@ typedef struct maage_world_config {
     /* Copied independently; NULL uses deterministic seed/domain defaults. */
     const struct maage_random_tick_state *initial_random_ticks;
 } maage_world_config;
+/* Owner epoch boundary: cancel/detach replica columns without waiting for jobs.
+ * Authority resets only its acknowledged transfer baselines for a fresh reader. */
+maage_status maage_world_reset_replica(maage_world *, const struct maage_dimension_definition *);
+maage_status maage_world_reset_transfer(maage_world *);
 maage_status maage_world_config_init(maage_world_config *config);
 typedef struct maage_world_stats {
     unsigned int loaded, loaded_sections, pending, ready;
@@ -199,6 +205,10 @@ typedef struct maage_world_target {
 typedef struct maage_block_position {
     int x, y, z;
 } maage_block_position;
+/* Searches loaded numeric palettes in a bounded region. NOOP means missing
+ * columns, NOT_FOUND means a complete search without a matching state. */
+maage_status maage_world_find_states(const maage_world *, const maage_block_state_id *, size_t, const double[3], int, maage_block_position *);
+
 /* Bounded replica-owner camera collision volume. Zero column revisions mean
  * unavailable terrain, never confirmed air. No borrowed World storage. */
 #define MAAGE_CAMERA_RADIUS 5

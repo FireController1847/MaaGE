@@ -441,14 +441,21 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
     held = &game->inventory.slots[game->inventory.selected];
     target_block = maage_block_registry_block(maage_world_registry(world), game->target.block_id);
     if (target_block && target_block->use && (!sneaking || !held->count)) return target_block->use(world, &game->target, &game->crafting);
-    result = maage_gameplay_placement(player, world, items, held, &game->target, yaw, &destination, &placed);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    item = maage_item_registry_get(items, held->item_id);
-    result = maage_world_set(world, destination.x, destination.y, destination.z, destination.state_id, placed);
-    if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
-    game->last_place = destination;
-    game->last_placed_state = placed;
-    maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE, maage_gameplay_state_material(world, placed), destination.x + 0.5, destination.y + 0.5, destination.z + 0.5, 1.0, 1.0);
+    item = held->count ? maage_item_registry_get(items, held->item_id) : NULL;
+    if (item && item->use) {
+        result = item->use(item, world, &game->target);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+    } else {
+        result = maage_gameplay_placement(player, world, items, held, &game->target, yaw, &destination, &placed);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        item = maage_item_registry_get(items, held->item_id);
+        result = maage_world_set(world, destination.x, destination.y, destination.z, destination.state_id, placed);
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) return result;
+        game->last_place = destination;
+        game->last_placed_state = placed;
+        maage_gameplay_sound(sink, MAAGE_SOUND_BLOCK_PLACE, maage_gameplay_state_material(world, placed), destination.x + 0.5, destination.y + 0.5, destination.z + 0.5, 1.0, 1.0);
+        ++game->blocks_placed;
+    }
     if (game->mode == MAAGE_GAME_MODE_SURVIVAL) {
         if (item->use_durability) {
             if (held->damage == item->durability) {
@@ -457,7 +464,6 @@ static maage_status maage_gameplay_place(maage_gameplay *game, const maage_playe
             } else ++held->damage;
         } else if (--held->count == 0) memset(held, 0, sizeof(*held));
     }
-    ++game->blocks_placed;
     maage_gameplay_swing(game, 2U);
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_MUTATE, 0);
 }

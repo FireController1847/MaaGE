@@ -27,6 +27,8 @@ typedef struct maage_fluid_definition {
     const unsigned long *states; /* Normal levels then falling levels; registry copies. */
     size_t state_count;
     int drops_displaced, reverse_faces;
+    int evaporates; /* Content opts into a dimension's evaporation policy. */
+    unsigned int hot_tick_delay, hot_level_step; /* Zero keeps ordinary behavior. */
     int swimming, submerges, resets_fall;
     double acceleration, drag, gravity, swim_impulse, current_impulse, wall_exit_impulse;
     unsigned long material; /* Registered sound material; zero uses global bindings. */

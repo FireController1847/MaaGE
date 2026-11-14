@@ -1,5 +1,6 @@
 #include "maage/block_entity.h"
 #include "world_internal.h"
+#include "maage/dimensions.h"
 #include "maage/entities.h"
 #include "maage/world_store.h"
 #include "maage/log.h"
@@ -81,6 +82,7 @@ struct maage_world_task {
     const maage_biome_registry *biomes;
     maage_world_seed seed;
     maage_generation_policy generation_policy;
+    const maage_dimension_definition *dimension;
     maage_world_store *store;
     int predicted;
     unsigned long presentation_generation;
@@ -663,6 +665,7 @@ maage_status maage_chunk_clone(const maage_chunk *source, maage_chunk **output) 
     *output = NULL;
     result = maage_chunk_create(source->x, source->z, source->air, &copy);
     if (maage_status_failed(result)) return result;
+    copy->skylight = source->skylight;
     memcpy(copy->biomes, source->biomes, sizeof(copy->biomes));
     memcpy(copy->heightmap, source->heightmap, sizeof(copy->heightmap));
     memcpy(copy->random_tick_counts, source->random_tick_counts, sizeof(copy->random_tick_counts));
@@ -975,9 +978,11 @@ static void maage_world_run(void *context, const maage_job_token *token) {
     }
     if (task->kind == MAAGE_JOB_LOAD) {
         task->status = task->store ? maage_world_store_load_chunk(task->store, task->x, task->z, task->blocks, task->biomes, &task->output, task->error, trace) : maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, 0);
+        if (task->output) task->output->skylight = task->dimension->skylight;
     } else if (task->kind == MAAGE_JOB_GENERATE) {
         task->status = maage_chunk_create(task->x, task->z, maage_block_registry_bindings(task->blocks)->state_air, &task->output);
-        if (!maage_status_failed(task->status)) task->status = maage_generate_chunk_job(task->output, task->seed, task->blocks, task->biomes, &task->generation_policy, token, trace);
+        if (!maage_status_failed(task->status)) task->output->skylight = task->dimension->skylight;
+        if (!maage_status_failed(task->status)) task->status = task->dimension->generate(task->dimension->context, task->output, task->seed, task->blocks, task->biomes, &task->generation_policy, token, trace);
         if (maage_status_failed(task->status)) strcpy(task->error, "Chunk generation failed.");
     } else if (task->kind == MAAGE_JOB_SAVE) {
         task->status = task->store ? maage_world_store_save_chunk_at(task->store, task->inputs[0]->chunk, task->blocks, task->biomes, task->tick_low, task->tick_high, task->error, trace) : maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SAVE, 0);
@@ -993,6 +998,7 @@ static void maage_world_run(void *context, const maage_job_token *token) {
                 strcpy(task->error, "Chunk lighting snapshot allocation failed.");
                 goto finished;
             }
+            task->output->skylight = task->dimension->skylight;
             task->status = maage_light_column_job(task->output, neighbors, task->light_cells ? task->light_cells : maage_world_empty_light_cells, task->boundaries, task->blocks, token, trace);
             if (maage_status_failed(task->status)) strcpy(task->error, "Chunk lighting failed.");
         }
@@ -1364,6 +1370,7 @@ static maage_status maage_world_submit(maage_world *world, maage_world_slot *slo
     task->light_epoch = slot->light_epoch;
     task->blocks = world->config.registry;
     task->biomes = world->config.biomes;
+    task->dimension = world->config.dimension;
     task->seed = world->config.seed;
     task->store = world->config.store;
     task->generation_policy = world->config.generation_policy;
@@ -1668,6 +1675,7 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
         result = maage_random_tick_default(config->seed, &initial_random);
         if (maage_status_failed(result)) return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     }
+    if (!config->dimension || !config->dimension->generate || !config->dimension->spawn) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     policy = config->generation_policy;
     if (!policy.sea_level && !policy.spawn_search_radius && !policy.spawn_search_step && maage_status_failed(maage_generation_policy_default(&policy))) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
     if (!maage_generation_policy_valid(&policy)) return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0), MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
@@ -1712,10 +1720,13 @@ maage_status maage_world_create(const maage_world_config *config, maage_world **
     world->cache_limit = cache_limit;
     world->task_limit = job_limit;
     memcpy(world->spawn, config->position, sizeof(world->spawn));
-    if (config->new_world && maage_status_failed(maage_generation_spawn(config->seed, config->registry, config->biomes, &policy, world->spawn))) {
-        maage_entities_destroy(world->entities);
-        free(world);
-        goto invalid_spawn;
+    if (config->new_world) {
+        result = config->dimension->spawn(config->dimension->context, config->seed, config->registry, config->biomes, &policy, world->spawn);
+        if (maage_status_failed(result)) {
+            maage_entities_destroy(world->entities);
+            free(world);
+            return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE);
+        }
     }
     for (axis = 0; axis < 3; ++axis)
         if (!(world->spawn[axis] > -MAAGE_WORLD_LIMIT && world->spawn[axis] < MAAGE_WORLD_LIMIT)) {
@@ -2224,7 +2235,7 @@ maage_status maage_world_present_light(const maage_world *world, int x, int y, i
     int nx, ny, nz, pending;
     if (!world || !world->config.presentation_only || !light || x <= -MAAGE_WORLD_LIMIT || x >= MAAGE_WORLD_LIMIT || z <= -MAAGE_WORLD_LIMIT || z >= MAAGE_WORLD_LIMIT) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
     if (y >= 256 || y < 0) {
-        *light = y >= 256 ? 240 : 0;
+        *light = y >= 256 && world->config.dimension->skylight ? 240 : 0;
         return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
     }
     slot = maage_world_find(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
@@ -2293,7 +2304,7 @@ int maage_world_observe(const maage_world *world, int x, int y, int z, maage_wor
         observation->temperature = biome->temperature - (y > 64 ? (y - 64) / 600.0 : 0.0);
         observation->rainfall = biome->rainfall;
     }
-    observation->sky_exposed = y >= chunk->heightmap[local_z * 16 + local_x];
+    observation->sky_exposed = world->config.dimension->skylight && y >= chunk->heightmap[local_z * 16 + local_x];
     observation->precipitation_height = chunk->heightmap[local_z * 16 + local_x];
     for (section = 0; section < 16; ++section)
         if (chunk->sections[section]) ++observation->section_count;
@@ -3416,6 +3427,7 @@ maage_status maage_world_apply_column(maage_world *world, const maage_column_upd
      * and visual replicas; later prediction and light writes detach only their
      * independently mutable data. Packing failure leaves correct direct state. */
     if (!update->base_revision) maage_chunk_compact(authority);
+    authority->skylight = world->config.dimension->skylight;
     /* Keep locally calculated light and its direct-sky cache across deltas. */
     result = slot->data && update->base_revision ? maage_chunk_clone(slot->data->chunk, &visual) : maage_chunk_clone(authority, &visual);
     if (maage_status_failed(result)) goto done;
@@ -3659,4 +3671,89 @@ int maage_world_simulation_contains(const maage_world *world, double x, double z
     dx = maage_world_chunk_coordinate((int) floor(x)) - world->center_x;
     dz = maage_world_chunk_coordinate((int) floor(z)) - world->center_z;
     return dx >= -world->config.simulation_distance && dx <= world->config.simulation_distance && dz >= -world->config.simulation_distance && dz <= world->config.simulation_distance;
+}
+
+const maage_dimension_definition *maage_world_dimension(const maage_world *world) {
+    return world ? world->config.dimension : NULL;
+}
+
+maage_status maage_world_reset_transfer(maage_world *world) {
+    maage_world_slot *slot;
+    if (!world || world->config.presentation_only) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    for (slot = world->chunks; slot; slot = slot->next)
+        slot->sent_revision = 0;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
+}
+maage_status maage_world_reset_replica(maage_world *world, const maage_dimension_definition *dimension) {
+    maage_world_slot *slot, *next;
+    if (!world || !world->config.presentation_only || !dimension) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    for (slot = world->chunks; slot; slot = next) {
+        next = slot->next;
+        maage_world_cancel(world, slot->work);
+        maage_world_cancel(world, slot->light_work);
+        maage_world_remove(world, slot);
+    }
+    world->config.dimension = dimension;
+    world->prediction_count = 0;
+    ++world->prediction_generation;
+    memset(world->visual_frontier, 0, sizeof(world->visual_frontier));
+    world->front_loading_pending = 1;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
+}
+
+maage_status maage_world_find_states(const maage_world *world, const maage_block_state_id *states, size_t count, const double position[3], int radius, maage_block_position *found) {
+    const maage_world_slot *slot;
+    const maage_chunk *chunk;
+    const maage_section *section;
+    int cx, cz, x, y, z, first_x, last_x, first_z, last_z, part, present, matched = 0;
+    size_t i, palette, cell;
+    double dx, dy, dz, distance, best = 1e30;
+    maage_block_state_id state;
+    if (!world || !states || !count || !position || !found || radius < 0 || radius >= MAAGE_WORLD_LIMIT || !(position[0] > -MAAGE_WORLD_LIMIT + radius && position[0] < MAAGE_WORLD_LIMIT - radius && position[2] > -MAAGE_WORLD_LIMIT + radius && position[2] < MAAGE_WORLD_LIMIT - radius && position[1] >= 0 && position[1] < MAAGE_WORLD_HEIGHT)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    for (i = 0; i < count; ++i)
+        if (!maage_block_registry_state(world->config.registry, states[i])) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
+    first_x = maage_world_chunk_coordinate((int) floor(position[0]) - radius);
+    last_x = maage_world_chunk_coordinate((int) floor(position[0]) + radius);
+    first_z = maage_world_chunk_coordinate((int) floor(position[2]) - radius);
+    last_z = maage_world_chunk_coordinate((int) floor(position[2]) + radius);
+    for (cz = first_z; cz <= last_z; ++cz)
+        for (cx = first_x; cx <= last_x; ++cx) {
+            slot = maage_world_find(world, cx, cz);
+            if (!slot || !slot->data) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_QUERY, 0);
+            chunk = slot->edit ? slot->edit : slot->data->chunk;
+            for (part = 0; part < 16; ++part) {
+                section = chunk->sections[part];
+                if (!section) continue;
+                present = section->states != NULL;
+                for (palette = 0; !present && palette < section->palette_count; ++palette)
+                    for (i = 0; i < count; ++i)
+                        if (section->palette[palette] == states[i]) {
+                            present = 1;
+                            break;
+                        }
+                if (!present) continue;
+                for (cell = 0; cell < 4096; ++cell) {
+                    state = maage_section_get(section, cell);
+                    for (i = 0; i < count && state != states[i]; ++i) {
+                    }
+                    if (i == count) continue;
+                    x = cx * 16 + (int) (cell % 16);
+                    y = part * 16 + (int) (cell / 256);
+                    z = cz * 16 + (int) ((cell / 16) % 16);
+                    dx = x + 0.5 - position[0];
+                    dy = y - position[1];
+                    dz = z + 0.5 - position[2];
+                    if (fabs(dx) > radius || fabs(dz) > radius) continue;
+                    distance = dx * dx + dy * dy + dz * dz;
+                    if (!matched || distance < best || (distance == best && (x < found->x || (x == found->x && (z < found->z || (z == found->z && y < found->y)))))) {
+                        found->x = x;
+                        found->y = y;
+                        found->z = z;
+                        matched = 1;
+                        best = distance;
+                    }
+                }
+            }
+        }
+    return maage_status_make(matched ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOT_FOUND, matched ? 0 : MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_QUERY, 0);
 }

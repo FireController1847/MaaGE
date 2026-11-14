@@ -42,6 +42,11 @@ maage_status maage_base_recipes(maage_content_context *context, const maage_base
     maage_status result;
     memset(choices, 0, sizeof(choices));
     memset(&recipe, 0, sizeof(recipe));
+    choices[0].item = ids->item_iron_ingot;
+    choices[1].item = ids->item_flint;
+    result = builtin_recipe(context, MAAGE_RECIPE_SHAPELESS, 2, 1, "AB", choices, ids->item_flint_steel, 1, 0);
+    if (maage_status_failed(result)) return result;
+    memset(choices, 0, sizeof(choices));
     choices[0].kind = MAAGE_RECIPE_CHOICE_TAG;
     choices[0].tag = ids->tag_log;
     choices[0].variant = MAAGE_RECIPE_VARIANT_ANY;

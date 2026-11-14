@@ -2,6 +2,7 @@
 #define MAAGE_SESSION_PROTOCOL_H
 
 #include "maage/environment.h"
+#include "maage/dimensions.h"
 #include "maage/gameplay.h"
 #include "maage/entities.h"
 #include "maage/status.h"
@@ -16,7 +17,7 @@ extern "C" {
  * explicitly, not memcpy C layouts (including unsigned long and padding).
  * Local hosting validates the independently composed Server against its Client
  * content identity peer before World startup or publishing any numeric data. */
-#define MAAGE_SESSION_PROTOCOL_VERSION 28U
+#define MAAGE_SESSION_PROTOCOL_VERSION 29U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -58,6 +59,7 @@ typedef struct maage_creative_action {
 typedef struct maage_session_command {
     unsigned int protocol_version;
     unsigned int kind;
+    unsigned long world_epoch;
     unsigned long sequence;                /* Nonzero and increasing within the session. */
     double sampled_at, queued_at, sent_at; /* Optional local diagnostic clock; -1 when unavailable. */
     maage_gameplay_intent intent;
@@ -141,6 +143,8 @@ typedef struct maage_session_snapshot {
     /* Next owner boundary on the local monotonic clock. A remote adapter must
      * translate it or use -1; prediction never extrapolates beyond one step. */
     double next_tick_at;
+    maage_dimension_id dimension;
+    int travelling;
     int paused; /* Integrated owner pause; presentation may continue. */
     maage_session_player_view player;
     maage_environment_state environment;

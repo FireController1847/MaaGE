@@ -75,7 +75,8 @@ enum {
 #define MAAGE_BASE_TEXTURE_WHEAT (MAAGE_BASE_TEXTURE_FARMLAND + 2)
 #define MAAGE_BASE_TEXTURE_ITEMS (MAAGE_BASE_TEXTURE_WHEAT + 8)
 #define MAAGE_BASE_TEXTURE_FLORA (MAAGE_BASE_TEXTURE_ITEMS + MAAGE_BASE_ITEM_TEXTURE_COUNT)
-#define MAAGE_BASE_TEXTURE_COUNT (MAAGE_BASE_TEXTURE_FLORA + 21)
+#define MAAGE_BASE_TEXTURE_DIMENSIONS (MAAGE_BASE_TEXTURE_FLORA + 21)
+#define MAAGE_BASE_TEXTURE_COUNT (MAAGE_BASE_TEXTURE_DIMENSIONS + 9)
 
 /* Registration-assigned references, owned by each registry set. Readers borrow
  * this table through const accessors; publication/finalization ends mutation.
@@ -97,6 +98,10 @@ typedef struct maage_base_ids {
     unsigned long container_player, container_table, container_furnace, container_chest[2];
     unsigned long chest_models[2][2], chest_states[2][4], chest_open_sound, chest_close_sound;
     unsigned long fluid_water, fluid_lava;
+    unsigned long dimension_overworld, dimension_nether, dimension_end, biome_hell, biome_sky;
+    unsigned long dimension_blocks[6], dimension_states[6], dimension_items[6];
+    unsigned long portal_states[2], frame_states[2][4], portal_geometry, property_eye;
+    unsigned long item_flint_steel, item_ender_eye;
     unsigned long geometry_cube, geometry_cactus, geometry_cross, geometry_torch, geometry_entity;
     unsigned long texture_water_flow, texture_lava_flow, texture_water_overlay;
     unsigned long biome_ids[MAAGE_BASE_BIOME_COUNT];

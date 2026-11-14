@@ -473,6 +473,7 @@ maage_status maage_chunk_create(int x, int z, maage_block_state_id air, maage_ch
         chunk->x = x;
         chunk->z = z;
         chunk->air = air;
+        chunk->skylight = 1;
     }
     *output = chunk;
     return maage_status_make(chunk ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_CREATE, 0);
@@ -531,10 +532,10 @@ maage_status maage_chunk_set(maage_chunk *chunk, int x, int y, int z, maage_bloc
 }
 unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z) {
     if (!chunk || x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0) return 0;
-    if (y >= 256) return 0xf0;
+    if (y >= 256) return chunk->skylight ? 0xf0 : 0;
     if (chunk->sections[y / 16]) return chunk->sections[y / 16]->light[maage_chunk_cell(x, y, z)];
     if (chunk->direct_sky) return (unsigned char) (maage_chunk_direct_sky_get(chunk, (size_t) (y * 16 + z) * 16 + x) << 4);
-    return y >= chunk->heightmap[z * 16 + x] ? 0xf0 : 0;
+    return chunk->skylight && y >= chunk->heightmap[z * 16 + x] ? 0xf0 : 0;
 }
 
 maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage_block_registry *blocks, int *imported_changes) {
@@ -570,13 +571,13 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
 
 unsigned char maage_chunk_presentation_light(const maage_chunk *chunk, const maage_block_registry *blocks, int x, int y, int z) {
     const maage_block_state_definition *state;
-    if (y >= 256) return 240;
+    if (y >= 256) return chunk->skylight ? 240 : 0;
     if (y < 0) return 0;
     if (chunk->direct_sky) return maage_chunk_light(chunk, x, y, z);
     state = maage_block_registry_state(blocks, maage_chunk_get(chunk, x, y, z));
     /* This is never stored in numerical light buffers. Roofed terrain has a
      * modest sky approximation; calculated cave darkness is left untouched. */
-    return (unsigned char) ((y >= chunk->heightmap[z * 16 + x] ? 240 : 64) | (state ? state->emitted_light : 0));
+    return (unsigned char) ((chunk->skylight ? (y >= chunk->heightmap[z * 16 + x] ? 240 : 64) : 0) | (state ? state->emitted_light : 0));
 }
 
 int maage_chunk_x(const maage_chunk *chunk) {

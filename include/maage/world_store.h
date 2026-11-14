@@ -11,6 +11,7 @@ extern "C" {
 #endif
 typedef struct maage_world_record {
     char id[37], name[128], created_utc[32];
+    maage_dimension_id dimension; /* Active named World within this session. */
     maage_world_seed seed;
     maage_generation_policy generation_policy;
     maage_environment_state environment;
@@ -44,14 +45,20 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
  * Errors are static, credential-free text (256 bytes); optional traces are
  * caller-owned. Only the current metadata/chunk encodings are accepted. */
 maage_status maage_world_store_open(const char *instance_root, const char *id, int create, const char *name, const maage_world_seed *seed, const maage_generation_policy *generation_policy, const maage_content *content, maage_world_store **store, maage_world_record *record, char error[256], maage_status_trace *trace);
+/* Session root owns one dictionary/lease and dimension-scoped region views.
+ * Views borrow root storage and must outlive their World's jobs. Records borrow
+ * their initial entity arrays. Snapshot every visited World after its flush,
+ * then save the shared player once; metadata publishes all dimensions atomically. */
+maage_status maage_world_store_dimension(maage_world_store *root, maage_dimension_id dimension, maage_world_store **view, maage_world_record *record);
+maage_status maage_world_store_checkpoint(maage_world_store *view, const maage_world *world, maage_status_trace *trace);
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
  * independent region files may be written concurrently; each region serializes
  * its own index and append operations without a global World lock. Player inventories and
- * World entities use numeric saved item/variant/state/type IDs. The cached, checksummed MGIDMAP3 header
+ * World entities use numeric saved item/variant/state/type IDs. The cached, checksummed MGIDMAP4 header
  * retains stable saved IDs and both numeric translation directions. Dictionary
  * extensions publish atomically before new IDs can be saved by workers.
  * Environment, random ticks, generation settings and gameplay share the same
- * atomic metadata replacement (MGWRLD16 only). */
+ * atomic metadata replacement (MGWRLD17 only). */
 maage_status maage_world_store_save(maage_world_store *store, const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world, const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);

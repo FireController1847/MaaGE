@@ -655,7 +655,7 @@ static void maage_client_camera(float output[16], const double eye[3], double ya
 typedef struct maage_client_outbox {
     maage_session_command commands[MAAGE_CLIENT_OUTBOX_CAPACITY];
     unsigned int head, count;
-    unsigned long next_sequence, input_sequence;
+    unsigned long next_sequence, input_sequence, world_epoch;
     int diagnostics;
 } maage_client_outbox;
 
@@ -679,6 +679,7 @@ static maage_status maage_client_outbox_queue(maage_client_outbox *outbox, const
     unsigned int tail, previous;
     if (!outbox || !input) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_SUBMIT, 0);
     command = *input;
+    if (!command.world_epoch) command.world_epoch = outbox->world_epoch;
     command.queued_at = outbox->diagnostics ? maage_time_monotonic_seconds() : -1;
     command.sent_at = -1;
     command.protocol_version = MAAGE_SESSION_PROTOCOL_VERSION;
@@ -1055,6 +1056,7 @@ choose_world:
         if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS && incoming.protocol_version == MAAGE_SESSION_PROTOCOL_VERSION && incoming.sequence) {
             latest = previous = incoming;
             world_epoch = latest.world_epoch;
+            outbox.world_epoch = world_epoch;
             last_seen_tick = latest.tick;
             selected_hotbar = queued_hotbar = (int) latest.player.inventory.selected;
             valid_snapshot = 1;
@@ -1086,6 +1088,7 @@ choose_world:
     memset(&visual_stats, 0, sizeof(visual_stats));
     visual_stats_time = -1;
     maage_world_config_init(&visual_config);
+    visual_config.dimension = maage_dimension_get(maage_content_dimensions(content), latest.dimension);
     visual_config.registry = blocks;
     visual_config.items = items;
     visual_config.execution = *maage_content_execution(content);
@@ -1394,6 +1397,12 @@ choose_world:
              incoming.sequence > latest.sequence)) {
             if (incoming.session_epoch != latest.session_epoch || incoming.world_epoch != latest.world_epoch) {
                 (void) maage_client_mesh_cache_clear(&cache, visual_world);
+                operation = maage_world_reset_replica(visual_world, maage_dimension_get(maage_content_dimensions(content), incoming.dimension));
+                if (maage_status_failed(operation)) goto done;
+                outbox.head = outbox.count = 0;
+                outbox.world_epoch = incoming.world_epoch;
+                has_last_input = 0;
+                memset(&last_input, 0, sizeof(last_input));
                 previous = incoming;
                 received_time = now;
                 memset(&collision, 0, sizeof(collision));

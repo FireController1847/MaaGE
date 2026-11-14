@@ -1,4 +1,5 @@
 #include "world_internal.h"
+#include "maage/dimensions.h"
 #include "maage/entities.h"
 #include <stdlib.h>
 #include <string.h>
@@ -427,6 +428,12 @@ static const maage_block_state_definition *maage_environment_fluid(const maage_w
 static int maage_environment_loaded(maage_world *world, int x, int y, int z) {
     return y >= 0 && y < MAAGE_WORLD_HEIGHT && x > -MAAGE_WORLD_LIMIT && x < MAAGE_WORLD_LIMIT && z > -MAAGE_WORLD_LIMIT && z < MAAGE_WORLD_LIMIT && maage_world_chunk_loaded(world, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z));
 }
+static unsigned int maage_environment_fluid_delay(const maage_world *world, const maage_fluid_definition *fluid) {
+    return maage_world_dimension(world)->water_evaporates && fluid->hot_tick_delay ? fluid->hot_tick_delay : fluid->tick_delay;
+}
+static unsigned int maage_environment_fluid_step(const maage_world *world, const maage_fluid_definition *fluid) {
+    return maage_world_dimension(world)->water_evaporates && fluid->hot_level_step ? fluid->hot_level_step : fluid->level_step;
+}
 static maage_status maage_environment_schedule(maage_environment *environment, maage_world *world, int x, int y, int z, unsigned int delay) {
     unsigned long low, high;
     if (!maage_environment_loaded(world, x, y, z)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_SUBMIT, 0);
@@ -444,7 +451,7 @@ static maage_status maage_environment_change_delay(maage_world *world, const maa
     int allow;
     maage_status result;
     if (!fluid) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
-    *delay = fluid->tick_delay;
+    *delay = maage_environment_fluid_delay(world, fluid);
     if (!fluid->contact) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
     for (side = 0; side < 5; ++side) {
         if (!maage_environment_loaded(world, x + offsets[side][0], y + offsets[side][1], z + offsets[side][2])) continue;
@@ -595,7 +602,7 @@ static maage_status maage_environment_flow(maage_environment *environment, maage
         result = maage_entities_set_random(entities, random);
         if (maage_status_failed(result)) return result;
     }
-    return maage_environment_schedule(environment, world, x, y, z, fluid->tick_delay);
+    return maage_environment_schedule(environment, world, x, y, z, maage_environment_fluid_delay(world, fluid));
 }
 static maage_status maage_environment_fluid_update(maage_environment *environment, maage_world *world, int x, int y, int z) {
     const maage_registry_bindings *ids = maage_block_registry_bindings(maage_world_registry(world));
@@ -611,11 +618,12 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
     if (!state) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     fluid = state->fluid_definition;
     if (!fluid) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_UPDATE, 0);
+    if (fluid->evaporates && maage_world_dimension(world)->water_evaporates) return maage_world_set(world, x, y, z, state->id, maage_block_registry_bindings(maage_world_registry(world))->state_air);
     minimum = fluid->flow_levels;
     best = fluid->routing_depth + 2U;
     old = state->id;
     level = state->fluid_level;
-    delay = fluid->tick_delay;
+    delay = maage_environment_fluid_delay(world, fluid);
     for (i = 0; i < 4; ++i) {
         nx = x + directions[i][0];
         nz = z + directions[i][1];
@@ -647,7 +655,7 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
     }
     if (level) {
         if (waiting) return maage_environment_schedule(environment, world, x, y, z, delay);
-        next = minimum >= fluid->flow_levels || fluid->level_step >= fluid->flow_levels - minimum ? fluid->flow_levels : minimum + fluid->level_step;
+        next = minimum >= fluid->flow_levels || maage_environment_fluid_step(world, fluid) >= fluid->flow_levels - minimum ? fluid->flow_levels : minimum + maage_environment_fluid_step(world, fluid);
         if (above && above->fluid_kind == state->fluid_kind) next = fluid->flow_levels + above->fluid_level % fluid->flow_levels;
         /* Supporting sources regenerate even with the same fluid above. Material
          * support is independent of opaque/full-cube collision geometry. */
@@ -675,7 +683,7 @@ static maage_status maage_environment_fluid_update(maage_environment *environmen
     }
     blocked = maage_environment_barrier(world, x, y - 1, z, state->fluid_kind, 0, &waiting);
     if (level && !blocked) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
-    next = level >= fluid->flow_levels ? fluid->falling_spread_level : (fluid->level_step >= fluid->flow_levels - level ? fluid->flow_levels : level + fluid->level_step);
+    next = level >= fluid->flow_levels ? fluid->falling_spread_level : (maage_environment_fluid_step(world, fluid) >= fluid->flow_levels - level ? fluid->flow_levels : level + maage_environment_fluid_step(world, fluid));
     if (next >= fluid->flow_levels) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     for (i = 0; i < 4; ++i) {
         costs[i] = maage_environment_outlet(environment, world, x, y, z, fluid, i, &waiting);
@@ -755,24 +763,29 @@ maage_status maage_environment_tick(maage_environment *environment, maage_world 
         state->day_tick = 0;
         maage_environment_increment(&state->day_low, &state->day_high);
     }
-    if (state->rain_ticks) --state->rain_ticks;
-    if (!state->rain_ticks) {
-        state->raining = !state->raining;
-        state->rain_ticks = state->raining ? 12000UL + maage_environment_random(state) % 12001UL : 12000UL + maage_environment_random(state) % 168001UL;
-    }
-    if (state->thunder_ticks) --state->thunder_ticks;
-    if (!state->thunder_ticks) {
-        state->thundering = !state->thundering;
-        state->thunder_ticks = state->thundering ? 3600UL + maage_environment_random(state) % 12001UL : 12000UL + maage_environment_random(state) % 168001UL;
-    }
-    state->rain_intensity += state->raining ? 0.01 : -0.01;
-    /* Rain weights the observed thunder strength at presentation time. Its
+    if (maage_world_dimension(world)->weather) {
+        if (state->rain_ticks) --state->rain_ticks;
+        if (!state->rain_ticks) {
+            state->raining = !state->raining;
+            state->rain_ticks = state->raining ? 12000UL + maage_environment_random(state) % 12001UL : 12000UL + maage_environment_random(state) % 168001UL;
+        }
+        if (state->thunder_ticks) --state->thunder_ticks;
+        if (!state->thunder_ticks) {
+            state->thundering = !state->thundering;
+            state->thunder_ticks = state->thundering ? 3600UL + maage_environment_random(state) % 12001UL : 12000UL + maage_environment_random(state) % 168001UL;
+        }
+        state->rain_intensity += state->raining ? 0.01 : -0.01;
+        /* Rain weights the observed thunder strength at presentation time. Its
      * independent transition must not be faded a second time when rain starts. */
-    state->thunder_intensity += state->thundering ? 0.01 : -0.01;
-    if (state->rain_intensity < 0) state->rain_intensity = 0;
-    if (state->rain_intensity > 1) state->rain_intensity = 1;
-    if (state->thunder_intensity < 0) state->thunder_intensity = 0;
-    if (state->thunder_intensity > 1) state->thunder_intensity = 1;
+        state->thunder_intensity += state->thundering ? 0.01 : -0.01;
+        if (state->rain_intensity < 0) state->rain_intensity = 0;
+        if (state->rain_intensity > 1) state->rain_intensity = 1;
+        if (state->thunder_intensity < 0) state->thunder_intensity = 0;
+        if (state->thunder_intensity > 1) state->thunder_intensity = 1;
+    } else {
+        state->raining = state->thundering = 0;
+        state->rain_intensity = state->thunder_intensity = 0;
+    }
     for (count = 0; count < budget; ++count) {
         result = maage_world_take_update(world, state->ticks_low, state->ticks_high, &x, &z, &update);
         if (maage_status_failed(result)) return result;
