@@ -48,11 +48,15 @@ try {
             (Test-Path -LiteralPath (Join-Path $_.FullName 'maage-client.exe') -PathType Leaf) -and
             (Test-Path -LiteralPath (Join-Path $_.FullName 'maage-client.json') -PathType Leaf)
         })
-    if ($clientPackages.Count -ne 1) {
-        throw "Expected exactly one complete Client package under $buildRoot/$Configuration; found $($clientPackages.Count)."
+    if ($clientPackages.Count -eq 0) {
+        throw "No complete Client package found under $buildRoot/$Configuration."
     }
-
-    $clientExe = Join-Path $clientPackages[0].FullName 'maage-client.exe'
+    # Old versioned outputs can coexist in a development checkout. The
+    # just-built manifest is normally the most recently written one.
+    $selectedPackage = $clientPackages |
+        Sort-Object { (Get-Item -LiteralPath (Join-Path $_.FullName 'maage-client.json')).LastWriteTimeUtc } -Descending |
+        Select-Object -First 1
+    $clientExe = Join-Path $selectedPackage.FullName 'maage-client.exe'
     Write-Host "Client package ready: $clientExe"
     Write-Host 'Launching MaaGE Launcher...'
     Start-Process -FilePath $launcherPath -WorkingDirectory (Split-Path $launcherPath -Parent)
