@@ -57,7 +57,7 @@ See [diagnostics](diagnostics.md) and [AGENTS.md](../AGENTS.md) for shared loggi
 
 ## Player Appearance and Cameras
 
-F5 cycles transient First/Back/Front during captured gameplay. The third-person four-block boom uses local 11³ collision samples, including predictions; unknown terrain obstructs. Targeting/audio remain at the player eye. One interpolated model drives arm, preview and world body using cached geometry; duplicate snapshots do not restart swings or damage. Server-owned sprint changes world FOV separately from saved base/foreground projection; Creative sprint flight adds horizontal acceleration.
+F5 cycles transient First/Back/Front during captured gameplay. The third-person four-block boom uses local 11³ collision samples, including predictions; unknown terrain obstructs. Targeting/audio remain at the player eye. One interpolated model drives arm, preview and world body using cached geometry; duplicate snapshots do not restart swings or damage. Server-owned sprint changes world FOV separately from saved base/foreground projection; Creative flight uses independent horizontal acceleration (0.05), momentum retention (0.88) and a 1.5x sprint boost for smoother, slower cruising; vertical control and ground sprinting are unchanged.
 
 The Launcher verifies/caches the selected profile's ACTIVE skin at `minecraft/skins/<uuid>/`; failures preserve profile-scoped known-good/default appearance without affecting authorization. Client receives a versioned nonsecret reference and normalizes classic/slim 64×64 or legacy 64×32 skins once, including independent limbs/layers. No per-frame I/O.
 

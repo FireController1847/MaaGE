@@ -307,8 +307,8 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
         for (axis = 0; axis < 3; ++axis)
             if (fabs(player->velocity[axis]) < 0.005) player->velocity[axis] = 0;
     if (input->flying) {
-        acceleration = 0.2 * (player->sprinting ? MAAGE_PLAYER_FLIGHT_SPRINT_SPEED : 1.0);
-        drag = 0.6;
+        acceleration = MAAGE_PLAYER_FLIGHT_ACCELERATION * (player->sprinting ? MAAGE_PLAYER_FLIGHT_SPRINT_SPEED : 1.0);
+        drag = MAAGE_PLAYER_FLIGHT_DRAG;
     } else if (definition && definition->swimming) {
         acceleration = definition->acceleration;
         drag = definition->drag;
