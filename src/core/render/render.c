@@ -539,6 +539,11 @@ maage_status maage_renderer_upload_mesh(maage_renderer *renderer, const maage_me
     maage_render_texture_destroy(texture);
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD);
 }
+maage_status maage_render_mesh_set_fog_blend(maage_render_mesh *mesh, float amount) {
+    if (!mesh || !(amount >= 0 && amount <= 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_SET, 0);
+    mesh->fog_blend = amount;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SET, 0);
+}
 maage_status maage_render_mesh_destroy(maage_render_mesh *mesh) {
     maage_render_mesh *source;
     if (!mesh) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);

@@ -14,6 +14,7 @@ typedef struct maage_client_chunk_mesh {
     size_t vertices, indices;
     float minimum[3], maximum[3]; /* Immutable source bounds; prediction views only remove faces. */
     double initialized_at, uploaded_at;
+    double fade_started_at; /* Zero finished; negative waits for gameplay reveal. */
 } maage_client_chunk_mesh;
 typedef struct maage_client_prediction {
     struct {

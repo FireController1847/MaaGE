@@ -101,7 +101,7 @@ MAAGE_SHADER_VEC4 maage_shader_mesh_color(MAAGE_SHADER_VEC4 texel, MAAGE_SHADER_
     MAAGE_SHADER_VEC3 rgb = mix(texel.rgb * color.rgb * light, parameters.yzw * light, max(lighting.w - 1.0, 0.0));
     return MAAGE_SHADER_VEC4(rgb, alpha);
 }
-MAAGE_SHADER_VEC4 maage_shader_fog(MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC3 position, float material, MAAGE_SHADER_VEC4 fog, MAAGE_SHADER_VEC4 range) {
+MAAGE_SHADER_VEC4 maage_shader_fog(MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC3 position, float material, MAAGE_SHADER_VEC4 fog, MAAGE_SHADER_VEC4 range, MAAGE_SHADER_VEC4 lighting) {
     float visibility = 1.0;
     if (range.y > range.x) {
         /* Interpolate camera coordinates, then measure radius per fragment;
@@ -109,7 +109,9 @@ MAAGE_SHADER_VEC4 maage_shader_fog(MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC3 po
         float radius = length(position * MAAGE_SHADER_VEC3(range.zw, 1.0));
         visibility = 1.0 - smoothstep(range.x, range.y, radius);
     } else if (fog.w > 0.0) visibility = exp(-fog.w * max(position.z, 0.0));
-    else return color;
+    /* Direct meshes reuse lighting.y for extra fog, never instance lighting.
+     * Multiply materials approach their neutral color; alpha/depth stay intact. */
+    if (lighting.w == 0.0) visibility *= 1.0 - clamp(lighting.y, 0.0, 1.0);
     MAAGE_SHADER_VEC3 target = material == float(MAAGE_MESH_MATERIAL_MULTIPLY) ? MAAGE_SHADER_VEC3(0.5) : fog.rgb;
     return MAAGE_SHADER_VEC4(mix(target, color.rgb, visibility), color.a);
 }

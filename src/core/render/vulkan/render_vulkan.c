@@ -800,7 +800,7 @@ static void maage_vulkan_mesh_passes(maage_vulkan_renderer *native, VkCommandBuf
     const maage_render_mesh *mesh;
     maage_render_uniforms uniforms;
     while ((mesh = maage_render_frame_next_mesh(plan, foreground, &cursor)) != NULL) {
-        maage_render_draw_uniforms(plan, foreground, &cursor, &uniforms);
+        maage_render_draw_uniforms(plan, foreground, mesh, &cursor, &uniforms);
         if (!foreground && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
             maage_vulkan_mesh *geometry = mesh->platform;
             maage_vulkan_image *texture = mesh->texture->platform;

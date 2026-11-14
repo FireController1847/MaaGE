@@ -485,7 +485,7 @@ static void maage_metal_draw_mesh_passes(maage_metal_renderer *native, id<MTLRen
             [encoder setCullMode:state->cull ? MTLCullModeBack : MTLCullModeNone];
             previous = cursor.layer;
         }
-        maage_render_draw_uniforms(plan, foreground, &cursor, &uniforms);
+        maage_render_draw_uniforms(plan, foreground, mesh, &cursor, &uniforms);
         [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
         [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
         if (!foreground && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {

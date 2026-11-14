@@ -64,7 +64,7 @@ maage_status maage_client_ui_open(maage_client_ui *ui, maage_client_ui_screen_id
     ui->dragging_sensitivity = ui->dragging_controls = 0;
     ui->selected = 0;
     ui->selected_keyboard = 0;
-    ui->dragging_fov = ui->dragging_fps = ui->dragging_distance = ui->dragging_volume = 0;
+    ui->dragging_fov = ui->dragging_fps = ui->dragging_distance = ui->dragging_chunk_fade = ui->dragging_volume = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_NAVIGATE, 0);
 }
 
@@ -89,7 +89,7 @@ maage_status maage_client_ui_back(maage_client_ui *ui) {
     ui->dragging_sensitivity = ui->dragging_controls = 0;
     ui->selected = 0;
     ui->selected_keyboard = 0;
-    ui->dragging_fov = ui->dragging_fps = ui->dragging_distance = ui->dragging_volume = 0;
+    ui->dragging_fov = ui->dragging_fps = ui->dragging_distance = ui->dragging_chunk_fade = ui->dragging_volume = 0;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_NAVIGATE, 0);
 }
 

@@ -1216,6 +1216,7 @@ choose_world:
             }
         }
         video_options.render_distance = maage_client_ui_render_distance(ui);
+        video_options.chunk_fade_ms = maage_client_ui_chunk_fade_ms(ui);
         if (options.radius != video_options.render_distance) {
             memory_reclaim_after = video_options.render_distance < options.radius ? now + 3.0 : -1.0;
             options.radius = video_options.render_distance;
@@ -1734,12 +1735,31 @@ choose_world:
                     cache.slots[slot_index].first_frame = 1;
                     ++first_count;
                 }
-                if (state.framebuffer_width > 0 && state.framebuffer_height > 0 && cache.slots[slot_index].vertices && !maage_client_mesh_visible(&cache.slots[slot_index], matrix)) continue;
+                {
+                    maage_client_chunk_mesh *chunk = &cache.slots[slot_index];
+                    maage_render_mesh *mesh = chunk->filtered ? chunk->prediction : chunk->mesh;
+                    float fog_blend = 0.0f;
+                    int arrival = loading_terrain && abs(chunk->x - cx) <= 1 && abs(chunk->z - cz) <= 1;
+                    if (!video_options.chunk_fade_ms || arrival) chunk->fade_started_at = 0.0;
+                    else if (!chunk->presented) fog_blend = 1.0f;
+                    else if (chunk->fade_started_at != 0.0) {
+                        double progress;
+                        if (chunk->fade_started_at < 0.0 && !loading_terrain && !latest.travelling && !latest.credits) chunk->fade_started_at = now;
+                        progress = chunk->fade_started_at < 0.0 ? 0.0 : (now - chunk->fade_started_at) * 1000.0 / video_options.chunk_fade_ms;
+                        if (progress >= 1.0) chunk->fade_started_at = 0.0;
+                        else {
+                            if (progress < 0.0) progress = 0.0;
+                            fog_blend = (float) (1.0 - progress * progress * (3.0 - 2.0 * progress));
+                        }
+                    }
+                    if (state.framebuffer_width > 0 && state.framebuffer_height > 0 && chunk->vertices && !maage_client_mesh_visible(chunk, matrix)) continue;
+                    if (mesh) {
+                        operation = maage_render_mesh_set_fog_blend(mesh, fog_blend);
+                        if (maage_status_failed(operation)) goto done;
+                        cache.draws[draw_count++] = mesh;
+                    }
+                }
                 if (cache.slots[slot_index].filtered || cache.slots[slot_index].mesh) {
-                    if (cache.slots[slot_index].filtered) {
-                        if (cache.slots[slot_index].prediction) cache.draws[draw_count++] = cache.slots[slot_index].prediction;
-                    } else
-                        cache.draws[draw_count++] = cache.slots[slot_index].mesh;
                     ++mesh_stats.meshes;
                     mesh_stats.vertices += cache.slots[slot_index].vertices;
                     mesh_stats.indices += cache.slots[slot_index].indices;
@@ -1815,6 +1835,10 @@ choose_world:
                     if (maage_status_failed(operation)) goto done;
                     if (maage_status_code(operation) == MAAGE_STATUS_SUCCESS) {
                         cache.slots[slot_index].presented = 1;
+                        if (video_options.chunk_fade_ms) {
+                            if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= 1 && abs(cache.slots[slot_index].z - cz) <= 1) cache.slots[slot_index].fade_started_at = 0.0;
+                            else cache.slots[slot_index].fade_started_at = loading_terrain || latest.travelling || latest.credits ? -1.0 : frame_end;
+                        }
                         if (prediction.diagnostics) MAAGE_LOG_VERBOSE_EVENT("maage.client.latency", maage_log_verbose("maage.client.latency", "phase=first_visible_frame_submitted column=%d,%d revision=%lu state=%lu initial_ms=%.3f gpu_ready_to_submit_ms=%.3f", cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision, cache.slots[slot_index].revision, (frame_end - cache.slots[slot_index].initialized_at) * 1000, (frame_end - cache.slots[slot_index].uploaded_at) * 1000));
                     }
                 }

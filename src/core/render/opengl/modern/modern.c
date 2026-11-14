@@ -376,7 +376,7 @@ static void maage_gl_mesh_passes(maage_gl_renderer *native, const maage_render_f
         maage_gl_mesh *geometry = mesh->platform;
         maage_gl_texture *texture = mesh->texture->platform;
         maage_gl_pipeline(native, cursor.layer);
-        maage_render_draw_uniforms(plan, foreground, &cursor, &uniforms);
+        maage_render_draw_uniforms(plan, foreground, mesh, &cursor, &uniforms);
         maage_gl_uniforms(native, &native->mesh_program, &uniforms);
         maage_gl_texture_bind(native, texture->name);
         native->gl.ActiveTexture(MAAGE_GL_TEXTURE0 + 1);

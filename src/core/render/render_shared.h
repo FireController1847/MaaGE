@@ -103,6 +103,6 @@ maage_status maage_render_ui_pack(const maage_render_ui_data *batch, maage_rende
  * World translucency merges sorted streams into contiguous index ranges in
  * triangle/count, consuming the plan's heap once. NULL ends traversal. */
 const maage_render_mesh *maage_render_frame_next_mesh(const maage_render_frame_plan *plan, int foreground, maage_render_mesh_cursor *cursor);
-void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foreground, const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms);
+void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foreground, const maage_render_mesh *mesh, const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms);
 int maage_render_gpu_layout_supported(void);
 #endif

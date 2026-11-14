@@ -122,6 +122,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui, const maage_client_ui_deb
 double maage_client_ui_fov_radians(const maage_client_ui *ui);
 int maage_client_ui_max_fps(const maage_client_ui *ui);
 int maage_client_ui_render_distance(const maage_client_ui *ui);
+int maage_client_ui_chunk_fade_ms(const maage_client_ui *ui);
 int maage_client_ui_vsync(const maage_client_ui *ui);
 int maage_client_ui_view_bobbing(const maage_client_ui *ui);
 int maage_client_ui_gui_scale(const maage_client_ui *ui);

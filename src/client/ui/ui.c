@@ -118,6 +118,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     ui->last_nonwindowed_mode = ui->confirmed_fullscreen_style = MAAGE_CLIENT_BORDERLESS;
     ui->fps_step = 26;
     ui->render_distance = MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT;
+    ui->chunk_fade_ms = MAAGE_CLIENT_CHUNK_FADE_DEFAULT_MS;
     ui->render_distance_max = MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX;
     ui->vsync = 1;
     ui->view_bobbing = 1;
@@ -281,6 +282,7 @@ maage_status maage_client_ui_update(maage_client_ui *ui, const maage_client_ui_i
                           maage_client_ui_current(ui) == MAAGE_CLIENT_UI_CRAFTING_TABLE)) {
         ui->dragging_fps = 0;
         ui->dragging_distance = 0;
+        ui->dragging_chunk_fade = 0;
         ui->dragging_volume = 0;
         ui->dragging_fov = 0;
         return maage_client_ui_modal(ui) ? maage_client_ui_back(ui) : maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
@@ -374,6 +376,7 @@ maage_status maage_client_ui_apply_options(maage_client_ui *ui, const maage_clie
     if (ui->fov_degrees > 110) ui->fov_degrees = 110;
     ui->fps_step = options->max_fps ? options->max_fps / 10 - 1 : 26;
     ui->render_distance = options->render_distance;
+    ui->chunk_fade_ms = options->chunk_fade_ms >= 0 && options->chunk_fade_ms <= MAAGE_CLIENT_CHUNK_FADE_MAX_MS && !(options->chunk_fade_ms % MAAGE_CLIENT_CHUNK_FADE_STEP_MS) ? options->chunk_fade_ms : MAAGE_CLIENT_CHUNK_FADE_DEFAULT_MS;
     if (ui->render_distance < 1 || ui->render_distance > MAAGE_WORLD_MAX_RADIUS) ui->render_distance = MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT;
     /* Keep an explicitly larger CLI/INI choice representable by this slider. */
     ui->render_distance_max = ui->render_distance > MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX ? ui->render_distance : MAAGE_CLIENT_RENDER_DISTANCE_SLIDER_MAX;
@@ -413,6 +416,7 @@ void maage_client_ui_get_options(const maage_client_ui *ui, maage_client_options
     options->fov_degrees = ui->fov_degrees;
     options->max_fps = ui->fps_step == 26 ? 0 : (ui->fps_step + 1) * 10;
     options->render_distance = ui->render_distance;
+    options->chunk_fade_ms = ui->chunk_fade_ms;
     options->vsync = ui->vsync;
     options->view_bobbing = ui->view_bobbing;
     options->gui_scale = ui->requested_scale;
@@ -444,6 +448,9 @@ int maage_client_ui_max_fps(const maage_client_ui *ui) {
 }
 int maage_client_ui_render_distance(const maage_client_ui *ui) {
     return ui ? ui->render_distance : MAAGE_CLIENT_RENDER_DISTANCE_DEFAULT;
+}
+int maage_client_ui_chunk_fade_ms(const maage_client_ui *ui) {
+    return ui ? ui->chunk_fade_ms : MAAGE_CLIENT_CHUNK_FADE_DEFAULT_MS;
 }
 int maage_client_ui_vsync(const maage_client_ui *ui) {
     return ui ? ui->vsync : 1;

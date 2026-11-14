@@ -29,6 +29,7 @@ struct maage_render_mesh {
     maage_render_texture *texture;
     void *platform;
     maage_render_geometry geometry;
+    float fog_blend;
     maage_mesh_preparation *upload;
     maage_render_mesh *vertex_source;
     size_t upload_offset, vertex_count, surface_count, references;

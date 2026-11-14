@@ -355,10 +355,15 @@ const maage_render_mesh *maage_render_frame_next_mesh(const maage_render_frame_p
     }
     return NULL;
 }
-void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foreground, const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms) {
+void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foreground, const maage_render_mesh *mesh, const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms) {
     unsigned int row, column, k;
     *uniforms = foreground ? plan->hand : plan->world;
-    if (!cursor->instance) return;
+    if (!cursor->instance) {
+        /* Direct world meshes have no light override. Reuse its unused sky
+         * component for extra fog; the 128-byte Vulkan ABI stays unchanged. */
+        if (!foreground) uniforms->lighting[1] = mesh->fog_blend;
+        return;
+    }
     for (column = 0; column < 4; ++column)
         for (row = 0; row < 4; ++row) {
             uniforms->matrix[column * 4 + row] = 0;
