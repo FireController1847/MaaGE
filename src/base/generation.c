@@ -187,12 +187,16 @@ typedef struct maage_generation_environment {
     double weights[MAAGE_GENERATION_REGION_SAMPLES], ocean, coast, flow;
 } maage_generation_environment;
 static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, maage_world_seed seed, int x, int z, maage_generation_environment *sample, maage_generation_region_cache *cache) {
-    double region_x = x, region_z = z, dx, dz, distance, radius, weight, nearest = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, total = 0;
+    double region_x = x, region_z = z, land_x, land_z, dx, dz, distance, identity_distance, radius, weight, nearest = HUGE_VAL, total = 0;
     int gx, gz, ix, iz, i = 0;
     maage_biome_id selected = MAAGE_CONTENT_ID_INVALID;
     memset(sample, 0, sizeof(*sample));
     region_x += 128 * maage_generation_fractal(seed, x / 320.0, z / 320.0, 500UL, 2) + 32 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 1200UL, 2);
     region_z += 128 * maage_generation_fractal(seed, x / 320.0, z / 320.0, 800UL, 2) + 32 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 1300UL, 2);
+    /* Smaller land-only bends soften categorical soil boundaries without
+     * moving ocean coverage, coastal elevation or the broad inlet shapes. */
+    land_x = region_x + 24 * maage_generation_fractal(seed, x / 48.0, z / 48.0, 1500UL, 2) + 6 * maage_generation_noise(seed, x / 12.0, z / 12.0, 1501UL);
+    land_z = region_z + 24 * maage_generation_fractal(seed, x / 48.0, z / 48.0, 1600UL, 2) + 6 * maage_generation_noise(seed, x / 12.0, z / 12.0, 1601UL);
     gx = (int) floor(region_x / MAAGE_GENERATION_REGION_SCALE);
     gz = (int) floor(region_z / MAAGE_GENERATION_REGION_SCALE);
     /* Terrestrial identity belongs to the nearest supported land site.
@@ -206,8 +210,11 @@ static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, 
             dx = region_x - sample->regions[i].site_x;
             dz = region_z - sample->regions[i].site_z;
             distance = dx * dx + dz * dz;
-            if (sample->regions[i].supported_biome != ids->biome_ocean && distance < nearest) {
-                nearest = distance;
+            dx = land_x - sample->regions[i].site_x;
+            dz = land_z - sample->regions[i].site_z;
+            identity_distance = dx * dx + dz * dz;
+            if (sample->regions[i].supported_biome != ids->biome_ocean && identity_distance < nearest) {
+                nearest = identity_distance;
                 selected = sample->regions[i].supported_biome;
             }
             radius = distance / (MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS);
@@ -222,7 +229,7 @@ static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, 
         if (sample->regions[i].supported_biome == ids->biome_ocean) sample->ocean += sample->weights[i];
     }
     /* Identity and elevation use this same signed, smoothly blended shore
-     * coordinate. Its positive land side owns the narrow beach band. */
+     * coordinate. Its positive land side can receive local beach patches. */
     sample->coast = MAAGE_GENERATION_REGION_SCALE * (1 - 2 * sample->ocean);
     return sample->coast <= 0 ? ids->biome_ocean : selected;
 }
@@ -272,7 +279,7 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     maage_generation_sample_entry *cached = maage_generation_sample_entry_at(regions, x, z);
     const maage_biome_definition *definition, *climate;
     maage_biome_id biome;
-    double base = 0, variation = 0, temperature = 0, land = 0, terrain, detail, elevation, uncarved, coast, distance, width, depth, pool, cross, bank, target, span;
+    double base = 0, variation = 0, temperature = 0, land = 0, terrain, detail, elevation, uncarved, coast, beach_width, distance, width, depth, pool, cross, bank, target, span, relief;
     int i, ocean;
     if (!environment && cached && cached->valid && cached->x == x && cached->z == z) {
         column->height = cached->sample.height;
@@ -314,16 +321,24 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     elevation = maage_generation_lerp(policy->sea_level, elevation, coast);
     uncarved = elevation;
     column->biome = biome;
-    if (!ocean && sample->coast >= 0 && sample->coast < 12) {
-        if (biome == ids->biome_hills) column->biome = ids->biome_stone_beach;
-        else column->biome = temperature < 0.15 ? ids->biome_cold_beach : ids->biome_beach;
+    /* Beaches widen and disappear along the coast instead of painting a
+     * continuous strip. Water-anchored deposits supply the smaller patches
+     * between them, using the same bounded cover layers as river banks. */
+    if (!ocean && sample->coast >= 0 && sample->coast < 8) {
+        beach_width = -2 + 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 2600UL, 2) + 8 * maage_generation_noise(seed, x / 24.0, z / 24.0, 2601UL);
+        if (sample->coast < beach_width) {
+            if (biome == ids->biome_hills) column->biome = ids->biome_stone_beach;
+            else column->biome = temperature < 0.15 ? ids->biome_cold_beach : ids->biome_beach;
+        }
     }
     distance = maage_generation_river_distance(seed, x, z);
-    width = 8 + 12 * maage_generation_fractal(seed, x / 160.0, z / 160.0, 2000UL, 2);
+    /* Scale the entire valley so coherent width variation remains visible
+     * through the banks instead of being hidden by a fixed outer span. */
+    width = 0.75 + 1.2 * maage_generation_fractal(seed, x / 160.0, z / 160.0, 2000UL, 2) + 0.35 * maage_generation_noise(seed, x / 48.0, z / 48.0, 2001UL);
+    if (width < 0.35) width = 0.35;
+    if (width > 1.35) width = 1.35;
     pool = (maage_generation_noise(seed, x / 240.0 + 11.5, z / 240.0 - 7.5, 2200UL) - 0.18) / 0.35;
     pool = pool <= 0 ? 0 : (pool < 1 ? maage_generation_fade(pool) : 1);
-    width += 14 * pool;
-    if (width < 3) width = 3;
     depth = 5 + 7 * maage_generation_fractal(seed, x / 112.0, z / 112.0, 2100UL, 2) + maage_generation_noise(seed, x / 24.0, z / 24.0, 2101UL);
     if (depth < 2) depth = 2;
     if (depth > 9) depth = 9;
@@ -331,7 +346,9 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
      * depth and outer bank ramps would leave a steep trench beside a shelf.
      * Higher relief gets a wider valley instead of a taller channel wall. */
     target = policy->sea_level - depth;
-    span = width + 24 + (elevation > policy->sea_level ? (elevation - policy->sea_level) * 2 : 0);
+    relief = elevation > policy->sea_level ? elevation - policy->sea_level : 0;
+    span = (28 + relief * 2) * width + 24 * pool;
+    if (span < depth * 2.5 + relief) span = depth * 2.5 + relief;
     cross = distance / span;
     bank = cross < 1 ? 1 - maage_generation_fade(cross) : 0;
     if (elevation > target) elevation = maage_generation_lerp(elevation, target, bank);
@@ -405,7 +422,7 @@ static int maage_generation_soil_depth(maage_world_seed seed, int x, int z) {
  * inside its own vertical interval, so a patch never replaces a whole bank
  * profile or creates a sandstone foundation below a thin sand deposit. */
 static int maage_generation_sediment(const maage_base_ids *ids, maage_world_seed seed, const maage_biome_registry *biomes, const maage_generation_policy *policy, int x, int z, maage_generation_sample *sample, maage_generation_region_cache *regions) {
-    static const unsigned int attempts[3] = {3, 1, 1};
+    static const unsigned int attempts[3] = {5, 1, 1};
     static const unsigned long radii[3] = {5, 2, 4};
     static const int reach[3] = {2, 1, 2};
     maage_block_state_id materials[3];
@@ -441,6 +458,9 @@ static int maage_generation_sediment(const maage_base_ids *ids, maage_world_seed
                     if (dx * dx + dz * dz > radius * radius) continue;
                     if (!maage_generation_column_at(ids, seed, biomes, policy, cx, cz, &anchor, NULL, regions)) return 0;
                     if (anchor.height >= policy->sea_level) continue;
+                    /* The additional sand attempts belong only to ocean
+                     * anchors; river banks keep their existing density. */
+                    if (pass == 0 && attempt >= 3 && anchor.biome != ids->biome_ocean) continue;
                     for (layer = 0; layer <= depth; ++layer) {
                         y = sample->height - layer;
                         if (abs(y - anchor.height - 1) > reach[pass]) continue;
