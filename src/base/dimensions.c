@@ -713,9 +713,16 @@ static int dimension_find_surface(const maage_base_ids *ids, const maage_world *
         }
     return 0;
 }
-static int dimension_find_cavity(const maage_base_ids *ids, const maage_world *world, int x, int y, int z, int nether, int carve, int *out_x, int *out_y, int *out_z) {
+static int dimension_area_loaded(const maage_world *world, int x, int z, int radius) {
+    int cx, cz;
+    for (cz = maage_world_chunk_coordinate(z - radius); cz <= maage_world_chunk_coordinate(z + radius); ++cz)
+        for (cx = maage_world_chunk_coordinate(x - radius); cx <= maage_world_chunk_coordinate(x + radius); ++cx)
+            if (!maage_world_chunk_loaded(world, cx, cz)) return 0;
+    return 1;
+}
+static int dimension_find_cavity(const maage_base_ids *ids, const maage_world *world, int x, int y, int z, int nether, int carve, int limit, int *out_x, int *out_y, int *out_z) {
     int radius, index, dx, dz, offset, direction, height, top = nether ? 118 : MAAGE_WORLD_HEIGHT - 6;
-    for (radius = 0; radius <= 32; ++radius)
+    for (radius = 0; radius <= limit; ++radius)
         for (index = 0; index < (radius ? radius * 8 : 1); ++index) {
             dimension_ring_offset(radius, index, &dx, &dz);
             for (offset = 0; offset <= top; ++offset)
@@ -743,8 +750,15 @@ static maage_status dimension_arrive(const void *context, maage_world *world, ma
     const maage_block_state_definition *surface;
     maage_world_observation observation;
     int x, y, z, i, j, k, origin_x, origin_z, origin_y, found, ocean, nether = maage_world_dimension(world)->id == ids->dimension_nether;
-    if (travel->kind == TRAVEL_NETHER) {
-        result = maage_world_find_states(world, ids->portal_states, 2, travel->position, 128, &portal);
+    if (travel->kind == TRAVEL_NETHER && !travel->destination_pristine) {
+        /* A nearby result is globally nearest if its full 3D distance is
+         * smaller than the horizontal boundary of the completed search. */
+        result = maage_world_find_states(world, ids->portal_states, 2, travel->position, 16, &portal);
+        if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
+            double dx = portal.x + 0.5 - travel->position[0], dy = portal.y - travel->position[1], dz = portal.z + 0.5 - travel->position[2];
+            if (dx * dx + dy * dy + dz * dz >= 16.0 * 16.0) result = dimension_result(MAAGE_STATUS_NOOP);
+        }
+        if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) result = maage_world_find_states(world, ids->portal_states, 2, travel->position, 128, &portal);
         if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) {
             int width, portal_height;
             maage_block_plan frame;
@@ -771,6 +785,9 @@ static maage_status dimension_arrive(const void *context, maage_world *world, ma
             result = dimension_result(MAAGE_STATUS_NOT_FOUND);
         }
         if (maage_status_code(result) != MAAGE_STATUS_NOT_FOUND) return result;
+        /* A near portal with an unsafe exit may have been rejected before
+         * the larger search/placement area finished loading. */
+        if (!dimension_area_loaded(world, (int) floor(travel->position[0]), (int) floor(travel->position[2]), 131)) return dimension_result(MAAGE_STATUS_NOOP);
     }
     x = (int) floor(travel->position[0]);
     z = (int) floor(travel->position[2]);
@@ -781,15 +798,24 @@ static maage_status dimension_arrive(const void *context, maage_world *world, ma
         origin_z = z;
         found = 0;
         ocean = 0;
+        if (nether && travel->destination_pristine) {
+            /* No existing portals are possible on the first visit to an
+             * empty dimension. Prefer nearby natural terrain as soon as its
+             * safety perimeter is ready; expand only if necessary. */
+            if (!dimension_area_loaded(world, origin_x, origin_z, 11)) return dimension_result(MAAGE_STATUS_NOOP);
+            found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, 1, 0, 8, &x, &y, &z);
+            if (!found && !dimension_area_loaded(world, origin_x, origin_z, 35)) return dimension_result(MAAGE_STATUS_NOOP);
+        }
         if (!nether) {
+            if (!dimension_area_loaded(world, origin_x, origin_z, 115)) return dimension_result(MAAGE_STATUS_NOOP);
             surface = maage_block_registry_state(maage_world_registry(world), maage_world_get(world, x, policy->sea_level, z));
             ocean = surface && surface->fluid_kind == ids->fluid_water;
             if (maage_world_observe(world, x, policy->sea_level, z, &observation) && observation.biome_id == ids->biome_ocean) ocean = 1;
             if (ocean) found = dimension_find_surface(ids, world, origin_x, origin_z, policy->sea_level, 1, &x, &y, &z);
             if (!found) found = dimension_find_surface(ids, world, origin_x, origin_z, policy->sea_level, 0, &x, &y, &z);
         }
-        if (!found && !ocean) found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, nether, 0, &x, &y, &z);
-        if (!found && !ocean) found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, nether, 1, &x, &y, &z);
+        if (!found && !ocean) found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, nether, 0, 32, &x, &y, &z);
+        if (!found && !ocean) found = dimension_find_cavity(ids, world, origin_x, origin_y, origin_z, nether, 1, 32, &x, &y, &z);
         if (!found) return dimension_result(MAAGE_STATUS_NOT_FOUND);
     }
     for (k = -2; k <= 2; ++k)

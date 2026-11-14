@@ -58,6 +58,9 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
  * their initial entity arrays. Snapshot every visited World after its flush,
  * then save the shared player once; metadata publishes all dimensions atomically. */
 maage_status maage_world_store_dimension(maage_world_store *root, maage_dimension_id dimension, maage_world_store **view, maage_world_record *record);
+/* Snapshot of region-directory emptiness at session open, not a live query.
+ * Only use before this dimension has ever been instantiated in this session. */
+int maage_world_store_initial_regions_empty(const maage_world_store *view);
 maage_status maage_world_store_checkpoint(maage_world_store *view, const maage_world *world, maage_status_trace *trace);
 /* Saves one complete caller-owned snapshot. Metadata writes must be serialized;
  * independent region files may be written concurrently; each region serializes

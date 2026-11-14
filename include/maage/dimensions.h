@@ -15,6 +15,7 @@ typedef struct maage_dimension_travel {
     unsigned int delay;
     unsigned int cooldown; /* Optional elapsed-tick delay, never refreshed by contact. */
     int arrival_radius; /* Minimum destination streaming radius in chunks; zero uses normal view. */
+    int destination_pristine; /* Server-owned: no saved regions or previous World in this session. */
     unsigned long presentation;
     int survival_screen_effect; /* Suppress only the screen effect in Creative, not sounds. */
     int credits;  /* Request the per-player, per-session-World credits milestone on arrival. */

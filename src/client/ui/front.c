@@ -177,7 +177,7 @@ static void front_draw(maage_client_ui *ui, void *context) {
             sprintf(line, "\"%.127s\" will be lost forever!", f->entries[f->selected].name);
             front_center(f, line, 90, 1, 1, 1);
         }
-        front_button(f, 0, "Delete", !f->busy);
+        front_button(f, 0, f->busy ? "Deleting..." : "Delete", !f->busy);
         front_button(f, 1, "Cancel", !f->busy);
     }
     if (f->message[0]) front_center(f, f->message, 29, 1, 0.65f, 0.3f);

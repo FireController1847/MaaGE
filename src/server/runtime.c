@@ -800,7 +800,7 @@ static void server_offer_columns(maage_server_runtime *runtime) {
     }
 }
 
-static maage_status server_dimension_world(maage_server_runtime *runtime, maage_dimension_id dimension, int initial, const double *position, maage_status_trace *trace) {
+static maage_status server_dimension_world(maage_server_runtime *runtime, maage_dimension_id dimension, int initial, const double *position, int radius, maage_status_trace *trace) {
     maage_world_config world_config;
     maage_world_record record;
     maage_world_store *store;
@@ -829,7 +829,7 @@ static maage_status server_dimension_world(maage_server_runtime *runtime, maage_
     world_config.build_meshes = 0;
     world_config.store = store;
     world_config.worker_count = runtime->config.world_workers;
-    world_config.render_distance = runtime->config.render_distance;
+    world_config.render_distance = radius;
     world_config.new_world = initial && record.new_world;
     memcpy(world_config.position, position ? position : record.position, sizeof(world_config.position));
     world_config.generation_policy = record.generation_policy;
@@ -872,7 +872,7 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     if (runtime->dimension_count > (size_t) - 1 / sizeof(*runtime->dimension_worlds)) return server_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_CREATE);
     runtime->dimension_worlds = (maage_world **) calloc(runtime->dimension_count, sizeof(*runtime->dimension_worlds));
     if (!runtime->dimension_worlds) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
-    result = server_dimension_world(runtime, runtime->record.dimension, 1, NULL, trace);
+    result = server_dimension_world(runtime, runtime->record.dimension, 1, NULL, runtime->config.render_distance, trace);
     if (maage_status_failed(result)) return result;
     runtime->world = runtime->dimension_worlds[runtime->record.dimension - 1];
     result = maage_world_store_dimension(runtime->session_store, runtime->record.dimension, &runtime->store, &runtime->record);
@@ -1004,13 +1004,21 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
         runtime->spawn_resolved = 1;
     }
     if (!server_finite(runtime->travel.position[0]) || !server_finite(runtime->travel.position[1]) || !server_finite(runtime->travel.position[2]) || fabs(runtime->travel.position[0]) >= MAAGE_WORLD_LIMIT - 16 || fabs(runtime->travel.position[2]) >= MAAGE_WORLD_LIMIT - 16 || runtime->travel.position[1] < 0 || runtime->travel.position[1] >= MAAGE_WORLD_HEIGHT) return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+    /* Before a first visit, a completely empty region directory proves
+     * there cannot be a previously placed portal in that dimension. */
+    if (!runtime->dimension_worlds[definition->id - 1]) {
+        maage_world_store *view;
+        result = maage_world_store_dimension(runtime->session_store, definition->id, &view, &record);
+        if (maage_status_failed(result)) return result;
+        runtime->travel.destination_pristine = maage_world_store_initial_regions_empty(view);
+    }
+    /* Prepare only the required arrival footprint, not the entire view. */
+    arrival_radius = runtime->travel.arrival_radius ? runtime->travel.arrival_radius : 1;
     runtime->preparing_destination = 1;
-    result = server_dimension_world(runtime, definition->id, 0, runtime->travel.position, trace);
+    result = server_dimension_world(runtime, definition->id, 0, runtime->travel.position, arrival_radius, trace);
     runtime->preparing_destination = 0;
     if (maage_status_failed(result)) return result;
     destination = runtime->dimension_worlds[definition->id - 1];
-    /* Prepare only the required arrival footprint, not the entire view. */
-    arrival_radius = runtime->travel.arrival_radius ? runtime->travel.arrival_radius : 1;
     result = maage_world_set_render_distance(destination, arrival_radius, 0);
     if (maage_status_failed(result)) return result;
     runtime->preparing_destination = 1;
@@ -1102,6 +1110,7 @@ static maage_status server_dimension_contact(maage_server_runtime *runtime) {
     if (!runtime->portal_ticks && effect && effect->enter) server_entity_sound(runtime, effect->enter, runtime->player.position, 0.7, 1);
     runtime->portal_presentation = travel.presentation;
     runtime->portal_progress = (runtime->portal_ticks + 1.0) / travel.delay;
+    travel.destination_pristine = 0;
     runtime->travel = travel;
     if (++runtime->portal_ticks >= travel.delay) {
         runtime->travelling = 1;

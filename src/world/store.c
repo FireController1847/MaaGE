@@ -57,7 +57,7 @@ struct maage_world_store {
     char map_id[37];
     unsigned char *map_bytes;
     size_t map_length;
-    int map_extended;
+    int map_extended, initial_regions_empty;
 };
 static int maage_store_player_valid(const char *uuid) {
     size_t i;
@@ -1074,6 +1074,14 @@ static void maage_store_dimension_get(maage_store_bytes *bytes, maage_world_reco
     record->random_ticks.selection = maage_store_get(bytes, 4);
     record->random_ticks.random = maage_store_get(bytes, 4);
 }
+/* Any directory entry makes the first-visit optimization ineligible.
+ * Listing failure is conservative: the ordinary portal lookup remains required. */
+static int maage_store_region_present(const char *name, maage_folder_link_kind kind, void *context) {
+    (void) name;
+    (void) kind;
+    *(int *) context = 0;
+    return 0;
+}
 static maage_status maage_store_dimensions_init(maage_world_store *store) {
     size_t i;
     maage_world_store *view;
@@ -1454,6 +1462,8 @@ maage_status maage_world_store_open(const char *instance_root, const char *id, i
         MAAGE_STORE_STEP(maage_storage_join(view->directory, sizeof(view->directory), dimensions_dir, component), "Dimension path is too long.");
         MAAGE_STORE_STEP(maage_storage_join(view->regions_dir, sizeof(view->regions_dir), view->directory, "regions"), "Dimension region path is too long.");
         MAAGE_STORE_STEP(maage_storage_directories(view->regions_dir), "Could not prepare dimension region storage.");
+        view->initial_regions_empty = 1;
+        if (maage_status_code(maage_folder_link_list(view->regions_dir, maage_store_region_present, &view->initial_regions_empty)) != MAAGE_STATUS_SUCCESS) view->initial_regions_empty = 0;
         MAAGE_STORE_STEP(maage_region_store_create(view->regions_dir, store->map_id, &view->regions), "Could not initialize dimension regions.");
     }
     length = strlen(chosen);
@@ -1480,6 +1490,9 @@ maage_status maage_world_store_dimension(maage_world_store *root, maage_dimensio
     record->yaw = root->record.yaw;
     record->pitch = root->record.pitch;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_OPEN, 0);
+}
+int maage_world_store_initial_regions_empty(const maage_world_store *view) {
+    return view && view->root && view->initial_regions_empty;
 }
 maage_status maage_world_store_checkpoint(maage_world_store *view, const maage_world *world, maage_status_trace *trace) {
     maage_entity_save entities;
@@ -1515,15 +1528,17 @@ maage_status maage_world_store_save(maage_world_store *store, const double posit
     return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_SAVE);
 }
 maage_status maage_world_store_close(maage_world_store *store) {
-    maage_status result;
+    maage_status result = maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CLOSE, 0), operation;
     size_t i;
     if (!store) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_CLOSE, 0);
     if (store->root) return maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_CLOSE, 0);
     for (i = 0; i < store->dimension_count; ++i) {
         maage_world_store *view = store->dimensions ? store->dimensions[i] : NULL;
         if (!view) continue;
-        result = maage_region_store_destroy(view->regions);
-        if (maage_status_failed(result)) return result;
+        /* Region destruction consumes its handle even on compaction error.
+         * Finish releasing every view and the session lease. */
+        operation = maage_region_store_destroy(view->regions);
+        if (maage_status_failed(operation) && !maage_status_failed(result)) result = operation;
         maage_entity_save_clear(&view->record.entities);
         free(view);
         store->dimensions[i] = NULL;
@@ -1531,11 +1546,10 @@ maage_status maage_world_store_close(maage_world_store *store) {
     free(store->dimensions);
     maage_entity_save_clear(&store->record.entities);
     maage_gameplay_save_clear(&store->record.gameplay);
-    result = maage_region_store_destroy(store->regions);
-    {
-        maage_status released = maage_storage_release(store->lock);
-        if (!maage_status_failed(result)) result = released;
-    }
+    operation = maage_region_store_destroy(store->regions);
+    if (!maage_status_failed(result)) result = operation;
+    operation = maage_storage_release(store->lock);
+    if (!maage_status_failed(result)) result = operation;
     maage_store_map_clear(store);
     free(store);
     return maage_status_failed(result) ? result : maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_CLOSE, 0);
@@ -2250,14 +2264,20 @@ maage_status maage_world_store_delete(const char *instance_root, const char *id,
     if (!maage_status_failed(result)) result = maage_storage_join(directory, sizeof(directory), worlds, id);
     if (!maage_status_failed(result) && !maage_folder_link_managed_path(directory, 0)) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
     if (!maage_status_failed(result)) result = maage_storage_join(path, sizeof(path), worlds, ".selection.lock");
-    if (!maage_status_failed(result)) result = maage_storage_acquire(path, &selection, trace);
+    if (!maage_status_failed(result)) {
+        result = maage_storage_acquire(path, &selection, trace);
+        if (maage_status_failed(result)) maage_store_error(error, "World catalog selection lock unavailable.");
+    }
     if (!maage_status_failed(result)) {
         kind = maage_storage_status(directory);
         if (kind != 0 && kind != 2) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
     }
     if (!maage_status_failed(result) && kind == 2) result = maage_storage_join(path, sizeof(path), directory, ".world.lock");
     if (!maage_status_failed(result) && kind == 2 && maage_storage_status(path) != 0 && maage_storage_status(path) != 1) result = maage_status_make(MAAGE_STATUS_ACCESS_DENIED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_REMOVE, 0);
-    if (!maage_status_failed(result) && kind == 2) result = maage_storage_acquire(path, &lock, trace);
+    if (!maage_status_failed(result) && kind == 2) {
+        result = maage_storage_acquire(path, &lock, trace);
+        if (maage_status_failed(result)) maage_store_error(error, "Selected world is still locked or its lease is unavailable.");
+    }
     if (!maage_status_failed(result) && kind == 2) {
         remove.path = directory;
         remove.root = 1;

@@ -13,7 +13,7 @@ The Client owns UI, controls, camera, sound and visuals, consuming copied Server
 | 10–13 | Video, Sound, Crafting Table, Controls |
 | 14 | Credits |
 
-Pause/Options pause gameplay and music, not streaming. Inventory/table and window focus loss release capture without pausing; focus return restores gameplay capture when no modal is open. World operations and Save/Quit are asynchronous; Quit hides the window before teardown. Loading reports actual work.
+Pause/Options pause gameplay and music, not streaming. Inventory/table and window focus loss release capture without pausing; focus return restores gameplay capture when no modal is open. World operations and Save/Quit are asynchronous; confirmed rename/delete wait for background save and lease release, keeping the selected UUID. Quit hides the window before teardown. Loading reports actual work.
 
 Music uses registered content playlists and one active native music voice. A session/world epoch or playlist change stops the previous voice and releases its decoder before applying the new playlist's initial delay. Native World resets also stop the music bus, and admitting a new music stream first retires any remaining voice on that bus. DEBUG audio-scene logs identify track starts/stops and their world epochs; tracks decode only while selected.
 
