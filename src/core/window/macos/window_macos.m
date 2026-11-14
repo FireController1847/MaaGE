@@ -617,7 +617,8 @@ static int maage_cocoa_input_event(maage_window_system *system, NSEvent *event) 
             key = maage_window_key_macos([event keyCode]);
             if (!key) return text_event;
             maage_window_input_key(window, key, type == NSEventTypeKeyDown);
-            return ([event modifierFlags] & NSEventModifierFlagCommand) ? 0 : 1;
+            /* MaaGE owns mapped keys, including Command shortcuts. Forwarding them also invokes AppKit responder actions. */
+            return 1;
         }
         if (type == NSEventTypeMouseMoved || type == NSEventTypeLeftMouseDown ||
             type == NSEventTypeLeftMouseUp || type == NSEventTypeLeftMouseDragged ||
