@@ -20,6 +20,8 @@ Worlds live at `instances/<uuid>/worlds/<uuid>/`. Current formats: `MGWRLD17` me
 
 Async region writes use immutable snapshots; dirty clears only for the saved revision. After successful flush, metadata checkpoints player/inventory, weather, separate RNG streams, rotating simulation cursor and active/dormant entities (including health/orientation, variants, damage/death, goals, retained effects and flat versioned module state). No pointers or open temporary GUI results. Old development formats fail without migration/deletion. See `world_store.h`, `src/world/{store,region_store}.c`.
 
+Explicit catalog deletion acquires the selection and World locks, validates the entire `dimensions/<saved-id>/regions` directory layout, then removes its regular files and directories. It does not require readable metadata, so a partially removed or corrupt selected World remains deletable. Links and unexpected directories are rejected before removing World files; later filesystem failures retain remaining files and report that deletion is incomplete.
+
 ## Random Ticks and Growth
 
 At 20 TPS the unpaused owner retries neighbor work, services scheduled updates, random ticks and block entities. Available cascades drain before phase publication. Random tick speed defaults to 3 (zero disables); simulation radius defaults to 8, independent of rendering. Eligible numeric-state counts avoid section scans; coordinate, behavior and weather RNG persist separately. Missing terrain/light defers work without synchronous loading.

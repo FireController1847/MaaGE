@@ -32,6 +32,10 @@ typedef struct maage_world_summary {
 } maage_world_summary;
 maage_status maage_world_store_list(const char *instance_root, const maage_content *content, maage_world_summary **entries, size_t *count, char error[256], maage_status_trace *trace);
 maage_status maage_world_store_rename(const char *instance_root, const char *id, const char *name, const maage_content *content, char error[256], maage_status_trace *trace);
+/* Explicit deletion needs no readable metadata. Preflight the current
+ * dimensions/<saved-id>/regions layout under both locks before removing files;
+ * linked entries and unexpected directories fail without deleting world data.
+ * An I/O failure after preflight can leave a partially removed World. */
 maage_status maage_world_store_delete(const char *instance_root, const char *id, char error[256], maage_status_trace *trace);
 /* Metadata/import boundary only. instance_root is an absolute physical instance
  * directory containing instance.json; global application-data roots are rejected.
