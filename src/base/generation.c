@@ -131,9 +131,9 @@ static maage_generation_region_seed maage_generation_region_raw(const maage_base
     region.z = z;
     region.valid = 1;
     random = maage_generation_hash(seed, x, z, 1000UL);
-    region.site_x = x * (double) MAAGE_GENERATION_REGION_SCALE + MAAGE_GENERATION_REGION_SCALE * 0.5 + ((random & 65535UL) / 65536.0 - 0.5) * 48;
+    region.site_x = x * (double) MAAGE_GENERATION_REGION_SCALE + MAAGE_GENERATION_REGION_SCALE * 0.5 + ((random & 65535UL) / 65536.0 - 0.5) * 160;
     random = maage_generation_hash(seed, x, z, 1100UL);
-    region.site_z = z * (double) MAAGE_GENERATION_REGION_SCALE + MAAGE_GENERATION_REGION_SCALE * 0.5 + ((random & 65535UL) / 65536.0 - 0.5) * 48;
+    region.site_z = z * (double) MAAGE_GENERATION_REGION_SCALE + MAAGE_GENERATION_REGION_SCALE * 0.5 + ((random & 65535UL) / 65536.0 - 0.5) * 160;
     region.biome = maage_generation_biome(ids, seed, (int) floor(region.site_x), (int) floor(region.site_z), &region.climate);
     if (cache) cache->entries[index] = region;
     return region;
@@ -187,32 +187,28 @@ typedef struct maage_generation_environment {
     double weights[MAAGE_GENERATION_REGION_SAMPLES], ocean, coast, flow;
 } maage_generation_environment;
 static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, maage_world_seed seed, int x, int z, maage_generation_environment *sample, maage_generation_region_cache *cache) {
-    double region_x = x, region_z = z, dx, dz, distance, radius, weight, nearest = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, ocean_distance = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, land_distance = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, total = 0;
+    double region_x = x, region_z = z, dx, dz, distance, radius, weight, nearest = MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS, total = 0;
     int gx, gz, ix, iz, i = 0;
     maage_biome_id selected = MAAGE_CONTENT_ID_INVALID;
     memset(sample, 0, sizeof(*sample));
-    region_x += 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 2) + 3 * maage_generation_noise(seed, x / 8.0, z / 8.0, 1200UL);
-    region_z += 24 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 800UL, 2) + 3 * maage_generation_noise(seed, x / 8.0, z / 8.0, 1300UL);
+    region_x += 128 * maage_generation_fractal(seed, x / 320.0, z / 320.0, 500UL, 2) + 32 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 1200UL, 2);
+    region_z += 128 * maage_generation_fractal(seed, x / 320.0, z / 320.0, 800UL, 2) + 32 * maage_generation_fractal(seed, x / 96.0, z / 96.0, 1300UL, 2);
     gx = (int) floor(region_x / MAAGE_GENERATION_REGION_SCALE);
     gz = (int) floor(region_z / MAAGE_GENERATION_REGION_SCALE);
-    /* Categorical identity belongs to the nearest supported regional site;
-     * broad influence weights blend relief and climate, not region ownership.
-     * This avoids creating small categorical pockets from competing sums.
-     * The compact radial kernel vanishes smoothly before the window edge. */
+    /* Terrestrial identity belongs to the nearest supported land site.
+     * Ocean coverage combines radial influences so enclosed water follows
+     * a rounded basin rather than the polygon of one regional site.
+     * Even with 80-block site offsets, omitted sites are beyond the compact
+     * kernel's radius and one site is always within that radius. */
     for (iz = -2; iz <= 2; ++iz)
         for (ix = -2; ix <= 2; ++ix, ++i) {
             sample->regions[i] = maage_generation_region_at(ids, seed, gx + ix, gz + iz, cache);
             dx = region_x - sample->regions[i].site_x;
             dz = region_z - sample->regions[i].site_z;
             distance = dx * dx + dz * dz;
-            if (distance < nearest) {
+            if (sample->regions[i].supported_biome != ids->biome_ocean && distance < nearest) {
                 nearest = distance;
                 selected = sample->regions[i].supported_biome;
-            }
-            if (sample->regions[i].supported_biome == ids->biome_ocean) {
-                if (distance < ocean_distance) ocean_distance = distance;
-            } else if (distance < land_distance) {
-                land_distance = distance;
             }
             radius = distance / (MAAGE_GENERATION_REGION_RADIUS * MAAGE_GENERATION_REGION_RADIUS);
             if (radius >= 1) continue;
@@ -220,48 +216,50 @@ static maage_biome_id maage_generation_region_sample(const maage_base_ids *ids, 
             sample->weights[i] = weight * weight * weight;
             total += sample->weights[i];
         }
-    if (total <= 0 || selected == MAAGE_CONTENT_ID_INVALID) return MAAGE_CONTENT_ID_INVALID;
-    /* A continuous signed shore coordinate, positive inland. Clip distant
-     * sites rather than enabling/disabling a coast when a query window moves.
-     * Shores occupy only a narrow land-side band, independent of elevation. */
-    sample->coast = (ocean_distance - land_distance) / (2 * MAAGE_GENERATION_REGION_SCALE);
+    if (total <= 0) return MAAGE_CONTENT_ID_INVALID;
     for (i = 0; i < MAAGE_GENERATION_REGION_SAMPLES; ++i) {
         sample->weights[i] /= total;
         if (sample->regions[i].supported_biome == ids->biome_ocean) sample->ocean += sample->weights[i];
     }
-    return selected;
+    /* Identity and elevation use this same signed, smoothly blended shore
+     * coordinate. Its positive land side owns the narrow beach band. */
+    sample->coast = MAAGE_GENERATION_REGION_SCALE * (1 - 2 * sample->ocean);
+    return sample->coast <= 0 ? ids->biome_ocean : selected;
 }
 
 /* Drainage has its own seeded cells, independent of climate and chunk order.
- * Opposite cell classes form a connected contour; smoothly warped coordinates
- * give channels bends without sampling or modifying neighboring columns. */
+ * Overlapping radial class influences round channel junctions; smoothly warped
+ * coordinates give bends without sampling or modifying neighboring columns. */
 static double maage_generation_river_distance(maage_world_seed seed, int x, int z) {
-    double px, pz, sx, sz, dx, dz, distance, best[2];
+    double px, pz, sx, sz, dx, dz, radius, weight, balance, coverage[2];
     unsigned long random;
     int gx, gz, ix, iz, group;
     px = x + 64 * maage_generation_fractal(seed, x / 120.0, z / 120.0, 1700UL, 2);
     pz = z + 64 * maage_generation_fractal(seed, x / 120.0, z / 120.0, 1800UL, 2);
     gx = (int) floor(px / 192.0);
     gz = (int) floor(pz / 192.0);
-    /* Cap both nearest-class fields at one cell radius. Sites outside the
-     * 3x3 window cannot contribute; bounded jitter guarantees that at least
-     * one class is closer than the cap. A missing class therefore fades out
-     * continuously instead of abruptly disabling the channel. */
-    best[0] = best[1] = 192.0 * 192.0;
-    for (iz = -1; iz <= 1; ++iz)
-        for (ix = -1; ix <= 1; ++ix) {
+    /* The 288-block support overlaps several sites of each class. A 5x5
+     * window contains every contributor, with zero boundary derivatives;
+     * changing the window cannot introduce a seam or a nearest-site corner. */
+    coverage[0] = coverage[1] = 0;
+    for (iz = -2; iz <= 2; ++iz)
+        for (ix = -2; ix <= 2; ++ix) {
             random = maage_generation_hash(seed, gx + ix, gz + iz, 1900UL);
             group = (int) (random & 1UL);
             sx = (gx + ix + 0.5) * 192 + (((random >> 1) & 255UL) / 255.0 - 0.5) * 64;
             sz = (gz + iz + 0.5) * 192 + (((random >> 9) & 255UL) / 255.0 - 0.5) * 64;
             dx = px - sx;
             dz = pz - sz;
-            distance = dx * dx + dz * dz;
-            if (distance < best[group]) best[group] = distance;
+            radius = (dx * dx + dz * dz) / (288.0 * 288.0);
+            if (radius >= 1) continue;
+            weight = 1 - radius;
+            coverage[group] += weight * weight * weight;
         }
-    /* A fixed scale preserves continuity when either nearest site changes.
-     * This is a drainage coordinate, not an exact geometric distance. */
-    return fabs(best[0] - best[1]) / (2 * 192);
+    /* Coverage is nonzero because the containing cell's site is at most
+     * 128 blocks away on each axis. Distance grows without a finite cap so
+     * wide highland valleys cannot carve a class's entire dry interior. */
+    balance = fabs(coverage[0] - coverage[1]) / (coverage[0] + coverage[1]);
+    return balance < 1 ? 96 * balance / (1 - balance * balance) : HUGE_VAL;
 }
 
 typedef struct maage_generation_column {
@@ -329,19 +327,21 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     depth = 5 + 7 * maage_generation_fractal(seed, x / 112.0, z / 112.0, 2100UL, 2) + maage_generation_noise(seed, x / 24.0, z / 24.0, 2101UL);
     if (depth < 2) depth = 2;
     if (depth > 9) depth = 9;
-    cross = distance / width;
-    cross = cross < 1 ? maage_generation_fade(cross) : 1;
-    target = policy->sea_level - depth * (1 - 0.8 * cross);
-    span = 24 + (elevation > policy->sea_level ? (elevation - policy->sea_level) * 1.5 : 0);
-    bank = (distance - width) / span;
-    bank = bank <= 0 ? 1 : (bank < 1 ? 1 - maage_generation_fade(bank) : 0);
+    /* One profile rises from the bed to untouched terrain. Separate inner
+     * depth and outer bank ramps would leave a steep trench beside a shelf.
+     * Higher relief gets a wider valley instead of a taller channel wall. */
+    target = policy->sea_level - depth;
+    span = width + 24 + (elevation > policy->sea_level ? (elevation - policy->sea_level) * 2 : 0);
+    cross = distance / span;
+    bank = cross < 1 ? 1 - maage_generation_fade(cross) : 0;
     if (elevation > target) elevation = maage_generation_lerp(elevation, target, bank);
     column->height = (int) floor(elevation);
     /* Every submerged part of the carved channel is river, including its
      * shallow margins and pools. The pre-carve ocean retains mouth ownership. */
     if (!ocean && bank > 0 && elevation < uncarved && column->height < policy->sea_level) {
         column->biome = temperature < 0.15 ? ids->biome_frozen_river : ids->biome_river;
-        sample->flow = (1 - cross) * (1 - pool * 0.5);
+        cross = (policy->sea_level - elevation) / depth;
+        sample->flow = (cross < 1 ? cross : 1) * (1 - pool * 0.5);
     }
     if (column->height < 3) column->height = 3;
     if (column->height > MAAGE_WORLD_HEIGHT - 4) column->height = MAAGE_WORLD_HEIGHT - 4;
