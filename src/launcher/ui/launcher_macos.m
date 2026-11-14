@@ -41,39 +41,62 @@ static NSTextField *maage_ui_row_label(NSString *text, CGFloat size, BOOL bold) 
     [label setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationVertical];
     return label;
 }
-/* A hidden constrained view still participates in AppKit layout. Keep only
- * the selected page attached, and size it by frame rather than constraints
- * crossing the host boundary. Child constraints remain local to that page. */
+/* Keep only the active page attached. At the window boundary the active
+ * screen has explicit dimensions, updated from the host's actual frame.
+ * Its internal Auto Layout constraints must not determine the window size.
+ * Within the management shell the active page fills the normal stack body. */
 @interface MaaGELauncherPageHost : NSView
 @property(nonatomic, strong) NSView *displayedPage;
+@property(nonatomic) BOOL isolatesWindowSize;
+@property(nonatomic, strong) NSArray<NSLayoutConstraint *> *pageConstraints;
+@property(nonatomic, strong) NSLayoutConstraint *pageWidth, *pageHeight;
 - (void)showPage:(NSView *)page;
+- (void)updatePageSize;
 @end
 @implementation MaaGELauncherPageHost
+- (void)updatePageSize {
+    if (!self.isolatesWindowSize || !self.displayedPage) return;
+    CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
+    if (self.pageWidth.constant != width) self.pageWidth.constant = width;
+    if (self.pageHeight.constant != height) self.pageHeight.constant = height;
+}
 - (void)showPage:(NSView *)page {
     if (self.displayedPage == page) return;
+    if (self.pageConstraints.count) [NSLayoutConstraint deactivateConstraints:self.pageConstraints];
+    self.pageConstraints = nil;
+    self.pageWidth = self.pageHeight = nil;
     [self.displayedPage removeFromSuperview];
     self.displayedPage = page;
     if (!page) return;
+
     page.translatesAutoresizingMaskIntoConstraints = NO;
-    page.autoresizingMask = NSViewNotSizable;
     page.frame = self.bounds;
     [self addSubview:page];
+    if (self.isolatesWindowSize) {
+        /* No trailing or top constraint to the host: these constants describe
+         * the allocated client area, rather than deriving it from the page. */
+        self.pageWidth = [page.widthAnchor constraintEqualToConstant:NSWidth(self.bounds)];
+        self.pageHeight = [page.heightAnchor constraintEqualToConstant:NSHeight(self.bounds)];
+        self.pageConstraints = @[
+            [page.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [page.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
+            self.pageWidth, self.pageHeight
+        ];
+    } else {
+        self.pageConstraints = @[
+            [page.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [page.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+            [page.topAnchor constraintEqualToAnchor:self.topAnchor],
+            [page.bottomAnchor constraintEqualToAnchor:self.bottomAnchor]
+        ];
+    }
+    [NSLayoutConstraint activateConstraints:self.pageConstraints];
     [page setNeedsLayout:YES];
     [self setNeedsLayout:YES];
 }
 - (void)setFrameSize:(NSSize)size {
     [super setFrameSize:size];
-    if (self.displayedPage && !NSEqualRects(self.displayedPage.frame, self.bounds)) {
-        self.displayedPage.frame = self.bounds;
-        [self.displayedPage setNeedsLayout:YES];
-    }
-}
-- (void)layout {
-    [super layout];
-    if (self.displayedPage && !NSEqualRects(self.displayedPage.frame, self.bounds)) {
-        self.displayedPage.frame = self.bounds;
-        [self.displayedPage setNeedsLayout:YES];
-    }
+    [self updatePageSize];
 }
 @end
 /* Cover the native Launcher completely during initial preparation. */
@@ -175,6 +198,12 @@ static NSAttributedString *maage_ui_home_inline(NSString *text, NSString *symbol
         }
     }
     [line appendAttributedString:[[NSAttributedString alloc] initWithString:text attributes:attributes]];
+    /* Setting attributedStringValue can replace NSTextField's cell alignment.
+     * Apply the paragraph to the entire icon-and-caption run. */
+    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+    paragraph.alignment = NSTextAlignmentCenter;
+    paragraph.lineBreakMode = NSLineBreakByTruncatingTail;
+    [line addAttribute:NSParagraphStyleAttributeName value:paragraph range:NSMakeRange(0, line.length)];
     return line;
 }
 /* Use the same intrinsic text measurement for the button's hit area and its
@@ -294,7 +323,7 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
         self.readinessLabel.attributedStringValue = maage_ui_home_inline(status, self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
     }
     NSRect statusBox = maage_ui_home_rect(0, 885, 2560, 49, scale, originX, originY);
-    CGFloat statusWidth = MIN(width - 40, MAX(1100 * scale, self.readinessLabel.attributedStringValue.size.width + 16));
+    CGFloat statusWidth = MIN(width - 40, MAX(1100 * scale, ceil(self.readinessLabel.attributedStringValue.size.width) + 16));
     self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(NSMidX(self.bounds) - statusWidth / 2, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
 
     /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
@@ -781,6 +810,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) notification;
     /* The home lays out its children manually; its outer constraints alone
      * do not express the width-dependent row count. */
+    [self.rootHost updatePageSize];
     [self.rootHost setNeedsLayout:YES];
     [self.playHome setNeedsLayout:YES];
     [self.rootHost layoutSubtreeIfNeeded];
@@ -904,9 +934,13 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.playHome.hidden = !home || splash;
     self.playSplash.hidden = !splash;
     NSView *page = !home && !splash && (NSUInteger) self.state->page < self.pages.count ? self.pages[self.state->page] : nil;
+    BOOL pageChanged = self.body.displayedPage != page;
     [self.body showPage:page];
-    [self.rootHost showPage:splash ? self.playSplash : home ? self.playHome : self.shell];
+    NSView *screen = splash ? self.playSplash : home ? self.playHome : self.shell;
+    BOOL changed = self.rootHost.displayedPage != screen;
+    [self.rootHost showPage:screen];
     [self setHomeWindowAppearance:home && !splash];
+    if (changed || pageChanged) [self.rootHost layoutSubtreeIfNeeded];
 }
 - (void)activatePage:(maage_launcher_page)page {
     self.state->page = page;
@@ -2189,6 +2223,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, MAAGE_LAUNCHER_WINDOW_WIDTH, MAAGE_LAUNCHER_WINDOW_HEIGHT) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     self.window.title = @"MaaGE Launcher";
     self.rootHost = [[MaaGELauncherPageHost alloc] initWithFrame:self.window.contentView.bounds];
+    self.rootHost.isolatesWindowSize = YES;
     self.window.contentView = self.rootHost;
     self.rootHost.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     self.window.contentMinSize = NSMakeSize(MAAGE_LAUNCHER_WINDOW_MIN_WIDTH, MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT);
@@ -2278,6 +2313,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     [content addArrangedSubview:context];
     [context.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     self.body = [[MaaGELauncherPageHost alloc] init];
+    [self.body setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationVertical];
     [content addArrangedSubview:self.body];
     [self.body.widthAnchor constraintEqualToAnchor:content.widthAnchor].active = YES;
     self.pages = @[ [self playPage], [self installationsPage], [self accountsPage], [self settingsPage], [self aboutPage] ];
