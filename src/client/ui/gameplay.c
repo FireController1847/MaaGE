@@ -266,6 +266,10 @@ maage_status maage_client_ui_set_snapshot(maage_client_ui *ui, const maage_sessi
         maage_client_ui_back(ui);
     }
     if (respawned && maage_client_ui_current(ui) == MAAGE_CLIENT_UI_PAUSE) maage_client_ui_back(ui);
+    {
+        maage_status credits_result = maage_client_ui_credits_observe(ui);
+        if (maage_status_failed(credits_result)) return credits_result;
+    }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
 static int maage_client_ui_container_command(const maage_session_command *command) {

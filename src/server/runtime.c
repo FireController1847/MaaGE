@@ -40,7 +40,9 @@ struct maage_server_runtime {
     size_t dimension_count;
     unsigned long world_epoch;
     maage_dimension_travel travel;
-    int travelling, spawn_resolved;
+    int travelling, spawn_resolved, credits, portal_require_exit;
+    unsigned long portal_presentation;
+    double portal_progress;
     unsigned int portal_ticks, portal_cooldown;
     maage_world *world;
     maage_world_record record;
@@ -412,7 +414,7 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
     if (!command->sequence || command->sequence <= runtime->last_command_sequence) return server_reject(runtime, MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_VALIDATE);
     runtime->last_command_sequence = command->sequence;
     if (command->world_epoch != runtime->world_epoch && command->kind != MAAGE_CMD_DISCONNECT) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
-    if (runtime->travelling && command->kind != MAAGE_CMD_DISCONNECT && command->kind != MAAGE_CMD_PAUSE && command->kind != MAAGE_CMD_VIEW) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
+    if ((runtime->travelling || runtime->credits) && command->kind != MAAGE_CMD_CREDITS_DONE && command->kind != MAAGE_CMD_DISCONNECT && command->kind != MAAGE_CMD_PAUSE && command->kind != MAAGE_CMD_VIEW) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     if (command->kind != MAAGE_CMD_INPUT && command->kind != MAAGE_CMD_VIEW && command->kind != MAAGE_CMD_HOTBAR) runtime->publication_dirty = 1;
     switch (command->kind) {
     case MAAGE_CMD_INPUT:
@@ -510,6 +512,12 @@ static maage_status server_apply_command(maage_server_runtime *runtime, const ma
         }
         runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
         break;
+    case MAAGE_CMD_CREDITS_DONE:
+        if (runtime->credits) {
+            runtime->credits = 0;
+            runtime->publication_dirty = 1;
+        }
+        return server_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_UPDATE);
     case MAAGE_CMD_PAUSE:
         if (runtime->config.execution_mode != MAAGE_SERVER_INTEGRATED) return server_reject(runtime, MAAGE_STATUS_ACCESS_DENIED, MAAGE_OPERATION_SET);
         if (command->paused != 0 && command->paused != 1) return server_reject(runtime, MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
@@ -663,6 +671,9 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.world_epoch = runtime->world_epoch;
     snapshot.dimension = maage_world_dimension(runtime->world)->id;
     snapshot.travelling = runtime->travelling;
+    snapshot.credits = runtime->credits;
+    snapshot.portal_presentation = runtime->portal_presentation;
+    snapshot.portal_progress = runtime->portal_progress;
     snapshot.tick = runtime->tick;
     snapshot.paused = runtime->paused;
     snapshot.sequence = ++runtime->publication_sequence;
@@ -961,6 +972,8 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     maage_world *destination;
     const maage_dimension_definition *definition;
     maage_world_record record;
+    const maage_portal_presentation *effect;
+    int seen = 1;
     maage_status result;
     if (!runtime->travelling || runtime->paused) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_UPDATE);
     definition = maage_dimension_get(maage_content_dimensions(runtime->content), runtime->travel.destination);
@@ -988,6 +1001,11 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     if (runtime->world_epoch == ULONG_MAX) return server_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_UPDATE);
     result = maage_world_store_dimension(runtime->session_store, definition->id, &runtime->store, &record);
     if (maage_status_failed(result)) return result;
+    if (runtime->travel.credits && runtime->config.session) {
+        result = maage_world_store_credits(runtime->session_store, runtime->config.player_uuid, 1, &seen);
+        if (maage_status_failed(result)) return result;
+    }
+    runtime->credits = !seen;
     runtime->world = destination;
     memcpy(runtime->player.position, runtime->travel.position, sizeof(runtime->player.position));
     memset(runtime->player.velocity, 0, sizeof(runtime->player.velocity));
@@ -1007,10 +1025,14 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
     memset(runtime->use_poses, 0, sizeof(runtime->use_poses));
     runtime->pending_jump = runtime->pending_attack = runtime->pending_use = runtime->pending_forward = 0;
     runtime->has_deferred_command = 0;
-    runtime->portal_cooldown = 300;
+    runtime->portal_cooldown = runtime->travel.cooldown;
+    runtime->portal_require_exit = 1;
     runtime->portal_ticks = 0;
+    runtime->portal_progress = 0;
     runtime->travelling = runtime->spawn_resolved = 0;
     ++runtime->world_epoch;
+    effect = maage_presentation_portal(maage_content_presentation(runtime->content), runtime->travel.presentation);
+    if (effect && effect->travel) server_entity_sound(runtime, effect->travel, runtime->player.position, 0.8, 1);
     runtime->has_pending_status = 0;
     runtime->publication_dirty = 1;
     runtime->last_stats_time = 0;
@@ -1020,6 +1042,7 @@ static maage_status server_dimension_service(maage_server_runtime *runtime, maag
 static maage_status server_dimension_contact(maage_server_runtime *runtime) {
     const maage_dimension_definition *definition = maage_world_dimension(runtime->world);
     maage_dimension_travel travel;
+    const maage_portal_presentation *effect;
     maage_status result;
     if (!runtime->game.health || runtime->game.crafting.kind || !definition->contact) return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_QUERY);
     memset(&travel, 0, sizeof(travel));
@@ -1027,14 +1050,22 @@ static maage_status server_dimension_contact(maage_server_runtime *runtime) {
     if (maage_status_failed(result)) return result;
     if (maage_status_code(result) != MAAGE_STATUS_SUCCESS) {
         runtime->portal_ticks = 0;
+        runtime->portal_progress = 0;
+        runtime->portal_require_exit = 0;
         if (runtime->portal_cooldown) --runtime->portal_cooldown;
         return result;
     }
-    if (runtime->portal_cooldown) {
-        runtime->portal_cooldown = 300;
+    if (runtime->portal_cooldown || runtime->portal_require_exit) {
+        runtime->portal_cooldown = travel.cooldown;
         return server_status(MAAGE_STATUS_NOOP, MAAGE_OPERATION_QUERY);
     }
     if (runtime->travel.destination != travel.destination || runtime->travel.kind != travel.kind) runtime->portal_ticks = 0;
+    if (!travel.delay || travel.cooldown > 12000 || !maage_dimension_get(maage_content_dimensions(runtime->content), travel.destination) || (travel.credits != 0 && travel.credits != 1)) return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_VALIDATE);
+    effect = maage_presentation_portal(maage_content_presentation(runtime->content), travel.presentation);
+    if (travel.presentation && !effect) return server_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_RESOLVE);
+    if (!runtime->portal_ticks && effect && effect->enter) server_entity_sound(runtime, effect->enter, runtime->player.position, 0.7, 1);
+    runtime->portal_presentation = travel.presentation;
+    runtime->portal_progress = (runtime->portal_ticks + 1.0) / travel.delay;
     runtime->travel = travel;
     if (++runtime->portal_ticks >= travel.delay) {
         runtime->travelling = 1;
@@ -1187,12 +1218,12 @@ static void server_thread_entry(void *context) {
             maage_mutex_unlock(runtime->mutex);
             ready_logged = 1;
         }
-        if (runtime->paused || runtime->travelling || !spawn_ready) {
+        if (runtime->paused || runtime->credits || runtime->travelling || !spawn_ready) {
             /* Do not run delayed gameplay when resuming from pause/loading. */
             deadline = now + MAAGE_SERVER_STEP_SECONDS;
         } else {
             caught_up = 0;
-            while (now >= deadline && caught_up < MAAGE_SERVER_MAX_CATCHUP && !runtime->paused && !runtime->travelling && !server_stop_requested(runtime)) {
+            while (now >= deadline && caught_up < MAAGE_SERVER_MAX_CATCHUP && !runtime->paused && !runtime->credits && !runtime->travelling && !server_stop_requested(runtime)) {
                 /* Sample bounded commands for every ordered step, not merely
                  * once per render-independent scheduler wake. */
                 result = server_take_commands(runtime);
@@ -1200,7 +1231,7 @@ static void server_thread_entry(void *context) {
                     server_capture_failure(runtime, result, NULL);
                     break;
                 }
-                if (runtime->paused || server_stop_requested(runtime)) {
+                if (runtime->paused || runtime->credits || server_stop_requested(runtime)) {
                     deadline = now + MAAGE_SERVER_STEP_SECONDS;
                     break;
                 }
@@ -1341,6 +1372,18 @@ maage_status maage_server_runtime_create(const maage_server_config *config, maag
     runtime = (maage_server_runtime *) calloc(1, sizeof(*runtime));
     if (!runtime) return server_status(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_OPERATION_CREATE);
     runtime->diagnostics = maage_log_enabled("maage.server.latency", MAAGE_LOG_VERBOSE) && getenv("MAAGE_WORLD_DIAGNOSTICS") && !strcmp(getenv("MAAGE_WORLD_DIAGNOSTICS"), "1");
+    if (config->player_uuid[32] != 0) {
+        free(runtime);
+        return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    }
+    if (config->player_uuid[0]) {
+        size_t i;
+        for (i = 0; i < 32; ++i)
+            if (!((config->player_uuid[i] >= '0' && config->player_uuid[i] <= '9') || (config->player_uuid[i] >= 'a' && config->player_uuid[i] <= 'f'))) {
+                free(runtime);
+                return server_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+            }
+    }
     runtime->config = *config;
     runtime->world_epoch = 1;
     if (config->entity_policy) {

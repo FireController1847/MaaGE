@@ -80,6 +80,7 @@ static maage_status base_music_resource(maage_content_context *context, const ch
 }
 static maage_sound_music_id base_music_select(const void *context, const maage_sound_scene_query *query) {
     const maage_base_sound_data *data = (const maage_base_sound_data *) context;
+    if (query->credits) return data->credits_music;
     if (query->visual && maage_world_dimension(query->visual)->id == data->ids->dimension_nether) return data->nether_music;
     if (query->visual && maage_world_dimension(query->visual)->id == data->ids->dimension_end) return data->end_music;
     return !query->has_world ? data->menu_music : (query->game_mode == MAAGE_GAME_MODE_CREATIVE ? data->creative_music : data->game_music);
@@ -123,6 +124,8 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     maage_base_sound_data *data;
     maage_sound_bindings bindings;
     maage_sound_music_definition music;
+    maage_portal_presentation portal;
+    base_sound_family portal_family;
     maage_sound_resource_id game[18], menu[4], extra, nether[4], end;
     maage_status result;
     memset(&families, 0, sizeof(families));
@@ -130,6 +133,7 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     data = (maage_base_sound_data *) calloc(1, sizeof(*data));
     if (!data) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_REGISTER, 0);
     data->ids = ids;
+    data->presentation = context->presentation;
     result = maage_content_own(context, data, free);
     if (maage_status_failed(result)) {
         free(data);
@@ -239,6 +243,39 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     data->cave = bindings.actions[MAAGE_SOUND_CAVE_AMBIENT];
     result = base_sound_event(context, "minecraft:liquid.lava_pop", &families.lava_pop, MAAGE_SOUND_BUS_BLOCKS, 1, 1, 1, &data->lava_pop);
     if (maage_status_failed(result)) goto done;
+    memset(&portal, 0, sizeof(portal));
+    result = base_sound_family_register(context, "minecraft:portal.hum", "portal/portal", 0, 1, &portal_family);
+    if (maage_status_failed(result)) goto done;
+    result = base_sound_event(context, "minecraft:portal.hum", &portal_family, MAAGE_SOUND_BUS_AMBIENT, 1, 1, 1, &portal.ambient);
+    free(portal_family.resources);
+    if (maage_status_failed(result)) goto done;
+    result = base_sound_family_register(context, "minecraft:portal.enter", "portal/trigger", 0, 1, &portal_family);
+    if (maage_status_failed(result)) goto done;
+    result = base_sound_event(context, "minecraft:portal.enter", &portal_family, MAAGE_SOUND_BUS_PLAYERS, 0, 1, 1, &portal.enter);
+    free(portal_family.resources);
+    if (maage_status_failed(result)) goto done;
+    result = base_sound_family_register(context, "minecraft:portal.travel", "portal/travel", 0, 1, &portal_family);
+    if (maage_status_failed(result)) goto done;
+    result = base_sound_event(context, "minecraft:portal.travel", &portal_family, MAAGE_SOUND_BUS_PLAYERS, 0, 1, 1, &portal.travel);
+    free(portal_family.resources);
+    if (maage_status_failed(result)) goto done;
+    portal.color[0] = 0.75f;
+    portal.color[1] = 0.25f;
+    portal.color[2] = 1;
+    memcpy(portal.particle_color, portal.color, sizeof(portal.color));
+    portal.particle = 0;
+    portal.particle_frames = 8;
+    result = maage_presentation_portal_register(context->presentation, "minecraft:nether_portal", &portal);
+    if (maage_status_failed(result)) goto done;
+    ids->nether_presentation = portal.id;
+    portal.color[0] = 0.3f;
+    portal.color[1] = 0.7f;
+    portal.color[2] = 0.65f;
+    portal.particle_color[0] = portal.particle_color[1] = portal.particle_color[2] = 0.3f;
+    portal.smoke = 1;
+    result = maage_presentation_portal_register(context->presentation, "minecraft:end_portal", &portal);
+    if (maage_status_failed(result)) goto done;
+    ids->end_presentation = portal.id;
     result = base_sound_material(context, "minecraft:default", &bindings, &families.step_stone, &families.dig_stone, &families.dig_stone, 1, 1, &ids->material_default);
     if (maage_status_failed(result)) goto done;
     result = base_sound_material(context, "minecraft:stone", &bindings, &families.step_stone, &families.dig_stone, &families.dig_stone, 1, 1, &ids->material_stone);
@@ -376,6 +413,14 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     result = maage_sound_music_register(context->sounds, "minecraft:end", &music);
     if (maage_status_failed(result)) goto done;
     data->end_music = music.id;
+    result = base_music_resource(context, "minecraft:music.credits", "minecraft/sounds/music/game/end/credits.ogg", &extra);
+    if (maage_status_failed(result)) goto done;
+    music.resources = &extra;
+    music.minimum_delay = music.maximum_delay = 0;
+    music.initial_delay = 0;
+    result = maage_sound_music_register(context->sounds, "minecraft:credits", &music);
+    if (maage_status_failed(result)) goto done;
+    data->credits_music = music.id;
     bindings.music = base_music_select;
     bindings.context = data;
     result = maage_sound_bind(context->sounds, &bindings);

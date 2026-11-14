@@ -21,6 +21,7 @@ typedef struct maage_server_config {
     const char *instance_root;
     /* NULL resumes the selected world (or creates one if none is selected). */
     const char *world_id, *world_name;
+    char player_uuid[33]; /* Optional copied nonsecret profile identity; empty is local/offline. */
     int create_world, has_seed;
     maage_world_seed seed;
     /* Optional policy applies only at creation; existing worlds retain theirs. */

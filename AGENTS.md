@@ -261,7 +261,7 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers without loading. Never initialize support on import or activate
   floating falling blocks through random sampling. Preserve distinct content rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD17` metadata embeds one checksummed
+  worlds. Canonical UUIDs identify them. `MGWRLD18` metadata embeds one checksummed
   `MGIDMAP4` World dictionary for blocks, states (block identity plus canonical typed properties),
   items, item variants, biomes, entity types and dimensions; `MGRGN2` region headers bind its UUID. `MGCHNK11` palettes, stacks and
   entities carry numeric saved IDs only. Block-entity records bind registered codecs through the owning saved block identity, not runtime handler order. Resolve names once at open, retain both

@@ -17,7 +17,7 @@ extern "C" {
  * explicitly, not memcpy C layouts (including unsigned long and padding).
  * Local hosting validates the independently composed Server against its Client
  * content identity peer before World startup or publishing any numeric data. */
-#define MAAGE_SESSION_PROTOCOL_VERSION 29U
+#define MAAGE_SESSION_PROTOCOL_VERSION 30U
 
 typedef enum maage_session_command_kind {
     MAAGE_CMD_INPUT = 1,
@@ -34,7 +34,8 @@ typedef enum maage_session_command_kind {
     MAAGE_CMD_CONTAINER_SLOT = 13,
     MAAGE_CMD_BREAK_PREVIEW = 14,
     MAAGE_CMD_PLACE_PREVIEW = 15,
-    MAAGE_CMD_CONTAINER_PAGE = 16
+    MAAGE_CMD_CONTAINER_PAGE = 16,
+    MAAGE_CMD_CREDITS_DONE = 17
 } maage_session_command_kind;
 
 enum {
@@ -145,6 +146,9 @@ typedef struct maage_session_snapshot {
     double next_tick_at;
     maage_dimension_id dimension;
     int travelling;
+    int credits;
+    unsigned long portal_presentation;
+    double portal_progress;
     int paused; /* Integrated owner pause; presentation may continue. */
     maage_session_player_view player;
     maage_environment_state environment;

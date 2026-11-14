@@ -11,6 +11,7 @@ The Client owns UI, controls, camera, sound and visuals, consuming copied Server
 | 0–3 | Gameplay (HUD/F3), Pause, Options, Inventory |
 | 4–9 | Title, Worlds, Create World, Delete confirmation, Rename, Loading |
 | 10–13 | Video, Sound, Crafting Table, Controls |
+| 14 | Credits |
 
 Pause/Options pause gameplay and music, not streaming. Inventory/table release capture without pausing. World operations and Save/Quit are asynchronous; Quit hides the window before teardown. Loading reports actual work.
 
@@ -18,7 +19,11 @@ Music uses registered content playlists and one active native music voice. A ses
 
 Auto GUI scale selects the largest integer backing-pixel factor preserving 320×240 logical units (minimum 1). Small/Normal/Large request 1/2/3; larger supported factors are available. Temporary clamping preserves the saved choice. Safe-area margins apply after scale selection. Drawing retains exact framebuffer/factor extents while layout rounds up; native top-origin pointer coordinates use the inverse transform, including Retina/fractional DPI. All screens, HUD and splash share it. Text input/font remain ASCII.
 
+Built-in Control shortcuts use Command on macOS, including editing/select-all, whole-stack actions and the initial/reset sprint binding. Saved and manually assigned physical Control bindings retain their exact HID usages; no raw key remapping occurs.
+
 Growable action bindings use USB HID usages or one-based mouse buttons. Remapping waits for a new edge; Escape unassigns, focus loss cancels, duplicate bindings remain independent. System Escape/F3/F11 and GUI modifiers are separate. `config/options.ini`: `[controls]` values `key:<usage>`, `mouse:<button>` or `none`; `[mouse]` sensitivity 0–100 (50 default), invert; `[video]` render distance defaults to 8 (normally 1–32, larger valid saved values supported). CLI overrides startup preferences.
+
+Credits scroll at ten logical pixels per second over an opaque backdrop with Escape skipping. Entries come from the immutable content presentation registry in append order, including inline package credits and optional reconstructed end-poem/original-credit text. Text loads once during UI creation, wraps before drawing and substitutes the selected display name; missing optional resources log and leave remaining entries available. The existing ASCII font limits text coverage. The owner freezes gameplay while credits are active, but streaming and the registered credits music remain available; UI completion waits for authoritative acknowledgement.
 
 ## Creative Inventory
 

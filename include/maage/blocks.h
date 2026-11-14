@@ -134,11 +134,12 @@ typedef struct maage_block_definition {
     maage_block_id id;
     int solid;
     int opaque;
-    int falls;                   /* Eligible payload for the shared falling-entity mechanism. */
-    int material_solid;          /* Plant adjacency rule; independent of collision. */
-    unsigned int emitted_light;  /* 0..15; resolved during registration. */
-    unsigned int light_opacity;  /* 0..15; independent of face occlusion. */
-    int use_neighbor_brightness; /* Combined light uses up and four sides. */
+    int falls;                         /* Eligible payload for the shared falling-entity mechanism. */
+    int material_solid;                /* Plant adjacency rule; independent of collision. */
+    unsigned int emitted_light;        /* 0..15; resolved during registration. */
+    unsigned int light_opacity;        /* 0..15; independent of face occlusion. */
+    int use_neighbor_brightness;       /* Combined light uses up and four sides. */
+    unsigned long portal_presentation; /* Optional registered numeric Client effects profile; zero absent. */
     int selectable, replaceable;
     maage_block_geometry_id geometry_id; /* Registered geometry; resolved before finalization. */
     unsigned int mesh_shape;             /* Cached optimized primitive tag from the geometry registry. */

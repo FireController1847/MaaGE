@@ -217,7 +217,7 @@ maage_status maage_local_session_wait_commands(maage_local_session *session, uns
 maage_status maage_local_session_publish_snapshot(maage_local_session *session, const maage_session_snapshot *snapshot) {
     maage_status result;
     if (!session) return session_argument(MAAGE_OPERATION_SNAPSHOT, 0);
-    if (!snapshot || !snapshot->dimension || !snapshot->session_epoch || !snapshot->world_epoch || (snapshot->travelling != 0 && snapshot->travelling != 1) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
+    if (!snapshot || !snapshot->dimension || !snapshot->session_epoch || !snapshot->world_epoch || (snapshot->travelling != 0 && snapshot->travelling != 1) || (snapshot->credits != 0 && snapshot->credits != 1) || !(snapshot->portal_progress >= 0 && snapshot->portal_progress <= 1) || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION ||
         !session_motion_valid(&snapshot->player.motion) || !session_container_valid(&snapshot->player.crafting) || snapshot->player.air < -19 || snapshot->player.air > 300 ||
         (snapshot->player.food.remaining && (!snapshot->player.food.stack.item_id || !snapshot->player.food.stack.count || snapshot->player.food.slot >= MAAGE_HOTBAR_SLOTS || snapshot->player.food.remaining > snapshot->player.food.duration || snapshot->player.food.started_tick > snapshot->tick)) ||
         snapshot->player.damage_tick > snapshot->tick || snapshot->player.death_tick > snapshot->tick || snapshot->player.last_break_tick > snapshot->tick ||

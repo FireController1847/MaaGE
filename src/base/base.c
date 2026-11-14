@@ -134,6 +134,9 @@ static maage_status maage_base_define(maage_content_context *context) {
     if (!maage_status_failed(result)) result = maage_base_dimension_creative(context, ids);
     if (!maage_status_failed(result)) result = maage_base_flora_creative(context, ids);
     if (!maage_status_failed(result)) result = maage_base_entity_creative(context, ids);
+    if (!maage_status_failed(result)) result = maage_presentation_credit_append(context->presentation, "minecraft:maage_credits", "[C]MaaGE\n\n[C]Created by FireController1847\n\n[C]Minecraft as a Game Engine\n[C]An independent native voxel platform\n\n[C]Thank you for playing.\n", NULL);
+    if (!maage_status_failed(result)) result = maage_presentation_credit_append(context->presentation, "minecraft:end_poem", NULL, "minecraft/texts/end.txt");
+    if (!maage_status_failed(result)) result = maage_presentation_credit_append(context->presentation, "minecraft:original_credits", NULL, "minecraft/texts/credits.txt");
     return result;
 }
 static maage_status maage_base_bind_internal(maage_content_context *context) {

@@ -268,6 +268,7 @@ maage_status maage_client_audio_scene_update(maage_client_audio_scene *scene, co
     query.now = now;
     query.has_world = snapshot != NULL;
     if (snapshot) {
+        query.credits = snapshot->credits;
         query.environment = &snapshot->environment;
         query.tick = snapshot->tick;
         query.game_mode = snapshot->player.game_mode;

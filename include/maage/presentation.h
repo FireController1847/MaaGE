@@ -2,6 +2,26 @@
 #define MAAGE_PRESENTATION_H
 #include "maage/blocks.h"
 typedef struct maage_presentation_registry maage_presentation_registry;
+typedef struct maage_credit_definition {
+    const char *name, *text, *source; /* Copied identity and inline text OR reconstructed text resource path. */
+} maage_credit_definition;
+/* Append only, in stable composition call order. No insertion, replacement or
+ * reordering API exists; FINALIZE freezes the copied entries. Source files are
+ * optional presentation resources, loaded by the Client before showing credits. */
+maage_status maage_presentation_credit_append(maage_presentation_registry *, const char *name, const char *text, const char *source);
+size_t maage_presentation_credit_count(const maage_presentation_registry *);
+const maage_credit_definition *maage_presentation_credit(const maage_presentation_registry *, size_t);
+typedef struct maage_portal_presentation {
+    unsigned long id;
+    float color[3];
+    float particle_color[3];
+    unsigned int particle, particle_frames; /* Contiguous particle-sheet animation frames. */
+    int smoke;
+    maage_sound_id ambient, enter, travel;
+} maage_portal_presentation;
+maage_status maage_presentation_portal_register(maage_presentation_registry *, const char *, maage_portal_presentation *);
+const maage_portal_presentation *maage_presentation_portal(const maage_presentation_registry *, unsigned long);
+size_t maage_presentation_portal_count(const maage_presentation_registry *);
 typedef struct maage_texture_definition {
     unsigned long source, fallback; /* Numeric source IDs; INVALID generates the missing tile. */
     int opaque;

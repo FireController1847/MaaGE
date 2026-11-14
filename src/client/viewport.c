@@ -1020,6 +1020,7 @@ choose_world:
     if (maage_status_failed(operation)) goto done;
     operation = maage_local_session_create(256U, 256U, 512U, &session);
     if (maage_status_failed(operation)) goto done;
+    if (maage_client_storage_player()) strcpy(server_config.player_uuid, maage_client_storage_player()->uuid);
     server_config.instance_root = maage_instance_directory(instance);
     server_config.world_id = options.id;
     server_config.world_name = options.name;
@@ -1681,6 +1682,7 @@ choose_world:
         if (maage_status_failed(operation)) goto done;
         if (maage_status_is_warning(operation)) maage_client_ui_notify(ui, operation, now);
         effective_fov = maage_client_ui_fov_radians(ui) * maage_client_fov_update(&fov, &latest, raw_elapsed) * camera_effects.fov_scale * (eye_fluid ? eye_fluid->fov_scale : 1);
+        if (latest.portal_progress > 0 && !latest.paused) effective_fov *= 1 + 0.08 * latest.portal_progress * sin(now * 6);
         if (state.resized) {
             rendered = maage_renderer_resize(renderer);
             if (maage_status_failed(rendered)) goto done;

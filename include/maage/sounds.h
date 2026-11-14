@@ -79,7 +79,7 @@ typedef struct maage_sound_scene_query {
     double now;
     unsigned long tick;
     unsigned int game_mode;
-    int has_world;
+    int has_world, credits;
 } maage_sound_scene_query;
 typedef struct maage_sound_ambient_sink {
     maage_status (*play)(void *, maage_sound_id, unsigned int, maage_sound_material_id, const double[3], double, double, maage_status_trace *);

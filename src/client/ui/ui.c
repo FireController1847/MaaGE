@@ -146,6 +146,7 @@ maage_status maage_client_ui_create(maage_renderer *renderer, maage_window *wind
     if (!maage_status_failed(result)) result = maage_client_ui_options_register(ui);
     if (!maage_status_failed(result)) result = maage_client_ui_controls_register(ui);
     if (!maage_status_failed(result)) result = maage_client_ui_inventory_register(ui);
+    if (!maage_status_failed(result)) result = maage_client_ui_credits_register(ui, application_data, game_resources ? maage_content_presentation(game_resources->content) : NULL, trace);
     if (maage_status_failed(result)) {
         maage_client_ui_destroy(ui);
         return MAAGE_STATUS_TRACE(trace, result, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_INITIALIZE);
@@ -177,6 +178,7 @@ maage_status maage_client_ui_destroy(maage_client_ui *ui) {
     if (!ui) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_render_texture_destroy(ui->resources.texture);
     maage_client_item_icon_cache_destroy(ui->model_icons);
+    free(ui->credit_lines);
     free(ui->creative_filter);
     free(ui->commands);
     free(ui->debug_cache.vertices);

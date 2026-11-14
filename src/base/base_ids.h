@@ -102,6 +102,7 @@ typedef struct maage_base_ids {
     unsigned long dimension_blocks[6], dimension_states[6], dimension_items[6];
     unsigned long portal_states[2], frame_states[2][4], portal_geometry, frame_geometry, property_eye;
     unsigned long item_flint_steel, item_ender_eye;
+    unsigned long nether_presentation, end_presentation;
     unsigned long geometry_cube, geometry_cactus, geometry_cross, geometry_torch, geometry_entity;
     unsigned long texture_water_flow, texture_lava_flow, texture_water_overlay;
     unsigned long biome_ids[MAAGE_BASE_BIOME_COUNT];

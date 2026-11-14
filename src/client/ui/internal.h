@@ -49,8 +49,16 @@ typedef struct maage_client_ui_control_row {
     size_t handle;
     float y;
 } maage_client_ui_control_row;
+typedef struct maage_client_credit_line {
+    char text[80];
+    int centered;
+} maage_client_credit_line;
 struct maage_client_ui {
     maage_client_ui_navigation navigation;
+    maage_client_credit_line *credit_lines;
+    size_t credit_count, credit_capacity;
+    double credit_started;
+    int credit_done;
     maage_renderer *renderer;
     maage_window *window;
     const maage_item_registry *items;
@@ -130,6 +138,8 @@ void maage_client_ui_gradient(maage_client_ui *ui, maage_client_ui_rect rectangl
 void maage_client_ui_slider(maage_client_ui *ui, maage_client_ui_rect rectangle, const char *label, float value, int highlighted);
 /* Shared cursor feedback for standard and custom-drawn controls. */
 void maage_client_ui_pointer(maage_client_ui *ui, maage_client_ui_rect rectangle);
+maage_status maage_client_ui_credits_register(maage_client_ui *, const char *, const maage_presentation_registry *, maage_status_trace *);
+maage_status maage_client_ui_credits_observe(maage_client_ui *);
 maage_status maage_client_ui_controls_register(maage_client_ui *ui);
 int maage_client_ui_controls_capture(maage_client_ui *ui, const maage_client_ui_input *input);
 maage_status maage_client_ui_options_register(maage_client_ui *ui);

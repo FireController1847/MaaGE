@@ -37,6 +37,10 @@ maage_status maage_world_store_rename(const char *instance_root, const char *id,
  * linked entries and unexpected directories fail without deleting world data.
  * An I/O failure after preflight can leave a partially removed World. */
 maage_status maage_world_store_delete(const char *instance_root, const char *id, char error[256], maage_status_trace *trace);
+/* Owner-only per-player milestone in the session metadata. UUID is 32 lowercase
+ * hexadecimal digits; NULL selects the stable offline local player. Marking
+ * appends at most once and publishes with the normal shared checkpoint. */
+maage_status maage_world_store_credits(maage_world_store *, const char *uuid, int mark, int *seen);
 /* Metadata/import boundary only. instance_root is an absolute physical instance
  * directory containing instance.json; global application-data roots are rejected.
  * World IDs are canonical UUIDs. NULL id resumes the instance's last selection,
@@ -62,7 +66,7 @@ maage_status maage_world_store_checkpoint(maage_world_store *view, const maage_w
  * retains stable saved IDs and both numeric translation directions. Dictionary
  * extensions publish atomically before new IDs can be saved by workers.
  * Environment, random ticks, generation settings and gameplay share the same
- * atomic metadata replacement (MGWRLD17 only). */
+ * atomic metadata replacement (MGWRLD18 only). */
 maage_status maage_world_store_save(maage_world_store *store, const double position[3], double yaw, double pitch, const maage_gameplay *game, const maage_world *world, const maage_environment_state *environment, char error[256], maage_status_trace *trace);
 /* All jobs borrowing this store must finish before close releases its lock. */
 maage_status maage_world_store_close(maage_world_store *store);

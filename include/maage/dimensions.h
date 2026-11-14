@@ -13,6 +13,9 @@ typedef struct maage_dimension_travel {
     double position[3];
     unsigned long kind;
     unsigned int delay;
+    unsigned int cooldown;
+    unsigned long presentation;
+    int credits;  /* Request the per-player, per-session-World credits milestone on arrival. */
     int at_spawn; /* Resolve the destination's spawn before streaming. */
 } maage_dimension_travel;
 typedef struct maage_dimension_definition {

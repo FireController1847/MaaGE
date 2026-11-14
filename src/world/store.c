@@ -45,6 +45,8 @@ struct maage_world_store {
     maage_world_record record;
     maage_world_store *root, **dimensions;
     size_t dimension_count, saved_dimension_count;
+    char (*credits_players)[33];
+    size_t credits_count;
     const maage_content *content;
     const maage_block_registry *blocks;
     const maage_biome_registry *biomes;
@@ -57,6 +59,32 @@ struct maage_world_store {
     size_t map_length;
     int map_extended;
 };
+static int maage_store_player_valid(const char *uuid) {
+    size_t i;
+    if (!uuid || strlen(uuid) != 32) return 0;
+    for (i = 0; i < 32; ++i)
+        if (!((uuid[i] >= '0' && uuid[i] <= '9') || (uuid[i] >= 'a' && uuid[i] <= 'f'))) return 0;
+    return 1;
+}
+maage_status maage_world_store_credits(maage_world_store *store, const char *uuid, int mark, int *seen) {
+    char (*grown)[33];
+    size_t i;
+    if (!uuid || !*uuid) uuid = "00000000000000000000000000000000";
+    if (!store || store->root || !seen || (mark != 0 && mark != 1) || !maage_store_player_valid(uuid)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_UPDATE, 0);
+    *seen = 0;
+    for (i = 0; i < store->credits_count; ++i)
+        if (!strcmp(store->credits_players[i], uuid)) {
+            *seen = 1;
+            return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+        }
+    if (!mark) return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+    if (store->credits_count >= MAAGE_STORE_WORD || store->credits_count >= (size_t) - 1 / sizeof(*grown)) return maage_status_make(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_UPDATE, 0);
+    grown = (char (*)[33]) realloc(store->credits_players, (store->credits_count + 1) * sizeof(*grown));
+    if (!grown) return maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_UPDATE, 0);
+    store->credits_players = grown;
+    strcpy(store->credits_players[store->credits_count++], uuid);
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPDATE, 0);
+}
 typedef struct maage_store_bytes {
     unsigned char *data;
     size_t length, position;
@@ -348,6 +376,9 @@ static void maage_store_map_clear(maage_world_store *store) {
     free(store->variant_offsets);
     store->variant_offsets = NULL;
     store->variant_item_count = 0;
+    free(store->credits_players);
+    store->credits_players = NULL;
+    store->credits_count = 0;
     free(store->map_bytes);
     store->map_bytes = NULL;
     store->map_length = 0;
@@ -1089,6 +1120,8 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     capacity = 16384UL;
     if (store->dimension_count > ((size_t) - 1 - capacity) / 256UL) return maage_store_fail(error, "Dimension checkpoint size overflow.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
     capacity += store->dimension_count * 256UL;
+    if (store->credits_count > ((size_t) - 1 - capacity) / 32UL) return maage_store_fail(error, "Player milestone size overflow.", MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_SAVE, trace);
+    capacity += store->credits_count * 32UL;
     for (dimension_index = 0; dimension_index < store->dimension_count; ++dimension_index) {
         checkpoint = &store->dimensions[dimension_index]->record;
         for (entity_index = 0; entity_index < checkpoint->entities.count; ++entity_index) {
@@ -1109,7 +1142,7 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    maage_store_text_put(&bytes, "MGWRLD17", 8);
+    maage_store_text_put(&bytes, "MGWRLD18", 8);
     maage_store_put(&bytes, (unsigned long) store->map_length, 4);
     maage_store_text_put(&bytes, (const char *) store->map_bytes, store->map_length);
     maage_store_put(&bytes, record->seed.low, 4);
@@ -1126,6 +1159,9 @@ static maage_status maage_store_metadata_write(const maage_world_store *store, c
     maage_store_double_put(&bytes, record->yaw);
     maage_store_double_put(&bytes, record->pitch);
     maage_store_gameplay_put(&bytes, &record->gameplay, store);
+    maage_store_put(&bytes, (unsigned long) store->credits_count, 4);
+    for (dimension_index = 0; dimension_index < store->credits_count; ++dimension_index)
+        maage_store_text_put(&bytes, store->credits_players[dimension_index], 32);
     maage_store_put(&bytes, maage_store_saved(store, MAAGE_STORE_DIMENSION, record->dimension, &bytes), 4);
     maage_store_put(&bytes, (unsigned long) record->generation_policy.sea_level, 4);
     maage_store_put(&bytes, (unsigned long) record->generation_policy.spawn_search_radius, 4);
@@ -1166,12 +1202,12 @@ static maage_status maage_store_metadata_load(maage_world_store *store, const ch
     bytes.position = 0;
     bytes.failed = 0;
     bytes.failure = 0;
-    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD17", 8)) {
+    if (bytes.length >= 8 && memcmp(bytes.data, "MGWRLD18", 8)) {
         free(bytes.data);
         maage_store_error(error, "World was created using an incompatible development metadata format; recreate this development world.");
         return MAAGE_STATUS_TRACE(trace, maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD, MAAGE_DETAIL_WORLD_FORMAT), MAAGE_CONTEXT_WORLD_IO, MAAGE_OPERATION_LOAD);
     }
-    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD17");
+    ok = maage_store_checksum(&bytes) && maage_store_magic(&bytes, "MGWRLD18");
     if (ok) {
         unsigned long map_length = maage_store_get(&bytes, 4);
         if (bytes.failed || map_length > bytes.length - bytes.position) ok = 0;
@@ -1207,6 +1243,19 @@ static maage_status maage_store_metadata_load(maage_world_store *store, const ch
         record->yaw = maage_store_double_get(&bytes);
         record->pitch = maage_store_double_get(&bytes);
         maage_store_gameplay_get(&bytes, &record->gameplay, store);
+        {
+            unsigned long credits_count = maage_store_get(&bytes, 4), player_index;
+            char uuid[33];
+            int seen;
+            if (credits_count > (bytes.length - bytes.position) / 32UL) bytes.failed = 1;
+            for (player_index = 0; player_index < credits_count && !bytes.failed; ++player_index) {
+                unsigned int digit;
+                for (digit = 0; digit < 32; ++digit)
+                    uuid[digit] = (char) maage_store_get(&bytes, 1);
+                uuid[32] = 0;
+                if (maage_status_failed(maage_world_store_credits(store, uuid, 1, &seen)) || seen) bytes.failed = 1;
+            }
+        }
         record->dimension = maage_store_runtime(store, MAAGE_STORE_DIMENSION, maage_store_get(&bytes, 4), &bytes);
         gameplay_read = 1;
         value = maage_store_get(&bytes, 4);

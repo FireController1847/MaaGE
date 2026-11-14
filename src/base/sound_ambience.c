@@ -7,6 +7,7 @@ typedef struct base_ambient_state {
     unsigned long random, cave_ticks;
     unsigned int rain_counter;
     int initialized;
+    double portal_next;
 } base_ambient_state;
 static unsigned long base_ambient_random(base_ambient_state *state, unsigned long bound) {
     state->random = (state->random * 1664525UL + 1013904223UL) & 0xffffffffUL;
@@ -26,6 +27,9 @@ static maage_status base_ambient_update(const void *context, void *storage, cons
     const maage_block_registry *registry;
     const maage_block_state_definition *cell, *above;
     const maage_block_definition *block;
+    const maage_portal_presentation *portal = NULL;
+    double portal_position[3];
+    unsigned long portals = 0;
     maage_world_observation observation, local;
     double water_position[3], lava_position[3], rain_position[3], position[3], dx, dy, dz, rain;
     unsigned long water_count = 0, lava_count = 0, rain_count = 0, sample;
@@ -51,6 +55,13 @@ static maage_status base_ambient_update(const void *context, void *storage, cons
         if (y < 0 || y >= MAAGE_WORLD_HEIGHT || !maage_world_chunk_loaded(visual, maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z))) continue;
         cell = maage_block_registry_state(registry, maage_world_get(visual, x, y, z));
         if (!cell) continue;
+        block = maage_block_registry_block(registry, cell->block_id);
+        if (block && block->portal_presentation && base_ambient_random(state, ++portals) == 0) {
+            portal = maage_presentation_portal(data->presentation, block->portal_presentation);
+            portal_position[0] = x + 0.5;
+            portal_position[1] = y + 0.5;
+            portal_position[2] = z + 0.5;
+        }
         if (cell->fluid_kind == ids->fluid_water && cell->fluid_level > 0 && cell->fluid_level < 8) {
             if (base_ambient_random(state, ++water_count) == 0) {
                 water_position[0] = x + 0.5;
@@ -65,6 +76,12 @@ static maage_status base_ambient_update(const void *context, void *storage, cons
                 lava_position[2] = z;
             }
         }
+    }
+    if (portal && portal->ambient && query->now >= state->portal_next) {
+        state->portal_next = query->now + base_ambient_span(state, 3, 6);
+        result = base_ambient_play(sink, portal->ambient, 0, portal_position, 0.5, base_ambient_span(state, 0.8, 1.2), trace);
+        if (maage_status_failed(result)) return result;
+        if (maage_status_is_warning(result)) outcome = result;
     }
     rain = query->environment->rain_intensity;
     samples = (int) (100.0 * rain * rain);

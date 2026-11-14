@@ -277,6 +277,8 @@ static int content_face_registered(const maage_content_context *context, const m
 }
 static maage_status content_validate_presentation(const maage_content_context *context) {
     const maage_block_state_definition *state;
+    const maage_block_definition *block;
+    const maage_portal_presentation *portal;
     const maage_block_face_definition *face;
     const maage_fluid_definition *fluid;
     const maage_container_definition *container;
@@ -286,8 +288,14 @@ static maage_status content_validate_presentation(const maage_content_context *c
     const maage_item_definition *item;
     const maage_item_variant_definition *variant;
     size_t i, j;
+    for (i = 1; i <= maage_presentation_portal_count(context->presentation); ++i) {
+        portal = maage_presentation_portal(context->presentation, (unsigned long) i);
+        if ((portal->ambient && !maage_sound_get(context->sounds, portal->ambient)) || (portal->enter && !maage_sound_get(context->sounds, portal->enter)) || (portal->travel && !maage_sound_get(context->sounds, portal->travel))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
+    }
     for (i = 0; i < maage_block_registry_state_count(context->blocks); ++i) {
         state = maage_block_registry_state(context->blocks, (maage_block_state_id) i);
+        block = state ? maage_block_registry_block(context->blocks, state->block_id) : NULL;
+        if (block && block->portal_presentation && !maage_presentation_portal(context->presentation, block->portal_presentation)) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         if (!state || (state->fast_texture && !maage_presentation_texture(context->presentation, state->fast_texture))) return maage_status_make(MAAGE_STATUS_NOT_FOUND, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_FINALIZE, 0);
         for (j = 0; j < MAAGE_FACE_COUNT; ++j) {
             face = &state->faces[j];
@@ -347,7 +355,7 @@ static maage_status content_validate_presentation(const maage_content_context *c
  * This rejects callbacks which continue after a failed registration. */
 static maage_status content_validate_registrations(const maage_content *content, maage_content_failure *failure) {
     const maage_content_context *context = &content->context;
-    size_t actual[CONTENT_BEHAVIOR + 1], claimed[CONTENT_BEHAVIOR + 1], i, j;
+    size_t actual[CONTENT_PORTAL + 1], claimed[CONTENT_PORTAL + 1], i, j;
     memset(claimed, 0, sizeof(claimed));
     actual[CONTENT_BLOCK] = content_blocks_identity_count(context->blocks, CONTENT_BLOCK);
     actual[CONTENT_ITEM] = maage_item_registry_count(context->items);
@@ -373,9 +381,11 @@ static maage_status content_validate_registrations(const maage_content *content,
     actual[CONTENT_TAG] = maage_tag_count(context->traits);
     actual[CONTENT_DIMENSION] = maage_dimension_count(context->dimensions);
     actual[CONTENT_BEHAVIOR] = maage_behavior_count(context->traits);
+    actual[CONTENT_CREDITS] = maage_presentation_credit_count(context->presentation);
+    actual[CONTENT_PORTAL] = maage_presentation_portal_count(context->presentation);
     for (i = 0; i < content->policy.count; ++i)
-        if (content->policy.identities[i].domain <= CONTENT_BEHAVIOR) ++claimed[content->policy.identities[i].domain];
-    for (i = 0; i <= CONTENT_BEHAVIOR; ++i)
+        if (content->policy.identities[i].domain <= CONTENT_PORTAL) ++claimed[content->policy.identities[i].domain];
+    for (i = 0; i <= CONTENT_PORTAL; ++i)
         if (actual[i] != claimed[i]) {
             failure->dependency_name = content_policy_domain_name((content_domain) i);
             failure->reason = "Callback continued after unsuccessful registration";
@@ -679,7 +689,9 @@ failed:
 const maage_entity_type_registry *maage_content_entity_types(const maage_content *content) {
     return content ? content->context.entity_types : NULL;
 }
-const maage_dimension_registry *maage_content_dimensions(const maage_content *content) { return content ? content->context.dimensions : NULL; }
+const maage_dimension_registry *maage_content_dimensions(const maage_content *content) {
+    return content ? content->context.dimensions : NULL;
+}
 const maage_model_registry *maage_content_models(const maage_content *content) {
     return content ? content->context.models : NULL;
 }
@@ -827,6 +839,15 @@ maage_status maage_content_validate_identity(const maage_content *content, const
         texture = maage_presentation_texture(a->presentation, (maage_texture_id) i);
         peer_texture = maage_presentation_texture(b->presentation, (maage_texture_id) i);
         if (texture->source != peer_texture->source || texture->fallback != peer_texture->fallback || texture->opaque != peer_texture->opaque || texture->frame_ticks != peer_texture->frame_ticks || texture->pingpong != peer_texture->pingpong || texture->frame_edge != peer_texture->frame_edge || texture->sheet_width != peer_texture->sheet_width || texture->sheet_height != peer_texture->sheet_height) return content_identity_mismatch(content, trace, 33, NULL);
+    }
+    if (maage_presentation_credit_count(a->presentation) != maage_presentation_credit_count(b->presentation) || maage_presentation_portal_count(a->presentation) != maage_presentation_portal_count(b->presentation)) return content_identity_mismatch(content, trace, 33, NULL);
+    for (i = 0; i < maage_presentation_credit_count(a->presentation); ++i) {
+        const maage_credit_definition *left_credit = maage_presentation_credit(a->presentation, i), *right_credit = maage_presentation_credit(b->presentation, i);
+        if (strcmp(left_credit->name, right_credit->name) || (!!left_credit->text != !!right_credit->text) || (!!left_credit->source != !!right_credit->source) || (left_credit->text && strcmp(left_credit->text, right_credit->text)) || (left_credit->source && strcmp(left_credit->source, right_credit->source))) return content_identity_mismatch(content, trace, 33, left_credit->name);
+    }
+    for (i = 1; i <= maage_presentation_portal_count(a->presentation); ++i) {
+        const maage_portal_presentation *left_portal = maage_presentation_portal(a->presentation, (unsigned long) i), *right_portal = maage_presentation_portal(b->presentation, (unsigned long) i);
+        if (left_portal->particle != right_portal->particle || left_portal->particle_frames != right_portal->particle_frames || left_portal->smoke != right_portal->smoke || memcmp(left_portal->particle_color, right_portal->particle_color, sizeof(left_portal->particle_color)) || left_portal->ambient != right_portal->ambient || left_portal->enter != right_portal->enter || left_portal->travel != right_portal->travel || memcmp(left_portal->color, right_portal->color, sizeof(left_portal->color))) return content_identity_mismatch(content, trace, 33, NULL);
     }
     if (maage_creative_entry_count(a->creative) != maage_creative_entry_count(b->creative)) return content_identity_mismatch(content, trace, 34, NULL);
     for (i = 0; i < maage_creative_entry_count(a->creative); ++i) {

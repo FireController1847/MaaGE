@@ -597,6 +597,8 @@ static maage_status dimension_contact(const void *context, maage_world *world, c
         travel->destination = source->id == ids->dimension_end ? ids->dimension_overworld : ids->dimension_end;
         travel->kind = source->id == ids->dimension_end ? TRAVEL_RETURN : TRAVEL_END;
         travel->delay = 1;
+        travel->presentation = ids->end_presentation;
+        travel->credits = source->id == ids->dimension_end;
         if (travel->kind == TRAVEL_END) {
             travel->position[0] = 100.5;
             travel->position[1] = 50;
@@ -607,6 +609,8 @@ static maage_status dimension_contact(const void *context, maage_world *world, c
         travel->destination = source->id == ids->dimension_nether ? ids->dimension_overworld : ids->dimension_nether;
         travel->kind = TRAVEL_NETHER;
         travel->delay = creative ? 1 : 80;
+        travel->cooldown = 300;
+        travel->presentation = ids->nether_presentation;
         travel->position[0] *= source->id == ids->dimension_nether ? 8 : 0.125;
         travel->position[2] *= source->id == ids->dimension_nether ? 8 : 0.125;
         if (travel->position[1] > 118) travel->position[1] = 118;
@@ -706,6 +710,7 @@ static maage_status dimension_register_block(maage_content_context *context, maa
     if (solid) block.collision_shape = block.selection_shape;
     if (index == DIM_PORTAL || index == DIM_END_PORTAL) {
         block.geometry_id = ids->portal_geometry;
+        block.portal_presentation = index == DIM_PORTAL ? ids->nether_presentation : ids->end_presentation;
         block.emitted_light = index == DIM_PORTAL ? 11 : 15;
         block.mesh_material = index == DIM_END_PORTAL ? MAAGE_MESH_MATERIAL_STARFIELD : MAAGE_MESH_MATERIAL_TRANSLUCENT;
     }
