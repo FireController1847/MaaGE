@@ -18,9 +18,10 @@ maage_status maage_client_frontend_create(maage_client_ui *ui, const maage_insta
 /* SUCCESS selects a world; NOOP closes Client. No Server exists in this loop. */
 maage_status maage_client_frontend_run(maage_client_frontend *front, maage_window_system *system, maage_client_audio_service *audio, maage_client_world_choice *choice, maage_status_trace *trace);
 maage_status maage_client_frontend_loading(maage_client_frontend *front, maage_status_trace *trace);
+void maage_client_frontend_loading_progress(maage_client_frontend *front, const char *label, const unsigned char *cells);
 /* Transfer ownership of an integrated session and its presentation replica
- * to a background cleanup job. The menu remains live while its authoritative
- * Server flushes; starting another world waits for release of its file locks. */
+ * to a background cleanup job. The saving screen remains responsive while its
+ * authoritative Server flushes; title appears only after cleanup completes. */
 maage_status maage_client_frontend_leave_world(maage_client_frontend *front, maage_server_runtime *server, maage_local_session *session, maage_world *visual, maage_status_trace *trace);
 /* Coalesce latest Client options on one independently owned disk writer. */
 maage_status maage_client_frontend_save_options(maage_client_frontend *front, const maage_client_options *options);

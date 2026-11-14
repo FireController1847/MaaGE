@@ -822,7 +822,9 @@ maage_status maage_client_run(int argc, char *const argv[], maage_status_trace *
     int drop_latched = 0, drop_stack = 0;
     unsigned int drop_slot = 0;
     int valid_snapshot = 0, connected = 0, ok = 0, options_ready = 0, server_started = 0, i, axis;
-    int initial_capture = 1, active = 0, was_active = 0;
+    int initial_capture = 1, active = 0, was_active = 0, loading_terrain = 0;
+    unsigned char terrain_cells[9];
+    unsigned int terrain_ready, terrain_index;
     int was_modal = 0, changing_mode = 0, was_changing_mode = 0;
     int was_options_visible = 0, options_save_needed = 0, resize_pending = 0;
     int logged_max_fps, logged_vsync, paused_command = -1;
@@ -1010,12 +1012,15 @@ choose_world:
     memset(&mesh_activity, 0, sizeof(mesh_activity));
     world_epoch = last_sound_sequence = last_seen_tick = sound_epoch = sound_world_epoch = 0;
     active = was_active = was_modal = was_changing_mode = 0;
+    valid_snapshot = 0;
+    loading_terrain = 1;
     paused_command = -1;
     view_sent = disconnected = 0;
     initial_capture = 1;
     jump_latched = attack_latched = use_latched = respawn_latched = forward_latched = drop_latched = 0;
     pacing.deadline = 0;
     pacing.fps = 0;
+    maage_client_frontend_loading_progress(frontend, "Loading world...", NULL);
     operation = maage_client_frontend_loading(frontend, trace);
     if (maage_status_failed(operation)) goto done;
     operation = maage_local_session_create(256U, 256U, 512U, &session);
@@ -1109,8 +1114,10 @@ choose_world:
     memcpy(visual_config.position, latest.player.player.position, sizeof(visual_config.position));
     operation = maage_world_create(&visual_config, &visual_world, trace);
     if (maage_status_failed(operation)) goto done;
-    while (maage_client_ui_modal(ui))
-        (void) maage_client_ui_back(ui);
+    /* Keep the loading root visible while the Client receives, lights and
+     * uploads the nearby terrain. Streaming uses the ordinary frame loop. */
+    memset(terrain_cells, 0, sizeof(terrain_cells));
+    maage_client_frontend_loading_progress(frontend, "Loading terrain...", terrain_cells);
     operation = maage_client_ui_set_snapshot(ui, &latest);
     if (maage_status_failed(operation)) goto done;
     rendered = maage_renderer_set_clear_color(renderer, 0.53f, 0.76f, 1.0f, 1.0f);
@@ -1411,6 +1418,7 @@ choose_world:
                 memset(&camera_effects, 0, sizeof(camera_effects));
                 player_view.initialized = 0;
                 world_epoch = incoming.world_epoch;
+                loading_terrain = 1;
                 view_sent = 0;
                 paused_command = -1;
                 sound_epoch = sound_world_epoch = last_sound_sequence = 0;
@@ -1701,6 +1709,10 @@ choose_world:
             maage_client_camera(matrix, camera_eye, camera_yaw, camera_pitch, (double) state.framebuffer_width / state.framebuffer_height, options.radius, effective_fov, camera_effects.matrix, camera_mode == MAAGE_CAMERA_FIRST);
         }
         draw_count = resident_count = first_count = 0;
+        if (loading_terrain) {
+            for (terrain_index = 0; terrain_index < 9; ++terrain_index)
+                terrain_cells[terrain_index] = maage_world_chunk_loaded(visual_world, cx + (int) (terrain_index % 3) - 1, cz + (int) (terrain_index / 3) - 1) ? 1 : 0;
+        }
         memset(&mesh_stats, 0, sizeof(mesh_stats));
         for (slot_index = 0; slot_index < cache.capacity; ++slot_index) {
             cache.slots[slot_index].first_frame = 0;
@@ -1713,6 +1725,10 @@ choose_world:
                  * authoritative lifetime boundary for cached replicas. */
                 if (abs(cache.slots[slot_index].x - cx) > options.radius || abs(cache.slots[slot_index].z - cz) > options.radius) continue;
                 if (!maage_world_chunk_loaded(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
+                if (loading_terrain && abs(cache.slots[slot_index].x - cx) <= 1 && abs(cache.slots[slot_index].z - cz) <= 1) {
+                    terrain_index = (unsigned int) ((cache.slots[slot_index].z - cz + 1) * 3 + cache.slots[slot_index].x - cx + 1);
+                    terrain_cells[terrain_index] = cache.slots[slot_index].presented ? 3 : 2;
+                }
                 if (!cache.slots[slot_index].presented) {
                     if (!maage_world_mesh_current(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z, cache.slots[slot_index].visual_revision) || !maage_world_mesh_can_present(visual_world, cache.slots[slot_index].x, cache.slots[slot_index].z)) continue;
                     cache.slots[slot_index].first_frame = 1;
@@ -1742,6 +1758,32 @@ choose_world:
                 goto done;
             }
             cache.draws[draw_count++] = interaction.mesh;
+        }
+        /* Do not turn the lifecycle screen into a Server pause. The nearby
+         * chunk map is measured from this epoch's own replica/GPU cache. */
+        if (loading_terrain) {
+            terrain_ready = 0;
+            for (terrain_index = 0; terrain_index < 9; ++terrain_index)
+                if (terrain_cells[terrain_index] == 3) ++terrain_ready;
+            if (terrain_ready == 9) loading_terrain = 0;
+        }
+        if (!latest.player.health) {
+            loading_terrain = 0;
+            if (maage_client_ui_current(ui) == MAAGE_CLIENT_UI_LOADING) {
+                operation = maage_client_ui_back(ui);
+                if (!maage_status_failed(operation)) operation = maage_client_ui_open(ui, MAAGE_CLIENT_UI_PAUSE);
+                if (maage_status_failed(operation)) goto done;
+            }
+        } else if (!latest.credits && (latest.travelling || loading_terrain)) {
+            maage_client_frontend_loading_progress(frontend, "Loading terrain...", latest.travelling ? NULL : terrain_cells);
+            if (!maage_client_ui_modal(ui)) {
+                operation = maage_client_ui_open(ui, MAAGE_CLIENT_UI_LOADING);
+                if (maage_status_failed(operation)) goto done;
+            }
+        } else if (maage_client_ui_current(ui) == MAAGE_CLIENT_UI_LOADING) {
+            operation = maage_client_ui_back(ui);
+            if (maage_status_failed(operation)) goto done;
+            initial_capture = 1;
         }
         debug_text = maage_client_ui_debug_visible(ui) ? maage_client_debug_collect(&debug, now, &visual_snapshot, options.radius, !active, renderer, &mesh_stats, visual_stats.resident_storage_bytes, maage_content_biomes(content), maage_content_dimensions(content)) : NULL;
         maage_client_ui_notice_time(ui, now);

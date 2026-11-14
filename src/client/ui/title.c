@@ -86,7 +86,7 @@ static unsigned int title_clip(const title_camera *camera, title_vertex vertices
     return count;
 }
 
-static void title_panorama(maage_client_ui *ui) {
+void maage_client_ui_title_panorama(maage_client_ui *ui) {
     title_camera camera;
     title_vertex polygon[8];
     maage_render_ui_vertex vertices[4];
@@ -184,7 +184,7 @@ static void title_splash(maage_client_ui *ui) {
 void maage_client_ui_title_draw(maage_client_ui *ui, void *context) {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *) context;
     maage_client_ui_rect r;
-    title_panorama(ui);
+    maage_client_ui_title_panorama(ui);
     title_logo(ui);
     title_splash(ui);
     r = title_button(ui, 0);

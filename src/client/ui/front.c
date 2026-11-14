@@ -77,6 +77,56 @@ static int front_seed_valid(const char *seed) {
     maage_world_seed parsed;
     return !*seed || maage_status_is_success(maage_world_seed_parse(seed, &parsed));
 }
+static void front_lifecycle_draw(maage_client_ui_frontend *f, int saving) {
+    maage_client_ui *ui = f->ui;
+    maage_client_ui_rect full, bar, cell;
+    float w = ui->content.width, h = ui->content.height, edge, top, width;
+    unsigned int i, ready = 0;
+    char percent[16];
+    static const float colors[4][3] = {{0.20f, 0.20f, 0.20f}, {0.43f, 0.54f, 0.32f}, {0.96f, 0.83f, 0.56f}, {1.0f, 1.0f, 1.0f}};
+    full.x = full.y = 0;
+    full.width = ui->width;
+    full.height = ui->height;
+    ui->clip = full;
+    for (i = 1; i <= 6; ++i)
+        if (!ui->resources.title_available[i]) break;
+    if (i == 7) maage_client_ui_title_panorama(ui);
+    else maage_client_ui_menu_background(ui);
+    maage_client_ui_panel(ui, full, 0, 0, 0, 0.58f);
+    ui->clip = ui->content;
+    if (saving) {
+        front_center(f, "Saving world...", h / 2 - 4, 1, 1, 1);
+        return;
+    }
+    if (!f->loading_has_cells) {
+        front_center(f, f->loading_label[0] ? f->loading_label : "Loading world...", h / 2 - 4, 1, 1, 1);
+        return;
+    }
+    /* Fixed nearby terrain, not the entire configurable render distance. */
+    edge = h < 140 ? 9.0f : 14.0f;
+    top = h / 2 - edge * 1.5f;
+    front_center(f, f->loading_label[0] ? f->loading_label : "Loading terrain...", top - 20, 1, 1, 1);
+    cell = front_rect(f, w / 2 - edge * 1.5f - 2, top - 2, edge * 3 + 4, edge * 3 + 4);
+    maage_client_ui_panel(ui, cell, 0, 0, 0, 0.9f);
+    for (i = 0; i < 9; ++i) {
+        unsigned int stage = f->loading_cells[i] <= 3 ? f->loading_cells[i] : 0;
+        if (stage == 3) ++ready;
+        cell = front_rect(f, w / 2 - edge * 1.5f + (float) (i % 3) * edge, top + (float) (i / 3) * edge, edge - 1, edge - 1);
+        maage_client_ui_panel(ui, cell, colors[stage][0], colors[stage][1], colors[stage][2], 1);
+    }
+    width = w < 200 ? w - 20 : 180;
+    bar = front_rect(f, w / 2 - width / 2, top + edge * 3 + 12, width, 5);
+    maage_client_ui_panel(ui, bar, 0.72f, 0.72f, 0.72f, 1);
+    bar.x += 1;
+    bar.y += 1;
+    bar.width -= 2;
+    bar.height -= 2;
+    maage_client_ui_panel(ui, bar, 0.08f, 0.08f, 0.08f, 1);
+    bar.width *= (float) ready / 9;
+    maage_client_ui_panel(ui, bar, 1, 1, 1, 1);
+    sprintf(percent, "%u%%", ready * 100U / 9U);
+    front_center(f, percent, top + edge * 3 + 23, 1, 1, 1);
+}
 static void front_draw(maage_client_ui *ui, void *context) {
     maage_client_ui_frontend *f = (maage_client_ui_frontend *) context;
     unsigned int screen = maage_client_ui_current(ui);
@@ -84,12 +134,11 @@ static void front_draw(maage_client_ui *ui, void *context) {
     float w = ui->content.width, h = ui->content.height, y;
     maage_client_ui_rect r;
     char line[192];
-    maage_client_ui_menu_background(ui);
-    if (screen == MAAGE_CLIENT_UI_LOADING) {
-        front_center(f, "Loading world...", h / 2 - 20, 1, 1, 1);
-        front_center(f, "Preparing terrain and starting simulation", h / 2 + 4, 0.7f, 0.7f, 0.7f);
+    if (screen == MAAGE_CLIENT_UI_LOADING || screen == MAAGE_CLIENT_UI_SAVING) {
+        front_lifecycle_draw(f, screen == MAAGE_CLIENT_UI_SAVING);
         return;
     }
+    maage_client_ui_menu_background(ui);
     if (screen == MAAGE_CLIENT_UI_WORLDS) {
         float list_width = w < 240 ? w - 16 : 220;
         front_center(f, "Select World", 20, 1, 1, 1);
@@ -215,7 +264,7 @@ static unsigned int front_input(maage_client_ui *ui, const maage_client_ui_input
     int hover = -1, text_submit = 0;
     float w = ui->content.width, list_width = w < 240 ? w - 16 : 220;
     size_t row;
-    if (screen == MAAGE_CLIENT_UI_LOADING || (f->busy && screen != MAAGE_CLIENT_UI_WORLDS)) return 0;
+    if (screen == MAAGE_CLIENT_UI_LOADING || screen == MAAGE_CLIENT_UI_SAVING || (f->busy && screen != MAAGE_CLIENT_UI_WORLDS)) return 0;
     if (input->escape) {
         if ((!f->busy || screen == MAAGE_CLIENT_UI_WORLDS) && screen != MAAGE_CLIENT_UI_TITLE) {
             if (screen == MAAGE_CLIENT_UI_CREATE_WORLD && f->more) {
@@ -356,6 +405,11 @@ maage_status maage_client_ui_front_register(maage_client_ui *ui, maage_client_ui
             return result;
         }
     }
+    result = maage_client_ui_register_screen(ui, MAAGE_CLIENT_UI_SAVING, front_draw, front_input, f);
+    if (maage_status_failed(result)) {
+        free(f);
+        return result;
+    }
     *output = f;
     return result;
 }
@@ -369,6 +423,14 @@ void maage_client_ui_front_begin(maage_client_ui_frontend *f) {
     f->busy = 0;
     f->focus_keyboard = 0;
     f->message[0] = 0;
+}
+void maage_client_ui_front_loading(maage_client_ui_frontend *f, const char *label, const unsigned char *cells) {
+    if (!f) return;
+    if (!label) label = "";
+    strncpy(f->loading_label, label, sizeof(f->loading_label) - 1);
+    f->loading_label[sizeof(f->loading_label) - 1] = 0;
+    f->loading_has_cells = cells != NULL;
+    if (cells) memcpy(f->loading_cells, cells, sizeof(f->loading_cells));
 }
 void maage_client_ui_front_busy(maage_client_ui_frontend *f, int busy) {
     if (f) f->busy = busy;

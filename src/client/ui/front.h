@@ -12,6 +12,9 @@ typedef struct maage_client_ui_front_request {
 maage_status maage_client_ui_front_register(maage_client_ui *ui, maage_client_ui_frontend **output);
 void maage_client_ui_front_destroy(maage_client_ui_frontend *front);
 void maage_client_ui_front_begin(maage_client_ui_frontend *front);
+/* Real 3x3 arrival-column states: 0 absent, 1 received, 2 GPU prepared,
+ * 3 submitted. NULL shows a phase without inventing a percentage. */
+void maage_client_ui_front_loading(maage_client_ui_frontend *front, const char *label, const unsigned char *cells);
 void maage_client_ui_front_busy(maage_client_ui_frontend *front, int busy);
 void maage_client_ui_front_complete(maage_client_ui_frontend *front, const maage_world_summary *entries, size_t count, unsigned int operation);
 void maage_client_ui_front_error(maage_client_ui_frontend *front, const char *message);

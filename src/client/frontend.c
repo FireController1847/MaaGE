@@ -222,7 +222,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         matrix[i * 5] = 1;
     maage_client_ui_get_options(ui, &f->saved_options);
     maage_client_ui_front_begin(f->view);
-    result = maage_client_ui_open_root(ui, MAAGE_CLIENT_UI_TITLE);
+    result = maage_client_ui_open_root(ui, f->shutdown_active ? MAAGE_CLIENT_UI_SAVING : MAAGE_CLIENT_UI_TITLE);
     if (maage_status_failed(result)) return result;
     result = maage_window_capture_mouse(maage_client_ui_window(ui), 0);
     if (maage_status_failed(result)) return result;
@@ -282,7 +282,7 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         }
         /* Both queued button clicks and the original menu music need the
          * same audio service tick used during gameplay. */
-        if (audio) {
+        if (audio && !f->shutdown_active) {
             maage_client_ui_get_options(ui, &options);
             (void) maage_client_audio_service_apply_options(audio, &options);
             (void) maage_client_audio_service_update(audio, NULL, NULL, menu_listener, menu_forward, start, NULL);
@@ -290,6 +290,11 @@ maage_status maage_client_frontend_run(maage_client_frontend *f, maage_window_sy
         if (f->shutdown_active && maage_status_code(maage_jobs_poll(f->shutdown_jobs, &completion)) == MAAGE_STATUS_SUCCESS) {
             f->shutdown_active = 0;
             f->shutdown_unsafe = f->shutdown.server || f->shutdown.session || f->shutdown.visual;
+            if (maage_client_ui_current(ui) == MAAGE_CLIENT_UI_SAVING) {
+                result = maage_client_ui_open_root(ui, MAAGE_CLIENT_UI_TITLE);
+                if (maage_status_failed(result)) return result;
+            }
+            if (maage_status_failed(completion.result)) maage_client_ui_notify(ui, completion.result, start);
             if (f->shutdown_unsafe) {
                 f->busy = f->io_pending = 0;
                 maage_client_ui_front_error(f->view, "World cleanup incomplete; restart required.");
@@ -446,6 +451,9 @@ maage_status maage_client_frontend_destroy(maage_client_frontend *f) {
     return result;
 }
 
+void maage_client_frontend_loading_progress(maage_client_frontend *f, const char *label, const unsigned char *cells) {
+    if (f) maage_client_ui_front_loading(f->view, label, cells);
+}
 maage_status maage_client_frontend_loading(maage_client_frontend *f, maage_status_trace *trace) {
     maage_window_state state;
     maage_client_ui_input input;
@@ -460,6 +468,11 @@ maage_status maage_client_frontend_loading(maage_client_frontend *f, maage_statu
     }
     result = maage_window_get_state(maage_client_ui_window(f->ui), &state);
     if (maage_status_failed(result)) return result;
+    result = maage_client_ui_set_window_state(f->ui, &state);
+    if (maage_status_failed(result)) return result;
+    result = maage_client_ui_set_safe_area(f->ui, &state.safe_area);
+    if (maage_status_failed(result)) return result;
+    maage_client_ui_notice_time(f->ui, maage_time_monotonic_seconds());
     memset(&input, 0, sizeof(input));
     result = maage_client_ui_update(f->ui, &input, state.framebuffer_width, state.framebuffer_height, state.width, state.height, &actions);
     if (maage_status_failed(result)) return result;

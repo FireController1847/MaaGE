@@ -9,11 +9,14 @@ struct maage_client_ui_frontend {
     unsigned int action, focus;
     int focus_keyboard;
     int busy, quit, play, mode, more;
-    char name[128], seed[64], message[256];
+    char name[128], seed[64], message[256], loading_label[64];
+    unsigned char loading_cells[9];
+    int loading_has_cells;
     double last_click;
     float scroll, scroll_grab;
     int scrolling;
 };
+void maage_client_ui_title_panorama(maage_client_ui *ui);
 void maage_client_ui_title_draw(maage_client_ui *ui, void *context);
 unsigned int maage_client_ui_title_input(maage_client_ui *ui, const maage_client_ui_input *input, void *context);
 #endif

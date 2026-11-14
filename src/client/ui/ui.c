@@ -588,7 +588,8 @@ maage_status maage_client_ui_draw(maage_client_ui *ui, const maage_client_ui_deb
     ui->clip.x = ui->clip.y = 0;
     ui->clip.width = ui->width;
     ui->clip.height = ui->height;
-    if (ui->has_snapshot) maage_client_ui_gameplay_draw(ui);
+    id = maage_client_ui_current(ui);
+    if (ui->has_snapshot && id != MAAGE_CLIENT_UI_LOADING && id != MAAGE_CLIENT_UI_SAVING) maage_client_ui_gameplay_draw(ui);
     if (ui->has_snapshot && !maage_client_ui_modal(ui)) {
         ui->batch.invert_first_index = ui->batch.index_count;
         rectangle.x = (float) (int) (ui->width * 0.5f) - 7.0f;
@@ -597,7 +598,7 @@ maage_status maage_client_ui_draw(maage_client_ui *ui, const maage_client_ui_deb
         maage_client_ui_rectangle(ui, rectangle, 0, 0, 16.0f / ui->resources.atlas_edge, 16.0f / ui->resources.atlas_edge, 1, 1, 1, 1);
         ui->batch.invert_index_count = ui->batch.index_count - ui->batch.invert_first_index;
     }
-    if (ui->debug && debug) {
+    if (ui->debug && debug && id != MAAGE_CLIENT_UI_LOADING && id != MAAGE_CLIENT_UI_SAVING) {
         maage_client_ui_debug_column(ui, debug->left, debug->left_count, 0);
         maage_client_ui_debug_right(ui, debug);
     }
@@ -608,11 +609,11 @@ maage_status maage_client_ui_draw(maage_client_ui *ui, const maage_client_ui_deb
     if (id) {
         rectangle = ui->clip;
         if (id == MAAGE_CLIENT_UI_CONTROLS) maage_client_ui_menu_background(ui);
-        else if (ui->has_snapshot) maage_client_ui_gradient(ui, rectangle, 0xC0101010UL, 0xD0101010UL);
+        else if (ui->has_snapshot && id != MAAGE_CLIENT_UI_LOADING && id != MAAGE_CLIENT_UI_SAVING) maage_client_ui_gradient(ui, rectangle, 0xC0101010UL, 0xD0101010UL);
         else if (id == MAAGE_CLIENT_UI_OPTIONS || id == MAAGE_CLIENT_UI_VIDEO_SETTINGS || id == MAAGE_CLIENT_UI_SOUND_SETTINGS || id == MAAGE_CLIENT_UI_CONTROLS) maage_client_ui_menu_background(ui);
         /* Only interactive content is kept within safe-area bounds; the title
          * panorama and its darkening layer must fill even the notch region. */
-        ui->clip = id == MAAGE_CLIENT_UI_TITLE ? rectangle : ui->content;
+        ui->clip = id == MAAGE_CLIENT_UI_TITLE || id == MAAGE_CLIENT_UI_LOADING || id == MAAGE_CLIENT_UI_SAVING ? rectangle : ui->content;
         screen = maage_client_ui_screen_get(ui, id);
         screen->draw(ui, screen->context);
     }
@@ -644,7 +645,7 @@ maage_status maage_client_ui_open_root(maage_client_ui *ui, maage_client_ui_scre
     if (!ui) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_GUI, MAAGE_OPERATION_NAVIGATE, 0);
     ui->navigation.depth = 0;
     ui->selected = 0;
-    if (id == MAAGE_CLIENT_UI_TITLE) {
+    if (id == MAAGE_CLIENT_UI_TITLE || id == MAAGE_CLIENT_UI_SAVING) {
         ui->has_snapshot = 0;
         ui->container_command_pending = 0;
         ui->container_command_sequence = 0;
