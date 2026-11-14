@@ -96,11 +96,127 @@ static maage_status dimension_overworld_spawn(const void *context, maage_world_s
     (void) context;
     return maage_base_spawn(seed, blocks, biomes, policy, position);
 }
+typedef struct dimension_nether_profile {
+    int floor, ceiling, bridge;
+} dimension_nether_profile;
+/* The cavern's lower and upper envelopes always remain attached to their
+ * bedrock slabs. A shared pillar field joins them, rather than thresholding
+ * isolated 3D noise lobes into unsupported netherrack islands. */
+static dimension_nether_profile dimension_nether_column(maage_world_seed seed, int x, int z) {
+    dimension_nether_profile profile;
+    double pillar;
+    int region_x, region_z, fortress_x, fortress_z;
+    pillar = dimension_noise(seed, x / 32.0, 0, z / 32.0, 72003) + 0.3 * dimension_noise(seed, x / 11.0, 0, z / 11.0, 72005) - 0.15;
+    if (pillar < 0) pillar = 0;
+    profile.floor = 26 + (int) (dimension_noise(seed, x / 90.0, 0, z / 90.0, 72001) * 28 + dimension_noise(seed, x / 23.0, 0, z / 23.0, 72006) * 8 + pillar * 130);
+    profile.ceiling = 96 + (int) (dimension_noise(seed, x / 70.0, 0, z / 70.0, 72002) * 20 + dimension_noise(seed, x / 19.0, 0, z / 19.0, 72007) * 6 - pillar * 104);
+    if (profile.floor < 6) profile.floor = 6;
+    if (profile.floor > 120) profile.floor = 120;
+    if (profile.ceiling < 8) profile.ceiling = 8;
+    if (profile.ceiling > 122) profile.ceiling = 122;
+    region_x = maage_generation_region(x, 512);
+    region_z = maage_generation_region(z, 512);
+    fortress_x = region_x * 512 + 128 + (int) (maage_generation_feature_hash(seed, region_x, region_z, 72010) % 256UL);
+    fortress_z = region_z * 512 + 128 + (int) (maage_generation_feature_hash(seed, region_x, region_z, 72011) % 256UL);
+    profile.bridge = (abs(x - fortress_x) <= 3 && abs(z - fortress_z) < 60) || (abs(z - fortress_z) <= 3 && abs(x - fortress_x) < 60);
+    return profile;
+}
+static int dimension_nether_air(const dimension_nether_profile *profile, int y) {
+    if (profile->bridge && y >= 60 && y <= 65) return y >= 62;
+    return y >= 32 && y > profile->floor && y < profile->ceiling;
+}
+/* Replay bounded features from neighboring origin columns. Their RNG and
+ * geometry never depend on resident neighbors or generation job order. */
+static maage_status dimension_nether_quartz(const maage_base_ids *ids, maage_chunk *chunk, maage_world_seed seed, const maage_job_token *token) {
+    static const int directions[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+    int cx, cz, attempt, step, x, y, z, direction;
+    unsigned long random;
+    maage_status result;
+    for (cz = maage_chunk_z(chunk) - 1; cz <= maage_chunk_z(chunk) + 1; ++cz)
+        for (cx = maage_chunk_x(chunk) - 1; cx <= maage_chunk_x(chunk) + 1; ++cx) {
+            if (maage_job_cancelled(token)) return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, MAAGE_DETAIL_CANCELLED);
+            random = maage_generation_feature_hash(seed, cx, cz, 72004);
+            for (attempt = 0; attempt < 16; ++attempt) {
+                x = cx * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
+                y = 10 + (int) (maage_generation_feature_next(&random) % 108UL);
+                z = cz * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
+                for (step = 0; step < 13; ++step) {
+                    if (y >= 10 && y <= 117 && maage_world_chunk_coordinate(x) == maage_chunk_x(chunk) && maage_world_chunk_coordinate(z) == maage_chunk_z(chunk) && maage_chunk_get(chunk, maage_world_local_coordinate(x), y, maage_world_local_coordinate(z)) == ids->state_netherrack) {
+                        result = dimension_set(chunk, x, y, z, ids->state_quartz_ore);
+                        if (maage_status_failed(result)) return result;
+                    }
+                    direction = (int) (maage_generation_feature_next(&random) % 6UL);
+                    x += directions[direction][0];
+                    y += directions[direction][1];
+                    z += directions[direction][2];
+                }
+            }
+        }
+    return dimension_result(MAAGE_STATUS_SUCCESS);
+}
+static maage_status dimension_nether_glowstone(const maage_base_ids *ids, maage_chunk *chunk, maage_world_seed seed, const maage_job_token *token) {
+    dimension_nether_profile profiles[15][15], anchor;
+    unsigned char occupied[13][15][15];
+    int points[72][3];
+    int cx, cz, attempt, x, y, z, root_x, root_y, root_z, i, count, target, parent, direction, dx, dy, dz, tries;
+    unsigned long random;
+    maage_status result;
+    for (cz = maage_chunk_z(chunk) - 1; cz <= maage_chunk_z(chunk) + 1; ++cz)
+        for (cx = maage_chunk_x(chunk) - 1; cx <= maage_chunk_x(chunk) + 1; ++cx) {
+            if (maage_job_cancelled(token)) return maage_status_make(MAAGE_STATUS_INTERRUPTED, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_GENERATE, MAAGE_DETAIL_CANCELLED);
+            for (attempt = 0; attempt < 10; ++attempt) {
+                random = maage_generation_feature_hash(seed, cx, cz, 72100UL + (unsigned long) attempt);
+                root_x = cx * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
+                y = 40 + (int) (maage_generation_feature_next(&random) % 80UL);
+                root_z = cz * 16 + (int) (maage_generation_feature_next(&random) % 16UL);
+                anchor = dimension_nether_column(seed, root_x, root_z);
+                root_y = anchor.ceiling - 1;
+                if (y < root_y - 7 || y > root_y || !dimension_nether_air(&anchor, root_y) || dimension_nether_air(&anchor, root_y + 1) || (anchor.bridge && root_y + 1 >= 60 && root_y + 1 <= 65)) continue;
+                for (z = 0; z < 15; ++z)
+                    for (x = 0; x < 15; ++x)
+                        profiles[z][x] = dimension_nether_column(seed, root_x + x - 7, root_z + z - 7);
+                memset(occupied, 0, sizeof(occupied));
+                occupied[0][7][7] = 1;
+                points[0][0] = points[0][2] = 7;
+                points[0][1] = 0;
+                count = 1;
+                target = 24 + (int) (maage_generation_feature_next(&random) % 49UL);
+                /* Each accepted child shares a face with an existing cell;
+                 * the root hangs immediately below the natural roof. */
+                for (tries = 0; tries < target * 24 && count < target; ++tries) {
+                    parent = (int) (maage_generation_feature_next(&random) % (unsigned long) count);
+                    dx = points[parent][0];
+                    dy = points[parent][1];
+                    dz = points[parent][2];
+                    direction = (int) (maage_generation_feature_next(&random) % 6UL);
+                    if (direction == 0) --dx;
+                    else if (direction == 1) ++dx;
+                    else if (direction == 2) --dz;
+                    else if (direction == 3) ++dz;
+                    else ++dy;
+                    if (dx < 0 || dx >= 15 || dz < 0 || dz >= 15 || dy >= 13 || occupied[dy][dz][dx] || !dimension_nether_air(&profiles[dz][dx], root_y - dy)) continue;
+                    occupied[dy][dz][dx] = 1;
+                    points[count][0] = dx;
+                    points[count][1] = dy;
+                    points[count][2] = dz;
+                    ++count;
+                }
+                for (i = 0; i < count; ++i) {
+                    x = root_x + points[i][0] - 7;
+                    y = root_y - points[i][1];
+                    z = root_z + points[i][2] - 7;
+                    result = dimension_set(chunk, x, y, z, ids->dimension_states[DIM_GLOWSTONE]);
+                    if (maage_status_failed(result)) return result;
+                }
+            }
+        }
+    return dimension_result(MAAGE_STATUS_SUCCESS);
+}
 static maage_status dimension_nether_generate(const void *context, maage_chunk *chunk, maage_world_seed seed, const maage_block_registry *blocks, const maage_biome_registry *biomes, const maage_generation_policy *policy, const maage_job_token *token, maage_status_trace *trace) {
     const maage_base_ids *ids = (const maage_base_ids *) context;
     maage_generation_output output;
-    int x, y, z, wx, wz, top, floor_y, ceiling, region_x, region_z, fortress_x, fortress_z, bridge;
-    double density;
+    dimension_nether_profile profile;
+    int x, y, z, wx, wz, soul;
     unsigned long hash;
     maage_block_state_id state;
     maage_status result = maage_chunk_generation_output(chunk, &output);
@@ -115,34 +231,25 @@ static maage_status dimension_nether_generate(const void *context, maage_chunk *
             wx = output.x * 16 + x;
             wz = output.z * 16 + z;
             hash = maage_generation_feature_hash(seed, wx, wz, 72000);
-            floor_y = 28 + (int) (dimension_noise(seed, wx / 45.0, 0, wz / 45.0, 72001) * 18);
-            ceiling = 92 + (int) (dimension_noise(seed, wx / 60.0, 0, wz / 60.0, 72002) * 16);
-            top = 0;
-            region_x = (int) floor(wx / 512.0);
-            region_z = (int) floor(wz / 512.0);
-            fortress_x = region_x * 512 + 128 + (int) (maage_generation_feature_hash(seed, region_x, region_z, 72010) % 256UL);
-            fortress_z = region_z * 512 + 128 + (int) (maage_generation_feature_hash(seed, region_x, region_z, 72011) % 256UL);
-            bridge = (abs(wx - fortress_x) <= 3 && abs(wz - fortress_z) < 60) || (abs(wz - fortress_z) <= 3 && abs(wx - fortress_x) < 60);
+            profile = dimension_nether_column(seed, wx, wz);
+            soul = profile.floor >= 30 && profile.floor <= 35 && dimension_noise(seed, wx / 12.0, 0, wz / 12.0, 72008) > 0.1;
             for (y = 0; y < 128; ++y) {
-                density = dimension_noise(seed, wx / 28.0, y / 19.0, wz / 28.0, 72003);
-                state = y <= floor_y || y >= ceiling || density > 0.36 ? ids->state_netherrack : (y < 32 ? ids->state_lava : ids->state_air);
+                state = y <= profile.floor || y >= profile.ceiling ? ids->state_netherrack : (y < 32 ? ids->state_lava : ids->state_air);
                 if (y <= (int) (hash % 5) || y >= 127 - (int) ((hash >> 8) % 5)) state = ids->state_bedrock;
-                if (state == ids->state_netherrack && y > 5 && y < 120) {
-                    if (dimension_noise(seed, wx / 3.0, y / 3.0, wz / 3.0, 72004) > 0.65) state = ids->state_quartz_ore;
-                    if (y == floor_y && floor_y >= 30 && floor_y <= 35 && (hash & 7) < 3) state = ids->dimension_states[DIM_SOUL_SAND];
-                    if (y == ceiling && (hash & 63) < 3) state = ids->dimension_states[DIM_GLOWSTONE];
-                }
-                if (bridge && y >= 60 && y <= 65) state = y <= 61 ? ids->state_nether_brick : ids->state_air;
+                if (soul && y <= profile.floor && y >= profile.floor - 3 && y < profile.ceiling) state = ids->dimension_states[DIM_SOUL_SAND];
+                if (profile.bridge && y >= 60 && y <= 65) state = y <= 61 ? ids->state_nether_brick : ids->state_air;
                 if (state != ids->state_air) {
                     result = maage_chunk_set(chunk, x, y, z, state);
                     if (maage_status_failed(result)) return result;
-                    top = y + 1;
                 }
             }
             output.biomes[z * 16 + x] = ids->biome_hell;
-            output.heightmap[z * 16 + x] = (unsigned short) top;
+            output.heightmap[z * 16 + x] = 128;
         }
     }
+    result = dimension_nether_quartz(ids, chunk, seed, token);
+    if (!maage_status_failed(result)) result = dimension_nether_glowstone(ids, chunk, seed, token);
+    if (maage_status_failed(result)) return result;
     *output.stages = 255;
     return dimension_result(MAAGE_STATUS_SUCCESS);
 }
