@@ -63,6 +63,24 @@ MAAGE_SHADER_VEC3 maage_shader_lighting(MAAGE_SHADER_VEC2 level, float daylight)
 bool maage_shader_cutout(float material, float alpha) {
     return material == float(MAAGE_MESH_MATERIAL_CUTOUT) && alpha < MAAGE_RENDER_CUTOUT_ALPHA;
 }
+/* Independent layered star volume. Cell hashes select sparse glints; changing
+ * projected eye direction offsets each depth layer differently. No shared
+ * texture repetition, lighting tint or per-block renderer objects are needed. */
+MAAGE_SHADER_VEC4 maage_shader_starfield(MAAGE_SHADER_VEC3 world, MAAGE_SHADER_VEC3 projected, float tick) {
+    MAAGE_SHADER_VEC3 color = MAAGE_SHADER_VEC3(0.003, 0.008, 0.012);
+    MAAGE_SHADER_VEC2 eye = projected.xy / max(abs(projected.z), 0.01);
+    for (int layer = 0; layer < 8; ++layer) {
+        float depth = float(layer + 1);
+        MAAGE_SHADER_VEC2 p = world.xz * (5.0 + depth * 2.7) + eye * (depth * 0.7) + MAAGE_SHADER_VEC2(sin(tick * 0.0017223644 + depth), cos(tick * 0.0017223644 + depth)) * 0.6;
+        MAAGE_SHADER_VEC2 cell = floor(p);
+        float hash = sin(dot(cell, MAAGE_SHADER_VEC2(127.1 + depth, 311.7 - depth))) * 43758.5453;
+        hash -= floor(hash);
+        float radius = length((p - floor(p)) - MAAGE_SHADER_VEC2(0.5));
+        float star = (1.0 - smoothstep(0.015, 0.12, radius)) * step(0.82, hash) / (0.8 + depth * 0.22);
+        color += MAAGE_SHADER_VEC3(0.18 + hash * 0.25, 0.45 + hash * 0.5, 0.6 + hash * 0.4) * star;
+    }
+    return MAAGE_SHADER_VEC4(color, 1.0);
+}
 MAAGE_SHADER_VEC4 maage_shader_mesh_color(MAAGE_SHADER_VEC4 texel, MAAGE_SHADER_VEC4 color, MAAGE_SHADER_VEC2 level, float material, MAAGE_SHADER_VEC4 lighting, MAAGE_SHADER_VEC4 parameters) {
     if (material == float(MAAGE_MESH_MATERIAL_MULTIPLY)) return MAAGE_SHADER_VEC4(mix(MAAGE_SHADER_VEC3(0.5), texel.rgb * color.rgb, texel.a), 1.0);
     MAAGE_SHADER_VEC3 light = maage_shader_lighting(lighting.w > 0.0 ? lighting.yz : level, lighting.x);

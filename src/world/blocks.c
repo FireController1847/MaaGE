@@ -431,7 +431,7 @@ maage_status maage_block_registry_register_state(maage_block_registry *registry,
 }
 static int maage_block_definition_valid(const maage_block_definition *block) {
     unsigned int axis;
-    if (!block || (block->harvest_requires_tool && !block->has_required_tool) || block->emitted_light > 15 || block->light_opacity > 15 || block->mesh_material > 2 || !(block->hardness >= -DBL_MAX && block->hardness <= DBL_MAX) || !(block->item_drag >= 0 && block->item_drag <= 1) || (block->has_special_tool && !(block->special_tool_speed >= 1 && block->special_tool_speed <= 1024))) return 0;
+    if (!block || (block->harvest_requires_tool && !block->has_required_tool) || block->emitted_light > 15 || block->light_opacity > 15 || (block->mesh_material > MAAGE_MESH_MATERIAL_TRANSLUCENT && block->mesh_material != MAAGE_MESH_MATERIAL_STARFIELD) || !(block->hardness >= -DBL_MAX && block->hardness <= DBL_MAX) || !(block->item_drag >= 0 && block->item_drag <= 1) || (block->has_special_tool && !(block->special_tool_speed >= 1 && block->special_tool_speed <= 1024))) return 0;
     for (axis = 0; axis < 3; ++axis) {
         if (block->solid && !(block->collision_shape.minimum[axis] >= 0 && block->collision_shape.maximum[axis] <= 1 && block->collision_shape.minimum[axis] < block->collision_shape.maximum[axis])) return 0;
         if (block->selectable && !(block->selection_shape.minimum[axis] >= 0 && block->selection_shape.maximum[axis] <= 1 && block->selection_shape.minimum[axis] < block->selection_shape.maximum[axis])) return 0;

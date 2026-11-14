@@ -707,7 +707,7 @@ static maage_status dimension_register_block(maage_content_context *context, maa
     if (index == DIM_PORTAL || index == DIM_END_PORTAL) {
         block.geometry_id = ids->portal_geometry;
         block.emitted_light = index == DIM_PORTAL ? 11 : 15;
-        block.mesh_material = MAAGE_MESH_MATERIAL_TRANSLUCENT;
+        block.mesh_material = index == DIM_END_PORTAL ? MAAGE_MESH_MATERIAL_STARFIELD : MAAGE_MESH_MATERIAL_TRANSLUCENT;
     }
     if (index == DIM_PORTAL) block.neighbor_changed = dimension_portal_neighbor;
     if (index == DIM_END_PORTAL) block.neighbor_changed = dimension_end_neighbor;

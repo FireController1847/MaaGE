@@ -185,7 +185,7 @@ maage_status maage_block_geometry_resolve(const maage_block_geometry_registry *r
 }
 maage_status maage_block_geometry_quad_validate(const maage_block_geometry_quad *quad) {
     unsigned int corner, axis;
-    if (!quad || (quad->appearance && quad->appearance->texture_rotation) || quad->face >= MAAGE_FACE_COUNT || (quad->cull != 0 && quad->cull != 1) || (quad->double_sided != 0 && quad->double_sided != 1) || (quad->material != MAAGE_BLOCK_GEOMETRY_INHERIT_MATERIAL && quad->material > MAAGE_MESH_MATERIAL_MULTIPLY)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
+    if (!quad || (quad->appearance && quad->appearance->texture_rotation) || quad->face >= MAAGE_FACE_COUNT || (quad->cull != 0 && quad->cull != 1) || (quad->double_sided != 0 && quad->double_sided != 1) || (quad->material != MAAGE_BLOCK_GEOMETRY_INHERIT_MATERIAL && quad->material >= MAAGE_MESH_MATERIAL_COUNT)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
     for (corner = 0; corner < 4; ++corner) {
         for (axis = 0; axis < 3; ++axis)
             if (!(quad->positions[corner][axis] >= 0 && quad->positions[corner][axis] <= 1)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
@@ -199,7 +199,7 @@ maage_status maage_block_geometry_cuboid(const maage_block_geometry_sink *sink, 
     maage_block_geometry_quad quad;
     maage_status result;
     unsigned int face, corner, axis;
-    if (!sink || !sink->quad || !bounds || (face_mask & ~63U) || (cull != 0 && cull != 1) || (material != MAAGE_BLOCK_GEOMETRY_INHERIT_MATERIAL && material > MAAGE_MESH_MATERIAL_MULTIPLY)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
+    if (!sink || !sink->quad || !bounds || (face_mask & ~63U) || (cull != 0 && cull != 1) || (material != MAAGE_BLOCK_GEOMETRY_INHERIT_MATERIAL && material >= MAAGE_MESH_MATERIAL_COUNT)) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
     for (axis = 0; axis < 3; ++axis)
         if (!(bounds->minimum[axis] >= 0 && bounds->maximum[axis] <= 1 && bounds->minimum[axis] < bounds->maximum[axis])) return geometry_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_MESH);
     memset(&quad, 0, sizeof(quad));

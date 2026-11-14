@@ -26,7 +26,7 @@ static maage_status maage_geometry_validate(const maage_mesh_data *data) {
                     if (first->animation[axis] != vertex->animation[axis]) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
         }
         if (!(material == MAAGE_MESH_MATERIAL_OPAQUE || material == MAAGE_MESH_MATERIAL_CUTOUT ||
-              material == MAAGE_MESH_MATERIAL_TRANSLUCENT || material == MAAGE_MESH_MATERIAL_MULTIPLY) ||
+              material == MAAGE_MESH_MATERIAL_TRANSLUCENT || material == MAAGE_MESH_MATERIAL_MULTIPLY || material == MAAGE_MESH_MATERIAL_STARFIELD) ||
             data->vertices[data->indices[index + 1]].material != material ||
             data->vertices[data->indices[index + 2]].material != material)
             return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);

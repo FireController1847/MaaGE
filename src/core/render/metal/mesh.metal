@@ -62,6 +62,7 @@ vertex maage_fragment maage_mesh_vertex_shader(uint index [[vertex_id]], const d
 }
 fragment float4 maage_mesh_fragment_shader(maage_fragment input [[stage_in]], texture2d<float> atlas [[texture(0)]], constant maage_uniforms &uniforms [[buffer(0)]]) {
     constexpr sampler pixels(coord::normalized, address::clamp_to_edge, filter::nearest, mip_filter::none);
+    if (input.material == float(MAAGE_MESH_MATERIAL_STARFIELD)) return maage_shader_fog(maage_shader_starfield(input.world_position, input.fog_position, uniforms.parameters.x), input.fog_position, input.material, uniforms.fog, uniforms.fog_distance);
     float4 texel = atlas.sample(pixels, maage_shader_tile_uv(input.uv, input.tile, input.world_position, input.rotation_face));
     if (maage_shader_cutout(input.material, texel.a)) discard_fragment();
     return maage_shader_fog(maage_shader_mesh_color(texel, input.color, input.light, input.material, uniforms.lighting, uniforms.parameters), input.fog_position, input.material, uniforms.fog, uniforms.fog_distance);
