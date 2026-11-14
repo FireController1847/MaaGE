@@ -82,7 +82,7 @@ maage_status maage_controls_create(maage_controls **output) {
     CONTROL(right, "minecraft:right", "Strafe Right", MAAGE_CONTROL_MOVEMENT, MAAGE_INPUT_KEY_D)
     CONTROL(jump, "minecraft:jump", "Jump", MAAGE_CONTROL_MOVEMENT, MAAGE_INPUT_KEY_SPACE)
     CONTROL(sneak, "minecraft:sneak", "Sneak", MAAGE_CONTROL_MOVEMENT, MAAGE_INPUT_KEY_LEFT_SHIFT)
-    CONTROL(sprint, "minecraft:sprint", "Sprint", MAAGE_CONTROL_MOVEMENT, MAAGE_INPUT_KEY_LEFT_CONTROL)
+    CONTROL(sprint, "minecraft:sprint", "Sprint", MAAGE_CONTROL_MOVEMENT, maage_input_shortcut_key())
     CONTROL(inventory, "minecraft:inventory", "Inventory", MAAGE_CONTROL_INVENTORY, MAAGE_INPUT_KEY_E)
     CONTROL(drop, "minecraft:drop", "Drop", MAAGE_CONTROL_GAMEPLAY, MAAGE_INPUT_KEY_Q)
     CONTROL(attack, "minecraft:attack", "Attack/Destroy", MAAGE_CONTROL_GAMEPLAY, MAAGE_INPUT_MOUSE_BASE)
@@ -140,6 +140,9 @@ void maage_control_label(unsigned int binding, char *buffer) {
     else if (binding == 101U) strcpy(buffer, "Menu");
     else if (binding == 103U) strcpy(buffer, "Keypad =");
     else if (binding >= 104U && binding <= 115U) sprintf(buffer, "F%u", binding - 91U);
+#ifdef __APPLE__
+    else if (binding == MAAGE_INPUT_KEY_LEFT_COMMAND || binding == MAAGE_INPUT_KEY_RIGHT_COMMAND) strcpy(buffer, binding == MAAGE_INPUT_KEY_LEFT_COMMAND ? "Left Cmd" : "Right Cmd");
+#endif
     else if (binding >= 224U && binding <= 231U) strcpy(buffer, modifiers[binding - 224U]);
     else sprintf(buffer, "Key %u", binding);
 }

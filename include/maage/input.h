@@ -29,6 +29,8 @@ typedef unsigned int maage_input_key;
 #define MAAGE_INPUT_KEY_RIGHT 79U
 #define MAAGE_INPUT_KEY_1 30U
 #define MAAGE_INPUT_KEY_LEFT_CONTROL 224U
+#define MAAGE_INPUT_KEY_LEFT_COMMAND 227U
+#define MAAGE_INPUT_KEY_RIGHT_COMMAND 231U
 #define MAAGE_INPUT_KEY_LEFT_SHIFT 225U
 #define MAAGE_INPUT_KEY_RIGHT_CONTROL 228U
 #define MAAGE_INPUT_KEY_RIGHT_SHIFT 229U
@@ -56,6 +58,11 @@ typedef struct maage_input_snapshot {
     int focus_lost; /* Latched through a loss/regain within one polling interval. */
     int captured;
 } maage_input_snapshot;
+
+/* Built-in shortcuts/defaults only. Physical bindings retain their exact HID
+ * usages, including explicitly assigned Control keys on macOS. */
+maage_input_key maage_input_shortcut_key(void);
+int maage_input_shortcut_down(const maage_input_snapshot *input);
 
 /* Call on the window thread after event polling. Consumes press edges and mouse
  * deltas; held keys persist. Mouse deltas are native relative units, positive

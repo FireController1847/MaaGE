@@ -1,6 +1,22 @@
 #include "window_internal.h"
 #include <string.h>
 
+maage_input_key maage_input_shortcut_key(void) {
+#ifdef __APPLE__
+    return MAAGE_INPUT_KEY_LEFT_COMMAND;
+#else
+    return MAAGE_INPUT_KEY_LEFT_CONTROL;
+#endif
+}
+int maage_input_shortcut_down(const maage_input_snapshot *input) {
+    if (!input) return 0;
+#ifdef __APPLE__
+    return input->keys[MAAGE_INPUT_KEY_LEFT_COMMAND] || input->keys[MAAGE_INPUT_KEY_RIGHT_COMMAND];
+#else
+    return input->keys[MAAGE_INPUT_KEY_CONTROL];
+#endif
+}
+
 /* Translation only: USB HID keyboard usages are the public physical identity.
  * Scan is PC set-1 with bit 8 for E0; evdev and XKB names describe Linux positions. */
 typedef struct maage_native_key {

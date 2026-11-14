@@ -1328,7 +1328,7 @@ choose_world:
             if (maage_control_pressed(controls, controls->drop, &input) && !drop_latched) {
                 drop_latched = 1;
                 drop_slot = (unsigned int) selected_hotbar;
-                drop_stack = input.keys[MAAGE_INPUT_KEY_CONTROL] != 0;
+                drop_stack = maage_input_shortcut_down(&input);
             }
             if (drop_latched) {
                 memset(&command, 0, sizeof(command));

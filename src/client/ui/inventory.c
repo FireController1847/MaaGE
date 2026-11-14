@@ -311,7 +311,7 @@ static int creative_search_input(maage_client_ui *ui, const maage_client_ui_inpu
         return 0;
     }
     length = strlen(ui->creative_query);
-    if (raw && raw->keys[MAAGE_INPUT_KEY_CONTROL] && raw->pressed[MAAGE_INPUT_KEY_A]) {
+    if (raw && maage_input_shortcut_down(raw) && raw->pressed[MAAGE_INPUT_KEY_A]) {
         ui->creative_query_anchor = 0;
         ui->creative_query_cursor = length;
     } else if (raw && (raw->pressed[MAAGE_INPUT_KEY_LEFT] || raw->pressed[MAAGE_INPUT_KEY_RIGHT] || raw->pressed[MAAGE_INPUT_KEY_HOME] || raw->pressed[MAAGE_INPUT_KEY_END])) {
@@ -319,7 +319,7 @@ static int creative_search_input(maage_client_ui *ui, const maage_client_ui_inpu
         else if (raw->pressed[MAAGE_INPUT_KEY_END]) ui->creative_query_cursor = length;
         else if (raw->pressed[MAAGE_INPUT_KEY_LEFT] && ui->creative_query_cursor) {
             --ui->creative_query_cursor;
-            if (raw->keys[MAAGE_INPUT_KEY_CONTROL]) {
+            if (maage_input_shortcut_down(raw)) {
                 while (ui->creative_query_cursor && ui->creative_query[ui->creative_query_cursor] == ' ')
                     --ui->creative_query_cursor;
                 while (ui->creative_query_cursor && ui->creative_query[ui->creative_query_cursor - 1] != ' ')
@@ -327,7 +327,7 @@ static int creative_search_input(maage_client_ui *ui, const maage_client_ui_inpu
             }
         } else if (raw->pressed[MAAGE_INPUT_KEY_RIGHT] && ui->creative_query_cursor < length) {
             ++ui->creative_query_cursor;
-            if (raw->keys[MAAGE_INPUT_KEY_CONTROL]) {
+            if (maage_input_shortcut_down(raw)) {
                 while (ui->creative_query[ui->creative_query_cursor] && ui->creative_query[ui->creative_query_cursor] != ' ')
                     ++ui->creative_query_cursor;
                 while (ui->creative_query[ui->creative_query_cursor] == ' ')
@@ -339,7 +339,7 @@ static int creative_search_input(maage_client_ui *ui, const maage_client_ui_inpu
         if (ui->creative_query_cursor != ui->creative_query_anchor) creative_query_delete_selection(ui);
         else if (ui->creative_query_cursor < length) {
             cursor = ui->creative_query_cursor + 1;
-            if (raw->keys[MAAGE_INPUT_KEY_CONTROL]) {
+            if (maage_input_shortcut_down(raw)) {
                 while (ui->creative_query[cursor] && ui->creative_query[cursor] != ' ')
                     ++cursor;
                 while (ui->creative_query[cursor] == ' ')
@@ -352,12 +352,12 @@ static int creative_search_input(maage_client_ui *ui, const maage_client_ui_inpu
     }
     if (text) {
         for (i = 0; text[i]; ++i) {
-            if (raw && raw->keys[MAAGE_INPUT_KEY_CONTROL] && text[i] != '\b') continue;
+            if (raw && maage_input_shortcut_down(raw) && text[i] != '\b') continue;
             if (text[i] == '\b') {
                 if (ui->creative_query_cursor != ui->creative_query_anchor) creative_query_delete_selection(ui);
                 else if (ui->creative_query_cursor) {
                     cursor = ui->creative_query_cursor - 1;
-                    if (raw && raw->keys[MAAGE_INPUT_KEY_CONTROL]) {
+                    if (raw && maage_input_shortcut_down(raw)) {
                         while (cursor && ui->creative_query[cursor] == ' ')
                             --cursor;
                         while (cursor && ui->creative_query[cursor - 1] != ' ')
@@ -380,7 +380,7 @@ static int creative_search_input(maage_client_ui *ui, const maage_client_ui_inpu
         }
     }
     if (changed) creative_filter(ui);
-    if (raw && raw->keys[MAAGE_INPUT_KEY_CONTROL] && !raw->pressed[MAAGE_INPUT_KEY_A] && !raw->pressed[MAAGE_INPUT_KEY_DELETE] && !raw->pressed[MAAGE_INPUT_KEY_LEFT] && !raw->pressed[MAAGE_INPUT_KEY_RIGHT] && !raw->pressed[MAAGE_INPUT_KEY_HOME] && !raw->pressed[MAAGE_INPUT_KEY_END]) return 0;
+    if (raw && maage_input_shortcut_down(raw) && !raw->pressed[MAAGE_INPUT_KEY_A] && !raw->pressed[MAAGE_INPUT_KEY_DELETE] && !raw->pressed[MAAGE_INPUT_KEY_LEFT] && !raw->pressed[MAAGE_INPUT_KEY_RIGHT] && !raw->pressed[MAAGE_INPUT_KEY_HOME] && !raw->pressed[MAAGE_INPUT_KEY_END]) return 0;
     return 1;
 }
 static size_t creative_query_first(const maage_client_ui *ui);
@@ -507,7 +507,7 @@ static unsigned int inventory_input(maage_client_ui *ui, const maage_client_ui_i
             return 0;
         }
         if (drop && !consumed) {
-            secondary = raw && raw->keys[MAAGE_INPUT_KEY_CONTROL] ? 1U : 0U;
+            secondary = raw && maage_input_shortcut_down(raw) ? 1U : 0U;
             if (cell) creative_command(ui, MAAGE_CREATIVE_DROP, secondary, entry, 0, NULL);
             else if (slot < MAAGE_INVENTORY_SLOTS) {
                 operation.slot = slot;
