@@ -54,15 +54,17 @@ maage_status maage_generation_decorate(maage_generation_context *context) {
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SURFACE, 0);
 }
-static int maage_generation_reed_height(const maage_generation_context *context, int x, int y, int z, unsigned long random) {
+static int maage_generation_reed_height(const maage_generation_context *context, int x, int y, int z) {
     static const int sides[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     maage_generation_sample sample;
     const maage_generation_sample *neighbor;
+    unsigned long random = maage_generation_feature_hash(context->seed, x, z, 23004UL);
     unsigned int side;
-    if (y != context->policy->sea_level || maage_surface_unit(random) >= 0.22) return 0;
+    /* Sparse independent candidates avoid a dense fence along every bank. */
+    if (y != context->policy->sea_level || (random & 127UL)) return 0;
     for (side = 0; side < 4; ++side) {
         neighbor = maage_surface_sample(context, x + sides[side][0], z + sides[side][1], &sample);
-        if (neighbor && neighbor->height < y && !maage_generation_cold(neighbor, y)) return 2 + (int) ((random >> 24) % 3UL);
+        if (neighbor && neighbor->height < y && !maage_generation_cold(neighbor, y)) return 2 + (int) ((random >> 24) & 1UL);
     }
     return 0;
 }
@@ -98,7 +100,7 @@ static maage_status maage_generation_ground_flora(maage_generation_context *cont
             /* Reeds require actual dry ground beside the common water plane;
              * the same numeric surface query handles neighboring chunk edges. */
             if (floor->block_id == ids->block_grass || floor->block_id == ids->block_dirt || floor->block_id == ids->block_sand) {
-                count = maage_generation_reed_height(context, wx, height, wz, random);
+                count = maage_generation_reed_height(context, wx, height, wz);
                 if (count) state = ids->flora_states[MAAGE_BASE_REEDS][0];
                 else count = 1;
             }

@@ -280,7 +280,7 @@ static double maage_generation_river_distance(maage_world_seed seed, int x, int 
 
 typedef struct maage_generation_column {
     maage_biome_id biome;
-    int height;
+    int height, river;
 } maage_generation_column;
 
 static int maage_generation_grid(int coordinate) {
@@ -321,11 +321,13 @@ static int maage_generation_column_at(const maage_base_ids *ids, maage_world_see
     terrain = maage_generation_fractal(seed, x / 96.0, z / 96.0, 500UL, 4);
     detail = maage_generation_fractal(seed, x / 24.0, z / 24.0, 600UL, 2);
     column->height = (int) floor(base + policy->sea_level - MAAGE_GENERATION_DEFAULT_SEA_Y + terrain * variation * 2.5 + detail * 1.5);
+    column->river = 0;
     if (column->biome != ids->biome_ocean) {
         distance = maage_generation_river_distance(seed, x, z);
         width = 4 + 2 * maage_generation_noise(seed, x / 64.0, z / 64.0, 2000UL);
         bank = (distance - width) / 18;
         bank = bank <= 0 ? 1 : (bank < 1 ? 1 - maage_generation_fade(bank) : 0);
+        column->river = bank > 0;
         target = policy->sea_level - 4 + maage_generation_noise(seed, x / 40.0, z / 40.0, 2100UL);
         if (column->height > target) column->height = (int) floor(maage_generation_lerp(column->height, target, bank));
         if (distance <= width && column->height < policy->sea_level) column->biome = column->biome == ids->biome_taiga ? ids->biome_frozen_river : ids->biome_river;
@@ -422,7 +424,8 @@ int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed,
         int gx, gz, ix, iz, px, pz, dx, dz, radius;
         gx = maage_generation_region(x, 12);
         gz = maage_generation_region(z, 12);
-        if (sample->surface != ids->state_sand && column.biome != ids->biome_ocean) sample->surface = ids->state_dirt;
+        if (column.river) sample->surface = sample->filler = ids->state_gravel;
+        else if (sample->surface != ids->state_sand && column.biome != ids->biome_ocean) sample->surface = ids->state_dirt;
         for (iz = -1; iz <= 1; ++iz)
             for (ix = -1; ix <= 1; ++ix) {
                 patch = maage_generation_hash(seed, gx + ix, gz + iz, 2200UL);
@@ -436,6 +439,10 @@ int maage_generation_sample_at(const maage_base_ids *ids, maage_world_seed seed,
                 sample->filler = sample->surface;
             }
     }
+    /* Banks include the shallow margin and the first dry elevation steps,
+     * independently of whether the categorical biome is River or inland.
+     * Apply last so underwater material patches cannot erase the sand rim. */
+    if (column.river && sample->height >= policy->sea_level - 1 && sample->height <= policy->sea_level + 2) sample->surface = sample->filler = ids->state_sand;
     return 1;
 }
 
