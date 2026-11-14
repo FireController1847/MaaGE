@@ -70,6 +70,11 @@
 #define MAAGE_SPLASH_RETRY 8
 #define MAAGE_SPLASH_SKIP 16
 #define MAAGE_SPLASH_PROGRESS 32
+#define MAAGE_UI_ANIMATION_TIMER 2
+#define MAAGE_UI_ANIMATION_INTERVAL 15
+#define MAAGE_UI_PAGE_FADE_SECONDS 0.19
+#define MAAGE_UI_PROGRESS_SECONDS 0.22
+#define MAAGE_UI_HOME_FONTS 48
 typedef struct maage_launcher_win32 {
     maage_launcher_ui *state;
     HWND window, navigation[5], account, list, name, arguments, status, resource, account_status, verify, repair, error, clients, client_choice, play;
@@ -79,8 +84,13 @@ typedef struct maage_launcher_win32 {
     HWND home_choose[4], home_manage[4], home_settings, home_status;
     HWND splash_message, splash_detail, splash_sign_in, splash_device_sign_in, splash_cancel, splash_code, splash_copy, splash_open, splash_retry, splash_skip, splash_activity;
     HICON artwork;
-    maage_win32_surface backdrop, button_surface, logo, logo_shadow;
+    maage_win32_surface backdrop, button_surface, logo, logo_shadow, play_shadow, card_shadow, transition;
+    HWND transition_window;
+    double transition_started, progress_from, progress_started;
+    int backdrop_width, backdrop_height, live_resize, transition_active;
     HFONT splash_title_font, splash_detail_font, splash_log_font;
+    struct { HFONT handle; int pixels, bold; } home_fonts[MAAGE_UI_HOME_FONTS];
+    unsigned home_font_next;
     RECT home_logo, home_heading, home_tagline, home_cards[4], splash_logo;
     HWND hot_button, splash_summary, home_tooltip;
     wchar_t home_tooltip_text[384];
@@ -131,7 +141,10 @@ static RECT maage_ui_child_rect(maage_launcher_win32 *ui, HWND control) {
 }
 
 static void maage_ui_place(HWND control, RECT rect) {
-    SetWindowPos(control, NULL, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    RECT current;
+    GetWindowRect(control, &current);
+    MapWindowPoints(NULL, GetParent(control), (POINT *) &current, 2);
+    if (!EqualRect(&rect, &current)) SetWindowPos(control, NULL, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
 static void maage_ui_visible(HWND control, int visible) {
@@ -139,9 +152,11 @@ static void maage_ui_visible(HWND control, int visible) {
 }
 
 static int maage_ui_scratch(maage_win32_surface *surface, HDC dc, int width, int height) {
+    if (width <= 0 || height <= 0) return 0;
+    if (surface->width >= width && surface->height >= height && surface->dc) return 1;
     if (surface->width > width) width = surface->width;
     if (surface->height > height) height = surface->height;
-    return maage_win32_surface_resize(surface, dc, width, height);
+    return maage_win32_surface_resize(surface, dc, (width + 63) / 64 * 64, (height + 63) / 64 * 64);
 }
 
 /* Windows 11 can tint its native caption; older versions simply retain
@@ -269,27 +284,44 @@ static void maage_ui_splash_fonts(maage_launcher_win32 *ui) {
     ui->splash_log_font = log;
 }
 
-static int maage_ui_text_width(HDC dc, const wchar_t *text, int pixels, int bold) {
-    HFONT font = maage_ui_home_font(pixels, bold), previous;
+/* The home uses only a handful of font sizes at any one window size.
+ * Reuse GDI font handles during live resize and repeated owner-draw. */
+static HFONT maage_ui_cached_font(maage_launcher_win32 *ui, int pixels, int bold) {
+    unsigned i, slot;
+    HFONT font;
+    if (pixels < 1) pixels = 1;
+    for (i = 0; i < MAAGE_UI_HOME_FONTS; ++i)
+        if (ui->home_fonts[i].handle && ui->home_fonts[i].pixels == pixels && ui->home_fonts[i].bold == bold) return ui->home_fonts[i].handle;
+    font = maage_ui_home_font(pixels, bold);
+    if (!font) return NULL;
+    slot = ui->home_font_next++ % MAAGE_UI_HOME_FONTS;
+    if (ui->home_fonts[slot].handle) DeleteObject(ui->home_fonts[slot].handle);
+    ui->home_fonts[slot].handle = font;
+    ui->home_fonts[slot].pixels = pixels;
+    ui->home_fonts[slot].bold = bold;
+    return font;
+}
+
+static int maage_ui_text_width(maage_launcher_win32 *ui, HDC dc, const wchar_t *text, int pixels, int bold) {
+    HFONT font = maage_ui_cached_font(ui, pixels, bold), previous;
     SIZE size = {0, 0};
     if (!font) return 0;
     previous = (HFONT) SelectObject(dc, font);
     GetTextExtentPoint32W(dc, text, lstrlenW(text), &size);
     SelectObject(dc, previous);
-    DeleteObject(font);
     return size.cx;
 }
 
-static void maage_ui_home_text(HDC dc, RECT rect, const wchar_t *text, int pixels, int bold, COLORREF color, UINT flags, int fit, int shadow) {
+static void maage_ui_home_text(maage_launcher_win32 *ui, HDC dc, RECT rect, const wchar_t *text, int pixels, int bold, COLORREF color, UINT flags, int fit, int shadow) {
     HFONT font, previous;
     int width = rect.right - rect.left, length = lstrlenW(text), needed;
     if (width <= 0 || rect.bottom <= rect.top) return;
-    needed = fit ? maage_ui_text_width(dc, text, pixels, bold) : 0;
+    needed = fit ? maage_ui_text_width(ui, dc, text, pixels, bold) : 0;
     if (needed > width) {
         pixels = MulDiv(pixels, width, needed);
         if (pixels < fit) pixels = fit;
     }
-    font = maage_ui_home_font(pixels, bold);
+    font = maage_ui_cached_font(ui, pixels, bold);
     if (!font) return;
     previous = (HFONT) SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
@@ -302,7 +334,6 @@ static void maage_ui_home_text(HDC dc, RECT rect, const wchar_t *text, int pixel
     SetTextColor(dc, color);
     DrawTextW(dc, text, length, &rect, flags | DT_NOPREFIX);
     SelectObject(dc, previous);
-    DeleteObject(font);
 }
 
 static COLORREF maage_ui_backdrop_color(maage_launcher_win32 *ui) {
@@ -331,14 +362,18 @@ static int maage_ui_backdrop(maage_launcher_win32 *ui, HDC compatible) {
     GetClientRect(ui->window, &client);
     width = client.right;
     height = client.bottom;
-    if (ui->backdrop.width != width || ui->backdrop.height != height) ui->backdrop_dirty = 1;
-    if (!maage_win32_surface_resize(&ui->backdrop, compatible, width, height)) return 0;
+    if (ui->backdrop_width != width || ui->backdrop_height != height) {
+        ui->backdrop_dirty = 1;
+        ui->backdrop_width = width;
+        ui->backdrop_height = height;
+    }
+    if (!maage_ui_scratch(&ui->backdrop, compatible, width, height)) return 0;
     if (!ui->backdrop_dirty) return 1;
     dc = ui->backdrop.dc;
     background = maage_ui_backdrop_color(ui);
     foreground = ui->native.high_contrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(255, 255, 255);
-    if (ui->splash_visible || ui->native.high_contrast) maage_win32_surface_gradient(&ui->backdrop, background, background);
-    else maage_win32_surface_gradient(&ui->backdrop, RGB(97, 133, 150), RGB(41, 69, 77));
+    if (ui->splash_visible || ui->native.high_contrast) maage_win32_surface_gradient_rect(&ui->backdrop, width, height, background, background);
+    else maage_win32_surface_gradient_rect(&ui->backdrop, width, height, RGB(97, 133, 150), RGB(41, 69, 77));
     if (ui->splash_visible) {
         rect = ui->splash_logo;
         size = (rect.right - rect.left) * ui->splash_logo_size / 144;
@@ -347,25 +382,25 @@ static int maage_ui_backdrop(maage_launcher_win32 *ui, HDC compatible) {
     } else {
         maage_ui_logo_paint(ui, ui->home_logo, 1);
         shadow = ui->native.high_contrast ? 0 : maage_ui_scale(ui, 2);
-        maage_ui_home_text(dc, ui->home_heading, L"MaaGE", (ui->home_heading.bottom - ui->home_heading.top) * 78 / 100, 1, foreground, centered, 0, shadow);
-        maage_ui_home_text(dc, ui->home_tagline, L"—  MINECRAFT AS A GAME ENGINE  —", (ui->home_tagline.bottom - ui->home_tagline.top) * 72 / 100, 0, foreground, centered, 0, shadow);
+        maage_ui_home_text(ui, dc, ui->home_heading, L"MaaGE", (ui->home_heading.bottom - ui->home_heading.top) * 78 / 100, 1, foreground, centered, 0, shadow);
+        maage_ui_home_text(ui, dc, ui->home_tagline, L"—  MINECRAFT AS A GAME ENGINE  —", (ui->home_tagline.bottom - ui->home_tagline.top) * 72 / 100, 0, foreground, centered, 0, shadow);
         if (!ui->native.high_contrast) {
             rect = maage_ui_child_rect(ui, ui->play);
             OffsetRect(&rect, 0, maage_ui_scale(ui, 5));
-            maage_win32_surface_round(&ui->backdrop, rect, (rect.bottom - rect.top) * 0.5, RGB(12, 28, 31), 0.42, maage_ui_scale(ui, 13));
+            maage_win32_surface_control_shadow(&ui->backdrop, &ui->play_shadow, rect);
             for (i = 0; i < 4; ++i) {
                 rect = ui->home_cards[i];
                 OffsetRect(&rect, 0, maage_ui_scale(ui, 4));
-                maage_win32_surface_round(&ui->backdrop, rect, (rect.bottom - rect.top) * 0.26, RGB(12, 28, 31), 0.32, maage_ui_scale(ui, 9));
+                maage_win32_surface_control_shadow(&ui->backdrop, &ui->card_shadow, rect);
             }
         }
         rect = client;
         rect.top = height - maage_ui_scale(ui, 48);
         rect.bottom = height - maage_ui_scale(ui, 27);
-        maage_ui_home_text(dc, rect, L"v" MAAGE_LAUNCHER_VERSION, maage_ui_scale(ui, 12), 0, foreground, centered, 0, 0);
+        maage_ui_home_text(ui, dc, rect, L"v" MAAGE_LAUNCHER_VERSION, maage_ui_scale(ui, 12), 0, foreground, centered, 0, 0);
         rect.top = rect.bottom;
         rect.bottom = height - maage_ui_scale(ui, 5);
-        maage_ui_home_text(dc, rect, L"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", maage_ui_scale(ui, 11), 0, foreground, centered, maage_ui_scale(ui, 9), 0);
+        maage_ui_home_text(ui, dc, rect, L"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", maage_ui_scale(ui, 11), 0, foreground, centered, maage_ui_scale(ui, 9), 0);
     }
     ui->backdrop_dirty = 0;
     return 1;
@@ -376,89 +411,114 @@ static void maage_ui_line(maage_win32_surface *surface, RECT icon, double x1, do
     maage_win32_surface_line(surface, icon.left + x1 * size, icon.top + y1 * size, icon.left + x2 * size, icon.top + y2 * size, size * 0.085, color);
 }
 
+/* Draw independent vector equivalents of AppKit's symbol choices. */
+static void maage_ui_icon_arc(maage_win32_surface *surface, RECT r, double cx, double cy, double rx, double ry, double start, double end, COLORREF ink) {
+    int i, segments = (int) ceil(fabs(end - start) * 5);
+    for (i = 0; i < segments; ++i) {
+        double a = start + (end - start) * i / segments, b = start + (end - start) * (i + 1) / segments;
+        maage_ui_line(surface, r, cx + rx * cos(a), cy + ry * sin(a), cx + rx * cos(b), cy + ry * sin(b), ink);
+    }
+}
+
+static void maage_ui_icon_path(maage_win32_surface *surface, RECT r, const double *points, unsigned count, COLORREF ink) {
+    unsigned i;
+    for (i = 1; i < count; ++i)
+        maage_ui_line(surface, r, points[(i - 1) * 2], points[(i - 1) * 2 + 1], points[i * 2], points[i * 2 + 1], ink);
+}
+
+static void maage_ui_icon_disk(maage_win32_surface *surface, RECT r, double cx, double cy, double radius, COLORREF ink) {
+    double size = r.right - r.left;
+    maage_win32_surface_round_f(surface, r.left + (cx - radius) * size, r.top + (cy - radius) * size, r.left + (cx + radius) * size, r.top + (cy + radius) * size, radius * size, ink, 1, 0);
+}
+
 static void maage_ui_icon(maage_win32_surface *surface, RECT r, int kind, COLORREF ink) {
     double s = r.right - r.left;
+    const double pi = 3.141592653589793;
+    COLORREF cutout = (GetRValue(ink) * 299 + GetGValue(ink) * 587 + GetBValue(ink) * 114 >= 150000) ? RGB(30, 60, 44) : RGB(255, 255, 255);
     int i;
-    RECT inner;
     if (s < 2) return;
+    GdiFlush();
     switch (kind) {
-    case 0:
-        maage_ui_line(surface, r, .50, .10, .87, .30, ink);
-        maage_ui_line(surface, r, .87, .30, .87, .72, ink);
-        maage_ui_line(surface, r, .87, .72, .50, .91, ink);
-        maage_ui_line(surface, r, .50, .91, .13, .72, ink);
-        maage_ui_line(surface, r, .13, .72, .13, .30, ink);
-        maage_ui_line(surface, r, .13, .30, .50, .10, ink);
-        maage_ui_line(surface, r, .13, .30, .50, .51, ink);
-        maage_ui_line(surface, r, .87, .30, .50, .51, ink);
-        maage_ui_line(surface, r, .50, .51, .50, .91, ink);
+    case 0: { /* cube */
+        const double outline[] = {.50,.08, .86,.28, .86,.72, .50,.92, .14,.72, .14,.28, .50,.08};
+        const double folds[] = {.14,.28, .50,.49, .86,.28};
+        maage_ui_icon_path(surface, r, outline, 7, ink);
+        maage_ui_icon_path(surface, r, folds, 3, ink);
+        maage_ui_line(surface, r, .50, .49, .50, .92, ink);
         break;
-    case 1:
-        for (i = 0; i < 7; ++i) {
-            double a = -2.7 + i * .37, b = a + .37;
-            maage_ui_line(surface, r, .50 + .34 * cos(a), .50 + .34 * sin(a), .50 + .34 * cos(b), .50 + .34 * sin(b), ink);
-            maage_ui_line(surface, r, .50 - .34 * cos(a), .50 - .34 * sin(a), .50 - .34 * cos(b), .50 - .34 * sin(b), ink);
+    }
+    case 1: { /* arrow.triangle.2.circlepath */
+        const double upper[] = {.92,.25, .84,.45, .64,.36};
+        const double lower[] = {.08,.75, .16,.55, .36,.64};
+        maage_ui_icon_arc(surface, r, .50, .50, .35, .35, -2.9, -.15, ink);
+        maage_ui_icon_arc(surface, r, .50, .50, .35, .35, .24, 2.99, ink);
+        maage_ui_icon_path(surface, r, upper, 3, ink);
+        maage_ui_icon_path(surface, r, lower, 3, ink);
+        break;
+    }
+    case 2: /* person.2 */
+        maage_ui_icon_arc(surface, r, .35, .30, .135, .155, 0, 2*pi, ink);
+        maage_ui_icon_arc(surface, r, .73, .34, .115, .135, 0, 2*pi, ink);
+        maage_ui_icon_arc(surface, r, .35, .83, .28, .265, pi, 2*pi, ink);
+        maage_ui_line(surface, r, .07, .83, .63, .83, ink);
+        maage_ui_icon_arc(surface, r, .73, .83, .225, .22, -1.95, 0, ink);
+        maage_ui_line(surface, r, .72, .83, .955, .83, ink);
+        break;
+    case 3: { /* wrench.and.screwdriver */
+        const double wrench[] = {.18,.91, .09,.82, .48,.43, .45,.31, .49,.17, .59,.10, .71,.09, .61,.23, .72,.34, .86,.24, .86,.37, .77,.48, .64,.50, .25,.90, .18,.91};
+        const double shaft[] = {.35,.45, .10,.20, .10,.10, .20,.10, .45,.35};
+        const double handle[] = {.66,.53, .89,.76, .90,.84, .84,.90, .76,.89, .53,.66};
+        maage_ui_icon_path(surface, r, wrench, 15, ink);
+        maage_ui_icon_path(surface, r, shaft, 5, ink);
+        maage_ui_icon_path(surface, r, handle, 6, ink);
+        break;
+    }
+    case 4: {
+        const double points[] = {.16,.35, .50,.68, .84,.35};
+        maage_ui_icon_path(surface, r, points, 3, ink);
+        break;
+    }
+    case 5: {
+        const double points[] = {.34,.16, .67,.50, .34,.84};
+        maage_ui_icon_path(surface, r, points, 3, ink);
+        break;
+    }
+    case 6: { /* checkmark.circle.fill */
+        const double check[] = {.25,.49, .43,.67, .75,.33};
+        maage_ui_icon_disk(surface, r, .50, .50, .46, ink);
+        maage_ui_icon_path(surface, r, check, 3, cutout);
+        break;
+    }
+    case 7: /* clock.fill */
+        maage_ui_icon_disk(surface, r, .50, .50, .46, ink);
+        maage_ui_line(surface, r, .50, .23, .50, .52, cutout);
+        maage_ui_line(surface, r, .50, .52, .69, .64, cutout);
+        break;
+    case 8: /* gearshape */
+        for (i = 0; i < 8; ++i) {
+            double a = i * pi / 4, b = a + pi / 4;
+            double points[8];
+            points[0] = .50 + .35*cos(a-.16);
+            points[1] = .50 + .35*sin(a-.16);
+            points[2] = .50 + .46*cos(a-.12);
+            points[3] = .50 + .46*sin(a-.12);
+            maage_ui_line(surface, r, points[0], points[1], points[2], points[3], ink);
+            maage_ui_line(surface, r, points[2], points[3], .50 + .46*cos(a+.12), .50 + .46*sin(a+.12), ink);
+            maage_ui_line(surface, r, .50 + .46*cos(a+.12), .50 + .46*sin(a+.12), .50 + .35*cos(a+.16), .50 + .35*sin(a+.16), ink);
+            maage_ui_icon_arc(surface, r, .50, .50, .35, .35, a+.16, b-.16, ink);
         }
-        maage_ui_line(surface, r, .84, .45, .65, .38, ink);
-        maage_ui_line(surface, r, .84, .45, .91, .25, ink);
-        maage_ui_line(surface, r, .16, .55, .35, .62, ink);
-        maage_ui_line(surface, r, .16, .55, .09, .75, ink);
+        maage_ui_icon_arc(surface, r, .50, .50, .15, .15, 0, 2*pi, ink);
         break;
-    case 2:
-        inner = r;
-        InflateRect(&inner, -(int) (s * .31), -(int) (s * .31));
-        OffsetRect(&inner, 0, -(int) (s * .23));
-        maage_win32_surface_round(surface, inner, s, ink, 1, 0);
-        for (i = 0; i < 10; ++i) {
-            double a = 3.14159265 + i * 3.14159265 / 10, b = a + 3.14159265 / 10;
-            maage_ui_line(surface, r, .50 + .39 * cos(a), .87 + .31 * sin(a), .50 + .39 * cos(b), .87 + .31 * sin(b), ink);
-        }
-        maage_ui_line(surface, r, .11, .87, .89, .87, ink);
-        break;
-    case 3:
-        maage_ui_line(surface, r, .18, .83, .75, .26, ink);
-        maage_ui_line(surface, r, .70, .13, .88, .31, ink);
-        maage_ui_line(surface, r, .57, .25, .76, .44, ink);
-        maage_ui_line(surface, r, .18, .20, .84, .86, ink);
-        maage_ui_line(surface, r, .10, .12, .32, .34, ink);
-        maage_ui_line(surface, r, .10, .12, .13, .30, ink);
-        maage_ui_line(surface, r, .10, .12, .28, .15, ink);
-        break;
-    case 4:
-        maage_ui_line(surface, r, .18, .37, .50, .67, ink);
-        maage_ui_line(surface, r, .50, .67, .82, .37, ink);
-        break;
-    case 5:
-        maage_ui_line(surface, r, .37, .18, .67, .50, ink);
-        maage_ui_line(surface, r, .67, .50, .37, .82, ink);
-        break;
-    case 6:
-        maage_ui_line(surface, r, .17, .50, .41, .74, ink);
-        maage_ui_line(surface, r, .41, .74, .84, .24, ink);
-        break;
-    case 7:
-        for (i = 0; i < 20; ++i) {
-            double a = i * 6.2831853 / 20, b = a + 6.2831853 / 20;
-            maage_ui_line(surface, r, .50 + .39 * cos(a), .50 + .39 * sin(a), .50 + .39 * cos(b), .50 + .39 * sin(b), ink);
-        }
-        maage_ui_line(surface, r, .50, .25, .50, .52, ink);
-        maage_ui_line(surface, r, .50, .52, .68, .62, ink);
-        break;
-    case 8:
-        for (i = 0; i < 24; ++i) {
-            double a = i * 6.2831853 / 24, b = a + 6.2831853 / 24, radius = i % 3 == 1 ? .44 : .32, next = (i + 1) % 3 == 1 ? .44 : .32;
-            maage_ui_line(surface, r, .50 + radius * cos(a), .50 + radius * sin(a), .50 + next * cos(b), .50 + next * sin(b), ink);
-        }
-        for (i = 0; i < 12; ++i) {
-            double a = i * 6.2831853 / 12, b = a + 6.2831853 / 12;
-            maage_ui_line(surface, r, .50 + .13 * cos(a), .50 + .13 * sin(a), .50 + .13 * cos(b), .50 + .13 * sin(b), ink);
-        }
-        break;
-    case 9:
+    case 9: /* play.fill */
         for (i = 0; i < (int) s; ++i) {
-            double y = (i + .5) / s, length = .70 * (1.0 - fabs(y - .50) / .39);
-            if (length > 0) maage_win32_surface_line(surface, r.left + .18 * s, r.top + i + .5, r.left + (.18 + length) * s, r.top + i + .5, 1.0, ink);
+            double y = (i + .5) / s, length = .76 * (1.0 - fabs(y - .50) / .43);
+            if (length > 0) maage_win32_surface_line(surface, r.left + .12*s, r.top + i + .5, r.left + (.12 + length)*s, r.top + i + .5, 1.0, ink);
         }
+        break;
+    case 10: /* pause.circle.fill */
+        maage_ui_icon_disk(surface, r, .50, .50, .46, ink);
+        maage_win32_surface_line(surface, r.left + .38*s, r.top + .29*s, r.left + .38*s, r.top + .71*s, .13*s, cutout);
+        maage_win32_surface_line(surface, r.left + .62*s, r.top + .29*s, r.left + .62*s, r.top + .71*s, .13*s, cutout);
         break;
     }
 }
@@ -474,7 +534,7 @@ static RECT maage_ui_icon_rect(int x, int center, int size) {
 
 static void maage_ui_inline(maage_launcher_win32 *ui, maage_win32_surface *surface, RECT rect, const wchar_t *text, int pixels, int icon, COLORREF ink, COLORREF symbol) {
     int width = rect.right - rect.left, center = (rect.top + rect.bottom) / 2, icon_size = pixels, gap = pixels / 3;
-    int needed = maage_ui_text_width(surface->dc, text, pixels, 1), x;
+    int needed = maage_ui_text_width(ui, surface->dc, text, pixels, 1), x;
     RECT glyph, caption = rect;
     if (needed > width - icon_size - gap - 2) needed = width - icon_size - gap - 2;
     if (needed < 1) return;
@@ -483,7 +543,7 @@ static void maage_ui_inline(maage_launcher_win32 *ui, maage_win32_surface *surfa
     caption.left = glyph.right + gap;
     caption.right = caption.left + needed + 2;
     maage_ui_icon(surface, glyph, icon, symbol);
-    maage_ui_home_text(surface->dc, caption, text, pixels, 1, ink, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, maage_ui_scale(ui, 9), 0);
+    maage_ui_home_text(ui, surface->dc, caption, text, pixels, 1, ink, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, maage_ui_scale(ui, 9), 0);
 }
 
 static int maage_ui_is_home_button(maage_launcher_win32 *ui, HWND button) {
@@ -556,20 +616,20 @@ static int maage_ui_draw_home_button(maage_launcher_win32 *ui, const DRAWITEMSTR
             verified = card == 2 ? wcsstr(value, L" ✓") : NULL;
             pixels = height * 29 / 100;
             if (verified) {
-                int check_size = height * 30 / 100, available, needed, fitted = pixels;
+                int check_size = height * 26 / 100, available, needed, fitted = pixels;
                 *verified = 0;
                 available = caption.right - caption.left - check_size - height * 7 / 100;
-                needed = maage_ui_text_width(surface->dc, value, pixels, 1);
+                needed = maage_ui_text_width(ui, surface->dc, value, pixels, 1);
                 if (needed > available && available > 0) fitted = MulDiv(pixels, available, needed);
                 if (fitted < maage_ui_scale(ui, 10)) fitted = maage_ui_scale(ui, 10);
-                needed = maage_ui_text_width(surface->dc, value, fitted, 1);
+                needed = maage_ui_text_width(ui, surface->dc, value, fitted, 1);
                 if (needed > available) needed = available;
                 caption.right = caption.left + (needed > 0 ? needed + 1 : 0);
                 glyph = maage_ui_icon_rect(caption.right + height * 7 / 100, center, check_size);
-                maage_ui_icon(surface, glyph, 6, ui->native.high_contrast ? ink : RGB(55, 121, 61));
+                maage_ui_icon(surface, glyph, 6, ui->native.high_contrast ? ink : RGB(43, 158, 66));
                 pixels = fitted;
             }
-            maage_ui_home_text(surface->dc, caption, value, pixels, 1, ink, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, maage_ui_scale(ui, 10), 0);
+            maage_ui_home_text(ui, surface->dc, caption, value, pixels, 1, ink, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, maage_ui_scale(ui, 10), 0);
         } else {
             maage_win32_surface_line(surface, .5, 1, .5, height - 1, 1, outline);
             pixels = height * 34 / 100;
@@ -588,12 +648,12 @@ static int maage_ui_draw_home_button(maage_launcher_win32 *ui, const DRAWITEMSTR
     } else {
         ink = ui->native.high_contrast ? GetSysColor(COLOR_WINDOWTEXT) : foreground;
         symbol = ink;
-        if (hot && enabled) maage_win32_surface_round(surface, rect, height * .23, ui->native.high_contrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(255, 255, 255), ui->native.high_contrast ? 1 : .11, 0);
+        if (hot && enabled) maage_win32_surface_round(surface, rect, height * .50, ui->native.high_contrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(255, 255, 255), ui->native.high_contrast ? 1 : .11, 0);
         if (hot && ui->native.high_contrast) ink = symbol = GetSysColor(COLOR_HIGHLIGHTTEXT);
         if (button == ui->home_status) {
             value = !wcsncmp(text, L"✓ ", 2) ? text + 2 : text;
-            if (ui->state->can_play && !*ui->state->error && !ui->native.high_contrast) symbol = RGB(150, 220, 114);
-            maage_ui_inline(ui, surface, rect, value, height * 46 / 100, ui->state->can_play && !*ui->state->error ? 6 : 7, ink, symbol);
+            if (ui->state->can_play && !*ui->state->error && !ui->native.high_contrast) symbol = RGB(122, 207, 89);
+            maage_ui_inline(ui, surface, rect, value, height * 46 / 100, ui->state->can_play && !*ui->state->error ? 6 : ui->state->client_process ? 10 : 7, ink, symbol);
         } else {
             maage_ui_inline(ui, surface, rect, text, height * 48 / 100, 8, ink, ink);
         }
@@ -607,11 +667,22 @@ static int maage_ui_draw_home_button(maage_launcher_win32 *ui, const DRAWITEMSTR
     return 1;
 }
 
+static double maage_ui_progress_value(maage_launcher_win32 *ui, double now) {
+    double t;
+    if (ui->splash_percent < 0) return -1;
+    if (!ui->animate_splash) return ui->splash_percent;
+    t = (now - ui->progress_started) / MAAGE_UI_PROGRESS_SECONDS;
+    if (t >= 1.0) return ui->splash_percent;
+    if (t < 0) t = 0;
+    t = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+    return ui->progress_from + (ui->splash_percent - ui->progress_from) * t;
+}
+
 static void maage_ui_progress_paint(maage_launcher_win32 *ui, HWND control, HDC dc) {
     maage_win32_surface *surface = &ui->button_surface;
-    RECT rect, fill;
-    int width, height, length, offset;
-    double phase;
+    RECT rect;
+    int width, height;
+    double phase, left = 0, right, length, value, now = maage_time_monotonic_seconds();
     COLORREF track = ui->native.high_contrast ? GetSysColor(COLOR_3DSHADOW) : ui->native.dark ? RGB(66, 66, 66) : RGB(218, 222, 218);
     COLORREF color = ui->native.high_contrast ? GetSysColor(COLOR_HIGHLIGHT) : RGB(103, 161, 77);
     GetClientRect(control, &rect);
@@ -623,19 +694,16 @@ static void maage_ui_progress_paint(maage_launcher_win32 *ui, HWND control, HDC 
     }
     FillRect(surface->dc, &rect, ui->background);
     maage_win32_surface_round(surface, rect, height * .5, track, 1, 0);
-    fill = rect;
-    if (ui->splash_percent >= 0) fill.right = MulDiv(width, ui->splash_percent, 100);
+    value = maage_ui_progress_value(ui, now);
+    if (value >= 0) right = width * value / 100.0;
     else {
-        length = width / 4;
-        phase = ui->animate_splash ? (maage_time_monotonic_seconds() - ui->splash_started) / 1.1 : .5;
-        phase -= floor(phase / 2.0) * 2.0;
-        if (phase > 1.0) phase = 2.0 - phase;
-        phase = phase * phase * (3.0 - 2.0 * phase);
-        offset = (int) ((width - length) * phase);
-        fill.left = offset;
-        fill.right = offset + length;
+        length = width * .25;
+        /* Continuous velocity at both ends, with fractional-pixel positioning. */
+        phase = ui->animate_splash ? .5 - .5 * cos((now - ui->splash_started) * 3.141592653589793 / 1.65) : .5;
+        left = (width - length) * phase;
+        right = left + length;
     }
-    maage_win32_surface_round(surface, fill, height * .5, color, 1, 0);
+    maage_win32_surface_round_f(surface, left, 0, right, height, height * .5, color, 1, 0);
     BitBlt(dc, 0, 0, width, height, surface->dc, 0, 0, SRCCOPY);
 }
 
@@ -740,12 +808,131 @@ static void maage_ui_installations_layout(maage_launcher_win32 *ui, int width, i
     maage_ui_installation_place(ui, ui->default_button, editor_x, editor_y + 353, secondary_width, 32, offset, bottom);
     maage_ui_installation_place(ui, ui->active_button, editor_x + secondary_width + 10, editor_y + 353, secondary_width, 32, offset, bottom);
     maage_ui_installation_place(ui, ui->folder_button, editor_x, editor_y + 396, editor_width < 245 ? editor_width : 245, 32, offset, bottom);
-    ListView_SetColumnWidth(ui->list, 0, maage_launcher_win32_scale(&ui->native, list_width - 132));
-    ListView_SetColumnWidth(ui->list, 1, maage_launcher_win32_scale(&ui->native, 120));
+    {
+        int first = maage_launcher_win32_scale(&ui->native, list_width - 132), second = maage_launcher_win32_scale(&ui->native, 120);
+        if (ListView_GetColumnWidth(ui->list, 0) != first) ListView_SetColumnWidth(ui->list, 0, first);
+        if (ListView_GetColumnWidth(ui->list, 1) != second) ListView_SetColumnWidth(ui->list, 1, second);
+    }
 }
 
 /* Only the main content scrolls. Sidebar navigation and the status footer
  * remain visible, even when a compact window needs additional page height. */
+/* The page beneath a fade is always the real live native UI. The outgoing
+ * client-area frame is captured through native printing, not screen capture;
+ * its owned layered surface is noninteractive and never takes focus. */
+static void maage_ui_paint_client(maage_launcher_win32 *ui, HDC dc, RECT rect) {
+    if (ui->controls_ready && (ui->splash_visible || ui->state->page == MAAGE_PAGE_PLAY)) {
+        if (maage_ui_backdrop(ui, dc)) BitBlt(dc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, ui->backdrop.dc, rect.left, rect.top, SRCCOPY);
+        else FillRect(dc, &rect, ui->background);
+    } else if (ui->background) {
+        RECT sidebar = rect;
+        FillRect(dc, &rect, ui->background);
+        if (sidebar.right > maage_launcher_win32_scale(&ui->native, 170)) sidebar.right = maage_launcher_win32_scale(&ui->native, 170);
+        if (sidebar.right > sidebar.left) FillRect(dc, &sidebar, ui->sidebar);
+    }
+}
+
+static void maage_ui_transition_cancel(maage_launcher_win32 *ui) {
+    ui->transition_active = 0;
+    if (ui->transition_window && IsWindowVisible(ui->transition_window)) ShowWindow(ui->transition_window, SW_HIDE);
+    maage_win32_surface_destroy(&ui->transition);
+}
+
+static LRESULT CALLBACK maage_ui_transition_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR reference) {
+    maage_launcher_win32 *ui = (maage_launcher_win32 *) reference;
+    switch (message) {
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT paint;
+        HDC dc = BeginPaint(window, &paint);
+        RECT rect;
+        GetClientRect(window, &rect);
+        if (ui->transition.dc) {
+            if (rect.right == ui->transition.width && rect.bottom == ui->transition.height) BitBlt(dc, 0, 0, rect.right, rect.bottom, ui->transition.dc, 0, 0, SRCCOPY);
+            else StretchBlt(dc, 0, 0, rect.right, rect.bottom, ui->transition.dc, 0, 0, ui->transition.width, ui->transition.height, SRCCOPY);
+        }
+        EndPaint(window, &paint);
+        return 0;
+    }
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(window, maage_ui_transition_proc, id);
+        ui->transition_window = NULL;
+        break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
+static int maage_ui_transition_position(maage_launcher_win32 *ui) {
+    RECT client;
+    POINT origin = {0, 0};
+    GetClientRect(ui->window, &client);
+    ClientToScreen(ui->window, &origin);
+    return SetWindowPos(ui->transition_window, HWND_TOP, origin.x, origin.y, client.right, client.bottom, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+}
+
+static void maage_ui_transition_capture(maage_launcher_win32 *ui) {
+    RECT client;
+    unsigned i;
+    HDC dc;
+    maage_ui_transition_cancel(ui);
+    if (!ui->transition_window || !ui->animate_splash || ui->native.high_contrast || !ui->controls_ready || ui->live_resize || !IsWindowVisible(ui->window) || IsIconic(ui->window) || GetActiveWindow() != ui->window) return;
+    GetClientRect(ui->window, &client);
+    if (!maage_win32_surface_resize(&ui->transition, NULL, client.right, client.bottom)) return;
+    dc = ui->transition.dc;
+    maage_ui_paint_client(ui, dc, client);
+    for (i = 0; i < ui->native.count; ++i) {
+        HWND child = ui->native.controls[i].handle;
+        RECT bounds, local, visible;
+        int saved;
+        if (!child || !IsWindowVisible(child)) continue;
+        bounds = maage_ui_child_rect(ui, child);
+        if (!IntersectRect(&visible, &bounds, &client)) continue;
+        saved = SaveDC(dc);
+        if (!saved) continue;
+        SetViewportOrgEx(dc, bounds.left, bounds.top, NULL);
+        GetClientRect(child, &local);
+        IntersectClipRect(dc, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top);
+        if (!ui->splash_visible && ui->state->page == MAAGE_PAGE_PLAY && maage_ui_is_home_button(ui, child)) {
+            DRAWITEMSTRUCT draw;
+            memset(&draw, 0, sizeof(draw));
+            draw.CtlType = ODT_BUTTON;
+            draw.CtlID = GetDlgCtrlID(child);
+            draw.itemAction = ODA_DRAWENTIRE;
+            draw.itemState = (!IsWindowEnabled(child) ? ODS_DISABLED : 0) | (GetFocus() == child ? ODS_FOCUS : 0);
+            draw.hwndItem = child;
+            draw.hDC = dc;
+            draw.rcItem = local;
+            maage_ui_draw_home_button(ui, &draw);
+        } else SendMessageW(child, WM_PRINT, (WPARAM) dc, PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
+        RestoreDC(dc, saved);
+    }
+    GdiFlush();
+    if (!SetLayeredWindowAttributes(ui->transition_window, 0, 255, LWA_ALPHA) ||
+        !maage_ui_transition_position(ui)) {
+        maage_ui_transition_cancel(ui);
+        return;
+    }
+    RedrawWindow(ui->transition_window, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+static void maage_ui_transition_start(maage_launcher_win32 *ui) {
+    if (!ui->transition.dc || !ui->transition_window) return;
+    if (GetActiveWindow() != ui->window || !maage_ui_transition_position(ui) ||
+        !SetTimer(ui->window, MAAGE_UI_ANIMATION_TIMER, MAAGE_UI_ANIMATION_INTERVAL, NULL)) {
+        maage_ui_transition_cancel(ui);
+        return;
+    }
+    RedrawWindow(ui->window, NULL, NULL, RDW_UPDATENOW | RDW_ALLCHILDREN);
+    ui->transition_started = maage_time_monotonic_seconds();
+    ui->transition_active = 1;
+    InvalidateRect(ui->transition_window, NULL, FALSE);
+}
+
 static void maage_ui_layout(maage_launcher_win32 *ui) {
     RECT rect;
     SCROLLINFO scroll;
@@ -789,7 +976,7 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
     scroll.nMax = max_scroll + bottom - top - 1;
     scroll.nPage = (UINT) (bottom > top ? bottom - top : 1);
     scroll.nPos = ui->scroll[page];
-    SetScrollInfo(ui->window, SB_VERT, &scroll, TRUE);
+    if (!ui->splash_visible && page != MAAGE_PAGE_PLAY) SetScrollInfo(ui->window, SB_VERT, &scroll, TRUE);
     for (i = 0; i < ui->native.count; ++i) {
         maage_launcher_control *c = &ui->native.controls[i];
         x = c->x;
@@ -812,7 +999,7 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
             visible = ui->state->progress.busy || ui->state->accounts.busy;
         }
         if (c->page == MAAGE_PAGE_INSTALLATIONS && c->y != 80) {
-            if (page != MAAGE_PAGE_INSTALLATIONS || ui->splash_visible) ShowWindow(c->handle, SW_HIDE);
+            if (page != MAAGE_PAGE_INSTALLATIONS || ui->splash_visible) maage_ui_visible(c->handle, 0);
             continue;
         }
         if (y < 0) y += height;
@@ -834,15 +1021,30 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
             if (ui->native.controls[i].page == MAAGE_UI_HOME) maage_ui_visible(ui->native.controls[i].handle, 1);
     }
     else if (page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_layout(ui, width, height);
-    ListView_SetColumnWidth(ui->profiles, 0, maage_launcher_win32_scale(&ui->native, (width - 230) * 36 / 100));
-    ListView_SetColumnWidth(ui->profiles, 1, maage_launcher_win32_scale(&ui->native, (width - 230) * 60 / 100));
-    for (i = 0; i < 5; ++i)
-        SendMessageW(ui->navigation[i], BM_SETCHECK, i == (unsigned) page ? BST_CHECKED : BST_UNCHECKED, 0);
+    if (!ui->splash_visible && page == MAAGE_PAGE_ACCOUNTS) {
+        int first = maage_launcher_win32_scale(&ui->native, (width - 230) * 36 / 100), second = maage_launcher_win32_scale(&ui->native, (width - 230) * 60 / 100);
+        if (ListView_GetColumnWidth(ui->profiles, 0) != first) ListView_SetColumnWidth(ui->profiles, 0, first);
+        if (ListView_GetColumnWidth(ui->profiles, 1) != second) ListView_SetColumnWidth(ui->profiles, 1, second);
+    }
+    if (!ui->splash_visible && page != MAAGE_PAGE_PLAY)
+        for (i = 0; i < 5; ++i) {
+            LRESULT checked = i == (unsigned) page ? BST_CHECKED : BST_UNCHECKED;
+            if (SendMessageW(ui->navigation[i], BM_GETCHECK, 0, 0) != checked) SendMessageW(ui->navigation[i], BM_SETCHECK, checked, 0);
+        }
     ui->laying_out = 0;
     ui->backdrop_dirty = 1;
     maage_ui_caption(ui);
     RedrawWindow(ui->window, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
 }
+static void maage_ui_navigate(maage_launcher_win32 *ui, maage_launcher_page page) {
+    if (ui->state->page == page) return;
+    if (!ui->splash_visible) maage_ui_transition_capture(ui);
+    ui->hot_button = NULL;
+    ui->state->page = page;
+    maage_ui_layout(ui);
+    maage_ui_transition_start(ui);
+}
+
 static int maage_ui_selected(maage_launcher_win32 *ui) {
     int row = ListView_GetNextItem(ui->list, -1, LVNI_SELECTED);
     if (ui->creating) return -1;
@@ -1080,6 +1282,11 @@ static void maage_ui_appearance(maage_launcher_win32 *ui) {
     {
         BOOL animation = FALSE;
         ui->animate_splash = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animation, 0) && animation && !ui->native.high_contrast;
+        if (!ui->animate_splash) {
+            maage_ui_transition_cancel(ui);
+            KillTimer(ui->window, MAAGE_UI_ANIMATION_TIMER);
+            ui->splash_logo_size = 144;
+        } else if (ui->splash_visible && IsWindowVisible(ui->window)) SetTimer(ui->window, MAAGE_UI_ANIMATION_TIMER, MAAGE_UI_ANIMATION_INTERVAL, NULL);
     }
 }
 static void maage_ui_copy_code(maage_launcher_win32 *ui) {
@@ -1253,7 +1460,12 @@ static void maage_ui_refresh_splash(maage_launcher_win32 *ui) {
         }
     }
     if (splash && (ui->onboarding_required || (state->catalog_finished && !state->services_ready))) flags |= MAAGE_SPLASH_SKIP;
+    if (ui->splash_visible && !splash) maage_ui_transition_capture(ui);
     if (ui->splash_percent != percent) {
+        double now = maage_time_monotonic_seconds();
+        ui->progress_from = maage_ui_progress_value(ui, now);
+        if (ui->progress_from < 0 || percent < ui->progress_from) ui->progress_from = percent;
+        ui->progress_started = now;
         ui->splash_percent = percent;
         if (splash) {
             SendMessageW(ui->progress, PBM_SETPOS, percent < 0 ? 0 : percent, 0);
@@ -1269,11 +1481,14 @@ static void maage_ui_refresh_splash(maage_launcher_win32 *ui) {
     if (ui->splash_visible != splash || ui->splash_flags != flags || ui->splash_preparing != preparing) {
         int was_splash = ui->splash_visible;
         ui->splash_visible = splash;
-        if (!splash) KillTimer(ui->window, 2);
+        if (!splash && !ui->transition.dc) KillTimer(ui->window, MAAGE_UI_ANIMATION_TIMER);
         ui->splash_flags = flags;
         ui->splash_preparing = preparing;
         maage_ui_layout(ui);
-        if (was_splash && !splash) SetFocus(state->page == MAAGE_PAGE_PLAY ? (state->can_play ? ui->play : ui->home_settings) : ui->navigation[state->page]);
+        if (was_splash && !splash) {
+            SetFocus(state->page == MAAGE_PAGE_PLAY ? (state->can_play ? ui->play : ui->home_settings) : ui->navigation[state->page]);
+            maage_ui_transition_start(ui);
+        }
         else if (splash && (!GetFocus() || !IsWindowVisible(GetFocus()))) {
             if (flags & MAAGE_SPLASH_SIGN_IN && IsWindowEnabled(ui->splash_sign_in)) SetFocus(ui->splash_sign_in);
             else if (flags & MAAGE_SPLASH_CANCEL) SetFocus(ui->splash_cancel);
@@ -1518,8 +1733,7 @@ static void maage_ui_client_import(maage_launcher_win32 *ui, int replacing) {
 #endif
 static void maage_ui_home_manage(maage_launcher_win32 *ui, unsigned card) {
     if (card == 3) return;
-    ui->state->page = card == 2 ? MAAGE_PAGE_ACCOUNTS : MAAGE_PAGE_INSTALLATIONS;
-    maage_ui_layout(ui);
+    maage_ui_navigate(ui, card == 2 ? MAAGE_PAGE_ACCOUNTS : MAAGE_PAGE_INSTALLATIONS);
     if (card != 2) maage_ui_installations_ensure_selection(ui);
     SetFocus(ui->navigation[ui->state->page]);
 }
@@ -1607,7 +1821,9 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         ((MINMAXINFO *) lparam)->ptMinTrackSize.y = maage_launcher_win32_scale(&ui->native, 650);
         return 0;
     case WM_DPICHANGED: {
-        maage_status result = maage_launcher_win32_dpi_changed(&ui->native, wparam, lparam);
+        maage_status result;
+        maage_ui_transition_cancel(ui);
+        result = maage_launcher_win32_dpi_changed(&ui->native, wparam, lparam);
         if (maage_status_failed(result)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", result, "Could not update Launcher DPI.");
         if (ui->controls_ready) maage_ui_splash_fonts(ui);
         maage_ui_layout(ui);
@@ -1617,7 +1833,21 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_THEMECHANGED:
         if (ui->native.window) maage_ui_appearance(ui);
         break;
+    case WM_ACTIVATE:
+        if (LOWORD(wparam) == WA_INACTIVE) maage_ui_transition_cancel(ui);
+        break;
+    case WM_MOVE:
+        if (!ui->laying_out && ui->transition_active) maage_ui_transition_cancel(ui);
+        break;
+    case WM_ENTERSIZEMOVE:
+        ui->live_resize = 1;
+        maage_ui_transition_cancel(ui);
+        return 0;
+    case WM_EXITSIZEMOVE:
+        ui->live_resize = 0;
+        return 0;
     case WM_SIZE:
+        if (!ui->laying_out && ui->transition_active) maage_ui_transition_cancel(ui);
         if (wparam != SIZE_MINIMIZED) maage_ui_layout(ui);
         return 0;
     case WM_VSCROLL: {
@@ -1690,17 +1920,32 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     }
     case WM_TIMER:
         if (wparam == 1) maage_ui_refresh(ui);
-        if (wparam == 2 && ui->splash_visible && !IsIconic(window)) {
-            double elapsed = maage_time_monotonic_seconds() - ui->splash_started;
-            int size = ui->animate_splash ? (int) (144 + 3 * sin(elapsed * 6.2831853 / 12.0) + .5) : 144;
-            if (size != ui->splash_logo_size) {
-                RECT rect = ui->splash_logo;
-                ui->splash_logo_size = size;
-                ui->backdrop_dirty = 1;
-                InflateRect(&rect, maage_ui_scale(ui, 5), maage_ui_scale(ui, 5));
-                InvalidateRect(window, &rect, FALSE);
+        if (wparam == MAAGE_UI_ANIMATION_TIMER) {
+            double now = maage_time_monotonic_seconds();
+            if (ui->transition_active) {
+                double t = (now - ui->transition_started) / MAAGE_UI_PAGE_FADE_SECONDS;
+                if (t >= 1.0 || !ui->animate_splash || IsIconic(window)) maage_ui_transition_cancel(ui);
+                else {
+                    double remaining = (1.0 - t) * (1.0 - t);
+                    if (!SetLayeredWindowAttributes(ui->transition_window, 0, (BYTE) (remaining * 255 + .5), LWA_ALPHA)) maage_ui_transition_cancel(ui);
+                }
             }
-            if ((ui->splash_flags & MAAGE_SPLASH_PROGRESS) && ui->splash_percent < 0 && ui->animate_splash) InvalidateRect(ui->progress, NULL, FALSE);
+            if (ui->splash_visible && ui->animate_splash && !IsIconic(window)) {
+                double elapsed = now - ui->splash_started;
+                int size = (int) (144 + 3 * sin(elapsed * 6.2831853 / 12.0) + .5);
+                if (size != ui->splash_logo_size) {
+                    RECT rect = ui->splash_logo;
+                    ui->splash_logo_size = size;
+                    ui->backdrop_dirty = 1;
+                    InflateRect(&rect, maage_ui_scale(ui, 5), maage_ui_scale(ui, 5));
+                    InvalidateRect(window, &rect, FALSE);
+                }
+                if ((ui->splash_flags & MAAGE_SPLASH_PROGRESS) && (ui->splash_percent < 0 || ui->progress_from != ui->splash_percent)) {
+                    InvalidateRect(ui->progress, NULL, FALSE);
+                    if (ui->splash_percent >= 0 && now - ui->progress_started >= MAAGE_UI_PROGRESS_SECONDS) ui->progress_from = ui->splash_percent;
+                }
+            }
+            if (!ui->transition_active && (!ui->splash_visible || !ui->animate_splash)) KillTimer(window, MAAGE_UI_ANIMATION_TIMER);
         }
         return 0;
     case WM_COMMAND: {
@@ -1727,27 +1972,23 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             else maage_ui_home_manage(ui, card);
         }
         if (id == MAAGE_UI_HOME_SETTINGS) {
-            ui->state->page = MAAGE_PAGE_SETTINGS;
-            maage_ui_layout(ui);
+            maage_ui_navigate(ui, MAAGE_PAGE_SETTINGS);
             SetFocus(ui->navigation[MAAGE_PAGE_SETTINGS]);
         }
         if (id == MAAGE_UI_SPLASH_SKIP) ui->splash_dismissed = 1;
         if (id == MAAGE_UI_SPLASH_RETRY) maage_launcher_resources(ui->state, MAAGE_ASSETS_PREPARE);
         if (id >= 100 && id < 105) {
-            ui->state->page = (maage_launcher_page) (id - 100);
-            maage_ui_layout(ui);
+            maage_ui_navigate(ui, (maage_launcher_page) (id - 100));
             if (ui->state->page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_ensure_selection(ui);
             if (ui->state->page == MAAGE_PAGE_PLAY) SetFocus(ui->state->can_play ? ui->play : ui->home_settings);
             return 0;
         }
         if (id == MAAGE_UI_ABOUT || id == MAAGE_UI_BACK_SETTINGS) {
-            ui->state->page = id == MAAGE_UI_ABOUT ? MAAGE_PAGE_ABOUT : MAAGE_PAGE_SETTINGS;
-            maage_ui_layout(ui);
+            maage_ui_navigate(ui, id == MAAGE_UI_ABOUT ? MAAGE_PAGE_ABOUT : MAAGE_PAGE_SETTINGS);
             return 0;
         }
         if (id == MAAGE_UI_STATUS) {
-            ui->state->page = maage_launcher_attention_page(ui->state);
-            maage_ui_layout(ui);
+            maage_ui_navigate(ui, maage_launcher_attention_page(ui->state));
             if (ui->state->page != MAAGE_PAGE_PLAY) SetFocus(ui->navigation[ui->state->page]);
             return 0;
         }
@@ -1756,8 +1997,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
             index = SendMessageW(ui->account, CB_GETITEMDATA, row, 0);
             if (index >= 0 && (unsigned) index < ui->state->accounts.count) maage_launcher_account_select(ui->state, ui->state->accounts.profiles[index].uuid);
             else if (index == -2) {
-                ui->state->page = MAAGE_PAGE_ACCOUNTS;
-                maage_ui_layout(ui);
+                maage_ui_navigate(ui, MAAGE_PAGE_ACCOUNTS);
             }
             ui->revision = 0;
         }
@@ -1872,7 +2112,7 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         break;
     case WM_ERASEBKGND: {
         RECT rect;
-        if (ui->splash_visible || ui->state->page == MAAGE_PAGE_PLAY) return 1;
+        if (ui->controls_ready) return 1;
         GetClientRect(window, &rect);
         FillRect((HDC) wparam, &rect, ui->background);
         rect.right = maage_launcher_win32_scale(&ui->native, 170);
@@ -1882,17 +2122,14 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
     case WM_PAINT: {
         PAINTSTRUCT paint;
         HDC dc = BeginPaint(window, &paint);
-        RECT rect = paint.rcPaint;
-        if (ui->controls_ready && (ui->splash_visible || ui->state->page == MAAGE_PAGE_PLAY)) {
-            if (maage_ui_backdrop(ui, dc)) BitBlt(dc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, ui->backdrop.dc, rect.left, rect.top, SRCCOPY);
-            else FillRect(dc, &rect, ui->background);
-        } else if (ui->background) {
-            RECT sidebar = rect;
-            FillRect(dc, &rect, ui->background);
-            if (sidebar.right > maage_launcher_win32_scale(&ui->native, 170)) sidebar.right = maage_launcher_win32_scale(&ui->native, 170);
-            if (sidebar.right > sidebar.left) FillRect(dc, &sidebar, ui->sidebar);
-        }
+        maage_ui_paint_client(ui, dc, paint.rcPaint);
         EndPaint(window, &paint);
+        return 0;
+    }
+    case WM_PRINTCLIENT: {
+        RECT rect;
+        GetClientRect(window, &rect);
+        maage_ui_paint_client(ui, (HDC) wparam, rect);
         return 0;
     }
     case WM_CLOSE:
@@ -1900,7 +2137,8 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         return 0;
     case WM_DESTROY:
         KillTimer(window, 1);
-        KillTimer(window, 2);
+        KillTimer(window, MAAGE_UI_ANIMATION_TIMER);
+        maage_ui_transition_cancel(ui);
         PostQuitMessage(0);
         return 0;
     }
@@ -1957,6 +2195,7 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state) {
         maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_LOAD, 0), "Launcher PNG artwork is unavailable; using the native icon.");
     }
     if (ui.logo.dc && !maage_win32_surface_shadow(&ui.logo_shadow, &ui.logo)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_CREATE, 0), "Launcher logo shadow is unavailable.");
+    if (!maage_win32_surface_make_control_shadow(&ui.play_shadow, 1) || !maage_win32_surface_make_control_shadow(&ui.card_shadow, 0)) maage_log_status(MAAGE_LOG_WARNING, "maage.launcher.ui", maage_status_make(MAAGE_STATUS_PARTIAL, MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_CREATE, 0), "Launcher control shadows are unavailable.");
     maage_ui_appearance(&ui);
     maage_ui_label(&ui, -1, L"MaaGE", 20, 24, 130, 24);
     for (i = 0; i < 5; ++i)
@@ -2124,6 +2363,13 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state) {
         DestroyWindow(ui.window);
         goto cleanup;
     }
+    /* An owned compositor surface avoids clipping the real window's child
+     * controls during the fade, and has no separate taskbar entry. */
+    ui.transition_window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"STATIC", NULL, WS_POPUP, 0, 0, 0, 0, ui.window, NULL, klass.hInstance, NULL);
+    if (ui.transition_window && !SetWindowSubclass(ui.transition_window, maage_ui_transition_proc, 1, (DWORD_PTR) &ui)) {
+        DestroyWindow(ui.transition_window);
+        ui.transition_window = NULL;
+    }
     ui.controls_ready = 1;
     maage_ui_splash_fonts(&ui);
     maage_ui_appearance(&ui);
@@ -2132,11 +2378,12 @@ maage_status maage_launcher_native_run(maage_launcher_ui *state) {
     maage_ui_refresh(&ui);
     if (ui.state->page == MAAGE_PAGE_INSTALLATIONS) maage_ui_installations_ensure_selection(&ui);
     if (!ui.splash_visible) SetFocus(ui.state->page == MAAGE_PAGE_PLAY ? ui.play : ui.navigation[ui.state->page]);
-    if (!SetTimer(ui.window, 1, 250, NULL) || (ui.splash_visible && !SetTimer(ui.window, 2, 33, NULL))) {
+    if (!SetTimer(ui.window, 1, 250, NULL)) {
         outcome = maage_status_from_win32((unsigned long) GetLastError(), MAAGE_CONTEXT_LAUNCHER, MAAGE_OPERATION_OPEN);
         DestroyWindow(ui.window);
     } else {
         ShowWindow(ui.window, SW_SHOW);
+        if (ui.splash_visible && ui.animate_splash) SetTimer(ui.window, MAAGE_UI_ANIMATION_TIMER, MAAGE_UI_ANIMATION_INTERVAL, NULL);
         UpdateWindow(ui.window);
         MAAGE_LOG_DEBUG_EVENT("maage.launcher.startup", maage_log_debug("maage.launcher.startup", "Win32 main window creation/presentation: %.3f s.", maage_time_monotonic_seconds() - started));
         maage_launcher_ui_presented(state);
@@ -2156,8 +2403,13 @@ cleanup:
     if (ui.splash_title_font) DeleteObject(ui.splash_title_font);
     if (ui.splash_detail_font) DeleteObject(ui.splash_detail_font);
     if (ui.splash_log_font) DeleteObject(ui.splash_log_font);
+    for (i = 0; i < MAAGE_UI_HOME_FONTS; ++i)
+        if (ui.home_fonts[i].handle) DeleteObject(ui.home_fonts[i].handle);
+    maage_win32_surface_destroy(&ui.transition);
     maage_win32_surface_destroy(&ui.button_surface);
     maage_win32_surface_destroy(&ui.backdrop);
+    maage_win32_surface_destroy(&ui.play_shadow);
+    maage_win32_surface_destroy(&ui.card_shadow);
     maage_win32_surface_destroy(&ui.logo_shadow);
     maage_win32_surface_destroy(&ui.logo);
     if (ui.artwork) DestroyIcon(ui.artwork);

@@ -141,13 +141,32 @@ static DWORD maage_win32_bgra(COLORREF color) {
     return 0xff000000UL | ((DWORD) GetRValue(color) << 16) | ((DWORD) GetGValue(color) << 8) | GetBValue(color);
 }
 
-void maage_win32_surface_gradient(maage_win32_surface *s, COLORREF top, COLORREF bottom) {
-    int x, y, d = s->height > 1 ? s->height - 1 : 1;
-    GdiFlush();
-    for (y = 0; y < s->height; ++y) {
-        DWORD pixel = maage_win32_bgra(RGB((GetRValue(top) * (d - y) + GetRValue(bottom) * y) / d, (GetGValue(top) * (d - y) + GetGValue(bottom) * y) / d, (GetBValue(top) * (d - y) + GetBValue(bottom) * y) / d));
-        DWORD *row = s->pixels + (size_t) y * s->width;
-        for (x = 0; x < s->width; ++x) row[x] = pixel;
+/* Let GDI fill the entire background in one operation, rather than writing
+ * millions of pixels from the unoptimized Debug build on every resize. */
+void maage_win32_surface_gradient_rect(maage_win32_surface *s, int width, int height, COLORREF top, COLORREF bottom) {
+    TRIVERTEX vertices[2];
+    GRADIENT_RECT gradient = {0, 1};
+    RECT rect;
+    if (width <= 0 || height <= 0) return;
+    if (top == bottom) {
+        SetRect(&rect, 0, 0, width, height);
+        SetDCBrushColor(s->dc, top);
+        FillRect(s->dc, &rect, (HBRUSH) GetStockObject(DC_BRUSH));
+        return;
+    }
+    memset(vertices, 0, sizeof(vertices));
+    vertices[0].Red = (COLOR16) (GetRValue(top) << 8);
+    vertices[0].Green = (COLOR16) (GetGValue(top) << 8);
+    vertices[0].Blue = (COLOR16) (GetBValue(top) << 8);
+    vertices[1].x = width;
+    vertices[1].y = height;
+    vertices[1].Red = (COLOR16) (GetRValue(bottom) << 8);
+    vertices[1].Green = (COLOR16) (GetGValue(bottom) << 8);
+    vertices[1].Blue = (COLOR16) (GetBValue(bottom) << 8);
+    if (!GradientFill(s->dc, vertices, 2, &gradient, 1, GRADIENT_FILL_RECT_V)) {
+        SetRect(&rect, 0, 0, width, height);
+        SetDCBrushColor(s->dc, top);
+        FillRect(s->dc, &rect, (HBRUSH) GetStockObject(DC_BRUSH));
     }
 }
 
@@ -174,33 +193,119 @@ static double maage_win32_clamp(double v, double lo, double hi) {
 
 /* Signed distance gives smooth corners and soft shadows even across
  * separate native child hit targets sharing one card outline. */
-void maage_win32_surface_round(maage_win32_surface *s, RECT rect, double radius, COLORREF color, double opacity, double blur) {
-    double hw = (rect.right - rect.left) * 0.5, hh = (rect.bottom - rect.top) * 0.5;
-    double cx = rect.left + hw, cy = rect.top + hh;
-    int x, y, left, right, top, bottom, margin;
+/* Only the rounded edge needs a distance calculation. Interior opaque spans
+ * are written directly, and straight edges use a single coverage per row. */
+void maage_win32_surface_round_f(maage_win32_surface *s, double x0, double y0, double x1, double y1, double radius, COLORREF color, double opacity, double blur) {
+    double hw = (x1 - x0) * 0.5, hh = (y1 - y0) * 0.5;
+    double cx = x0 + hw, cy = y0 + hh;
+    double distance, coverage, dy, dx;
+    int x, y, left, right, top, bottom, middle_left, middle_right, middle_end;
+    DWORD pixel = maage_win32_bgra(color), *row;
     if (hw <= 0 || hh <= 0 || opacity <= 0.0) return;
     radius = maage_win32_clamp(radius, 0.0, hw < hh ? hw : hh);
-    margin = (int) ceil(blur + 1.0);
-    left = rect.left - margin;
-    right = rect.right + margin;
-    top = rect.top - margin;
-    bottom = rect.bottom + margin;
+    left = (int) floor(x0 - blur - 1);
+    right = (int) ceil(x1 + blur + 1);
+    top = (int) floor(y0 - blur - 1);
+    bottom = (int) ceil(y1 + blur + 1);
     if (left < 0) left = 0;
     if (top < 0) top = 0;
     if (right > s->width) right = s->width;
     if (bottom > s->height) bottom = s->height;
+    if (left >= right || top >= bottom) return;
+    middle_left = (int) ceil(x0 + radius);
+    middle_right = (int) floor(x1 - radius);
+    if (middle_left < left) middle_left = left;
+    if (middle_right > right) middle_right = right;
     GdiFlush();
     for (y = top; y < bottom; ++y) {
-        double dy = fabs(y + 0.5 - cy) - (hh - radius);
-        DWORD *row = s->pixels + (size_t) y * s->width;
-        for (x = left; x < right; ++x) {
-            double dx = fabs(x + 0.5 - cx) - (hw - radius);
-            double distance = dx > 0 && dy > 0 ? sqrt(dx * dx + dy * dy) - radius : (dx > dy ? dx : dy) - radius;
-            double coverage = blur > 0 ? maage_win32_clamp(1.0 - (distance + blur * 0.35) / blur, 0.0, 1.0) : maage_win32_clamp(0.5 - distance, 0.0, 1.0);
+        int row_left = left, row_right = right, solid_left = right, solid_right = right;
+        dy = fabs(y + 0.5 - cy) - (hh - radius);
+        row = s->pixels + (size_t) y * s->width;
+        if (opacity == 1.0 && blur == 0.0 && radius >= .5) {
+            double outer = radius + .5, inner = radius - .5, offset = hw - radius, extent;
+            if (dy >= outer) continue;
+            extent = offset + (dy > 0 ? sqrt(outer * outer - dy * dy) : outer);
+            row_left = (int) ceil(cx - extent - .5);
+            row_right = (int) floor(cx + extent - .5) + 1;
+            if (row_left < left) row_left = left;
+            if (row_right > right) row_right = right;
+            if (dy <= inner) {
+                extent = offset + (dy > 0 ? sqrt(inner * inner - dy * dy) : inner);
+                solid_left = (int) ceil(cx - extent - .5);
+                solid_right = (int) floor(cx + extent - .5) + 1;
+                if (solid_left < row_left) solid_left = row_left;
+                if (solid_right > row_right) solid_right = row_right;
+            }
+        }
+        for (x = row_left; x < row_right;) {
+            if (x >= solid_left && x < solid_right) {
+                while (x < solid_right) row[x++] = pixel;
+                continue;
+            }
+            if (x >= middle_left && x < middle_right) {
+                middle_end = middle_right < row_right ? middle_right : row_right;
+                if (x < solid_left && middle_end > solid_left) middle_end = solid_left;
+                distance = dy - radius;
+            } else {
+                middle_end = x + 1;
+                dx = fabs(x + 0.5 - cx) - (hw - radius);
+                distance = dx > 0 && dy > 0 ? sqrt(dx * dx + dy * dy) - radius : (dx > dy ? dx : dy) - radius;
+            }
+            coverage = blur > 0 ? maage_win32_clamp(1.0 - (distance + blur * 0.35) / blur, 0.0, 1.0) : maage_win32_clamp(0.5 - distance, 0.0, 1.0);
             if (blur > 0) coverage = coverage * coverage * (3.0 - 2.0 * coverage);
-            maage_win32_blend(&row[x], color, opacity * coverage);
+            coverage *= opacity;
+            if (coverage >= 1.0) {
+                while (x < middle_end) row[x++] = pixel;
+            } else if (coverage > 0.0) {
+                while (x < middle_end) maage_win32_blend(&row[x++], color, coverage);
+            } else x = middle_end;
         }
     }
+}
+
+void maage_win32_surface_round(maage_win32_surface *s, RECT rect, double radius, COLORREF color, double opacity, double blur) {
+    maage_win32_surface_round_f(s, rect.left, rect.top, rect.right, rect.bottom, radius, color, opacity, blur);
+}
+
+/* A canonical 64px-high shadow is generated once per shape. Native
+ * AlphaBlend stretches only its straight middle, preserving the corners
+ * and blur while the controls resize. The black source is premultiplied. */
+int maage_win32_surface_make_control_shadow(maage_win32_surface *s, int pill) {
+    int x, y;
+    double radius = pill ? 32.0 : 16.64, opacity = pill ? .42 : .32;
+    double blur = pill ? 12.0 : 11.0, dx, dy, distance, coverage;
+    if (!maage_win32_surface_resize(s, NULL, 100, 96)) return 0;
+    GdiFlush();
+    for (y = 0; y < 96; ++y) {
+        dy = fabs(y + .5 - 48.0) - (32.0 - radius);
+        for (x = 0; x < 100; ++x) {
+            dx = fabs(x + .5 - 50.0) - (34.0 - radius);
+            distance = dx > 0 && dy > 0 ? sqrt(dx * dx + dy * dy) - radius : (dx > dy ? dx : dy) - radius;
+            coverage = maage_win32_clamp(1.0 - (distance + blur * .35) / blur, 0.0, 1.0);
+            coverage = coverage * coverage * (3.0 - 2.0 * coverage) * opacity;
+            s->pixels[(size_t) y * 100 + x] = (DWORD) (coverage * 255.0 + .5) << 24;
+        }
+    }
+    return 1;
+}
+
+void maage_win32_surface_control_shadow(maage_win32_surface *s, const maage_win32_surface *mask, RECT shape) {
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    int height = shape.bottom - shape.top, width = shape.right - shape.left;
+    int pad, cap, total_width, total_height, left, top, middle;
+    if (!mask->dc || height <= 0 || width <= 0) return;
+    pad = (height + 2) / 4;
+    cap = (height + 2) / 2 + pad;
+    total_width = width + 2 * pad;
+    total_height = height + 2 * pad;
+    left = shape.left - pad;
+    top = shape.top - pad;
+    if (cap > total_width / 2) cap = total_width / 2;
+    middle = total_width - 2 * cap;
+    if (cap <= 0) return;
+    AlphaBlend(s->dc, left, top, cap, total_height, mask->dc, 0, 0, 48, 96, blend);
+    if (middle) AlphaBlend(s->dc, left + cap, top, middle, total_height, mask->dc, 48, 0, 4, 96, blend);
+    AlphaBlend(s->dc, left + cap + middle, top, cap, total_height, mask->dc, 52, 0, 48, 96, blend);
 }
 
 void maage_win32_surface_line(maage_win32_surface *s, double x1, double y1, double x2, double y2, double thickness, COLORREF color) {
@@ -211,7 +316,6 @@ void maage_win32_surface_line(maage_win32_surface *s, double x1, double y1, doub
     if (top < 0) top = 0;
     if (right > s->width) right = s->width;
     if (bottom > s->height) bottom = s->height;
-    GdiFlush();
     for (y = top; y < bottom; ++y) {
         DWORD *row = s->pixels + (size_t) y * s->width;
         for (x = left; x < right; ++x) {

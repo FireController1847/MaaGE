@@ -14,7 +14,11 @@ void maage_win32_surface_destroy(maage_win32_surface *s);
 int maage_win32_surface_png(maage_win32_surface *s, HINSTANCE instance, int resource);
 int maage_win32_surface_shadow(maage_win32_surface *s, const maage_win32_surface *source);
 void maage_win32_surface_image(maage_win32_surface *s, const maage_win32_surface *image, RECT rect);
-void maage_win32_surface_gradient(maage_win32_surface *s, COLORREF top, COLORREF bottom);
+void maage_win32_surface_gradient_rect(maage_win32_surface *s, int width, int height, COLORREF top, COLORREF bottom);
+int maage_win32_surface_make_control_shadow(maage_win32_surface *s, int pill);
+void maage_win32_surface_control_shadow(maage_win32_surface *s, const maage_win32_surface *mask, RECT shape);
+void maage_win32_surface_round_f(maage_win32_surface *s, double x0, double y0, double x1, double y1, double radius, COLORREF color, double opacity, double blur);
 void maage_win32_surface_round(maage_win32_surface *s, RECT rect, double radius, COLORREF color, double opacity, double blur);
+/* Flush any pending GDI operations before starting a batch of CPU strokes. */
 void maage_win32_surface_line(maage_win32_surface *s, double x1, double y1, double x2, double y2, double thickness, COLORREF color);
 #endif
