@@ -532,7 +532,6 @@ maage_status maage_base_blocks(maage_content_context *context, maage_base_ids *i
     block.material = ids->material_foliage;
     block.changed = maage_leaves_changed;
     block.foliage = 1;
-    block.import_state = maage_base_leaf_import;
     block.special_tool_class = MAAGE_TOOL_SHEARS;
     block.special_tool_speed = 15;
     block.tool_wear_class = MAAGE_TOOL_SHEARS;

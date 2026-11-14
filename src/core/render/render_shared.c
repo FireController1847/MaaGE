@@ -50,7 +50,7 @@ static float maage_render_depth(const float center[3], const float matrix[16], c
     }
     return depth > FLT_MAX ? FLT_MAX : (depth < -FLT_MAX ? -FLT_MAX : (float) depth);
 }
-static maage_status maage_render_geometry_sort(maage_render_geometry *geometry, const float matrix[16]) {
+static maage_status maage_render_geometry_sort(maage_render_geometry *geometry, const float matrix[16], int shared_camera) {
     double origin[3], movement = 0;
     int perspective, axis;
     size_t index, count = geometry->translucent_count / 3;
@@ -63,11 +63,12 @@ static maage_status maage_render_geometry_sort(maage_render_geometry *geometry, 
     }
     for (axis = 0; axis < 3; ++axis)
         movement += (origin[axis] - geometry->sort_origin[axis]) * (origin[axis] - geometry->sort_origin[axis]);
-    if (geometry->revision && movement <= (perspective ? 0.25 : 0.0001)) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPLOAD, 0);
+    if (geometry->revision && perspective == geometry->sort_perspective && movement <= (shared_camera ? 0 : (perspective ? 0.25 : 0.0001))) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPLOAD, 0);
     for (index = 0; index < count; ++index)
         geometry->triangles[index].depth = maage_render_depth(geometry->triangles[index].center, matrix, origin, perspective);
     qsort(geometry->triangles, count, sizeof(*geometry->triangles), maage_render_triangle_order);
     memcpy(geometry->sort_origin, origin, sizeof(origin));
+    geometry->sort_perspective = perspective;
     if (++geometry->revision == 0) geometry->revision = 1;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
@@ -85,6 +86,22 @@ size_t maage_render_transient_capacity(size_t current, size_t required) {
         capacity *= 2;
     }
     return capacity;
+}
+/* Keep every world stream on the same camera reference, including newly
+ * uploaded meshes. Independently gated references cannot be merged by depth. */
+static void maage_render_sort_camera(maage_renderer *renderer, const float matrix[16]) {
+    double origin[3], previous[3], movement = 0, difference;
+    int perspective, axis;
+    perspective = maage_render_camera_origin(matrix, origin);
+    if (renderer->sort_initialized && perspective == maage_render_camera_origin(renderer->sort_matrix, previous)) {
+        for (axis = 0; axis < 3; ++axis) {
+            difference = perspective ? origin[axis] - previous[axis] : matrix[axis * 4 + 2] - renderer->sort_matrix[axis * 4 + 2];
+            movement += difference * difference;
+        }
+        if (movement <= (perspective ? 0.25 : 0.0001)) return;
+    }
+    memcpy(renderer->sort_matrix, matrix, sizeof(renderer->sort_matrix));
+    renderer->sort_initialized = 1;
 }
 maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count, const float matrix[16], const maage_render_ui_data *ui, int preparing, maage_render_frame_plan *plan) {
     maage_render_ordered_mesh *ordered;
@@ -132,16 +149,19 @@ maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maa
         renderer->ordered_capacity = required;
     }
     plan->ordered = renderer->ordered;
-    perspective = matrix ? maage_render_camera_origin(matrix, origin) : 0;
+    if (matrix) maage_render_sort_camera(renderer, matrix);
+    perspective = matrix ? maage_render_camera_origin(renderer->sort_matrix, origin) : 0;
     for (index = 0; index < count; ++index) {
+        result = maage_render_geometry_sort(&((maage_render_mesh *) meshes[index])->geometry, renderer->sort_matrix, 1);
+        if (maage_status_failed(result)) return result;
         geometry = &meshes[index]->geometry;
         if (!geometry->translucent_count) continue;
         ordered = &renderer->ordered[plan->ordered_count++];
         ordered->mesh = meshes[index];
         ordered->instance = NULL;
         ordered->triangle = 0;
-        ordered->order = index;
-        ordered->depth = maage_render_depth(geometry->center, matrix, origin, perspective);
+        ordered->order = plan->ordered_count - 1;
+        ordered->depth = geometry->triangles[0].depth;
     }
     for (index = 0; index < plan->instance_count; ++index) {
         const maage_render_instance *instance = &plan->instances[index];
@@ -154,7 +174,7 @@ maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maa
             ordered->instance = instance;
             ordered->triangle = geometry->solid_count + geometry->triangles[triangle].order * 3;
             ordered->order = plan->ordered_count++;
-            ordered->depth = maage_render_depth(center, matrix, origin, perspective);
+            ordered->depth = maage_render_depth(center, renderer->sort_matrix, origin, perspective);
         }
     }
     if (plan->ordered_count > 1) qsort(renderer->ordered, plan->ordered_count, sizeof(*plan->ordered), maage_render_mesh_order);
@@ -200,7 +220,7 @@ const maage_render_pipeline_state maage_render_pipeline_states[MAAGE_RENDER_PIPE
 maage_status maage_render_geometry_sort_slot(const maage_render_mesh *mesh, const float matrix[16], unsigned long *revisions, size_t slots, size_t slot) {
     /* The opaque handle owns this mutable cache; caller geometry stays immutable. */
     maage_render_geometry *geometry = &((maage_render_mesh *) mesh)->geometry;
-    maage_status result = maage_render_geometry_sort(geometry, matrix);
+    maage_status result = matrix ? maage_render_geometry_sort(geometry, matrix, 0) : maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPLOAD, 0);
     if (maage_status_failed(result)) return result;
     if (maage_status_code(result) == MAAGE_STATUS_SUCCESS) memset(revisions, 0, slots * sizeof(*revisions));
     return maage_status_make(geometry->translucent_count && revisions[slot] != geometry->revision ? MAAGE_STATUS_SUCCESS : MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPLOAD, 0);
@@ -250,12 +270,70 @@ maage_status maage_render_ui_pack(const maage_render_ui_data *batch, maage_rende
     if (batch->index_count) memcpy(indices, batch->indices, batch->index_count * sizeof(*indices));
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
+/* Each heap node owns one already sorted world stream or one transformed
+ * triangle. Emit a contiguous run until the next stream must draw, then repair
+ * only the root. Scratch space scales with streams, not terrain triangles. */
+static const maage_render_mesh *maage_render_translucent_next(const maage_render_frame_plan *plan, maage_render_mesh_cursor *cursor) {
+    maage_render_ordered_mesh *heap = plan->ordered, selected, competitor, swap;
+    const maage_render_geometry *geometry;
+    size_t low, high, middle, child, parent, end;
+    if (!cursor->index) cursor->remaining = plan->ordered_count;
+    if (!cursor->remaining) return NULL;
+    ++cursor->index;
+    selected = heap[0];
+    cursor->instance = selected.instance;
+    geometry = &selected.mesh->geometry;
+    cursor->triangle = selected.instance ? selected.triangle : selected.triangle * 3;
+    cursor->count = 3;
+    end = selected.triangle + 1;
+    if (!selected.instance) {
+        high = geometry->translucent_count / 3;
+        if (cursor->remaining == 1) end = high;
+        else {
+            competitor = heap[1];
+            if (cursor->remaining > 2 && maage_render_mesh_order(&heap[2], &competitor) < 0) competitor = heap[2];
+            low = end;
+            while (low < high) {
+                middle = low + (high - low) / 2;
+                heap[0].depth = geometry->triangles[middle].depth;
+                if (maage_render_mesh_order(&heap[0], &competitor) < 0) low = middle + 1;
+                else
+                    high = middle;
+            }
+            end = low;
+        }
+        cursor->count = (end - selected.triangle) * 3;
+    }
+    if (selected.instance || end == geometry->translucent_count / 3) heap[0] = heap[--cursor->remaining];
+    else {
+        heap[0] = selected;
+        heap[0].triangle = end;
+        heap[0].depth = geometry->triangles[end].depth;
+    }
+    parent = 0;
+    while (parent < cursor->remaining / 2) {
+        child = parent * 2 + 1;
+        if (child + 1 < cursor->remaining && maage_render_mesh_order(&heap[child + 1], &heap[child]) < 0) ++child;
+        if (maage_render_mesh_order(&heap[parent], &heap[child]) <= 0) break;
+        swap = heap[parent];
+        heap[parent] = heap[child];
+        heap[child] = swap;
+        parent = child;
+    }
+    return selected.mesh;
+}
 const maage_render_mesh *maage_render_frame_next_mesh(const maage_render_frame_plan *plan, int foreground, maage_render_mesh_cursor *cursor) {
     const maage_render_mesh *mesh;
-    const maage_render_ordered_mesh *ordered;
     size_t count, first, index;
     while (cursor->layer <= MAAGE_RENDER_MULTIPLY) {
-        count = foreground ? (plan->foreground ? 1 : 0) : (cursor->layer == MAAGE_RENDER_TRANSLUCENT ? plan->ordered_count : plan->mesh_count + plan->instance_count);
+        if (!foreground && cursor->layer == MAAGE_RENDER_TRANSLUCENT) {
+            mesh = maage_render_translucent_next(plan, cursor);
+            if (mesh) return mesh;
+            ++cursor->layer;
+            cursor->index = 0;
+            continue;
+        }
+        count = foreground ? (plan->foreground ? 1 : 0) : plan->mesh_count + plan->instance_count;
         if (cursor->index == count) {
             ++cursor->layer;
             cursor->index = 0;
@@ -264,13 +342,9 @@ const maage_render_mesh *maage_render_frame_next_mesh(const maage_render_frame_p
         index = cursor->index++;
         cursor->instance = NULL;
         cursor->triangle = 0;
+        cursor->count = 0;
         if (foreground) mesh = plan->foreground;
-        else if (cursor->layer == MAAGE_RENDER_TRANSLUCENT) {
-            ordered = &plan->ordered[index];
-            mesh = ordered->mesh;
-            cursor->instance = ordered->instance;
-            cursor->triangle = ordered->triangle;
-        } else if (index < plan->mesh_count) mesh = plan->meshes[index];
+        else if (index < plan->mesh_count) mesh = plan->meshes[index];
         else {
             cursor->instance = &plan->instances[index - plan->mesh_count];
             mesh = cursor->instance->mesh;

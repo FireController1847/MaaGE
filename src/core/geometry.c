@@ -77,11 +77,9 @@ static maage_status maage_geometry_prepare(maage_geometry *geometry, const maage
         triangle = &geometry->triangles[triangle_count];
         memcpy(triangle->indices, data->indices + index, sizeof(triangle->indices));
         triangle->order = triangle_count++;
-        for (axis = 0; axis < 3; ++axis) {
+        for (axis = 0; axis < 3; ++axis)
             for (corner = 0; corner < 3; ++corner)
                 triangle->center[axis] += data->vertices[triangle->indices[corner]].position[axis] / 3;
-            geometry->center[axis] += triangle->center[axis] / (geometry->translucent_count / 3);
-        }
     }
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_UPLOAD, 0);
 }
@@ -189,7 +187,7 @@ maage_status maage_mesh_prepare_index_view(const maage_mesh_data *data, const un
     maage_mesh_preparation *prepared = NULL;
     const maage_geometry_triangle **original = NULL;
     size_t source_faces, source_triangles, faces, counts[3] = {0, 0, 0}, destination[3];
-    size_t face, previous = 0, ordinal = 0, written = 0, source, triangle, axis, category, corner;
+    size_t face, previous = 0, ordinal = 0, written = 0, source, triangle, category, corner;
     maage_status result = maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 0);
     if (output) *output = NULL;
     if (!data || !face_flags || !base || !output || !data->indices || !data->index_count ||
@@ -256,8 +254,6 @@ maage_status maage_mesh_prepare_index_view(const maage_mesh_data *data, const un
                 *target = *original[ordinal + triangle];
                 memcpy(target->indices, data->indices + face * 6 + triangle * 3, sizeof(target->indices));
                 target->order = written++;
-                for (axis = 0; axis < 3; ++axis)
-                    prepared->geometry.center[axis] += target->center[axis] / (counts[1] / 3);
             }
             ordinal += 2;
         }

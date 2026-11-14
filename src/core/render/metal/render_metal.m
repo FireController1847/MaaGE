@@ -473,7 +473,7 @@ static void maage_metal_draw_geometry(id<MTLRenderCommandEncoder> encoder, const
 }
 static void maage_metal_draw_mesh_passes(maage_metal_renderer *native, id<MTLRenderCommandEncoder> encoder, const maage_render_frame_plan *plan, int foreground, unsigned int slot) {
     maage_render_uniforms uniforms;
-    maage_render_mesh_cursor cursor = {0, 0};
+    maage_render_mesh_cursor cursor = {0};
     const maage_render_mesh *mesh;
     unsigned int previous = MAAGE_RENDER_FULLSCREEN;
     [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
@@ -488,14 +488,14 @@ static void maage_metal_draw_mesh_passes(maage_metal_renderer *native, id<MTLRen
         maage_render_draw_uniforms(plan, foreground, &cursor, &uniforms);
         [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
         [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
-        if (cursor.instance && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
+        if (!foreground && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
             maage_metal_mesh *geometry = mesh->platform;
             [encoder setVertexBuffer:geometry->vertices offset:0 atIndex:0];
             [encoder setVertexBuffer:geometry->surfaces offset:0 atIndex:2];
             [encoder setFragmentTexture:(id<MTLTexture>) mesh->texture->platform atIndex:0];
             {
-                size_t width = maage_render_gpu_mesh_index_bytes(mesh);
-                [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:3 indexType:width == 2U ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32 indexBuffer:geometry->indices indexBufferOffset:cursor.triangle * width];
+                size_t width = cursor.instance ? maage_render_gpu_mesh_index_bytes(mesh) : sizeof(unsigned int);
+                [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:cursor.count indexType:width == 2U ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32 indexBuffer:cursor.instance ? geometry->indices : geometry->sorted_indices[slot] indexBufferOffset:cursor.triangle * width];
             }
         } else
             maage_metal_draw_geometry(encoder, mesh, cursor.layer, slot);
@@ -709,7 +709,7 @@ static maage_status maage_metal_frame(maage_renderer *renderer, const maage_wind
     }
     for (index = 0; index < plan->ordered_count; ++index) {
         if (plan->ordered[index].instance) continue;
-        result = maage_metal_sort_geometry(native, plan->ordered[index].mesh, view_projection, slot);
+        result = maage_metal_sort_geometry(native, plan->ordered[index].mesh, NULL, slot);
         if (maage_status_failed(result)) {
             [pool drain];
             return result;

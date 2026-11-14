@@ -368,7 +368,7 @@ static void maage_gl_indices(size_t first, size_t count, size_t width) {
     }
 }
 static void maage_gl_mesh_passes(maage_gl_renderer *native, const maage_render_frame_plan *plan, int foreground, unsigned int slot) {
-    maage_render_mesh_cursor cursor = {0, 0, NULL, 0};
+    maage_render_mesh_cursor cursor = {0};
     maage_render_uniforms uniforms;
     const maage_render_mesh *mesh;
     size_t first, count;
@@ -384,9 +384,9 @@ static void maage_gl_mesh_passes(maage_gl_renderer *native, const maage_render_f
         native->gl.ActiveTexture(MAAGE_GL_TEXTURE0);
         maage_gl_vao_bind(native, geometry->vao);
         count = maage_render_geometry_range(&mesh->geometry, cursor.layer, &first);
-        if (cursor.instance && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
-            native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, geometry->indices);
-            maage_gl_indices(cursor.triangle, 3, maage_render_gpu_mesh_index_bytes(mesh));
+        if (!foreground && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
+            native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, cursor.instance ? geometry->indices : geometry->sorted[slot].name);
+            maage_gl_indices(cursor.triangle, cursor.count, cursor.instance ? maage_render_gpu_mesh_index_bytes(mesh) : sizeof(unsigned int));
         } else {
             native->gl.BindBuffer(MAAGE_GL_ELEMENT_ARRAY_BUFFER, cursor.layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted[slot + (foreground ? MAAGE_GL_FRAME_SLOTS : 0)].name : geometry->indices);
             maage_gl_indices(first, count, cursor.layer == MAAGE_RENDER_TRANSLUCENT ? sizeof(unsigned int) : maage_render_gpu_mesh_index_bytes(mesh));
@@ -457,7 +457,7 @@ static maage_status maage_gl_frame_render(maage_renderer *renderer, const maage_
     for (layer = 0; layer < 3; ++layer)
         MAAGE_GL_TRY(maage_gl_ui_prepare(renderer, &frame->ui[layer], plan->layers[layer]));
     for (index = 0; index < plan->mesh_count; ++index)
-        MAAGE_GL_TRY(maage_gl_sort(renderer, plan->meshes[index], plan->world.matrix, native->slot));
+        MAAGE_GL_TRY(maage_gl_sort(renderer, plan->meshes[index], NULL, native->slot));
     if (plan->foreground) MAAGE_GL_TRY(maage_gl_sort(renderer, plan->foreground, plan->hand.matrix, native->slot + MAAGE_GL_FRAME_SLOTS));
 
     /* Uploads/target creation bind native objects outside the draw-state cache. */

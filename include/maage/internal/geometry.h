@@ -11,9 +11,9 @@ typedef struct maage_geometry_triangle {
 typedef struct maage_geometry {
     size_t solid_count, translucent_count, multiply_count;
     maage_geometry_triangle *triangles;
-    float center[3];
     double sort_origin[3];
     unsigned long revision;
+    int sort_perspective;
 } maage_geometry;
 
 typedef struct maage_mesh_surface {

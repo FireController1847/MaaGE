@@ -58,6 +58,8 @@ struct maage_renderer {
     maage_render_texture *textures;
     maage_render_ordered_mesh *ordered;
     size_t ordered_capacity;
+    float sort_matrix[16];
+    int sort_initialized;
     char device_name[256];
 };
 extern const maage_render_backend_api maage_render_metal_api;

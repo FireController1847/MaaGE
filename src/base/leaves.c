@@ -56,6 +56,8 @@ maage_status maage_random_tick_leaves(maage_world *world, int x, int y, int z, c
     unsigned long drop_random;
     size_t i;
     maage_status result, mutation;
+    /* Natural leaves remain dormant until a nearby removal marks them.
+     * Generation and loading preserve this flag, including pending checks. */
     if (maage_base_state_value(blocks, state, ids->property_persistent) || !maage_base_state_value(blocks, state, ids->property_check_decay)) return maage_leaves_noop();
     /* Require the radius-five neighborhood before searching the radius-four
      * support cube. Outside vertical world bounds is known air. */

@@ -537,14 +537,14 @@ unsigned char maage_chunk_light(const maage_chunk *chunk, int x, int y, int z) {
     return y >= chunk->heightmap[z * 16 + x] ? 0xf0 : 0;
 }
 
-maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage_block_registry *blocks, int *leaf_rechecks) {
+maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage_block_registry *blocks, int *imported_changes) {
     const maage_block_state_definition *state;
     const maage_block_definition *block;
     maage_block_state_id pending;
     maage_status result;
     int section, cell;
-    if (leaf_rechecks) *leaf_rechecks = 0;
-    if (!chunk || !blocks || !leaf_rechecks) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
+    if (imported_changes) *imported_changes = 0;
+    if (!chunk || !blocks || !imported_changes) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     for (section = 0; section < 16; ++section) {
         chunk->random_tick_counts[section] = 0;
         if (!chunk->sections[section]) continue;
@@ -552,16 +552,15 @@ maage_status maage_chunk_random_ticks_initialize(maage_chunk *chunk, const maage
             state = maage_block_registry_state(blocks, maage_section_get(chunk->sections[section], (size_t) cell));
             block = state ? maage_block_registry_block(blocks, state->block_id) : NULL;
             if (!block) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
-            /* Detached load/generation output only. Rechecking natural leaves
-             * catches support removals that occurred while this column was
-             * absent, without retaining events or generating distant terrain. */
+            /* Content import callbacks operate on detached output only.
+             * Without a provider, preserve the generated or saved state. */
             if (block->import_state) {
                 result = block->import_state(blocks, state, &pending);
                 if (maage_status_failed(result)) return result;
                 if (!maage_block_registry_state(blocks, pending)) return maage_status_make(MAAGE_STATUS_INVARIANT_VIOLATION, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
                 result = maage_section_set(chunk->sections[section], (size_t) cell, pending);
                 if (maage_status_failed(result)) return result;
-                if (pending != state->id) *leaf_rechecks = 1;
+                if (pending != state->id) *imported_changes = 1;
             }
             if (state->random_ticks) ++chunk->random_tick_counts[section];
         }

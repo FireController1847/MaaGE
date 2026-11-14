@@ -965,7 +965,7 @@ static unsigned maage_world_light_boundaries(const maage_chunk *before, const ma
 static void maage_world_run(void *context, const maage_job_token *token) {
     maage_world_task *task = (maage_world_task *) context;
     const maage_chunk *neighbors[8];
-    int side, leaf_rechecks;
+    int side, imported_changes;
     maage_status_trace *trace = maage_job_trace(token);
     task->status = maage_status_make(MAAGE_STATUS_ALLOCATION_FAILED, MAAGE_CONTEXT_WORLD,
                                      task->kind == MAAGE_JOB_GENERATE ? MAAGE_OPERATION_GENERATE : (task->kind == MAAGE_JOB_LIGHT ? MAAGE_OPERATION_LIGHT : MAAGE_OPERATION_MESH), 0);
@@ -1005,8 +1005,8 @@ static void maage_world_run(void *context, const maage_job_token *token) {
             task->initialized_environment = 1;
     }
     if ((task->kind == MAAGE_JOB_LOAD || task->kind == MAAGE_JOB_GENERATE) && !maage_status_failed(task->status) && task->output) {
-        task->status = maage_chunk_random_ticks_initialize(task->output, task->blocks, &leaf_rechecks);
-        if (leaf_rechecks) task->initialized_environment = 1;
+        task->status = maage_chunk_random_ticks_initialize(task->output, task->blocks, &imported_changes);
+        if (imported_changes) task->initialized_environment = 1;
         if (maage_status_failed(task->status)) strcpy(task->error, "Random-tick section initialization failed.");
     }
 finished:

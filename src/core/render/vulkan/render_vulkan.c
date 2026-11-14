@@ -796,19 +796,19 @@ static void maage_vulkan_mesh_draw(maage_vulkan_renderer *native, VkCommandBuffe
     maage_vulkan_indices(native, command, layer == MAAGE_RENDER_TRANSLUCENT ? geometry->sorted[slot].buffer : geometry->indices.buffer, first, count, layer == MAAGE_RENDER_TRANSLUCENT ? sizeof(unsigned int) : maage_render_gpu_mesh_index_bytes(mesh));
 }
 static void maage_vulkan_mesh_passes(maage_vulkan_renderer *native, VkCommandBuffer command, const maage_render_frame_plan *plan, int foreground, unsigned int slot) {
-    maage_render_mesh_cursor cursor = {0, 0};
+    maage_render_mesh_cursor cursor = {0};
     const maage_render_mesh *mesh;
     maage_render_uniforms uniforms;
     while ((mesh = maage_render_frame_next_mesh(plan, foreground, &cursor)) != NULL) {
         maage_render_draw_uniforms(plan, foreground, &cursor, &uniforms);
-        if (cursor.instance && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
+        if (!foreground && cursor.layer == MAAGE_RENDER_TRANSLUCENT) {
             maage_vulkan_mesh *geometry = mesh->platform;
             maage_vulkan_image *texture = mesh->texture->platform;
             VkDeviceSize offset = 0;
             maage_vulkan_bind(native, command, ((maage_vulkan_rendering *) native->rendering)->mesh[cursor.layer], texture->descriptor, &uniforms);
             vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, ((maage_vulkan_rendering *) native->rendering)->layout, 1, 1, &geometry->surface_descriptor.descriptor, 0, NULL);
             vkCmdBindVertexBuffers(command, 0, 1, &geometry->vertices.buffer, &offset);
-            maage_vulkan_indices(native, command, geometry->indices.buffer, cursor.triangle, 3, maage_render_gpu_mesh_index_bytes(mesh));
+            maage_vulkan_indices(native, command, cursor.instance ? geometry->indices.buffer : geometry->sorted[slot].buffer, cursor.triangle, cursor.count, cursor.instance ? maage_render_gpu_mesh_index_bytes(mesh) : sizeof(unsigned int));
         } else
             maage_vulkan_mesh_draw(native, command, mesh, cursor.layer, slot, &uniforms);
     }
@@ -893,7 +893,7 @@ static maage_status maage_vulkan_render_frame(maage_renderer *renderer, const ma
     }
     for (size_t index = 0; index < plan->ordered_count; ++index) {
         if (plan->ordered[index].instance) continue;
-        result = maage_vulkan_sort(renderer, plan->ordered[index].mesh, plan->world.matrix, slot);
+        result = maage_vulkan_sort(renderer, plan->ordered[index].mesh, NULL, slot);
         if (maage_status_failed(result)) goto failed;
     }
     if (plan->foreground) {

@@ -10,7 +10,7 @@ typedef maage_geometry maage_render_geometry;
 typedef struct maage_render_ordered_mesh {
     const maage_render_mesh *mesh;
     const maage_render_instance *instance;
-    size_t triangle; /* Original immutable index offset for a transformed triangle. */
+    size_t triangle; /* Sorted triangle ordinal, or immutable index offset for an instance. */
     float depth;
     size_t order;
 } maage_render_ordered_mesh;
@@ -74,7 +74,7 @@ typedef struct maage_render_frame_plan {
     size_t mesh_count;
     const maage_render_instance *instances;
     size_t instance_count;
-    const maage_render_ordered_mesh *ordered;
+    maage_render_ordered_mesh *ordered; /* Consumed as a heap during the world pass. */
     size_t ordered_count;
     const maage_render_ui_data *layers[3];
     const maage_render_mesh *foreground;
@@ -86,10 +86,12 @@ typedef struct maage_render_mesh_cursor {
     size_t index;
     const maage_render_instance *instance;
     size_t triangle;
+    size_t count, remaining;
 } maage_render_mesh_cursor;
 
-/* Half-block movement gates perspective re-sorts. SUCCESS needs a native upload;
- * mark revisions[slot] only after it succeeds. NOOP keeps the slot unchanged. */
+/* World plans sort against one shared camera reference. NULL matrix uploads
+ * that order; a foreground matrix sorts independently. SUCCESS needs a native
+ * upload; mark revisions[slot] only after it succeeds. */
 maage_status maage_render_geometry_sort_slot(const maage_render_mesh *mesh, const float matrix[16], unsigned long *revisions, size_t slots, size_t slot);
 maage_status maage_render_geometry_write_sorted(const maage_render_geometry *geometry, unsigned int *indices);
 size_t maage_render_geometry_range(const maage_render_geometry *geometry, unsigned int layer, size_t *first);
@@ -97,8 +99,9 @@ size_t maage_render_transient_capacity(size_t current, size_t required);
 maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maage_render_mesh *const *meshes, size_t count, const float matrix[16], const maage_render_ui_data *ui, int preparing, maage_render_frame_plan *plan);
 void maage_render_ui_uniforms(const maage_render_ui_data *batch, maage_render_uniforms *uniforms);
 maage_status maage_render_ui_pack(const maage_render_ui_data *batch, maage_render_ui_gpu_vertex *vertices, unsigned int *indices);
-/* Zero the cursor first. Visits nonempty material ranges in canonical order;
- * only world translucent meshes use distance order. NULL ends traversal. */
+/* Zero the cursor first. Visits nonempty material ranges in canonical order.
+ * World translucency merges sorted streams into contiguous index ranges in
+ * triangle/count, consuming the plan's heap once. NULL ends traversal. */
 const maage_render_mesh *maage_render_frame_next_mesh(const maage_render_frame_plan *plan, int foreground, maage_render_mesh_cursor *cursor);
 void maage_render_draw_uniforms(const maage_render_frame_plan *plan, int foreground, const maage_render_mesh_cursor *cursor, maage_render_uniforms *uniforms);
 int maage_render_gpu_layout_supported(void);

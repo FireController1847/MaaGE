@@ -53,15 +53,6 @@ maage_status maage_base_farmland_land(maage_world *world, int x, int y, int z, c
     if ((*random >> 8) / 16777216.0 < distance - 0.5) return maage_world_set(world, x, y, z, state->id, ids->state_dirt);
     return use_status(MAAGE_STATUS_SUCCESS);
 }
-maage_status maage_base_leaf_import(const maage_block_registry *blocks, const maage_block_state_definition *state, maage_block_state_id *replacement) {
-    *replacement = state->id;
-    {
-        const maage_base_ids *ids = maage_base_state_references(blocks, state);
-        if (!maage_base_state_value(blocks, state, ids->property_persistent) && !maage_base_state_value(blocks, state, ids->property_check_decay)) return maage_block_state_change(blocks, state, ids->property_check_decay, 1, replacement);
-    }
-    return use_status(MAAGE_STATUS_NOOP);
-}
-
 maage_status maage_base_furnace_action(maage_world *world, maage_gameplay *game, unsigned long revision, unsigned int group, unsigned int slot, unsigned int action) {
     maage_furnace_state furnace;
     maage_gameplay next = *game;

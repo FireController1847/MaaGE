@@ -84,7 +84,6 @@ maage_status maage_base_furnace_use(maage_world *, const maage_world_target *, m
 int maage_base_table_access(const maage_base_ids *, const maage_world *, const maage_crafting_container *);
 int maage_base_furnace_access(const maage_world *, const maage_crafting_container *);
 maage_status maage_base_farmland_land(maage_world *, int, int, int, const maage_block_state_definition *, double, unsigned long *);
-maage_status maage_base_leaf_import(const maage_block_registry *, const maage_block_state_definition *, maage_block_state_id *);
 maage_status maage_base_furnace_entity(maage_content_context *, const maage_base_ids *);
 maage_status maage_base_containers(maage_content_context *, maage_base_ids *);
 maage_status maage_base_sounds(maage_content_context *, maage_base_ids *);

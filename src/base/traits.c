@@ -33,7 +33,7 @@ maage_status maage_base_traits(maage_content_context *context, maage_base_ids *i
     size_t i;
     maage_block_definition callbacks;
     maage_tag_definition tag;
-    maage_tag_id leaf_tags[3];
+    maage_tag_id leaf_tags[2];
     maage_property_id leaf_properties[3];
     static const char *const tools[] = {"minecraft:pickaxe", "minecraft:shovel", "minecraft:axe", "minecraft:shears", "minecraft:hoe"};
     ids->traits = context->traits;
@@ -73,13 +73,11 @@ maage_status maage_base_traits(maage_content_context *context, maage_base_ids *i
     callbacks.id = MAAGE_CONTENT_ID_INVALID;
     callbacks.changed = maage_leaves_changed;
     callbacks.random_tick = maage_random_tick_leaves;
-    callbacks.import_state = maage_base_leaf_import;
     leaf_properties[0] = ids->property_wood;
     leaf_properties[1] = ids->property_persistent;
     leaf_properties[2] = ids->property_check_decay;
     result = base_behavior_tag(context, "minecraft:leaf_neighbors", &callbacks, MAAGE_BEHAVIOR_CHANGED, NULL, 0, &leaf_tags[0]);
     if (!maage_status_failed(result)) result = base_behavior_tag(context, "minecraft:leaf_decay", &callbacks, MAAGE_BEHAVIOR_RANDOM_TICK, leaf_properties, 3, &leaf_tags[1]);
-    if (!maage_status_failed(result)) result = base_behavior_tag(context, "minecraft:leaf_import", &callbacks, MAAGE_BEHAVIOR_IMPORT, leaf_properties, 3, &leaf_tags[2]);
     if (maage_status_failed(result)) return result;
     result = base_tag(context, "minecraft:wood", &ids->property_wood, 1, &ids->tag_wood);
     if (maage_status_failed(result)) return result;
@@ -101,7 +99,7 @@ maage_status maage_base_traits(maage_content_context *context, maage_base_ids *i
     if (maage_status_failed(result)) return result;
     tag.domains = MAAGE_TRAIT_BLOCK;
     tag.includes = leaf_tags;
-    tag.include_count = 3;
+    tag.include_count = 2;
     result = maage_tag_register(context->traits, "minecraft:leaves", &tag);
     ids->tag_leaves = tag.id;
     if (!maage_status_failed(result)) result = base_tag(context, "minecraft:soil", NULL, 0, &ids->tag_soil);
@@ -369,7 +367,7 @@ maage_status maage_base_traits_bind(maage_content_context *context, const maage_
             if (event == MAAGE_BEHAVIOR_LAND && block.land == maage_base_farmland_land) continue;
             if (event == MAAGE_BEHAVIOR_DROPS && block.drops == maage_base_drop_species) continue;
             if ((block.id == ids->block_log || block.id == ids->block_log2 || block.id == ids->block_leaves) && event == MAAGE_BEHAVIOR_CHANGED) continue;
-            if (block.id == ids->block_leaves && (event == MAAGE_BEHAVIOR_RANDOM_TICK || event == MAAGE_BEHAVIOR_IMPORT)) continue;
+            if (block.id == ids->block_leaves && event == MAAGE_BEHAVIOR_RANDOM_TICK) continue;
             sprintf(identity, "minecraft:behavior/%s/%s", strchr(name, ':') + 1, events[event - 1]);
             result = base_behavior_tag(context, identity, &block, event, NULL, 0, &tags[count]);
             if (maage_status_failed(result)) return result;
