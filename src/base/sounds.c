@@ -80,6 +80,8 @@ static maage_status base_music_resource(maage_content_context *context, const ch
 }
 static maage_sound_music_id base_music_select(const void *context, const maage_sound_scene_query *query) {
     const maage_base_sound_data *data = (const maage_base_sound_data *) context;
+    if (query->visual && maage_world_dimension(query->visual)->id == data->ids->dimension_nether) return data->nether_music;
+    if (query->visual && maage_world_dimension(query->visual)->id == data->ids->dimension_end) return data->end_music;
     return !query->has_world ? data->menu_music : (query->game_mode == MAAGE_GAME_MODE_CREATIVE ? data->creative_music : data->game_music);
 }
 maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *ids) {
@@ -121,7 +123,7 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     maage_base_sound_data *data;
     maage_sound_bindings bindings;
     maage_sound_music_definition music;
-    maage_sound_resource_id game[18], menu[4], extra;
+    maage_sound_resource_id game[18], menu[4], extra, nether[4], end;
     maage_status result;
     memset(&families, 0, sizeof(families));
     memset(&bindings, 0, sizeof(bindings));
@@ -314,15 +316,15 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     if (maage_status_failed(result)) goto done;
     result = base_music_resource(context, "minecraft:music.menu4", "minecraft/sounds/music/menu/menu4.ogg", &menu[3]);
     if (maage_status_failed(result)) goto done;
-    result = base_music_resource(context, "minecraft:music.nether1", "minecraft/sounds/music/game/nether/nether1.ogg", &extra);
+    result = base_music_resource(context, "minecraft:music.nether1", "minecraft/sounds/music/game/nether/nether1.ogg", &nether[0]);
     if (maage_status_failed(result)) goto done;
-    result = base_music_resource(context, "minecraft:music.nether2", "minecraft/sounds/music/game/nether/nether2.ogg", &extra);
+    result = base_music_resource(context, "minecraft:music.nether2", "minecraft/sounds/music/game/nether/nether2.ogg", &nether[1]);
     if (maage_status_failed(result)) goto done;
-    result = base_music_resource(context, "minecraft:music.nether3", "minecraft/sounds/music/game/nether/nether3.ogg", &extra);
+    result = base_music_resource(context, "minecraft:music.nether3", "minecraft/sounds/music/game/nether/nether3.ogg", &nether[2]);
     if (maage_status_failed(result)) goto done;
-    result = base_music_resource(context, "minecraft:music.nether4", "minecraft/sounds/music/game/nether/nether4.ogg", &extra);
+    result = base_music_resource(context, "minecraft:music.nether4", "minecraft/sounds/music/game/nether/nether4.ogg", &nether[3]);
     if (maage_status_failed(result)) goto done;
-    result = base_music_resource(context, "minecraft:music.end", "minecraft/sounds/music/game/end/end.ogg", &extra);
+    result = base_music_resource(context, "minecraft:music.end", "minecraft/sounds/music/game/end/end.ogg", &end);
     if (maage_status_failed(result)) goto done;
     result = base_music_resource(context, "minecraft:music.credits", "minecraft/sounds/music/game/end/credits.ogg", &extra);
     if (maage_status_failed(result)) goto done;
@@ -361,6 +363,19 @@ maage_status maage_base_sounds(maage_content_context *context, maage_base_ids *i
     result = maage_sound_music_register(context->sounds, "minecraft:creative", &music);
     if (maage_status_failed(result)) goto done;
     data->creative_music = music.id;
+    music.resources = nether;
+    music.resource_count = 4;
+    music.minimum_delay = 60;
+    music.maximum_delay = 300;
+    result = maage_sound_music_register(context->sounds, "minecraft:nether", &music);
+    if (maage_status_failed(result)) goto done;
+    data->nether_music = music.id;
+    music.resources = &end;
+    music.resource_count = 1;
+    music.minimum_delay = music.maximum_delay = 0;
+    result = maage_sound_music_register(context->sounds, "minecraft:end", &music);
+    if (maage_status_failed(result)) goto done;
+    data->end_music = music.id;
     bindings.music = base_music_select;
     bindings.context = data;
     result = maage_sound_bind(context->sounds, &bindings);

@@ -70,6 +70,7 @@ Peer validation covers named domain/owner/ID maps, property schemas/values/confi
 | containers.h | Copied layouts/progress; owner open/access/action/sample/retryable close |
 | fluids.h | Numeric state maps for propagation, contact, physics, immersion |
 | block_geometry.h | Immutable worker-safe count/write geometry; separate collision/selection |
+| dimensions.h | Named World definitions, generation/environment policy and owner portal callbacks |
 | entity_types.h, entities.h | Registered types, loot/spawn rules, instance behavior and codecs |
 | models.h | Hierarchies, cuboids, numeric materials, channels and animation callbacks |
 | sounds.h | Registered sounds/music/ambience independent of device capacity |
@@ -82,3 +83,11 @@ Registries are growable, not capped by transport pages, GPU working sets or voic
 `context.creative` owns presentation, not inventory. Register tabs with `maage_creative_tab_register` in DEFINE and explicit variants with `maage_creative_entry_register` in DEFINE/binding. `maage_content_creative` exposes finalized catalog. `src/base/creative.c` registers twelve built-in tabs through these APIs.
 
 Tab order, entry order and search order are independent of IDs. Entries carry count-one pristine stacks, optional copied tooltips and searchable flag; item tooltip callbacks supply variant text. Search/Inventory are optional singleton roles. Finalization validates stacks/textures, creates ordered views and deduplicates searchable item/variant pairs. Retain IDs through growable registration; no implicit variant enumeration. Icons use item stacks or copied 16×16 textured quads (not necessarily obtainable items). Catalog/tab IDs are not persisted as stacks. See [Creative UI](client-presentation.md#creative-inventory).
+
+### Dimension Providers
+
+`context->dimensions` participates in module ownership, dependency reads, numeric peer identity validation and finalization. Register one namespaced definition with `primary=1` per composition; each other dimension has its own automatically assigned ID. Registration copies names, labels and callbacks, borrowing immutable `context` data until all Worlds and jobs have ended. Capture IDs during composition; do not resolve names in generation or owner ticks.
+
+A definition supplies detached `generate`, numeric `spawn`, optional owner `contact` and optional owner `arrive` callbacks. `contact` returns a copied `maage_dimension_travel` destination/position/kind/delay, or NOOP when there is no contact. `at_spawn` requests the destination's spawn before streaming. `arrive` returns NOOP to defer on unavailable terrain, SUCCESS only after its placement/preflight succeeds, and an originating Status on failure. It must use ordinary World mutations or `maage_world_apply_plan`; it cannot borrow live player, source World or storage state. Provider-owned travel kinds are opaque to Server. `respawn=0` retains local respawn; another finalized numeric ID redirects death respawn.
+
+Skylight, weather, celestial presentation, ambient floor, fog and evaporation policy are copied immutable definition values. Numeric light stays independent of the presentation floor. Fluids opt into evaporation and optional hot-dimension delay/level-step overrides. `maage_world_dimension` exposes the current immutable definition to content callbacks and Client presentation. See [dimension ownership and built-ins](world-and-gameplay.md#dimensions-and-portal-travel).

@@ -202,7 +202,13 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
 - Columns are 16x16 with sixteen sparse 16x16x16 sections, Y=0..255. Negative X/Z use
   floor division/positive modulo. Coordinate hashing is expected O(1). Dimensions may
   change deliberately; current seeds use C90-compatible signed 64-bit word pairs.
-- Keep one deterministic current generator, independent of job order. Ordered terrain,
+- Finalized content defines named dimensions within one saved session. Each visited
+  dimension owns a World, environment, entities and simulation checkpoints; one
+  Server-owned player/inventory travels between them through epoch changes.
+  Inactive dimensions retain bounded storage without advancing simulation. One
+  session dictionary/lock owns dimension-scoped regions and an atomic shared
+  player plus dimension checkpoint. See [dimensions](docs/world-and-gameplay.md#dimensions-and-portal-travel).
+- Keep one deterministic current generator per dimension, independent of job order. Ordered terrain,
   cave, ore, surface, vegetation and structure stages own detached columns without
   neighbor waits. Generation policy contains only sea level and spawn radius/step
   (defaults 63 and 4096/16), shared by Client/Server; no historical generator selectors.
@@ -255,9 +261,9 @@ Roadmaps describe direction, not authorization or evidence of runtime correctnes
   Missing support/light defers without loading. Never initialize support on import or activate
   floating falling blocks through random sampling. Preserve distinct content rules/drops.
 - Worlds live only under `instances/<uuid>/worlds/<uuid>/`, never shared resources/global
-  worlds. Canonical UUIDs identify them. `MGWRLD16` metadata embeds one checksummed
-  `MGIDMAP3` World dictionary for blocks, states (block identity plus canonical typed properties),
-  items, item variants, biomes and entity types; `MGRGN2` region headers bind its UUID. `MGCHNK11` palettes, stacks and
+  worlds. Canonical UUIDs identify them. `MGWRLD17` metadata embeds one checksummed
+  `MGIDMAP4` World dictionary for blocks, states (block identity plus canonical typed properties),
+  items, item variants, biomes, entity types and dimensions; `MGRGN2` region headers bind its UUID. `MGCHNK11` palettes, stacks and
   entities carry numeric saved IDs only. Block-entity records bind registered codecs through the owning saved block identity, not runtime handler order. Resolve names once at open, retain both
   numeric translation directions, and atomically publish map extensions before jobs
   can save new IDs. Never reinterpret saved IDs or duplicate dictionaries per chunk.

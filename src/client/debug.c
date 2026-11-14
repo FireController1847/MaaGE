@@ -87,7 +87,8 @@ void maage_client_debug_frame(maage_client_debug *debug, double now, double elap
     debug->tick_ms = debug->ticks ? debug->tick_seconds * 1000.0 / debug->ticks : 0;
     debug->timing_ready = 1;
 }
-const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, size_t client_world_bytes, const maage_biome_registry *biomes) {
+const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, size_t client_world_bytes, const maage_biome_registry *biomes, const maage_dimension_registry *dimensions) {
+    const maage_dimension_definition *dimension;
     maage_client_ui_debug *text;
     const maage_client_metadata *identity = maage_client_identity();
     static const char *const facing[4] = {"North (-Z)", "East (+X)", "South (+Z)", "West (-X)"};
@@ -100,6 +101,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     int x, y, z, direction;
     unsigned left = 0, right = 0;
     if (!debug || !snapshot || !renderer || !meshes || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return NULL;
+    dimension = maage_dimension_get(dimensions, snapshot->dimension);
     text = &debug->text;
     stats = &snapshot->world_stats;
     player = &snapshot->player.player;
@@ -133,12 +135,12 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
          * allocations can make this a deliberately incomplete reconciliation. */
         if (resident >= tracked)
             sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / U %.0f MiB",
-                (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
-                (double) client_world_bytes / 1048576.0, (resident - tracked) / 1048576.0);
+                    (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
+                    (double) client_world_bytes / 1048576.0, (resident - tracked) / 1048576.0);
         else
             sprintf(debug->breakdown, "GPU %.0f MiB / SW %.0f MiB / CW %.0f MiB / U ? MiB",
-                (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
-                (double) client_world_bytes / 1048576.0);
+                    (double) native_gpu_bytes / 1048576.0, (double) snapshot->world_stats.resident_storage_bytes / 1048576.0,
+                    (double) client_world_bytes / 1048576.0);
         sprintf(debug->workers, "Workers: %.0f/%u | Chunks queued: %u", debug->busy_workers, stats->worker_count, stats->generation_queued + stats->meshing_queued + stats->lighting_queued + stats->io_queued);
         debug->measurement_after = now + 0.25;
     }
@@ -154,6 +156,7 @@ const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debu
     sprintf(text->left[left++], "XYZ: %.3f / %.3f / %.3f", player->position[0], player->position[1], player->position[2]);
     sprintf(text->left[left++], "Block: %d %d %d", x, y, z);
     sprintf(text->left[left++], "Chunk: %d %d | local: %d %d", maage_world_chunk_coordinate(x), maage_world_chunk_coordinate(z), maage_world_local_coordinate(x), maage_world_local_coordinate(z));
+    sprintf(text->left[left++], "Dimension: %.127s%s", dimension ? dimension->display_name : "Unknown", snapshot->travelling ? " (travelling)" : "");
     sprintf(text->left[left++], "Facing: %s (%.1f / %.1f)", facing[direction], degrees, pitch * 57.29577951308232);
     if (snapshot->has_observation) {
         const maage_world_observation *observation = &snapshot->observation;

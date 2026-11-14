@@ -40,5 +40,5 @@ typedef struct maage_client_debug {
  * World/renderer contraction; a no-op on other platforms. */
 void maage_client_debug_release_unused_memory(void);
 void maage_client_debug_frame(maage_client_debug *debug, double now, double elapsed, int presented, unsigned long ticks, double tick_seconds);
-const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, size_t client_world_bytes, const maage_biome_registry *biomes);
+const maage_client_ui_debug *maage_client_debug_collect(maage_client_debug *debug, double now, const maage_session_snapshot *snapshot, int radius, int paused, maage_renderer *renderer, const maage_client_mesh_stats *meshes, size_t client_world_bytes, const maage_biome_registry *biomes, const maage_dimension_registry *dimensions);
 #endif

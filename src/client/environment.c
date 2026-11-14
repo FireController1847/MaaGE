@@ -1,4 +1,5 @@
 #include "environment.h"
+#include "maage/dimensions.h"
 #include "maage/image.h"
 #include "maage/minecraft_assets.h"
 #include "maage/storage.h"
@@ -435,6 +436,7 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
     const maage_client_environment_resource *resource;
     const maage_environment_state *state;
     const maage_fluid_definition *fluid;
+    const maage_dimension_definition *dimension;
     double sun[3], angle, phase, sunlight, rain, sky_brightness, visibility, camera_dx, camera_dz;
     float x, y, size, alpha;
     float sky_color[3], brightness, sky_level, block_level, range_weight;
@@ -445,6 +447,9 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
     if (!view || !renderer || !snapshot || !view_projection || !visual || !camera || snapshot->protocol_version != MAAGE_SESSION_PROTOCOL_VERSION) return MAAGE_STATUS_VALUE(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
     if (width <= 0 || height <= 0) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_UPDATE, 0);
     if (!(width > 0 && height > 0)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_CLIENT, MAAGE_OPERATION_UPDATE, 0);
+    dimension = maage_world_dimension(visual);
+    result = maage_renderer_set_ambient_light(renderer, (float) dimension->ambient_light);
+    if (maage_status_failed(result)) return result;
     state = &snapshot->environment;
     view->sky.vertex_count = view->sky.index_count = view->weather.vertex_count = view->weather.index_count = 0;
     view->sky.logical_width = view->weather.logical_width = width;
@@ -476,6 +481,15 @@ maage_status maage_client_environment_update(maage_client_environment *view, maa
         if (first_person && fluid->id <= view->fluid_count && view->fluid_overlays[fluid->id]) maage_client_environment_water(view, width, height, yaw, pitch, fluid->fog_light_scaled ? view->water_brightness : 1, view->fluid_overlays[fluid->id]);
         maage_client_environment_particles(view, snapshot, visual, camera, view_projection, width, height);
         return maage_renderer_set_scene(renderer, (float) sunlight, &view->sky, &view->weather);
+    }
+    if (!dimension->celestial) {
+        result = maage_renderer_set_clear_color(renderer, dimension->fog[0], dimension->fog[1], dimension->fog[2], 1);
+        if (maage_status_failed(result)) return result;
+        visibility = (double) radius * MAAGE_CHUNK_EDGE;
+        if (dimension->fog_distance > 0 && visibility > dimension->fog_distance) visibility = dimension->fog_distance;
+        result = maage_renderer_set_distance_fog(renderer, dimension->fog[0], dimension->fog[1], dimension->fog[2], (float) (visibility * 0.2), (float) (visibility * 0.95));
+        if (maage_status_failed(result)) return result;
+        return maage_renderer_set_scene(renderer, (float) dimension->ambient_light, &view->sky, &view->weather);
     }
     angle = maage_environment_celestial_angle(state) * 6.283185307179586;
     sky_brightness = cos(angle) * 2 + 0.5;

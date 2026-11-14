@@ -310,8 +310,15 @@ static void base_mob_definition(maage_entity_type_definition *definition, const 
         definition->despawn_ticks = 6000;
     }
 }
+static maage_status base_spawn_dimension(const maage_entity_type_definition *definition, const maage_world *world, const double position[3], int *valid) {
+    const maage_base_ids *ids = (const maage_base_ids *) definition->behavior_context;
+    (void) position;
+    *valid = maage_world_dimension(world)->id == ids->dimension_overworld;
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_QUERY, 0);
+}
 static void base_spawn_rule(maage_entity_spawn_rule *spawn, const maage_base_ids *ids, int passive, maage_biome_id biomes[4]) {
     memset(spawn, 0, sizeof(*spawn));
+    spawn->validate = base_spawn_dimension;
     spawn->weight = passive ? 10 : 100;
     spawn->group_min = 2;
     spawn->group_max = 4;

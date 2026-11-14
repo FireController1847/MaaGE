@@ -49,13 +49,15 @@ MAAGE_SHADER_VEC2 maage_shader_tile_uv(MAAGE_SHADER_VEC2 uv, MAAGE_SHADER_VEC4 t
 }
 
 MAAGE_SHADER_VEC3 maage_shader_lighting(MAAGE_SHADER_VEC2 level, float daylight) {
+    float floor_light = max(-daylight, 0.0);
+    daylight = max(daylight, 0.0);
     MAAGE_SHADER_VEC2 normalized = MAAGE_SHADER_SATURATE(level);
     MAAGE_SHADER_VEC2 brightness = normalized / (MAAGE_RENDER_LIGHT_CURVE_BASE - MAAGE_RENDER_LIGHT_CURVE_SCALE * normalized);
     float sky = brightness.x * (daylight * MAAGE_RENDER_SKY_SCALE + MAAGE_RENDER_SKY_MINIMUM);
     float torch = brightness.y * MAAGE_RENDER_TORCH_SCALE;
     MAAGE_SHADER_VEC3 emission = MAAGE_SHADER_VEC3(torch, torch * (torch * MAAGE_RENDER_TORCH_GREEN_SCALE + MAAGE_RENDER_TORCH_GREEN_MINIMUM), torch * (torch * torch * MAAGE_RENDER_TORCH_BLUE_SCALE + MAAGE_RENDER_TORCH_BLUE_MINIMUM));
     MAAGE_SHADER_VEC3 ambient = MAAGE_SHADER_VEC3(sky * (daylight * MAAGE_RENDER_AMBIENT_SCALE + MAAGE_RENDER_AMBIENT_MINIMUM), sky * (daylight * MAAGE_RENDER_AMBIENT_SCALE + MAAGE_RENDER_AMBIENT_MINIMUM), sky);
-    return MAAGE_SHADER_SATURATE(MAAGE_SHADER_SATURATE((ambient + emission) * MAAGE_RENDER_LIGHT_GAIN + MAAGE_RENDER_LIGHT_MINIMUM) * MAAGE_RENDER_LIGHT_GAIN + MAAGE_RENDER_LIGHT_MINIMUM);
+    return max(MAAGE_SHADER_VEC3(floor_light), MAAGE_SHADER_SATURATE(MAAGE_SHADER_SATURATE((ambient + emission) * MAAGE_RENDER_LIGHT_GAIN + MAAGE_RENDER_LIGHT_MINIMUM) * MAAGE_RENDER_LIGHT_GAIN + MAAGE_RENDER_LIGHT_MINIMUM));
 }
 
 bool maage_shader_cutout(float material, float alpha) {

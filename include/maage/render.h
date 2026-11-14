@@ -136,6 +136,8 @@ maage_status maage_renderer_set_clear_color(maage_renderer *renderer, float red,
  * Optional screen batches draw behind geometry and before the main UI. Borrow
  * data/textures through subsequent draw_frame calls; clear before destruction.
  * Implemented mesh/UI backends only; others return UNSUPPORTED. */
+/* Constant unlit floor for dimensions without celestial daylight; zero disables. */
+maage_status maage_renderer_set_ambient_light(maage_renderer *, float);
 maage_status maage_renderer_set_scene(maage_renderer *renderer, float sky_light, const maage_render_ui_data *background, const maage_render_ui_data *overlay);
 /* Exponential view-depth fog on scene meshes/instances; density zero disables.
  * RGB stays in [0,1], density is finite/nonnegative. Foreground/UI stay clear.

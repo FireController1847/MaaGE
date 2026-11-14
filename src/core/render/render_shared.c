@@ -179,7 +179,9 @@ maage_status maage_render_frame_plan_prepare(maage_renderer *renderer, const maa
     }
     if (plan->ordered_count > 1) qsort(renderer->ordered, plan->ordered_count, sizeof(*plan->ordered), maage_render_mesh_order);
     if (matrix) memcpy(plan->world.matrix, matrix, sizeof(plan->world.matrix));
-    plan->world.lighting[0] = renderer->sky_light;
+    /* Negative daylight encodes a constant floor without expanding the shared
+     * 128-byte push-constant ABI. It never changes numerical World light. */
+    plan->world.lighting[0] = renderer->ambient_light > 0 ? -renderer->ambient_light : renderer->sky_light;
     plan->world.parameters[0] = renderer->animation_tick;
     memcpy(plan->world.fog, renderer->fog, sizeof(plan->world.fog));
     memcpy(plan->world.fog_distance, renderer->fog_distance, sizeof(plan->world.fog_distance));
@@ -389,8 +391,10 @@ void maage_render_mesh_pack_span(const maage_mesh_preparation *prepared, size_t 
         if (part > bytes) part = bytes;
         memcpy(packed.position, source->position, sizeof(packed.position));
         memcpy(packed.uv, source->uv, sizeof(packed.uv));
-        for (channel = 0; channel < 4; ++channel) packed.color[channel] = maage_render_unit_channel(source->color[channel]);
-        for (channel = 0; channel < 2; ++channel) packed.light[channel] = maage_render_unit_channel(source->light[channel]);
+        for (channel = 0; channel < 4; ++channel)
+            packed.color[channel] = maage_render_unit_channel(source->color[channel]);
+        for (channel = 0; channel < 2; ++channel)
+            packed.light[channel] = maage_render_unit_channel(source->light[channel]);
         packed.padding[0] = packed.padding[1] = 0;
         packed.surface = prepared->surface_indices[vertex];
         memcpy(target, (const unsigned char *) &packed + start, part);
