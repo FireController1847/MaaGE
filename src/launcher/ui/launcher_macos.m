@@ -147,6 +147,7 @@ static NSImageView *maage_ui_macos_app_icon(CGFloat size) {
     return logo;
 }
 /* The HTML home uses one viewport-relative rem, independent of aspect ratio. */
+static const CGFloat maage_ui_home_card_height_rem = 1.99375;
 static NSFont *maage_ui_home_font(CGFloat size, NSFontWeight weight) {
     NSString *name = weight >= NSFontWeightBold ? @"FiraSans-Bold" : weight >= NSFontWeightMedium ? @"FiraSans-Medium" : weight <= NSFontWeightLight ? @"FiraSans-Light" : @"FiraSans-Regular";
     return [NSFont fontWithName:name size:size] ?: [NSFont systemFontOfSize:size weight:weight];
@@ -192,24 +193,7 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     CGFloat textHeight = ceil(font.ascender - font.descender + font.leading + 3);
     return NSMakeRect(NSMinX(box), NSMidY(box) - textHeight / 2, NSWidth(box), textHeight);
 }
-/* Place the SF Symbol into the text run itself, so both glyphs use one real
- * typographic baseline regardless of NSTextField's internal cell geometry. */
-/* Account verification belongs to the same line as the account name, after
- * the name rather than in an independently positioned image view. */
-static NSAttributedString *maage_ui_home_verified_name(NSString *name, NSFont *font, CGFloat rem) {
-    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: [NSColor colorWithWhite:48.0 / 255.0 alpha:1] };
-    NSMutableAttributedString *label = [[NSMutableAttributedString alloc] initWithString:name attributes:attributes];
-    CGFloat size = 0.75 * rem;
-    NSImage *symbol = maage_ui_home_tinted_asset(@"verified", [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1], size);
-    if (symbol) {
-        NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
-        attachment.image = symbol;
-        attachment.bounds = NSMakeRect(0, (font.capHeight - size) / 2, size, size);
-        [label appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attributes]];
-        [label appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
-    }
-    return label;
-}
+/* Readiness places its symbol and caption on a shared typographic baseline. */
 static NSAttributedString *maage_ui_home_inline(NSString *text, NSString *symbolName, NSFont *font, NSColor *textColor, NSColor *symbolColor, CGFloat symbolSize, NSShadow *shadow) {
     NSMutableDictionary *attributes = [@{ NSFontAttributeName: font, NSForegroundColorAttributeName: textColor } mutableCopy];
     if (shadow) attributes[NSShadowAttributeName] = shadow;
@@ -290,32 +274,55 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
 - (void)layout {
     [super layout];
     CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
-    if (width <= 0 || height <= 0) return;
-    CGFloat rem = MIN(0.0302 * height, 0.044 * width);
-    CGFloat contentWidth = MAX(0, width - 2 * rem);
-    CGFloat cardWidth = 9.84375 * rem, cardHeight = 1.74375 * rem;
-    CGFloat gap = 0.84375 * rem, rowGap = 0.5 * rem;
-    CGFloat groupWidth = 2 * cardWidth + gap;
-    BOOL compact = contentWidth <= 700 || 2 * groupWidth + gap > contentWidth;
-    CGFloat actionHeight = compact ? 2 * cardHeight + rowGap : cardHeight;
+    if (width < 40 || height < 40) return;
+    /* Prefer the default-size controls even in a narrower window. At wider
+     * sizes the preferred scale follows width, not each change in height.
+     * Consume the free vertical space before reducing the common rem. */
+    CGFloat rem = MIN(MAX(21.0, 0.021 * width), 0.044 * width);
+    CGFloat contentWidth, cardWidth, cardHeight, gap, rowGap, groupWidth, actionHeight;
+    CGFloat headingHeight, taglineHeight, playHeight, configurationHeight, playWidth;
+    CGFloat footerHeight, footerBottom, footerGap, playGap, footerTop, totalHeight;
+    NSFont *headingFont, *taglineFont, *playFont, *statusFont, *footerFont;
+    BOOL compact = NO;
+    for (;;) {
+        contentWidth = width - 2 * rem;
+        NSFont *cardFont = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
+        NSDictionary *cardAttributes = @{ NSFontAttributeName: cardFont };
+        CGFloat defaultNameWidth = MAX([@"Default Installation" sizeWithAttributes:cardAttributes].width, [@"Default Playspace" sizeWithAttributes:cardAttributes].width);
+        /* Allow the default names, icon/arrow segments and text cell padding. */
+        cardWidth = MAX(10.25 * rem, ceil(defaultNameWidth + 4.8375 * rem + 5));
+        cardHeight = maage_ui_home_card_height_rem * rem;
+        gap = 0.84375 * rem;
+        rowGap = 0.5 * rem;
+        groupWidth = 2 * cardWidth + gap;
+        /* Once wrapping is needed, keep the two groups wrapped while fitting
+         * their height rather than shrinking them back onto a single row. */
+        compact = compact || contentWidth <= 700 || 2 * groupWidth + gap > contentWidth;
+        actionHeight = compact ? 2 * cardHeight + rowGap : cardHeight;
 
-    NSFont *headingFont = maage_ui_home_font(2.19375 * rem, NSFontWeightBold);
-    NSFont *taglineFont = maage_ui_home_font(0.9 * rem, NSFontWeightLight);
-    NSFont *playFont = maage_ui_home_font(1.125 * rem, NSFontWeightMedium);
-    NSFont *statusFont = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
-    NSFont *footerFont = maage_ui_home_font(0.45 * rem, NSFontWeightRegular);
-    CGFloat headingHeight = maage_ui_home_line_height(headingFont), taglineHeight = maage_ui_home_line_height(taglineFont);
-    CGFloat playHeight = 2.7 * rem, configurationHeight = 1.35 * rem;
-    CGFloat playWidth = ceil([self.playButton.title sizeWithAttributes:@{ NSFontAttributeName: playFont }].width + (1.8 + 0.28125 + 2 * 2.8125) * rem);
-    CGFloat footerHeight = maage_ui_home_line_height(footerFont);
-    CGFloat footerBottom = 0.3375 * rem;
-    CGFloat footerGap = 0.075 * rem, playGap = 1.25 * rem;
-    CGFloat footerTop = footerBottom + 2 * footerHeight + footerGap;
-    CGFloat totalHeight = 8.4375 * rem + headingHeight + 0.225 * rem + taglineHeight + 0.84375 * rem + playHeight + playGap + actionHeight + 1.06875 * rem + configurationHeight;
-    /* The footer is absolute in the prototype. Reserve its space only when
-     * necessary, without allowing window width to shrink the hero at the wrap. */
-    CGFloat top = MAX(footerTop + totalHeight, (height + totalHeight) / 2);
-    top = MIN(height, top);
+        headingFont = maage_ui_home_font(2.19375 * rem, NSFontWeightBold);
+        taglineFont = maage_ui_home_font(0.9 * rem, NSFontWeightLight);
+        playFont = maage_ui_home_font(1.125 * rem, NSFontWeightMedium);
+        statusFont = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
+        footerFont = maage_ui_home_font(0.45 * rem, NSFontWeightRegular);
+        headingHeight = maage_ui_home_line_height(headingFont);
+        taglineHeight = maage_ui_home_line_height(taglineFont);
+        playHeight = 2.7 * rem;
+        configurationHeight = 1.35 * rem;
+        playWidth = ceil([self.playButton.title sizeWithAttributes:@{ NSFontAttributeName: playFont }].width + (1.8 + 0.28125 + 2 * 2.8125) * rem);
+        footerHeight = maage_ui_home_line_height(footerFont);
+        footerBottom = 0.3375 * rem;
+        footerGap = 0.075 * rem;
+        playGap = 1.25 * rem;
+        footerTop = footerBottom + 2 * footerHeight + footerGap;
+        totalHeight = 8.4375 * rem + headingHeight + 0.225 * rem + taglineHeight + 0.84375 * rem + playHeight + playGap + actionHeight + 1.06875 * rem + configurationHeight;
+        /* The prototype has 1rem body padding. Reserve that much above the
+         * logo and half a rem between the configuration action and footer. */
+        CGFloat fit = MIN(height / (totalHeight + footerTop + 1.5 * rem), width / (groupWidth + 2 * rem));
+        if (fit >= 1) break;
+        rem *= MIN(fit, 0.995);
+    }
+    CGFloat top = MIN(height - rem, MAX(footerTop + 0.5 * rem + totalHeight, (height + totalHeight) / 2));
 
     self.brand.frame = maage_ui_home_row(width, 8.4375 * rem, top, 8.4375 * rem);
     self.brand.layer.shadowOpacity = 0.275;
@@ -573,12 +580,11 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @end
 @interface MaaGELauncherHomeCard : NSView
 @property(nonatomic, strong) NSView *symbolTile, *divider, *hoverSurface, *dropdownHighlight, *manageHighlight;
-@property(nonatomic, strong) NSImageView *symbol, *downSymbol, *manageSymbol;
+@property(nonatomic, strong) NSImageView *symbol, *downSymbol, *manageSymbol, *verifiedSymbol;
 @property(nonatomic, strong) NSTextField *value;
 @property(nonatomic, strong) MaaGELauncherHomeCardButton *dropdown, *manage;
 @property(nonatomic, copy) NSString *accountName;
-@property(nonatomic) BOOL verified, accountLabelDirty;
-@property(nonatomic) CGFloat accountLabelScale;
+@property(nonatomic) BOOL verified;
 - (void)setAccountName:(NSString *)name verified:(BOOL)verified;
 @end
 @implementation MaaGELauncherHomeCard
@@ -590,7 +596,8 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     if ([_accountName isEqualToString:name] && _verified == verified) return;
     _accountName = [name copy];
     _verified = verified;
-    self.accountLabelDirty = YES;
+    self.value.stringValue = name;
+    self.verifiedSymbol.hidden = !verified;
     [self setNeedsLayout:YES];
 }
 - (void)resetCursorRects {
@@ -599,7 +606,7 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 }
 - (void)layout {
     [super layout];
-    CGFloat rem = NSHeight(self.bounds) / 1.74375;
+    CGFloat rem = NSHeight(self.bounds) / maage_ui_home_card_height_rem;
     if (rem <= 0) return;
     CGFloat height = NSHeight(self.bounds), width = NSWidth(self.bounds);
     self.layer.cornerRadius = 0.5625 * rem;
@@ -622,13 +629,16 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     CGFloat labelX = NSMaxX(self.symbolTile.frame) + 0.3375 * rem;
     CGFloat labelWidth = MAX(0, NSMinX(self.downSymbol.frame) - 0.1125 * rem - labelX);
     NSFont *font = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
-    BOOL fontChanged = fabs(self.value.font.pointSize - font.pointSize) > 0.01;
-    if (fontChanged) self.value.font = font;
-    if (self.accountName && (self.accountLabelDirty || fontChanged || fabs(self.accountLabelScale - rem) > 0.001)) {
-        if (self.verified) self.value.attributedStringValue = maage_ui_home_verified_name(self.accountName, font, rem);
-        else self.value.stringValue = self.accountName;
-        self.accountLabelDirty = NO;
-        self.accountLabelScale = rem;
+    if (fabs(self.value.font.pointSize - font.pointSize) > 0.01) self.value.font = font;
+    /* A separate badge reserves its own space. Only the name can truncate,
+     * and the icon stays adjacent to the text rather than the trailing arrow. */
+    if (self.verified && self.verifiedSymbol) {
+        CGFloat badgeSize = 0.62 * rem, badgeGap = 0.12 * rem;
+        CGFloat nameWidth = ceil([self.value.stringValue sizeWithAttributes:@{ NSFontAttributeName: font }].width) + 5;
+        labelWidth = MIN(nameWidth, MAX(0, labelWidth - badgeSize - badgeGap));
+        self.verifiedSymbol.frame = NSMakeRect(labelX + labelWidth + badgeGap, (height - badgeSize) / 2, badgeSize, badgeSize);
+        self.verifiedSymbol.layer.shadowOffset = NSMakeSize(0, -0.025 * rem);
+        self.verifiedSymbol.layer.shadowRadius = 0.04 * rem;
     }
     self.value.lineBreakMode = NSLineBreakByTruncatingTail;
     self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(labelX, 0, labelWidth, height), font);
@@ -678,7 +688,13 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     *display = card.value;
     if (account) {
         card.accountName = title;
-        card.accountLabelDirty = YES;
+        card.verifiedSymbol = maage_ui_home_symbol(@"verified", [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1]);
+        card.verifiedSymbol.wantsLayer = YES;
+        card.verifiedSymbol.layer.masksToBounds = NO;
+        card.verifiedSymbol.layer.shadowColor = NSColor.blackColor.CGColor;
+        card.verifiedSymbol.layer.shadowOpacity = 0.22;
+        card.verifiedSymbol.hidden = YES;
+        [card addSubview:card.verifiedSymbol];
     }
     card.downSymbol = maage_ui_home_symbol(@"keyboard_arrow_down", labelInk);
     [card addSubview:card.downSymbol];
