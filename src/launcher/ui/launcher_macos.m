@@ -226,6 +226,9 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
     NSFont *font = maage_ui_home_font(0.675 * rem, NSFontWeightMedium);
     return ceil([@"Launcher Configuration" sizeWithAttributes:@{ NSFontAttributeName: font }].width + (0.9 + 0.3375 + 2 * 0.3375) * rem);
 }
+static BOOL maage_ui_home_is_dark(NSView *view) {
+    return [[view.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] isEqualToString:NSAppearanceNameDarkAqua];
+}
 @interface MaaGELauncherHomeView : NSView
 @property(nonatomic, strong) NSImageView *brand;
 @property(nonatomic, strong) NSImage *background;
@@ -240,6 +243,10 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
 - (void)updateReadiness:(NSString *)text symbol:(NSString *)symbol tint:(NSColor *)tint;
 @end
 @implementation MaaGELauncherHomeView
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    self.needsDisplay = YES;
+}
 - (void)setFrameSize:(NSSize)size {
     [super setFrameSize:size];
     [self setNeedsLayout:YES];
@@ -265,11 +272,16 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
         NSSize size = NSMakeSize(self.background.size.width * scale, self.background.size.height * scale);
         NSRect destination = NSMakeRect(NSMidX(self.bounds) - size.width / 2, NSMidY(self.bounds) - size.height / 2, size.width, size.height);
         [self.background drawInRect:destination fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
-        return;
+    } else {
+        NSColor *upper = [NSColor colorWithSRGBRed:0.38 green:0.52 blue:0.59 alpha:1];
+        NSColor *lower = [NSColor colorWithSRGBRed:0.16 green:0.27 blue:0.30 alpha:1];
+        [[[NSGradient alloc] initWithStartingColor:lower endingColor:upper] drawInRect:self.bounds angle:90];
     }
-    NSColor *upper = [NSColor colorWithSRGBRed:0.38 green:0.52 blue:0.59 alpha:1];
-    NSColor *lower = [NSColor colorWithSRGBRed:0.16 green:0.27 blue:0.30 alpha:1];
-    [[[NSGradient alloc] initWithStartingColor:lower endingColor:upper] drawInRect:self.bounds angle:90];
+    /* Dim the background only, leaving the foreground controls and text intact. */
+    if (maage_ui_home_is_dark(self)) {
+        [[NSColor colorWithWhite:0 alpha:0.14] setFill];
+        NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+    }
 }
 - (void)layout {
     [super layout];
@@ -565,9 +577,6 @@ static NSImageView *maage_ui_home_symbol(NSString *name) {
     symbol.imageScaling = NSImageScaleProportionallyUpOrDown;
     return symbol;
 }
-static BOOL maage_ui_home_is_dark(NSView *view) {
-    return [[view.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] isEqualToString:NSAppearanceNameDarkAqua];
-}
 /* Each side of a selection card has its own native hit area and hover surface. */
 @interface MaaGELauncherHomeCardButton : MaaGELauncherHomeActionButton
 @property(nonatomic, weak) NSView *hoverBackground;
@@ -650,7 +659,8 @@ static BOOL maage_ui_home_is_dark(NSView *view) {
     CGFloat manageWidth = (1.06875 + 2 * 0.28125) * rem;
     CGFloat dividerX = round((width - manageWidth - thickness) * backing) / backing;
     CGFloat downSize = 0.7875 * rem;
-    self.downSymbol.frame = NSMakeRect(dividerX - padding - downSize, (height - downSize) / 2 - 0.05625 * rem, downSize, downSize);
+    CGFloat downY = round((height - downSize) / 2 * backing) / backing;
+    self.downSymbol.frame = NSMakeRect(dividerX - padding - downSize, downY, downSize, downSize);
     CGFloat labelX = NSMaxX(self.symbolTile.frame) + 0.3375 * rem;
     CGFloat labelWidth = MAX(0, NSMinX(self.downSymbol.frame) - 0.1125 * rem - labelX);
     NSFont *font = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
@@ -666,7 +676,9 @@ static BOOL maage_ui_home_is_dark(NSView *view) {
         self.verifiedSymbol.layer.shadowRadius = 0.04 * rem;
     }
     self.value.lineBreakMode = NSLineBreakByTruncatingTail;
-    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(labelX, 0, labelWidth, height), font);
+    NSRect valueFrame = maage_ui_home_centered_text_rect(NSMakeRect(labelX, 0, labelWidth, height), font);
+    valueFrame.origin.y -= 1 / backing;
+    self.value.frame = valueFrame;
 
     self.divider.frame = NSMakeRect(dividerX, 0, thickness, height);
     self.dropdownHighlight.frame = NSMakeRect(0, 0, dividerX, height);
