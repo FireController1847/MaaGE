@@ -432,7 +432,29 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 @property(nonatomic) CGFloat homeRestOpacity;
 - (void)refreshHomeInteraction;
 - (void)syncHomeHover;
+- (void)syncHomeHoverTarget:(MaaGELauncherHomeActionButton *)target;
 @end
+/* Resolve one actual control through AppKit's hit-test hierarchy. Tracking
+ * events can be delivered to several views during layout or window changes. */
+static MaaGELauncherHomeActionButton *maage_ui_home_hover_target(NSWindow *window) {
+    if (!window || !window.isVisible || !window.isKeyWindow || !NSApp.isActive) return nil;
+    NSPoint location = window.mouseLocationOutsideOfEventStream;
+    NSView *root = window.contentView;
+    if (!root || !NSPointInRect(location, [root convertRect:root.bounds toView:nil])) return nil;
+    if ([NSWindow windowNumberAtPoint:[window convertPointToScreen:location] belowWindowWithWindowNumber:0] != window.windowNumber) return nil;
+
+    /* hitTest: takes a point in the receiver's superview coordinate space. */
+    NSView *hit = [root hitTest:root.superview ? [root.superview convertPoint:location fromView:nil] : location];
+    for (NSView *view = hit; view; view = view.superview) {
+        if ([view isKindOfClass:MaaGELauncherHomeActionButton.class]) {
+            MaaGELauncherHomeActionButton *button = (MaaGELauncherHomeActionButton *) view;
+            if (!button.enabled || [button isHiddenOrHasHiddenAncestor]) return nil;
+            if (!NSPointInRect(location, [button convertRect:button.bounds toView:nil])) return nil;
+            return button;
+        }
+    }
+    return nil;
+}
 @implementation MaaGELauncherHomeActionButton
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
@@ -454,16 +476,11 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     [self syncHomeHover];
 }
 - (void)syncHomeHover {
-    NSWindow *window = self.window;
-    BOOL active = self.enabled && window && window.isVisible && window.isKeyWindow && NSApp.isActive && ![self isHiddenOrHasHiddenAncestor];
-    BOOL hovered = NO;
-    if (active) {
-        NSPoint location = window.mouseLocationOutsideOfEventStream;
-        NSPoint point = [self convertPoint:location fromView:nil];
-        /* A window or native menu covering the control must not leave it highlighted. */
-        hovered = NSMouseInRect(point, self.visibleRect, self.isFlipped) && [NSWindow windowNumberAtPoint:[window convertPointToScreen:location] belowWindowWithWindowNumber:0] == window.windowNumber;
-    }
-    BOOL pressed = active && self.homePressed;
+    [self syncHomeHoverTarget:maage_ui_home_hover_target(self.window)];
+}
+- (void)syncHomeHoverTarget:(MaaGELauncherHomeActionButton *)target {
+    BOOL hovered = target == self;
+    BOOL pressed = self.homePressed && hovered;
     if (self.homeHovered == hovered && self.homePressed == pressed) return;
     self.homeHovered = hovered;
     self.homePressed = pressed;
@@ -899,11 +916,12 @@ static NSTableView *maage_ui_navigation_table(void) {
  * during the existing launcher refresh to recover missed tracking events. */
 - (void)syncHomeHover {
     MaaGELauncherHomeView *home = (MaaGELauncherHomeView *) self.playHome;
-    [(MaaGELauncherHomeActionButton *) home.playButton syncHomeHover];
-    [(MaaGELauncherHomeActionButton *) home.configuration syncHomeHover];
+    MaaGELauncherHomeActionButton *target = maage_ui_home_hover_target(self.window);
+    [(MaaGELauncherHomeActionButton *) home.playButton syncHomeHoverTarget:target];
+    [(MaaGELauncherHomeActionButton *) home.configuration syncHomeHoverTarget:target];
     for (MaaGELauncherHomeCard *card in home.cards) {
-        [card.dropdown syncHomeHover];
-        [card.manage syncHomeHover];
+        [card.dropdown syncHomeHoverTarget:target];
+        [card.manage syncHomeHoverTarget:target];
     }
 }
 - (void)windowDidBecomeKey:(NSNotification *)notification {
