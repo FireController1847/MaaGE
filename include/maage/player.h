@@ -2,6 +2,7 @@
 #define MAAGE_PLAYER_H
 
 #include <maage/world.h>
+#include <maage/attributes.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,7 +63,7 @@ maage_status maage_player_spawn(maage_player *player, const maage_world *world);
  * Grounded crouch clips horizontal requests against the projected body shifted
  * one block down; upward takeoff, airborne motion and flight bypass the guard.
  * The AABB then sweeps each crossed voxel plane (Y, X, Z). */
-maage_status maage_player_tick(maage_player *player, const maage_world *world, const maage_player_input *input);
+maage_status maage_player_tick(maage_player *player, const maage_world *world, const maage_player_input *input, const maage_attribute_set *attributes);
 
 #ifdef __cplusplus
 }

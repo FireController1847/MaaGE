@@ -22,6 +22,7 @@ struct maage_entity_type_registry {
     entity_type_slot **slots;
     size_t count, capacity, *buckets, bucket_count;
     content_policy *policy;
+    const maage_attribute_registry *attributes;
     int finalized;
     entity_spawn_table *spawns;
     size_t biome_count;
@@ -72,6 +73,7 @@ static void type_definition_clear(maage_entity_type_definition *definition) {
         free((void *) definition->spawns[i].biomes);
     free((void *) definition->spawns);
     free((void *) definition->loot);
+    free((void *) definition->attributes);
     free((void *) definition->textures);
     free((void *) definition->display_name);
     memset(definition, 0, sizeof(*definition));
@@ -96,6 +98,7 @@ int maage_entity_spawn_biome_matches(const maage_entity_spawn_rule *rule, maage_
 static maage_status type_definition_copy(maage_entity_type_definition *target, const maage_entity_type_definition *source) {
     maage_entity_spawn_rule *spawns;
     maage_entity_loot *loot;
+    maage_attribute_base *attributes;
     unsigned long *textures;
     maage_biome_id *biomes;
     size_t i;
@@ -104,11 +107,18 @@ static maage_status type_definition_copy(maage_entity_type_definition *target, c
     target->spawns = NULL;
     target->spawn_count = 0;
     target->loot = NULL;
+    target->attributes = NULL;
     target->textures = NULL;
-    if (!source->display_name || !*source->display_name || (source->loot_count && !source->loot) || (source->spawn_count && !source->spawns) || (source->texture_count && !source->textures)) return type_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
-    if (source->spawn_count > (size_t) - 1 / sizeof(*spawns) || source->loot_count > (size_t) - 1 / sizeof(*loot) || source->texture_count > (size_t) - 1 / sizeof(*textures)) return type_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
+    if (!source->display_name || !*source->display_name || (source->loot_count && !source->loot) || (source->spawn_count && !source->spawns) || (source->texture_count && !source->textures) || (source->attribute_count && !source->attributes)) return type_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_REGISTER);
+    if (source->spawn_count > (size_t) - 1 / sizeof(*spawns) || source->loot_count > (size_t) - 1 / sizeof(*loot) || source->texture_count > (size_t) - 1 / sizeof(*textures) || source->attribute_count > (size_t) - 1 / sizeof(*attributes)) return type_status(MAAGE_STATUS_BUFFER_OVERFLOW, MAAGE_OPERATION_REGISTER);
     target->display_name = type_string(source->display_name);
     if (!target->display_name) goto allocation;
+    if (source->attribute_count) {
+        attributes = (maage_attribute_base *) malloc(source->attribute_count * sizeof(*attributes));
+        if (!attributes) goto allocation;
+        memcpy(attributes, source->attributes, source->attribute_count * sizeof(*attributes));
+        target->attributes = attributes;
+    }
     if (source->loot_count) {
         loot = (maage_entity_loot *) malloc(source->loot_count * sizeof(*loot));
         if (!loot) goto allocation;
@@ -305,6 +315,51 @@ maage_status maage_entity_spawn_select(const maage_entity_type_registry *registr
     *rule = table->entries[low].rule;
     return type_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_SELECT);
 }
+const maage_attribute_registry *maage_entity_type_attributes(const maage_entity_type_registry *registry) {
+    return registry ? registry->attributes : NULL;
+}
+void content_entity_types_attributes(maage_entity_type_registry *registry, const maage_attribute_registry *attributes) {
+    registry->attributes = attributes;
+}
+static maage_status type_attributes_apply(const maage_attribute_registry *registry, maage_attribute_set *set, const maage_entity_type_definition *definition) {
+    maage_status result;
+    size_t i, j;
+    maage_attribute_id id;
+    const maage_attribute_role roles[] = {MAAGE_ATTRIBUTE_ROLE_MOVEMENT, MAAGE_ATTRIBUTE_ROLE_PANIC_MOVEMENT, MAAGE_ATTRIBUTE_ROLE_JUMP, MAAGE_ATTRIBUTE_ROLE_GRAVITY, MAAGE_ATTRIBUTE_ROLE_FALL_LIMIT, MAAGE_ATTRIBUTE_ROLE_ATTACK_DAMAGE, MAAGE_ATTRIBUTE_ROLE_ATTACK_RANGE, MAAGE_ATTRIBUTE_ROLE_FOLLOW_RANGE, MAAGE_ATTRIBUTE_ROLE_PROJECTILE_SPEED};
+    double values[sizeof(roles) / sizeof(*roles)];
+    values[0] = definition->speed;
+    values[1] = definition->panic_speed;
+    values[2] = definition->jump_velocity;
+    values[3] = definition->gravity;
+    values[4] = definition->fall_speed_limit;
+    values[5] = definition->attack_damage;
+    values[6] = definition->attack_range;
+    values[7] = definition->follow_range;
+    values[8] = definition->projectile_speed;
+    for (i = 0; i < sizeof(roles) / sizeof(*roles); ++i) {
+        id = maage_attribute_role_id(registry, roles[i]);
+        if (!id) continue;
+        for (j = 0; j < definition->attribute_count; ++j)
+            if (definition->attributes[j].attribute == id) break;
+        if (j < definition->attribute_count) continue;
+        result = maage_attributes_set_base(set, id, values[i]);
+        if (maage_status_failed(result)) return result;
+    }
+    return type_status(MAAGE_STATUS_SUCCESS, MAAGE_OPERATION_INITIALIZE);
+}
+maage_status maage_entity_type_create_attributes(const maage_entity_type_registry *registry, const maage_entity_type_definition *definition, maage_attribute_set **output) {
+    maage_status result;
+    if (!registry || !definition || !output) return type_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_CREATE);
+    *output = NULL;
+    if (!registry->attributes) return type_status(definition->attribute_count ? MAAGE_STATUS_INVALID_STATE : MAAGE_STATUS_NOOP, MAAGE_OPERATION_CREATE);
+    result = maage_attributes_create(registry->attributes, definition->attributes, definition->attribute_count, output);
+    if (!maage_status_failed(result)) result = type_attributes_apply(registry->attributes, *output, definition);
+    if (maage_status_failed(result)) {
+        maage_attributes_destroy(*output);
+        *output = NULL;
+    }
+    return result;
+}
 maage_status maage_entity_type_finalize(maage_entity_type_registry *registry, const maage_item_registry *items, const maage_block_registry *blocks, const maage_biome_registry *biomes) {
     const maage_entity_type_definition *definition;
     const maage_entity_spawn_rule *spawn;
@@ -313,12 +368,16 @@ maage_status maage_entity_type_finalize(maage_entity_type_registry *registry, co
     size_t i, j, k;
     unsigned long weight;
     maage_status result;
+    maage_attribute_set *attributes;
     if (!registry || registry->finalized || !items || !blocks || !biomes) return type_status(MAAGE_STATUS_INVALID_STATE, MAAGE_OPERATION_FINALIZE);
     result = content_policy_finalize(registry->policy);
     if (maage_status_failed(result)) return result;
     for (i = 0; i < registry->count; ++i) {
         definition = &registry->slots[i]->definition;
         if (definition->classification < MAAGE_ENTITY_CLASS_PASSIVE || definition->classification > MAAGE_ENTITY_CLASS_PROJECTILE || !type_number(definition->width, 0.001, MAAGE_WORLD_HEIGHT) || !type_number(definition->height, 0.001, MAAGE_WORLD_HEIGHT) || !type_number(definition->eye_height, 0, definition->height) || !definition->health || !type_number(definition->speed, 0, 4) || !type_number(definition->panic_speed, 0, 4) || !type_number(definition->attack_damage, 0, 65535) || !type_number(definition->attack_range, 0, MAAGE_WORLD_LIMIT) || !type_number(definition->follow_range, 0, MAAGE_WORLD_LIMIT) || !type_number(definition->jump_velocity, 0, 4) || !type_number(definition->gravity, 0, 4) || !type_number(definition->fall_speed_limit, 0, 4) || !type_number(definition->explosion_radius, 0, MAAGE_WORLD_HEIGHT) || !type_number(definition->projectile_speed, 0, 4) || !type_number(definition->despawn_distance, 0, MAAGE_WORLD_LIMIT) || definition->despawn_ticks > 4294967295UL || (definition->classification != MAAGE_ENTITY_CLASS_PROJECTILE && !definition->behavior)) return type_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
+        result = maage_entity_type_create_attributes(registry, definition, &attributes);
+        if (maage_status_failed(result)) return result;
+        maage_attributes_destroy(attributes);
         if (definition->projectile_type && (!maage_entity_type_get(registry, definition->projectile_type) || maage_entity_type_get(registry, definition->projectile_type)->classification != MAAGE_ENTITY_CLASS_PROJECTILE)) return type_status(MAAGE_STATUS_NOT_FOUND, MAAGE_OPERATION_FINALIZE);
         if (definition->state_size && (!definition->state_version || !definition->encoded_size || definition->state_version > 4294967295UL || definition->encoded_size > 4294967295UL || !definition->initialize || !definition->valid || !definition->encode || !definition->decode)) return type_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);
         if (!definition->state_size && (definition->encoded_size || definition->state_version || definition->encode || definition->decode)) return type_status(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_OPERATION_FINALIZE);

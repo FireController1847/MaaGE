@@ -382,6 +382,7 @@ static maage_status content_validate_registrations(const maage_content *content,
     actual[CONTENT_DIMENSION] = maage_dimension_count(context->dimensions);
     actual[CONTENT_BEHAVIOR] = maage_behavior_count(context->traits);
     actual[CONTENT_CREDITS] = maage_presentation_credit_count(context->presentation);
+    actual[CONTENT_ATTRIBUTE] = maage_attribute_count(context->attributes);
     actual[CONTENT_PORTAL] = maage_presentation_portal_count(context->presentation);
     for (i = 0; i < content->policy.count; ++i)
         if (content->policy.identities[i].domain <= CONTENT_PORTAL) ++claimed[content->policy.identities[i].domain];
@@ -532,6 +533,7 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     if (!maage_status_failed(result)) result = maage_block_geometry_create(&context->geometry);
     if (!maage_status_failed(result)) result = maage_container_registry_create(&context->containers);
     if (!maage_status_failed(result)) result = maage_sound_registry_create(&context->sounds);
+    if (!maage_status_failed(result)) result = maage_attribute_registry_create(&context->attributes);
     if (!maage_status_failed(result)) result = maage_entity_type_registry_create(&context->entity_types);
     if (!maage_status_failed(result)) result = maage_model_registry_create(&context->models);
     if (!maage_status_failed(result)) result = maage_block_registry_bind_traits(context->blocks, context->traits);
@@ -554,6 +556,8 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     content_sounds_policy(context->sounds, &content->policy);
     content_presentation_policy(context->presentation, &content->policy);
     content_entity_types_policy(context->entity_types, &content->policy);
+    content_attributes_policy(context->attributes, &content->policy);
+    content_entity_types_attributes(context->entity_types, context->attributes);
     content_models_policy(context->models, &content->policy);
     for (phase = MAAGE_CONTENT_PHASE_DEFINE; phase <= MAAGE_CONTENT_PHASE_BIND_COMPATIBILITY; phase = (maage_content_phase) (phase + 1)) {
         result = content_modules_run(content, config, phase, trace);
@@ -644,6 +648,9 @@ maage_status maage_content_create(const maage_content_config *config, maage_cont
     config->failure->dependency_name = "maage_model_registry_finalize";
     result = maage_model_registry_finalize(context->models);
     if (maage_status_failed(result)) goto failed;
+    config->failure->dependency_name = "maage_attribute_registry_finalize";
+    result = maage_attribute_registry_finalize(context->attributes);
+    if (maage_status_failed(result)) goto failed;
     config->failure->dependency_name = "maage_entity_type_finalize";
     result = maage_entity_type_finalize(context->entity_types, context->items, context->blocks, context->biomes);
     if (maage_status_failed(result)) goto failed;
@@ -686,6 +693,9 @@ failed:
     maage_content_destroy(content);
     return result;
 }
+const maage_attribute_registry *maage_content_attributes(const maage_content *content) {
+    return content ? content->context.attributes : NULL;
+}
 const maage_entity_type_registry *maage_content_entity_types(const maage_content *content) {
     return content ? content->context.entity_types : NULL;
 }
@@ -717,6 +727,7 @@ maage_status maage_content_destroy(maage_content *content) {
     content_owner *node, *next;
     if (!content) return maage_status_make(MAAGE_STATUS_NOOP, 0, MAAGE_OPERATION_DESTROY, 0);
     maage_entity_type_destroy(content->context.entity_types);
+    maage_attribute_registry_destroy(content->context.attributes);
     maage_dimension_registry_destroy(content->context.dimensions);
     maage_model_registry_destroy(content->context.models);
     maage_creative_destroy(content->context.creative);

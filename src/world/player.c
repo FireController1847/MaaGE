@@ -263,7 +263,7 @@ static double maage_player_edge_step(double displacement) {
     return displacement + (displacement > 0 ? -0.05 : 0.05);
 }
 
-maage_status maage_player_tick(maage_player *player, const maage_world *world, const maage_player_input *input) {
+maage_status maage_player_tick(maage_player *player, const maage_world *world, const maage_player_input *input, const maage_attribute_set *attributes) {
     double forward;
     double strafe;
     double magnitude;
@@ -295,7 +295,8 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
         forward /= magnitude;
         strafe /= magnitude;
     }
-    acceleration = player->grounded ? MAAGE_PLAYER_GROUND_ACCELERATION : MAAGE_PLAYER_AIR_ACCELERATION;
+    acceleration = maage_attributes_role_value(attributes, MAAGE_ATTRIBUTE_ROLE_MOVEMENT, MAAGE_PLAYER_GROUND_ACCELERATION);
+    if (!player->grounded) acceleration *= MAAGE_PLAYER_AIR_ACCELERATION / MAAGE_PLAYER_GROUND_ACCELERATION;
     /* Contact at the start of the step determines retained momentum, including
      * the takeoff and landing steps. The sweep publishes next step's contact. */
     drag = player->grounded ? MAAGE_PLAYER_GROUND_DRAG : MAAGE_PLAYER_AIR_DRAG;
@@ -307,7 +308,7 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
         for (axis = 0; axis < 3; ++axis)
             if (fabs(player->velocity[axis]) < 0.005) player->velocity[axis] = 0;
     if (input->flying) {
-        acceleration = MAAGE_PLAYER_FLIGHT_ACCELERATION * (player->sprinting ? MAAGE_PLAYER_FLIGHT_SPRINT_SPEED : 1.0);
+        acceleration = maage_attributes_role_value(attributes, MAAGE_ATTRIBUTE_ROLE_FLIGHT_MOVEMENT, MAAGE_PLAYER_FLIGHT_ACCELERATION) * (player->sprinting ? MAAGE_PLAYER_FLIGHT_SPRINT_SPEED : 1.0);
         drag = MAAGE_PLAYER_FLIGHT_DRAG;
     } else if (definition && definition->swimming) {
         acceleration = definition->acceleration;
@@ -323,7 +324,7 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
     player->velocity[0] += acceleration * (forward * sine + strafe * cosine);
     player->velocity[2] += acceleration * (-forward * cosine + strafe * sine);
     if (input->jump && player->grounded && !input->flying && fluid == MAAGE_FLUID_NONE) {
-        player->velocity[1] = MAAGE_PLAYER_JUMP_PER_TICK;
+        player->velocity[1] = maage_attributes_role_value(attributes, MAAGE_ATTRIBUTE_ROLE_JUMP, MAAGE_PLAYER_JUMP_PER_TICK);
         if (player->sprinting && fluid == MAAGE_FLUID_NONE) {
             player->velocity[0] += sine * MAAGE_PLAYER_SPRINT_JUMP;
             player->velocity[2] -= cosine * MAAGE_PLAYER_SPRINT_JUMP;
@@ -354,7 +355,7 @@ maage_status maage_player_tick(maage_player *player, const maage_world *world, c
     if (maage_world_sweep_body(world, player->position, player->velocity, MAAGE_PLAYER_WIDTH, MAAGE_PLAYER_HEIGHT, 2, horizontal[1])) player->collided_horizontally = 1;
     if (player->collided_horizontally) player->sprinting = 0;
     if (definition && definition->swimming) player->velocity[1] = player->velocity[1] * definition->drag - definition->gravity;
-    else player->velocity[1] = (player->velocity[1] - MAAGE_PLAYER_GRAVITY_PER_TICK) * MAAGE_PLAYER_VERTICAL_DRAG;
+    else player->velocity[1] = (player->velocity[1] - maage_attributes_role_value(attributes, MAAGE_ATTRIBUTE_ROLE_GRAVITY, MAAGE_PLAYER_GRAVITY_PER_TICK)) * MAAGE_PLAYER_VERTICAL_DRAG;
     if (input->flying) player->velocity[1] = 0;
     player->velocity[0] *= drag;
     player->velocity[2] *= drag;

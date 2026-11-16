@@ -31,6 +31,7 @@ typedef struct maage_food_use {
     unsigned long started_tick;
 } maage_food_use;
 typedef struct maage_gameplay {
+    maage_attribute_set *attributes; /* Owned, transient; initialized from logical Content. */
     maage_inventory inventory;
     maage_crafting_container crafting;
     maage_food_use food;
@@ -77,7 +78,7 @@ typedef struct maage_gameplay_intent {
  * NOOP defers unavailable/invalid placement or non-block interaction. The caller
  * resolves block activation first, including the held-item crouch bypass. */
 maage_status maage_gameplay_placement(const maage_player *player, const maage_world *world, const maage_item_registry *items, const maage_item_stack *held, const maage_world_target *target, double yaw, maage_world_target *destination, maage_block_state_id *placed);
-maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items);
+maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items, const maage_attribute_registry *attributes);
 maage_status maage_gameplay_set_mode(maage_gameplay *game, unsigned int mode);
 /* Foundation respawn returns to the session's start and retains inventory;
  * persistent spawn points and full death-drop rules are deferred. */
@@ -89,7 +90,9 @@ maage_status maage_gameplay_destroy(maage_gameplay *game);
 maage_status maage_gameplay_save_clear(maage_gameplay_save *save);
 /* Player-only checkpoint; World owns and checkpoints entities independently. */
 maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_save *save);
-maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save);
+/* Init and restore both construct a fresh gameplay owner; destroy before reuse. */
+maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save, const maage_attribute_registry *attributes);
+double maage_gameplay_reach(const maage_gameplay *game);
 /* Slot == MAAGE_INVENTORY_SLOTS selects the inventory cursor. */
 maage_status maage_gameplay_drop(maage_gameplay *game, const maage_player *player, maage_world *world, const maage_item_registry *items, double yaw, double pitch, unsigned int slot, int whole);
 /* Owner-thread targeting may run every frame. Reach zero uses classic 5/4.5

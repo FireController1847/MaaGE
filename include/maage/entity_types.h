@@ -1,6 +1,7 @@
 #ifndef MAAGE_ENTITY_TYPES_H
 #define MAAGE_ENTITY_TYPES_H
 #include "maage/items.h"
+#include "maage/attributes.h"
 #include "maage/biome.h"
 #include "maage/block_entity.h"
 
@@ -60,6 +61,8 @@ typedef struct maage_entity_type_definition {
     unsigned int classification, flags, behaviors;
     double width, height, eye_height;
     unsigned int health;
+    const maage_attribute_base *attributes; /* Optional numeric base overrides, copied. */
+    size_t attribute_count;
     double panic_speed; /* Absolute steering target in blocks/tick; zero uses ordinary movement speed. */
     double speed, attack_damage, attack_range, follow_range, jump_velocity, gravity, fall_speed_limit;
     unsigned int attack_cooldown, invulnerability_ticks, fuse_ticks;
@@ -106,6 +109,8 @@ maage_status maage_entity_spawn_select(const maage_entity_type_registry *, unsig
 const maage_entity_type_definition *maage_entity_type_get(const maage_entity_type_registry *, maage_entity_type_id);
 const maage_entity_type_definition *maage_entity_type_at(const maage_entity_type_registry *, size_t);
 size_t maage_entity_type_count(const maage_entity_type_registry *);
+const maage_attribute_registry *maage_entity_type_attributes(const maage_entity_type_registry *);
+maage_status maage_entity_type_create_attributes(const maage_entity_type_registry *, const maage_entity_type_definition *, maage_attribute_set **);
 int maage_entity_type_registry_is_finalized(const maage_entity_type_registry *);
 const char *maage_entity_type_name(const maage_entity_type_registry *, maage_entity_type_id);
 maage_status maage_entity_type_resolve_name(const maage_entity_type_registry *, const char *, maage_entity_type_id *);

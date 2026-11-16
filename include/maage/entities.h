@@ -56,6 +56,7 @@ typedef struct maage_entity {
     unsigned int pickup_delay;
     int grounded;
     maage_entity_payload payload;
+    maage_attribute_set *attributes; /* Owner-thread state; omitted from Session views and checkpoints. */
     void *state; /* Owned flat module state; never copied into a Session view. */
     size_t state_size;
 } maage_entity;

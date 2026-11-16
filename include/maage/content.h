@@ -16,6 +16,7 @@
 #include "maage/models.h"
 #include "maage/traits.h"
 #include "maage/dimensions.h"
+#include "maage/attributes.h"
 
 typedef struct maage_content maage_content;
 typedef struct maage_content_module maage_content_module;
@@ -55,6 +56,7 @@ typedef struct maage_content_context {
     maage_container_registry *containers;
     maage_sound_registry *sounds;
     maage_entity_type_registry *entity_types;
+    maage_attribute_registry *attributes;
     maage_model_registry *models;
     void *owner; /* Private ownership list; use maage_content_own. */
     const struct maage_content_config *config;
@@ -135,6 +137,7 @@ const maage_smelting_registry *maage_content_smelting(const maage_content *conte
 const maage_fuel_registry *maage_content_fuels(const maage_content *content);
 const maage_sound_registry *maage_content_sounds(const maage_content *content);
 const maage_entity_type_registry *maage_content_entity_types(const maage_content *content);
+const maage_attribute_registry *maage_content_attributes(const maage_content *content);
 const maage_model_registry *maage_content_models(const maage_content *content);
 const maage_container_registry *maage_content_containers(const maage_content *content);
 const maage_fluid_registry *maage_content_fluids(const maage_content *content);

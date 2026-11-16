@@ -102,6 +102,38 @@ maage_status base_smelt(maage_smelting_registry *registry, maage_item_id input, 
     recipe.experience = xp;
     return maage_smelting_register(registry, &recipe);
 }
+static maage_status maage_base_attributes(maage_content_context *context) {
+    static const struct {
+        const char *name;
+        maage_attribute_role role;
+        double base, minimum, maximum;
+    } definitions[] = {
+        {"minecraft:movement_speed", MAAGE_ATTRIBUTE_ROLE_MOVEMENT, MAAGE_PLAYER_GROUND_ACCELERATION, 0, 4},
+        {"minecraft:panic_speed", MAAGE_ATTRIBUTE_ROLE_PANIC_MOVEMENT, 0, 0, 4},
+        {"minecraft:flight_speed", MAAGE_ATTRIBUTE_ROLE_FLIGHT_MOVEMENT, MAAGE_PLAYER_FLIGHT_ACCELERATION, 0, 4},
+        {"minecraft:jump_velocity", MAAGE_ATTRIBUTE_ROLE_JUMP, MAAGE_PLAYER_JUMP_PER_TICK, 0, 4},
+        {"minecraft:gravity", MAAGE_ATTRIBUTE_ROLE_GRAVITY, MAAGE_PLAYER_GRAVITY_PER_TICK, 0, 4},
+        {"minecraft:fall_speed_limit", MAAGE_ATTRIBUTE_ROLE_FALL_LIMIT, 3.9, 0, 4},
+        {"minecraft:attack_damage", MAAGE_ATTRIBUTE_ROLE_ATTACK_DAMAGE, 1, 0, 65535},
+        {"minecraft:attack_range", MAAGE_ATTRIBUTE_ROLE_ATTACK_RANGE, 1.5, 0, MAAGE_WORLD_LIMIT},
+        {"minecraft:follow_range", MAAGE_ATTRIBUTE_ROLE_FOLLOW_RANGE, 6, 0, MAAGE_WORLD_LIMIT},
+        {"minecraft:projectile_speed", MAAGE_ATTRIBUTE_ROLE_PROJECTILE_SPEED, 0, 0, 4},
+        {"minecraft:reach", MAAGE_ATTRIBUTE_ROLE_REACH, 4.5, 0.01, 64}
+    };
+    maage_attribute_definition definition;
+    maage_status result;
+    size_t i;
+    memset(&definition, 0, sizeof(definition));
+    for (i = 0; i < sizeof(definitions) / sizeof(*definitions); ++i) {
+        definition.role = definitions[i].role;
+        definition.base = definitions[i].base;
+        definition.minimum = definitions[i].minimum;
+        definition.maximum = definitions[i].maximum;
+        result = maage_attribute_register(context->attributes, definitions[i].name, &definition);
+        if (maage_status_failed(result)) return result;
+    }
+    return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_REGISTER, 0);
+}
 static maage_status maage_base_define(maage_content_context *context) {
     maage_base_ids *ids;
     maage_status result;
@@ -115,7 +147,8 @@ static maage_status maage_base_define(maage_content_context *context) {
     }
     context->module_data = ids;
     /* Definitions precede every module's internal binding stage. */
-    result = maage_base_traits(context, ids);
+    result = maage_base_attributes(context);
+    if (!maage_status_failed(result)) result = maage_base_traits(context, ids);
     if (!maage_status_failed(result)) result = maage_base_textures(context, ids);
     if (!maage_status_failed(result)) result = maage_base_sounds(context, ids);
     if (!maage_status_failed(result)) result = maage_base_bind(context, ids);

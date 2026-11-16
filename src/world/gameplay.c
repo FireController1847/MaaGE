@@ -113,10 +113,13 @@ static void maage_gameplay_begin_life(maage_gameplay *game) {
     game->damage_sequence = game->damage_tick = game->death_tick = 0;
     game->jump_repeat_ticks = 0;
 }
-maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items) {
+maage_status maage_gameplay_init(maage_gameplay *game, const maage_item_registry *items, const maage_attribute_registry *attributes) {
+    maage_status result;
     if (!game) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_INITIALIZE, 0);
     (void) items;
     memset(game, 0, sizeof(*game));
+    result = maage_attributes_create(attributes, NULL, 0, &game->attributes);
+    if (maage_status_failed(result)) return result;
     maage_gameplay_begin_life(game);
     game->mode = MAAGE_GAME_MODE_CREATIVE;
     game->health = game->hunger = 20;
@@ -168,6 +171,7 @@ maage_status maage_gameplay_respawn(maage_gameplay *game, maage_player *player, 
 }
 maage_status maage_gameplay_destroy(maage_gameplay *game) {
     if (!game) return maage_status_make(MAAGE_STATUS_NOOP, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_DESTROY, 0);
+    maage_attributes_destroy(game->attributes);
     memset(game, 0, sizeof(*game));
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_DESTROY, 0);
 }
@@ -193,8 +197,9 @@ maage_status maage_gameplay_snapshot(const maage_gameplay *game, maage_gameplay_
     save->flying = game->flying;
     return maage_status_make(MAAGE_STATUS_SUCCESS, 0, MAAGE_OPERATION_SNAPSHOT, 0);
 }
-maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save) {
+maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_registry *items, const maage_gameplay_save *save, const maage_attribute_registry *attributes) {
     unsigned int i;
+    maage_status result;
     if (!game || !maage_item_registry_is_finalized(items) || !save || save->experience > 4294967295UL || save->experience_random > 4294967295UL || save->mode > MAAGE_GAME_MODE_CREATIVE ||
         save->health > 20 || save->hunger > 20 || save->air < -19 || save->air > 300 || save->inventory.selected >= MAAGE_HOTBAR_SLOTS ||
         !(save->saturation >= 0 && save->saturation <= save->hunger) ||
@@ -209,6 +214,8 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
         if (!maage_item_stack_valid(items, &save->crafting_inputs[i]))
             return maage_status_make(MAAGE_STATUS_MALFORMED_INPUT, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
     memset(game, 0, sizeof(*game));
+    result = maage_attributes_create(attributes, NULL, 0, &game->attributes);
+    if (maage_status_failed(result)) return result;
     memcpy(game->crafting.inputs, save->crafting_inputs, sizeof(game->crafting.inputs));
     maage_gameplay_begin_life(game);
     for (i = 0; i < MAAGE_CRAFTING_CELLS; ++i)
@@ -226,6 +233,15 @@ maage_status maage_gameplay_restore(maage_gameplay *game, const maage_item_regis
     game->flying = save->flying;
     return maage_status_make(MAAGE_STATUS_SUCCESS, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_LOAD, 0);
 }
+double maage_gameplay_reach(const maage_gameplay *game) {
+    int configured;
+    double offset, fallback;
+    if (!game) return 0;
+    configured = game->reach > 0 && game->reach <= 64;
+    offset = !configured && game->mode == MAAGE_GAME_MODE_CREATIVE ? 0.5 : 0;
+    fallback = configured ? game->reach : 4.5 + offset;
+    return maage_attributes_role_offset(game->attributes, MAAGE_ATTRIBUTE_ROLE_REACH, offset, fallback);
+}
 maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *player, const maage_world *world, double yaw, double pitch) {
     double origin[3], direction[3], range;
     maage_status result;
@@ -235,7 +251,7 @@ maage_status maage_gameplay_target(maage_gameplay *game, const maage_player *pla
     direction[0] = sin(yaw) * cos(pitch);
     direction[1] = -sin(pitch);
     direction[2] = -cos(yaw) * cos(pitch);
-    range = game->reach > 0 && game->reach <= 64 ? game->reach : (game->mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5);
+    range = maage_gameplay_reach(game);
     result = maage_world_raycast(world, origin, direction, range, &game->target);
     game->has_target = maage_status_code(result) == MAAGE_STATUS_SUCCESS;
     if (game->breaking_active && (!game->has_target || game->breaking.x != game->target.x ||
@@ -750,7 +766,7 @@ maage_status maage_gameplay_tick(maage_gameplay *game, maage_player *player, maa
     memcpy(previous, player->position, sizeof(previous));
     grounded = player->grounded;
     memcpy(velocity, player->velocity, sizeof(velocity));
-    result = maage_player_tick(player, world, &movement);
+    result = maage_player_tick(player, world, &movement, game->attributes);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_WORLD, MAAGE_OPERATION_TICK);
     if (game->flying && player->grounded) game->flying = 0;
     dx = player->position[0] - previous[0];

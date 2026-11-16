@@ -716,7 +716,7 @@ static void server_publish_snapshot(maage_server_runtime *runtime, double now) {
     snapshot.player.damage_yaw = runtime->game.damage_yaw;
     snapshot.player.has_target = runtime->game.has_target;
     snapshot.player.breaking_active = runtime->game.breaking_active;
-    snapshot.player.reach = runtime->game.reach > 0 ? runtime->game.reach : (runtime->game.mode == MAAGE_GAME_MODE_CREATIVE ? 5.0 : 4.5);
+    snapshot.player.reach = maage_gameplay_reach(&runtime->game);
     snapshot.player.break_delay = runtime->game.break_delay;
     snapshot.player.attack_miss_delay = runtime->game.attack_miss_delay;
     snapshot.player.submerged = maage_player_submerged(&runtime->player, runtime->world);
@@ -882,18 +882,19 @@ static maage_status server_open_world(maage_server_runtime *runtime, maage_statu
     result = maage_player_spawn(&runtime->player, runtime->world);
     if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_INITIALIZE);
     runtime->player_ready = 1;
-    result = maage_gameplay_init(&runtime->game, items);
-    if (maage_status_failed(result)) return result;
+    if (runtime->record.new_world) result = maage_gameplay_init(&runtime->game, items, maage_content_attributes(runtime->content));
+    else result = maage_gameplay_restore(&runtime->game, items, &runtime->record.gameplay, maage_content_attributes(runtime->content));
+    if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_INITIALIZE);
     runtime->game_ready = 1;
-    if (!runtime->record.new_world) {
-        result = maage_gameplay_restore(&runtime->game, items, &runtime->record.gameplay);
-        if (maage_status_failed(result)) return MAAGE_STATUS_PROPAGATE(trace, result, MAAGE_CONTEXT_SERVER, MAAGE_OPERATION_LOAD);
-    }
     if (runtime->config.initial_game_mode >= 0) {
         result = maage_gameplay_set_mode(&runtime->game, (unsigned int) runtime->config.initial_game_mode);
         if (maage_status_failed(result)) return result;
     }
     runtime->game.reach = runtime->config.interaction_range;
+    if (runtime->game.reach > 0 && runtime->game.reach <= 64) {
+        result = maage_attributes_set_role_base(runtime->game.attributes, MAAGE_ATTRIBUTE_ROLE_REACH, runtime->game.reach);
+        if (maage_status_failed(result)) return result;
+    }
     runtime->yaw = runtime->record.yaw;
     runtime->pitch = runtime->record.pitch;
     runtime->sampled.movement.yaw = runtime->yaw;

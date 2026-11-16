@@ -26,6 +26,7 @@ typedef enum content_domain {
     CONTENT_DIMENSION,
     CONTENT_BEHAVIOR,
     CONTENT_CREDITS,
+    CONTENT_ATTRIBUTE,
     CONTENT_PORTAL,
     CONTENT_BLOCK_BINDINGS,
     CONTENT_SOUND_BINDINGS,
@@ -72,6 +73,8 @@ void content_creative_policy(maage_creative_registry *, content_policy *);
 void content_sounds_policy(maage_sound_registry *, content_policy *);
 void content_presentation_policy(maage_presentation_registry *, content_policy *);
 void content_entity_types_policy(maage_entity_type_registry *, content_policy *);
+void content_attributes_policy(maage_attribute_registry *, content_policy *);
+void content_entity_types_attributes(maage_entity_type_registry *, const maage_attribute_registry *);
 void content_dimensions_policy(maage_dimension_registry *, content_policy *);
 void content_models_policy(maage_model_registry *, content_policy *);
 #endif
