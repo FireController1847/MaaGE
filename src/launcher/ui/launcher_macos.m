@@ -431,6 +431,7 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 @property(nonatomic) BOOL homeHovered, homePressed;
 @property(nonatomic) CGFloat homeRestOpacity;
 - (void)refreshHomeInteraction;
+- (void)syncHomeHover;
 @end
 @implementation MaaGELauncherHomeActionButton
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -444,8 +445,29 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];
     if (self.homeTracking) [self removeTrackingArea:self.homeTracking];
-    self.homeTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil];
+    self.homeTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil];
     [self addTrackingArea:self.homeTracking];
+    [self syncHomeHover];
+}
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self syncHomeHover];
+}
+- (void)syncHomeHover {
+    NSWindow *window = self.window;
+    BOOL active = self.enabled && window && window.isVisible && window.isKeyWindow && NSApp.isActive && ![self isHiddenOrHasHiddenAncestor];
+    BOOL hovered = NO;
+    if (active) {
+        NSPoint location = window.mouseLocationOutsideOfEventStream;
+        NSPoint point = [self convertPoint:location fromView:nil];
+        /* A window or native menu covering the control must not leave it highlighted. */
+        hovered = NSMouseInRect(point, self.visibleRect, self.isFlipped) && [NSWindow windowNumberAtPoint:[window convertPointToScreen:location] belowWindowWithWindowNumber:0] == window.windowNumber;
+    }
+    BOOL pressed = active && self.homePressed;
+    if (self.homeHovered == hovered && self.homePressed == pressed) return;
+    self.homeHovered = hovered;
+    self.homePressed = pressed;
+    [self refreshHomeInteraction];
 }
 - (void)refreshHomeInteraction {
     /* AppKit owns a control's backing-layer geometry. Transforming that layer
@@ -462,14 +484,15 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 }
 - (void)mouseEntered:(NSEvent *)event {
     (void) event;
-    if (!self.enabled) return;
-    self.homeHovered = YES;
-    [self refreshHomeInteraction];
+    [self syncHomeHover];
 }
 - (void)mouseExited:(NSEvent *)event {
     (void) event;
-    self.homeHovered = NO;
-    [self refreshHomeInteraction];
+    [self syncHomeHover];
+}
+- (void)mouseMoved:(NSEvent *)event {
+    (void) event;
+    [self syncHomeHover];
 }
 - (void)mouseDown:(NSEvent *)event {
     if (!self.enabled) return;
@@ -477,12 +500,13 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     [self refreshHomeInteraction];
     [super mouseDown:event];
     self.homePressed = NO;
+    [self syncHomeHover];
     [self refreshHomeInteraction];
 }
 - (void)setEnabled:(BOOL)enabled {
     if (self.enabled == enabled) return;
     [super setEnabled:enabled];
-    if (!enabled) self.homeHovered = self.homePressed = NO;
+    [self syncHomeHover];
     [self refreshHomeInteraction];
     [self.window invalidateCursorRectsForView:self];
 }
@@ -871,6 +895,29 @@ static NSTableView *maage_ui_navigation_table(void) {
     (void) sender;
     [self finish];
 }
+/* Reconcile all home hit areas after geometry, page or focus changes, and
+ * during the existing launcher refresh to recover missed tracking events. */
+- (void)syncHomeHover {
+    MaaGELauncherHomeView *home = (MaaGELauncherHomeView *) self.playHome;
+    [(MaaGELauncherHomeActionButton *) home.playButton syncHomeHover];
+    [(MaaGELauncherHomeActionButton *) home.configuration syncHomeHover];
+    for (MaaGELauncherHomeCard *card in home.cards) {
+        [card.dropdown syncHomeHover];
+        [card.manage syncHomeHover];
+    }
+}
+- (void)windowDidBecomeKey:(NSNotification *)notification {
+    (void) notification;
+    [self syncHomeHover];
+}
+- (void)windowDidResignKey:(NSNotification *)notification {
+    (void) notification;
+    [self syncHomeHover];
+}
+- (void)windowDidMove:(NSNotification *)notification {
+    (void) notification;
+    [self syncHomeHover];
+}
 - (void)windowDidResize:(NSNotification *)notification {
     (void) notification;
     /* The home lays out its children manually; its outer constraints alone
@@ -879,6 +926,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     [self.rootHost setNeedsLayout:YES];
     [self.playHome setNeedsLayout:YES];
     [self.rootHost layoutSubtreeIfNeeded];
+    [self syncHomeHover];
 }
 - (BOOL)windowShouldClose:(NSWindow *)window {
     (void) window;
@@ -1015,6 +1063,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     [self.rootHost showPage:screen];
     [self setHomeWindowAppearance:home && !splash];
     if (changed || pageChanged) [self.rootHost layoutSubtreeIfNeeded];
+    [self syncHomeHover];
 }
 - (void)activatePage:(maage_launcher_page)page {
     self.state->page = page;
@@ -2306,6 +2355,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     self.window.contentMinSize = NSMakeSize(MAAGE_LAUNCHER_WINDOW_MIN_WIDTH, MAAGE_LAUNCHER_WINDOW_MIN_HEIGHT);
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;
+    self.window.acceptsMouseMovedEvents = YES;
     [self applyAppearance];
     /* Replace the stark split-view divider with an integrated, fixed-width sidebar. */
     NSView *shell = [[NSView alloc] init];
