@@ -291,7 +291,7 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
     [super layout];
     CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
     if (width <= 0 || height <= 0) return;
-    CGFloat rem = MIN(0.02962963 * height, 0.044 * width);
+    CGFloat rem = MIN(0.0302 * height, 0.044 * width);
     CGFloat contentWidth = MAX(0, width - 2 * rem);
     CGFloat cardWidth = 9.84375 * rem, cardHeight = 1.74375 * rem;
     CGFloat gap = 0.84375 * rem, rowGap = 0.5 * rem;
@@ -309,8 +309,9 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
     CGFloat playWidth = ceil([self.playButton.title sizeWithAttributes:@{ NSFontAttributeName: playFont }].width + (1.8 + 0.28125 + 2 * 2.8125) * rem);
     CGFloat footerHeight = maage_ui_home_line_height(footerFont);
     CGFloat footerBottom = 0.3375 * rem;
-    CGFloat footerTop = footerBottom + 2 * footerHeight + 0.225 * rem;
-    CGFloat totalHeight = 8.4375 * rem + headingHeight + 0.225 * rem + taglineHeight + 0.84375 * rem + playHeight + 1.63125 * rem + actionHeight + 1.06875 * rem + configurationHeight;
+    CGFloat footerGap = 0.075 * rem, playGap = 1.25 * rem;
+    CGFloat footerTop = footerBottom + 2 * footerHeight + footerGap;
+    CGFloat totalHeight = 8.4375 * rem + headingHeight + 0.225 * rem + taglineHeight + 0.84375 * rem + playHeight + playGap + actionHeight + 1.06875 * rem + configurationHeight;
     /* The footer is absolute in the prototype. Reserve its space only when
      * necessary, without allowing window width to shrink the hero at the wrap. */
     CGFloat top = MAX(footerTop + totalHeight, (height + totalHeight) / 2);
@@ -329,12 +330,21 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
 
     self.tagline.font = taglineFont;
     self.tagline.shadow = self.heading.shadow;
-    CGFloat taglineWidth = ceil([self.tagline.stringValue sizeWithAttributes:@{ NSFontAttributeName: taglineFont }].width) + 6;
-    self.tagline.frame = maage_ui_home_row(width, taglineWidth, top, taglineHeight);
-    CGFloat ruleWidth = 1.51875 * rem, ruleHeight = MAX(1 / MAX(1, self.window.backingScaleFactor), 0.0703125 * rem);
+    /* Give the label the full available row; NSTextField's cell can need more
+     * room than the measured glyphs. Position the rules from the actual text width. */
+    CGFloat taglineWidth = ceil([self.tagline.stringValue sizeWithAttributes:@{ NSFontAttributeName: taglineFont }].width);
+    CGFloat ruleWidth = 1.51875 * rem, ruleGap = 0.9 * rem;
+    CGFloat ruleHeight = MAX(1 / MAX(1, self.window.backingScaleFactor), 0.0703125 * rem);
+    CGFloat taglineAvailable = MAX(1, contentWidth - 2 * (ruleWidth + ruleGap) - 12);
+    if (taglineWidth > taglineAvailable) {
+        taglineFont = maage_ui_home_font(taglineFont.pointSize * taglineAvailable / taglineWidth, NSFontWeightLight);
+        self.tagline.font = taglineFont;
+        taglineWidth = ceil([self.tagline.stringValue sizeWithAttributes:@{ NSFontAttributeName: taglineFont }].width);
+    }
+    self.tagline.frame = maage_ui_home_row(width, contentWidth, top, taglineHeight);
     CGFloat ruleY = NSMidY(self.tagline.frame) - ruleHeight / 2;
-    self.taglineLeftRule.frame = NSMakeRect(NSMinX(self.tagline.frame) - 0.9 * rem - ruleWidth, ruleY, ruleWidth, ruleHeight);
-    self.taglineRightRule.frame = NSMakeRect(NSMaxX(self.tagline.frame) + 0.9 * rem, ruleY, ruleWidth, ruleHeight);
+    self.taglineLeftRule.frame = NSMakeRect((width - taglineWidth) / 2 - ruleGap - ruleWidth, ruleY, ruleWidth, ruleHeight);
+    self.taglineRightRule.frame = NSMakeRect((width + taglineWidth) / 2 + ruleGap, ruleY, ruleWidth, ruleHeight);
     for (NSView *rule in @[ self.taglineLeftRule, self.taglineRightRule ]) {
         rule.layer.shadowColor = NSColor.blackColor.CGColor;
         rule.layer.shadowOpacity = 0.3;
@@ -352,8 +362,8 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
     self.readinessLabel.font = statusFont;
     self.readinessLabel.shadow = maage_ui_home_shadow(rem, 0.05625, 0.05625, 0.16875, 0.3);
     self.readinessLabel.attributedStringValue = maage_ui_home_inline(self.readinessText ?: @"Initializing…", self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
-    self.readinessLabel.frame = maage_ui_home_row(width, contentWidth, top - (1.63125 * rem - statusHeight) / 2, statusHeight);
-    top -= 1.63125 * rem;
+    self.readinessLabel.frame = maage_ui_home_row(width, contentWidth, top - (playGap - statusHeight) / 2, statusHeight);
+    top -= playGap;
 
     CGFloat actionsWidth = compact ? groupWidth : 2 * groupWidth + gap;
     CGFloat left = (width - actionsWidth) / 2;
@@ -369,7 +379,7 @@ static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
     self.notice.shadow = maage_ui_home_shadow(rem, 0.05625, 0.05625, 0.1125, 0.3);
     self.version.shadow = self.notice.shadow;
     self.notice.frame = NSMakeRect(0.675 * rem, footerBottom, width - 1.35 * rem, footerHeight);
-    self.version.frame = NSMakeRect(0.675 * rem, NSMaxY(self.notice.frame) + 0.225 * rem, width - 1.35 * rem, footerHeight);
+    self.version.frame = NSMakeRect(0.675 * rem, NSMaxY(self.notice.frame) + footerGap, width - 1.35 * rem, footerHeight);
     self.playButton.needsDisplay = YES;
     self.configuration.needsDisplay = YES;
 }
@@ -930,10 +940,19 @@ static NSTableView *maage_ui_navigation_table(void) {
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@MAAGE_PROJECT_URL]];
 }
 - (void)setHomeWindowAppearance:(BOOL)home {
-    if (self.window.titlebarAppearsTransparent == home) return;
+    NSWindowStyleMask style = self.window.styleMask;
+    BOOL fullSize = (style & NSWindowStyleMaskFullSizeContentView) != 0;
+    if (self.window.titlebarAppearsTransparent == home && fullSize == home) return;
+    NSRect frame = self.window.frame;
+    self.window.styleMask = home ? style | NSWindowStyleMaskFullSizeContentView : style & ~NSWindowStyleMaskFullSizeContentView;
     self.window.titleVisibility = home ? NSWindowTitleHidden : NSWindowTitleVisible;
     self.window.titlebarAppearsTransparent = home;
     self.window.backgroundColor = home ? [NSColor colorWithSRGBRed:0.31 green:0.42 blue:0.51 alpha:1] : NSColor.windowBackgroundColor;
+    /* Keep the same outer window when switching between titlebar modes. */
+    if (!NSEqualRects(self.window.frame, frame)) [self.window setFrame:frame display:NO];
+    [self.rootHost updatePageSize];
+    [self.rootHost setNeedsLayout:YES];
+    [self.playHome setNeedsLayout:YES];
 }
 - (void)presentPageWithSplash:(BOOL)splash {
     BOOL home = self.state->page == MAAGE_PAGE_PLAY;
@@ -1744,6 +1763,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     home.tagline = maage_ui_row_label(@"MINECRAFT AS A GAME ENGINE", 18, NO);
     home.tagline.textColor = NSColor.whiteColor;
     home.tagline.alignment = NSTextAlignmentCenter;
+    home.tagline.lineBreakMode = NSLineBreakByClipping;
     NSShadow *detailShadow = [[NSShadow alloc] init];
     detailShadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.4];
     detailShadow.shadowBlurRadius = 7;
