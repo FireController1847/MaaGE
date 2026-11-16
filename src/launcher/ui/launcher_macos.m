@@ -559,12 +559,14 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     [self.title drawAtPoint:NSMakePoint(x + iconSize + gap, y - titleSize.height / 2) withAttributes:attributes];
 }
 @end
-static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
+static NSImageView *maage_ui_home_symbol(NSString *name) {
     NSImageView *symbol = [[NSImageView alloc] init];
     symbol.image = maage_ui_home_asset(name);
     symbol.imageScaling = NSImageScaleProportionallyUpOrDown;
-    symbol.contentTintColor = color;
     return symbol;
+}
+static BOOL maage_ui_home_is_dark(NSView *view) {
+    return [[view.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] isEqualToString:NSAppearanceNameDarkAqua];
 }
 /* Each side of a selection card has its own native hit area and hover surface. */
 @interface MaaGELauncherHomeCardButton : MaaGELauncherHomeActionButton
@@ -572,9 +574,10 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @end
 @implementation MaaGELauncherHomeCardButton
 - (void)refreshHomeInteraction {
-    /* Animate white opacity only, behind the icon, text and chevron.
-     * The pressed/hovered segments retain the card's white color. */
-    NSColor *fill = [NSColor colorWithWhite:1 alpha:!self.enabled ? 0 : self.homePressed ? 0.18 : self.homeHovered ? 0.35 : 0];
+    /* Dark cards use a gentler highlight so their light captions stay legible. */
+    BOOL dark = maage_ui_home_is_dark(self);
+    CGFloat opacity = !self.enabled ? 0 : self.homePressed ? (dark ? 0.08 : 0.18) : self.homeHovered ? (dark ? 0.16 : 0.35) : 0;
+    NSColor *fill = [NSColor colorWithWhite:1 alpha:opacity];
     maage_ui_home_animate_layer(self.hoverBackground.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
 }
 @end
@@ -586,8 +589,30 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 @property(nonatomic, copy) NSString *accountName;
 @property(nonatomic) BOOL verified;
 - (void)setAccountName:(NSString *)name verified:(BOOL)verified;
+- (void)refreshHomeAppearance;
 @end
 @implementation MaaGELauncherHomeCard
+- (void)refreshHomeAppearance {
+    BOOL dark = maage_ui_home_is_dark(self);
+    NSColor *background = dark ? [NSColor colorWithSRGBRed:0.19 green:0.21 blue:0.19 alpha:0.88] : [NSColor colorWithWhite:1 alpha:0.65];
+    NSColor *ink = dark ? [NSColor colorWithSRGBRed:0.58 green:0.80 blue:0.46 alpha:1] : [NSColor colorWithSRGBRed:54.0 / 255.0 green:89.0 / 255.0 blue:37.0 / 255.0 alpha:1];
+    NSColor *labelInk = [NSColor colorWithWhite:dark ? 0.94 : 48.0 / 255.0 alpha:1];
+    NSColor *tile = [NSColor colorWithSRGBRed:103.0 / 255.0 green:161.0 / 255.0 blue:77.0 / 255.0 alpha:dark ? 0.26 : 0.2];
+    self.layer.backgroundColor = background.CGColor;
+    self.symbolTile.layer.backgroundColor = tile.CGColor;
+    self.symbol.contentTintColor = ink;
+    self.value.textColor = labelInk;
+    self.downSymbol.contentTintColor = labelInk;
+    self.manageSymbol.contentTintColor = [NSColor colorWithWhite:dark ? 0.82 : 80.0 / 255.0 alpha:1];
+    self.verifiedSymbol.contentTintColor = dark ? [NSColor colorWithSRGBRed:0.39 green:0.80 blue:0.43 alpha:1] : [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1];
+    self.divider.layer.backgroundColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.16 : 0.1].CGColor;
+    [self.dropdown refreshHomeInteraction];
+    [self.manage refreshHomeInteraction];
+}
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self refreshHomeAppearance];
+}
 - (void)setFrameSize:(NSSize)size {
     [super setFrameSize:size];
     [self setNeedsLayout:YES];
@@ -655,7 +680,6 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL manageAction, NSInteger selection, BOOL account, NSTextField * __strong *display) {
     MaaGELauncherHomeCard *card = [[MaaGELauncherHomeCard alloc] init];
     card.wantsLayer = YES;
-    card.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0.65].CGColor;
     card.layer.shadowColor = NSColor.blackColor.CGColor;
     card.layer.shadowOpacity = 0.3;
     card.layer.masksToBounds = NO;
@@ -673,22 +697,18 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.manageHighlight.wantsLayer = YES;
     card.manageHighlight.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0].CGColor;
     [card.hoverSurface addSubview:card.manageHighlight];
-    NSColor *ink = [NSColor colorWithSRGBRed:54.0 / 255.0 green:89.0 / 255.0 blue:37.0 / 255.0 alpha:1];
-    NSColor *labelInk = [NSColor colorWithWhite:48.0 / 255.0 alpha:1];
     card.symbolTile = [[NSView alloc] init];
     card.symbolTile.wantsLayer = YES;
-    card.symbolTile.layer.backgroundColor = [NSColor colorWithSRGBRed:103.0 / 255.0 green:161.0 / 255.0 blue:77.0 / 255.0 alpha:0.2].CGColor;
     [card addSubview:card.symbolTile];
-    card.symbol = maage_ui_home_symbol(symbol, ink);
+    card.symbol = maage_ui_home_symbol(symbol);
     [card addSubview:card.symbol];
     card.value = maage_ui_row_label(title, 12, YES);
-    card.value.textColor = labelInk;
     card.value.alignment = NSTextAlignmentLeft;
     [card addSubview:card.value];
     *display = card.value;
     if (account) {
         card.accountName = title;
-        card.verifiedSymbol = maage_ui_home_symbol(@"verified", [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1]);
+        card.verifiedSymbol = maage_ui_home_symbol(@"verified");
         card.verifiedSymbol.wantsLayer = YES;
         card.verifiedSymbol.layer.masksToBounds = NO;
         card.verifiedSymbol.layer.shadowColor = NSColor.blackColor.CGColor;
@@ -696,7 +716,7 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
         card.verifiedSymbol.hidden = YES;
         [card addSubview:card.verifiedSymbol];
     }
-    card.downSymbol = maage_ui_home_symbol(@"keyboard_arrow_down", labelInk);
+    card.downSymbol = maage_ui_home_symbol(@"keyboard_arrow_down");
     [card addSubview:card.downSymbol];
     card.dropdown = [[MaaGELauncherHomeCardButton alloc] init];
     card.dropdown.title = @"";
@@ -715,7 +735,7 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.manage.hoverBackground = card.manageHighlight;
     card.manage.target = target;
     card.manage.action = manageAction;
-    card.manageSymbol = maage_ui_home_symbol(@"chevron_right", [NSColor colorWithWhite:80.0 / 255.0 alpha:1]);
+    card.manageSymbol = maage_ui_home_symbol(@"chevron_right");
     [card addSubview:card.manageSymbol];
     card.manage.toolTip = account ? @"Manage accounts" : selection == 1 ? @"Manage Client builds" : selection == 3 ? @"Manage Playspaces (coming later)" : @"Manage installations";
     card.manage.accessibilityLabel = @"Manage selection";
@@ -723,12 +743,12 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     /* Keep the physical-pixel-aligned divider above both hover surfaces. */
     card.divider = [[NSView alloc] init];
     card.divider.wantsLayer = YES;
-    card.divider.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.1].CGColor;
     [card addSubview:card.divider];
     /* The card owns explicit responsive frames, not an Auto Layout subgraph. */
     for (NSView *part in card.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
     card.dropdownHighlight.translatesAutoresizingMaskIntoConstraints = NO;
     card.manageHighlight.translatesAutoresizingMaskIntoConstraints = NO;
+    [card refreshHomeAppearance];
     return card;
 }
 static void maage_ui_home_set_value(NSTextField *label, NSString *value) {
