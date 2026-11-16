@@ -43,6 +43,13 @@ These technologies and their surrounding ecosystems make MaaGE's cross-platform 
 
 MaaGE uses the following third-party libraries and development technologies. Their inclusion in this notice does not necessarily mean their source code or binaries are distributed within this repository.
 
+### Google Material Symbols
+
+The macOS launcher home uses Material Symbols supplied with the HTML prototype, rasterized from SVG into PNG assets for native AppKit rendering.
+
+**License:** Apache License, Version 2.0  
+[Upstream Material Symbols](https://github.com/google/material-design-icons)
+
 ### zlib
 
 Developed by Jean-loup Gailly and Mark Adler.

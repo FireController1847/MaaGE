@@ -54,6 +54,20 @@ function(maage_configure_gui_application target application)
             set(MAAGE_BUNDLE_LOGO "${MAAGE_LAUNCHER_ICON_DIRECTORY}/icon.png")
             target_sources(${target} PRIVATE "${MAAGE_BUNDLE_ICON}" "${MAAGE_BUNDLE_LOGO}")
             set_source_files_properties("${MAAGE_BUNDLE_ICON}" "${MAAGE_BUNDLE_LOGO}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+            set(MAAGE_HOME_DIRECTORY "${PROJECT_SOURCE_DIR}/src/launcher/ui/home")
+            set(MAAGE_HOME_RESOURCES
+                "${MAAGE_HOME_DIRECTORY}/background.jpg"
+                "${MAAGE_HOME_DIRECTORY}/change_circle.png"
+                "${MAAGE_HOME_DIRECTORY}/chevron_right.png"
+                "${MAAGE_HOME_DIRECTORY}/deployed_code.png"
+                "${MAAGE_HOME_DIRECTORY}/group.png"
+                "${MAAGE_HOME_DIRECTORY}/handyman.png"
+                "${MAAGE_HOME_DIRECTORY}/keyboard_arrow_down.png"
+                "${MAAGE_HOME_DIRECTORY}/play_arrow.png"
+                "${MAAGE_HOME_DIRECTORY}/settings.png"
+                "${MAAGE_HOME_DIRECTORY}/verified.png")
+            target_sources(${target} PRIVATE ${MAAGE_HOME_RESOURCES})
+            set_source_files_properties(${MAAGE_HOME_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/Home)
             set_target_properties(${target} PROPERTIES MACOSX_BUNDLE_ICON_FILE "${MAAGE_LAUNCHER_ICON_FILE}")
         endif()
         # The version target writes the complete plist with the same HEAD snapshot

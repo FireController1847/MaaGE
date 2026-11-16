@@ -146,10 +146,47 @@ static NSImageView *maage_ui_macos_app_icon(CGFloat size) {
     [logo.heightAnchor constraintEqualToConstant:size].active = YES;
     return logo;
 }
-/* Native launch home sized from the InDesign composition (2560 x 1440).
- * Compact windows reserve a separate two-row card area; no background image or web view. */
-static NSRect maage_ui_home_rect(CGFloat x, CGFloat y, CGFloat width, CGFloat height, CGFloat scale, CGFloat originX, CGFloat originY) {
-    return NSMakeRect(originX + x * scale, originY + (1440.0 - y - height) * scale, width * scale, height * scale);
+/* The HTML home uses one viewport-relative rem, independent of aspect ratio. */
+static NSFont *maage_ui_home_font(CGFloat size, NSFontWeight weight) {
+    NSString *name = weight >= NSFontWeightBold ? @"FiraSans-Bold" : weight >= NSFontWeightMedium ? @"FiraSans-Medium" : weight <= NSFontWeightLight ? @"FiraSans-Light" : @"FiraSans-Regular";
+    return [NSFont fontWithName:name size:size] ?: [NSFont systemFontOfSize:size weight:weight];
+}
+static CGFloat maage_ui_home_line_height(NSFont *font) {
+    return ceil(font.ascender - font.descender + font.leading + 3);
+}
+static NSRect maage_ui_home_row(CGFloat width, CGFloat rowWidth, CGFloat top, CGFloat height) {
+    return NSMakeRect((width - rowWidth) / 2, top - height, rowWidth, height);
+}
+static NSImage *maage_ui_home_asset(NSString *name) {
+    static NSMutableDictionary<NSString *, NSImage *> *images;
+    if (!images) images = [[NSMutableDictionary alloc] init];
+    NSImage *image = images[name];
+    if (!image) {
+        NSString *path = [NSBundle.mainBundle pathForResource:name ofType:@"png" inDirectory:@"Home"];
+        image = path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
+        if (image) {
+            image.template = YES;
+            images[name] = image;
+        }
+    }
+    return image;
+}
+static NSImage *maage_ui_home_tinted_asset(NSString *name, NSColor *color, CGFloat size) {
+    NSImage *source = maage_ui_home_asset(name);
+    if (!source) return nil;
+    return [NSImage imageWithSize:NSMakeSize(size, size) flipped:NO drawingHandler:^BOOL(NSRect rect) {
+        [source drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1];
+        [color setFill];
+        NSRectFillUsingOperation(rect, NSCompositingOperationSourceIn);
+        return YES;
+    }];
+}
+static NSShadow *maage_ui_home_shadow(CGFloat rem, CGFloat x, CGFloat y, CGFloat blur, CGFloat opacity) {
+    NSShadow *shadow = [[NSShadow alloc] init];
+    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:opacity];
+    shadow.shadowOffset = NSMakeSize(x * rem, -y * rem);
+    shadow.shadowBlurRadius = blur * rem;
+    return shadow;
 }
 static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
     CGFloat textHeight = ceil(font.ascender - font.descender + font.leading + 3);
@@ -159,22 +196,17 @@ static NSRect maage_ui_home_centered_text_rect(NSRect box, NSFont *font) {
  * typographic baseline regardless of NSTextField's internal cell geometry. */
 /* Account verification belongs to the same line as the account name, after
  * the name rather than in an independently positioned image view. */
-static NSAttributedString *maage_ui_home_verified_name(NSString *name, NSFont *font, CGFloat scale) {
-    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: NSColor.blackColor };
+static NSAttributedString *maage_ui_home_verified_name(NSString *name, NSFont *font, CGFloat rem) {
+    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: [NSColor colorWithWhite:48.0 / 255.0 alpha:1] };
     NSMutableAttributedString *label = [[NSMutableAttributedString alloc] initWithString:name attributes:attributes];
-    if (@available(macOS 11.0, *)) {
-        NSImage *symbol = [NSImage imageWithSystemSymbolName:@"checkmark.circle.fill" accessibilityDescription:@"Verified Minecraft account"];
-        if (symbol) {
-            CGFloat size = 24 * scale;
-            NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightMedium];
-            if (@available(macOS 12.0, *)) configuration = [configuration configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:[NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1]]];
-            symbol = [symbol imageWithSymbolConfiguration:configuration] ?: symbol;
-            NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
-            attachment.image = symbol;
-            attachment.bounds = NSMakeRect(0, (font.capHeight - size) / 2, size, size);
-            [label appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attributes]];
-            [label appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
-        }
+    CGFloat size = 0.75 * rem;
+    NSImage *symbol = maage_ui_home_tinted_asset(@"verified", [NSColor colorWithSRGBRed:0.17 green:0.62 blue:0.26 alpha:1], size);
+    if (symbol) {
+        NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+        attachment.image = symbol;
+        attachment.bounds = NSMakeRect(0, (font.capHeight - size) / 2, size, size);
+        [label appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attributes]];
+        [label appendAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
     }
     return label;
 }
@@ -206,17 +238,13 @@ static NSAttributedString *maage_ui_home_inline(NSString *text, NSString *symbol
     [line addAttribute:NSParagraphStyleAttributeName value:paragraph range:NSMakeRange(0, line.length)];
     return line;
 }
-/* Use the same intrinsic text measurement for the button's hit area and its
- * caption. Text-field cells need extra horizontal space beyond glyph bounds. */
-static CGFloat maage_ui_home_configuration_caption_width(NSFont *font, CGFloat scale) {
-    return ceil([@"Launcher Configuration" sizeWithAttributes:@{ NSFontAttributeName: font }].width) + 24 * scale;
-}
-static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
-    NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
-    return 38 * scale + 17 * scale + maage_ui_home_configuration_caption_width(font, scale) + 36 * scale;
+static CGFloat maage_ui_home_configuration_width(CGFloat rem) {
+    NSFont *font = maage_ui_home_font(0.675 * rem, NSFontWeightMedium);
+    return ceil([@"Launcher Configuration" sizeWithAttributes:@{ NSFontAttributeName: font }].width + (0.9 + 0.3375 + 2 * 0.3375) * rem);
 }
 @interface MaaGELauncherHomeView : NSView
 @property(nonatomic, strong) NSImageView *brand;
+@property(nonatomic, strong) NSImage *background;
 @property(nonatomic, strong) NSView *taglineLeftRule, *taglineRightRule;
 @property(nonatomic, strong) NSTextField *heading, *tagline, *notice, *version;
 @property(nonatomic, strong) NSButton *playButton, *configuration;
@@ -238,7 +266,8 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
     self.readinessText = text;
     self.readinessSymbol = symbol;
     self.readinessTint = tint;
-    NSFont *font = self.readinessFontSize > 0 ? [NSFont systemFontOfSize:self.readinessFontSize weight:NSFontWeightMedium] : self.readinessLabel.font;
+    self.readinessLabel.hidden = [text isEqualToString:@"Ready to Play"];
+    NSFont *font = self.readinessFontSize > 0 ? maage_ui_home_font(self.readinessFontSize, NSFontWeightMedium) : self.readinessLabel.font;
     self.readinessLabel.attributedStringValue = maage_ui_home_inline(text, symbol, font, NSColor.whiteColor, tint, font.pointSize, self.readinessLabel.shadow);
     [self setNeedsLayout:YES];
 }
@@ -247,6 +276,13 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 }
 - (void)drawRect:(NSRect)dirtyRect {
     (void) dirtyRect;
+    if (self.background && self.background.size.width > 0 && self.background.size.height > 0) {
+        CGFloat scale = MAX(NSWidth(self.bounds) / self.background.size.width, NSHeight(self.bounds) / self.background.size.height);
+        NSSize size = NSMakeSize(self.background.size.width * scale, self.background.size.height * scale);
+        NSRect destination = NSMakeRect(NSMidX(self.bounds) - size.width / 2, NSMidY(self.bounds) - size.height / 2, size.width, size.height);
+        [self.background drawInRect:destination fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
+        return;
+    }
     NSColor *upper = [NSColor colorWithSRGBRed:0.38 green:0.52 blue:0.59 alpha:1];
     NSColor *lower = [NSColor colorWithSRGBRed:0.16 green:0.27 blue:0.30 alpha:1];
     [[[NSGradient alloc] initWithStartingColor:lower endingColor:upper] drawInRect:self.bounds angle:90];
@@ -254,82 +290,88 @@ static CGFloat maage_ui_home_configuration_width(CGFloat scale) {
 - (void)layout {
     [super layout];
     CGFloat width = NSWidth(self.bounds), height = NSHeight(self.bounds);
-    if (width <= 40 || height <= 34) return;
-    BOOL compact = width < MAAGE_LAUNCHER_HOME_GRID_WIDTH;
-    CGFloat scale = MIN((width - 40.0) / 2210.0, (height - 34.0) / 1440.0);
-    CGFloat controlsScale = compact ? MIN(0.52, MAX(0.42, height / 1300.0)) : scale;
-    CGFloat originX = (width - 2560.0 * scale) / 2, originY = (height - 1440.0 * scale) / 2;
+    if (width <= 0 || height <= 0) return;
+    CGFloat rem = MIN(0.02962963 * height, 0.044 * width);
+    CGFloat contentWidth = MAX(0, width - 2 * rem);
+    CGFloat cardWidth = 9.84375 * rem, cardHeight = 1.74375 * rem;
+    CGFloat gap = 0.84375 * rem, rowGap = 0.5 * rem;
+    CGFloat groupWidth = 2 * cardWidth + gap;
+    BOOL compact = contentWidth <= 700 || 2 * groupWidth + gap > contentWidth;
+    CGFloat actionHeight = compact ? 2 * cardHeight + rowGap : cardHeight;
 
-    /* Reserve the footer before positioning the compact grid so its second
-     * row and configuration action never compete with the version/notice. */
-    NSFont *footerFont = [NSFont systemFontOfSize:26 * controlsScale];
-    NSFont *versionFont = [NSFont systemFontOfSize:25 * controlsScale];
-    if (fabs(self.notice.font.pointSize - footerFont.pointSize) > 0.1) self.notice.font = footerFont;
-    if (fabs(self.version.font.pointSize - versionFont.pointSize) > 0.1) self.version.font = versionFont;
-    CGFloat footerWidth = MIN(width - 28, 2200 * controlsScale);
-    CGFloat noticeHeight = MAX(15, ceil(footerFont.ascender - footerFont.descender + footerFont.leading + 4));
-    CGFloat versionHeight = MAX(15, ceil(versionFont.ascender - versionFont.descender + versionFont.leading + 4));
-    self.notice.frame = NSMakeRect((width - footerWidth) / 2, 11, footerWidth, noticeHeight);
-    self.version.frame = NSMakeRect((width - footerWidth) / 2, NSMaxY(self.notice.frame) + 10 * controlsScale, footerWidth, versionHeight);
+    NSFont *headingFont = maage_ui_home_font(2.19375 * rem, NSFontWeightBold);
+    NSFont *taglineFont = maage_ui_home_font(0.9 * rem, NSFontWeightLight);
+    NSFont *playFont = maage_ui_home_font(1.125 * rem, NSFontWeightMedium);
+    NSFont *statusFont = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
+    NSFont *footerFont = maage_ui_home_font(0.45 * rem, NSFontWeightRegular);
+    CGFloat headingHeight = maage_ui_home_line_height(headingFont), taglineHeight = maage_ui_home_line_height(taglineFont);
+    CGFloat playHeight = 2.7 * rem, configurationHeight = 1.35 * rem;
+    CGFloat playWidth = ceil([self.playButton.title sizeWithAttributes:@{ NSFontAttributeName: playFont }].width + (1.8 + 0.28125 + 2 * 2.8125) * rem);
+    CGFloat footerHeight = maage_ui_home_line_height(footerFont);
+    CGFloat footerBottom = 0.3375 * rem;
+    CGFloat footerTop = footerBottom + 2 * footerHeight + 0.225 * rem;
+    CGFloat totalHeight = 8.4375 * rem + headingHeight + 0.225 * rem + taglineHeight + 0.84375 * rem + playHeight + 1.63125 * rem + actionHeight + 1.06875 * rem + configurationHeight;
+    /* The footer is absolute in the prototype. Reserve its space only when
+     * necessary, without allowing window width to shrink the hero at the wrap. */
+    CGFloat top = MAX(footerTop + totalHeight, (height + totalHeight) / 2);
+    top = MIN(height, top);
 
-    NSRect configurationRow;
-    if (compact) {
-        CGFloat gap = 35 * controlsScale, cardHeight = 110 * controlsScale;
-        CGFloat cardWidth = MIN(350, (width - 40 - gap) / 2);
-        CGFloat gridLeft = (width - 2 * cardWidth - gap) / 2;
-        CGFloat configurationBottom = NSMaxY(self.version.frame) + 24 * controlsScale;
-        configurationRow = NSMakeRect(0, configurationBottom, width, 56 * controlsScale);
-        CGFloat gridBottom = NSMaxY(configurationRow) + 40 * controlsScale;
-        CGFloat gridTop = gridBottom + 2 * cardHeight + gap;
-        for (NSUInteger i = 0; i < MIN(self.cards.count, (NSUInteger) 4); ++i)
-            self.cards[i].frame = NSMakeRect(gridLeft + (i % 2) * (cardWidth + gap), gridBottom + (1 - (NSInteger) (i / 2)) * (cardHeight + gap), cardWidth, cardHeight);
+    self.brand.frame = maage_ui_home_row(width, 8.4375 * rem, top, 8.4375 * rem);
+    self.brand.layer.shadowOpacity = 0.275;
+    self.brand.layer.shadowRadius = 0.05625 * rem;
+    self.brand.layer.shadowOffset = NSMakeSize(0.16875 * rem, -0.225 * rem);
+    top = NSMinY(self.brand.frame);
 
-        /* Only the brand/Play group scales into the space above the grid.
-         * Keep the same reference positions and center the group there. */
-        CGFloat heroBottom = gridTop + 40 * controlsScale, heroTop = height - 17;
-        CGFloat heroHeight = MAX(1, heroTop - heroBottom);
-        scale = MIN(MIN((width - 40.0) / 1100.0, (height - 34.0) / 1440.0), heroHeight / 960.0);
-        originX = (width - 2560.0 * scale) / 2;
-        originY = heroBottom + (heroHeight - 960.0 * scale) / 2 - 480.0 * scale;
-    } else {
-        NSArray<NSNumber *> *positions = @[ @188, @743, @1298, @1853 ];
-        for (NSUInteger i = 0; i < MIN(self.cards.count, positions.count); ++i)
-            self.cards[i].frame = maage_ui_home_rect(positions[i].doubleValue, 1080, 520, 110, scale, originX, originY);
-        configurationRow = maage_ui_home_rect(0, 1230, 2560, 56, scale, originX, originY);
+    self.heading.font = headingFont;
+    self.heading.shadow = maage_ui_home_shadow(rem, 0.1125, 0.05625, 0.225, 0.3);
+    self.heading.frame = maage_ui_home_row(width, contentWidth, top, headingHeight);
+    top = NSMinY(self.heading.frame) - 0.225 * rem;
+
+    self.tagline.font = taglineFont;
+    self.tagline.shadow = self.heading.shadow;
+    CGFloat taglineWidth = ceil([self.tagline.stringValue sizeWithAttributes:@{ NSFontAttributeName: taglineFont }].width) + 6;
+    self.tagline.frame = maage_ui_home_row(width, taglineWidth, top, taglineHeight);
+    CGFloat ruleWidth = 1.51875 * rem, ruleHeight = MAX(1 / MAX(1, self.window.backingScaleFactor), 0.0703125 * rem);
+    CGFloat ruleY = NSMidY(self.tagline.frame) - ruleHeight / 2;
+    self.taglineLeftRule.frame = NSMakeRect(NSMinX(self.tagline.frame) - 0.9 * rem - ruleWidth, ruleY, ruleWidth, ruleHeight);
+    self.taglineRightRule.frame = NSMakeRect(NSMaxX(self.tagline.frame) + 0.9 * rem, ruleY, ruleWidth, ruleHeight);
+    for (NSView *rule in @[ self.taglineLeftRule, self.taglineRightRule ]) {
+        rule.layer.shadowColor = NSColor.blackColor.CGColor;
+        rule.layer.shadowOpacity = 0.3;
+        rule.layer.shadowOffset = NSMakeSize(0.1125 * rem, -0.05625 * rem);
+        rule.layer.shadowRadius = 0.225 * rem;
     }
+    top = NSMinY(self.tagline.frame) - 0.84375 * rem;
 
-    self.brand.frame = maage_ui_home_rect(1054, 0, 451, 451, scale, originX, originY);
-    NSFont *headingFont = [NSFont systemFontOfSize:110 * scale weight:NSFontWeightBold];
-    if (fabs(self.heading.font.pointSize - headingFont.pointSize) > 0.1) self.heading.font = headingFont;
-    self.heading.frame = maage_ui_home_centered_text_rect(maage_ui_home_rect(930, 426, 700, 170, scale, originX, originY), headingFont);
-    NSFont *taglineFont = [NSFont systemFontOfSize:45 * scale weight:NSFontWeightRegular];
-    if (fabs(self.tagline.font.pointSize - taglineFont.pointSize) > 0.1) {
-        self.tagline.font = taglineFont;
-        NSShadow *shadow = self.tagline.shadow;
-        shadow.shadowBlurRadius = 28 * scale;
-        shadow.shadowOffset = NSMakeSize(0, -8 * scale);
-        self.tagline.shadow = shadow;
+    self.playButton.frame = maage_ui_home_row(width, playWidth, top, playHeight);
+    top = NSMinY(self.playButton.frame);
+    /* Readiness is absent from the ready-state prototype, but still conveys
+     * real blocking state in the existing gap below the Play button. */
+    CGFloat statusHeight = maage_ui_home_line_height(statusFont);
+    self.readinessFontSize = statusFont.pointSize;
+    self.readinessLabel.font = statusFont;
+    self.readinessLabel.shadow = maage_ui_home_shadow(rem, 0.05625, 0.05625, 0.16875, 0.3);
+    self.readinessLabel.attributedStringValue = maage_ui_home_inline(self.readinessText ?: @"Initializing…", self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
+    self.readinessLabel.frame = maage_ui_home_row(width, contentWidth, top - (1.63125 * rem - statusHeight) / 2, statusHeight);
+    top -= 1.63125 * rem;
+
+    CGFloat actionsWidth = compact ? groupWidth : 2 * groupWidth + gap;
+    CGFloat left = (width - actionsWidth) / 2;
+    for (NSUInteger i = 0; i < MIN(self.cards.count, (NSUInteger) 4); ++i) {
+        NSUInteger column = compact ? i % 2 : i, row = compact ? i / 2 : 0;
+        self.cards[i].frame = NSMakeRect(left + column * (cardWidth + gap), top - cardHeight - row * (cardHeight + rowGap), cardWidth, cardHeight);
     }
-    self.tagline.frame = maage_ui_home_centered_text_rect(maage_ui_home_rect(868, 615, 824, 59, scale, originX, originY), taglineFont);
-    self.taglineLeftRule.frame = maage_ui_home_rect(868, 643, 60, 2, scale, originX, originY);
-    self.taglineRightRule.frame = maage_ui_home_rect(1626, 643, 66, 2, scale, originX, originY);
+    top -= actionHeight + 1.06875 * rem;
+    self.configuration.frame = maage_ui_home_row(width, maage_ui_home_configuration_width(rem), top, configurationHeight);
 
-    self.playButton.frame = maage_ui_home_rect(915, 708, 730, 154, scale, originX, originY);
-    NSFont *statusFont = [NSFont systemFontOfSize:31 * scale weight:NSFontWeightMedium];
-    if (fabs(self.readinessFontSize - statusFont.pointSize) > 0.1) {
-        self.readinessFontSize = statusFont.pointSize;
-        NSString *status = self.readinessText ?: @"Initializing…";
-        self.readinessLabel.font = statusFont;
-        self.readinessLabel.attributedStringValue = maage_ui_home_inline(status, self.readinessSymbol ?: @"clock.fill", statusFont, NSColor.whiteColor, self.readinessTint ?: NSColor.whiteColor, statusFont.pointSize, self.readinessLabel.shadow);
-    }
-    NSRect statusBox = maage_ui_home_rect(0, 908, 2560, 49, scale, originX, originY);
-    CGFloat statusWidth = MIN(width - 40, MAX(1100 * scale, ceil(self.readinessLabel.attributedStringValue.size.width) + 16));
-    self.readinessLabel.frame = maage_ui_home_centered_text_rect(NSMakeRect(NSMidX(self.bounds) - statusWidth / 2, NSMinY(statusBox), statusWidth, NSHeight(statusBox)), statusFont);
-
-    /* The hit area follows the centered gear-and-caption group, not a 800-unit box. */
-    CGFloat configurationWidth = maage_ui_home_configuration_width(controlsScale);
-    self.configuration.frame = NSMakeRect(NSMidX(self.bounds) - configurationWidth / 2, NSMinY(configurationRow), configurationWidth, NSHeight(configurationRow));
+    self.notice.font = footerFont;
+    self.version.font = footerFont;
+    self.notice.shadow = maage_ui_home_shadow(rem, 0.05625, 0.05625, 0.1125, 0.3);
+    self.version.shadow = self.notice.shadow;
+    self.notice.frame = NSMakeRect(0.675 * rem, footerBottom, width - 1.35 * rem, footerHeight);
+    self.version.frame = NSMakeRect(0.675 * rem, NSMaxY(self.notice.frame) + 0.225 * rem, width - 1.35 * rem, footerHeight);
     self.playButton.needsDisplay = YES;
+    self.configuration.needsDisplay = YES;
 }
 @end
 /* Layer-backed hover feedback is shared by Play, the managed-card arrows,
@@ -365,7 +407,8 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 - (instancetype)initWithFrame:(NSRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.wantsLayer = YES;
-        _homeRestOpacity = 0.94;
+        _homeRestOpacity = 1;
+        self.focusRingType = NSFocusRingTypeExterior;
     }
     return self;
 }
@@ -378,9 +421,15 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 - (void)refreshHomeInteraction {
     /* AppKit owns a control's backing-layer geometry. Transforming that layer
      * scales around AppKit's layout origin and makes small arrows jump diagonally. */
-    CGFloat opacity = !self.enabled ? 0.86 : self.homePressed ? 0.85 : self.homeHovered ? 1 : self.homeRestOpacity;
+    CGFloat opacity = !self.enabled ? 0.65 : self.homeRestOpacity;
     maage_ui_home_animate_layer(self.layer, @"opacity", @(opacity), self.homePressed ? 0.10 : 0.17);
     [self setNeedsDisplay:YES];
+}
+- (NSRect)focusRingMaskBounds {
+    return self.bounds;
+}
+- (void)drawFocusRingMask {
+    [[NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:self.layer.cornerRadius yRadius:self.layer.cornerRadius] fill];
 }
 - (void)mouseEntered:(NSEvent *)event {
     (void) event;
@@ -413,11 +462,9 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
     if (self.enabled) [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
 }
 @end
-/* Keep the gear and caption in the SAME attributed line, sharing one native
- * text baseline and one hitbox. No independently laid-out NSImageView. */
+/* Draw icon and caption as one centered group, with the prototype's fixed
+ * spacing. The native NSButton still owns keyboard, mouse and accessibility. */
 @interface MaaGELauncherConfigurationButton : MaaGELauncherHomeActionButton
-@property(nonatomic, strong) NSTextField *homeCaption;
-@property(nonatomic) CGFloat captionFontSize;
 @end
 @implementation MaaGELauncherConfigurationButton
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -425,40 +472,34 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
         self.title = @"";
         self.bordered = NO;
         self.accessibilityLabel = @"Launcher Configuration";
-        _homeCaption = maage_ui_row_label(@"Launcher Configuration", 18, YES);
-        _homeCaption.textColor = NSColor.whiteColor;
-        _homeCaption.alignment = NSTextAlignmentCenter;
-        [self addSubview:_homeCaption];
-        _homeCaption.translatesAutoresizingMaskIntoConstraints = NO;
     }
     return self;
 }
 - (void)refreshHomeInteraction {
     [super refreshHomeInteraction];
-    CGFloat opacity = !self.enabled ? 0 : self.homePressed ? 0.16 : self.homeHovered ? 0.11 : 0;
+    CGFloat opacity = !self.enabled ? 0 : self.homePressed ? 0.05 : self.homeHovered ? 0.1 : 0;
     NSColor *background = [NSColor colorWithWhite:1 alpha:opacity];
-    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) background.CGColor, 0.19);
+    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) background.CGColor, 0.15);
 }
 - (void)layout {
     [super layout];
-    CGFloat scale = NSHeight(self.bounds) / 56.0;
-    if (scale <= 0) return;
-    self.layer.cornerRadius = NSHeight(self.bounds) / 2;
-    NSFont *font = [NSFont systemFontOfSize:38 * scale weight:NSFontWeightMedium];
-    if (fabs(self.captionFontSize - font.pointSize) > 0.1) {
-        self.captionFontSize = font.pointSize;
-        self.homeCaption.font = font;
-        NSShadow *shadow = [[NSShadow alloc] init];
-        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.46];
-        shadow.shadowBlurRadius = 8 * scale;
-        shadow.shadowOffset = NSMakeSize(0, -3 * scale);
-        self.homeCaption.attributedStringValue = maage_ui_home_inline(@"Launcher Configuration", @"gearshape", font, NSColor.whiteColor, NSColor.whiteColor, 38 * scale, shadow);
-    }
-    self.homeCaption.frame = maage_ui_home_centered_text_rect(NSInsetRect(self.bounds, 14 * scale, 0), font);
+    CGFloat rem = NSHeight(self.bounds) / 1.35;
+    self.layer.cornerRadius = 0.39375 * rem;
+    [self setNeedsDisplay:YES];
 }
-- (NSView *)hitTest:(NSPoint)point {
-    NSView *hit = [super hitTest:point];
-    return hit == self.homeCaption ? self : hit;
+- (void)drawRect:(NSRect)dirtyRect {
+    (void) dirtyRect;
+    CGFloat rem = NSHeight(self.bounds) / 1.35;
+    if (rem <= 0) return;
+    NSFont *font = maage_ui_home_font(0.675 * rem, NSFontWeightMedium);
+    NSColor *color = [NSColor colorWithWhite:1 alpha:self.homeHovered ? 1 : 0.75];
+    NSString *caption = @"Launcher Configuration";
+    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color, NSShadowAttributeName: maage_ui_home_shadow(rem, 0.05625, 0.05625, 0.16875, 0.3) };
+    NSSize titleSize = [caption sizeWithAttributes:attributes];
+    CGFloat iconSize = 0.9 * rem, gap = 0.3375 * rem, y = NSMidY(self.bounds);
+    CGFloat x = NSMidX(self.bounds) - (iconSize + gap + titleSize.width) / 2;
+    [maage_ui_home_tinted_asset(@"settings", color, iconSize) drawInRect:NSMakeRect(x, y - iconSize / 2, iconSize, iconSize)];
+    [caption drawAtPoint:NSMakePoint(x + iconSize + gap, y - titleSize.height / 2) withAttributes:attributes];
 }
 @end
 @interface MaaGELauncherPlayButton : MaaGELauncherHomeActionButton
@@ -466,58 +507,44 @@ static void maage_ui_home_animate_layer(CALayer *layer, NSString *key, id value,
 @implementation MaaGELauncherPlayButton
 - (void)layout {
     [super layout];
-    CGFloat scale = NSHeight(self.bounds) / 154.0;
-    if (scale <= 0) return;
+    CGFloat rem = NSHeight(self.bounds) / 2.7;
+    if (rem <= 0) return;
     self.layer.cornerRadius = NSHeight(self.bounds) / 2;
     self.layer.masksToBounds = NO;
     self.layer.shadowColor = NSColor.blackColor.CGColor;
-    /* Core Animation's positive Y offset places this layer shadow below the button. */
-    self.layer.shadowOffset = NSMakeSize(0, 11 * scale);
+    self.layer.shadowOffset = NSMakeSize(0, -0.1125 * rem);
     [self refreshHomeInteraction];
 }
 - (void)refreshHomeInteraction {
     [super refreshHomeInteraction];
-    CGFloat scale = MAX(0.01, NSHeight(self.bounds) / 154.0);
-    NSColor *fill = !self.enabled ? [NSColor colorWithSRGBRed:0.38 green:0.48 blue:0.39 alpha:1]
-                    : self.homePressed ? [NSColor colorWithSRGBRed:0.34 green:0.52 blue:0.27 alpha:1]
-                    : self.homeHovered ? [NSColor colorWithSRGBRed:0.45 green:0.70 blue:0.35 alpha:1]
-                                       : [NSColor colorWithSRGBRed:103.0 / 255.0 green:161.0 / 255.0 blue:77.0 / 255.0 alpha:1];
-    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.19);
-    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(!self.enabled ? 0.22 : self.homeHovered ? 0.51 : 0.36), 0.19);
-    maage_ui_home_animate_layer(self.layer, @"shadowRadius", @((self.enabled && self.homeHovered ? 17 : 12) * scale), 0.19);
+    CGFloat rem = NSHeight(self.bounds) / 2.7;
+    NSColor *fill = self.homePressed ? [NSColor colorWithSRGBRed:87.0 / 255.0 green:139.0 / 255.0 blue:64.0 / 255.0 alpha:1]
+                    : self.homeHovered && self.enabled ? [NSColor colorWithSRGBRed:121.0 / 255.0 green:180.0 / 255.0 blue:94.0 / 255.0 alpha:1]
+                    : [NSColor colorWithSRGBRed:103.0 / 255.0 green:161.0 / 255.0 blue:77.0 / 255.0 alpha:1];
+    maage_ui_home_animate_layer(self.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.15);
+    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.enabled && self.homeHovered && !self.homePressed ? 0.2 : 0), 0.15);
+    maage_ui_home_animate_layer(self.layer, @"shadowRadius", @(0.45 * rem), 0.15);
 }
 - (void)drawRect:(NSRect)dirtyRect {
     (void) dirtyRect;
-    CGFloat scale = NSHeight(self.bounds) / 154.0;
-    NSRect rect = NSInsetRect(self.bounds, 6 * scale, 9 * scale);
-    NSFont *font = [NSFont systemFontOfSize:60 * scale weight:NSFontWeightSemibold];
-    NSShadow *textShadow = [[NSShadow alloc] init];
-    textShadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.32];
-    textShadow.shadowBlurRadius = 7 * scale;
-    textShadow.shadowOffset = NSMakeSize(0, -4 * scale);
-    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: [NSColor colorWithWhite:1 alpha:self.enabled ? 1 : 0.7], NSShadowAttributeName: textShadow };
+    CGFloat rem = NSHeight(self.bounds) / 2.7;
+    if (rem <= 0) return;
+    NSFont *font = maage_ui_home_font(1.125 * rem, NSFontWeightMedium);
+    NSColor *color = NSColor.whiteColor;
+    NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color, NSShadowAttributeName: maage_ui_home_shadow(rem, 0.1125, 0.05625, 0.225, 0.3) };
     NSSize titleSize = [self.title sizeWithAttributes:attributes];
-    CGFloat arrowWidth = 60 * scale, gap = 34 * scale, centerY = NSMidY(rect);
-    CGFloat x = NSMidX(rect) - (arrowWidth + gap + titleSize.width) / 2;
-    NSBezierPath *arrow = [NSBezierPath bezierPath];
-    [arrow moveToPoint:NSMakePoint(x, centerY - 29 * scale)];
-    [arrow lineToPoint:NSMakePoint(x + arrowWidth, centerY)];
-    [arrow lineToPoint:NSMakePoint(x, centerY + 29 * scale)];
-    [arrow closePath];
+    CGFloat iconSize = 1.8 * rem, gap = 0.28125 * rem, y = NSMidY(self.bounds);
+    CGFloat x = NSMidX(self.bounds) - (iconSize + gap + titleSize.width) / 2;
     [NSGraphicsContext saveGraphicsState];
-    [textShadow set];
-    [[NSColor colorWithWhite:1 alpha:self.enabled ? 1 : 0.7] setFill];
-    [arrow fill];
+    [maage_ui_home_shadow(rem, 0.16875, 0.1125, 0.05625, 0.12) set];
+    [maage_ui_home_tinted_asset(@"play_arrow", color, iconSize) drawInRect:NSMakeRect(x, y - iconSize / 2, iconSize, iconSize)];
     [NSGraphicsContext restoreGraphicsState];
-    [self.title drawAtPoint:NSMakePoint(x + arrowWidth + gap, centerY - titleSize.height / 2) withAttributes:attributes];
+    [self.title drawAtPoint:NSMakePoint(x + iconSize + gap, y - titleSize.height / 2) withAttributes:attributes];
 }
 @end
 static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     NSImageView *symbol = [[NSImageView alloc] init];
-    if (@available(macOS 11.0, *)) {
-        symbol.image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
-        if (!symbol.image && [name isEqualToString:@"wrench.and.screwdriver"]) symbol.image = [NSImage imageWithSystemSymbolName:@"hammer" accessibilityDescription:nil];
-    }
+    symbol.image = maage_ui_home_asset(name);
     symbol.imageScaling = NSImageScaleProportionallyUpOrDown;
     symbol.contentTintColor = color;
     return symbol;
@@ -530,18 +557,17 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
 - (void)refreshHomeInteraction {
     /* Animate white opacity only, behind the icon, text and chevron.
      * The pressed/hovered segments retain the card's white color. */
-    NSColor *fill = [NSColor colorWithWhite:1 alpha:self.homePressed ? 0.72 : self.homeHovered ? 0.80 : 0];
+    NSColor *fill = [NSColor colorWithWhite:1 alpha:!self.enabled ? 0 : self.homePressed ? 0.18 : self.homeHovered ? 0.35 : 0];
     maage_ui_home_animate_layer(self.hoverBackground.layer, @"backgroundColor", (__bridge id) fill.CGColor, 0.18);
 }
 @end
 @interface MaaGELauncherHomeCard : NSView
 @property(nonatomic, strong) NSView *symbolTile, *divider, *hoverSurface, *dropdownHighlight, *manageHighlight;
-@property(nonatomic, strong) NSImageView *symbol, *downSymbol;
+@property(nonatomic, strong) NSImageView *symbol, *downSymbol, *manageSymbol;
 @property(nonatomic, strong) NSTextField *value;
 @property(nonatomic, strong) MaaGELauncherHomeCardButton *dropdown, *manage;
-@property(nonatomic, strong) NSTrackingArea *homeTracking;
 @property(nonatomic, copy) NSString *accountName;
-@property(nonatomic) BOOL homeHovered, verified, accountLabelDirty;
+@property(nonatomic) BOOL verified, accountLabelDirty;
 @property(nonatomic) CGFloat accountLabelScale;
 - (void)setAccountName:(NSString *)name verified:(BOOL)verified;
 @end
@@ -550,15 +576,6 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     [super setFrameSize:size];
     [self setNeedsLayout:YES];
 }
-- (void)updateTrackingAreas {
-    [super updateTrackingAreas];
-    if (self.homeTracking) [self removeTrackingArea:self.homeTracking];
-    self.homeTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil];
-    [self addTrackingArea:self.homeTracking];
-}
-- (void)refreshHomeHover {
-    maage_ui_home_animate_layer(self.layer, @"shadowOpacity", @(self.homeHovered ? 0.35 : 0.23), 0.18);
-}
 - (void)setAccountName:(NSString *)name verified:(BOOL)verified {
     if ([_accountName isEqualToString:name] && _verified == verified) return;
     _accountName = [name copy];
@@ -566,71 +583,61 @@ static NSImageView *maage_ui_home_symbol(NSString *name, NSColor *color) {
     self.accountLabelDirty = YES;
     [self setNeedsLayout:YES];
 }
-- (void)mouseEntered:(NSEvent *)event {
-    (void) event;
-    if (self.homeHovered) return;
-    self.homeHovered = YES;
-    [self refreshHomeHover];
-}
-- (void)mouseExited:(NSEvent *)event {
-    (void) event;
-    if (!self.homeHovered) return;
-    self.homeHovered = NO;
-    [self refreshHomeHover];
-}
 - (void)resetCursorRects {
     [super resetCursorRects];
     [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
 }
 - (void)layout {
     [super layout];
-    CGFloat scale = NSHeight(self.bounds) / 110.0;
-    if (scale <= 0) return;
-    self.layer.cornerRadius = 28 * scale;
-    self.layer.shadowRadius = 15 * scale;
-    self.layer.shadowOffset = NSMakeSize(0, -6 * scale);
-    /* Clip the independent hover surfaces to the SAME corner radius as
-     * the outer card. Keep the outer layer unclipped for its drop shadow. */
+    CGFloat rem = NSHeight(self.bounds) / 1.74375;
+    if (rem <= 0) return;
+    CGFloat height = NSHeight(self.bounds), width = NSWidth(self.bounds);
+    self.layer.cornerRadius = 0.5625 * rem;
+    self.layer.shadowRadius = 0.16875 * rem;
+    self.layer.shadowOffset = NSMakeSize(0.05625 * rem, -0.1125 * rem);
     self.hoverSurface.frame = self.bounds;
     self.hoverSurface.layer.cornerRadius = self.layer.cornerRadius;
-    self.symbolTile.frame = NSMakeRect(14 * scale, 18 * scale, 74 * scale, 74 * scale);
-    self.symbolTile.layer.cornerRadius = 37 * scale;
-    self.symbol.frame = NSMakeRect(28 * scale, 32 * scale, 46 * scale, 46 * scale);
-    CGFloat fontSize = 28 * scale, available = (NSWidth(self.bounds) / scale - 250) * scale;
-    CGFloat nameWidth = MAX(1, available - 8 - (self.verified ? 34 * scale : 0));
-    NSString *value = self.accountName ?: self.value.stringValue;
-    NSFont *font = [NSFont systemFontOfSize:fontSize weight:NSFontWeightMedium];
-    CGFloat needed = [value sizeWithAttributes:@{ NSFontAttributeName: font }].width;
-    if (needed > nameWidth && needed > 0) font = [NSFont systemFontOfSize:fontSize * nameWidth / needed weight:NSFontWeightMedium];
-    BOOL fontChanged = fabs(self.value.font.pointSize - font.pointSize) > 0.1;
+
+    CGFloat padding = 0.3375 * rem, tile = 1.2375 * rem, icon = 0.9 * rem;
+    self.symbolTile.frame = NSMakeRect(padding, (height - tile) / 2, tile, tile);
+    self.symbolTile.layer.cornerRadius = tile / 2;
+    self.symbol.frame = NSMakeRect(NSMidX(self.symbolTile.frame) - icon / 2, (height - icon) / 2, icon, icon);
+
+    CGFloat backing = MAX(1, self.window.backingScaleFactor);
+    CGFloat thickness = MAX(1 / backing, round(0.05625 * rem * backing) / backing);
+    CGFloat manageWidth = (1.06875 + 2 * 0.28125) * rem;
+    CGFloat dividerX = round((width - manageWidth - thickness) * backing) / backing;
+    CGFloat downSize = 0.7875 * rem;
+    self.downSymbol.frame = NSMakeRect(dividerX - padding - downSize, (height - downSize) / 2 - 0.05625 * rem, downSize, downSize);
+    CGFloat labelX = NSMaxX(self.symbolTile.frame) + 0.3375 * rem;
+    CGFloat labelWidth = MAX(0, NSMinX(self.downSymbol.frame) - 0.1125 * rem - labelX);
+    NSFont *font = maage_ui_home_font(0.5625 * rem, NSFontWeightMedium);
+    BOOL fontChanged = fabs(self.value.font.pointSize - font.pointSize) > 0.01;
     if (fontChanged) self.value.font = font;
-    if (self.accountName && (self.accountLabelDirty || fontChanged || fabs(self.accountLabelScale - scale) > 0.001)) {
-        if (self.verified) self.value.attributedStringValue = maage_ui_home_verified_name(self.accountName, font, scale);
+    if (self.accountName && (self.accountLabelDirty || fontChanged || fabs(self.accountLabelScale - rem) > 0.001)) {
+        if (self.verified) self.value.attributedStringValue = maage_ui_home_verified_name(self.accountName, font, rem);
         else self.value.stringValue = self.accountName;
         self.accountLabelDirty = NO;
-        self.accountLabelScale = scale;
+        self.accountLabelScale = rem;
     }
-    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(105 * scale, 0, available, NSHeight(self.bounds)), font);
-    self.downSymbol.frame = NSMakeRect(NSWidth(self.bounds) - 119 * scale, 43 * scale, 23 * scale, 24 * scale);
-    CGFloat backing = self.window.backingScaleFactor;
-    if (backing < 1) backing = 2;
-    CGFloat dividerX = round((NSWidth(self.bounds) - 74 * scale) * backing) / backing;
-    CGFloat thickness = MAX(2.0 / backing, round(1.5 * scale * backing) / backing);
-    self.divider.frame = NSMakeRect(dividerX, 0, thickness, NSHeight(self.bounds));
-    self.dropdownHighlight.frame = NSMakeRect(0, 0, dividerX, NSHeight(self.bounds));
-    self.manageHighlight.frame = NSMakeRect(dividerX + thickness, 0, NSWidth(self.bounds) - dividerX - thickness, NSHeight(self.bounds));
+    self.value.lineBreakMode = NSLineBreakByTruncatingTail;
+    self.value.frame = maage_ui_home_centered_text_rect(NSMakeRect(labelX, 0, labelWidth, height), font);
+
+    self.divider.frame = NSMakeRect(dividerX, 0, thickness, height);
+    self.dropdownHighlight.frame = NSMakeRect(0, 0, dividerX, height);
+    self.manageHighlight.frame = NSMakeRect(dividerX + thickness, 0, width - dividerX - thickness, height);
     self.dropdown.frame = self.dropdownHighlight.frame;
     self.manage.frame = self.manageHighlight.frame;
+    CGFloat chevron = 1.06875 * rem;
+    self.manageSymbol.frame = NSMakeRect(NSMidX(self.manage.frame) - chevron / 2, (height - chevron) / 2, chevron, chevron);
 }
 @end
 static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, SEL manageAction, NSInteger selection, BOOL account, NSTextField * __strong *display) {
     MaaGELauncherHomeCard *card = [[MaaGELauncherHomeCard alloc] init];
     card.wantsLayer = YES;
-    card.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0.79].CGColor;
-    card.layer.borderColor = [NSColor colorWithWhite:1 alpha:0.68].CGColor;
-    card.layer.borderWidth = 0.8;
+    card.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0.65].CGColor;
     card.layer.shadowColor = NSColor.blackColor.CGColor;
-    card.layer.shadowOpacity = 0.23;
+    card.layer.shadowOpacity = 0.3;
     card.layer.masksToBounds = NO;
     /* First child: a clipped, transparent hover surface behind every icon
      * and caption. Separate child layers maintain independent button states. */
@@ -646,15 +653,16 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.manageHighlight.wantsLayer = YES;
     card.manageHighlight.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0].CGColor;
     [card.hoverSurface addSubview:card.manageHighlight];
-    NSColor *ink = [NSColor colorWithSRGBRed:0.19 green:0.25 blue:0.21 alpha:1];
+    NSColor *ink = [NSColor colorWithSRGBRed:54.0 / 255.0 green:89.0 / 255.0 blue:37.0 / 255.0 alpha:1];
+    NSColor *labelInk = [NSColor colorWithWhite:48.0 / 255.0 alpha:1];
     card.symbolTile = [[NSView alloc] init];
     card.symbolTile.wantsLayer = YES;
-    card.symbolTile.layer.backgroundColor = [NSColor colorWithSRGBRed:0.40 green:0.62 blue:0.30 alpha:0.13].CGColor;
+    card.symbolTile.layer.backgroundColor = [NSColor colorWithSRGBRed:103.0 / 255.0 green:161.0 / 255.0 blue:77.0 / 255.0 alpha:0.2].CGColor;
     [card addSubview:card.symbolTile];
     card.symbol = maage_ui_home_symbol(symbol, ink);
     [card addSubview:card.symbol];
     card.value = maage_ui_row_label(title, 12, YES);
-    card.value.textColor = NSColor.blackColor;
+    card.value.textColor = labelInk;
     card.value.alignment = NSTextAlignmentLeft;
     [card addSubview:card.value];
     *display = card.value;
@@ -662,7 +670,7 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
         card.accountName = title;
         card.accountLabelDirty = YES;
     }
-    card.downSymbol = maage_ui_home_symbol(@"chevron.down", ink);
+    card.downSymbol = maage_ui_home_symbol(@"keyboard_arrow_down", labelInk);
     [card addSubview:card.downSymbol];
     card.dropdown = [[MaaGELauncherHomeCardButton alloc] init];
     card.dropdown.title = @"";
@@ -681,16 +689,15 @@ static NSView *maage_ui_home_card(NSString *symbol, NSString *title, id target, 
     card.manage.hoverBackground = card.manageHighlight;
     card.manage.target = target;
     card.manage.action = manageAction;
-    if (@available(macOS 11.0, *)) card.manage.image = [NSImage imageWithSystemSymbolName:@"chevron.right" accessibilityDescription:@"Manage"];
-    card.manage.imagePosition = NSImageOnly;
-    card.manage.contentTintColor = ink;
+    card.manageSymbol = maage_ui_home_symbol(@"chevron_right", [NSColor colorWithWhite:80.0 / 255.0 alpha:1]);
+    [card addSubview:card.manageSymbol];
     card.manage.toolTip = account ? @"Manage accounts" : selection == 1 ? @"Manage Client builds" : selection == 3 ? @"Manage Playspaces (coming later)" : @"Manage installations";
     card.manage.accessibilityLabel = @"Manage selection";
     [card addSubview:card.manage];
     /* Keep the physical-pixel-aligned divider above both hover surfaces. */
     card.divider = [[NSView alloc] init];
     card.divider.wantsLayer = YES;
-    card.divider.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.23].CGColor;
+    card.divider.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.1].CGColor;
     [card addSubview:card.divider];
     /* The card owns explicit responsive frames, not an Auto Layout subgraph. */
     for (NSView *part in card.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1711,6 +1718,8 @@ static NSTableView *maage_ui_navigation_table(void) {
 
     MaaGELauncherHomeView *home = [[MaaGELauncherHomeView alloc] init];
     self.playHome = home;
+    NSString *backgroundPath = [NSBundle.mainBundle pathForResource:@"background" ofType:@"jpg" inDirectory:@"Home"];
+    home.background = backgroundPath ? [[NSImage alloc] initWithContentsOfFile:backgroundPath] : nil;
     NSString *logoPath = [NSBundle.mainBundle pathForResource:@"icon" ofType:@"png"];
     NSImage *artwork = logoPath ? [[NSImage alloc] initWithContentsOfFile:logoPath] : nil;
     home.brand = [NSImageView imageViewWithImage:artwork ?: NSApp.applicationIconImage];
@@ -1733,7 +1742,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     [home addSubview:home.heading];
 
     home.tagline = maage_ui_row_label(@"MINECRAFT AS A GAME ENGINE", 18, NO);
-    home.tagline.textColor = [NSColor colorWithWhite:1 alpha:0.95];
+    home.tagline.textColor = NSColor.whiteColor;
     home.tagline.alignment = NSTextAlignmentCenter;
     NSShadow *detailShadow = [[NSShadow alloc] init];
     detailShadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.4];
@@ -1749,7 +1758,7 @@ static NSTableView *maage_ui_navigation_table(void) {
     home.taglineRightRule = [[NSView alloc] init];
     for (NSView *rule in @[ home.taglineLeftRule, home.taglineRightRule ]) {
         rule.wantsLayer = YES;
-        rule.layer.backgroundColor = [NSColor colorWithWhite:1 alpha:0.82].CGColor;
+        rule.layer.backgroundColor = NSColor.whiteColor.CGColor;
         [home addSubview:rule];
     }
 
@@ -1775,34 +1784,34 @@ static NSTableView *maage_ui_navigation_table(void) {
     [home updateReadiness:@"Initializing…" symbol:@"clock.fill" tint:NSColor.whiteColor];
 
     home.cards = @[
-        maage_ui_home_card(@"cube", @"Loading installation…", self, @selector(showInstallations:), 0, NO, &_homeInstallation),
-        maage_ui_home_card(@"arrow.triangle.2.circlepath", @"No Client build", self, @selector(showInstallations:), 1, NO, &_homeVersion),
-        maage_ui_home_card(@"person.2", @"No account selected", self, @selector(manage:), 2, YES, &_homeAccount),
-        maage_ui_home_card(@"wrench.and.screwdriver", @"Default Playspace", self, @selector(showPlayspacePlaceholder:), 3, NO, &_homePlayspace)
+        maage_ui_home_card(@"deployed_code", @"Loading installation…", self, @selector(showInstallations:), 0, NO, &_homeInstallation),
+        maage_ui_home_card(@"change_circle", @"No Client build", self, @selector(showInstallations:), 1, NO, &_homeVersion),
+        maage_ui_home_card(@"group", @"No account selected", self, @selector(manage:), 2, YES, &_homeAccount),
+        maage_ui_home_card(@"handyman", @"Default Playspace", self, @selector(showPlayspacePlaceholder:), 3, NO, &_homePlayspace)
     ];
     for (NSView *card in home.cards) [home addSubview:card];
 
     MaaGELauncherConfigurationButton *configuration = [[MaaGELauncherConfigurationButton alloc] init];
     configuration.target = self;
     configuration.action = @selector(showSettings:);
-    configuration.homeRestOpacity = 0.92;
+    configuration.homeRestOpacity = 1;
     configuration.toolTip = @"Launcher settings and About";
     home.configuration = configuration;
     [home addSubview:configuration];
     [configuration refreshHomeInteraction];
 
     home.notice = maage_ui_row_label(@"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", 10, NO);
-    home.notice.textColor = [NSColor colorWithWhite:1 alpha:0.63];
+    home.notice.textColor = [NSColor colorWithWhite:1 alpha:0.55];
     home.notice.alignment = NSTextAlignmentCenter;
     home.notice.shadow = detailShadow;
     [home addSubview:home.notice];
     home.version = maage_ui_row_label(@"v" MAAGE_LAUNCHER_VERSION, 10, NO);
     home.version.alignment = NSTextAlignmentCenter;
-    home.version.textColor = [NSColor colorWithWhite:1 alpha:0.70];
+    home.version.textColor = [NSColor colorWithWhite:1 alpha:0.55];
     home.version.shadow = detailShadow;
     home.version.toolTip = @"Launcher " MAAGE_LAUNCHER_VERSION;
     [home addSubview:home.version];
-    /* The home owns the reference and compact-grid layouts at every window size. */
+    /* The home owns viewport-relative sizing and grouped wrapping. */
     for (NSView *part in home.subviews) part.translatesAutoresizingMaskIntoConstraints = NO;
     home.hidden = YES;
     self.playSplash = [[MaaGELauncherSplashView alloc] init];
