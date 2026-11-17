@@ -413,13 +413,13 @@ static void maage_mesh_face(maage_mesh_vertex *vertices, unsigned int *indices, 
 
 /* Convert the authored (possibly oriented or cropped) atlas UVs to local tile
  * coordinates. World position selects the variation in the fragment shader. */
-static void maage_mesh_repeat_face(maage_mesh_vertex *quad, const float uv[4], unsigned int face, unsigned int variation) {
+static void maage_mesh_repeat_face(maage_mesh_vertex *quad, const float uv[4], unsigned int face, unsigned int variation, int boundary) {
     unsigned int corner, axis;
     for (corner = 0; corner < 4; ++corner) {
         memcpy(quad[corner].tile, uv, sizeof(quad[corner].tile));
         for (axis = 0; axis < 2; ++axis)
             quad[corner].uv[axis] = quad[corner].uv[axis] == uv[axis] ? 0 : (quad[corner].uv[axis] == uv[axis + 2] ? 1 : (quad[corner].uv[axis] - uv[axis]) / (uv[axis + 2] - uv[axis]));
-        quad[corner].rotation_face = variation ? 1U + face + MAAGE_MESH_ROTATION_FACE_COUNT * (variation - 1U) : 0;
+        quad[corner].rotation_face = variation ? 1U + face + MAAGE_MESH_ROTATION_FACE_COUNT * (variation - 1U) + (boundary ? 0U : MAAGE_MESH_VARIATION_FACE_RANGE) : 0;
     }
 }
 
@@ -788,16 +788,16 @@ static size_t maage_mesh_generate(const maage_block_registry *registry, const ma
                              * sloped/flowing surfaces on the original path. */
                             if (state->fluid_kind && material == MAAGE_MESH_MATERIAL_TRANSLUCENT && face == MAAGE_FACE_POSITIVE_Y && !flow && fluid_flow[0] == 0 && fluid_flow[1] == 0 && fluid_heights[0] == fluid_heights[1] && fluid_heights[0] == fluid_heights[2] && fluid_heights[0] == fluid_heights[3]) mergeable = 1;
                             if (variation && uv[2] > uv[0] && uv[3] > uv[1]) {
-                                maage_mesh_repeat_face(vertices + face_count * 4, uv, face, variation);
+                                maage_mesh_repeat_face(vertices + face_count * 4, uv, face, variation, boundary);
                             } else if (!overlay && !reverse && mergeable && model == MAAGE_BLOCK_MESH_CUBE && log_axis < 0 && uv[2] > uv[0] && uv[3] > uv[1] && face_shape.minimum[0] == 0 && face_shape.minimum[1] == 0 && face_shape.minimum[2] == 0 && face_shape.maximum[0] == 1 && face_shape.maximum[1] == 1 && face_shape.maximum[2] == 1) {
                                 maage_mesh_vertex *quad = vertices + face_count * 4;
                                 for (corner = 1; corner < 4; ++corner)
                                     if (memcmp(quad[0].color, quad[corner].color, sizeof(quad[0].color)) || memcmp(quad[0].light, quad[corner].light, sizeof(quad[0].light))) break;
-                                if (corner == 4) maage_mesh_repeat_face(quad, uv, face, 0);
+                                if (corner == 4) maage_mesh_repeat_face(quad, uv, face, 0, boundary);
                             }
                             if (overlay) {
                                 maage_mesh_face(vertices, indices, face_count + 1, chunk->x * 16 + x, y, chunk->z * 16 + z, face, definition, definition->overlay_uv, &face_shape, model, state->geometry_variant, -1, MAAGE_MESH_MATERIAL_CUTOUT, colors[definition->overlay_tint_mode], definition->overlay_tint_mode && blend >= MAAGE_BIOME_BLEND_SMOOTH_5, NULL, NULL, NULL, &illumination);
-                                if (definition->overlay_variation && definition->overlay_uv[3] > definition->overlay_uv[1]) maage_mesh_repeat_face(vertices + (face_count + 1) * 4, definition->overlay_uv, face, definition->overlay_variation);
+                                if (definition->overlay_variation && definition->overlay_uv[3] > definition->overlay_uv[1]) maage_mesh_repeat_face(vertices + (face_count + 1) * 4, definition->overlay_uv, face, definition->overlay_variation, boundary);
                             }
                             if (reverse) maage_mesh_reverse_face(vertices, indices, face_count, face_count + 1 + (overlay ? 1 : 0));
                         }

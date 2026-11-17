@@ -26,12 +26,13 @@ MAAGE_SHADER_VEC2 maage_shader_tile_uv(MAAGE_SHADER_VEC2 uv, MAAGE_SHADER_VEC4 t
     if (tile.z > tile.x && tile.w > tile.y) {
         MAAGE_SHADER_VEC2 local_uv = uv - floor(uv);
         if (rotation_face != 0u) {
-            /* Recover the owning cell, including at negative coordinates and
-             * on positive faces lying exactly on the next cell's boundary. */
-            uint face = (rotation_face - 1u) % uint(MAAGE_MESH_ROTATION_FACE_COUNT);
-            uint variation = (rotation_face - 1u) / uint(MAAGE_MESH_ROTATION_FACE_COUNT) + 1u;
+            /* Boundary planes need an inward offset; interior planes already
+             * lie inside their owner (including shallow snow and farmland). */
+            uint selector = (rotation_face - 1u) % uint(MAAGE_MESH_VARIATION_FACE_RANGE);
+            uint face = selector % uint(MAAGE_MESH_ROTATION_FACE_COUNT);
+            uint variation = selector / uint(MAAGE_MESH_ROTATION_FACE_COUNT) + 1u;
             uint axis = face / 2u;
-            world_position[axis] += (face & 1u) != 0u ? -0.5 : 0.5;
+            if (rotation_face <= uint(MAAGE_MESH_VARIATION_FACE_RANGE)) world_position[axis] += (face & 1u) != 0u ? -0.5 : 0.5;
             MAAGE_SHADER_VEC3 cell = floor(world_position);
             uint hash = uint(int(cell.x)) * 0x9e3779b1u ^ uint(int(cell.y)) * 0x85ebca77u ^ uint(int(cell.z)) * 0xc2b2ae3du ^ face * 0x27d4eb2du;
             hash ^= hash >> 16u;

@@ -447,8 +447,6 @@ static int maage_block_state_presentation_valid(const maage_block_state_definiti
         if (!maage_block_face_definition_valid(face)) return 0;
         if (!face->texture_variation && !face->overlay_variation && !face->snow_variation) continue;
         if (block->mesh_shape != MAAGE_BLOCK_MESH_CUBE || state->fluid_kind || (block->mesh_material != MAAGE_MESH_MATERIAL_OPAQUE && block->mesh_material != MAAGE_MESH_MATERIAL_CUTOUT)) return 0;
-        /* The shader finds the owner by moving half a cell inward from the plane. */
-        if (block->selectable && !(block->mesh_inset && side / 2 != 1) && (side & 1U ? block->selection_shape.maximum[side / 2] < 0.5 : block->selection_shape.minimum[side / 2] >= 0.5)) return 0;
     }
     return 1;
 }

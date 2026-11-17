@@ -18,7 +18,8 @@ typedef struct maage_mesh_vertex {
      * inside this tile; zero spans preserve ordinary absolute atlas UVs.
      * Repeated triangles require identical bounds and animation at each corner. */
     float tile[4];
-    /* Zero is fixed; otherwise 1 + face + 6 * (variation - 1).
+    /* Zero is fixed; otherwise 1 + face + 6 * (variation - 1), plus
+     * MAAGE_MESH_VARIATION_FACE_RANGE for an interior face plane.
      * Nonzero requires repeated tile UVs and untransformed world positions. */
     unsigned int rotation_face;
 } maage_mesh_vertex;

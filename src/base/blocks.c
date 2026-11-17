@@ -29,7 +29,6 @@ static unsigned int base_texture_variation(int texture) {
         case MAAGE_BASE_TEXTURE_EXTRA + 9: /* lapis ore */
         case MAAGE_BASE_TEXTURE_EXTRA + 19: /* diamond ore */
         case MAAGE_BASE_TEXTURE_EXTRA + 20: /* redstone ore */
-        case MAAGE_BASE_TEXTURE_EXTRA + 22: /* cactus side */
         case MAAGE_BASE_TEXTURE_EXTRA + 26: /* spruce bark */
         case MAAGE_BASE_TEXTURE_EXTRA + 28: /* spruce leaves */
         case MAAGE_BASE_TEXTURE_EXTRA + 31: /* birch leaves */
@@ -194,7 +193,8 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
                     state.faces[face].tint[channel] = (float) ((color >> ((2 - channel) * 8)) & 255UL) / 255;
         }
         if (block == ids->block_log || block == ids->block_log2) state.texture_axis = axis == 1 ? 1 : (axis == 2 ? 3 : 2);
-        if (block != ids->block_air && definition->mesh_shape == MAAGE_BLOCK_MESH_CUBE && !state.fluid_kind) {
+        /* Geometry identity is authoritative before registry finalization. */
+        if (block != ids->block_air && definition->geometry_id == ids->geometry_cube && !state.fluid_kind) {
             state.faces[face].texture_variation = base_texture_variation(selected);
             if (state.faces[face].overlay_texture) state.faces[face].overlay_variation = base_texture_variation((int) state.faces[face].overlay_texture);
             if (state.faces[face].snow_texture) state.faces[face].snow_variation = base_texture_variation((int) state.faces[face].snow_texture);
