@@ -56,7 +56,18 @@ elseif(MAAGE_PLATFORM_WINDOWS)
     target_link_libraries(maage_launcher_access PRIVATE bcrypt ws2_32 shell32)
     target_sources(maage_launcher PRIVATE native/windows/win32_ui.c native/windows/win32_paint.c ui/launcher_win32.c native/windows/launcher.rc)
     target_include_directories(maage_launcher PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/native/windows"
-        "${MAAGE_LAUNCHER_ICON_DIRECTORY}")
+        "${MAAGE_LAUNCHER_ICON_DIRECTORY}" "${CMAKE_CURRENT_SOURCE_DIR}/ui/home")
+    set_property(SOURCE native/windows/launcher.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/background.jpg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/deployed_code.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/change_circle.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/group.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/handyman.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/keyboard_arrow_down.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/chevron_right.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/verified.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/settings.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ui/home/play_arrow.png")
     target_link_libraries(maage_launcher PRIVATE comctl32 comdlg32 uxtheme dwmapi shell32 ole32 windowscodecs uuid msimg32)
     if(MSVC)
         target_sources(maage_launcher PRIVATE native/windows/launcher.manifest)

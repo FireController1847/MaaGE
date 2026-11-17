@@ -46,9 +46,8 @@ int maage_win32_surface_resize(maage_win32_surface *s, HDC compatible, int width
     return 1;
 }
 
-/* Decode the packaged transparent PNG with the native Windows Imaging
- * Component. The ICO is still used for the executable and window chrome. */
-int maage_win32_surface_png(maage_win32_surface *s, HINSTANCE instance, int resource) {
+/* Decode packaged artwork with Windows Imaging Component (PNG or JPEG). */
+int maage_win32_surface_resource(maage_win32_surface *s, HINSTANCE instance, int resource) {
     IWICImagingFactory *factory = NULL;
     IWICStream *stream = NULL;
     IWICBitmapDecoder *decoder = NULL;
@@ -137,6 +136,30 @@ void maage_win32_surface_image(maage_win32_surface *s, const maage_win32_surface
     AlphaBlend(s->dc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, image->dc, 0, 0, image->width, image->height, blend);
 }
 
+/* Cover the client area with the centered source crop, without rescaling
+ * an intermediate bitmap. Constant alpha over black dims the image. */
+void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height, int dark) {
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    int sw = image->width, sh = image->height, x = 0, y = 0;
+    if (!image->dc || width <= 0 || height <= 0 || sw <= 0 || sh <= 0) return;
+    if ((double) width / height > (double) sw / sh) {
+        sh = (int) ((double) sw * height / width + .5);
+        if (sh < 1) sh = 1;
+        y = (image->height - sh) / 2;
+    } else {
+        sw = (int) ((double) sh * width / height + .5);
+        if (sw < 1) sw = 1;
+        x = (image->width - sw) / 2;
+    }
+    if (dark) {
+        RECT rect;
+        SetRect(&rect, 0, 0, width, height);
+        FillRect(s->dc, &rect, (HBRUSH) GetStockObject(BLACK_BRUSH));
+        blend.SourceConstantAlpha = 219;
+    }
+    AlphaBlend(s->dc, 0, 0, width, height, image->dc, x, y, sw, sh, blend);
+}
+
 static DWORD maage_win32_bgra(COLORREF color) {
     return 0xff000000UL | ((DWORD) GetRValue(color) << 16) | ((DWORD) GetGValue(color) << 8) | GetBValue(color);
 }
@@ -185,6 +208,34 @@ static void maage_win32_blend(DWORD *pixel, COLORREF color, double coverage) {
     g = (GetGValue(color) * a + ((old >> 8) & 255) * inverse + 127) / 255;
     b = (GetBValue(color) * a + (old & 255) * inverse + 127) / 255;
     *pixel = 0xff000000UL | ((DWORD) r << 16) | ((DWORD) g << 8) | b;
+}
+
+/* Tint immutable icon alpha masks while sampling them at the control's DPI.
+ * Only the small destination icon rectangle is touched. */
+void maage_win32_surface_mask(maage_win32_surface *s, const maage_win32_surface *image, RECT rect, COLORREF color, double opacity) {
+    int x, y, sx, sy, sx1, sy1, width = rect.right - rect.left, height = rect.bottom - rect.top;
+    double fx, fy, tx, ty, a, b;
+    if (!image->pixels || !s->pixels || width <= 0 || height <= 0) return;
+    GdiFlush();
+    for (y = rect.top; y < rect.bottom; ++y) {
+        if (y < 0 || y >= s->height) continue;
+        fy = ((y - rect.top + .5) * image->height / height) - .5;
+        if (fy < 0) fy = 0;
+        sy = (int) fy;
+        sy1 = sy + 1 < image->height ? sy + 1 : sy;
+        ty = fy - sy;
+        for (x = rect.left; x < rect.right; ++x) {
+            if (x < 0 || x >= s->width) continue;
+            fx = ((x - rect.left + .5) * image->width / width) - .5;
+            if (fx < 0) fx = 0;
+            sx = (int) fx;
+            sx1 = sx + 1 < image->width ? sx + 1 : sx;
+            tx = fx - sx;
+            a = (image->pixels[(size_t) sy * image->width + sx] >> 24) * (1 - tx) + (image->pixels[(size_t) sy * image->width + sx1] >> 24) * tx;
+            b = (image->pixels[(size_t) sy1 * image->width + sx] >> 24) * (1 - tx) + (image->pixels[(size_t) sy1 * image->width + sx1] >> 24) * tx;
+            maage_win32_blend(&s->pixels[(size_t) y * s->width + x], color, (a * (1 - ty) + b * ty) * opacity / 255);
+        }
+    }
 }
 
 static double maage_win32_clamp(double v, double lo, double hi) {

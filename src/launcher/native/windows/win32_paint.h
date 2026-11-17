@@ -11,9 +11,11 @@ typedef struct maage_win32_surface {
 } maage_win32_surface;
 int maage_win32_surface_resize(maage_win32_surface *s, HDC compatible, int width, int height);
 void maage_win32_surface_destroy(maage_win32_surface *s);
-int maage_win32_surface_png(maage_win32_surface *s, HINSTANCE instance, int resource);
+int maage_win32_surface_resource(maage_win32_surface *s, HINSTANCE instance, int resource);
 int maage_win32_surface_shadow(maage_win32_surface *s, const maage_win32_surface *source);
 void maage_win32_surface_image(maage_win32_surface *s, const maage_win32_surface *image, RECT rect);
+void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height, int dark);
+void maage_win32_surface_mask(maage_win32_surface *s, const maage_win32_surface *image, RECT rect, COLORREF color, double opacity);
 void maage_win32_surface_gradient_rect(maage_win32_surface *s, int width, int height, COLORREF top, COLORREF bottom);
 int maage_win32_surface_make_control_shadow(maage_win32_surface *s, int pill);
 void maage_win32_surface_control_shadow(maage_win32_surface *s, const maage_win32_surface *mask, RECT shape);

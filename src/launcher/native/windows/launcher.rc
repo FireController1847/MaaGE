@@ -2,6 +2,16 @@
 
 MAAGE_LAUNCHER_ICON_RESOURCE ICON "icon.ico"
 MAAGE_LAUNCHER_LOGO_RESOURCE RCDATA "icon.png"
+MAAGE_LAUNCHER_HOME_BACKGROUND RCDATA "background.jpg"
+104 RCDATA "deployed_code.png"
+105 RCDATA "change_circle.png"
+106 RCDATA "group.png"
+107 RCDATA "handyman.png"
+108 RCDATA "keyboard_arrow_down.png"
+109 RCDATA "chevron_right.png"
+110 RCDATA "verified.png"
+111 RCDATA "settings.png"
+112 RCDATA "play_arrow.png"
 
 #ifndef MAAGE_LAUNCHER_LINKER_MANIFEST
 1 24 "launcher.manifest"
