@@ -1162,6 +1162,28 @@ static NSTableView *maage_ui_navigation_table(void) {
         [menu addItem:empty];
     }
     [menu addItem:NSMenuItem.separatorItem];
+#if MAAGE_LAUNCHER_DEVELOPMENT
+    if (selection == 1) {
+        NSMenuItem *replace = [[NSMenuItem alloc] initWithTitle:@"Replace Current Client…" action:@selector(importClient:) keyEquivalent:@""];
+        replace.target = self;
+        replace.tag = 1;
+        replace.enabled = NO;
+        if (state->catalog_ready && state->clients_valid && state->clients && !state->client_job && !state->launch_pending) {
+            for (unsigned i = 0; i < state->count; ++i) {
+                maage_installation *installation = &state->installations[i];
+                if (installation->id != state->selected) continue;
+                int index = maage_clients_find(state->clients, installation->client);
+                if (index >= 0) {
+                    maage_client_build *build = &state->clients->builds[index];
+                    replace.representedObject = @(build->id);
+                    replace.enabled = !strcmp(build->origin, "local") && strcmp(state->running_client, build->id) != 0;
+                }
+                break;
+            }
+        }
+        [menu addItem:replace];
+    }
+#endif
     NSString *manageTitle = selection == 0 ? @"Manage Installations…" : selection == 1 ? @"Manage Client Builds…" : selection == 2 ? @"Manage Accounts…" : @"Manage Playspaces (Coming Soon)";
     SEL manageAction = selection == 2 ? @selector(manage:) : selection == 3 ? @selector(showPlayspacePlaceholder:) : @selector(showInstallations:);
     NSMenuItem *manage = [[NSMenuItem alloc] initWithTitle:manageTitle action:manageAction keyEquivalent:@""];
@@ -2241,8 +2263,17 @@ static NSTableView *maage_ui_navigation_table(void) {
 #if MAAGE_LAUNCHER_DEVELOPMENT
 - (void)importClient:(id)sender {
     BOOL replacing = [sender tag] == 1;
-    NSInteger row = self.clients.selectedRow;
-    if (self.state->client_job || (replacing && row < 0)) return;
+    maage_launcher_ui *state = self.state;
+    if (!state->catalog_ready || !state->clients_valid || !state->clients || state->client_job || state->launch_pending) return;
+    NSString *clientID = nil;
+    if (replacing) {
+        if ([sender isKindOfClass:NSMenuItem.class]) clientID = [(NSMenuItem *) sender representedObject];
+        else {
+            NSInteger row = self.clients.selectedRow;
+            if (row >= 0 && (NSUInteger) row < state->clients->count) clientID = @(state->clients->builds[row].id);
+        }
+        if (!clientID.length || maage_clients_find(state->clients, clientID.UTF8String) < 0) return;
+    }
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.title = replacing ? @"Replace Client" : @"Import Local Client";
     panel.message = @"Choose maage-client with its adjacent maage-client.json manifest. Import copies only those two files without running the Client.";
@@ -2251,9 +2282,11 @@ static NSTableView *maage_ui_navigation_table(void) {
     panel.treatsFilePackagesAsDirectories = NO;
     panel.allowsMultipleSelection = NO;
     if ([panel runModal] == NSModalResponseOK) {
-        if (replacing) maage_launcher_client_replace(self.state, (unsigned) row, panel.URL.path.UTF8String);
-        else
-            maage_launcher_client_probe(self.state, panel.URL.path.UTF8String);
+        if (!state->catalog_ready || !state->clients_valid || !state->clients || state->client_job || state->launch_pending) return;
+        if (replacing) {
+            int index = maage_clients_find(state->clients, clientID.UTF8String);
+            if (index >= 0) maage_launcher_client_replace(state, (unsigned) index, panel.URL.path.UTF8String);
+        } else maage_launcher_client_probe(state, panel.URL.path.UTF8String);
     }
 }
 #endif
