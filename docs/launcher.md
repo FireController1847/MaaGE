@@ -27,7 +27,7 @@ Play requires a valid catalog, exact selected package, verified active account, 
 
 Client lifetime survives Launcher closure. Close cancels and joins workers before releasing borrowed services; failed joins retain resources. Existing filesystem calls finish on their worker. Native controls consume copied snapshots; workers never update them.
 
-AppKit/Win32 default to 1000×670, minimum 700×500 logical content units; selection cards reflow into 2×2 when their natural width no longer fits. AppKit hosts only active screens/pages with explicit host sizing, so hidden constraints cannot impose minima. Win32 preserves native DPI, keyboard focus, selection and high contrast; buffered DIB painting and owner-drawn controls support live resize. Cached shadows avoid per-pixel regeneration. Onboarding progress is time-based; page fades use noninteractive outgoing frames and respect reduced motion/high contrast. GTK retains native conventions.
+AppKit/Win32 default to 1000×670, minimum 700×500 logical content units; selection cards reflow into 2×2 when their natural width no longer fits. AppKit hosts only active screens/pages with explicit host sizing, so hidden constraints cannot impose minima. Win32 preserves native DPI, keyboard focus, selection and high contrast; buffered DIB painting, filtered artwork, supersampled home text and batched native control placement support live resize. Cached shadows avoid per-pixel regeneration. Onboarding progress is time-based; page fades use noninteractive outgoing frames and respect reduced motion/high contrast. GTK retains native conventions.
 
 `--manage-accounts` opens Accounts; `--repair-assets` queues Repair in Settings; only explicit `--renderer-demo` starts graphics, independently of account/resources.
 

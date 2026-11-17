@@ -136,11 +136,53 @@ void maage_win32_surface_image(maage_win32_surface *s, const maage_win32_surface
     AlphaBlend(s->dc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, image->dc, 0, 0, image->width, image->height, blend);
 }
 
-/* Cover the client area with the centered source crop, without rescaling
- * an intermediate bitmap. Constant alpha over black dims the image. */
-void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height, int dark) {
-    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-    int sw = image->width, sh = image->height, x = 0, y = 0;
+/* WIC resamples premultiplied alpha, avoiding jagged edges or dark halos
+ * on the logo and shadow. Cache the result at its actual destination size. */
+int maage_win32_surface_resample(maage_win32_surface *s, const maage_win32_surface *image, int width, int height) {
+    IWICImagingFactory *factory = NULL;
+    IWICBitmap *bitmap = NULL;
+    IWICBitmapScaler *scaler = NULL;
+    HRESULT initialized, result;
+    int success = 0;
+    if (!image->pixels || width <= 0 || height <= 0 || width > 8192 || height > 8192) return 0;
+    if (s->dc && s->width == width && s->height == height) return 1;
+    initialized = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return 0;
+    GdiFlush();
+    result = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (void **) &factory);
+    if (SUCCEEDED(result)) result = IWICImagingFactory_CreateBitmapFromMemory(factory, (UINT) image->width, (UINT) image->height, &GUID_WICPixelFormat32bppPBGRA, (UINT) image->width * 4, (UINT) image->width * image->height * 4, (BYTE *) image->pixels, &bitmap);
+    if (SUCCEEDED(result)) result = IWICImagingFactory_CreateBitmapScaler(factory, &scaler);
+    if (SUCCEEDED(result)) result = IWICBitmapScaler_Initialize(scaler, (IWICBitmapSource *) bitmap, (UINT) width, (UINT) height, width < image->width || height < image->height ? WICBitmapInterpolationModeFant : WICBitmapInterpolationModeLinear);
+    if (SUCCEEDED(result) && maage_win32_surface_resize(s, NULL, width, height)) {
+        GdiFlush();
+        result = IWICBitmapScaler_CopyPixels(scaler, NULL, (UINT) width * 4, (UINT) width * height * 4, (BYTE *) s->pixels);
+        success = SUCCEEDED(result);
+    }
+    if (scaler) IWICBitmapScaler_Release(scaler);
+    if (bitmap) IWICBitmap_Release(bitmap);
+    if (factory) IWICImagingFactory_Release(factory);
+    if (SUCCEEDED(initialized)) CoUninitialize();
+    if (!success) maage_win32_surface_destroy(s);
+    return success;
+}
+
+/* Dim the opaque home artwork once; the resize path only has to stretch it. */
+int maage_win32_surface_dim(maage_win32_surface *s, const maage_win32_surface *image) {
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 219, 0};
+    RECT rect;
+    if (!image->dc || !maage_win32_surface_resize(s, NULL, image->width, image->height)) return 0;
+    SetRect(&rect, 0, 0, image->width, image->height);
+    FillRect(s->dc, &rect, (HBRUSH) GetStockObject(BLACK_BRUSH));
+    if (AlphaBlend(s->dc, 0, 0, image->width, image->height, image->dc, 0, 0, image->width, image->height, blend)) return 1;
+    maage_win32_surface_destroy(s);
+    return 0;
+}
+
+/* The JPEG is opaque, so GDI's HALFTONE filter can resample its centered
+ * cover crop directly into the cached backdrop without an extra buffer. */
+void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height) {
+    int sw = image->width, sh = image->height, x = 0, y = 0, mode;
+    POINT origin = {0, 0};
     if (!image->dc || width <= 0 || height <= 0 || sw <= 0 || sh <= 0) return;
     if ((double) width / height > (double) sw / sh) {
         sh = (int) ((double) sw * height / width + .5);
@@ -151,13 +193,14 @@ void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface
         if (sw < 1) sw = 1;
         x = (image->width - sw) / 2;
     }
-    if (dark) {
-        RECT rect;
-        SetRect(&rect, 0, 0, width, height);
-        FillRect(s->dc, &rect, (HBRUSH) GetStockObject(BLACK_BRUSH));
-        blend.SourceConstantAlpha = 219;
+    mode = SetStretchBltMode(s->dc, HALFTONE);
+    SetBrushOrgEx(s->dc, 0, 0, &origin);
+    if (!StretchBlt(s->dc, 0, 0, width, height, image->dc, x, y, sw, sh, SRCCOPY)) {
+        BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, 0};
+        AlphaBlend(s->dc, 0, 0, width, height, image->dc, x, y, sw, sh, blend);
     }
-    AlphaBlend(s->dc, 0, 0, width, height, image->dc, x, y, sw, sh, blend);
+    SetBrushOrgEx(s->dc, origin.x, origin.y, NULL);
+    if (mode) SetStretchBltMode(s->dc, mode);
 }
 
 static DWORD maage_win32_bgra(COLORREF color) {
@@ -208,6 +251,29 @@ static void maage_win32_blend(DWORD *pixel, COLORREF color, double coverage) {
     g = (GetGValue(color) * a + ((old >> 8) & 255) * inverse + 127) / 255;
     b = (GetBValue(color) * a + (old & 255) * inverse + 127) / 255;
     *pixel = 0xff000000UL | ((DWORD) r << 16) | ((DWORD) g << 8) | b;
+}
+
+/* Average a 2x grayscale glyph mask onto the real background. The mask
+ * comes from white GDI text on black, so it is independent of DIB alpha
+ * and of the system's subpixel/ClearType configuration. */
+void maage_win32_surface_text_mask(maage_win32_surface *s, const maage_win32_surface *mask, RECT rect, COLORREF color, double opacity) {
+    int x, y, width = rect.right - rect.left, height = rect.bottom - rect.top;
+    if (!s->pixels || !mask->pixels || width <= 0 || height <= 0 || width > mask->width / 2 || height > mask->height / 2) return;
+    GdiFlush();
+    for (y = 0; y < height; ++y) {
+        const DWORD *a = mask->pixels + (size_t) y * 2 * mask->width, *b = a + mask->width;
+        DWORD *row;
+        int dy = rect.top + y;
+        if (dy < 0 || dy >= s->height) continue;
+        row = s->pixels + (size_t) dy * s->width;
+        for (x = 0; x < width; ++x) {
+            unsigned coverage;
+            int dx = rect.left + x, sx = 2 * x;
+            if (dx < 0 || dx >= s->width) continue;
+            coverage = (a[sx] & 255) + (a[sx + 1] & 255) + (b[sx] & 255) + (b[sx + 1] & 255);
+            if (coverage) maage_win32_blend(&row[dx], color, coverage * opacity / 1020.0);
+        }
+    }
 }
 
 /* Tint immutable icon alpha masks while sampling them at the control's DPI.
