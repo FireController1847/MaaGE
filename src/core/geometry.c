@@ -35,7 +35,7 @@ static maage_status maage_geometry_validate(const maage_mesh_data *data) {
         const float *animation = data->vertices[index].animation;
         const float *tile = data->vertices[index].tile;
         unsigned int rotation_face = data->vertices[index].rotation_face;
-        if (rotation_face > MAAGE_MESH_ROTATION_FACE_COUNT || (rotation_face && !(tile[2] > tile[0] && tile[3] > tile[1]))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
+        if (rotation_face > MAAGE_MESH_VARIATION_FACE_MAX || (rotation_face && !(tile[2] > tile[0] && tile[3] > tile[1]))) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
         for (axis = 0; axis < 4; ++axis)
             if (!(tile[axis] >= 0 && tile[axis] <= 1)) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);
         if (tile[2] < tile[0] || tile[3] < tile[1] || (tile[2] > tile[0]) != (tile[3] > tile[1])) return maage_status_make(MAAGE_STATUS_INVALID_ARGUMENT, MAAGE_CONTEXT_RENDER, MAAGE_OPERATION_UPLOAD, 1);

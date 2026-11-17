@@ -15,6 +15,63 @@ static void base_block(maage_block_definition *block, const maage_base_ids *ids,
     block->selection_shape.maximum[0] = block->selection_shape.maximum[1] = block->selection_shape.maximum[2] = 1;
     if (solid) block->collision_shape = block->selection_shape;
 }
+/* Natural variation belongs to texture slots, not block identities. The base
+ * content opts in here once, before immutable face definitions are published. */
+static unsigned int base_texture_variation(int texture) {
+    switch (texture) {
+        case MAAGE_BASE_TEXTURE_STONE:
+        case MAAGE_BASE_TEXTURE_BEDROCK:
+        case MAAGE_BASE_TEXTURE_EXTRA + 3: /* gold ore */
+        case MAAGE_BASE_TEXTURE_EXTRA + 4: /* iron ore */
+        case MAAGE_BASE_TEXTURE_EXTRA + 5: /* coal ore */
+        case MAAGE_BASE_TEXTURE_EXTRA + 6: /* oak bark */
+        case MAAGE_BASE_TEXTURE_EXTRA + 8: /* oak leaves */
+        case MAAGE_BASE_TEXTURE_EXTRA + 9: /* lapis ore */
+        case MAAGE_BASE_TEXTURE_EXTRA + 19: /* diamond ore */
+        case MAAGE_BASE_TEXTURE_EXTRA + 20: /* redstone ore */
+        case MAAGE_BASE_TEXTURE_EXTRA + 22: /* cactus side */
+        case MAAGE_BASE_TEXTURE_EXTRA + 26: /* spruce bark */
+        case MAAGE_BASE_TEXTURE_EXTRA + 28: /* spruce leaves */
+        case MAAGE_BASE_TEXTURE_EXTRA + 31: /* birch leaves */
+        case MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 6: /* acacia bark */
+        case MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 1: /* jungle bark */
+        case MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 3: /* dark oak bark */
+        case MAAGE_BASE_TEXTURE_FARMLAND:
+        case MAAGE_BASE_TEXTURE_FARMLAND + 1:
+            return MAAGE_TEXTURE_VARIATION_ROTATE_180_MIRROR;
+        case MAAGE_BASE_TEXTURE_DIRT:
+        case MAAGE_BASE_TEXTURE_GRASS_TOP:
+        case MAAGE_BASE_TEXTURE_SAND:
+        case MAAGE_BASE_TEXTURE_SANDSTONE_BOTTOM:
+        case MAAGE_BASE_TEXTURE_EXTRA + 7: /* oak end */
+        case MAAGE_BASE_TEXTURE_EXTRA + 17: /* obsidian */
+        case MAAGE_BASE_TEXTURE_EXTRA + 21: /* snow */
+        case MAAGE_BASE_TEXTURE_EXTRA + 27: /* spruce end */
+        case MAAGE_BASE_TEXTURE_EXTRA + 30: /* birch end */
+        case MAAGE_BASE_TEXTURE_STORAGE + 7: /* snow block */
+        case MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 1: /* clay */
+        case MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 3: /* netherrack */
+        case MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 2: /* jungle end */
+        case MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 4: /* dark oak end */
+        case MAAGE_BASE_TEXTURE_FURNACE_VARIANTS + 5: /* acacia end */
+        case MAAGE_BASE_TEXTURE_DIMENSIONS + 1: /* soul sand */
+            return MAAGE_TEXTURE_VARIATION_ROTATE_90_MIRROR;
+        case MAAGE_BASE_TEXTURE_GRAVEL:
+        case MAAGE_BASE_TEXTURE_FURNACE_EXTRA + 5: /* quartz ore */
+            return MAAGE_TEXTURE_VARIATION_ROTATE_180;
+        case MAAGE_BASE_TEXTURE_SANDSTONE_TOP:
+        case MAAGE_BASE_TEXTURE_DIMENSIONS: /* end stone */
+        case MAAGE_BASE_TEXTURE_DIMENSIONS + 2: /* glowstone */
+            return MAAGE_TEXTURE_VARIATION_ROTATE_90;
+        case MAAGE_BASE_TEXTURE_GRASS_SIDE:
+        case MAAGE_BASE_TEXTURE_GRASS_SIDE_OVERLAY:
+        case MAAGE_BASE_TEXTURE_GRASS_SIDE_SNOW:
+        case MAAGE_BASE_TEXTURE_EXTRA + 29: /* birch bark */
+            return MAAGE_TEXTURE_VARIATION_MIRROR;
+        default:
+            return MAAGE_TEXTURE_VARIATION_FIXED;
+    }
+}
 maage_status maage_content_register_state(maage_block_registry *registry, const maage_base_ids *ids, const maage_content_config *config, maage_block_state_id *output, maage_block_id block, const maage_property_assignment *properties, size_t property_count, int texture) {
     maage_block_state_definition state;
     const maage_block_definition *definition;
@@ -136,10 +193,12 @@ maage_status maage_content_register_state(maage_block_registry *registry, const 
                 for (channel = 0; channel < 3; ++channel)
                     state.faces[face].tint[channel] = (float) ((color >> ((2 - channel) * 8)) & 255UL) / 255;
         }
-        if (block == ids->block_log) state.texture_axis = axis == 1 ? 1 : (axis == 2 ? 3 : 2);
-        /* Natural, nondirectional textures vary per world cell; grass sides
-         * retain their upright overlay and authored edge. */
-        if (block != ids->block_air && (block == ids->block_stone || block == ids->block_dirt || block == ids->block_bedrock || block == ids->block_sand || block == ids->block_gravel || block == ids->block_cobblestone || block == ids->block_snow_block || block == ids->block_clay || block == ids->block_netherrack || block == ids->block_gold_ore || block == ids->block_iron_ore || block == ids->block_coal_ore || block == ids->block_lapis_ore || block == ids->block_diamond_ore || block == ids->block_redstone_ore || block == ids->block_emerald_ore || block == ids->block_quartz_ore || (block == ids->block_grass && face / 2 == 1))) state.faces[face].texture_rotation = MAAGE_BLOCK_TEXTURE_ROTATION_RANDOM_90;
+        if (block == ids->block_log || block == ids->block_log2) state.texture_axis = axis == 1 ? 1 : (axis == 2 ? 3 : 2);
+        if (block != ids->block_air && definition->mesh_shape == MAAGE_BLOCK_MESH_CUBE && !state.fluid_kind) {
+            state.faces[face].texture_variation = base_texture_variation(selected);
+            if (state.faces[face].overlay_texture) state.faces[face].overlay_variation = base_texture_variation((int) state.faces[face].overlay_texture);
+            if (state.faces[face].snow_texture) state.faces[face].snow_variation = base_texture_variation((int) state.faces[face].snow_texture);
+        }
         state.faces[face].texture_id = ids->textures[selected];
         if (state.fluid_kind) {
             state.faces[face].has_flow_texture = 1;

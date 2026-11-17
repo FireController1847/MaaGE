@@ -357,7 +357,7 @@ static int maage_block_animation_valid(const float uv[4], const float animation[
 int maage_block_face_definition_valid(const maage_block_face_definition *face) {
     unsigned int channel;
     if (!face || (face->has_flow_texture != 0 && face->has_flow_texture != 1) || (face->has_flow_texture && face->flow_texture >= MAAGE_CONTENT_ID_INVALID) || face->tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || face->overlay_tint_mode > MAAGE_BLOCK_TINT_GRASS_LOCAL || !maage_block_uv_valid(face->uv, 0) || !maage_block_uv_valid(face->overlay_uv, 1) || !maage_block_uv_valid(face->snow_uv, 1) || !maage_block_uv_valid(face->flow_uv, 1) || !maage_block_animation_valid(face->uv, face->animation) || !maage_block_animation_valid(face->flow_uv, face->flow_animation)) return 0;
-    if (face->texture_rotation > MAAGE_BLOCK_TEXTURE_ROTATION_RANDOM_90 || (face->texture_rotation && (face->overlay_texture || face->snow_texture || face->has_flow_texture))) return 0;
+    if (face->texture_variation > MAAGE_TEXTURE_VARIATION_MAX || face->overlay_variation > MAAGE_TEXTURE_VARIATION_MAX || face->snow_variation > MAAGE_TEXTURE_VARIATION_MAX || (face->overlay_variation && !face->overlay_texture) || (face->snow_variation && !face->snow_texture) || (face->has_flow_texture && (face->texture_variation || face->overlay_variation || face->snow_variation))) return 0;
     for (channel = 0; channel < 4; ++channel)
         if (!(face->tint[channel] >= 0 && face->tint[channel] <= 1)) return 0;
     return 1;
@@ -440,15 +440,15 @@ static int maage_block_definition_valid(const maage_block_definition *block) {
     return 1;
 }
 static int maage_block_state_presentation_valid(const maage_block_state_definition *state, const maage_block_definition *block) {
-    unsigned int side, axis;
+    unsigned int side;
     if (!block || state->texture_axis > 3 || !maage_block_state_bounds_valid(state)) return 0;
     for (side = 0; side < MAAGE_FACE_COUNT; ++side) {
-        if (!maage_block_face_definition_valid(&state->faces[side])) return 0;
-        if (!state->faces[side].texture_rotation) continue;
-        if (block->mesh_shape != MAAGE_BLOCK_MESH_CUBE || block->mesh_inset || block->foliage || block->mesh_material != MAAGE_MESH_MATERIAL_OPAQUE || state->texture_axis || state->fluid_kind) return 0;
-        if (block->selectable)
-            for (axis = 0; axis < 3; ++axis)
-                if (block->selection_shape.minimum[axis] != 0 || block->selection_shape.maximum[axis] != 1) return 0;
+        const maage_block_face_definition *face = &state->faces[side];
+        if (!maage_block_face_definition_valid(face)) return 0;
+        if (!face->texture_variation && !face->overlay_variation && !face->snow_variation) continue;
+        if (block->mesh_shape != MAAGE_BLOCK_MESH_CUBE || state->fluid_kind || (block->mesh_material != MAAGE_MESH_MATERIAL_OPAQUE && block->mesh_material != MAAGE_MESH_MATERIAL_CUTOUT)) return 0;
+        /* The shader finds the owner by moving half a cell inward from the plane. */
+        if (block->selectable && !(block->mesh_inset && side / 2 != 1) && (side & 1U ? block->selection_shape.maximum[side / 2] < 0.5 : block->selection_shape.minimum[side / 2] >= 0.5)) return 0;
     }
     return 1;
 }
@@ -959,7 +959,7 @@ maage_status content_blocks_view(const maage_block_registry *source, const maage
         *state = *logical;
         result = config->resolver(config->context, logical, state->faces, state->leaf_fast_uv);
         for (face = 0; face < MAAGE_FACE_COUNT && !maage_status_failed(result); ++face)
-            if (!maage_block_face_definition_valid(&state->faces[face]) || state->faces[face].texture_id != logical->faces[face].texture_id || state->faces[face].overlay_texture != logical->faces[face].overlay_texture || state->faces[face].snow_texture != logical->faces[face].snow_texture || state->faces[face].flow_texture != logical->faces[face].flow_texture || state->faces[face].has_flow_texture != logical->faces[face].has_flow_texture || state->faces[face].texture_rotation != logical->faces[face].texture_rotation) result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
+            if (!maage_block_face_definition_valid(&state->faces[face]) || state->faces[face].texture_id != logical->faces[face].texture_id || state->faces[face].overlay_texture != logical->faces[face].overlay_texture || state->faces[face].snow_texture != logical->faces[face].snow_texture || state->faces[face].flow_texture != logical->faces[face].flow_texture || state->faces[face].has_flow_texture != logical->faces[face].has_flow_texture || state->faces[face].texture_variation != logical->faces[face].texture_variation || state->faces[face].overlay_variation != logical->faces[face].overlay_variation || state->faces[face].snow_variation != logical->faces[face].snow_variation) result = maage_status_make(MAAGE_STATUS_INVALID_STATE, MAAGE_CONTEXT_REGISTRY, MAAGE_OPERATION_RESOLVE, 0);
         if (maage_status_failed(result)) {
             maage_block_registry_destroy(view);
             return result;

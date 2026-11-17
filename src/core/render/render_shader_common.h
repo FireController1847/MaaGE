@@ -14,7 +14,7 @@ float maage_shader_animation(MAAGE_SHADER_VEC3 animation, float tick) {
 }
 
 /* The surface table retains its two vec4 layout. Decode the exact packed
- * integer once per vertex; the fragment receives a flat face selector. */
+ * integer once per vertex; the fragment receives a flat variation/face selector. */
 float maage_shader_surface_material(float packed_surface) {
     return float(uint(packed_surface) % uint(MAAGE_MESH_MATERIAL_COUNT));
 }
@@ -28,17 +28,21 @@ MAAGE_SHADER_VEC2 maage_shader_tile_uv(MAAGE_SHADER_VEC2 uv, MAAGE_SHADER_VEC4 t
         if (rotation_face != 0u) {
             /* Recover the owning cell, including at negative coordinates and
              * on positive faces lying exactly on the next cell's boundary. */
-            uint face = rotation_face - 1u;
+            uint face = (rotation_face - 1u) % uint(MAAGE_MESH_ROTATION_FACE_COUNT);
+            uint variation = (rotation_face - 1u) / uint(MAAGE_MESH_ROTATION_FACE_COUNT) + 1u;
             uint axis = face / 2u;
             world_position[axis] += (face & 1u) != 0u ? -0.5 : 0.5;
             MAAGE_SHADER_VEC3 cell = floor(world_position);
-            uint hash = uint(int(cell.x)) * 0x9e3779b1u ^ uint(int(cell.y)) * 0x85ebca77u ^ uint(int(cell.z)) * 0xc2b2ae3du;
+            uint hash = uint(int(cell.x)) * 0x9e3779b1u ^ uint(int(cell.y)) * 0x85ebca77u ^ uint(int(cell.z)) * 0xc2b2ae3du ^ face * 0x27d4eb2du;
             hash ^= hash >> 16u;
             hash *= 0x7feb352du;
             hash ^= hash >> 15u;
             hash *= 0x846ca68bu;
             hash ^= hash >> 16u;
-            uint rotation = hash & 3u;
+            uint rotation = 0u;
+            if (variation == uint(MAAGE_TEXTURE_VARIATION_ROTATE_90) || variation == uint(MAAGE_TEXTURE_VARIATION_ROTATE_90_MIRROR)) rotation = hash & 3u;
+            else if (variation == uint(MAAGE_TEXTURE_VARIATION_ROTATE_180) || variation == uint(MAAGE_TEXTURE_VARIATION_ROTATE_180_MIRROR)) rotation = (hash & 1u) * 2u;
+            if ((variation == uint(MAAGE_TEXTURE_VARIATION_MIRROR) || variation == uint(MAAGE_TEXTURE_VARIATION_ROTATE_90_MIRROR) || variation == uint(MAAGE_TEXTURE_VARIATION_ROTATE_180_MIRROR)) && (hash & 4u) != 0u) local_uv.x = 1.0 - local_uv.x;
             if (rotation == 1u) local_uv = MAAGE_SHADER_VEC2(1.0 - local_uv.y, local_uv.x);
             else if (rotation == 2u) local_uv = MAAGE_SHADER_VEC2(1.0) - local_uv;
             else if (rotation == 3u) local_uv = MAAGE_SHADER_VEC2(local_uv.y, 1.0 - local_uv.x);
