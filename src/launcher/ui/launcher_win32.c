@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <math.h>
+#include <stdlib.h>
 #define MAAGE_UI_ACCOUNT 110
 #define MAAGE_UI_LIST 112
 #define MAAGE_UI_NAME 113
@@ -94,6 +95,7 @@ typedef struct maage_launcher_win32 {
     HWND transition_window;
     double transition_started, progress_from, progress_started;
     int backdrop_width, backdrop_height, live_resize, transition_active;
+    int home_resize_width, home_resize_height;
     HFONT splash_title_font, splash_detail_font, splash_log_font;
     struct { HFONT handle; int pixels, bold; } home_fonts[MAAGE_UI_HOME_FONTS];
     unsigned home_font_next;
@@ -428,14 +430,22 @@ static COLORREF maage_ui_backdrop_color(maage_launcher_win32 *ui) {
     return maage_launcher_win32_color(&ui->native, 0);
 }
 
+/* During a drag, reuse a filtered image within a small size interval.
+ * Exact-size WIC filtering resumes on the final resize repaint. */
+static const maage_win32_surface *maage_ui_logo_image(maage_launcher_win32 *ui, maage_win32_surface *cache, const maage_win32_surface *source, RECT rect) {
+    int width = rect.right - rect.left, height = rect.bottom - rect.top;
+    if (ui->live_resize && cache->dc && abs(cache->width - width) <= 4 && abs(cache->height - height) <= 4) return cache;
+    return maage_win32_surface_resample(cache, source, width, height) ? cache : source;
+}
+
 static void maage_ui_logo_paint(maage_launcher_win32 *ui, RECT rect, int shadow) {
     if (ui->logo.dc) {
         if (shadow && !ui->native.high_contrast && ui->logo_shadow.dc) {
             RECT shade = rect;
             OffsetRect(&shade, 0, (rect.bottom - rect.top) / 28);
-            maage_win32_surface_image(&ui->backdrop, maage_win32_surface_resample(&ui->scaled_logo_shadow, &ui->logo_shadow, shade.right - shade.left, shade.bottom - shade.top) ? &ui->scaled_logo_shadow : &ui->logo_shadow, shade);
+            maage_win32_surface_image(&ui->backdrop, maage_ui_logo_image(ui, &ui->scaled_logo_shadow, &ui->logo_shadow, shade), shade);
         }
-        maage_win32_surface_image(&ui->backdrop, maage_win32_surface_resample(&ui->scaled_logo, &ui->logo, rect.right - rect.left, rect.bottom - rect.top) ? &ui->scaled_logo : &ui->logo, rect);
+        maage_win32_surface_image(&ui->backdrop, maage_ui_logo_image(ui, &ui->scaled_logo, &ui->logo, rect), rect);
     } else if (ui->artwork || ui->native.icons[0]) DrawIconEx(ui->backdrop.dc, rect.left, rect.top, ui->artwork ? ui->artwork : ui->native.icons[0], rect.right - rect.left, rect.bottom - rect.top, 0, NULL, DI_NORMAL);
 }
 
@@ -461,7 +471,7 @@ static int maage_ui_backdrop(maage_launcher_win32 *ui, HDC compatible) {
     background = maage_ui_backdrop_color(ui);
     foreground = ui->native.high_contrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(255, 255, 255);
     if (ui->splash_visible || ui->native.high_contrast) maage_win32_surface_gradient_rect(&ui->backdrop, width, height, background, background);
-    else if (ui->home_background.dc) maage_win32_surface_cover(&ui->backdrop, ui->native.dark && ui->home_background_dark.dc ? &ui->home_background_dark : &ui->home_background, width, height);
+    else if (ui->home_background.dc) maage_win32_surface_cover(&ui->backdrop, ui->native.dark && ui->home_background_dark.dc ? &ui->home_background_dark : &ui->home_background, width, height, !ui->live_resize);
     else maage_win32_surface_gradient_rect(&ui->backdrop, width, height, ui->native.dark ? RGB(83, 114, 129) : RGB(97, 133, 150), ui->native.dark ? RGB(35, 59, 66) : RGB(41, 69, 77));
     if (ui->splash_visible) {
         rect = ui->splash_logo;
@@ -494,8 +504,8 @@ static int maage_ui_backdrop(maage_launcher_win32 *ui, HDC compatible) {
                 maage_win32_surface_control_shadow(&ui->backdrop, &ui->card_shadow, rect);
             }
         }
-        maage_ui_home_text(ui, &ui->backdrop, ui->home_version, L"v" MAAGE_LAUNCHER_VERSION, .45 * rem, 0, foreground, centered, 1, shadow, ui->native.high_contrast ? 1 : .55);
-        maage_ui_home_text(ui, &ui->backdrop, ui->home_notice, L"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", .45 * rem, 0, foreground, centered, 1, shadow, ui->native.high_contrast ? 1 : .55);
+        maage_ui_home_text(ui, &ui->backdrop, ui->home_version, L"v" MAAGE_LAUNCHER_VERSION, .45 * rem, 1, foreground, centered, 1, shadow, ui->native.high_contrast ? 1 : .55);
+        maage_ui_home_text(ui, &ui->backdrop, ui->home_notice, L"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", .45 * rem, 1, foreground, centered, 1, shadow, ui->native.high_contrast ? 1 : .55);
     }
     ui->backdrop_dirty = 0;
     return 1;
@@ -1205,7 +1215,7 @@ static void maage_ui_layout(maage_launcher_win32 *ui) {
     maage_ui_home_hover(ui);
     ui->backdrop_dirty = 1;
     maage_ui_caption(ui);
-    RedrawWindow(ui->window, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE | (ui->live_resize && !ui->splash_visible && page == MAAGE_PAGE_PLAY ? RDW_UPDATENOW : 0));
+    RedrawWindow(ui->window, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
 }
 static void maage_ui_navigate(maage_launcher_win32 *ui, maage_launcher_page page) {
     if (ui->state->page == page) return;
@@ -2031,16 +2041,31 @@ static LRESULT CALLBACK maage_ui_proc(HWND window, UINT message, WPARAM wparam, 
         break;
     case WM_ENTERSIZEMOVE:
         ui->live_resize = 1;
+        ui->home_resize_width = ui->home_resize_height = -1;
         maage_ui_transition_cancel(ui);
         maage_ui_home_hover(ui);
         return 0;
     case WM_EXITSIZEMOVE:
         ui->live_resize = 0;
         maage_ui_home_hover(ui);
+        if (ui->controls_ready && !ui->splash_visible && ui->state->page == MAAGE_PAGE_PLAY) {
+            /* Replace any interactive approximation with the settled frame,
+             * even if the final pointer movement did not change dimensions. */
+            ui->backdrop_dirty = 1;
+            RedrawWindow(window, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
+        }
         return 0;
     case WM_SIZE:
         if (!ui->laying_out && ui->transition_active) maage_ui_transition_cancel(ui);
-        if (wparam != SIZE_MINIMIZED) maage_ui_layout(ui);
+        if (wparam != SIZE_MINIMIZED) {
+            if (ui->live_resize && !ui->splash_visible && ui->state->page == MAAGE_PAGE_PLAY) {
+                int width = LOWORD(lparam), height = HIWORD(lparam);
+                if (width == ui->home_resize_width && height == ui->home_resize_height) return 0;
+                ui->home_resize_width = width;
+                ui->home_resize_height = height;
+            }
+            maage_ui_layout(ui);
+        }
         return 0;
     case WM_VSCROLL: {
         int page = (int) ui->state->page, position, amount;

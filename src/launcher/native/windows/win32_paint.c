@@ -178,9 +178,9 @@ int maage_win32_surface_dim(maage_win32_surface *s, const maage_win32_surface *i
     return 0;
 }
 
-/* The JPEG is opaque, so GDI's HALFTONE filter can resample its centered
- * cover crop directly into the cached backdrop without an extra buffer. */
-void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height) {
+/* The opaque JPEG uses a fast cover stretch during interactive resize and
+ * HALFTONE filtering for the settled frame. Both use the same centered crop. */
+void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height, int filtered) {
     int sw = image->width, sh = image->height, x = 0, y = 0, mode;
     POINT origin = {0, 0};
     if (!image->dc || width <= 0 || height <= 0 || sw <= 0 || sh <= 0) return;
@@ -193,7 +193,7 @@ void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface
         if (sw < 1) sw = 1;
         x = (image->width - sw) / 2;
     }
-    mode = SetStretchBltMode(s->dc, HALFTONE);
+    mode = SetStretchBltMode(s->dc, filtered ? HALFTONE : COLORONCOLOR);
     SetBrushOrgEx(s->dc, 0, 0, &origin);
     if (!StretchBlt(s->dc, 0, 0, width, height, image->dc, x, y, sw, sh, SRCCOPY)) {
         BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, 0};
@@ -236,15 +236,14 @@ void maage_win32_surface_gradient_rect(maage_win32_surface *s, int width, int he
     }
 }
 
-static void maage_win32_blend(DWORD *pixel, COLORREF color, double coverage) {
-    unsigned a, inverse, r, g, b;
+static void maage_win32_blend_alpha(DWORD *pixel, COLORREF color, unsigned a) {
+    unsigned inverse, r, g, b;
     DWORD old;
-    if (coverage <= 0.0) return;
-    if (coverage >= 1.0) {
+    if (!a) return;
+    if (a >= 255) {
         *pixel = maage_win32_bgra(color);
         return;
     }
-    a = (unsigned) (coverage * 255.0 + 0.5);
     inverse = 255 - a;
     old = *pixel;
     r = (GetRValue(color) * a + ((old >> 16) & 255) * inverse + 127) / 255;
@@ -253,12 +252,18 @@ static void maage_win32_blend(DWORD *pixel, COLORREF color, double coverage) {
     *pixel = 0xff000000UL | ((DWORD) r << 16) | ((DWORD) g << 8) | b;
 }
 
+static void maage_win32_blend(DWORD *pixel, COLORREF color, double coverage) {
+    if (coverage <= 0.0) return;
+    maage_win32_blend_alpha(pixel, color, coverage >= 1.0 ? 255 : (unsigned) (coverage * 255.0 + .5));
+}
+
 /* Average a 2x grayscale glyph mask onto the real background. The mask
  * comes from white GDI text on black, so it is independent of DIB alpha
  * and of the system's subpixel/ClearType configuration. */
 void maage_win32_surface_text_mask(maage_win32_surface *s, const maage_win32_surface *mask, RECT rect, COLORREF color, double opacity) {
     int x, y, width = rect.right - rect.left, height = rect.bottom - rect.top;
-    if (!s->pixels || !mask->pixels || width <= 0 || height <= 0 || width > mask->width / 2 || height > mask->height / 2) return;
+    unsigned alpha = opacity >= 1.0 ? 255 : opacity <= 0.0 ? 0 : (unsigned) (opacity * 255.0 + .5);
+    if (!alpha || !s->pixels || !mask->pixels || width <= 0 || height <= 0 || width > mask->width / 2 || height > mask->height / 2) return;
     GdiFlush();
     for (y = 0; y < height; ++y) {
         const DWORD *a = mask->pixels + (size_t) y * 2 * mask->width, *b = a + mask->width;
@@ -271,7 +276,7 @@ void maage_win32_surface_text_mask(maage_win32_surface *s, const maage_win32_sur
             int dx = rect.left + x, sx = 2 * x;
             if (dx < 0 || dx >= s->width) continue;
             coverage = (a[sx] & 255) + (a[sx + 1] & 255) + (b[sx] & 255) + (b[sx + 1] & 255);
-            if (coverage) maage_win32_blend(&row[dx], color, coverage * opacity / 1020.0);
+            if (coverage) maage_win32_blend_alpha(&row[dx], color, (coverage * alpha + 510) / 1020);
         }
     }
 }
@@ -374,7 +379,8 @@ void maage_win32_surface_round_f(maage_win32_surface *s, double x0, double y0, d
             if (coverage >= 1.0) {
                 while (x < middle_end) row[x++] = pixel;
             } else if (coverage > 0.0) {
-                while (x < middle_end) maage_win32_blend(&row[x++], color, coverage);
+                unsigned alpha = (unsigned) (coverage * 255.0 + .5);
+                while (x < middle_end) maage_win32_blend_alpha(&row[x++], color, alpha);
             } else x = middle_end;
         }
     }

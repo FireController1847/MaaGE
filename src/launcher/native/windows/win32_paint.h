@@ -17,7 +17,7 @@ void maage_win32_surface_image(maage_win32_surface *s, const maage_win32_surface
 int maage_win32_surface_resample(maage_win32_surface *s, const maage_win32_surface *image, int width, int height);
 int maage_win32_surface_dim(maage_win32_surface *s, const maage_win32_surface *image);
 void maage_win32_surface_text_mask(maage_win32_surface *s, const maage_win32_surface *mask, RECT rect, COLORREF color, double opacity);
-void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height);
+void maage_win32_surface_cover(maage_win32_surface *s, const maage_win32_surface *image, int width, int height, int filtered);
 void maage_win32_surface_mask(maage_win32_surface *s, const maage_win32_surface *image, RECT rect, COLORREF color, double opacity);
 void maage_win32_surface_gradient_rect(maage_win32_surface *s, int width, int height, COLORREF top, COLORREF bottom);
 int maage_win32_surface_make_control_shadow(maage_win32_surface *s, int pill);
