@@ -87,7 +87,7 @@ typedef struct maage_launcher_win32 {
     HWND splash_message, splash_detail, splash_sign_in, splash_device_sign_in, splash_cancel, splash_code, splash_copy, splash_open, splash_retry, splash_skip, splash_activity;
     HICON artwork;
     maage_win32_surface backdrop, button_surface, logo, logo_shadow, play_shadow, card_shadow, transition;
-    maage_win32_surface home_background, home_icons[MAAGE_LAUNCHER_HOME_ICON_COUNT];
+    maage_win32_surface home_background, home_icons[MAAGE_LAUNCHER_HOME_ICON_COUNT], footer_surface;
     double home_rem;
     double home_hover_started[MAAGE_UI_HOME_BUTTONS], home_hover_from[MAAGE_UI_HOME_BUTTONS];
     int home_fira;
@@ -321,7 +321,7 @@ static HFONT maage_ui_cached_font(maage_launcher_win32 *ui, int pixels, int bold
     if (pixels < 1) pixels = 1;
     for (i = 0; i < MAAGE_UI_HOME_FONTS; ++i)
         if (ui->home_fonts[i].handle && ui->home_fonts[i].pixels == pixels && ui->home_fonts[i].bold == bold) return ui->home_fonts[i].handle;
-    font = CreateFontW(-pixels, 0, 0, 0, bold == 2 ? FW_BOLD : bold == 3 ? FW_LIGHT : bold ? FW_MEDIUM : FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, ui->home_fira ? L"Fira Sans" : L"Segoe UI");
+    font = CreateFontW(-pixels, 0, 0, 0, bold == 2 ? FW_BOLD : bold == 3 ? FW_LIGHT : bold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, ui->home_fira ? L"Fira Sans" : L"Segoe UI");
     if (!font) return NULL;
     slot = ui->home_font_next++ % MAAGE_UI_HOME_FONTS;
     if (ui->home_fonts[slot].handle) DeleteObject(ui->home_fonts[slot].handle);
@@ -363,6 +363,25 @@ static void maage_ui_home_text(maage_launcher_win32 *ui, HDC dc, RECT rect, cons
     SetTextColor(dc, color);
     DrawTextW(dc, text, length, &rect, flags | DT_NOPREFIX);
     SelectObject(dc, previous);
+}
+
+/* Composite the footer against the actual artwork at the same 55% opacity
+ * as AppKit. Reuse a small scratch strip instead of fading the entire frame. */
+static void maage_ui_home_footer(maage_launcher_win32 *ui, RECT rect, const wchar_t *text, COLORREF foreground, int shadow) {
+    HDC dc = ui->backdrop.dc;
+    maage_win32_surface *surface = &ui->footer_surface;
+    int width = rect.right - rect.left, height = rect.bottom - rect.top;
+    int pixels = maage_ui_scale(ui, .45 * ui->home_rem);
+    UINT flags = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 140, 0};
+    RECT local;
+    if (width <= 0 || height <= 0) return;
+    if (!ui->native.high_contrast && maage_ui_scratch(surface, dc, width, height) && BitBlt(surface->dc, 0, 0, width, height, dc, rect.left, rect.top, SRCCOPY)) {
+        SetRect(&local, 0, 0, width, height);
+        maage_ui_home_text(ui, surface->dc, local, text, pixels, 0, foreground, flags, 1, shadow);
+        if (AlphaBlend(dc, rect.left, rect.top, width, height, surface->dc, 0, 0, width, height, blend)) return;
+    }
+    maage_ui_home_text(ui, dc, rect, text, pixels, 0, foreground, flags, 1, shadow);
 }
 
 static COLORREF maage_ui_backdrop_color(maage_launcher_win32 *ui) {
@@ -435,8 +454,8 @@ static int maage_ui_backdrop(maage_launcher_win32 *ui, HDC compatible) {
                 maage_win32_surface_control_shadow(&ui->backdrop, &ui->card_shadow, rect);
             }
         }
-        maage_ui_home_text(ui, dc, ui->home_version, L"v" MAAGE_LAUNCHER_VERSION, maage_ui_scale(ui, .45 * ui->home_rem), 0, foreground, centered, 1, shadow);
-        maage_ui_home_text(ui, dc, ui->home_notice, L"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", maage_ui_scale(ui, .45 * ui->home_rem), 0, foreground, centered, 1, shadow);
+        maage_ui_home_footer(ui, ui->home_version, L"v" MAAGE_LAUNCHER_VERSION, foreground, shadow);
+        maage_ui_home_footer(ui, ui->home_notice, L"MaaGE is NOT an official Minecraft project and is NOT approved by or associated with Mojang.", foreground, shadow);
     }
     ui->backdrop_dirty = 0;
     return 1;
@@ -2573,6 +2592,7 @@ cleanup:
         if (ui.home_fonts[i].handle) DeleteObject(ui.home_fonts[i].handle);
     maage_win32_surface_destroy(&ui.transition);
     maage_win32_surface_destroy(&ui.button_surface);
+    maage_win32_surface_destroy(&ui.footer_surface);
     maage_win32_surface_destroy(&ui.backdrop);
     maage_win32_surface_destroy(&ui.play_shadow);
     maage_win32_surface_destroy(&ui.card_shadow);
